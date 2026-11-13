@@ -31,7 +31,6 @@ use std::path::{Path, PathBuf};
 use symbio_kernel::event::{Entity, Event, EventEnvelope as _, Seq, Verb};
 use symbio_kernel::store::Store;
 use symbio_kernel::view::Budget;
-use symbio_sdk::actors::SKILL_TAG;
 use symbio_sdk::invariants::check_all;
 use symbio_sdk::projection::transcript::transcript;
 
@@ -85,7 +84,6 @@ fn read_path(
         || fleet_of(root),
         viewer,
         principal,
-        false,
         symbio_plugin_api::TASK_CAP,
     )
 }
@@ -495,9 +493,10 @@ fn panel_matches_the_columns_it_describes() {
     );
     let panel = panel_of(&got);
 
-    // 分区：时延兜底 / 事实源 / 不变量 / 技能 / 承诺，再加**能力视图**段
-    // （段数随登记面，不是本插件写死的常数——DE-025 D-221）
-    let expected_sections = 5 + usize::from(!expected_capability_view_names().is_empty());
+    // 分区：时延兜底 / 事实源 / 不变量 / 承诺，再加**能力视图**段
+    // （段数随登记面，不是本插件写死的常数——DE-025 D-221。技能段也是登记面的一段：
+    // `D-489` 起按 `slot` 取值，owner 缺席 ⇒ 整段不出现，本进程不链接它 ⇒ 四段）
+    let expected_sections = 4 + usize::from(!expected_capability_view_names().is_empty());
     assert_eq!(
         panel.sections.len(),
         expected_sections,
@@ -577,33 +576,25 @@ fn panel_matches_the_columns_it_describes() {
     );
     assert!(panel.has_warn(), "有 warn 行 ⇒ `has_warn()` 为真");
 
-    // ④ 技能段：开关与已编译数都从那两列搬来（同源），不另算
-    let skills = &panel.sections[3];
-    let skill_row = skills.rows.first().expect("有技能行");
-    assert_eq!(
-        skill_row.value,
-        if got.skill_compile_enabled {
-            "开"
-        } else {
-            "关"
-        },
-        "开关行 = 列里的开关"
+    // ④ 技能段：两格都是 skill 的报表（`D-489`），本进程不链接 owner ⇒ 整段缺席
+    // （与实例级落点缺席同一条降级语义；值与排版在满装配由 e2e 对账）。
+    assert!(
+        panel
+            .sections
+            .iter()
+            .all(|s| s.title.as_deref() != Some("技能")),
+        "owner 缺席 ⇒ 技能段整段不出现，不由读方替 owner 造形状"
     );
-    if got.skill_compile_enabled {
-        assert!(
-            skill_row
-                .hint
-                .as_deref()
-                .unwrap_or("")
-                .contains(&got.compiled_skills.to_string()),
-            "已编译数要对上：{:?} vs {}",
-            skill_row.hint,
-            got.compiled_skills
-        );
-    }
 
     // ⑤ 承诺段：条数与违约数都从那列搬来（seed 没委托过 ⇒ 「没有委托」+ 平常语气）
-    let cm_row = panel.sections[4].rows.first().expect("有承诺行");
+    let cm_row = panel
+        .sections
+        .iter()
+        .find(|s| s.title.as_deref() == Some("承诺"))
+        .expect("有承诺段")
+        .rows
+        .first()
+        .expect("有承诺行");
     assert_eq!(
         got.commitments["total"].as_u64().unwrap_or(1),
         0,
@@ -1319,8 +1310,15 @@ fn commitments_column_exposes_each_delegation_record() {
         check_all(vocab(), &store.range(Seq::new(0)))
     );
 
-    // 面板那一份（人读的）与列同源：数字直接来自本列，不重算
-    let row = &got.panel.sections[4].rows[0];
+    // 面板那一份（人读的）与列同源：数字直接来自本列，不重算。
+    // 按标题找段而不是按位置：段集随登记面增减（`D-488` / `D-489`），位置不是契约。
+    let cm_section = got
+        .panel
+        .sections
+        .iter()
+        .find(|s| s.title.as_deref() == Some("承诺"))
+        .expect("有承诺段");
+    let row = &cm_section.rows[0];
     assert!(
         row.value.contains("2 条 · 违约 1 条"),
         "面板与列对上：{:?}",
@@ -1460,67 +1458,21 @@ fn calibration_column_is_absent_when_no_owner_registers_it() {
     assert!(got.has_wal, "事实源在，账算不出来不改变这件事");
 }
 
-/// 技能编译两列：`skill_compile_enabled`（部署开关）与 `compiled_skills`（本会话
-/// `memory.encoded{tag:"skill"}` 的条数）。
-///
-/// 判据是**两种零必须分得开**：关着 ⇒ `false`（配置选择）；开着但没编译 ⇒ `true` +
-/// `0`（运行结果）。计数不新增投影，只数事实源里已有的格子；读侧闸对它同样生效
-/// （无权 ⇒ 空切片 ⇒ 0），开关是部署事实、不随闸变化。
+/// 技能编译两格已随 `D-489` 回 skill 能力包（报表 `slot = compiled_skills` /
+/// `skill_compile_enabled`）：本进程不链接 owner ⇒ 两格随报表列一起缺席。
+/// 「两种零分得开」的计数与开关判据移到 `crates/symbio-plugin-skill/src/decl.test.rs`
+/// ——数的是谁的格子、开关怎么读，都是 owner 的口径；读方不再抄标签、不再读配置。
 #[test]
-fn skill_compile_columns_distinguish_off_from_on_but_nothing_compiled() {
+fn skill_compile_slots_are_absent_without_their_owner() {
     let wal = seed("skills");
-    let root = wal.parent().expect("WAL 有父目录").to_path_buf();
-    let read_with = |enabled: bool, viewer: Option<&str>| {
-        read(
-            "s1",
-            facts_of(&wal),
-            || fleet_of(&root),
-            viewer,
-            symbio_sdk::authz::PRINCIPAL_MAIN,
-            enabled,
-            symbio_plugin_api::TASK_CAP,
-        )
-        .expect("读数")
-    };
-
-    // 关着：事实源里也没有技能格 ⇒ 两列各自如实
-    let off = read_with(false, None);
-    assert!(!off.skill_compile_enabled);
-    assert_eq!(off.compiled_skills, 0);
-
-    // 开着但本会话还没编译过 ⇒ 与上一行并读才分得清（两行计数相同、开关不同）
-    let on_empty = read_with(true, None);
-    assert!(on_empty.skill_compile_enabled);
-    assert_eq!(on_empty.compiled_skills, 0);
-
-    // 落两条技能 + 一条普通记忆：按 tag 认，不是按整格数
-    {
-        let store = EventWalStore::open(&wal).expect("WAL");
-        for (id, tag) in [("sk-1", SKILL_TAG), ("sk-2", SKILL_TAG), ("mem-1", "fact")] {
-            store
-                .append(
-                    Event::pending(
-                        id,
-                        symbio_plugin_api::events::EVENT_MEMORY_ENCODED,
-                        Entity::Memory,
-                        Verb::Opened,
-                        "user",
-                    )
-                    .with_produced_by(0)
-                    .with_payload(serde_json::json!({ "tag": tag, "trigger": id, "content": id })),
-                )
-                .expect("记忆入格");
-        }
-    }
-
-    let on = read_with(true, None);
-    assert_eq!(on.compiled_skills, 2, "只有 tag=skill 的两条算技能");
-
-    // 读侧闸：矩阵外主体 ⇒ 空切片 ⇒ 计数 0；开关是部署事实，照旧如实报告。
-    let denied = read_with(true, Some(symbio_sdk::authz::PRINCIPAL_MAIN));
-    assert_eq!(denied.compiled_skills, 0);
-    assert!(denied.skill_compile_enabled);
-    assert!(denied.has_wal, "has_wal 独立于可见域");
+    let got = read_at(&wal, symbio_sdk::authz::PRINCIPAL_MAIN);
+    assert!(
+        !got.reports.contains_key("compiled_skills")
+            && !got.reports.contains_key("skill_compile_enabled"),
+        "owner 不在 ⇒ 两格整条缺席（不是读方猜一份零冒充读数）：{:?}",
+        got.reports.keys().collect::<Vec<_>>()
+    );
+    assert!(got.has_wal, "缺席不改变「事实源在」这件事");
 }
 
 /// 转写列（**对话面读侧**）：

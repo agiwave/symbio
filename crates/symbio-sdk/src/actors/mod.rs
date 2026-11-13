@@ -1,8 +1,8 @@
-//! `actors` —— **主体面**：规格读法 · 承诺登记 · 淘汰裁决 · 技能词汇
+//! `actors` —— **主体面**：规格读法 · 承诺登记 · 淘汰裁决
 //!
 //! ## 这一域治什么
 //!
-//! `ActorSpec` 的**数据面**在 `symbio_kernel`（五字段，F3 冻结锚点）；本域装四件读它、
+//! `ActorSpec` 的**数据面**在 `symbio_kernel`（五字段，F3 冻结锚点）；本域装三件读它、
 //! 写它、按它判的东西：
 //!
 //! | 模块 | 内容 | 谁消费 |
@@ -10,7 +10,10 @@
 //! | `spec` | 本机部署表的读法——模式派生（`pattern_for_principal`）与能力位判定（`actor_can_assign_work`） | 全部能力包 |
 //! | `commitment` | 「谁向谁承诺了什么 / 是否履行」落成普通事件（`CommitmentKeeper`） | 写侧 `agent` · 读侧 `session` |
 //! | `control` | 淘汰裁决（`EliminationDecider`）：声誉投影低于阈值 ⇒ 收回 `assign.work` | 写侧 `reputation` · 读侧 `session` 工具层 |
-//! | `skill` | `SKILL_TAG`：`memory.encoded` 载荷里的技能标签（DE-041） | 写侧技能能力包 · 读侧 `session` 路由 |
+//!
+//! 技能词汇曾住这里（`SKILL_TAG`，读侧是 session 的 stats）：`D-489` 把「数技能」
+//! 收回 skill 能力包自己的视图后，机制面上再没有一条只有单个能力认识的名字，
+//! 本域随之只剩**跨能力**的主体机制。
 //!
 //! ## 为什么四块住在一起（D-279）
 //!
@@ -26,12 +29,10 @@
 
 mod commitment;
 mod control;
-mod skill;
 mod spec;
 
 pub use self::commitment::{commitment_events, commitment_records};
 pub use self::control::EliminationDecider;
-pub use self::skill::SKILL_TAG;
 pub use self::spec::{actor_can_assign_work, pattern_for_principal};
 // `trivial_actor_spec` 是**测试面**的平凡值构造（ADR-067：生产构造点按真实授权行立规格）。
 #[cfg(test)]

@@ -422,27 +422,6 @@ pub(super) fn panel_of(stats: &SessionStats) -> ReadingPanel {
         bar: None,
     };
 
-    // 技能：开关与已编译数并排——两种「零技能」靠这一行分辨（关着 = 配置选择，
-    // 开着但 0 条 = 本会话还没产出可编译的轨迹）。
-    let skills = ReadingSection {
-        title: Some("技能".into()),
-        rows: vec![ReadingRow {
-            label: "编译开关".into(),
-            value: if stats.skill_compile_enabled {
-                "开".into()
-            } else {
-                "关".into()
-            },
-            hint: Some(if stats.skill_compile_enabled {
-                format!("本会话已编译 {} 条技能", stats.compiled_skills)
-            } else {
-                "关着 ⇒ 本轮轨迹不会编译成技能（与「开着但没编译过」不同）".into()
-            }),
-            tone: ReadingTone::Normal,
-        }],
-        bar: None,
-    };
-
     // 承诺：一条一行读的是清单，面板只报「几条约、几条约没守住」——违约必须
     // 当着人的面出声（DE-038 §5），所以有违约就是留意语气，没有才是常态。
     let cm = &stats.commitments;
@@ -473,35 +452,55 @@ pub(super) fn panel_of(stats: &SessionStats) -> ReadingPanel {
         bar: None,
     };
 
+    // 技能段按报表列取值（`D-489`）：开关与已编译数都是 skill 的报表
+    // （`slot = skill_compile_enabled` / `compiled_skills`）；owner 缺席 ⇒
+    // 整段不出现（与实例级落点缺席同一条降级语义）。
+    let skills = skill_section(stats);
+
+    let mut sections = vec![perf];
+    if let Some(usage) = usage_section(&stats.reports) {
+        sections.push(usage);
+    }
+    sections.push(continuity);
+    sections.push(invariants);
+    if let Some(skills) = skills {
+        sections.push(skills);
+    }
+    sections.push(commitments);
+    if let Some(capability) = capability_section(stats) {
+        sections.push(capability);
+    }
+
     ReadingPanel {
         title: "会话读数".into(),
         subtitle: Some(stats.session_id.clone()),
-        sections: match (usage_section(&stats.reports), capability_section(stats)) {
-            (Some(usage), Some(capability)) => {
-                vec![
-                    perf,
-                    usage,
-                    continuity,
-                    invariants,
-                    skills,
-                    commitments,
-                    capability,
-                ]
-            }
-            (Some(usage), None) => vec![perf, usage, continuity, invariants, skills, commitments],
-            (None, Some(capability)) => {
-                vec![
-                    perf,
-                    continuity,
-                    invariants,
-                    skills,
-                    commitments,
-                    capability,
-                ]
-            }
-            (None, None) => vec![perf, continuity, invariants, skills, commitments],
-        },
+        sections,
     }
+}
+
+/// 技能段：编译开关与已编译数并排——两种「零技能」靠这一行分辨（关着 = 配置选择，
+/// 开着但 0 条 = 本会话还没产出可编译的轨迹）。
+///
+/// 两格的值按 `slot` 从报表列取（`D-489` 起都是 skill 的报表登记）：键是出品契约
+/// （`SV-003`），本处不认识形状、只搬运。owner 缺席（本进程没链接）⇒ 两格缺席 ⇒
+/// `None`——与实例级落点缺席同一条降级语义，不由读方替 owner 造形状。
+fn skill_section(stats: &SessionStats) -> Option<ReadingSection> {
+    let on = stats.reports.get("skill_compile_enabled")?.as_bool()?;
+    let compiled = stats.reports.get("compiled_skills")?.as_u64()?;
+    Some(ReadingSection {
+        title: Some("技能".into()),
+        rows: vec![ReadingRow {
+            label: "编译开关".into(),
+            value: if on { "开".into() } else { "关".into() },
+            hint: Some(if on {
+                format!("本会话已编译 {compiled} 条技能")
+            } else {
+                "关着 ⇒ 本轮轨迹不会编译成技能（与「开着但没编译过」不同）".into()
+            }),
+            tone: ReadingTone::Normal,
+        }],
+        bar: None,
+    })
 }
 
 /// 能力视图那一段（DE-025 D-221）：**清单有几条，段里就有几行**。

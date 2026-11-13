@@ -14,18 +14,23 @@
 
 use super::{
     calibration_ledger, calibration_ledger_view, confidence_of, retreating_skills, SkillStat,
-    EVENTS, EVENT_MEMORY_CALIBRATED, FACTS, OWNER, ROWS, SKILL_CALIBRATION, SKILL_RETREAT,
-    SKILL_TAG, VIEWS,
+    EVENTS, EVENT_MEMORY_CALIBRATED, FACTS, OWNER, ROWS, SKILL_CALIBRATION, SKILL_COMPILED,
+    SKILL_COMPILE_SWITCH, SKILL_RETREAT, SKILL_TAG, VIEWS,
 };
 use symbio_plugin_api::events::EVENT_MEMORY_ENCODED;
+use symbio_plugin_api::events::EVENT_SESSION_CONFIG;
 use symbio_plugin_api::ring::{Decl, Pattern};
 use symbio_plugin_api::{Entity, Event, EventDecl, FactDecl, PluginDeclarations, Verb, ViewDecl};
 
 /// loop 拥有的事实格（本二进制不链接它 ⇒ 夹具补格位与载荷字段）。
-const HARNESS_EVENTS: &[EventDecl] = &[EventDecl::new(
-    EVENT_MEMORY_ENCODED,
-    (Entity::Memory, Verb::Opened),
-)];
+const HARNESS_EVENTS: &[EventDecl] = &[
+    EventDecl::new(EVENT_MEMORY_ENCODED, (Entity::Memory, Verb::Opened)),
+    // `session.config` 的格位夹具：完整进程由会话插件交（`D-389` 移交时格位 /
+    // 载荷原样照抄），本二进制不链接它 ⇒ `skill.compile_switch` 读它会报
+    // `UnknownFact`。它只有事件格位、没有事实声明 ⇒ 视图 reads 冻结为
+    // assertion read（`D-282`），字段形状无从校验也不必校验。
+    EventDecl::new(EVENT_SESSION_CONFIG, (Entity::Scope, Verb::Asserted)),
+];
 
 const HARNESS_FACTS: &[FactDecl] = &[
     // `memory.encoded` 的**形状**夹具：完整进程由情景记忆能力包申报（D-263），本
@@ -164,6 +169,78 @@ fn the_retreat_view_is_sealed_under_this_owner() {
     let frozen = symbio_testkit::sealed_declarations().expect("测试进程的装配表应能冻结");
     assert!(frozen.view(SKILL_RETREAT).is_some());
     assert_eq!(frozen.view_owner(SKILL_RETREAT), Some(OWNER));
+}
+
+/// 编译两视图（已编译数 / 开关）同样在冻结表里，owner 是本插件（`D-489`）。
+#[test]
+fn the_compile_views_are_sealed_under_this_owner() {
+    let frozen = symbio_testkit::sealed_declarations().expect("测试进程的装配表应能冻结");
+    assert!(frozen.view(SKILL_COMPILED).is_some());
+    assert_eq!(frozen.view_owner(SKILL_COMPILED), Some(OWNER));
+    assert!(frozen.view(SKILL_COMPILE_SWITCH).is_some());
+    assert_eq!(frozen.view_owner(SKILL_COMPILE_SWITCH), Some(OWNER));
+}
+
+/// 已编译数只数 `tag:"skill"` 的编码事实——判据随口径一起回 owner（`D-489`）。
+///
+/// 从 session 迁来时逐字保持原口径：按 `tag` 认，不按整格数；空事实源 ⇒ 有据的零。
+#[test]
+fn compiled_count_only_counts_skill_tagged_facts() {
+    let encoded = |id: &str, tag: &str| {
+        Event::pending(
+            id.to_string(),
+            EVENT_MEMORY_ENCODED,
+            Entity::Memory,
+            Verb::Opened,
+            "session/main",
+        )
+        .with_payload(serde_json::json!({ "tag": tag, "content": id }))
+    };
+    let events = [
+        encoded("sk-1", SKILL_TAG),
+        encoded("sk-2", SKILL_TAG),
+        encoded("mem-1", "fact"),
+    ];
+    assert_eq!(
+        super::compiled_count(&events, i64::MAX),
+        serde_json::json!(2),
+        "只有 tag=skill 的两条算技能"
+    );
+    assert_eq!(
+        super::compiled_count(&[], i64::MAX),
+        serde_json::json!(0),
+        "空事实源 ⇒ 有据的零"
+    );
+}
+
+/// 开关读法只有一份（`contributor::compile_enabled`）：最后一条 `session.config`
+/// 的 `skill_compile_enabled`，缺省 `false`（出厂关，`D-427`）。
+#[test]
+fn compile_switch_reads_the_latest_config_event() {
+    let cfg = |id: &str, on: bool| {
+        Event::pending(
+            id.to_string(),
+            EVENT_SESSION_CONFIG,
+            Entity::Scope,
+            Verb::Asserted,
+            "session/main",
+        )
+        .with_payload(serde_json::json!({ "skill_compile_enabled": on }))
+    };
+    assert_eq!(
+        super::compile_switch(&[cfg("c-1", true), cfg("c-2", false)], i64::MAX),
+        serde_json::json!(false),
+        "最后一条为准"
+    );
+    assert_eq!(
+        super::compile_switch(&[cfg("c-1", false), cfg("c-2", true)], i64::MAX),
+        serde_json::json!(true)
+    );
+    assert_eq!(
+        super::compile_switch(&[], i64::MAX),
+        serde_json::json!(false),
+        "没有配置事件 ⇒ 出厂关"
+    );
 }
 
 /// 引用关系不虚：夹具里那条宿主格不是本能力的事实声明。

@@ -103,7 +103,7 @@ const SESSION_SRC_REL = 'crates/symbio-plugin-session/src'
  * `session_chat` / `rebuild` / `SKILL_TAG` / `commitment_records` /
  * `VdfsChangeSubscriptions` / `DriveEntry` / 词汇结构体）**不上门面**，不因换径退场。
  */
-const SYMBOL_BASELINE = 51
+const SYMBOL_BASELINE = 50
 
 const errors = []
 const notes = []

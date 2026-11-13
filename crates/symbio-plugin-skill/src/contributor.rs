@@ -148,7 +148,10 @@ fn recalled_skill_id(history: &[Event], seq: u64) -> Option<&str> {
 }
 
 /// 最后一条 `session.config` 的 `skill_compile_enabled`（缺省 `false`）。
-fn compile_enabled(history: &[Event]) -> bool {
+///
+/// 读数的视图 eval（`decl.rs` 的 `compile_switch`）也走这一份：开关怎么读是**一个**
+/// 口径，贡献者与出口不各写一半。
+pub(crate) fn compile_enabled(history: &[Event]) -> bool {
     history
         .iter()
         .rev()

@@ -35,6 +35,7 @@ use std::collections::BTreeMap;
 use serde_json::{json, Value};
 
 use symbio_plugin_api::events::EVENT_MEMORY_ENCODED;
+use symbio_plugin_api::events::EVENT_SESSION_CONFIG;
 use symbio_plugin_api::reports::{ReportCtx, ReportDecl};
 use symbio_plugin_api::ring::{Decl, Pattern};
 use symbio_plugin_api::{Entity, Event, EventDecl, FactDecl, PluginDeclarations, Verb, ViewDecl};
@@ -67,6 +68,23 @@ pub(crate) const SKILL_RETREAT: &str = "skill.retreat";
 /// 不依赖本 crate、也不经过 `shared_views` 生成物。本能力自己要的那一半（置信度）
 /// 经 [`calibration_ledger`] 直接折，不绕名字读自己的观测。
 pub(crate) const SKILL_CALIBRATION: &str = "skill.calibration";
+
+/// 对外可读视图：本会话**已编译技能数**（`memory.encoded{tag:"skill"}` 的条数）。
+///
+/// 读者是会话统计的 `compiled_skills` 顶层键（报表登记见下，`D-489`）。数的口径与
+/// 写方同源：数的是本能力写下的编码事实，`SKILL_TAG` 单点在本文件（`D-258`）——
+/// 此前 `symbio_sdk::actors` 里还挂着一份读侧词汇、由读方（session 的 stats）抄去数，
+/// 机制面上有一条只有 skill 认识的常量；随本条退场，读数不再由读方抄第二份标签。
+pub(crate) const SKILL_COMPILED: &str = "skill.compiled";
+
+/// 对外可读视图：编译开关的**当前值**（最后一条 `session.config` 的
+/// `skill_compile_enabled`，缺省 `false`——出厂关，`D-427`）。
+///
+/// 开关的真源在配置事件里（会话写、本能力读）：`contributor` 的轮首编译判
+/// [`super::contributor::compile_enabled`]，会话统计的 `skill_compile_enabled`
+/// 顶层键按本视图交值（`D-489`）——「关着」与「开着但没编译过」两种零的分辨
+/// （开关 × 已编译数并读）从此住在同一个 owner 里，读方不再各自读一遍配置。
+pub(crate) const SKILL_COMPILE_SWITCH: &str = "skill.compile_switch";
 
 /// 技能正文与触发串的截断上限（字符）。
 ///
@@ -131,6 +149,27 @@ pub(crate) const VIEWS: &[ViewDecl] = &[
         evidence: &[],
         cost: COST,
         eval: retreating_skills,
+        agg: None,
+    },
+    ViewDecl {
+        name: SKILL_COMPILED,
+        ver: 1,
+        reads: &[(EVENT_MEMORY_ENCODED, "tag")],
+        // 读出口径不是收束判据：本视图不替任何事实关门。
+        evidence: &[],
+        cost: COST,
+        eval: compiled_count,
+        agg: None,
+    },
+    ViewDecl {
+        name: SKILL_COMPILE_SWITCH,
+        ver: 1,
+        // `session.config` 只有事件格位、没有事实声明（`D-389` 移交时格位 / 载荷
+        // 原样照抄）⇒ 本 reads 冻结为 assertion read（报告项，不是缺口）。
+        reads: &[(EVENT_SESSION_CONFIG, "skill_compile_enabled")],
+        evidence: &[],
+        cost: COST,
+        eval: compile_switch,
         agg: None,
     },
 ];
@@ -271,18 +310,68 @@ fn retreating_skills(events: &[Event], now: i64) -> Value {
     Value::Array(out)
 }
 
+/// 纯折叠：已编译技能数 = `memory.encoded{tag:"skill"}` 的条数。
+///
+/// 数的是**写下的事实**，不新增投影（DE-041：技能是事实、不是特殊类型）——与
+/// session 迁移前数的那一份逐字同口径，只是标签与格子都归 owner（`D-489`）。
+fn compiled_count(events: &[Event], now: i64) -> Value {
+    let n = events
+        .iter()
+        .filter(|e| {
+            e.ts <= now
+                && e.kind == EVENT_MEMORY_ENCODED
+                && e.payload.get("tag").and_then(Value::as_str) == Some(SKILL_TAG)
+        })
+        .count();
+    json!(n)
+}
+
+/// 纯折叠：编译开关当前值 = 最后一条 `session.config` 的 `skill_compile_enabled`。
+///
+/// 读法只有一份（[`super::contributor::compile_enabled`]）：轮首编译判与统计出口
+/// 读同一个值，不会一半看新配置一半看旧配置。
+fn compile_switch(events: &[Event], _now: i64) -> Value {
+    json!(super::contributor::compile_enabled(events))
+}
+
 // 报表登记（`D-387`）：`session/stats` 的 `calibration` 顶层键。`views` 是 owner 自己的
 // 常量；空账形状留在 [`report`]，读方不再替 owner 猜形状。
-symbio_plugin_api::submit_reports!([ReportDecl {
-    owner: "skill",
-    slot: "calibration",
-    order: 60,
-    views: &[SKILL_CALIBRATION],
-    fleet: None,
-    render: report,
-    fleet_render: None,
-    panel: None,
-}]);
+//
+// `compiled_skills` / `skill_compile_enabled` 两格同批登记（`D-489`）：此前它们是
+// session 的 `SessionStats` 具名字段（读方数本能力的编码事实、读方再读一遍配置），
+// 现在随登记面回 owner——出口顶层键不变（`SV-003` 契约表随批扩两行），读方删字段。
+symbio_plugin_api::submit_reports!([
+    ReportDecl {
+        owner: "skill",
+        slot: "calibration",
+        order: 60,
+        views: &[SKILL_CALIBRATION],
+        fleet: None,
+        render: report,
+        fleet_render: None,
+        panel: None,
+    },
+    ReportDecl {
+        owner: "skill",
+        slot: "compiled_skills",
+        order: 61,
+        views: &[SKILL_COMPILED],
+        fleet: None,
+        render: count_report,
+        fleet_render: None,
+        panel: None,
+    },
+    ReportDecl {
+        owner: "skill",
+        slot: "skill_compile_enabled",
+        order: 62,
+        views: &[SKILL_COMPILE_SWITCH],
+        fleet: None,
+        render: flag_report,
+        fleet_render: None,
+        panel: None,
+    },
+]);
 
 /// 校准列的排版：账原样交出；读不出来（读方以 `Null` 占位）时交 owner 的空账。
 fn report(views: &[Value], _ctx: &ReportCtx<'_>) -> Value {
@@ -291,6 +380,17 @@ fn report(views: &[Value], _ctx: &ReportCtx<'_>) -> Value {
         .filter(|value| !value.is_null())
         .cloned()
         .unwrap_or_else(|| json!({ "by_skill": {} }))
+}
+
+/// 已编译数列的排版：计数原样交出（出口是一格裸数字，与迁移前的具名字段同形）；
+/// 读不出来 ⇒ `0`（有据的零，与读侧闸交空切片时的值相同）。
+fn count_report(views: &[Value], _ctx: &ReportCtx<'_>) -> Value {
+    views.first().cloned().unwrap_or(json!(0))
+}
+
+/// 开关列的排版：布尔原样交出；读不出来 ⇒ `false`（出厂关，`D-427`）。
+fn flag_report(views: &[Value], _ctx: &ReportCtx<'_>) -> Value {
+    views.first().cloned().unwrap_or(json!(false))
 }
 
 // 装配口的提交：宿主链接本 crate 即生效。本插件不认识也不依赖任何兄弟插件。

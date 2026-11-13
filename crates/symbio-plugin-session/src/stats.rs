@@ -54,7 +54,6 @@ use symbio_kernel::plugin::{
     PluginError, PluginInvokeRequest, PluginInvokeResponse, PluginPayload,
 };
 use symbio_kernel::present::ReadingPanel;
-use symbio_sdk::actors::SKILL_TAG;
 use symbio_sdk::invariants::check_all;
 use symbio_sdk::projection::transcript::transcript;
 
@@ -220,21 +219,6 @@ pub(crate) struct SessionStats {
     /// （与 `context_watermark` 缺数整条不出现同一条纪律）。
     #[serde(skip_serializing_if = "Option::is_none")]
     pub usage: Option<symbio_kernel::present::ReadingSection>,
-    /// 技能编译开关（部署配置 `skill_compile_enabled`，**不是**本会话的事实）。
-    ///
-    /// 与 [`Self::compiled_skills`] 并读才分辨得出两种「零技能」：`false` = 关着
-    /// （本轮轨迹不会被编译成技能）；`true` + `0` = 开着但本会话还没成功收束过
-    /// 可编译的轨迹。只有一列时两种零长同一个样子，而处置完全不同（一个是配置
-    /// 选择，一个是运行结果）。
-    ///
-    /// 读侧闸不影响本列：开关是部署事实，不是这份事实源里的内容。
-    pub skill_compile_enabled: bool,
-    /// 本会话**已编译技能数**：事实源里 `memory.encoded{tag:"skill"}` 的条数。
-    ///
-    /// 技能是事实、不是特殊类型，故这里只数列里已有的格子，**不新增投影**。
-    /// 归四列那一族（同一份切片、同一个 as-of）：`may_read = false` ⇒ 切片已空 ⇒
-    /// `0`，与「开着但没编译过」由 [`Self::skill_compile_enabled`] 分辨。
-    pub compiled_skills: usize,
     /// **实例级聚合**（跨会话的 SLO 真数）。
     ///
     /// 上面每一列回答「**这一个会话**怎么样」；本列回答「**整个实例**怎么样」——
@@ -274,15 +258,12 @@ pub(crate) struct SessionStats {
 /// 读方是「谁在看」，会话主体是「这份承诺是谁立的」——把两者合成一个参数会让
 /// 「别人看我的声誉」退化成「别人的声誉」。
 ///
-/// `skill_compile_enabled` 是部署开关（本函数不读配置，由调用方交值）：它与
-/// 「已编译技能数」并读才能分辨「关着」与「开着但没编译」两种零。
 pub(crate) fn read(
     session_id: &str,
     snapshot: Option<Vec<Event>>,
     deep_facts: impl FnOnce() -> Vec<Vec<Event>>,
     viewer: Option<&str>,
     session_principal: &str,
-    skill_compile_enabled: bool,
     // 调度容量（本会话配置 `task_cap`）：就绪集列按**同一个** `cap` 取，
     // 与调度段 / 调度者同源——三处各取一个数，就会读出「调度派了 1 笔，
     // 统计说候选有 5 笔」这种看不出谁错的差。
@@ -362,17 +343,6 @@ pub(crate) fn read(
     )
     .map_err(|e| PluginError::InternalError(format!("转写序列化失败：{e}")))?;
 
-    // 技能编译列：技能就是 `memory.encoded{tag:"skill"}` 这条事实，故只数
-    // 切片里的格子，不另造投影。切片已按 `may_read` 取过 ⇒ 无权读的人得 0，
-    // 与「开着但没编译过」由部署开关 `skill_compile_enabled` 分辨。
-    let compiled_skills = snapshot
-        .iter()
-        .filter(|e| {
-            e.kind == symbio_plugin_api::events::EVENT_MEMORY_ENCODED
-                && e.payload.get("tag").and_then(|v| v.as_str()) == Some(SKILL_TAG)
-        })
-        .count();
-
     // 实例级聚合列：owner 在 `ReportDecl::fleet` 里声明落点，读侧按登记求值、按登记
     // 落格（`D-488`）。`may_read = false` 时**不扫**（扫遍实例再报「不给你看」是白花
     // 代价）：交空快照，owner 的 `agg(&[])` 交有据的零 / 空——空形状住 owner 那里
@@ -397,8 +367,6 @@ pub(crate) fn read(
         transcript,
         fleet,
         capability_views,
-        skill_compile_enabled,
-        compiled_skills,
         panel: ReadingPanel::default(),
         usage: None,
     };
@@ -451,11 +419,12 @@ impl SessionPlugin {
             Some(agent) => symbio_plugin_api::principal_of(Some(&agent)),
             None => symbio_sdk::authz::request_principal(ctx.as_ref()),
         };
-        // 这两个数是能力方贡献的（D-427）：技能编译开关归 `skill`、就绪集容量归
-        // `task`。统计是**读方**，按共享名读最近一条 `session.config`；读不到就用
-        // 出厂值——与所有读快照的决策同一口径，本插件不再持有这两格的配置类型。
-        // 与已编译数并读，才分得清「关着」与「开着但没编译过」两种零。
-        let (skill_compile_enabled, task_cap) = {
+        // 调度容量是能力方贡献的数（D-427，归 `task`）：统计是**读方**，按共享名读
+        // 最近一条 `session.config`；读不到就用出厂值——与所有读快照的决策同一口径，
+        // 本插件不再持有这一格的配置类型。（技能编译开关同属 `session.config` 的
+        // 贡献键，但它的读数出口与轮首编译判都归 `skill`——`D-489` 起按报表列交值，
+        // 本处不再读第二遍。）
+        let task_cap = {
             let latest = snapshot.as_ref().and_then(|events| {
                 events
                     .iter()
@@ -463,16 +432,11 @@ impl SessionPlugin {
                     .find(|e| e.kind == symbio_plugin_api::events::EVENT_SESSION_CONFIG)
                     .map(|e| &e.payload)
             });
-            let flag = latest
-                .and_then(|p| p.get("skill_compile_enabled"))
-                .and_then(serde_json::Value::as_bool)
-                .unwrap_or(false);
-            let cap = latest
+            latest
                 .and_then(|p| p.get("readyset_cap"))
                 .and_then(serde_json::Value::as_u64)
                 .map(|v| v as usize)
-                .unwrap_or(symbio_plugin_api::TASK_CAP);
-            (flag, cap)
+                .unwrap_or(symbio_plugin_api::TASK_CAP)
         };
         let stats = read(
             &sid,
@@ -480,7 +444,6 @@ impl SessionPlugin {
             || store.deep_snapshots(),
             viewer.as_deref(),
             &session_principal,
-            skill_compile_enabled,
             task_cap,
         )?;
         Ok(PluginPayload::new(&stats))
