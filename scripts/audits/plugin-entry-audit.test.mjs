@@ -31,15 +31,27 @@ const DECLARED_RULES = [...fs.readFileSync(script, 'utf8').matchAll(/^ {2}'(E-\d
  * 在临时目录里搭一棵最小仓库树并跑审计。
  *
  * @param {Record<string, string>} files 相对仓库根的路径 → 内容
- * @param {{strict?: boolean}} [opts]
+ * @param {{strict?: boolean, readme?: boolean}} [opts] `readme: false` 不自带 README
+ *   （E-015 的用例用它造「缺手册页」；其余用例由本函数补齐，否则每条都会额外红在那里）
  */
-function audit(files, { strict = false } = {}) {
+function audit(files, { strict = false, readme = true } = {}) {
   const root = fs.mkdtempSync(path.join(os.tmpdir(), 'plugin-entry-audit-'))
   try {
     for (const [rel, content] of Object.entries(files)) {
       const abs = path.join(root, rel)
       fs.mkdirSync(path.dirname(abs), { recursive: true })
       fs.writeFileSync(abs, content)
+    }
+    if (readme) {
+      // 每份夹具插件都补一页 README：E-015 判的就是「有没有」，正文不参与判定。
+      for (const dir of new Set(
+        Object.keys(files)
+          .map((r) => (r.match(/^(crates\/symbio-plugin-[^/]+)\//) || [])[1])
+          .filter(Boolean),
+      )) {
+        const p = path.join(root, dir, 'README.md')
+        if (!fs.existsSync(p)) fs.writeFileSync(p, '# fixture' + String.fromCharCode(10))
+      }
     }
     const env = { ...process.env, NO_COLOR: '1' }
     const result = spawnSync(
@@ -97,6 +109,8 @@ impl Plugin for SessionPlugin {
 const CLEAN = {
   ...CORE,
   'crates/symbio-plugin-session/src/plugin.rs': PLUGIN,
+  // E-015：每份插件 crate 都带 README（夹具同理，否则每条用例都额外红在它上面）
+  'crates/symbio-plugin-session/README.md': '# 会话（session）' + String.fromCharCode(10),
   'docs/004-ref/003-ROUTES.md': '| `session/chat/send` | 发言 |\n',
 }
 
@@ -1364,4 +1378,32 @@ test('E-013 豁免：带理由的 plugin-entry-allow 放行；空理由仍报', 
     'crates/symbio-plugin-loop/src/driver.rs': `// plugin-entry-allow E-013:\n${line}`,
   })
   assert.match(emptyReason.stdout, E013_HIT)
+})
+
+// ── E-015：每份插件 crate 都有 README.md ─────────────────────────────────
+// 这条判据的由来：事实表的插件列长期挂着六个「缺」而没有红灯——手册页缺失是**读者**
+// 的失败，作者收不到任何信号。夹具默认自带 README（见 `audit()` 的 `readme` 选项）。
+
+const E015_HIT = /\[ERROR\]\s+E-015\s+crates\/symbio-plugin-telegram\//
+// 一份**真插件**（有 `impl Plugin for`：`discoverPlugins` 只收这种目录），
+// meta 首参与目录名一致，所以 E-015 是唯一会亮的那条。
+const TELEGRAM_PLUGIN = PLUGIN.replace('PluginMeta::new(PLUGIN_ID_SESSION', 'PluginMeta::new("telegram"')
+
+test('E-015 命中：插件 crate 没有 README.md', () => {
+  const r = audit(
+    { ...CLEAN, 'crates/symbio-plugin-telegram/src/plugin.rs': TELEGRAM_PLUGIN },
+    { readme: false },
+  )
+  assert.equal(r.status, 1, r.stdout)
+  assert.match(r.stdout, E015_HIT)
+})
+
+test('E-015 不误报：插件有 README.md', () => {
+  const r = audit({
+    ...CLEAN,
+    'crates/symbio-plugin-telegram/src/plugin.rs': TELEGRAM_PLUGIN,
+    'crates/symbio-plugin-telegram/README.md': '# telegram',
+  })
+  assert.equal(r.status, 0, r.stdout)
+  assert.doesNotMatch(r.stdout, E015_HIT)
 })

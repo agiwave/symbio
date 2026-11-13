@@ -31,7 +31,7 @@ lists: [gate-codes=owner]
 | **DC** | 文档计数对账（文档与源码注释里的少数几个数 vs 代码） | `scripts/audits/doc-count-audit.mjs` | DC-001–005 | `DC-006` |
 | **DR** | 死路径（写出来的 crate 名必须存在） | `scripts/audits/dead-path-audit.mjs` | DR-001–003 | `DR-004` |
 | **DS** | 文档小节寻址（一级编号唯一递增 + §N 引用可解析） | `scripts/audits/doc-section-audit.mjs` | DS-001–002 | `DS-003` |
-| **E** | 插件入口与门面 | `scripts/audits/plugin-entry-audit.mjs` | E-001–009、E-011–014 | `E-015` |
+| **E** | 插件入口与门面 | `scripts/audits/plugin-entry-audit.mjs` | E-001–009、E-011–015 | `E-016` |
 | **EL** | 引擎收口（DE-044 的账本读数） | `scripts/audits/engine-ledger-audit.mjs` | EL-001–003 | `EL-004` |
 | **EOL** | 行尾（工作树 / 入库 / 声明三面一致） | `scripts/audits/eol-audit.mjs` | EOL-001–003 | `EOL-004` |
 | **EX** | 能力全面拆分（名册处置与迁移边界） | `scripts/audits/capability-ledger-audit.mjs` · `scripts/audits/capability-migration-audit.mjs` · `scripts/audits/extension-locality-audit.mjs` · `scripts/audits/extension-vocab-audit.mjs` · `scripts/audits/uninstall-edge-audit.mjs` | EX-002–004、EX-006–008 | `EX-009` |
@@ -146,6 +146,7 @@ lists: [gate-codes=owner]
 | **E-012** | `scripts/audits/plugin-entry-audit.mjs` |
 | **E-013** | `scripts/audits/plugin-entry-audit.mjs` |
 | **E-014** | `scripts/audits/plugin-entry-audit.mjs` |
+| **E-015** | `scripts/audits/plugin-entry-audit.mjs` |
 | **EL-001** | `scripts/audits/engine-ledger-audit.mjs` |
 | **EL-002** | `scripts/audits/engine-ledger-audit.mjs` |
 | **EL-003** | `scripts/audits/engine-ledger-audit.mjs` |

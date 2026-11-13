@@ -37,6 +37,7 @@
  * | E-013 | `crates/symbio-plugin-loop/src/**` 的 import 根 ⊆ 闭族（core 端口 / 通用库 / 自身 `super` / owner 声明表 / owner 自己的折叠），**测试同样判** | 驱动器片跨墙只准用 [D-083 §4](../../docs/003-design/001-核心架构.md "D-083") 的闭族通货：宿主机制面 `symbio_sdk::` + 封闭语法 `symbio_kernel::` + 通用库 + crate 根日志/工厂宏 + 本插件自己的模块根。它一旦 import 会话模块（或任何兄弟插件），切片就退回「搬家」：卸载 loop 时编译面仍钉着会话内部类型。E-009 已拦兄弟插件的全部依赖通路（清单 / 源码 / 宿主门面），但拦不住 `crate::providers` / 第三方 crate 这类**族外根**；本条把闭族写成枚举白名单，族外新增必须先回到 D-083 §4 论证「它代表哪条事实，或哪个方向的世界端口」 |
  * | E-011 | 纯配置挂载点插件不得手写 `impl VdfsProvider`                    | 「挂载根 = 一份配置文档」的插件（`CONFIG_MOUNT_PLUGINS`）四臂 dispatch 骨架逐字相同，机制侧已提供唯一实现（`symbio_sdk::PluginConfigMount` 的泛型 blanket impl）。手写一份 = 把同一段语义复制出去：四份副本改一条错误文案要改四处，新增插件「记得抄对每条分支」是纯人肉负担。本条与行数棘轮互补——棘轮在**事后**度量规模，本条在**事前**禁止把已收口的语义再摊开 |
  * | E-012 | `ROUTE_*` 常量：**名**去掉前缀后逐字等于**值**的大写，且**值**必须是真实分发目标 | 名字与值分叉 ⇒ 照名字拼出的地址不存在；值不在 `route()` 的臂也不在 `VDFS_OPS` ⇒ 登记的是一条没人能到达的地址（`AGENT_CHAT` 就是这个形态）。E-005 判「引用」不判「定义」，这两条此前无守卫，而 `route.rs` 的文档还声称有 |
+ * | E-015 | 每份插件 crate 必须有 `README.md`（能力包的自述页） | 它不是一个「可有可无的文档」：`docs/004-ref/006-当前事实表.md` 的插件表有一列直接渲染「有 / **缺**」，而那一列长期挂着六个 `缺` 且没有任何判据会红——手册页缺失是**读者**的失败，不是作者的失败，所以它只能靠机制拦。README 还承载 E-006（路由权威清单）与 AO-005（兄弟插件地址）两处判据的输入面 |
  * | E-014 | 真插件 crate 的**导出根**（`src/lib.rs`）不得有 `pub` 项 | E-009 拦得住「已经依赖」，拦不住「随时可以依赖」：只要 `lib.rs` 还留着一个能用的 `pub` 类型，兄弟插件就有绕过注册机制的直接通路。注册入口是 crate 根的 `submit_object_creator!` 宏，不是 `pub` 项，所以白名单为空；内层私有模块的 `pub fn` 不可达，不算导出 |
  *
  * （原 E-010「消费方不得深引 `symbio_sdk::<域>::`」已迁至
@@ -84,7 +85,7 @@
 
 // 判据码命名空间（登记表 docs/004-ref/GATE_CODES.md 由这些行生成，判据见 gate-codes-audit.mjs）
 // @ns E 插件入口与门面
-// @codes E-001 E-002 E-003 E-004 E-005 E-006 E-007 E-008 E-009 E-011 E-012 E-013 E-014
+// @codes E-001 E-002 E-003 E-004 E-005 E-006 E-007 E-008 E-009 E-011 E-012 E-013 E-014 E-015
 
 import fs from 'node:fs'
 import path from 'node:path'
@@ -1500,6 +1501,24 @@ for (const plugin of pluginDirs) {
   }
 }
 
+// ── E-015：每份插件 crate 都有 README.md ────────────────────────────────────
+//
+// 为什么：`docs/004-ref/006-当前事实表.md` 的插件表把「有 README」渲染成一列 ✓/缺，
+// 而那一列长期挂着六个 `缺` 却没有任何判据会红——手册页缺失是**读者**的失败，
+// 作者不会因此收到任何信号。README 同时是 E-006（路由权威清单）与 AO-005
+// （兄弟插件地址）的输入面：没有它，那两条判据对这份插件就没有判据对象。
+for (const plugin of pluginDirs) {
+  const readme = path.join(crateDirOf(plugin.dirName), 'README.md')
+  if (fs.existsSync(readme)) continue
+  report(
+    'E-015',
+    'error',
+    `crates/${PLUGIN_CRATE_PREFIX}${plugin.dirName}/`,
+    0,
+    `插件 \`${plugin.dirName}\` 没有 README.md —— 能力包必须自述「它交什么 / 口径 / 关联」`,
+  )
+}
+
 // ── E-006：路由**权威清单**里的路径前缀必须是插件目录名（文档侧）─────────
 //
 // 为什么只扫这几个文件：`hooks/fire` 这个幽灵路径**不在任何代码里**——它出现在
@@ -1730,6 +1749,7 @@ const ruleNames = {
   'E-012': '路由常量名↔值同构且值可分发',
   'E-013': 'loop 驱动器的 import 根 ⊆ 闭族',
   'E-014': '插件导出根零 pub',
+  'E-015': '插件有 README',
 }
 for (const [rule, name] of Object.entries(ruleNames)) {
   const n = hitsByRule.get(rule) ?? 0
