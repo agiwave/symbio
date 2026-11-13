@@ -20,18 +20,18 @@ deps: [DE-016-工程落地与验证]
 | 执行体实测耗时 | `crates/symbio-plugin-model/src/port.rs` | `ModelExecutor` 落 `response{port=model}` 时写 `cost_ms`（`started.elapsed()`，覆盖解载荷到收束整段）。一次往返一个读数，不经中间层转发 |
 | `cost_ms` 读侧 | `crates/symbio-sdk/src/projection` | 逐轮读数进 final 的 `cost_ms`，`cost.ledger` 按主体累加 |
 | `cost_ms` 入事件 | final 事件字段 | 调用方把实测值写到 `chat.assistant.final` 的 `cost_ms` |
-| ③ `cost.ledger` | `crates/symbio-plugin-cost/src/decl.rs` | 按主体累计——**熔断判据「已耗多少」从此读实测值**（接上真实来源） |
+| `cost.ledger` | `crates/symbio-plugin-cost/src/decl.rs` | 按主体累计——**熔断判据「已耗多少」从此读实测值**（接上真实来源） |
 
 闭环：**adapter 边界实测 → final 事件 `cost_ms` → `cost.ledger` 累计 → CircuitBreaker 判据**——
 成本是同一份事实源算出来的，不是旁路统计（N1 同口径）。
 
-## 2. 实测方法
+## 2. 首测方法（2026-09-30 样本）
 
-- 链路：事件网格（`EventStore`）→ `Reasoner`（持 `FullModel` 令牌）→
- `ProviderLlmAdapter` → `BoundProvider::round_trip`（五态机）→ openai_chat
- SSE 解析 → **真实 TCP + HTTP/1.1 + 流式响应**（本地 `TcpListener` mock 即答）；
+- 链路：事件网格 → 模型端口执行体 → 协议适配 → `openai_chat` SSE 解析 →
+ **真实 TCP + HTTP/1.1 + 流式响应**（本地 `TcpListener` mock 即答）；
 - 样本：12 轮全链路（每轮新建连接——最坏情况，无连接复用红利）；
-- 计量：`generate_timed` 在 adapter 边界的耗时 = 传输 + 协议 + 解析 + 聚合，
+- 计量：执行体边界的 `started.elapsed()`（`crates/symbio-plugin-model/src/port.rs::ModelExecutor`
+ 写 `response{port=model}` 时落 `cost_ms`）= 传输 + 协议 + 解析 + 聚合，
  **不含模型推理**（mock 即答）——这正是「系统自身开销」的定义。
 
 ## 3. 实测结果（Windows，单进程）
@@ -42,42 +42,43 @@ deps: [DE-016-工程落地与验证]
 | **P50** | **1 ms** | 反射档 80 ms → 占 **1.3%** |
 | **max** | **3 ms** | 快速档 300 ms → 占 **1%** |
 
-守卫固化：`reflex_tier_system_overhead_is_measured_and_bounded`
-（P50 ≤ 80 断反射档、max ≤ 300 断快速档——超界即「链路自身失控，与模型无关」，
-CI 每轮重测，数字回归会被当场抓住）。
+判读口径：P50 ≤ 80 对照反射档预算、max ≤ 300 对照快速档预算——超界即
+「链路自身失控，与模型无关」。本节是首测读数；跑量后的现行读数按 §5 的
+实例级聚合列 `fleet` 出数（扫描边界的判据在
+`crates/symbio-plugin-session/src/stats.test.rs::fleet_aggregates_every_session_in_the_instance`）。
 
 ## 4. 解读（这两条缺口的回答）
 
 - **硬实时预算**：反射档 80ms 预算中，系统自身开销 ≈ 1ms——**98% 以上留给模型**。
  「预算断言」有了实测背书：预算约束模型为主，链路自身不是瓶颈。SLO 初值 80/300/60s/24h
  **在本机实证下无需下调**。
-- **成本模型**：`cost_ms` 从声明值变为实测值，`cost.ledger` 与熔断判据的输入
- 从此是真实测量。成本 SLO（兜底率 < 1%/3%/5%/5%）的**分母有了可信来源**；
- 兜底率统计仍待真实模型流量（跑量后出 P99）。
+- **成本模型**：`cost_ms` 是执行体边界实测值，`cost.ledger` 与熔断判据的输入
+ 与之同源（§1）。成本 SLO（兜底率 < 1%/3%/5%/5%）的**分母有了可信来源**；
+ 兜底率的现行统计口径归 §5.6。
 
 ## 5. 边界与后续
 
-1. **本测不含模型推理**——模型时代单轮耗时 = 系统开销（~1ms）+ 模型延迟（主导项）。
- 接真实 provider 后同法重测，才是完整校准（下一步候选 3：CLI 挂真 provider）；
+1. **本测不含模型推理**——单轮耗时 = 系统开销（~1ms）+ 模型延迟（主导项）；
+ 含模型延迟的读数见 §5.5 与 §5.7；
 2. 单进程 localhost，无 TLS/代理/跨机网络——生产网络开销另计；
 3. **P99 出自跑量后的扫描**（[DE-016 §8.2](../003-design/016-工程落地与验证.md "DE-016-工程落地与验证") 的承诺）：跑量后从事件日志
  扫描（final 事件自带 `cost_ms`，扫描器无需埋点设施——数据已经在事实源里）。
- **扫描口就是生产读数口**：`slo_scan_wal_roots`（不是 `#[ignore]` + 环境变量的手工口），
- 职责分两处——跨会话**聚合口径**
+ **扫描口就是生产读数口**，职责分两处——跨会话**聚合口径**
  归能力包 `slo` 的 `ViewDecl::agg`（`crates/symbio-plugin-slo/src/decl.rs::latency_merged`，
   `D-281`），**扫描 + 落成读数**落在 `session/stats` 的实例级聚合列 `fleet`
- （四条判据，含「只走一层」与「坏 WAL 不拖垮整列」两条原手工口没有的）。
- e2e 每轮实跑 ⇒ **CI 出真数**；
-4. 兜底率（DE-016 §8.2 第三列）需要真实流量的 fallback 事件计数，读数口同上：`fallback_rate` 投影 + 聚合列 `fleet.by_tier.fallback`（跨会话合并后的
+ （`crates/symbio-plugin-session/src/stats_reading.rs::fleet_reading`，落点由 `ReportDecl::fleet` 登记），
+ 出口行排版在 `crates/symbio-plugin-slo/src/decl.rs::tiers_fleet`。
+ e2e `t28-session-stats` 实跑该列，`stats.test.rs` 的 fleet 判据守住扫描边界 ⇒ **CI 出真数**；
+4. 兜底率（DE-016 §8.2 第三列）需要真实流量的 fallback 事件计数，读数口同上：`slo.fallback` 视图（`crates/symbio-plugin-slo/src/decl.rs::SLO_FALLBACK`）+ 聚合列 `fleet.by_tier.fallback`（跨会话合并后的
  分子 / 分母 / 率）。
 
 ## 5.5 完整校准 · 真实端点
 
-`real_provider_full_calibration`（opt-in，`#[ignore]`，
-凭 `SYMBIO_REHEARSE_API_BASE/_API_KEY/_MODEL` 即跑）接**真实模型端点**复测。
+**真实模型端点**下的复测读数：与 §2 首测同口径，只把 mock 换成真实端点，
+样本取每轮 `chat.assistant.final` 的顶层 `cost_ms`（执行体边界实测）。
 
 - 端点：LMStudio（局域网，本地模型 `google/gemma-4-e2b`，OpenAI 兼容
- openai_chat 协议）——与 CI 校准完全同形，只把 mock 换成真实端点；
+ openai_chat 协议）；
 - 链路全程不变量守卫：每轮落 final 后 `check_all` 即时校验（N3 每轮
  独立成 turn、N5 溯源指向本轮用户消息）；
 - **实测（6 轮）**：样本 `[3603, 3681, 4009, 4051, 4228, 4595]` ms，
@@ -86,15 +87,16 @@ CI 每轮重测，数字回归会被当场抓住）。
 - 解读：单轮耗时 ≈ 系统自身开销（~1ms）+ 模型延迟（~4s，主导项）——
  与 §4 的归因一致；四层预算把「模型延迟是主导项」接住了。
 
-端点不可达时按 I3 映射为 `GenerationFailed`，无 panic 无静默——错误映射路径本身
+端点不可达时按 I3「到点必答」收束，无 panic 无静默——错误映射路径本身
 就是兜底演练。
 
 ## 5.6 兜底率统计口径
 
 DE-016 §8.2 第三列（兜底率上限 <1%/3%/5%/5%）的**测量口径**落地：
 
-- **③ `fallback_rate` 投影**：turn 档位 = `user.message` 载荷 `tier`
- （`LatencyTier::name`）——「装配进哪一档」是数据，写进事实源；
+- **`slo.fallback` 视图**：turn 档位 = `turn.dispatch` 载荷 `tier`
+ （`crates/symbio-kernel/src/adapters.rs::LatencyTier::name`，`D-282` 是档位的唯一来源）
+ ——「装配进哪一档」是数据，写进事实源；
  兜底 = `chat.assistant.fallback`（`turn × closed`）按 turn 号归档；
 - **缺失/未知档位进 `unspecified` 桶**——可观测，不静默归类；
 - 投影只报数，达标判定交给读方（SLO 是承诺，投影是事实）；N1 双跑一致；
@@ -126,7 +128,7 @@ DE-016 §8.2 第三列（兜底率上限 <1%/3%/5%/5%）的**测量口径**落�
   否则这类轮次在台账与 SLO 里整类缺席，`cli-t82-cost2` 的 5867ms 就是快路的量级代表
   （WAL 同一事件带 `dialog.reason = from_context` 与措辞往返的 `reasoning`）。
 
-**仍是边界的部分**：这是 8 个真实样本，不是生产流量；`fallback_rate` 与
+**仍是边界的部分**：这是 8 个真实样本，不是生产流量；`slo.fallback` 与
 `fleet` 列的分母要到真实流量才有意义（§5.6 已写明口径）。
 
 ## 6. 结论
