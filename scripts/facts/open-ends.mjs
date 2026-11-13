@@ -99,6 +99,16 @@ export const ROWS = [
     owner: "`docs/007-task/` 的登记条目",
     how: "`node scripts/registry-board.mjs`",
   },
+  {
+    key: "verifyCoupled",
+    unit: "个",
+    label: "verify 程序与生产源码耦合",
+    owner: "`docs/003-design/verify/*.rs` 里指向 `crates/` 的 `#[path]` 行",
+    how: "`grep -l '#\[path' docs/003-design/verify/*.rs`",
+    // 分子分母都由同一份目录现数：16 这个分母写进注释就会漂移（`55-verify.mjs`
+    // 的头注释此前正是手抄了 `4/16`）。
+    fmt: (v) => `${v.verifyCoupled} / ${v.verifyPrograms}`,
+  },
 ];
 
 /** 一份 JSON 账本的 `symbols.length`；读不出 / 形状变了都抛错，不静默报 0。 */
@@ -144,6 +154,31 @@ export function ignoredTests(root) {
   return n;
 }
 
+/**
+ * verify 程序的「与生产源码耦合」比：分子 = 含指向 `crates/` 的 `#[path]` 的程序，
+ * 分母 = `verify/` 顶层的程序数（`facts/mod.rs` 是生成物，不算一个程序）。
+ *
+ * 这个比此前只活在 `55-verify.mjs` 的头注释里（手抄 `4/16`）——注释不是 owner，
+ * 挂一个新 `#[path]` 就漂。这里从目录与源码现数，判据仍归那个阶段自己。
+ */
+export function verifyCoupling(root) {
+  const dir = path.join(root, "docs", "003-design", "verify");
+  if (!fs.existsSync(dir)) {
+    throw new Error(`${OUT_REL}：owner 读不出——docs/003-design/verify 不存在`);
+  }
+  const programs = fs.readdirSync(dir).filter((f) => f.endsWith(".rs"));
+  if (programs.length < 10) {
+    throw new Error(`${OUT_REL}：owner 读不出——verify/ 只有 ${programs.length} 个程序（< 10）`);
+  }
+  let coupled = 0;
+  for (const f of programs) {
+    const src = fs.readFileSync(path.join(dir, f), "utf8");
+    // 只认真正指进 `crates/` 的包含；`mod tests` 这类同目录包含不算耦合。
+    if(/#\[path\s*=\s*"[^"]*crates\//.test(src)) coupled += 1;
+  }
+  return { verifyPrograms: programs.length, verifyCoupled: coupled };
+}
+
 /** 一次性从各 owner 取数；任何一格读不出就让整份事实生成失败。 */
 export function collect(root) {
   const registry = loadEntries(root);
@@ -162,12 +197,15 @@ export function collect(root) {
     partial: registry.entries.filter(
       (e) => e.meta?.kind === "design" && e.meta?.impl === "partial",
     ).length,
-    tasks: registry.entries.filter((e) => e.meta?.kind === "task").length,
+    // 目录自己的汇总页（`projection: true`）是投影的地址，不是一条任务——
+    // 计入会让「在册任务 1 条」与同页「共 0」自相矛盾。
+    tasks: registry.entries.filter((e) => e.meta?.kind === "task" && !e.meta?.projection).length,
     archDead: symbolCount(root, "scripts/baselines/arch-dead-code.json"),
     sessionFrozen: symbolCount(root, "scripts/exemptions/plugin-session-sdk.json"),
     debtExemptions: DEBT_EXEMPTIONS.length,
     injectionGaps: CELLS.filter((c) => c?.gap).length,
     ignoredTests: ignoredTests(root),
+    ...verifyCoupling(root),
   };
 }
 
@@ -198,7 +236,8 @@ export function render(values) {
     "|---|---:|---|---|",
   );
   for (const r of ROWS) {
-    L.push(`| ${r.label} | ${values[r.key]} ${r.unit} | ${r.owner} | ${r.how} |`);
+    const cell = r.fmt ? r.fmt(values) : `${values[r.key]} ${r.unit}`;
+    L.push(`| ${r.label} | ${cell} | ${r.owner} | ${r.how} |`);
   }
   L.push(
     "",
