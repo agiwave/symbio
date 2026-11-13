@@ -8,15 +8,18 @@
 //! **就绪判定是纯函数，从事件序列算**：`ready = 非终态 ∧ depends_on 全部终态 ∧ 无活租约 ∧
 //! 未挂起`。调度器不需要任何内部状态——同一份事件切片永远算出同一个就绪集（N1）。
 //!
-//! ## 容量是读者的预算，不是折叠的一格
+//! ## 容量随配置事实走，不在折叠的形参里
 //!
-//! [`ready_all`] 交出**全部**就绪任务，按 `(opened_seq, task_id)` 升序；`cap` 由读者在
-//! 折叠之外套上（[`ready_view`] 那一层）。这不是把口径拆成两份：折叠回答「谁就绪、什么序」，
-//! 读者回答「这一轮给几笔」——后者本来就是参数而不是结构（`cap = 1` 是本阶的平凡值，
-//! 调度器、租约、仲裁的逻辑一行不改，系统退化为串行 FIFO，
-//! [DE-034](../../../docs/003-design/034-并发调度与租约.md "DE-034-并发调度与租约") §4）。
-//! 搬出 core 之后这件事第一次**写在类型上**：声明视图的求值口只有事实切片与时间戳
-//! （`ViewDecl::eval`），容量根本没有进来的通道 ⇒ 谁想截断都得自己说明截了几笔。
+//! [`ready_all`] 交出**全部**就绪任务，按 `(opened_seq, task_id)` 升序；生效容量由
+//! 读者按**同一个来源**套上（[`ready_view`] 那一层）：`readyset_cap` 是本轮配置
+//! **事实**（`session.config` 的贡献键，[`crate::task::readyset_cap`] 单点读它），
+//! 调度段、提示段与统计列读的是同一份史——同一份史回放必然得到同一个容量
+//! （`D-252` 的既有判据）。`cap = 1` 是本阶的平凡值：调度器、租约、仲裁的逻辑
+//! 一行不改，系统退化为串行 FIFO，
+//! [DE-034](../../../docs/003-design/034-并发调度与租约.md "DE-034-并发调度与租约") §4。
+//! [`readyset_value`]（对外声明的求值口）因此直接按事实里的容量截断并报出**生效**
+//! 容量（`D-490`）；[`ready_view`] 保留形参版本给调度段——它拿的切片是本轮事实，
+//! 容量同样从事实里取。
 //!
 //! `cap = 0` 按 1 处理：容量为零的调度器不是「更保守」，是「永不动」。
 //!
@@ -72,8 +75,9 @@ pub(crate) struct ReadyTask {
 /// 就绪集视图：按 `(opened_seq, task_id)` 升序，至多 `cap` 笔。
 ///
 /// `cap` 写进视图，是因为「为什么只给这几笔」是读方要回答的问题：候选集被截断与
-/// 候选集本来就少，是两种不同的信号。它是**读者那一层**的记账（[`ready_view`]），
-/// 不在对外声明的视图值里（见模块文档「容量是读者的预算」）。
+/// 候选集本来就少，是两种不同的信号。它是**读者那一层**的记账（[`ready_view`]）；
+/// 对外声明的求值口（[`readyset_value`]）走同一条路径——容量从切片里的配置事实取
+/// （`D-490`），读方不必也无法再带一份。
 #[derive(Debug, Clone, PartialEq, Eq, Default, Serialize, Deserialize)]
 pub(crate) struct ReadySetView {
     pub(crate) ready: Vec<ReadyTask>,
@@ -212,13 +216,19 @@ pub(crate) fn ready_view(events: &[Event], now: i64, cap: usize) -> ReadySetView
     ReadySetView { ready, cap }
 }
 
-/// 对外声明的那一份：`task.readyset` 的值（[`ready_all`] 的原样序列化，不含 `cap`）。
+/// 对外声明的那一份：`task.readyset` 的值（[`ready_view`] 按事实里的容量截断后的
+/// 序列化，`D-490`）。
 ///
-/// 读方拿到的是**未截断**的候选集与它们的序；「这一轮派几笔」是读者自己的事
-/// （`session` 的统计列按会话配置截，本包的调度者按同一个 `task_cap` 截）。
-/// 同一切片、同一个 as-of ⇒ 两侧读出的前缀必然同源（N1 双跑一致）。
+/// 容量从**同一切片**里的配置事实读（[`crate::task::readyset_cap`]，与调度段同一份
+/// 单源读法）：史里没有配置 ⇒ 出厂值（`TASK_CAP`）——那是「这条史还没写过本轮配置」，
+/// 不是「容量未知」。同一切片、同一个 as-of ⇒ 两侧读出的前缀必然同源（N1 双跑一致）。
 pub(crate) fn readyset_value(events: &[Event], now: i64) -> Value {
-    json!({ "ready": ready_all(events, now) })
+    match serde_json::to_value(ready_view(events, now, crate::task::readyset_cap(events))) {
+        Ok(v) => v,
+        // ReadySetView 是纯数据结构（字符串 / 数字 / 数组），序列化不会失败；
+        // 兜底交文档写的空形状（出厂容量），不 panic。
+        Err(_) => json!({ "ready": [], "cap": symbio_plugin_api::TASK_CAP }),
+    }
 }
 
 #[cfg(test)]

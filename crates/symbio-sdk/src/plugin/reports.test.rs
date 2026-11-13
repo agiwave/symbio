@@ -154,7 +154,6 @@ fn readable_is_distinguished_from_a_failed_read() {
 
     let unreadable = ReportCtx {
         principal: "p",
-        cap: 4,
         readable: false,
     };
     let readable = ReportCtx {

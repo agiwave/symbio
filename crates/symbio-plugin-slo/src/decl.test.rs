@@ -343,7 +343,6 @@ fn the_tiers_report_merges_latency_and_fallback_by_tier() {
     ]});
     let ctx = ReportCtx {
         principal: PRINCIPAL,
-        cap: 0,
         readable: true,
     };
 

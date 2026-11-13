@@ -253,7 +253,6 @@ fn every_view_ships_both_halves_and_its_reads_are_declared() {
 fn report_ctx() -> symbio_plugin_api::reports::ReportCtx<'static> {
     symbio_plugin_api::reports::ReportCtx {
         principal: "session/main",
-        cap: 0,
         readable: true,
     }
 }

@@ -3,7 +3,7 @@
 //!
 //! 与实现**同级**分文件（`readyset.rs` + 同级 `readyset.test.rs`）。本文件钉的是「读出来是哪几笔」：
 //! 依赖闭合才算就绪、链式推进一次一笔、挂起排除与恢复（含 as-of 重放）、活租约排除与到期即回、
-//! 返工开新节点不复活旧节点、`cap` 由读者套而不进视图、同一切片永远同一个集合（N1）。
+//! 返工开新节点不复活旧节点、容量随切片里的配置事实走而折叠本体无界、同一切片永远同一个集合（N1）。
 //!
 //! 这些判据搬出前住在 `crates/symbio-sdk/src/actors/mod.test.rs` 的「彩排：任务树与返工」
 //! 一节（as-of 那一半在 `crates/symbio-plugin-session/src/transcript/inbox.test.rs`）。
@@ -29,7 +29,8 @@ use crate::decl::{
     EVENT_TASK_ASSERTED, EVENT_TASK_ASSIGNED, EVENT_TASK_HELD, EVENT_TASK_OPENED,
     EVENT_TASK_PROGRESS, EVENT_TASK_REWORK_CREATED, READYSET_VIEW,
 };
-use symbio_plugin_api::{Entity, Event, Verb, PRINCIPAL_SCHEDULER};
+use symbio_plugin_api::events::EVENT_SESSION_CONFIG;
+use symbio_plugin_api::{Entity, Event, Verb, PRINCIPAL_SCHEDULER, TASK_CAP};
 use symbio_testkit::{check_all, EventStore, Seq, Store, PRINCIPAL_MAIN};
 
 /// 开一个任务（载荷 `{ task_id, depends_on, goal }`——与 `todo_write` 落格的形状同构）。
@@ -48,6 +49,23 @@ fn open_task(store: &EventStore, id: &str, depends_on: &[&str]) {
             ),
         )
         .expect("开任务必入库");
+}
+
+/// 落一条本轮配置事实（`session.config` 载荷带 `readyset_cap`，格位与
+/// `symbio_plugin_api::events` 的声明同构：`Scope × Asserted`）。
+fn set_cap(store: &EventStore, cap: u64) {
+    store
+        .append(
+            Event::pending(
+                format!("cfg-{cap}"),
+                EVENT_SESSION_CONFIG,
+                Entity::Scope,
+                Verb::Asserted,
+                PRINCIPAL_MAIN,
+            )
+            .with_payload(serde_json::json!({ "readyset_cap": cap })),
+        )
+        .expect("配置事实必入库");
 }
 
 /// 终态：验证通过（`Task × Asserted`，断言类事件必须带溯源）。
@@ -170,41 +188,75 @@ fn the_ready_set_is_dependency_closed_and_advances_one_node_at_a_time() {
     );
 }
 
-/// `cap` 是读者的预算，不是折叠的一格：视图交无界候选集，`ready_view` 那一层才截断。
+/// 容量随配置事实走（`D-490`）：求值口从切片里的 `session.config` 读 `readyset_cap`。
 ///
-/// 搬出 core 之前这件事只能写在文档里（投影的形参表收得下 `cap`）；今天声明视图的求值口
-/// 只有切片与时间戳，**容量根本没有进来的通道**——所以「视图里不含 `cap`」这一条
-/// 是形状给的保证，不是约定。
+/// 之前这件事写在类型上（求值口没有形参通道 ⇒ 视图不设容量）；`D-252` 的判据把通道
+/// 补上了——容量是宿主本轮决定并已落格的事实，同一份史回放必然得到同一个容量。
+/// 折叠本体（[`ready_all`]）仍然无界：「谁就绪、什么序」不随配置变，截断是读者层。
 #[test]
-fn the_capacity_is_the_readers_budget_not_a_fold_parameter() {
+fn the_capacity_comes_from_the_config_fact_in_the_slice() {
+    // 无配置事实 ⇒ 出厂值（`TASK_CAP = 1`）：那是「这条史还没写过本轮配置」。
+    let store = EventStore::new();
+    for id in ["a", "b", "c", "d"] {
+        open_task(&store, id, &[]);
+    }
+    let bare = store.range(Seq::new(0));
+    assert_eq!(
+        readyset_value(&bare, 9_999)["cap"],
+        TASK_CAP,
+        "史里没有配置 ⇒ 容量交出厂值，不是未知"
+    );
+    assert_eq!(
+        readyset_value(&bare, 9_999)["ready"]
+            .as_array()
+            .map(Vec::len),
+        Some(1),
+        "出厂容量按 1 截：先开的先派"
+    );
+
+    // 配置事实进了切片 ⇒ 按它截，并报**生效**容量。
+    set_cap(&store, 3);
+    let capped = store.range(Seq::new(0));
+    assert_eq!(readyset_value(&capped, 9_999)["cap"], 3);
+    assert_eq!(
+        readyset_value(&capped, 9_999)["ready"]
+            .as_array()
+            .map(Vec::len),
+        Some(3),
+        "截断只改长度：前三笔按入队序"
+    );
+    assert_eq!(
+        readyset_value(&capped, 9_999)["ready"][0]["task_id"],
+        "a",
+        "先开的先派"
+    );
+
+    // `cap = 0` 与 1 同义：容量为零的调度器不是「更保守」，是「永不动」。
+    set_cap(&store, 0);
+    let zero = store.range(Seq::new(0));
+    assert_eq!(readyset_value(&zero, 9_999)["cap"], 1);
+
+    // 折叠本体不随容量变：[`ready_all`] 永远交全部就绪任务，截断发生在读者层。
+    assert_eq!(ids(&ready_all(&capped, 9_999)), ["a", "b", "c", "d"]);
+}
+
+/// 调度层（[`ready_view`]）的显式容量：语义与求值口一致，形参留给拿得到本轮事实
+/// 上下文的调用方（`context.rs` 的提示段）。
+#[test]
+fn the_scheduler_layer_truncates_by_the_cap_it_is_given() {
     let store = EventStore::new();
     for id in ["a", "b", "c", "d"] {
         open_task(&store, id, &[]);
     }
     let snapshot = store.range(Seq::new(0));
 
-    // 折叠本身：四笔全交，按入队序。
-    assert_eq!(ids(&ready_all(&snapshot, 9_999)), ["a", "b", "c", "d"]);
-    assert_eq!(
-        readyset_value(&snapshot, 9_999)["ready"]
-            .as_array()
-            .map(|a| a.len()),
-        Some(4),
-        "对外的视图不设容量：截几笔是读者的事"
-    );
-
-    // 读者套上预算：`cap = 1` 退化为串行 FIFO，先开的先派。
+    // `cap = 1` 退化为串行 FIFO，先开的先派。
     let one = ready_view(&snapshot, 9_999, 1);
     assert_eq!(ids(&one.ready), ["a"]);
     assert_eq!(one.cap, 1);
-    assert_eq!(
-        ready_view(&snapshot, 9_999, 4).ready.len(),
-        4,
-        "同一套判据放开四条"
-    );
 
-    // `cap = 0` 与 1 同义：容量为零的调度器不是「更保守」，是「永不动」。
-    // 视图里的 `cap` 因此是**生效**容量——报回原值会让「配了 0」与「配了 1」读起来不一样。
+    // `cap = 0` 与 1 同义：视图里的 `cap` 因此是**生效**容量——报回原值会让
+    // 「配了 0」与「配了 1」读起来不一样。
     let zero = ready_view(&snapshot, 9_999, 0);
     assert_eq!(zero.cap, 1);
     assert_eq!(ids(&zero.ready), ["a"]);
@@ -363,17 +415,18 @@ fn an_n_step_chain_advances_exactly_one_task_at_a_time() {
     assert!(violations.is_empty(), "全链跑完不留违规：{violations:?}");
 }
 
-/// 声明的视图在冻结声明表里按名字读得出，且读出的就是折叠那一份（**不含** `cap`）。
+/// 声明的视图在冻结声明表里按名字读得出，且读出的就是折叠那一份（含生效容量）。
 ///
 /// 这一条钉的是「owner 交的是同一张表」：`session` 的统计列与本包的调度段读的是同一个
-/// `eval`，容量各套各的——所以两侧的前缀必然同源。视图名若改名、或这条 `ViewDecl`
-/// 从 `decl.rs::VIEWS` 里掉出去，这条先红（报表登记的 `views` 指向同一个名字，
-/// 由 `decl.test.rs` 的登记用例守）。
+/// `eval`，容量都从切片里的配置事实取（`D-490`）——两侧的前缀必然同源。视图名若改名、
+/// 或这条 `ViewDecl` 从 `decl.rs::VIEWS` 里掉出去，这条先红（报表登记的 `views` 指向
+/// 同一个名字，由 `decl.test.rs` 的登记用例守）。
 #[test]
-fn the_declared_view_is_readable_by_name_and_carries_no_capacity() {
+fn the_declared_view_is_readable_by_name_and_carries_the_effective_capacity() {
     let store = EventStore::new();
     open_task(&store, "a", &[]);
     open_task(&store, "b", &["a"]);
+    set_cap(&store, 2);
     let snapshot = store.range(Seq::new(0));
 
     let frozen = symbio_testkit::sealed_declarations().expect("测试进程的装配表应能冻结");
@@ -384,41 +437,44 @@ fn the_declared_view_is_readable_by_name_and_carries_no_capacity() {
         readyset_value(&snapshot, i64::MAX),
         "声明视图 = 折叠本身，不在读口再算一遍"
     );
-    assert!(
-        by_name.get("cap").is_none(),
-        "容量不进对外那一份：{by_name}"
-    );
 
-    // 反向：`ready` 之外的键一个也不交（形状归 owner，读方不必分诊）。
-    let keys: Vec<&str> = by_name
+    // `ready` 与 `cap` 两键，一个不交第三个（形状归 owner，读方不必分诊）。
+    let mut keys: Vec<&str> = by_name
         .as_object()
         .expect("视图值是对象")
         .keys()
         .map(|k| k.as_str())
         .collect();
-    assert_eq!(keys, ["ready"]);
+    keys.sort_unstable();
+    assert_eq!(keys, ["cap", "ready"]);
+    assert_eq!(by_name["cap"], 2, "容量来自切片里的配置事实");
 }
 
-/// 读者的空形状与生效容量：`cap` 落进列的是**截断之后**那一份（`D-289` 的另一半判据）。
-///
-/// 本包的调度段（[`ReadySetView`]）交 `ready` + `cap` 两键；对外的视图只交 `ready`。
-/// 两者必须能同时成立——否则「为什么只给这几笔」这个信号在出口与在候选集里长得不一样。
+/// 调度层与求值口同一份史：显式容量（[`ReadySetView`]）与事实容量（[`readyset_value`]）
+/// 截出的前缀必然一致——「为什么只给这几笔」在出口与在候选集里长得一样。
 #[test]
-fn the_reader_shapes_the_capacity_while_the_view_stays_unbounded() {
+fn the_scheduler_layer_and_the_declared_view_agree_on_the_prefix() {
     let store = EventStore::new();
     for id in ["a", "b", "c"] {
         open_task(&store, id, &[]);
     }
+    set_cap(&store, 2);
     let snapshot = store.range(Seq::new(0));
+
+    let declared = readyset_value(&snapshot, i64::MAX);
+    assert_eq!(declared["cap"], 2, "容量来自配置事实");
+    assert_eq!(
+        declared["ready"].as_array().map(|a| a.len()),
+        Some(2),
+        "求值口按事实容量截断"
+    );
 
     let view: ReadySetView = ready_view(&snapshot, i64::MAX, 2);
     assert_eq!(view.ready.len(), 2);
     assert_eq!(view.cap, 2);
-
-    let declared = readyset_value(&snapshot, i64::MAX);
     assert_eq!(
-        declared["ready"].as_array().map(|a| a.len()),
-        Some(3),
-        "同一切片：视图无界、读者有预算"
+        serde_json::to_value(&view.ready).ok(),
+        Some(declared["ready"].clone()),
+        "同一份史 ⇒ 调度层与求值口交同一份前缀（N1）"
     );
 }

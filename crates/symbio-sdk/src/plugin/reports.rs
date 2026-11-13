@@ -46,15 +46,15 @@ use crate::plugin::views::ViewUnavailable::{self, NotSealed, Unknown};
 
 /// 读方在装配这一刻能提供的上下文。
 ///
-/// 只放**读方知道的、owner 不知道**的三个值：主体、容量、读侧闸的答案。owner 的
-/// `render` 用它们产出自己的形状（声誉的 `own` 行、就绪集的截断、无权限时的空表），
-/// 读方不解释这些形状。
+/// 只放**读方知道、owner 不知道**的两个值：主体与读侧闸的答案。owner 的
+/// `render` 用它们产出自己的形状（声誉的 `own` 行、无权限时的空表），读方不解释
+/// 这些形状。容量不在这张表里（`D-490`）：它是本轮配置**事实**（`session.config`
+/// 的 `readyset_cap` 贡献键），owner 的求值口从自己的切片里读——同一份史回放必然
+/// 得到同一个容量（`D-252` 的既有判据），不必由读方搬运。
 #[derive(Debug, Clone, Copy, PartialEq, Eq)]
 pub struct ReportCtx<'a> {
     /// 本会话主体：`reputation.ledger` 的 `own` 行取谁。
     pub principal: &'a str,
-    /// 本轮调度容量：`task.readyset` 的截断预算。
-    pub cap: usize,
     /// 读侧闸的答案：`false` = 不给你看，不是读失败（两者的空形状可以不同）。
     pub readable: bool,
 }

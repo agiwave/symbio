@@ -12,6 +12,7 @@
 
 use serde_json::{json, Value};
 
+use symbio_plugin_api::events::EVENT_SESSION_CONFIG;
 use symbio_plugin_api::reports::{ReportCtx, ReportDecl};
 use symbio_plugin_api::{
     Entity, EventDecl, FactRole, PluginDeclarations, TaskVocab, Verb, ViewDecl, PRINCIPAL_SCHEDULER,
@@ -61,9 +62,9 @@ pub(crate) const OWNER: &str = "crates/symbio-plugin-task";
 
 /// 对外可读的那条视图：就绪集（名册 #23，`D-289`）。
 ///
-/// 读方按报表登记取（`D-387`）、不认识形状（`D-221`）——`session` 的统计列因此不再
-/// 链 core 的投影，也不自己套容量：`ReportCtx::cap` 是读者的预算，由 owner 的
-/// [`readyset_report`] 套上（`cap = 0` 按 1，与调度器同一口径）。
+/// 读方按报表登记取（`D-387`）、不认识形状（`D-221`）。容量随配置事实走
+/// （`D-490`）：求值口从切片里的 `session.config` 读 `readyset_cap`（与调度段
+/// 同一份单源读法，[`crate::task::readyset_cap`]），读方不带、也无法再带一份。
 pub(crate) const READYSET_VIEW: &str = "task.readyset";
 
 /// 扫描成本上界（事件条数）。它是环内窗口求值的预算；跨插件读口不查它——读侧按
@@ -88,6 +89,10 @@ pub(crate) const VIEWS: &[ViewDecl] = &[ViewDecl {
         (EVENT_TASK_ASSERTED, "task_id"),
         (EVENT_TASK_ASSIGNED, "task_id"),
         (EVENT_TASK_ASSIGNED, "until_ms"),
+        // 容量的来源（`D-490`）：`session.config` 的贡献键与本包的调度段读同一格。
+        // `session.config` 只有事件格位、没有事实声明 ⇒ 按第二种读法登记，装载期
+        // 进 `assertion_reads()` 的名单（报告项，不是缺口）。
+        (EVENT_SESSION_CONFIG, "readyset_cap"),
     ],
     // 就绪集是读数，不替任何事实关门：调度者落的 `task.ready` / `task.assigned` 由
     // 写侧的 [`crate::task::ScheduleDecider`] 自己负责。
@@ -151,23 +156,15 @@ symbio_plugin_api::submit_reports!([ReportDecl {
     panel: None,
 }]);
 
-/// 就绪集列的**排版**：owner 交的是「谁就绪、按什么序」（[`READYSET_VIEW`]），本函数
-/// 只套上读者的预算——`cap` 是读者的预算，不是折叠的一格（[`crate::readyset`] 的
-/// 模块文档）。
-///
-/// `cap = 0` 按 1 处理，与调度器同一口径（容量为零的调度器不是「更保守」，是「永不动」）。
-/// 视图值缺席（读方交的是 `Null` 占位）⇒ 空表，仍产出 `{ ready: [], cap }` 这一份
-/// 文档写的形状。
-fn readyset_report(views: &[Value], ctx: &ReportCtx<'_>) -> Value {
-    let cap = ctx.cap.max(1);
-    let mut ready = views
+/// 就绪集列的**排版**：owner 的求值口已按事实里的容量截断并报出生效容量
+/// （[`crate::readyset::readyset_value`]，`D-490`），本函数只透传；视图值缺席
+/// （读方交的是 `Null` 占位）⇒ 交文档写的空形状（出厂容量）。
+fn readyset_report(views: &[Value], _ctx: &ReportCtx<'_>) -> Value {
+    views
         .first()
-        .and_then(|value| value.get("ready"))
-        .and_then(Value::as_array)
+        .filter(|value| !value.is_null())
         .cloned()
-        .unwrap_or_default();
-    ready.truncate(cap);
-    json!({ "ready": ready, "cap": cap })
+        .unwrap_or_else(|| json!({ "ready": [], "cap": symbio_plugin_api::TASK_CAP }))
 }
 
 fn submitted_declarations() -> PluginDeclarations<'static> {

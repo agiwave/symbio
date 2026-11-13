@@ -8,7 +8,6 @@ fn every_registered_slot_is_rendered_exactly_once() {
 
     let ctx = ReportCtx {
         principal: "acceptance",
-        cap: 1,
         readable: true,
     };
     let columns = read_all(&[], &ctx);

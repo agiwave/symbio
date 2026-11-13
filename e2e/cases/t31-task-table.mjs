@@ -225,8 +225,9 @@ export default defineCase(
         );
         assertEq(
           deniedReady.cap,
-          3,
-          '`cap` 是会话配置值，不随可见域变——它说的是「这台机器允许几笔」，不是事实',
+          1,
+          '未授权读数的切片里没有配置事实 ⇒ `cap` 交出厂值（`TASK_CAP = 1`，D-490：' +
+            '容量由 owner 从事实读，读不到配置与「这条史还没写过配置」同一处置）',
         );
       } finally {
         api.stop();

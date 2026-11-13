@@ -84,7 +84,6 @@ fn read_path(
         || fleet_of(root),
         viewer,
         principal,
-        symbio_plugin_api::TASK_CAP,
     )
 }
 
@@ -338,7 +337,6 @@ fn fleet_aggregates_the_snapshots_it_is_given() {
 
     let ctx = symbio_plugin_api::reports::ReportCtx {
         principal: symbio_sdk::authz::PRINCIPAL_MAIN,
-        cap: 0,
         readable: true,
     };
     let got = fleet_reading(&facts, &ctx);

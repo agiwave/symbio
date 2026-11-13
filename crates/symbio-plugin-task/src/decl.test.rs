@@ -13,7 +13,7 @@
 use super::{EVENT_TASK_REWORK_CREATED, OWNER};
 use symbio_plugin_api::reports::ReportCtx;
 use symbio_plugin_api::ring::{Decl, Pattern};
-use symbio_plugin_api::{Entity, PluginDeclarations};
+use symbio_plugin_api::{Entity, PluginDeclarations, TASK_CAP};
 
 /// 协议五格的自读行：完整进程里由 loop 交表，本二进制不链接它 ⇒ 夹具补上。
 fn protocol_rows() -> &'static [Decl] {
@@ -42,9 +42,18 @@ fn protocol_rows() -> &'static [Decl] {
     Box::leak(out.into_boxed_slice())
 }
 
+/// `session.config` 的格位夹具：完整进程由会话插件交（D-427 贡献键的载体），
+/// 本二进制不链接它 ⇒ `task.readyset` 读 `readyset_cap`（`D-490`）会报
+/// `UnknownFact`。它只有事件格位、没有事实声明 ⇒ 视图 reads 冻结为
+/// assertion read（`D-282`），字段形状无从校验也不必校验。
+const HARNESS_EVENTS: &[symbio_plugin_api::EventDecl] = &[symbio_plugin_api::EventDecl::new(
+    symbio_plugin_api::events::EVENT_SESSION_CONFIG,
+    (Entity::Scope, symbio_plugin_api::Verb::Asserted),
+)];
+
 fn harness_declarations() -> PluginDeclarations<'static> {
     PluginDeclarations {
-        events: &[],
+        events: HARNESS_EVENTS,
         facts: &[],
         views: &[],
         ports: &[],
@@ -92,46 +101,29 @@ fn the_readyset_report_is_registered_without_a_fleet_axis() {
 
 /// 容量由读者经 `ReportCtx::cap` 交，owner 套上并报出**生效**值（`cap = 0` 按 1）。
 ///
-/// 这是「容量是读者的预算，不是折叠的一格」在报表这一侧的落点：视图交无界候选集，
-/// 报表出口负责截断，并把截了几笔写进同一份读数。
+/// 这是「容量随配置事实走」（`D-490`）在报表这一侧的落点：求值口已按事实里的容量
+/// 截断并报出生效容量，报表出口**透传**（截几笔、按什么序都是 owner 一处算）；
+/// 视图缺席时交文档写的空形状（出厂容量）。
 #[test]
-fn the_readyset_report_takes_the_readers_capacity() {
+fn the_readyset_report_passes_the_owner_value_through() {
     let ready = serde_json::json!({ "ready": [
         { "task_id": "a", "seq": 1, "depends_on": [] },
         { "task_id": "b", "seq": 2, "depends_on": ["a"] },
-    ]});
-    let ctx = |cap| ReportCtx {
+    ], "cap": 2 });
+    let ctx = ReportCtx {
         principal: "session/main",
-        cap,
         readable: true,
     };
 
-    let all = super::readyset_report(std::slice::from_ref(&ready), &ctx(9));
-    assert_eq!(all["cap"], 9);
+    let got = super::readyset_report(std::slice::from_ref(&ready), &ctx);
     assert_eq!(
-        all["ready"].as_array().map(Vec::len),
-        Some(2),
-        "足够大就交全部"
+        got, ready,
+        "出口 = 视图值：截断与生效容量都在求值口算，排版不再动数字"
     );
 
-    let one = super::readyset_report(std::slice::from_ref(&ready), &ctx(1));
     assert_eq!(
-        one["ready"].as_array().map(Vec::len),
-        Some(1),
-        "截断只改长度"
-    );
-    assert_eq!(one["ready"][0]["task_id"], "a", "先开的先派");
-
-    let zero = super::readyset_report(&[ready], &ctx(0));
-    assert_eq!(
-        zero["cap"], 1,
-        "`cap = 0` 按 1：容量为零的调度器不是更保守，是永不动"
-    );
-    assert_eq!(zero["ready"].as_array().map(Vec::len), Some(1));
-
-    assert_eq!(
-        super::readyset_report(&[serde_json::Value::Null], &ctx(2)),
-        serde_json::json!({ "ready": [], "cap": 2 }),
-        "视图缺席 ⇒ 空表，形状不变"
+        super::readyset_report(&[serde_json::Value::Null], &ctx),
+        serde_json::json!({ "ready": [], "cap": TASK_CAP }),
+        "视图缺席 ⇒ 空表 + 出厂容量（装配故障不冒充正常读数）"
     );
 }

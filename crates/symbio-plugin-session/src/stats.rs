@@ -264,10 +264,6 @@ pub(crate) fn read(
     deep_facts: impl FnOnce() -> Vec<Vec<Event>>,
     viewer: Option<&str>,
     session_principal: &str,
-    // 调度容量（本会话配置 `task_cap`）：就绪集列按**同一个** `cap` 取，
-    // 与调度段 / 调度者同源——三处各取一个数，就会读出「调度派了 1 笔，
-    // 统计说候选有 5 笔」这种看不出谁错的差。
-    task_cap: usize,
 ) -> Result<SessionStats, PluginError> {
     let has_wal = snapshot.is_some();
     // 完整史（归档段 + 未取代的那段）：`snapshot` 由存储层按 `range(0)` 口径交值。
@@ -300,11 +296,11 @@ pub(crate) fn read(
     };
     let snapshot = if may_read { snapshot } else { Vec::new() };
 
-    // 报表读侧的公共上下文：三格都由本调用方给定，owner 的 `render` 只消费、不反查
+    // 报表读侧的公共上下文：两格都由本调用方给定，owner 的 `render` 只消费、不反查
     // （`D-387`）。可见域整列判一次的口径不变，`readable` 只是把同一个答案告诉 owner。
+    // 容量不在上下文里（`D-490`）：它是本轮配置事实，owner 的求值口从自己的切片读。
     let report_ctx = symbio_plugin_api::reports::ReportCtx {
         principal: session_principal,
-        cap: task_cap,
         readable: may_read,
     };
 
@@ -419,32 +415,15 @@ impl SessionPlugin {
             Some(agent) => symbio_plugin_api::principal_of(Some(&agent)),
             None => symbio_sdk::authz::request_principal(ctx.as_ref()),
         };
-        // 调度容量是能力方贡献的数（D-427，归 `task`）：统计是**读方**，按共享名读
-        // 最近一条 `session.config`；读不到就用出厂值——与所有读快照的决策同一口径，
-        // 本插件不再持有这一格的配置类型。（技能编译开关同属 `session.config` 的
-        // 贡献键，但它的读数出口与轮首编译判都归 `skill`——`D-489` 起按报表列交值，
-        // 本处不再读第二遍。）
-        let task_cap = {
-            let latest = snapshot.as_ref().and_then(|events| {
-                events
-                    .iter()
-                    .rev()
-                    .find(|e| e.kind == symbio_plugin_api::events::EVENT_SESSION_CONFIG)
-                    .map(|e| &e.payload)
-            });
-            latest
-                .and_then(|p| p.get("readyset_cap"))
-                .and_then(serde_json::Value::as_u64)
-                .map(|v| v as usize)
-                .unwrap_or(symbio_plugin_api::TASK_CAP)
-        };
+        // 能力方贡献的配置键（`D-427`：技能编译开关归 `skill`、就绪集容量归 `task`）
+        // 都由 owner 自己读——`D-489` 起开关按报表列交值，`D-490` 起容量在 owner 的
+        // 求值口从事实切片读，本处不再替任何能力搬运配置。
         let stats = read(
             &sid,
             snapshot,
             || store.deep_snapshots(),
             viewer.as_deref(),
             &session_principal,
-            task_cap,
         )?;
         Ok(PluginPayload::new(&stats))
     }
