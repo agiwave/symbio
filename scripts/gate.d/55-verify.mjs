@@ -115,6 +115,12 @@ export default {
           file,
           name: file.replace(/\.rs$/, ''),
           hasNegative: src.includes('should_not_compile'),
+          // 「与生产源码耦合」的**在处自报**：`#[path = …]` 指进 `crates/` 的程序才算
+          // 「验生产」，其余只证「判据在自造样本上自洽」。口径与 RE-015 的
+          // `grep -l '#[path'` 同形（分子分母都不在这里另立第二份），
+          // 这里只是把那份读数**报进门禁汇总**——日志里此前只有「N 个程序通过」，
+          // 全绿的含义边界（4/17 耦合 vs 其余验文档）要靠人翻账才知道。
+          coupled: src.includes('#[path'),
           // 断言数（棘轮，只许涨）：前两格只到文件级，把某个程序的断言删到只剩
           // 一条时程序数与反例数都不变 ⇒ 全绿。而 `DE-016 §5.1` 纪律 1 写着「零断言的
           // 程序不可能失败」——那条纪律此前没有任何机器判据。
@@ -135,6 +141,7 @@ export default {
     // 棘轮同一条判据，不在这里再决定一次红不红）。
     const negatives = entries.filter((e) => e.hasNegative).length
     const asserts = entries.reduce((n, e) => n + e.asserts, 0)
+    const coupled = entries.filter((e) => e.coupled).length
     yield {
       label: 'verify: 程序数 · 反例数 · 断言数棘轮',
       run: async () => {
@@ -178,9 +185,9 @@ export default {
         // 逐文件明细：断言数掉下来时要能**归因到文件**。`_shared.mjs` 里那条经验
         // 是「溯源方法有盲区，不等于来源不存在」——明细是归因的起点。
         for (const e of entries) {
-          console.log(dim(`        ${e.name}: ${e.asserts}${e.hasNegative ? ' (+反例档)' : ''}`))
+          console.log(dim(`        ${e.name}: ${e.asserts}${e.hasNegative ? ' (+反例档)' : ''}${e.coupled ? ' (#[path→生产)' : ''}`))
         }
-        return { ok: true }
+        return { ok: true, note: `生产耦合 ${coupled}/${entries.length}（验生产 vs 验文档，读数 owner 是 RE-015）` }
       },
     }
 
