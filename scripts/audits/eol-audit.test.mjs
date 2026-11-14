@@ -4,8 +4,9 @@
  * 这份守卫判的是**判据的输入前提**（D-142），它自己的失效形态比别的守卫更隐蔽：
  * 判据读的是 `git ls-files` / `git check-attr`，一旦这两个命令的解析写错，
  * 结果不是"报错"而是**一条都不命中**——一条永远不红的行尾守卫，看起来和
- * 「仓里行尾很干净」完全一样。所以三条码各配一条反向用例，另加两条边界：
- * 二进制不判（不该逼人写豁免）、不是 git 仓库时**必须红**（判不了不许亮绿灯）。
+ * 「仓里行尾很干净」完全一样。所以三条码各配一条反向用例，另加三条边界：
+ * 二进制不判（不该逼人写豁免）、不是 git 仓库时**必须红**、已跟踪文件从工作树
+ * 消失时**必须红**（读不到不能当成「无 `\r`」——`catch` 曾把它折成 `false`）。
  *
  * 跑法：node --test scripts/audits/eol-audit.test.mjs
  */
@@ -126,6 +127,18 @@ test('不是 git 仓库 → 红（判不了的判据不许亮绿灯）', () => {
   } finally {
     fs.rmSync(dir, { recursive: true, force: true })
   }
+})
+
+test('已跟踪的文件在工作树里读不到 → 红（读不到不能当成「无 \\r」静默通过）', () => {
+  // 失效形状：`catch { return false }` 曾把「读不到」折成「没有 CRLF」——文件消失
+  // 反而是绿的。这条用例钉住 fail-closed：暂存后删工作树文件，`git ls-files`
+  // 仍列出它，读失败必须落成一行红。
+  const r = audit({ '.gitattributes': ATTR, 'gone.md': '# G\n' }, {
+    beforeRun: (repo) => fs.rmSync(path.join(repo.root, 'gone.md')),
+  })
+  assert.equal(r.status, 1, r.stdout)
+  assert.match(r.stdout, /读不到/)
+  assert.match(r.stdout, /gone\.md/)
 })
 
 test('真实仓库当前状态通过（防本守卫在真仓库上误报）', () => {

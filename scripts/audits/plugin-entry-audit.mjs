@@ -311,7 +311,10 @@ function discoverPlugins() {
       .map((e) => e.name.slice(PLUGIN_CRATE_PREFIX.length))
       .sort()
   } catch {
-    return []
+    // 读不出 ≠ 没有插件：目录被改名 / 权限异常时返回 `[]` 会让全部规则
+    // 对空集合平凡通过（fail-open）。返回 `null` 让调用方判「范围读不出」——
+    // 判据没有输入，宁红不静默。
+    return null
   }
   const out = []
   for (const dirName of dirs) {
@@ -361,6 +364,10 @@ function discoverPlugins() {
 
 // ── 扫描主体 ─────────────────────────────────────────────────────────────
 const pluginDirs = discoverPlugins()
+if (pluginDirs === null) {
+  console.error(red(`plugin-entry-audit：范围读不出（${PLUGINS_DIR} 不存在或不可读）⇒ 判据没有输入，宁红不静默`))
+  process.exit(2)
+}
 const dirNames = new Set(pluginDirs.map((p) => p.dirName))
 
 // 常量表：先收全仓（装配方 `crates/symbio-deploy/src/lib.rs` 的 `PLUGIN_ID_*`、`routes.rs` 的 `ROUTE_*`、

@@ -87,7 +87,9 @@ function attrsOf(files) {
   return out
 }
 
-/** 内容像不像二进制：前 8KB 有 NUL 即二进制（同 git 的启发式） */
+/** 内容像不像二进制：前 8KB 有 NUL 即二进制（同 git 的启发式）。
+ *  返回 `null` = 工作树里读不到（已跟踪却消失 / 子模块缺失）——**不算**二进制，
+ *  交给主循环的 `unreadable` 统一判红：读不到不能当成「无 `\r`」通过。 */
 function looksBinary(abs) {
   let fd
   try {
@@ -96,18 +98,22 @@ function looksBinary(abs) {
     const n = fs.readSync(fd, buf, 0, buf.length, 0)
     return buf.subarray(0, n).includes(0)
   } catch {
-    return false // 读不到（子模块 / 工作树缺失）不判，见下面的 `missing`
+    return null
   } finally {
     if (fd !== undefined) fs.closeSync(fd)
   }
 }
 
-/** 工作树里是否带 `\r`（只判文本；整文件读，行尾判定要的是全文，不是采样） */
+/** 工作树里是否带 `\r`（只判文本；整文件读，行尾判定要的是全文，不是采样）。
+ *  返回 `null` = 读不到 —— 同上，判不了就红，不许静默折成「无 `\r`」。
+ *  （这条契约的由来：`catch` 曾把读失败折成 `false`——「读不到」与「没有」在
+ *  判定上是两种结论，前者必须在门禁表上有一个红行；DE-017 的「读空即全绿」
+ *  第二种形态。2026-11-14 普查 fail-open catch 时按本文件头自己的纪律补上。） */
 function worktreeHasCr(abs) {
   try {
     return fs.readFileSync(abs).includes(0x0d)
   } catch {
-    return false
+    return null
   }
 }
 
@@ -147,11 +153,19 @@ if (indexEol === null) {
 const undeclared = []
 const worktreeCrlf = []
 const indexCrlf = []
+const unreadable = []
 let textFiles = 0
 
 for (const rel of files) {
   const abs = path.join(ROOT, rel)
-  if (looksBinary(abs)) continue
+  const bin = looksBinary(abs)
+  if (bin === null) {
+    // 已跟踪却读不到（工作树里被删 / 子模块缺失）：判不了就红，不许当成
+    // 「无 `\r`」静默通过——与本文件头的「判不了的判据不许亮绿灯」同一条纪律。
+    unreadable.push(rel)
+    continue
+  }
+  if (bin) continue
   textFiles += 1
   const a = attrs.get(rel) ?? {}
   // EOL-002：没有行尾声明。放在最前面——它解释另外两条为什么可能「判不到」：
@@ -161,7 +175,12 @@ for (const rel of files) {
     continue
   }
   // EOL-001：声明了 LF，工作树却带 `\r`
-  if (worktreeHasCr(abs)) worktreeCrlf.push(rel)
+  const hasCr = worktreeHasCr(abs)
+  if (hasCr === null) {
+    unreadable.push(rel)
+  } else if (hasCr) {
+    worktreeCrlf.push(rel)
+  }
   // EOL-003：入库 blob 本身带 `\r`（声明之后 git 会自动归一化，所以这条只在
   // 「先提交、后声明」的路径上出现——正是 `.gitattributes` 头注释写的那次事故形状）
   const i = indexEol.get(rel)
@@ -184,7 +203,12 @@ if (undeclared.length) report(undeclared)
 console.log(`EOL-003 入库 blob：带 \\r ${indexCrlf.length} 个`)
 if (indexCrlf.length) report(indexCrlf)
 
-if (worktreeCrlf.length || undeclared.length || indexCrlf.length) {
+if (unreadable.length) {
+  console.log(`工作树读不到：${unreadable.length} 个受版本控制的文件`)
+  report(unreadable)
+}
+
+if (worktreeCrlf.length || undeclared.length || indexCrlf.length || unreadable.length) {
   console.log('')
   if (undeclared.length) {
     console.log('EOL-002 提示：`eol` 声明是「这条路径的行尾归谁管」的唯一答案。新文件类型不进')
@@ -202,7 +226,7 @@ if (worktreeCrlf.length || undeclared.length || indexCrlf.length) {
     console.log('EOL-003 提示：入库的 CRLF 让 diff 不可审阅（改 65 行显示成 1265 行）。')
     console.log(dim('      处置：`git add --renormalize .` 后提交（blob 归一化，内容不变）。'))
   }
-  console.log(red(`\neol-audit 未通过：工作树 ${worktreeCrlf.length} · 未声明 ${undeclared.length} · 入库 ${indexCrlf.length}`))
+  console.log(red(`\neol-audit 未通过：工作树 ${worktreeCrlf.length} · 未声明 ${undeclared.length} · 入库 ${indexCrlf.length} · 读不到 ${unreadable.length}`))
   process.exit(1)
 }
 
