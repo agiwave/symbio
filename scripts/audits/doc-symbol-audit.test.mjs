@@ -15,7 +15,7 @@ import path from 'node:path'
 import { spawnSync } from 'node:child_process'
 import { fileURLToPath } from 'node:url'
 import { withTempTree } from '../fs-walk.mjs'
-import { expectAudit } from '../audit-assert.mjs'
+import { auditCase, expectAudit } from '../audit-assert.mjs'
 
 const script = fileURLToPath(new URL('./doc-symbol-audit.mjs', import.meta.url))
 
@@ -51,31 +51,19 @@ const TS = {
   'tauri/src/constants/pages.ts': 'export const VDFS_PAGE_SIZE = 50\n',
 }
 
-test('失效指认变红：文档指认源码里不存在的符号（exit 1）', () => {
-  const r = audit({ ...RS, 'README.md': '桶名见 `symbio_sdk::GONE_FN`。\n' })
-  expectAudit(r, 1, [/D-005 README\.md:1/, /GONE_FN/])
-})
+auditCase('失效指认变红：文档指认源码里不存在的符号（exit 1）', () => audit({ ...RS, 'README.md': '桶名见 `symbio_sdk::GONE_FN`。\n' }), 1, [/D-005 README\.md:1/, /GONE_FN/])
 
-test('整词边界：`register_option` 不因 `register_option_field` 存在而放行（exit 1）', () => {
-  const r = audit({ ...RS, 'README.md': '接口 `OptionVisitor::register_option`。\n' })
-  expectAudit(r, 1, [/register_option`/])
-})
+auditCase('整词边界：`register_option` 不因 `register_option_field` 存在而放行（exit 1）', () => audit({ ...RS, 'README.md': '接口 `OptionVisitor::register_option`。\n' }), 1, [/register_option`/])
 
-test('有效指认通过（exit 0）', () => {
-  const r = audit({ ...RS, 'README.md': '桶名见 `symbio_sdk::PLUGIN_PAYLOAD_KEY`。\n' })
-  expectAudit(r, 0, [/doc-symbol-audit 通过/])
-})
+auditCase('有效指认通过（exit 0）', () => audit({ ...RS, 'README.md': '桶名见 `symbio_sdk::PLUGIN_PAYLOAD_KEY`。\n' }), 0, [/doc-symbol-audit 通过/])
 
 // ── 决策段与现行正文同一条判据（`D-483`：冻结表已撤下）──────────────────
 // 决策段此前整段跳过（悬空锚点是盲区），后来按登记表冻结（表是第二个豁免面）。
 // 两者都已退场：决策正文按现行代码判，历史用普通文字记名。
-test('决策正文的悬空 .rs::符号锚点照常判红（D-005）', () => {
-  const r = audit({
+auditCase('决策正文的悬空 .rs::符号锚点照常判红（D-005）', () => audit({
     ...RS,
     'README.md': '# R\n\n### D-100 裁决\n\n证据 `crates/nope/gone.rs::removed`。\n',
-  })
-  expectAudit(r, 1, [/D-005 README\.md:5/, /crates\/nope\/gone\.rs::removed/])
-})
+  }), 1, [/D-005 README\.md:5/, /crates\/nope\/gone\.rs::removed/])
 
 test('单段反引号词：代码里没有同族时不是符号指认（exit 0）', () => {
   const r = audit({ ...RS, 'README.md': '旧名 `GONE_WORD` 已不再使用。\n' })
@@ -89,10 +77,7 @@ test('非标识符形态（泛型 / 路径带参数）不查（exit 0）', () =>
 
 // ── D-009：裸常量名（同族闸把环境变量、CI 密钥挡在外面）──────────────────
 
-test('D-009 改名漂移变红：同族有成员、这个名查无（exit 1）', () => {
-  const r = audit({ ...RS, 'README.md': '分流由路由常量 `ROUTE_TRIAGE_DECIDE` 决定。\n' })
-  expectAudit(r, 1, [/D-009 README\.md:1/, /ROUTE_TRIAGE_DECIDE/])
-})
+auditCase('D-009 改名漂移变红：同族有成员、这个名查无（exit 1）', () => audit({ ...RS, 'README.md': '分流由路由常量 `ROUTE_TRIAGE_DECIDE` 决定。\n' }), 1, [/D-009 README\.md:1/, /ROUTE_TRIAGE_DECIDE/])
 
 test('D-009 逐字存在即通过（exit 0）', () => {
   const r = audit({ ...RS, 'README.md': '分流由路由常量 `ROUTE_SESSION_CHAT_SEND` 决定。\n' })
@@ -123,10 +108,7 @@ test('D-009 认前端语料：只有 ts 里声明的常量名，文档指认它�
   assert.equal(r.status, 0, r.stdout)
 })
 
-test('D-009 前端族同样开闸：VDFS_ 有成员而这个名字查无 ⇒ 红（exit 1）', () => {
-  const r = audit({ ...RS, ...TS, 'README.md': '分页大小取 `VDFS_PAGE_SZIE`。\n' })
-  expectAudit(r, 1, [/D-009 .*VDFS_PAGE_SZIE/])
-})
+auditCase('D-009 前端族同样开闸：VDFS_ 有成员而这个名字查无 ⇒ 红（exit 1）', () => audit({ ...RS, ...TS, 'README.md': '分页大小取 `VDFS_PAGE_SZIE`。\n' }), 1, [/D-009 .*VDFS_PAGE_SZIE/])
 
 /** 最小工具脚本语料：`WIRE_` 一族由 Rust 开（见 RS），脚本里只声明其中一个名字 */
 const MS = {
@@ -138,25 +120,19 @@ test('D-009 认工具脚本语料：只有 .mjs 里写过的名字，文档指�
   assert.equal(r.status, 0, r.stdout)
 })
 
-test('D-009 脚本语料不放宽判据：同族有成员而这个名字查无 ⇒ 红（exit 1）', () => {
-  const r = audit({ ...RS, ...MS, 'README.md': '非守卫的测试列在 `WIRE_ONLYE` 里。\n' })
-  expectAudit(r, 1, [/D-009 .*WIRE_ONLYE/])
-})
+auditCase('D-009 脚本语料不放宽判据：同族有成员而这个名字查无 ⇒ 红（exit 1）', () => audit({ ...RS, ...MS, 'README.md': '非守卫的测试列在 `WIRE_ONLYE` 里。\n' }), 1, [/D-009 .*WIRE_ONLYE/])
 
 test('D-009 脚本不开命名空间：ZZZ_ 只存在于脚本里 ⇒ 文档的 ZZZ_UNRELATED 不判（exit 0）', () => {
   const r = audit({ ...RS, ...MS, 'README.md': '构建产物的目录是 `ZZZ_UNRELATED_DIR`。\n' })
   assert.equal(r.status, 0, r.stdout)
 })
 
-test('D-009 不认测试语料：只在 *.test.mjs 里出现过的假名不算存在（exit 1）', () => {
-  const r = audit({
+auditCase('D-009 不认测试语料：只在 *.test.mjs 里出现过的假名不算存在（exit 1）', () => audit({
     ...RS,
     ...MS,
     'scripts/gate.d/30-docs.test.mjs': 'const WIRE_INVENTED = 1\n',
     'README.md': '名单里还有一项 `WIRE_INVENTED`。\n',
-  })
-  expectAudit(r, 1, [/D-009 .*WIRE_INVENTED/])
-})
+  }), 1, [/D-009 .*WIRE_INVENTED/])
 
 test('D-009 单段全大写但没有下划线 ⇒ 与普通词无法区分，不查（exit 0）', () => {
   const r = audit({ ...RS, 'README.md': '配置键 `PAYLOAD` 与开关 `VERBOSE`。\n' })
@@ -204,14 +180,11 @@ test('docs/archive/ 整目录排除：归档是历史快照（exit 0）', () => 
   assert.equal(r.status, 0, r.stdout)
 })
 
-test('排除只认整目录：docs/archive.md 这类同名前缀文件仍受查（exit 1）', () => {
-  const r = audit({
+auditCase('排除只认整目录：docs/archive.md 这类同名前缀文件仍受查（exit 1）', () => audit({
     ...RS,
     'docs/archive.md': '指认 `symbio_sdk::GONE_FN`。\n',
     'README.md': '正常文档。\n',
-  })
-  expectAudit(r, 1, [/docs\/archive\.md:1/])
-})
+  }), 1, [/docs\/archive\.md:1/])
 
 test('承认通道：理由非空则放行（exit 0）', () => {
   const r = audit({
@@ -229,15 +202,9 @@ test('承认通道：空理由视为未承认（exit 1）', () => {
   assert.equal(r.status, 1, r.stdout)
 })
 
-test('审计范围读不出：没有任何 md ⇒ 失败而非绿灯（exit 1）', () => {
-  const r = audit(RS)
-  expectAudit(r, 1, [/0 篇候选 md/])
-})
+auditCase('审计范围读不出：没有任何 md ⇒ 失败而非绿灯（exit 1）', () => audit(RS), 1, [/0 篇候选 md/])
 
-test('审计范围读不出：没有 .rs 语料 ⇒ 失败而非绿灯（exit 1）', () => {
-  const r = audit({ 'README.md': '正常文档。\n' })
-  expectAudit(r, 1, [/0 个 \.rs 语料根/])
-})
+auditCase('审计范围读不出：没有 .rs 语料 ⇒ 失败而非绿灯（exit 1）', () => audit({ 'README.md': '正常文档。\n' }), 1, [/0 个 \.rs 语料根/])
 
 // ── D-011：能力名册的「锚点」列（DE-008 §6.1）──────────────────────────────
 //
@@ -257,20 +224,11 @@ const roster = (anchor) => ({
 /** 锚点指向的文件（最小仓库里真有这个文件，D-011 才验得到「文件存在」之外的部分） */
 const ROSTER_RS = { 'crates/symbio-plugin-loop/src/context.rs': 'pub fn ctx_load() {}\n' }
 
-test('D-011 锚点指向不存在的符号 ⇒ 红（改一处即红，这是本条的硬要求）', () => {
-  const r = audit({ ...RS, ...ROSTER_RS, ...roster('`crates/symbio-plugin-loop/src/context.rs::GONE_FN`') })
-  expectAudit(r, 1, [/D-011 .*锚点符号在 Rust 源码中不存在/, /GONE_FN/])
-})
+auditCase('D-011 锚点指向不存在的符号 ⇒ 红（改一处即红，这是本条的硬要求）', () => audit({ ...RS, ...ROSTER_RS, ...roster('`crates/symbio-plugin-loop/src/context.rs::GONE_FN`') }), 1, [/D-011 .*锚点符号在 Rust 源码中不存在/, /GONE_FN/])
 
-test('D-011 锚点指向仓内不存在的文件 ⇒ 红（文件改名了还是从来没落地？）', () => {
-  const r = audit({ ...RS, ...roster('`crates/symbio-plugin-session/src/gone.rs`') })
-  expectAudit(r, 1, [/D-011 .*文件不在仓内/])
-})
+auditCase('D-011 锚点指向仓内不存在的文件 ⇒ 红（文件改名了还是从来没落地？）', () => audit({ ...RS, ...roster('`crates/symbio-plugin-session/src/gone.rs`') }), 1, [/D-011 .*文件不在仓内/])
 
-test('D-011 锚点列不是反引号形态 ⇒ 红（列必须有形状，不是自由文本）', () => {
-  const r = audit({ ...RS, ...ROSTER_RS, ...roster('在 context 里') })
-  expectAudit(r, 1, [/D-011 .*反引号形态/])
-})
+auditCase('D-011 锚点列不是反引号形态 ⇒ 红（列必须有形状，不是自由文本）', () => audit({ ...RS, ...ROSTER_RS, ...roster('在 context 里') }), 1, [/D-011 .*反引号形态/])
 
 test('D-011 有效锚点通过：`文件` 与 `文件::符号` 两种形态都认（exit 0）', () => {
   const r = audit({
@@ -288,18 +246,11 @@ test('D-011 有效锚点通过：`文件` 与 `文件::符号` 两种形态都�
   assert.match(r.stdout, /名册锚点 2\/2 已锚定/, '锚定率进日志——名册在长、锚定率不动要看得见')
 })
 
-test('D-011 `—` 是「尚未落地」：不判红，且不计入已锚定（exit 0）', () => {
-  const r = audit({ ...RS, ...ROSTER_RS, ...roster('—') })
-  expectAudit(r, 0, [/名册锚点 0\/1 已锚定/])
-})
+auditCase('D-011 `—` 是「尚未落地」：不判红，且不计入已锚定（exit 0）', () => audit({ ...RS, ...ROSTER_RS, ...roster('—') }), 0, [/名册锚点 0\/1 已锚定/])
 
-test('D-011 名册不在扫描范围 ⇒ 本条不适用，不为「没有名册」陪跑（exit 0）', () => {
-  const r = audit({ ...RS, 'README.md': '正常文档。\n' })
-  expectAudit(r, 0, [/D-011 不适用/])
-})
+auditCase('D-011 名册不在扫描范围 ⇒ 本条不适用，不为「没有名册」陪跑（exit 0）', () => audit({ ...RS, 'README.md': '正常文档。\n' }), 0, [/D-011 不适用/])
 
-test('D-011 名册一行都读不出 ⇒ 红（表格结构变了还是维的闭集写错了？）', () => {
-  const r = audit({
+auditCase('D-011 名册一行都读不出 ⇒ 红（表格结构变了还是维的闭集写错了？）', () => audit({
     ...RS,
     'docs/003-design/008-能力注册表与能力坐标系.md': [
       '| 能力 | 维 | 轴 | 天梯 | 等级 | 类型 | 落点 | 锚点 |',
@@ -307,9 +258,7 @@ test('D-011 名册一行都读不出 ⇒ 红（表格结构变了还是维的闭
       '| 工作记忆 | 未知维 | 抽象层级 | T1 | L1 | 认知 | S01 | — |',
       '',
     ].join('\n'),
-  })
-  expectAudit(r, 1, [/D-011 .*名册一行都没读出/])
-})
+  }), 1, [/D-011 .*名册一行都没读出/])
 
 // ── D-012：CLI 产物指路路径 == 构建落点 ────────────────────────────────
 //
@@ -320,25 +269,16 @@ test('D-011 名册一行都读不出 ⇒ 红（表格结构变了还是维的闭
 /** 讲构建的文档（D-012 的对象）：teach 文件在场本条才适用 */
 const teach = (lines) => ({ 'cli/README.md': ['# cli', '', '构建：`node scripts/build-cli.mjs`', ...lines, ''].join('\n') })
 
-test('D-012 旧布局写法变红：带具名目录段（symbio/target/…）', () => {
-  const r = audit({ ...RS, 'cli/Cargo.toml': '[package]\nname = "cli"\n', ...teach(['产物：`../symbio/target/debug/symbio-cli.exe`']) })
-  expectAudit(r, 1, [/D-012 cli\/README\.md:4/, /具名目录段/])
-})
+auditCase('D-012 旧布局写法变红：带具名目录段（symbio/target/…）', () => audit({ ...RS, 'cli/Cargo.toml': '[package]\nname = "cli"\n', ...teach(['产物：`../symbio/target/debug/symbio-cli.exe`']) }), 1, [/D-012 cli\/README\.md:4/, /具名目录段/])
 
-test('D-012 落点一致即通过：crate 文档用 `../target/…`（执行目录是 cli/）', () => {
-  const r = audit({ ...RS, 'cli/Cargo.toml': '[package]\nname = "cli"\n', ...teach(['产物：`../target/debug/symbio-cli.exe`']) })
-  expectAudit(r, 0, [/CLI 产物指路 1 处与构建落点一致/])
-})
+auditCase('D-012 落点一致即通过：crate 文档用 `../target/…`（执行目录是 cli/）', () => audit({ ...RS, 'cli/Cargo.toml': '[package]\nname = "cli"\n', ...teach(['产物：`../target/debug/symbio-cli.exe`']) }), 0, [/CLI 产物指路 1 处与构建落点一致/])
 
 test('D-012 执行目录判错就假红：仓库根的文档不许带 `../`', () => {
   const r = audit({ ...RS, 'README.md': '构建见 `scripts/build-cli.mjs`，产物：`target/debug/symbio-cli.exe`。\n' })
   assert.equal(r.status, 0, r.stdout)
 })
 
-test('D-012 少一层前缀也是错：cli 的文档写 `target/…` ⇒ 指的是 cli/target', () => {
-  const r = audit({ ...RS, 'cli/Cargo.toml': '[package]\nname = "cli"\n', ...teach(['产物：`target/debug/symbio-cli.exe`']) })
-  expectAudit(r, 1, [/不是构建落点/])
-})
+auditCase('D-012 少一层前缀也是错：cli 的文档写 `target/…` ⇒ 指的是 cli/target', () => audit({ ...RS, 'cli/Cargo.toml': '[package]\nname = "cli"\n', ...teach(['产物：`target/debug/symbio-cli.exe`']) }), 1, [/不是构建落点/])
 
 test('D-012 release 同理：落点跟 profile 走', () => {
   const ok = audit({ ...RS, 'cli/Cargo.toml': '[package]\nname = "cli"\n', ...teach(['门禁用 `../target/release/symbio-cli.exe`']) })
@@ -353,37 +293,25 @@ test('D-012 平台后缀不参与判定：无 `.exe` 的写法同样合法（Lin
   assert.equal(r.status, 0, r.stdout)
 })
 
-test('D-012 历史行豁免：说「这条旧路径已删除」的行不判', () => {
-  const r = audit({
+auditCase('D-012 历史行豁免：说「这条旧路径已删除」的行不判', () => audit({
     ...RS,
     'cli/Cargo.toml': '[package]\nname = "cli"\n',
     ...teach([
       '产物：`../target/debug/symbio-cli.exe`。',
       '原先写的 `../symbio/target/debug/symbio-cli.exe` 已删除，不再指向旧产物。',
     ]),
-  })
-  expectAudit(r, 0, [/CLI 产物指路 1 处/])
-})
+  }), 0, [/CLI 产物指路 1 处/])
 
-test('D-012 任务登记册排除：条目引用旧路径是记录本身，不是指路', () => {
-  const r = audit({
+auditCase('D-012 任务登记册排除：条目引用旧路径是记录本身，不是指路', () => audit({
     ...RS,
     'cli/Cargo.toml': '[package]\nname = "cli"\n',
     ...teach(['产物：`../target/debug/symbio-cli.exe`']),
     'docs/007-task/141-x.md': '事故经过：照 `../symbio/target/debug/symbio-cli.exe` 跑，全是旧产物。\n',
-  })
-  expectAudit(r, 0, [/CLI 产物指路 1 处/])
-})
+  }), 0, [/CLI 产物指路 1 处/])
 
-test('D-012 讲构建却一处产物路径都没写 ⇒ 红（指路断了 ≠ 判据脱节）', () => {
-  const r = audit({ ...RS, 'cli/Cargo.toml': '[package]\nname = "cli"\n', ...teach(['构建成功即可运行。']) })
-  expectAudit(r, 1, [/D-012 .*一处 CLI 产物路径都没写出/])
-})
+auditCase('D-012 讲构建却一处产物路径都没写 ⇒ 红（指路断了 ≠ 判据脱节）', () => audit({ ...RS, 'cli/Cargo.toml': '[package]\nname = "cli"\n', ...teach(['构建成功即可运行。']) }), 1, [/D-012 .*一处 CLI 产物路径都没写出/])
 
-test('D-012 没有讲构建的文档 ⇒ 不适用（不陪跑，日志说明原因）', () => {
-  const r = audit({ ...RS, 'README.md': '正常文档。\n' })
-  expectAudit(r, 0, [/D-012 不适用/])
-})
+auditCase('D-012 没有讲构建的文档 ⇒ 不适用（不陪跑，日志说明原因）', () => audit({ ...RS, 'README.md': '正常文档。\n' }), 0, [/D-012 不适用/])
 
 // ── D-014：§8 取值 ↔ 投影模块 三方对账 ──────────────────────────────────
 //
@@ -441,10 +369,7 @@ const OK = {
 }
 const fixture = (map = OK) => ({ ...RS, ...PARAMS, ...PROJ_RS, 'README.md': '正常文档。\n', ...mapDoc(map) })
 
-test('D-014 三侧一致 ⇒ 通过（exit 0）', () => {
-  const r = audit(fixture())
-  expectAudit(r, 0, [/投影取值 3 个（3 个有模块），4 个模块全归类/])
-})
+auditCase('D-014 三侧一致 ⇒ 通过（exit 0）', () => audit(fixture()), 0, [/投影取值 3 个（3 个有模块），4 个模块全归类/])
 
 test('D-014 §8 加了取值、映射表没跟上 ⇒ 红（exit 1）', () => {
   const files = fixture()
@@ -454,18 +379,12 @@ test('D-014 §8 加了取值、映射表没跟上 ⇒ 红（exit 1）', () => {
   expectAudit(r, 1, [/D-014 .*§8 有取值 `display`/])
 })
 
-test('D-014 映射表留着 §8 已删的取值 ⇒ 红（表过期）', () => {
-  const r = audit(fixture({ ...OK, v: [...OK.v, '| `ghost` | — | 已裁决不做 | 已经不存在的取值 |'] }))
-  expectAudit(r, 1, [/D-014 .*映射表有取值 `ghost`/])
-})
+auditCase('D-014 映射表留着 §8 已删的取值 ⇒ 红（表过期）', () => audit(fixture({ ...OK, v: [...OK.v, '| `ghost` | — | 已裁决不做 | 已经不存在的取值 |'] })), 1, [/D-014 .*映射表有取值 `ghost`/])
 
-test('D-014 承接方指向不存在的文件 ⇒ 红（exit 1）', () => {
-  const r = audit(fixture({
+auditCase('D-014 承接方指向不存在的文件 ⇒ 红（exit 1）', () => audit(fixture({
     ...OK,
     v: OK.v.map((l) => l.replace('projection/readyset.rs', 'projection/ready_set.rs')),
-  }))
-  expectAudit(r, 1, [/D-014 .*承接方不在投影目录里：`projection\/ready_set\.rs`/])
-})
+  })), 1, [/D-014 .*承接方不在投影目录里：`projection\/ready_set\.rs`/])
 
 test('D-014 目录里多了未归类模块 ⇒ 红（悄悄多一个投影）', () => {
   const files = fixture()
@@ -474,13 +393,10 @@ test('D-014 目录里多了未归类模块 ⇒ 红（悄悄多一个投影）', 
   expectAudit(r, 1, [/D-014 .*`projection\/legend\.rs` 没有归属/])
 })
 
-test('D-014 一个模块被两个取值认领 ⇒ 红（说明有一行是猜的）', () => {
-  const r = audit(fixture({
+auditCase('D-014 一个模块被两个取值认领 ⇒ 红（说明有一行是猜的）', () => audit(fixture({
     ...OK,
     v: [OK.v[0], OK.v[1], OK.v[2].replace('projection/conation.rs', 'projection/readyset.rs')],
-  }))
-  expectAudit(r, 1, [/D-014 .*同时被 `readyset` 与 `conation` 认领/])
-})
+  })), 1, [/D-014 .*同时被 `readyset` 与 `conation` 认领/])
 
 test('D-014 `—` 行合法：平凡值 / 写侧函数 / 已裁决不做都不是缺实现（exit 0）', () => {
   const files = fixture({
@@ -499,10 +415,7 @@ test('D-014 `—` 行合法：平凡值 / 写侧函数 / 已裁决不做都不�
   expectAudit(r, 0, [/投影取值 4 个（3 个有模块）/])
 })
 
-test('D-014 映射表或投影目录不在扫描范围内 ⇒ 不适用（不陪跑）', () => {
-  const r = audit({ ...RS, ...PARAMS, 'README.md': '正常文档。\n' })
-  expectAudit(r, 0, [/D-014 不适用/])
-})
+auditCase('D-014 映射表或投影目录不在扫描范围内 ⇒ 不适用（不陪跑）', () => audit({ ...RS, ...PARAMS, 'README.md': '正常文档。\n' }), 0, [/D-014 不适用/])
 
 // ── D-020：`类型::成员` 的后半段必须在**那个类型**的定义体里 ──────────────
 // 现场：设计文档写着 `Verdict::Unmanned`，可 `Unmanned` 只是同期另一个枚举的变体
@@ -518,10 +431,7 @@ const TYPES = {
   ].join('\n'),
 }
 
-test('D-020 成员记在别的类型上 ⇒ 红（D-005 只问「全仓出现过没有」）', () => {
-  const r = audit({ ...TYPES, 'README.md': '结算产出 `Verdict::Unmanned`。\n' })
-  expectAudit(r, 1, [/D-020 README\.md:1/, /Verdict::Unmanned/])
-})
+auditCase('D-020 成员记在别的类型上 ⇒ 红（D-005 只问「全仓出现过没有」）', () => audit({ ...TYPES, 'README.md': '结算产出 `Verdict::Unmanned`。\n' }), 1, [/D-020 README\.md:1/, /Verdict::Unmanned/])
 
 test('D-020 字段 / impl 方法 / trait 方法都算「定义体里有」⇒ 通过（exit 0）', () => {
   const r = audit({

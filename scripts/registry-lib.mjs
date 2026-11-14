@@ -393,7 +393,6 @@ export function loadKinds(root) {
  * 编号 = `<前缀>-<三位序号>[-名称]`——`id` 不含 `/`；含 `/` 的 `id` 是导航文档
  * （README / INDEX），等于仓根相对路径，不进 `deps`（RG-023）。
  */
-export const idPrefixOf = (kinds, kind) => kinds[kind]?.prefix
 /** 编号条目的 id 形状（名称段可选，允许中文 / 点 / 连字符）；前缀闭集由 kinds 动态生成。 */
 export const entryIdRe = (kinds) => new RegExp(`^(${Object.values(kinds).map((k) => k.prefix).sort((a, b) => b.length - a.length).join('|')})-[0-9]{3}[a-z]?(-[^\\s/]+)?$`)
 
@@ -475,8 +474,6 @@ export const SCAN_SKIP_FILES = new Map([
 export const SUMMARY_BEGIN = '<!-- registry:summary begin -->'
 export const SUMMARY_END = '<!-- registry:summary end -->'
 
-/** 该 kind 汇总页的文件（= kind 目录的 README.md，meta 声明于其 front-matter）。 */
-export const kindIndexFile = (kind, kinds) => kinds[kind]?.file
 /** 该 kind 汇总页的条目 id（README meta 的 `id`）。 */
 export const kindIndexId = (kind, kinds) => kinds[kind]?.id
 

@@ -18,7 +18,7 @@ import os from 'node:os'
 import path from 'node:path'
 import { spawnSync } from 'node:child_process'
 import { fileURLToPath } from 'node:url'
-import { expectAudit } from '../audit-assert.mjs'
+import { auditCase, expectAudit } from '../audit-assert.mjs'
 
 const script = fileURLToPath(new URL('./eol-audit.mjs', import.meta.url))
 
@@ -69,10 +69,7 @@ function audit(files, { beforeRun } = {}) {
 
 const ATTR = '* text=auto eol=lf\n'
 
-test('干净仓库（声明 lf、工作树 lf）→ 通过', () => {
-  const r = audit({ '.gitattributes': ATTR, 'a.md': '# A\n', 'b.ts': 'export const x = 1\n' })
-  expectAudit(r, 0, [/eol-audit 通过/])
-})
+auditCase('干净仓库（声明 lf、工作树 lf）→ 通过', () => audit({ '.gitattributes': ATTR, 'a.md': '# A\n', 'b.ts': 'export const x = 1\n' }), 0, [/eol-audit 通过/])
 
 test('EOL-001：声明了 lf，工作树却是 CRLF → 红（`git diff` 对此一个字符都不显示）', () => {
   const r = audit({ '.gitattributes': ATTR, 'a.md': '# A\r\n\r\n正文\r\n' })

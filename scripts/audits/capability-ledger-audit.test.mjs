@@ -20,7 +20,7 @@ import path from 'node:path'
 import { spawnSync } from 'node:child_process'
 import { fileURLToPath } from 'node:url'
 import { withTempTree } from '../fs-walk.mjs'
-import { expectAudit } from '../audit-assert.mjs'
+import { auditCase, expectAudit } from '../audit-assert.mjs'
 
 const script = fileURLToPath(new URL('./capability-ledger-audit.mjs', import.meta.url))
 
@@ -145,10 +145,7 @@ function assertRed(r, needle) {
   assert.match(r.stdout, new RegExp(needle), r.stdout)
 }
 
-test('干净夹具：名册与账本逐行对上，读数是 3 行', () => {
-  const r = audit(cleanTree())
-  expectAudit(r, 0, [/名册 3 行 = 账本 3 行（拆 1 · 留守 1 · 撤回 0 · 不做 0 · 待裁决 1）/])
-})
+auditCase('干净夹具：名册与账本逐行对上，读数是 3 行', () => audit(cleanTree()), 0, [/名册 3 行 = 账本 3 行（拆 1 · 留守 1 · 撤回 0 · 不做 0 · 待裁决 1）/])
 
 // ── 实现状态：设计在 / 实现还在，是两个字段 ─────────────────────────
 
@@ -215,10 +212,7 @@ function withdrawnTree(reason = '设计保留 / 实现撤回 / 待重新实现�
   return files
 }
 
-test('撤回写明设计保留与场景、且不挂交付段 ⇒ 绿', () => {
-  const r = audit(withdrawnTree())
-  expectAudit(r, 0, [/拆 1 · 留守 0 · 撤回 1 · 不做 0 · 待裁决 1/])
-})
+auditCase('撤回写明设计保留与场景、且不挂交付段 ⇒ 绿', () => audit(withdrawnTree()), 0, [/拆 1 · 留守 0 · 撤回 1 · 不做 0 · 待裁决 1/])
 
 test('撤回不写真实使用场景 ⇒ 红（写不出场景就该标 planned-unspecified）', () => {
   const files = withdrawnTree('设计保留 / 实现撤回 / 待重新实现')

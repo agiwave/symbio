@@ -5,7 +5,7 @@ import path from 'node:path'
 import { spawnSync } from 'node:child_process'
 import { fileURLToPath } from 'node:url'
 import { withTempTree } from '../fs-walk.mjs'
-import { expectAudit } from '../audit-assert.mjs'
+import { auditCase, expectAudit } from '../audit-assert.mjs'
 
 // `dead-code-audit.mjs` 的 R-001（Rust 声明级）是**判定型**守卫，按本仓教条必须
 // 有「注入真实违规并断言脚本变红」的回归测试——否则规则写错了也不会有人发现。
@@ -190,8 +190,7 @@ test('R-003 fires on an unused export with no acknowledgment', () => {
   assert.doesNotMatch(r.stdout, /dead\.ts :: USED/, '有人用的那个不报（判据不误伤）')
 })
 
-test('R-003 accepts a file-header acknowledgment with a reason (契约面)', () => {
-  const r = audit(
+auditCase('R-003 accepts a file-header acknowledgment with a reason (契约面)', () => audit(
     {},
     {
       ts: {
@@ -199,24 +198,18 @@ test('R-003 accepts a file-header acknowledgment with a reason (契约面)', () 
           '// dead-code-allow R-003: 前后端路由契约的全量镜像，未用常量是契约的另一半\nexport const ROUTE_UNUSED = "x/y"\n',
       },
     },
-  )
-  expectAudit(r, 0, [/全部已承认/])
-})
+  ), 0, [/全部已承认/])
 
-test('R-003 waiver needs a non-empty reason（写了标记不等于承认）', () => {
-  const r = audit(
+auditCase('R-003 waiver needs a non-empty reason（写了标记不等于承认）', () => audit(
     {},
     {
       ts: {
         'routes.gen.ts': '// dead-code-allow R-003:\nexport const ROUTE_UNUSED = "x/y"\n',
       },
     },
-  )
-  expectAudit(r, 1, [/R-003/, /ROUTE_UNUSED/])
-})
+  ), 1, [/R-003/, /ROUTE_UNUSED/])
 
-test('R-003 承认是**文件作用域**：同文件里新出现的未用导出一并被承认（生成物才有这个待遇）', () => {
-  const r = audit(
+auditCase('R-003 承认是**文件作用域**：同文件里新出现的未用导出一并被承认（生成物才有这个待遇）', () => audit(
     {},
     {
       ts: {
@@ -224,6 +217,4 @@ test('R-003 承认是**文件作用域**：同文件里新出现的未用导出�
           '// dead-code-allow R-003: 契约面全量镜像\nexport const A = 1\nexport const B = 2\n',
       },
     },
-  )
-  expectAudit(r, 0, [/2 个导出全库无人用，全部已承认/])
-})
+  ), 0, [/2 个导出全库无人用，全部已承认/])

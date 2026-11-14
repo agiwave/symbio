@@ -571,26 +571,6 @@ export function pruneStaleTaskKeys(tasks, scope, nowMs = Date.now()) {
   return dead
 }
 
-/**
- * 记一次「这个并发档位出现假红」。下次 `machine()` 会据此封顶。
- *
- * **只由测试自己调用**（它知道失败信息长什么样），门禁框架不猜——把「超时」
- * 自动当成「假红」会把真 bug 一起吞掉。
- */
-export function recordFalseRed(m, processConcurrency) {
-  const prev = Array.isArray(m.calibration.process?.falseRedAt) ? m.calibration.process.falseRedAt : []
-  if (prev.includes(processConcurrency)) return
-  m.calibration.process = { ...(m.calibration.process ?? {}), falseRedAt: [...prev, processConcurrency] }
-  try {
-    const onDisk = JSON.parse(fs.readFileSync(CALIBRATION_FILE, 'utf8'))
-    if (onDisk?.fingerprint !== m.fingerprint) return
-    onDisk.process = { ...(onDisk.process ?? {}), falseRedAt: m.calibration.process.falseRedAt }
-    fs.writeFileSync(CALIBRATION_FILE, JSON.stringify(onDisk, null, 2))
-  } catch {
-    /* 见 `recordRun` */
-  }
-}
-
 /** 上一轮实测的耗时（毫秒）；没有历史返回 `null`。LPT 排序用。 */
 export function measuredMs(m, stageId, label) {
   const ms = m.calibration.tasks?.[`${stageId}::${label}`]?.ms

@@ -32,7 +32,7 @@ import path from 'node:path'
 import { spawnSync } from 'node:child_process'
 import { fileURLToPath } from 'node:url'
 import { withTempTree } from '../fs-walk.mjs'
-import { expectAudit } from '../audit-assert.mjs'
+import { auditCase, expectAudit } from '../audit-assert.mjs'
 
 const script = fileURLToPath(new URL('./protocol-mirror-audit.mjs', import.meta.url))
 
@@ -750,12 +750,9 @@ test('词表数组被改名 → 变红（不是静默跳过）', () => {
 
 const VDFS_NODE_RS = 'crates/symbio-kernel/src/vdfs/node.rs'
 
-test('线路层信封的容器字段改名、前端没跟 → 变红（信封不再只有指针守着）', () => {
-  const r = mirror({
+auditCase('线路层信封的容器字段改名、前端没跟 → 变红（信封不再只有指针守着）', () => mirror({
     [TRANSPORT_RS]: rsStruct('PluginMessageWire', 'headers', 'payload'),
-  })
-  expectAudit(r, 1, [/前端持有后端不存在的字段：metadata/])
-})
+  }), 1, [/前端持有后端不存在的字段：metadata/])
 
 test('读数行字段改名、前端没跟 → 变红（T-202 守卫真的在看）', () => {
   const r = mirror({
@@ -765,12 +762,9 @@ test('读数行字段改名、前端没跟 → 变红（T-202 守卫真的在看
   assert.match(r.stdout, /前端持有后端不存在的字段：label/)
 })
 
-test('读数语气词表多一档 → 变红（T-202 词表组真的在看）', () => {
-  const r = mirror({
+auditCase('读数语气词表多一档 → 变红（T-202 词表组真的在看）', () => mirror({
     [READING_TS]: READING_TS_SRC.replace("'normal'", "'normal', 'danger'"),
-  })
-  expectAudit(r, 1, [/前端词表多出：danger/])
-})
+  }), 1, [/前端词表多出：danger/])
 
 test('后端结构体字段改名、前端没跟 → 变红', () => {
   const r = mirror({
@@ -993,17 +987,14 @@ test('前端 Corresponding Backend 悬空 → 变红（只守后端一侧时这�
   assert.match(r.stdout, /前端 tauri\/src\/schemas\/home\.ts:1 → .*（目标不存在）/)
 })
 
-test('没有任何跨栈导航头 → 不红（没写不违规，写了假指针才违规）', () => {
-  const r = mirror({
+auditCase('没有任何跨栈导航头 → 不红（没写不违规，写了假指针才违规）', () => mirror({
     'crates/symbio-sdk/src/event_bus/mod.rs': 'pub const EVENT_BUS_KIND_VDFS: &str = "vdfs";\n',
     [HOME_SCHEMAS_RS]: HOME_SCHEMAS_RS_SRC.replace(
       /^(\s*)\/\/! Corresponding Frontend: .*$\n/gm,
       '',
     ),
     [HOME_TS]: HOME_TS_SRC.replace('// Corresponding Backend: crates/symbio-plugin-home/src/schemas.rs\n', ''),
-  })
-  expectAudit(r, 0, [/E 组 0 条跨栈导航头/])
-})
+  }), 0, [/E 组 0 条跨栈导航头/])
 
 // ==================== G 组：ChatNode 顶层字段消费守卫 ====================
 

@@ -19,7 +19,7 @@ import path from 'node:path'
 import { spawnSync } from 'node:child_process'
 import { fileURLToPath } from 'node:url'
 import { withTempTree } from '../fs-walk.mjs'
-import { expectAudit } from '../audit-assert.mjs'
+import { auditCase, expectAudit } from '../audit-assert.mjs'
 
 const script = fileURLToPath(new URL('./domain-vocab-audit.mjs', import.meta.url))
 
@@ -46,10 +46,7 @@ function cleanTree() {
   }
 }
 
-test('干净夹具：无 schemas、依赖单向 ⇒ exit 0', () => {
-  const r = audit(cleanTree())
-  expectAudit(r, 0, [/✓ V-001/, /✓ V-002/])
-})
+auditCase('干净夹具：无 schemas、依赖单向 ⇒ exit 0', () => audit(cleanTree()), 0, [/✓ V-001/, /✓ V-002/])
 
 test('V-001：schemas 目录重新出现 ⇒ exit 1', () => {
   const files = cleanTree()

@@ -102,15 +102,6 @@ function parseStrConsts(text, map) {
   return map
 }
 
-/** 大括号配对取结构体字面量的内容（`matchBrace` 是全仓唯一实现）。 */
-function structBody(text, marker) {
-  const i = text.indexOf(marker)
-  if (i < 0) return null
-  const open = text.indexOf('{', i + marker.length - 1)
-  if (open < 0) return null
-  return text.slice(open, matchBrace(text, open) + 1)
-}
-
 const lastVariant = (s) => (s ? s.split('::').pop() : null)
 
 /** `name: "x"` / `name: CONST.to_string()` / `name: NAME.into()` */

@@ -492,10 +492,6 @@ export function codeTextOf(src) {
  */
 export const VITEST_TIMEOUT_MS = 300_000
 
-/** cargo 的进度噪音（刷屏且无信息量） */
-export const cargoNoiseRe =
-  /^(?:\s*$|.*\r$|\s*(Compiling|Checking|Downloading|Downloaded|Updating|Locking|Adding|Removing|Finished|Blocking|Waiting|Fresh|Documenting|Building)\b)/
-
 /** 从输出里抓一个整数（第一个捕获组） */
 export function grabInt(output, re) {
   const m = stripAnsi(output).match(re)

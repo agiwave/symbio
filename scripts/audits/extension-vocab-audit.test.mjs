@@ -24,7 +24,7 @@ import { fileURLToPath } from 'node:url'
 
 import { stripRustCode, findContainerWordTokens, validateExemptions } from './extension-vocab-audit.mjs'
 import { withTempTree } from '../fs-walk.mjs'
-import { expectAudit } from '../audit-assert.mjs'
+import { auditCase } from '../audit-assert.mjs'
 
 const script = fileURLToPath(new URL('./extension-vocab-audit.mjs', import.meta.url))
 
@@ -63,10 +63,7 @@ function audit(files, env = {}) {
   }, { prefix: 'ext-vocab-' })
 }
 
-test('① 干净夹具 ⇒ 绿', () => {
-  const r = audit(CLEAN)
-  expectAudit(r, 0, [/✓ EX-008/])
-})
+auditCase('① 干净夹具 ⇒ 绿', () => audit(CLEAN), 0, [/✓ EX-008/])
 
 test('② 端口形状加一格 `turn: u64` ⇒ 红', () => {
   const r = audit({

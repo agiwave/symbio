@@ -15,7 +15,7 @@ import path from 'node:path'
 import { spawnSync } from 'node:child_process'
 import { fileURLToPath } from 'node:url'
 import { withTempTree } from '../fs-walk.mjs'
-import { expectAudit } from '../audit-assert.mjs'
+import { auditCase } from '../audit-assert.mjs'
 
 const script = fileURLToPath(new URL('./baseline-scope-audit.mjs', import.meta.url))
 const LP_REL = 'scripts/loop-purity-baseline.json'
@@ -117,10 +117,7 @@ function assertRed(r, code) {
 
 // ───────────────────────────── 不该红 ─────────────────────────────
 
-test('基线面一字未动 ⇒ 绿', () => {
-  const r = audit()
-  expectAudit(r, 0, [/无未署名的格增删 \/ 计数上调 \/ 指纹改写/])
-})
+auditCase('基线面一字未动 ⇒ 绿', () => audit(), 0, [/无未署名的格增删 \/ 计数上调 \/ 指纹改写/])
 
 test('计数下调 ⇒ 绿（棘轮往下走不需要 allow）', () => {
   const lp = lpBaseline()

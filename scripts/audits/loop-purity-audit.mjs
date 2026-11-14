@@ -210,11 +210,6 @@ function worldRootHits(text) {
   return hits
 }
 
-/** LP-003：世界语义词根计数。 */
-function worldRoots(text) {
-  return worldRootHits(text).length
-}
-
 /** LP-004：端口受理面里带世界词根的 trait / 类型 / 方法名。 */
 function worldNamedContracts(text) {
   const stripped = blankComments(text)

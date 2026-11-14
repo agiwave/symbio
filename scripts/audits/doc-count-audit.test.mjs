@@ -20,7 +20,7 @@ import path from 'node:path'
 import { spawnSync } from 'node:child_process'
 import { fileURLToPath } from 'node:url'
 import { withTempTree } from '../fs-walk.mjs'
-import { expectAudit } from '../audit-assert.mjs'
+import { auditCase, expectAudit } from '../audit-assert.mjs'
 
 const script = fileURLToPath(new URL('./doc-count-audit.mjs', import.meta.url))
 
@@ -74,30 +74,15 @@ test('文档说对了一个数 ⇒ 通过（exit 0）', () => {
   assert.equal(r.status, 0, r.stdout + r.stderr)
 })
 
-test('DC-001 文档把 check_all 的条数写错 ⇒ 红', () => {
-  const r = audit({ body: '# A\n\n`check_all` 八条。\n', checkAll: 7 })
-  expectAudit(r, 1, [/DC-001 .*说 `check_all` 有 8，而代码里是 7/])
-})
+auditCase('DC-001 文档把 check_all 的条数写错 ⇒ 红', () => audit({ body: '# A\n\n`check_all` 八条。\n', checkAll: 7 }), 1, [/DC-001 .*说 `check_all` 有 8，而代码里是 7/])
 
-test('DC-002 文档把顶层键数写错 ⇒ 红（数在名字之前）', () => {
-  const r = audit({ body: '# A\n\n机制表 9 个顶层键。\n' })
-  expectAudit(r, 1, [/DC-002/])
-})
+auditCase('DC-002 文档把顶层键数写错 ⇒ 红（数在名字之前）', () => audit({ body: '# A\n\n机制表 9 个顶层键。\n' }), 1, [/DC-002/])
 
-test('DC-003 「登记的键（含子键）」数写错 ⇒ 红（数在名字之后）', () => {
-  const r = audit({ body: '# A\n\n§8 登记的键（含子键）12 项。\n' })
-  expectAudit(r, 1, [/DC-003/])
-})
+auditCase('DC-003 「登记的键（含子键）」数写错 ⇒ 红（数在名字之后）', () => audit({ body: '# A\n\n§8 登记的键（含子键）12 项。\n' }), 1, [/DC-003/])
 
-test('代码里的数变了而文档没跟 ⇒ 红（这是它存在的理由）', () => {
-  const r = audit({ body: OK, checkAll: 9, facts: { mechanisms: 11, paramKeys: 12 } })
-  expectAudit(r, 1, [/DC-002/])
-})
+auditCase('代码里的数变了而文档没跟 ⇒ 红（这是它存在的理由）', () => audit({ body: OK, checkAll: 9, facts: { mechanisms: 11, paramKeys: 12 } }), 1, [/DC-002/])
 
-test('DC-004 文档说 3 个验证程序而目录里只有 1 个 ⇒ 红（新程序落地而没人改文档的那种漂移）', () => {
-  const r = audit({ body: '# A\n\n证据是 3 个验证程序，全部带反向用例。\n', verify: 1 })
-  expectAudit(r, 1, [/DC-004/])
-})
+auditCase('DC-004 文档说 3 个验证程序而目录里只有 1 个 ⇒ 红（新程序落地而没人改文档的那种漂移）', () => audit({ body: '# A\n\n证据是 3 个验证程序，全部带反向用例。\n', verify: 1 }), 1, [/DC-004/])
 
 test('DC-004 数对得上 ⇒ 绿（数的是目录里那几个会被编译的文件）', () => {
   const r = audit({ body: '# A\n\n证据是 1 个验证程序。\n', verify: 1 })

@@ -24,7 +24,7 @@ import { spawnSync } from 'node:child_process'
 import { fileURLToPath } from 'node:url'
 import { classify } from './spec-coverage-audit.mjs'
 import { withTempTree } from '../fs-walk.mjs'
-import { expectAudit, onStderr } from '../audit-assert.mjs'
+import { auditCase, expectAudit, onStderr } from '../audit-assert.mjs'
 
 const script = fileURLToPath(new URL('./spec-coverage-audit.mjs', import.meta.url))
 
@@ -108,23 +108,14 @@ test('空理由 ⇒ SPC-002 红（空豁免等于没有判据）', () => {
   expectAudit(r, 1, [onStderr(/SPC-002/)])
 })
 
-test('没有 `## 判据` 小节 ⇒ SPC-001 红', () => {
-  const r = audit({
+auditCase('没有 `## 判据` 小节 ⇒ SPC-001 红', () => audit({
     'docs/005-spec/001.md': '---\nkind: spec\nid: SP-001\ntitle: SP-001\nstatus: active\ncreated: 2026-10-25\n---\n\n# x\n',
-  })
-  expectAudit(r, 1, [onStderr(/没有 .## 判据. 小节/)])
-})
+  }), 1, [onStderr(/没有 .## 判据. 小节/)])
 
-test('一条活跃规范都没有 ⇒ SPC-003 红（范围读空不是全覆盖）', () => {
-  const r = audit({ 'docs/005-spec/001.md': spec('SP-001', 'x', { status: 'done' }) })
-  expectAudit(r, 1, [onStderr(/一条活跃规范都没读到/)])
-})
+auditCase('一条活跃规范都没有 ⇒ SPC-003 红（范围读空不是全覆盖）', () => audit({ 'docs/005-spec/001.md': spec('SP-001', 'x', { status: 'done' }) }), 1, [onStderr(/一条活跃规范都没读到/)])
 
-test('编号重复 ⇒ SPC-003 红', () => {
-  const r = audit({
+auditCase('编号重复 ⇒ SPC-003 红', () => audit({
     'docs/005-spec/001.md': spec('SP-001', '执行方是 `scripts/foo.mjs`。'),
     'docs/005-spec/002.md': spec('SP-001', '执行方是 `scripts/foo.mjs`。'),
     [SCRIPT]: DECL,
-  })
-  expectAudit(r, 1, [onStderr(/编号 SP-001 重复/)])
-})
+  }), 1, [onStderr(/编号 SP-001 重复/)])

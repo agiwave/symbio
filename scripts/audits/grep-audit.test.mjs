@@ -6,7 +6,7 @@ import { spawnSync } from 'node:child_process'
 import { fileURLToPath } from 'node:url'
 import { machine, budget } from '../gate.d/_machine.mjs'
 import { withTempTree } from '../fs-walk.mjs'
-import { expectAudit } from '../audit-assert.mjs'
+import { auditCase, expectAudit } from '../audit-assert.mjs'
 
 const script = fileURLToPath(new URL('./grep-audit.mjs', import.meta.url))
 const repoRoot = fileURLToPath(new URL('../../', import.meta.url))
@@ -298,10 +298,7 @@ test('S-010 waiver requires a reason (same line or the line above)', () => {
 // 单独的「批 2」在批次重排后无人能解。判据只取两种无歧义形态（待办标记 / 批次号）。
 const S012_FILE = 'crates/symbio-sdk/src/actors/mod.rs'
 
-test('S-012 fires on a batch number', () => {
-  const r = s010Audit({ [S012_FILE]: '/// 运行器据此停止工具循环（批 2 的恢复前提）。\n' })
-  expectAudit(r, 1, [/S-012/, /批次号属施工计划/])
-})
+auditCase('S-012 fires on a batch number', () => s010Audit({ [S012_FILE]: '/// 运行器据此停止工具循环（批 2 的恢复前提）。\n' }), 1, [/S-012/, /批次号属施工计划/])
 
 test('S-012 fires on a TODO / FIXME marker left in a comment', () => {
   for (const marker of ['TODO', 'FIXME', 'XXX', 'HACK']) {
@@ -365,10 +362,7 @@ const S013_UNPINNED = `fn collect(workdir: &Path) -> Vec<PathBuf> {
 }
 `
 
-test('S-013 fires on a WalkBuilder construction with no sort in scope', () => {
-  const r = s010Audit({ [S013_FILE]: S013_UNPINNED })
-  expectAudit(r, 1, [/S-013 未钉遍历序/])
-})
+auditCase('S-013 fires on a WalkBuilder construction with no sort in scope', () => s010Audit({ [S013_FILE]: S013_UNPINNED }), 1, [/S-013 未钉遍历序/])
 
 test('S-013 accepts sort_by_file_name and the generic sort_by', () => {
   for (const sorter of [
@@ -740,12 +734,9 @@ test('S-017 `resume_anchor` 回来即红', () => {
   assert.match(anchor.stdout, /loop_rows\.rs:2/)
 })
 
-test('S-017 `resume.rs` 回来即红（文件存在本身就是违例）', () => {
-  const r = gateAudit17({
+auditCase('S-017 `resume.rs` 回来即红（文件存在本身就是违例）', () => gateAudit17({
     [`${S017_LOOP}/resume.rs`]: 'pub fn resume() {}\n',
-  })
-  expectAudit(r, 1, [/S-017 违例：恢复路径的私有旁路回来了/, /resume\.rs/])
-})
+  }), 1, [/S-017 违例：恢复路径的私有旁路回来了/, /resume\.rs/])
 
 test('S-017 注释行不判；`resumed` 载荷键不在判据面', () => {
   const asComment = gateAudit17({

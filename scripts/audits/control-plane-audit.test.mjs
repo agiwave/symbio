@@ -34,7 +34,7 @@ import path from 'node:path'
 import { spawnSync } from 'node:child_process'
 import { fileURLToPath } from 'node:url'
 import { withTempTree } from '../fs-walk.mjs'
-import { expectAudit, onStderr } from '../audit-assert.mjs'
+import { auditCase, expectAudit, onStderr } from '../audit-assert.mjs'
 
 const script = fileURLToPath(new URL('./control-plane-audit.mjs', import.meta.url))
 const BASELINE_REL = 'scripts/baselines/control-plane.json'
@@ -161,10 +161,7 @@ function cleanTree() {
 
 // ───────────────────────────── 不该红的用例 ─────────────────────────────
 
-test('干净夹具：四条判据全绿（循环体 1 段、世界事件名 2 个、端口名 1 个、生产文件 4 份）', () => {
-  const r = audit(cleanTree())
-  expectAudit(r, 0, [/CP-001 唯一循环体 1/, /CP-004 世界事件名 2 个、端口名 1 个、机制层 0 处/, /CP-006 机制面/, /（4 文件）/, /CP-009 第二推进循环 0/])
-})
+auditCase('干净夹具：四条判据全绿（循环体 1 段、世界事件名 2 个、端口名 1 个、生产文件 4 份）', () => audit(cleanTree()), 0, [/CP-001 唯一循环体 1/, /CP-004 世界事件名 2 个、端口名 1 个、机制层 0 处/, /CP-006 机制面/, /（4 文件）/, /CP-009 第二推进循环 0/])
 
 test('注释里的世界域名不算代码（CP-004 读剥注释后的文本）', () => {
   const files = cleanTree()
@@ -297,10 +294,7 @@ test('CP-006：控制面多一份生产文件而基线未跟 ⇒ 红', () => {
   assertRed(audit(files, { baselineFrom: cleanTree() }), 'CP-006')
 })
 
-test('CP-006：基线整个缺失 ⇒ 退 2（判不了不许亮绿灯）', () => {
-  const r = audit(cleanTree(), { withBaseline: false })
-  expectAudit(r, 2, [onStderr(/基线读不出/)])
-})
+auditCase('CP-006：基线整个缺失 ⇒ 退 2（判不了不许亮绿灯）', () => audit(cleanTree(), { withBaseline: false }), 2, [onStderr(/基线读不出/)])
 
 test('CP-006：基线指向一个不存在的机制面文件 ⇒ 红（陈旧基线）', () => {
   const files = cleanTree()

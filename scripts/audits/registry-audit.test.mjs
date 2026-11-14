@@ -33,7 +33,6 @@ let caseNo = 0
 
 const TASK_BODY = '## 内容\n说明。\n\n## 处理过程\n- 待补\n'
 const SPEC_BODY = '## 规范\n条文。\n\n## 判据\n人工核对。\n'
-const ADR_BODY = '## 决策\n一句话结论。\n\n## 状态\n- status：现行。\n'
 
 /** front-matter 序列化（夹具写文件用）。 */
 function fm(meta) {
@@ -60,25 +59,6 @@ function specDoc(id, over = {}) {
   return (
     fm({ kind: 'spec', id, title: `${id} 规范`, status: 'active', created: '2026-10-11', scope: '夹具', deps: [], ...meta }) +
     (body ?? SPEC_BODY)
-  )
-}
-
-/** adr 夹具：`adr` 序号默认从 id 去前缀推得（正向用例不该因手抄不对账）。 */
-function adrDoc(id, over = {}) {
-  const { body, ...meta } = over
-  return (
-    fm({
-      kind: 'adr',
-      id,
-      title: `${id} 决策`,
-      status: 'active',
-      impl: 'done',
-      domain: '平台基座',
-      created: '2026-10-11',
-      adr: id.replace(/^ADR-/, ''),
-      deps: [],
-      ...meta,
-    }) + (body ?? ADR_BODY)
   )
 }
 

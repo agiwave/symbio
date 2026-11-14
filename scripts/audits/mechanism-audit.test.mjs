@@ -15,7 +15,7 @@ import path from 'node:path'
 import { spawnSync } from 'node:child_process'
 import { fileURLToPath } from 'node:url'
 import { withTempTree } from '../fs-walk.mjs'
-import { expectAudit } from '../audit-assert.mjs'
+import { auditCase } from '../audit-assert.mjs'
 
 const script = fileURLToPath(new URL('./mechanism-audit.mjs', import.meta.url))
 
@@ -50,10 +50,7 @@ const CLEAN = {
   'components/Clean.vue': '<template><div /></template>\n<script setup lang="ts">\n</script>\n',
 }
 
-test('干净树通过（exit 0）', () => {
-  const r = audit(CLEAN)
-  expectAudit(r, 0, [/10 条规则全部通过/])
-})
+auditCase('干净树通过（exit 0）', () => audit(CLEAN), 0, [/10 条规则全部通过/])
 
 // ── M-001：组件不得解释后端 meta 字段 ────────────────────────────────────
 test('M-001 命中：组件直接取 meta 字段', () => {

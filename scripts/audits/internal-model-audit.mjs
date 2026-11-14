@@ -81,8 +81,6 @@ const DEFAULT_SRC = path.join('crates')
  * 理由单独切出来判空：空理由不算登记，且要**显式报出来**（否则人会以为登记过）。
  */
 const MARKER_RE = /\/\/\s*internal-model-allow\s+(IM-\d{3})(\/gate)?\s*:/
-/** 调用点（剥注释与测试模块之后）。 */
-const CALL_RE = /\.round_trip\s*\(/
 /** 空工具切片的规范化形状（`&[]` / `& []` 都算）。 */
 const EMPTY_TOOLS = /^&\s*\[\s*\]$/
 

@@ -15,7 +15,7 @@ import path from 'node:path'
 import { spawnSync } from 'node:child_process'
 import { fileURLToPath } from 'node:url'
 import { withTempTree } from '../fs-walk.mjs'
-import { expectAudit } from '../audit-assert.mjs'
+import { auditCase, expectAudit } from '../audit-assert.mjs'
 
 const script = fileURLToPath(new URL('./plugin-entry-audit.mjs', import.meta.url))
 
@@ -122,13 +122,10 @@ test('报告段给出每条路由的消费方计数', () => {
 })
 
 // ── E-001：`PluginMeta::new` 首参必须 == 插件目录名 ───────────────────────
-test('E-001 命中：meta 首参写成 "sessions" 而目录是 session', () => {
-  const r = audit({
+auditCase('E-001 命中：meta 首参写成 "sessions" 而目录是 session', () => audit({
     ...CLEAN,
     'crates/symbio-plugin-session/src/plugin.rs': PLUGIN.replace('PluginMeta::new(PLUGIN_ID_SESSION', 'PluginMeta::new("sessions"'),
-  })
-  expectAudit(r, 1, [/E-001 .*symbio-plugin-session\/src\/plugin\.rs/])
-})
+  }), 1, [/E-001 .*symbio-plugin-session\/src\/plugin\.rs/])
 
 test('E-001 不误报：首参用常量且与目录名一致', () => {
   const r = audit(CLEAN)
@@ -136,16 +133,13 @@ test('E-001 不误报：首参用常量且与目录名一致', () => {
 })
 
 // ── E-002：路径字面量首段必须是插件目录名 ───────────────────────────────
-test('E-002 命中：代码里引用 meta id 当命名空间（`sessions/update`）', () => {
-  const r = audit({
+auditCase('E-002 命中：代码里引用 meta id 当命名空间（`sessions/update`）', () => audit({
     ...CLEAN,
     // meta 首参错写成 sessions ⇒ `sessions` 成了一个「幽灵命名空间」
     'crates/symbio-plugin-session/src/plugin.rs': PLUGIN.replace('PluginMeta::new(PLUGIN_ID_SESSION', 'PluginMeta::new("sessions"'),
     'crates/symbio-plugin-session/src/caller.rs':
       `pub fn p() -> String { "sessions/update".to_string() }\n`,
-  })
-  expectAudit(r, 1, [/E-002 .*caller\.rs:1/])
-})
+  }), 1, [/E-002 .*caller\.rs:1/])
 
 // E-002 的**臂侧**：注册处写错前缀。真实案例 `work/set_workspace`——两条臂长在 home 的
 // `match` 里，`work` 既不是插件也没有目录，只扫引用的那半永远看不见它。
@@ -173,13 +167,10 @@ ${arms}
 `,
 })
 
-test('E-002 臂侧命中：home 的臂前缀不是 `home`（幽灵命名空间 `work/*`）', () => {
-  const r = audit({
+auditCase('E-002 臂侧命中：home 的臂前缀不是 `home`（幽灵命名空间 `work/*`）', () => audit({
     ...CLEAN,
     ...HOME_ARMS(`            "work/set_workspace" => Ok(PluginPayload::new(&1)),`),
-  })
-  expectAudit(r, 1, [/E-002 .*symbio-plugin-home\/src\/plugin\.rs:\d+/, /没有任何调用方能到达/])
-})
+  }), 1, [/E-002 .*symbio-plugin-home\/src\/plugin\.rs:\d+/, /没有任何调用方能到达/])
 
 test('E-002 臂侧不误报：home 的臂以 `home/` 开头（根容器收到的是未剥离的 PATH）', () => {
   const r = audit({
@@ -189,16 +180,13 @@ test('E-002 臂侧不误报：home 的臂以 `home/` 开头（根容器收到的
   assert.equal(r.status, 0, r.stdout)
 })
 
-test('E-002 臂侧命中：普通插件把臂写成绝对形（`session/update` 落在 session 里）', () => {
-  const r = audit({
+auditCase('E-002 臂侧命中：普通插件把臂写成绝对形（`session/update` 落在 session 里）', () => audit({
     ...CLEAN,
     'crates/symbio-plugin-session/src/plugin.rs': PLUGIN.replace(
       '"update" => Ok(PluginPayload::new(&2)),',
       '"session/update" => Ok(PluginPayload::new(&2)),',
     ),
-  })
-  expectAudit(r, 1, [/E-002 .*symbio-plugin-session\/src\/plugin\.rs:\d+.*绝对形/])
-})
+  }), 1, [/E-002 .*symbio-plugin-session\/src\/plugin\.rs:\d+.*绝对形/])
 
 test('E-002 臂侧可豁免：留理由的 `plugin-entry-allow`', () => {
   const r = audit({
@@ -212,14 +200,11 @@ test('E-002 臂侧可豁免：留理由的 `plugin-entry-allow`', () => {
 })
 
 // ── E-003：调用侧不得写字面量 PATH ──────────────────────────────────────
-test('E-003 命中：`set(PATH, "字面量")`', () => {
-  const r = audit({
+auditCase('E-003 命中：`set(PATH, "字面量")`', () => audit({
     ...CLEAN,
     'crates/symbio-plugin-session/src/caller.rs':
       `pub fn p(ctx: Arc<dyn PluginInvokeRequest>) { ctx.set(PATH, "session/chat/send".to_string()); }\n`,
-  })
-  expectAudit(r, 1, [/E-003 .*caller\.rs:1/])
-})
+  }), 1, [/E-003 .*caller\.rs:1/])
 
 test('E-003 不误报：用常量（`ROUTE_SESSION_CHAT_SEND.to_string()`）', () => {
   const r = audit({
@@ -258,16 +243,13 @@ test('E-003 不误报：测试文件里的假路径不判', () => {
 })
 
 // ── E-004：`traverse` 端点必须用常量 ────────────────────────────────────
-test('E-004 命中：`sub_path != "available_tools"`', () => {
-  const r = audit({
+auditCase('E-004 命中：`sub_path != "available_tools"`', () => audit({
     ...CLEAN,
     'crates/symbio-plugin-session/src/plugin.rs': PLUGIN.replace(
       'sub_path != TRAVERSE_AVAILABLE_TOOLS',
       'sub_path != "available_tools"',
     ),
-  })
-  expectAudit(r, 1, [/\[ERROR\] E-004 .*plugin\.rs/])
-})
+  }), 1, [/\[ERROR\] E-004 .*plugin\.rs/])
 
 test('E-004 不误报：常量定义行本身', () => {
   const r = audit(CLEAN)
@@ -275,17 +257,14 @@ test('E-004 不误报：常量定义行本身', () => {
 })
 
 // ── E-005：路径必须真实存在（WARNING）──────────────────────────────────
-test('E-005 命中：`session/chat` 少了 `/send`', () => {
-  const r = audit(
+auditCase('E-005 命中：`session/chat` 少了 `/send`', () => audit(
     {
       ...CLEAN,
       'crates/symbio-plugin-session/src/caller.rs':
         `pub fn p() -> String { "session/chat".to_string() }\n`,
     },
     { strict: true },
-  )
-  expectAudit(r, 2, [/E-005 .*caller\.rs:1/])
-})
+  ), 2, [/E-005 .*caller\.rs:1/])
 
 test('E-005 不误报：动态命名空间（`local/<工具名>`）', () => {
   const r = audit(
@@ -569,15 +548,9 @@ const VOCAB_CORE = {
 }
 const vocabDoc = (line) => ({ ...CLEAN, ...VOCAB_CORE, 'docs/003-design/009-VDFS规范.md': `${line}\n` })
 
-test('E-008 命中：文档写着代码里已不存在的词', () => {
-  const r = audit(vocabDoc('| `status` | `one` / `legacy` <!-- vocab:FOO_ --> |'))
-  expectAudit(r, 1, [/legacy/])
-})
+auditCase('E-008 命中：文档写着代码里已不存在的词', () => audit(vocabDoc('| `status` | `one` / `legacy` <!-- vocab:FOO_ --> |')), 1, [/legacy/])
 
-test('E-008 命中：代码新增了词而文档未列出', () => {
-  const r = audit(vocabDoc('| `status` | `one` <!-- vocab:FOO_ --> |'))
-  expectAudit(r, 1, [/`two`/])
-})
+auditCase('E-008 命中：代码新增了词而文档未列出', () => audit(vocabDoc('| `status` | `one` <!-- vocab:FOO_ --> |')), 1, [/`two`/])
 
 test('E-008 通过：两侧逐字一致', () => {
   const r = audit(vocabDoc('| `status` | `one` / `two` <!-- vocab:FOO_ --> |'))
@@ -594,10 +567,7 @@ test('E-008 不猜：没有 `<!-- vocab:… -->` 标记的行不判', () => {
   assert.equal(r.status, 0, r.stdout)
 })
 
-test('E-008 命中：标记的前缀在代码里没有同名常量（前缀写错）', () => {
-  const r = audit(vocabDoc('| `status` | `one` <!-- vocab:BAR_ --> |'))
-  expectAudit(r, 1, [/BAR_/])
-})
+auditCase('E-008 命中：标记的前缀在代码里没有同名常量（前缀写错）', () => audit(vocabDoc('| `status` | `one` <!-- vocab:BAR_ --> |')), 1, [/BAR_/])
 
 // ── E-009：插件不得直接 use 兄弟插件模块 ────────────────────────────────
 //
@@ -667,23 +637,17 @@ test('E-009 豁免理由为空视为未豁免', () => {
 // 这条规则拦下的那次拆隔离。上面 6 条全部只看生产文件——它们证明不了判据覆盖测试，
 // 而「只统计非测试的 0」正是原先那句绿灯的来源。
 
-test('E-009 命中**测试文件**里的跨插件引用', () => {
-  const r = audit({
+auditCase('E-009 命中**测试文件**里的跨插件引用', () => audit({
     ...CLEAN,
     'crates/symbio-plugin-mcp/src/caller.test.rs':
       '#[test]\nfn t() { use crate::plugins::web::something; }\n',
-  })
-  expectAudit(r, 1, [/E-009\s+crates\/symbio-plugin-mcp\/src\/caller\.test\.rs:2/])
-})
+  }), 1, [/E-009\s+crates\/symbio-plugin-mcp\/src\/caller\.test\.rs:2/])
 
-test('E-009 命中生产文件里的**内联测试模块**（`blankTestModules` 不是它的豁免口）', () => {
-  const r = audit({
+auditCase('E-009 命中生产文件里的**内联测试模块**（`blankTestModules` 不是它的豁免口）', () => audit({
     ...CLEAN,
     'crates/symbio-plugin-mcp/src/caller.rs':
       '#[cfg(test)]\nmod tests {\n    use crate::plugins::web::something;\n}\n',
-  })
-  expectAudit(r, 1, [/E-009\s+crates\/symbio-plugin-mcp\/src\/caller\.rs:3/])
-})
+  }), 1, [/E-009\s+crates\/symbio-plugin-mcp\/src\/caller\.rs:3/])
 
 test('E-009 放行对照：测试文件引用**自己**的插件模块仍通过', () => {
   const r = audit({
@@ -815,13 +779,10 @@ test('E-009 不误报：清单里自身的 name 行', () => {
   assert.equal(r.status, 0, r.stdout)
 })
 
-test('E-009 命中源码：`use symbio_plugin_web::…`（crate 化后的唯一 import 形态）', () => {
-  const r = audit({
+auditCase('E-009 命中源码：`use symbio_plugin_web::…`（crate 化后的唯一 import 形态）', () => audit({
     ...CLEAN,
     'crates/symbio-plugin-mcp/src/caller.rs': 'use symbio_plugin_web::something;\n',
-  })
-  expectAudit(r, 1, [/\[ERROR\]\s+E-009\s+crates\/symbio-plugin-mcp\/src\/caller\.rs:1/])
-})
+  }), 1, [/\[ERROR\]\s+E-009\s+crates\/symbio-plugin-mcp\/src\/caller\.rs:1/])
 
 test('E-009 不误报：源码注释里的 `symbio_plugin_<兄弟>`（loop 的 session_port 真实形态）', () => {
   const r = audit({
@@ -835,23 +796,17 @@ test('E-009 不误报：源码注释里的 `symbio_plugin_<兄弟>`（loop 的 s
 // `include!` 与 `#[path]` 不需要 Cargo 依赖就能把兄弟插件的源码文件搬进本 crate：
 // 清单层与 import 层全绿，零依赖却已经破了。这两条是边角写法，但公理的边界应该画在
 // 「物理上做不到」，而不是「通常没人这么写」。
-test('E-009 命中：`include!` 搬入兄弟插件源码', () => {
-  const r = audit({
+auditCase('E-009 命中：`include!` 搬入兄弟插件源码', () => audit({
     ...CLEAN,
     'crates/symbio-plugin-mcp/src/caller.rs':
       'include!("../../symbio-plugin-web/src/schema.rs");\n',
-  })
-  expectAudit(r, 1, [/E-009\s+crates\/symbio-plugin-mcp\/src\/caller\.rs:1/])
-})
+  }), 1, [/E-009\s+crates\/symbio-plugin-mcp\/src\/caller\.rs:1/])
 
-test('E-009 命中：`#[path]` 指向兄弟插件源码', () => {
-  const r = audit({
+auditCase('E-009 命中：`#[path]` 指向兄弟插件源码', () => audit({
     ...CLEAN,
     'crates/symbio-plugin-mcp/src/caller.rs':
       '#[path = "../../symbio-plugin-web/src/schema.rs"]\nmod web_schema;\n',
-  })
-  expectAudit(r, 1, [/E-009\s+crates\/symbio-plugin-mcp\/src\/caller\.rs:1/])
-})
+  }), 1, [/E-009\s+crates\/symbio-plugin-mcp\/src\/caller\.rs:1/])
 
 test('E-009 不误报：`include!` / `#[path]` 指向本 crate 内的文件', () => {
   const r = audit({
@@ -864,21 +819,15 @@ test('E-009 不误报：`include!` / `#[path]` 指向本 crate 内的文件', ()
 
 // 中转站：Rust 的 extern prelude 只含直接依赖，所以「没声明依赖却拿到类型」本不该发生，
 // 但 `pub use` 是一条合法转发链（mcp → deploy → web）。这条用例守的就是它。
-test('E-009 命中：非插件 crate 转发插件类型（`symbio-testkit` 的 `pub use`）', () => {
-  const r = audit({
+auditCase('E-009 命中：非插件 crate 转发插件类型（`symbio-testkit` 的 `pub use`）', () => audit({
     ...CLEAN,
     'crates/symbio-testkit/src/lib.rs': 'pub use symbio_plugin_session::SessionPlugin;\n',
-  })
-  expectAudit(r, 1, [/E-009\s+crates\/symbio-testkit\/src\/lib\.rs:1/])
-})
+  }), 1, [/E-009\s+crates\/symbio-testkit\/src\/lib\.rs:1/])
 
-test('E-009 命中：`symbio-plugin-api` 也不得转发插件（它被全部插件依赖，最坏形态）', () => {
-  const r = audit({
+auditCase('E-009 命中：`symbio-plugin-api` 也不得转发插件（它被全部插件依赖，最坏形态）', () => audit({
     ...CLEAN,
     'crates/symbio-plugin-api/src/lib.rs': 'pub use symbio_plugin_session::SessionPlugin;\n',
-  })
-  expectAudit(r, 1, [/E-009\s+crates\/symbio-plugin-api\/src\/lib\.rs:1/])
-})
+  }), 1, [/E-009\s+crates\/symbio-plugin-api\/src\/lib\.rs:1/])
 
 test('E-009 不误报：装配方 `crates/symbio` 聚合全部插件（inventory 链接的载体）', () => {
   const r = audit({
@@ -916,14 +865,11 @@ test('E-009 命中：`symbio-sdk` 改名后仍按 `package` 值判', () => {
   assert.match(r.stdout, depHit(5))
 })
 
-test('E-009 命中：控制面插件同样受白名单约束（`session` 依赖 `symbio-deploy`）', () => {
-  const r = audit({
+auditCase('E-009 命中：控制面插件同样受白名单约束（`session` 依赖 `symbio-deploy`）', () => audit({
     ...CLEAN,
     'crates/symbio-plugin-session/Cargo.toml':
       '[package]\nname = "symbio-plugin-session"\n\n[dependencies]\nsymbio-deploy = { path = "../symbio-deploy" }\n',
-  })
-  expectAudit(r, 1, [/E-009 crates\/symbio-plugin-session\/Cargo\.toml/])
-})
+  }), 1, [/E-009 crates\/symbio-plugin-session\/Cargo\.toml/])
 
 test('E-009 命中：扩展层插件的 [dependencies] 出现 `symbio-kernel`（直连语法）', () => {
   const r = audit({
@@ -976,46 +922,34 @@ const PROVIDERS = {
   'crates/symbio-providers/src/lib.rs': 'pub fn http() {}\n',
 }
 
-test('E-009 命中：`symbio-providers` 依赖插件（它会变成第二个共享层）', () => {
-  const r = audit({
+auditCase('E-009 命中：`symbio-providers` 依赖插件（它会变成第二个共享层）', () => audit({
     ...CLEAN,
     ...PROVIDERS,
     'crates/symbio-providers/Cargo.toml':
       '[package]\nname = "symbio-providers"\n\n[dependencies]\nsymbio-plugin-web = { path = "../symbio-plugin-web" }\n',
-  })
-  expectAudit(r, 1, [/E-009 crates\/symbio-providers\/Cargo\.toml/])
-})
+  }), 1, [/E-009 crates\/symbio-providers\/Cargo\.toml/])
 
-test('E-009 命中：`symbio-providers` 源码引用插件 crate', () => {
-  const r = audit({
+auditCase('E-009 命中：`symbio-providers` 源码引用插件 crate', () => audit({
     ...CLEAN,
     ...PROVIDERS,
     'crates/symbio-providers/src/lib.rs': 'use symbio_plugin_web::WebConfig;\n',
-  })
-  expectAudit(r, 1, [/E-009 crates\/symbio-providers\/src\/lib\.rs:1/])
-})
+  }), 1, [/E-009 crates\/symbio-providers\/src\/lib\.rs:1/])
 
-test('E-009 命中：`symbio-providers` 出现端口名字面量（端口名取自插件的生产声明）', () => {
-  const r = audit({
+auditCase('E-009 命中：`symbio-providers` 出现端口名字面量（端口名取自插件的生产声明）', () => audit({
     ...CLEAN,
     ...PROVIDERS,
     'crates/symbio-plugin-mcp/src/ports.rs':
       'pub const PORTS: &[PortDecl] = &[PortDecl::new("mcp.call")];\n',
     'crates/symbio-providers/src/lib.rs': 'pub const P: &str = "mcp.call";\n',
-  })
-  expectAudit(r, 1, [/E-009 crates\/symbio-providers\/src\/lib\.rs:1/, /端口名字面量/])
-})
+  }), 1, [/E-009 crates\/symbio-providers\/src\/lib\.rs:1/, /端口名字面量/])
 
-test('E-009 命中：`symbio-providers` 出现业务事实名（取自门面事件常量）', () => {
-  const r = audit({
+auditCase('E-009 命中：`symbio-providers` 出现业务事实名（取自门面事件常量）', () => audit({
     ...CLEAN,
     ...PROVIDERS,
     'crates/symbio-plugin-api/src/events.rs':
       'pub const EVENT_USER_MESSAGE: &str = "user.message";\n',
     'crates/symbio-providers/src/lib.rs': 'pub const E: &str = "user.message";\n',
-  })
-  expectAudit(r, 1, [/E-009 crates\/symbio-providers\/src\/lib\.rs:1/, /业务事实名/])
-})
+  }), 1, [/E-009 crates\/symbio-providers\/src\/lib\.rs:1/, /业务事实名/])
 
 test('E-009 不误报：`symbio-providers` 注释里的端口名与事实名', () => {
   const r = audit({
@@ -1065,35 +999,23 @@ test('E-009 限期豁免：对象 / 日期 / 符号集都对时绿（session 的
   assert.equal(r.status, 0, r.stdout)
 })
 
-test('E-009 限期豁免：新增一条 sdk 用法即红（符号集冻结真的抓得住新增）', () => {
-  const r = audit({
+auditCase('E-009 限期豁免：新增一条 sdk 用法即红（符号集冻结真的抓得住新增）', () => audit({
     ...CLEAN,
     ...sdkExemptionFixture(),
     'crates/symbio-plugin-session/src/new_use.rs':
       'pub fn fresh() -> u64 { symbio_sdk::keys::NEW_KEY }\n',
-  })
-  expectAudit(r, 1, [/新增了.*symbio_sdk.*用法.*NEW_KEY/])
-})
+  }), 1, [/新增了.*symbio_sdk.*用法.*NEW_KEY/])
 
-test('E-009 限期豁免：日期改成过去即红（`expires` 是数据，不是注释）', () => {
-  const r = audit({ ...CLEAN, ...sdkExemptionFixture({ expires: '2000-01-01' }) })
-  expectAudit(r, 1, [/限期豁免已过期/])
-})
+auditCase('E-009 限期豁免：日期改成过去即红（`expires` 是数据，不是注释）', () => audit({ ...CLEAN, ...sdkExemptionFixture({ expires: '2000-01-01' }) }), 1, [/限期豁免已过期/])
 
-test('E-009 限期豁免：对象改成别的 crate 即红（豁免不能扩散）', () => {
-  const r = audit({ ...CLEAN, ...sdkExemptionFixture({ crate: 'symbio-plugin-loop' }) })
-  expectAudit(r, 1, [/限期豁免只能针对/])
-})
+auditCase('E-009 限期豁免：对象改成别的 crate 即红（豁免不能扩散）', () => audit({ ...CLEAN, ...sdkExemptionFixture({ crate: 'symbio-plugin-loop' }) }), 1, [/限期豁免只能针对/])
 
-test('E-009 限期豁免：依赖被清掉后豁免悬空即红（空头豁免不留在仓里）', () => {
-  const r = audit({
+auditCase('E-009 限期豁免：依赖被清掉后豁免悬空即红（空头豁免不留在仓里）', () => audit({
     ...CLEAN,
     ...sdkExemptionFixture(),
     'crates/symbio-plugin-session/Cargo.toml':
       '[package]\nname = "symbio-plugin-session"\n\n[dependencies]\nsymbio-plugin-api = { path = "../symbio-plugin-api" }\n',
-  })
-  expectAudit(r, 1, [/限期豁免是空头/])
-})
+  }), 1, [/限期豁免是空头/])
 
 test('E-009 限期豁免不扩散：同一份豁免对 `mcp` 的 sdk 依赖不生效', () => {
   const r = audit({
@@ -1259,21 +1181,15 @@ test('E-013 命中：loop 生产文件 import 了会话模块（E-009 之外的�
   assert.match(r.stdout, E013_HIT)
 })
 
-test('E-013 命中：loop 生产文件 import 了族外第三方 crate', () => {
-  const r = audit({
+auditCase('E-013 命中：loop 生产文件 import 了族外第三方 crate', () => audit({
     ...CLEAN,
     'crates/symbio-plugin-loop/src/driver.rs': 'use reqwest::Client;\n',
-  })
-  expectAudit(r, 1, [/E-013 .*`use reqwest::…` 不在驱动器闭族内/])
-})
+  }), 1, [/E-013 .*`use reqwest::…` 不在驱动器闭族内/])
 
-test('E-013 命中：loop 生产文件用了 `crate::providers`（实现层，测试才豁免）', () => {
-  const r = audit({
+auditCase('E-013 命中：loop 生产文件用了 `crate::providers`（实现层，测试才豁免）', () => audit({
     ...CLEAN,
     'crates/symbio-plugin-loop/src/driver.rs': 'use crate::providers::DefaultToolVisitor;\n',
-  })
-  expectAudit(r, 1, [/E-013 .*`crate::providers` 不在驱动器闭族内/])
-})
+  }), 1, [/E-013 .*`crate::providers` 不在驱动器闭族内/])
 
 test('E-013 不误报：宿主机制面 / 通用库 / 相对路径 / crate 根宏', () => {
   const r = audit({

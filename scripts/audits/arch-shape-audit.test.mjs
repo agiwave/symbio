@@ -25,7 +25,7 @@ import path from 'node:path'
 import { spawnSync } from 'node:child_process'
 import { fileURLToPath } from 'node:url'
 import { withTempTree } from '../fs-walk.mjs'
-import { expectAudit, onStderr } from '../audit-assert.mjs'
+import { auditCase, expectAudit, onStderr } from '../audit-assert.mjs'
 
 const script = fileURLToPath(new URL('./arch-shape-audit.mjs', import.meta.url))
 
@@ -444,10 +444,7 @@ function vocab(sources = ['a.one'], cells = ['EVENT_A']) {
   }
 }
 
-test('CS-005：词汇等于基线 ⇒ 通过，且不把协议五格算进业务行', () => {
-  const r = audit(core(ONE, vocab()), { baseline: '1:1:0', vocab: '1:1' })
-  expectAudit(r, 0, [/CS-005.*kernelEvents 1\/1.*cellsRows 1\/1/])
-})
+auditCase('CS-005：词汇等于基线 ⇒ 通过，且不把协议五格算进业务行', () => audit(core(ONE, vocab()), { baseline: '1:1:0', vocab: '1:1' }), 0, [/CS-005.*kernelEvents 1\/1.*cellsRows 1\/1/])
 
 test('CS-005：新增一个业务事件常量 ⇒ 红（新事件该走 EventDecl）', () => {
   const r = audit(core(ONE, vocab(['a.one', 'b.two'])), { baseline: '1:1:0', vocab: '1:1' })
@@ -471,15 +468,9 @@ test('CS-005：grid.rs 已退役 ⇒ cellsRows 0 是目标态，不判「判据�
   expectAudit(r, 0, [/cellsRows 0\/0/])
 })
 
-test('CS-005：退役的 grid.rs 被加回内核 ⇒ 红（名字重新写进语法就是回潮）', () => {
-  const r = audit(core(ONE, vocab(['a.one'], ['EVENT_A'])), { baseline: '1:1:0', vocab: '1:0' })
-  expectAudit(r, 1, [onStderr(/cellsRows 实测 1 > 冻结 0/)])
-})
+auditCase('CS-005：退役的 grid.rs 被加回内核 ⇒ 红（名字重新写进语法就是回潮）', () => audit(core(ONE, vocab(['a.one'], ['EVENT_A'])), { baseline: '1:1:0', vocab: '1:0' }), 1, [onStderr(/cellsRows 实测 1 > 冻结 0/)])
 
-test('CS-005：收到基线下方 ⇒ 通过并提示同步数字', () => {
-  const r = audit(core(ONE, vocab([], [])), { baseline: '1:1:0', vocab: '1:1' })
-  expectAudit(r, 0, [/kernelEvents 0<1/])
-})
+auditCase('CS-005：收到基线下方 ⇒ 通过并提示同步数字', () => audit(core(ONE, vocab([], [])), { baseline: '1:1:0', vocab: '1:1' }), 0, [/kernelEvents 0<1/])
 
 // ==================== CS-008 core 生产代码零事件名字面量 ====================
 
@@ -534,37 +525,28 @@ const ALPHA_CRATE = 'crates/symbio-plugin-alpha/src/lib.rs'
 const BETA_CRATE = 'crates/symbio-plugin-beta/src/lib.rs'
 const CORE_BETA = 'crates/symbio-sdk/src/beta/mod.rs'
 
-test('CS-006：只有一个插件消费、core 已不读 ⇒ 红（这条名字该随 owner 的 EventDecl 走）', () => {
-  const r = audit(
+auditCase('CS-006：只有一个插件消费、core 已不读 ⇒ 红（这条名字该随 owner 的 EventDecl 走）', () => audit(
     core(ONE, { ...vocab(), [ALPHA_CRATE]: 'pub fn k() { let _ = EVENT_A; }\n' }),
     { baseline: '1:1:0', vocab: '1:1' },
-  )
-  expectAudit(r, 1, [onStderr(/CS-006/), onStderr(/「a\.one」的唯一生产消费方是 symbio-plugin-alpha/)])
-})
+  ), 1, [onStderr(/CS-006/), onStderr(/「a\.one」的唯一生产消费方是 symbio-plugin-alpha/)])
 
-test('CS-006：两个 crate 同时消费 ⇒ 绿（名字不能被任一插件独占，E-009）', () => {
-  const r = audit(
+auditCase('CS-006：两个 crate 同时消费 ⇒ 绿（名字不能被任一插件独占，E-009）', () => audit(
     core(ONE, {
       ...vocab(),
       [ALPHA_CRATE]: 'pub fn k() { EVENT_A }\n',
       [BETA_CRATE]: 'pub fn j() { "a.one" }\n',
     }),
     { baseline: '1:1:0', vocab: '1:1' },
-  )
-  expectAudit(r, 0, [/CS-006.*1 条都不在「单一消费方且 core 不读」这一形态（≥2 crate 消费 1/])
-})
+  ), 0, [/CS-006.*1 条都不在「单一消费方且 core 不读」这一形态（≥2 crate 消费 1/])
 
-test('CS-006：core 生产代码读它 ⇒ 不判红，但账记在「待迁存量」上（迁的移动作在读者那一侧，DE-024 D-203）', () => {
-  const r = audit(
+auditCase('CS-006：core 生产代码读它 ⇒ 不判红，但账记在「待迁存量」上（迁的移动作在读者那一侧，DE-024 D-203）', () => audit(
     core(ONE, {
       ...vocab(),
       [ALPHA_CRATE]: 'pub fn k() { EVENT_A }\n',
       [CORE_BETA]: 'pub const K: &str = "a.one";\n',
     }),
     { baseline: '1:1:0', vocab: '1:1' },
-  )
-  expectAudit(r, 0, [/CS-006.*core 读者 1/])
-})
+  ), 0, [/CS-006.*core 读者 1/])
 
 test('CS-006：core 里 `pub use` 转手一个名字不算读者 ⇒ 红（出口是账本，不是归属证据）', () => {
   const r = audit(
@@ -579,18 +561,12 @@ test('CS-006：core 里 `pub use` 转手一个名字不算读者 ⇒ 红（出�
   assert.match(r.stderr, /「a\.one」的唯一生产消费方是 symbio-plugin-alpha/)
 })
 
-test('CS-006：谁都不读的业务名 ⇒ 红（内核表里躺着没人读的名字）', () => {
-  const r = audit(
+auditCase('CS-006：谁都不读的业务名 ⇒ 红（内核表里躺着没人读的名字）', () => audit(
     core(ONE, { ...vocab(), [ALPHA_CRATE]: '// 曾经有人读 a.one，现在没有\n' }),
     { baseline: '1:1:0', vocab: '1:1' },
-  )
-  expectAudit(r, 1, [onStderr(/「a\.one」在 core 与插件的生产代码里都没有读者/)])
-})
+  ), 1, [onStderr(/「a\.one」在 core 与插件的生产代码里都没有读者/)])
 
-test('CS-006：没有插件 crate 的夹具仓库 ⇒ 不适用，不许静默当成已通过', () => {
-  const r = audit(core(ONE, vocab()), { baseline: '1:1:0', vocab: '1:1' })
-  expectAudit(r, 0, [/CS-006.*不适用/])
-})
+auditCase('CS-006：没有插件 crate 的夹具仓库 ⇒ 不适用，不许静默当成已通过', () => audit(core(ONE, vocab()), { baseline: '1:1:0', vocab: '1:1' }), 0, [/CS-006.*不适用/])
 
 // ==================== CS-010 内核不含业务名 ====================
 
@@ -610,19 +586,13 @@ const bizFiles = (alphaSrc, extra = {}) => ({
   ...extra,
 })
 
-test('CS-010：内核文件集写死能力名 ⇒ 红（能力坐标回流）', () => {
-  const r = audit(bizFiles(ONE + 'pub const C: &str = "judge.intent";\n'), {
+auditCase('CS-010：内核文件集写死能力名 ⇒ 红（能力坐标回流）', () => audit(bizFiles(ONE + 'pub const C: &str = "judge.intent";\n'), {
     baseline: '1:1:0',
-  })
-  expectAudit(r, 1, [onStderr(/CS-010/), onStderr(/judge\.intent/)])
-})
+  }), 1, [onStderr(/CS-010/), onStderr(/judge\.intent/)])
 
-test('CS-010：内核文件集写死 owner ⇒ 红（主体坐标回流）', () => {
-  const r = audit(bizFiles(ONE + 'pub const O: &str = "session/main";\n'), {
+auditCase('CS-010：内核文件集写死 owner ⇒ 红（主体坐标回流）', () => audit(bizFiles(ONE + 'pub const O: &str = "session/main";\n'), {
     baseline: '1:1:0',
-  })
-  expectAudit(r, 1, [onStderr(/CS-010/), onStderr(/session\/main/)])
-})
+  }), 1, [onStderr(/CS-010/), onStderr(/session\/main/)])
 
 test('CS-010：同名子串（不带引号）与注释里的名字 ⇒ 不红（判业务坐标，不判措辞）', () => {
   const r = audit(
@@ -636,16 +606,10 @@ test('CS-010：同名子串（不带引号）与注释里的名字 ⇒ 不红（
   assert.equal(r.status, 0, r.stderr + r.stdout)
 })
 
-test('CS-010 只量内核文件集：域文件里的业务名字面量不判红', () => {
-  const r = audit(
+auditCase('CS-010 只量内核文件集：域文件里的业务名字面量不判红', () => audit(
     bizFiles(ONE, { 'crates/symbio-sdk/src/beta/mod.rs': 'pub const N: &str = "session/main";\n' }),
     { baseline: '1:1:0' },
-  )
-  expectAudit(r, 0, [/CS-010.*14 个|CS-010.*1 个 owner/])
-})
+  ), 0, [/CS-010.*14 个|CS-010.*1 个 owner/])
 
-test('CS-010：没有 `principal_*` 声明的夹具仓库 ⇒ 不适用（不是「扫 0 条 = 全绿」）', () => {
-  const r = audit(core(ONE), { baseline: '1:1:0' })
-  expectAudit(r, 0, [/CS-010.*不适用/])
-})
+auditCase('CS-010：没有 `principal_*` 声明的夹具仓库 ⇒ 不适用（不是「扫 0 条 = 全绿」）', () => audit(core(ONE), { baseline: '1:1:0' }), 0, [/CS-010.*不适用/])
 

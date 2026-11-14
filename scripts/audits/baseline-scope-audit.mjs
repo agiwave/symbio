@@ -94,9 +94,7 @@ const BASE = baseArg ? baseArg.slice('--base='.length) : process.env.SYMBIO_BASE
 const LP_REL = 'scripts/loop-purity-baseline.json'
 const CP_REL = 'scripts/baselines/control-plane.json'
 
-/** 两份基线的「棘轮键」与元数据键。元数据不参与键集对账。 */
-const LP_RATCHET = ['lp001PayloadImports', 'lp002ForbiddenDeps', 'lp003WorldRoots', 'lp004WorldNamedContracts', 'lp005WorldPayloadSig']
-const CP_RATCHET = ['mechanism', 'extension']
+/** 元数据键不参与键集对账。 */
 const META = new Set(['note', 'baseline-allow'])
 
 let errors = 0

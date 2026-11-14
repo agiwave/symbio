@@ -24,7 +24,7 @@ import path from 'node:path'
 import { spawnSync } from 'node:child_process'
 import { fileURLToPath } from 'node:url'
 import { withTempTree } from '../fs-walk.mjs'
-import { expectAudit } from '../audit-assert.mjs'
+import { auditCase } from '../audit-assert.mjs'
 
 const script = fileURLToPath(new URL('./slo-exit-audit.mjs', import.meta.url))
 const PLAN04 = path.join('docs', '003-design', '016-工程落地与验证.md')
@@ -115,24 +115,18 @@ test('列被改名后旧指认必须红（这是守卫存在的理由）', () =>
 
 // ── ② 读不出即失败 ────────────────────────────────────────────────────
 
-test('出口表没有那一列 ⇒ exit 2（读不出规则源，不退化成绿灯）', () => {
-  const r = audit({
+auditCase('出口表没有那一列 ⇒ exit 2（读不出规则源，不退化成绿灯）', () => audit({
     docBody: ['## 1.3', '', '| 阶 | 出口指标 |', '|---|---|', '| S01 | 某指标 |'].join('\n'),
-  })
-  expectAudit(r, 2, [/SX-002|SX-003/])
-})
+  }), 2, [/SX-002|SX-003/])
 
 test('出口表整张不在 ⇒ exit 2', () => {
   const r = audit({ docBody: '# 没有表\n' })
   assert.equal(r.status, 2, r.stdout)
 })
 
-test('stats.rs 提不出字段 ⇒ exit 2', () => {
-  const r = audit({
+auditCase('stats.rs 提不出字段 ⇒ exit 2', () => audit({
     stats: ['// 结构体被改名了', 'pub(crate) struct Readings { pub a: u8 }'].join('\n'),
-  })
-  expectAudit(r, 2, [/SX-002/])
-})
+  }), 2, [/SX-002/])
 
 test('stats.rs 不在 ⇒ exit 2', () => {
   return withTempTree({}, (root) => {
@@ -149,10 +143,7 @@ test('stats.rs 不在 ⇒ exit 2', () => {
 
 // ── ③ `—` 不是违规 ────────────────────────────────────────────────────
 
-test('整表都是 `—` ⇒ 通过（不得假红，否则没人再填这一列）', () => {
-  const r = audit({ docBody: table(['—', '—', '—']) })
-  expectAudit(r, 0, [/3 行\*\*没有\*\*用户可见读数/])
-})
+auditCase('整表都是 `—` ⇒ 通过（不得假红，否则没人再填这一列）', () => audit({ docBody: table(['—', '—', '—']) }), 0, [/3 行\*\*没有\*\*用户可见读数/])
 
 test('`-` / 全角破折号也算「没有出口」', () => {
   const r = audit({ docBody: table(['-', '－', '']) })

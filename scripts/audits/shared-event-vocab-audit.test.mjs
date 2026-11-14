@@ -20,7 +20,7 @@ import path from 'node:path'
 import { spawnSync } from 'node:child_process'
 import { fileURLToPath } from 'node:url'
 import { withTempTree } from '../fs-walk.mjs'
-import { expectAudit } from '../audit-assert.mjs'
+import { auditCase } from '../audit-assert.mjs'
 
 const script = fileURLToPath(new URL('./shared-event-vocab-audit.mjs', import.meta.url))
 
@@ -79,10 +79,7 @@ const clean = (extra = {}) => ({
   ...extra,
 })
 
-test('① 干净夹具：owner 登记 + owner 声明 + 外部消费方 + 内核表无此行 ⇒ 绿', () => {
-  const r = audit(clean())
-  expectAudit(r, 0, [/✓ CS-007/, /memory\.encoded←loop→session/])
-})
+auditCase('① 干净夹具：owner 登记 + owner 声明 + 外部消费方 + 内核表无此行 ⇒ 绿', () => audit(clean()), 0, [/✓ CS-007/, /memory\.encoded←loop→session/])
 
 test('② 除 owner 外没人引用 ⇒ 红：共享表不许收单消费方的名字', () => {
   const r = audit(clean({ 'crates/symbio-plugin-session/src/stats.rs': 'pub fn f() {}\n' }))
@@ -135,24 +132,17 @@ test('④ 一条名字两个 owner ⇒ 非 0：owner 唯一是这条正道的前
   assert.match(r.stdout + r.stderr, /只能有一个 owner/)
 })
 
-test('⑤ 内核表上的多消费方存量：只报数，不判红', () => {
-  const r = audit(
+auditCase('⑤ 内核表上的多消费方存量：只报数，不判红', () => audit(
     clean({
       'crates/symbio-kernel/src/event/mod.rs': `${KERNEL_MOD}pub const EVENT_TASK_HELD: &str = "task.held";\n`,
       'crates/symbio-plugin-loop/src/hold.rs': 'pub const K: &str = "task.held";\n',
       'crates/symbio-plugin-session/src/hold.rs': 'pub const K: &str = "task.held";\n',
     }),
-  )
-  expectAudit(r, 0, [/内核表上的「task\.held」/])
-})
+  ), 0, [/内核表上的「task\.held」/])
 
-test('⑥ CS-011：干净夹具四档都有人住 ⇒ 绿', () => {
-  const r = audit(clean())
-  expectAudit(r, 0, [/✓ CS-011/, /CountsRework←1/])
-})
+auditCase('⑥ CS-011：干净夹具四档都有人住 ⇒ 绿', () => audit(clean()), 0, [/✓ CS-011/, /CountsRework←1/])
 
-test('⑥ CS-011：删掉一档角色 ⇒ 红（判据读角色，缺席只让守卫变哑）', () => {
-  const r = audit(
+auditCase('⑥ CS-011：删掉一档角色 ⇒ 红（判据读角色，缺席只让守卫变哑）', () => audit(
     clean({
       'crates/symbio-plugin-loop/src/control_decl.rs': `use symbio_sdk::{Entity, EventDecl, FactRole, Verb};
 pub const EVENTS: &[EventDecl] = &[
@@ -165,12 +155,9 @@ pub const ROLES: &[FactRole] = &[
 ];
 `,
     }),
-  )
-  expectAudit(r, 1, [/✗ CS-011 CountsRework/])
-})
+  ), 1, [/✗ CS-011 CountsRework/])
 
-test('⑥ CS-011：角色只写在 `.test.rs` 里不算居住 ⇒ 红', () => {
-  const r = audit(
+auditCase('⑥ CS-011：角色只写在 `.test.rs` 里不算居住 ⇒ 红', () => audit(
     clean({
       'crates/symbio-plugin-loop/src/control_decl.rs': `use symbio_sdk::{Entity, EventDecl, Verb};
 pub const EVENTS: &[EventDecl] = &[
@@ -186,6 +173,4 @@ pub const ROLES: &[FactRole] = &[
 ];
 `,
     }),
-  )
-  expectAudit(r, 1, [/✗ CS-011/])
-})
+  ), 1, [/✗ CS-011/])
