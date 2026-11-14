@@ -270,7 +270,7 @@ const RATCHETS = [
   },
   {
     // 形状三格（`pub trait` 数 / `fn` 成员总数 / 带默认体的成员数）。放宽的**资格**由
-    // `arch-shape-audit` 的 CS-002 判（注释里必须有能打开的 ADR），本条只判「数字有没有比
+    // `arch-shape-audit` 的 CS-002 判（注释里必须有能打开的决策编号 D-NNN），本条只判「数字有没有比
     // 上一版更松」——两半合起来才是「放宽 = 写一份决策」。
     id: 'core-shape',
     file: 'scripts/audits/arch-shape-audit.mjs',

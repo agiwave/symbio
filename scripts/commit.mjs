@@ -118,7 +118,7 @@ const KNOWN_FLAGS = new Set([
   '--help',
   '-h',
 ])
-const KNOWN_PREFIXES = ['--type=', '--scope=', '--title=', '--section=', '--only=', '--skip=', '--ci']
+const KNOWN_PREFIXES = ['--type=', '--scope=', '--title=', '--section=', '--only=', '--preset=', '--skip=', '--ci']
 const unknownArgs = argv.filter(
   (a) => !KNOWN_FLAGS.has(a) && !KNOWN_PREFIXES.some((p) => a.startsWith(p)),
 )
@@ -141,7 +141,9 @@ const TITLE = valOf('--title=')
 const SECTIONS = argv
   .filter((x) => x.startsWith('--section='))
   .map((x) => x.slice('--section='.length))
-const GATE_ARGS = argv.filter((x) => x.startsWith('--only=') || x.startsWith('--skip=') || x === '--ci')
+const GATE_ARGS = argv.filter(
+  (x) => x.startsWith('--only=') || x.startsWith('--preset=') || x.startsWith('--skip=') || x === '--ci',
+)
 
 function sh(cmd, args, opts = {}) {
   const r = spawnSync(cmd, args, { cwd: repoRoot, encoding: 'utf8', shell: false, ...opts })

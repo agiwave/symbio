@@ -69,8 +69,8 @@ symbio/
 
 ```bash
 node scripts/gate.mjs # 全量
-node scripts/gate.mjs --only=msrv # 单阶段（也有 --skip=）
-node scripts/gate.mjs --only=frontend-static,frontend-build # 前端两段：静态检查 + 构建
+node scripts/gate.mjs --preset=msrv # 命名档位（--list 列出；也有 --only= / --skip=）
+node scripts/gate.mjs --preset=frontend # 前端两段：静态检查 + 构建
 node scripts/gate.mjs --ci # 对齐 CI（cargo test --workspace）
 ```
 
@@ -78,16 +78,22 @@ node scripts/gate.mjs --ci # 对齐 CI（cargo test --workspace）
 **MSRV 实编译校验**、事实文件生成。完整输出落 `.workbuddy-ai/gate-logs/`；通过数低于基线
 会报错、高于基线提示更新 `BASELINE`。
 
-**格式化与事实文件由门禁自己做完，不用你动手。** `cargo fmt` 与 `facts/current` 是
-确定性的机械变换（函数，不是判断），所以门禁**直接执行**它们：命令跑成功即通过，命令本身
-报错才不通过；本地还会把改写的文件**当场暂存**，使修复与本次提交是同一份内容。在 CI 里
-（`--ci`）门禁不能提交，因此「执行后仍有差异」只能报红——那是唯一能保住不变量的信号，
-出现时在本地跑一次门禁再提交即可。
+**格式化与事实文件由 `gen` 做完；门禁只判。** `cargo fmt` 与 `facts/current` 是确定性的
+机械变换（函数，不是判断），但「执行」与「判定」是两件事：
 
-⚠️ **上面这条「CI 判红」完全依赖 `--ci`**，而漏写 `--ci` 不会报错、不会变慢、本地也复现不出来
-——它只会把这一步退化成「修复完静默放过漂移」，即一个只亮绿灯的检查项。所以 CI 里凡是
-跑到了自动执行阶段（`backend` 的 fmt、`facts`）的调用**必须**带 `--ci`；回归测试
-`scripts/gate.d/_shared.test.mjs` 会断言这一点。
+```bash
+node scripts/gen.mjs # 执行：格式化 + 生成链，改写当场 `git add`
+node scripts/gate.mjs # 判定：全量门禁，有差异即红（不回写、不暂存）
+```
+
+门禁默认**只判**：跑完修复动作、用内容哈希比对，有改写就还原并判红，提示跑 `gen.mjs`。
+所以「全绿」现在等于「工作树没有被门禁改过」；在 CI 里（`--ci`）同理，只是无法提交，
+只能报红。提交点的 `pre-commit` 钩子替你按这两个按钮（先 `gen`、再带 `--ci` 复核），
+所以不会因为「忘了跑」而红。
+
+⚠️ **判定模式下的「只判不改」完全依赖 `ctx.write` 没被置上**（`--write` 只给 `gen.mjs` 用），
+而 `--ci` 同样隐含判定。CI 里凡是跑到 fmt / `facts-write` 的调用**必须**带 `--ci`；
+回归测试 `scripts/gate.d/_shared.test.mjs` 会断言这一点（以及「判定模式必须还原」）。
 
 **失败后不需要为了看日志重跑一次。** 每轮门禁的日志落在
 `.workbuddy-ai/gate-logs/<轮次>/`（`YYYYMMDD-HHMMSS`，同秒再来一轮加 `-2`；只留最近
@@ -102,8 +108,8 @@ node scripts/gate.mjs --ci # 对齐 CI（cargo test --workspace）
 `Ctrl+C` 中断也会先打汇总与失败详情——已跑完的结果与日志归属不该因为按了一次中断键就丢掉。
 
 **提交与门禁分开：`scripts/commit.mjs` 默认不跑门禁。** 两者耦合时，一次提交要等几分钟，
-而门禁的 `autoWork` 还会在提交过程中改写并暂存文件——「提交」这个动作的输入被另一个动作
-改了。现在的分工是：**门禁在改动完成、提交之前单独跑**（上一条命令）；`commit.mjs` 只负责
+而生成器（`gen.mjs` / `autoWork`）还会在提交过程中改写并暂存文件——「提交」这个动作的输入
+被另一个动作改了。现在的分工是：**门禁在改动完成、提交之前单独跑**（上一条命令）；`commit.mjs` 只负责
 生成合规消息并提交，秒级完成。要「本次提交必须门禁全绿」时显式加 `--gate`。提交脚本也
 **默认非交互**（`--interactive` 才逐项问）：type / scope 从暂存路径推断，标题与正文分节
 从暂存 diff 归纳事实；要写「为什么」就显式给 `--title=` / `--section=`。
@@ -148,9 +154,11 @@ MSRV 阶段会换编译器（`RUSTUP_TOOLCHAIN` 覆盖 `rust-toolchain.toml`）�
 找不到某条机制 / 约定写在哪：`node scripts/doc-find.mjs <关键词>`（搜全仓 `*.md` 与源码
 `//!` / `///`）。项目文档是下沉的，**知识只写一处**；发现缺文档就补那一处，不要把摘要抄到别处。
 
-CI（[.github/workflows/ci.yml](.github/workflows/ci.yml)）跑的是**同一个脚本**
-（`--only=fmt,backend --ci --profile=<dev|release>` / `--only=frontend-static,frontend-build` / `--only=facts-write,docs,facts,baseline --ci`
-/ `--only=msrv`——最后一个由独立的 `msrv-check` job 跑，它会先装 1.91 工具链），
+CI（[.github/workflows/ci.yml](.github/workflows/ci.yml)）跑的是**同一个脚本**，且只引用**命名档位**
+（`--preset=rust --ci --profile=<dev|release>` / `--preset=frontend` / `--preset=docs-facts --ci`
+/ `--preset=msrv`——最后一个由独立的 `msrv-check` job 跑，它会先装 1.91 工具链）。
+阶段组合只写在 [`scripts/gate.d/_presets.mjs`](scripts/gate.d/_presets.mjs) 一处，
+调用点不另抄清单；漏写档位名会当场报「未知档位」，不会静默少跑一个 job。
 所以本地通过 ≈ CI 通过。注意后两个 `--ci` 不是可选项：`backend` 含 `cargo fmt`——门禁**自动执行**
 的工作，少了 `--ci` 就没有判红手段；`facts-write` 是**生成链**（事实 → 汇总页 → 引用地址 →
 verify 期望数据），`facts` 是两条**只读复核**（`gen-facts --check` 与 `gen-doc-refs --check`）。
@@ -170,8 +178,8 @@ git config core.hooksPath scripts/git-hooks # 本机：写提交时即时拦
 | 钩子 | 拦什么 | 为什么是它 |
 |---|---|---|
 | `commit-msg` | 提交信息格式 | 规范判据在 `scripts/check-commit-msg.mjs`，钩子只是入口 |
-| `pre-commit` | 事实文件与登记投影在提交点变旧 | 跑 `gate.mjs --only=facts-write,facts`（本地模式 = 重生成并**只暂存生成器自己改写的文件**，再复核引用地址末态），实测 1.7s，不违反「提交要秒级」；漂移不攒到推送点再补独立 chore 提交 |
-| `pre-push` | `docs/004-ref/006-当前事实表.md` 漂移 | 事实表由代码提取，漏了重新生成**不报错、只变旧**；它带 `--ci` ⇒ 只判红不代改（不在推送点替人暂存）。实测 2.6s（`cargo fmt` 判差异 + 生成链末态 + 两条复核）。`pre-commit` 没装上（`core.hooksPath` 会静默丢失）时它是第二道闸 |
+| `pre-commit` | 事实文件与登记投影在提交点变旧 | 先跑 `gen.mjs`（生成并**只暂存生成器自己改写的文件**），再跑 `gate.mjs --preset=pre-commit --ci`（末态复核），不违反「提交要秒级」；漂移不攒到推送点再补独立 chore 提交 |
+| `pre-push` | `docs/004-ref/006-当前事实表.md` 漂移 | 事实表由代码提取，漏了重新生成**不报错、只变旧**；它带 `--ci` ⇒ 只判红不代改（修复跑 `gen.mjs`，不在推送点替人暂存）。实测 2.6s（`cargo fmt` 判差异 + 生成链末态 + 两条复核）。`pre-commit` 没装上（`core.hooksPath` 会静默丢失）时它是第二道闸 |
 
 CI 侧另有 `commit-msg-check` job，用 `--range` 把本次引入的提交逐个判一遍
 （判据只有脚本里那一处，两边不重抄）。
@@ -198,14 +206,15 @@ CI 侧另有 `commit-msg-check` job，用 `--range` 把本次引入的提交逐�
 - ⚠️ **「棘轮」（单向基线）不止 `gate.mjs` 里那一处**，`scripts/` 下多个审计脚本各自带一个常量，
  且方向**不统一**，别记反：
  - `gate.d/_shared.mjs` 的 `BASELINE.rustTests` / `vitestFiles` / `vitestTests` 是**地板**——
- 实际值**低于**基线直接**报红**（「有测试被删或失败」），**高于**基线只打黄字让你上调。
+ 实际值**低于**基线直接**报红**（「有测试被删或失败」）；**高于**基线由本地门禁**自动上调**，
+ CI 侧只报「基线待更新」（不能代为写盘）。
  - `test-layout-audit.mjs` 的 `RATCHETS`（按 Rust crate 分别设 `files` / `tests` 两个**天花板**）——
- 实际值**高于**基线**报红**（「往源代码文件里加测试不被接受」），**低于**基线只打黄字让你下调。
+ 实际值**高于**基线**报红**（「往源代码文件里加测试不被接受」）；**低于**基线在 `--strict` 下同样
+ 报红（门禁就是这么调的），提示语写明应下调哪一格。
  它的判据是**测试函数数**而非模块名：`#[test]` / `#[tokio::test]` 无论写在哪个模块、哪个文件都数；
  旧判据只认 `mod tests` 名字，于是 `turn.rs` 那种 `mod tool_call_tests { … }` 里的测试一个都数不到。
- 两者共同点是：**漏了只打黄字，`gate.mjs` 仍然是绿的** ⇒ 「门禁通过」不等于收工。删代码、
- 删文件、拆测试文件之后，请**逐个复跑** `scripts/*-audit.mjs` 并读它的警告；改常量时**在常量旁
- 写明日期与原因**（`git log -S<常量名>` 能查到历次调整的判据）。
+ 两者共同点：**余量只有两个出口**——容差内是一条限期提示（`BASELINE_GRACE`），超出容差即红（`D-492`）。所以「门禁通过」不再需要你逐个复跑脚本读警告：余量要算数的部分，门禁已经判了。
+改常量时**在常量旁写明原因**（`git log -S<常量名>` 能查到历次调整的判据）。
 - ⚠️ `.workbuddy-ai/` 被 gitignore：**不要提交、不要删除**。仓库另有 `.workbuddy/`（旧 harness 遗留）——以 `.workbuddy-ai/` 为准。
 
 ---

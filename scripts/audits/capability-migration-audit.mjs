@@ -105,7 +105,7 @@ import path from 'node:path'
 import { spawnSync } from 'node:child_process'
 import { fileURLToPath } from 'node:url'
 import { green, red, yellow, dim } from '../color.mjs'
-import { BASELINE } from '../gate.d/_shared.mjs'
+import { BASELINE, exemptionActive } from '../gate.d/_shared.mjs'
 import { blankComments } from '../rust-scan.mjs'
 import { toolFacts } from '../facts/_capability.mjs'
 import { pluginIds } from '../facts/_plugin-yml.mjs'
@@ -345,8 +345,8 @@ export function activeDebtExemption({ today, decisions, exemptions = DEBT_EXEMPT
   return (
     exemptions.find(
       (e) =>
-        /^\d{4}-\d{2}-\d{2}$/.test(String(e.through ?? '')) &&
-        String(e.through) >= today &&
+        // `through` 是**失效日**（含当天）；日期比较走共享原语，不在这里另写一份。
+        exemptionActive({ expires: e.through, today }) &&
         decisions.has(String(e.decision ?? '')) &&
         String(e.reason ?? '').replace(/\s+/g, '').length >= 8,
     ) ?? null

@@ -12,7 +12,7 @@
  * |---|---|---|
  * | SRA-001 | 豁免账 `symbols` 里**每一条**都必须真被 `symbio-plugin-session` 用到（去注释后至少命中一次） | `scripts/exemptions/plugin-session-sdk.json` × `crates/symbio-plugin-session/src/**` |
  * | SRA-002 | `symbols` 条数 ≤ 基线（**只许降**；要涨必须回 sdk / 内核侧解决，不是往账上加） | 同上 |
- * | SRA-003 | 豁免三字段自洽：`expires` 是**将来的**合法复核日、`retire` 写明**可兑现的处置**（删除，或「保留 / 冻结 + 依据决策号」）、`knife` 形如登记号 | 同上 |
+ * | SRA-003 | 豁免三字段自洽：`expires` 是**将来的**合法失效日（当天仍有效，次日起红）、`retire` 写明**可兑现的处置**（删除，或「保留 / 冻结 + 依据决策号」）、`knife` 形如登记号 | 同上 |
  * | SRA-004 | 事实源开面**恰好一家**：生产 `.rs` 里 `submit_fact_source_opener!` 的登记点必须是 1 处 | `crates/` 下全部 `.rs`（去测试） |
  * | SRA-005 | 地址根**至多一家**：生产 `.rs` 里 `AddrRootDecl(…)` 的声明点 `≥ 2` 即红；`0` 绿 + 提示（合法降级） | 同上 |
  *
@@ -81,7 +81,7 @@ import fs from 'node:fs'
 import path from 'node:path'
 import { fileURLToPath } from 'node:url'
 import { green, red, yellow, dim } from '../color.mjs'
-import { sdkSymbolsIn } from '../gate.d/_shared.mjs'
+import { exemptionActive, sdkSymbolsIn } from '../gate.d/_shared.mjs'
 
 const scriptDir = path.dirname(fileURLToPath(import.meta.url))
 const rootArg = process.argv.find((a) => a.startsWith('--root='))
@@ -215,11 +215,12 @@ if (exemption && files) {
 if (exemption) {
   const { expires, retire, knife } = exemption
 
-  const parsed = typeof expires === 'string' ? Date.parse(`${expires}T00:00:00Z`) : NaN
-  if (Number.isNaN(parsed)) {
+  // 失效日含当天：统一由 `exemptionActive` 判（同一原语也被 E-009 用），
+  // 这里不另写一份日期比较——两份比较的边界迟早会差一天。
+  if (!/^\d{4}-\d{2}-\d{2}$/.test(String(expires ?? ''))) {
     report('SRA-003', `\`expires\` 不是可解析的日期（${JSON.stringify(expires)}）——没有到期日的豁免就是永久豁免`)
-  } else if (parsed <= Date.now()) {
-    report('SRA-003', `\`expires\`（${expires}）已过期——限期豁免过期即红，续期要有新决策`)
+  } else if (!exemptionActive({ expires, today: new Date().toISOString().slice(0, 10) })) {
+    report('SRA-003', `\`expires\`（${expires}）已过期——失效日是最后一天，到期未续即红，续期要有新决策`)
   }
 
   if (typeof retire !== 'string' || !retire.trim()) {

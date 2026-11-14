@@ -92,7 +92,7 @@ import path from 'node:path'
 import { fileURLToPath } from 'node:url'
 import { red, yellow, green, dim } from '../color.mjs'
 import { blankComments, blankTestModules } from '../rust-scan.mjs'
-import { sdkSymbolsIn } from '../gate.d/_shared.mjs'
+import { exemptionActive, sdkSymbolsIn } from '../gate.d/_shared.mjs'
 // 「什么算一条路由臂」「哪些地址能被分发」由 route-facts 单一持有：本脚本与
 // `facts/current` / `facts/routes-ts` 读的是同一份实现（两份判据各写一遍正则，
 // 就会有一份开始漏掉复合臂而另一份不报）。
@@ -895,10 +895,10 @@ function loadSdkExemption() {
       `限期豁免缺少可比较的 \`expires\`（YYYY-MM-DD）——到点必须能直接判红，不靠人记得`,
     )
   }
-  if (data.expires < todayIso()) {
+  if (!exemptionActive({ expires: data.expires, today: todayIso() })) {
     return fail(
       `限期豁免已过期（expires=${data.expires}，今天 ${todayIso()}）——` +
-        `session 退役时同批删除本豁免（D-253），不得续期`,
+        `失效日是最后一天；到期未续即红（续期须新决策），session 退役时同批删除本豁免（D-253）`,
     )
   }
 

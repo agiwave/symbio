@@ -10,8 +10,8 @@
  *   1. 形状 == 基线 ⇒ 退出 0；
  *   2. CS-001 三种变宽各自变红：多一个 `pub trait` / 既有 trait 多一个方法 / 必需成员长出身；
  *   3. 反向：默认体里的局部 `fn` 不算成员；`#[cfg(test)]` 模块与 `*.test.rs` 不算形状；
- *   4. CS-002：放宽注释**没有 ADR 编号** / ADR **打不开** / 格的键名不认识 ⇒ 各自红；
- *      ADR 能打开 ⇒ 不红（判据不拦「有决策的放宽」，那是论证的事）；
+ *   4. CS-002：放宽注释**没有决策编号** / 决策**打不开** / 格的键名不认识 ⇒ 各自红；
+ *      决策能打开 ⇒ 不红（判据不拦「有决策的放宽」，那是论证的事）；
  *   5. 范围读不出（没有 core）⇒ 红，不是静默通过；
  *   6. env 覆盖少给一格 ⇒ 红（那一格的判据不能凭空消失）。
  *
@@ -223,7 +223,7 @@ test('CS-004：登记缺 `依据=` ⇒ 红（豁免必须挂一条决策）', ()
     { baseline: '5:5:0', turnState: '1' },
   )
   assert.equal(r.status, 1)
-  assert.match(r.stderr, /没有 ADR 编号/)
+  assert.match(r.stderr, /没有决策编号/)
 })
 
 test('CS-004：登记缺 `登记=` 日期 ⇒ 红', () => {
@@ -289,14 +289,14 @@ test('CS-004 只量内核文件集：域文件里的插件 id 字面量不判红
 
 // ==================== CS-002 放宽必须有能打开的决策 ====================
 
-test('放宽注释里没有 ADR 编号 ⇒ CS-002 变红', () => {
+test('放宽注释里没有决策编号 ⇒ CS-002 变红', () => {
   const r = audit(
     core(ONE, { 'scripts/audits/arch-shape-audit.mjs': '// core-shape-allow methods: 批次需要，先放宽一点\n' }),
     { baseline: '1:2:0' },
   )
   assert.equal(r.status, 1, '没有决策的放宽必须红')
   assert.match(r.stderr, /CS-002/)
-  assert.match(r.stderr, /没有 ADR 编号/)
+  assert.match(r.stderr, /没有决策编号/)
 })
 
 test('放宽注释引用了不存在的决策 ⇒ CS-002 变红', () => {

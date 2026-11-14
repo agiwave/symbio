@@ -17,6 +17,7 @@ import fs from 'node:fs'
 import os from 'node:os'
 import path from 'node:path'
 import { spawnSync } from 'node:child_process'
+import { presetIds } from './_presets.mjs'
 import {
   autoChain,
   autoWork,
@@ -25,6 +26,7 @@ import {
   BASELINE,
   BASELINE_GRACE,
   baselineErosion,
+  exemptionActive,
   ratchetErosion,
   baselineWaivers,
   parseBaselineCells,
@@ -58,6 +60,7 @@ git(['config', 'core.autocrlf', 'false'])
 // 「相对 HEAD 是新增」而恒为真，判据就废了。）
 const SEED = {
   't1.rs': 'fn a() {}\n',
+  't9.rs': 'fn i() {}\n',
   't2.rs': 'fn b() {}\n',
   't4-untouched.rs': 'fn u() {}\n',
   't7.rs': 'fn g() {}\n',
@@ -106,18 +109,21 @@ const brokenWorker = () => async () => ({
   timedOut: false,
 })
 
-const work = (run, ci = false) =>
-  autoWork({ repoRoot: root, ci, run }, { label: 'probe', cmd: 'noop', args: [], cwd: root })
+// `write` 默认 true：既有的用例都在验「执行模式」（改写留在工作区并暂存）。
+// 判定模式（write false）的用例单独列在后面——它验的是「绿 == 树没被改」。
+const work = (run, ci = false, write = true) =>
+  autoWork({ repoRoot: root, ci, write, run }, { label: 'probe', cmd: 'noop', args: [], cwd: root })
 
 /**
  * 链版 `work`：`byLabel` 给出「这一步写什么」，`broken` 列出的步骤直接报错。
  * 步骤按**给出顺序**执行——被测的正是顺序带来的中间态。
  */
-const chain = (byLabel, ci = false, broken = []) =>
+const chain = (byLabel, ci = false, broken = [], doWrite = true) =>
   autoChain(
     {
       repoRoot: root,
       ci,
+      write: doWrite,
       run: async ({ label }) => {
         if (broken.includes(label)) {
           return { ok: false, code: 1, signal: null, output: 'boom', timedOut: false }
@@ -222,6 +228,36 @@ test('CI：无差异 ⇒ 通过（不误报）', async () => {
   assert.equal(r.ok, true)
 })
 
+// ================= 判定模式（默认，`--write` 未给）：绿 == 树没被改 =================
+//
+// 这是本原语的分界：同一份确定性改写，执行模式把它留下并暂存（修复进提交），
+// 判定模式把它**还原**并报红（指路 `gen.mjs`）。若判定模式不还原，「全绿」就仍然
+// 可能伴随着一个被改写的工作树——审计无法复现，正是拆开两条路的理由。
+
+test('判定模式：局部改写不入索引，也不吞掉人跑之前的未提交改动', async () => {
+  const f = 't9.rs'
+  const BEFORE = 'fn i(){ }\n'
+  write(f, BEFORE)
+  assert.equal(worktreeDiffers(f), true, '前置：跑之前就有未提交改动')
+
+  const r = await work(worker({ [f]: 'fn i(){}\n' }), false, false)
+
+  assert.equal(r.ok, false, '有改写就必须红——否则「绿」不说明树没被改')
+  assert.match(r.note ?? '', /gen\.mjs/, '应指路显式生成命令')
+  assert.equal(read(f), BEFORE, '必须还原到跑之前的内容（不是索引那版，也不是修复版）')
+  assert.equal(isStaged(f), false, '判定模式不得动索引')
+})
+
+test('判定模式：修复产生的新文件要删掉（不能把生成物留在未跟踪状态）', async () => {
+  const f = 't10.rs'
+  assert.equal(porcelain(f), '', '前置：文件不存在')
+
+  const r = await work(worker({ [f]: 'fn j() {}\n' }), false, false)
+
+  assert.equal(r.ok, false)
+  assert.equal(fs.existsSync(abs(f)), false, '新生成的文件应被删除，工作树回到跑之前')
+})
+
 // ================= `autoChain`：只在**末态**判差异 =================
 //
 // 这条原语存在的理由就是下面第一条：**逐格判差异时，生成链的中间态本身就是差异**
@@ -264,6 +300,17 @@ test('链：末态有差异 ⇒ 本地暂存末态、CI 报红并还原到跑之
   assert.equal(isStaged(f), true, 'CI 不得动索引')
 })
 
+test('链：判定模式（非 --write）末态有差异 ⇒ 红且还原，不暂存', async () => {
+  const f = 'c3.rs'
+  assert.equal(read(f), 'clean-three\n', '前置：与 HEAD 一致')
+  const r = await chain({ 'step-1': { [f]: '中间态\n' }, 'step-2': { [f]: '末态\n' } }, false, [], false)
+
+  assert.equal(r.ok, false, '判定模式不得把生成物留在工作区')
+  assert.match(r.note ?? '', /gen\.mjs/)
+  assert.equal(read(f), 'clean-three\n', '应还原到跑之前（= HEAD）的内容')
+  assert.equal(isStaged(f), false)
+})
+
 test('链：跑之前已脏的文件不被 git restore 吞掉（按内容快照写回）', async () => {
   const f = 'c3.rs'
   write(f, '我自己的改动，没提交\n') // 脏、未暂存 —— 提交前的常态
@@ -287,11 +334,24 @@ test('链：某一步命令本身报错 ⇒ 不通过（带退出码），已生
 // 而 ci.yml 的 docs & facts job 里那条 gate 调用——若那里漏了 `--ci`，
 // 这一步就变成「自动修复 + 暂存」并**静默放过漂移**，即一个只亮绿灯的检查项。
 // 参数漏写不会报错、不会变慢、本地也复现不出来，只能靠断言钉住。
+// 阶段清单可以写成 `--only=…`，也可以写成 `--preset=<名>`；两种写法在这里解析成同一份 id 集。
+// 档位名必须真实存在——拼错时这里返回 null，判据当场红，不把它当成「没点 facts」。
+function stageIdsOf(line) {
+  const p = /--preset=([\w-]+)/.exec(line)
+  if (p) {
+    const ids = presetIds(p[1])
+    assert.notEqual(ids, null, `未知档位 --preset=${p[1]}：${line.trim()}`)
+    return ids
+  }
+  const m = /--only=([\w,-]+)/.exec(line)
+  return m ? m[1].split(',') : []
+}
+
 test('ci.yml 里包含 facts 阶段的 gate 调用必须传 --ci', () => {
   const yml = fs.readFileSync(path.join(repoRoot, '.github/workflows/ci.yml'), 'utf8')
   const calls = yml.split('\n').filter((l) => l.includes('gate.mjs') && !l.trim().startsWith('#'))
   assert.ok(calls.length > 0, '没找到 gate.mjs 调用——守卫失效了')
-  const factsCalls = calls.filter((l) => /only=[^\s]*facts/.test(l))
+  const factsCalls = calls.filter((l) => stageIdsOf(l).includes('facts'))
   assert.ok(factsCalls.length > 0, '没找到含 facts 阶段的 gate 调用——守卫失效了')
   for (const l of factsCalls) {
     assert.match(l, /--ci/, `facts 阶段必须传 --ci，否则漂移会静默通过：${l.trim()}`)
@@ -319,10 +379,10 @@ test('gate 调用点了 facts 复核就必须点 facts-write 生成链', () => {
     const src = fs.readFileSync(path.join(repoRoot, f), 'utf8')
     for (const l of src.split('\n')) {
       if (!l.includes('gate.mjs') || l.trim().startsWith('#')) continue
-      const m = /--only=([\w,-]+)/.exec(l)
+      const ids = stageIdsOf(l)
       // 阶段 id 按逗号拆开**精确匹配**：`facts-write` 里的 `facts` 后面跟的是 `-`，
       // 用 `\bfacts\b` 数它会把它数进来——那条调用其实没点复核，判据就空转了。
-      if (m) calls.push({ f, ids: m[1].split(','), ci: /--ci/.test(l), line: l.trim() })
+      if (ids.length) calls.push({ f, ids, ci: /--ci/.test(l), line: l.trim() })
     }
   }
   const withFacts = calls.filter(({ ids }) => ids.includes('facts'))
@@ -406,7 +466,7 @@ test('ci.yml：承载 v2 工作的分支必须在 push 与 pull_request 的触�
 test('ci.yml：verify 阶段必须上 CI', () => {
   const yml = fs.readFileSync(path.join(repoRoot, '.github/workflows/ci.yml'), 'utf8')
   const calls = yml.split('\n').filter((l) => l.includes('gate.mjs') && !l.trim().startsWith('#'))
-  const verifyCalls = calls.filter((l) => /only=[^\s]*verify/.test(l))
+  const verifyCalls = calls.filter((l) => stageIdsOf(l).includes('verify'))
   assert.ok(
     verifyCalls.length > 0,
     '没有含 verify 阶段的 gate 调用 ⇒ 14 个验证程序退回「人手跑过一次」的状态',
@@ -964,4 +1024,22 @@ test('sdkSymbolsIn：表达式位置的 `Type::method()` 记类型、不记方�
 
 test('sdkSymbolsIn：`as` 别名只认左侧', () => {
   assert.deepEqual([...sdkSymbolsIn('use symbio_sdk::clock::ClockNow as Now;')], ['ClockNow'])
+})
+
+// ================= 限期豁免的日期语义（D-492） =================
+//
+// `expires` 是**失效日**：当天仍有效，次日起失效。三处判据（E-009 / SRA-003 / EX-007）
+// 共用这一个原语；边界差一天是这里最容易悄悄回归的东西，所以两天各钉一条。
+
+test('exemptionActive：失效日当天仍有效（含当天，不是零点即过期）', () => {
+  assert.equal(exemptionActive({ expires: '2027-06-30', today: '2027-06-30' }), true)
+})
+
+test('exemptionActive：次日起失效', () => {
+  assert.equal(exemptionActive({ expires: '2027-06-30', today: '2027-07-01' }), false)
+})
+
+test('exemptionActive：日期不可解析 ⇒ 无效（没有到期日的豁免就是永久豁免）', () => {
+  assert.equal(exemptionActive({ expires: '2027/06/30', today: '2027-06-01' }), false)
+  assert.equal(exemptionActive({ expires: undefined, today: '2027-06-01' }), false)
 })

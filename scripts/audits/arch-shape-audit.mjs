@@ -27,7 +27,7 @@
  * 也不占 CS-001（域 trait 不占格）；`crate::plugins` 引用仍按全 core 判（CS-003）。
  *
  * 表里的冻结值是**现值**，owner 是本文件的 `SHAPE_BASELINE`（下面那一行）；放宽一格
- * 必须按 CS-002 在它旁边留一条 `core-shape-allow`，并有一条能打开的 ADR 论证「必需」。
+ * 必须按 CS-002 在它旁边留一条 `core-shape-allow`，并有一条能打开的决策（`### D-NNN`）论证「必需」。
  *
  * ## 为什么需要它（实测缺口）
  *
@@ -606,7 +606,7 @@ for (const [key, cap] of Object.entries(SHAPE_BASELINE)) {
     report(
       'CS-001',
       `核心形状变宽：${CELL_LABEL[key]} 实测 ${now} > 基线 ${cap} —— symbio_kernel 的公共形状只许收窄。` +
-        `要让这一步成立，先在 \`docs/003-design/\` 立一条 ADR 逐条论证「必需」（SP-007；` +
+        `要让这一步成立，先在 \`docs/003-design/\` 立一条决策（\`### D-NNN\`）逐条论证「必需」（SP-007；` +
         `被这份棘轮钉住的先例见 D-055），再在基线旁写 core-shape-allow ${key}: D-NNN <理由>。逐 trait 清单：--verbose`,
     )
   }
@@ -679,7 +679,7 @@ if (fs.existsSync(selfPath)) {
     if (refs.length === 0) {
       report(
         'CS-002',
-        `放宽 \`${key}\` 的理由里没有 ADR 编号（\`${key}: ${reason}\`）—— 动棘轮数字必须挂一条**决策**。` +
+        `放宽 \`${key}\` 的理由里没有决策编号（D-NNN；\`${key}: ${reason}\`）—— 动棘轮数字必须挂一条**决策**。` +
           `「批次需要 / 顺手 / 待补 / 见对话」都不算`,
       )
       continue
@@ -824,7 +824,7 @@ if (hasPlugins && pluginIds.length > 0) {
       }
       const refs = [...nounAllowField(reason, '依据').matchAll(ADR_REF_RE)].map((r) => r[1])
       if (refs.length === 0) {
-        report('CS-004', `${where}：\`${id}\` 的 \`依据=\` 没有 ADR 编号——豁免必须挂一条决策`)
+        report('CS-004', `${where}：\`${id}\` 的 \`依据=\` 没有决策编号（D-NNN）——豁免必须挂一条决策`)
       }
       for (const ref of refs) {
         if (!hasDecisionAnchor(ref)) {

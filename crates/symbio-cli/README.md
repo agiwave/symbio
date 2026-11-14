@@ -19,7 +19,7 @@ created: 2026-09-11
  └────────────────────┘ │ ┌───────────────────────────┐
  ├─────▶│ home → worker(composite) │
  ┌────────────────────┐ │ │ ├─ session │
- cli/ ──────▶│ root.route(ctx) │──┘ │ ├─ model │
+ crates/symbio-cli/ ─▶│ root.route(ctx) │──┘ │ ├─ model │
  │ （进程内直连） │ │ ├─ event_bus … │
  └────────────────────┘ └───────────────────────────┘
 ```
@@ -45,8 +45,8 @@ created: 2026-09-11
 ## 快速开始
 
 ```bash
-# 以下都在 `cli/` 下执行；产物落在**仓库根**的 target/（`cli` 是根 workspace 的成员，
-# 所有成员共用一个 target/）——构建脚本成功后会打印这一行，别照记忆抄路径
+# 以下都在 `crates/symbio-cli/` 下执行；产物落在**仓库根**的 target/（`crates/symbio-cli`
+# 是根 workspace 的成员，所有成员共用一个 target/）——脚本成功后会打印这一行，别照记忆抄路径
 node scripts/build-cli.mjs
 
 # 非交互：单条消息
@@ -65,10 +65,10 @@ printf '第一轮\n/provider\n/exit\n' | ../../target/debug/symbio-cli.exe --rep
 ../../target/debug/symbio-cli.exe --homedir ~/.symbio --heartbeat
 ```
 
-产物：`../../target/debug/symbio-cli.exe`（相对 `cli/`；仓库根看就是 `target/debug/…`）。
+产物：`../../target/debug/symbio-cli.exe`（相对 `crates/symbio-cli/`；仓库根看就是 `target/debug/…`）。
 
 > **以构建脚本打印的绝对路径为准。** 上面是**规范位置**（根 workspace 单 target）。
-> 若本机 `cli/.cargo/config.toml` 改过 `target-dir`（该文件是机器本地配置、不入库；
+> 若本机 `crates/symbio-cli/.cargo/config.toml` 改过 `target-dir`（该文件是机器本地配置、不入库；
 > 本仓的常见改法是重定向到 `../symbio/target` 以复用 C 依赖缓存），真实产物就不在这里——
 > `node scripts/build-cli.mjs` 构建成功后会打印它实际解析到的绝对路径，照那一行敲。
 > 本页**不写**具体机器的落点：那会让每个读者都去用一台机器上的布局。
@@ -105,7 +105,7 @@ subscriber（默认过滤级别 `info,symbio=debug`），把插件日志混进�
 
 ## 构建（要点）
 
-**统一走 `node scripts/build-cli.mjs`**（它负责把 C 工具链喂给 cc-rs，并保证环境字节级一致）。
+**统一走 `node scripts/build-cli.mjs`**（在 `crates/symbio-cli/` 下执行；它负责把 C 工具链喂给 cc-rs，并保证环境字节级一致）。
 关键环节与坑见 [构建](docs/003-building.md "GU-003-building")，三句话概括：
 
 1. **C 编译器必须显式注入**（`CC`/`CXX`/`INCLUDE`/`LIB`，不碰 `PATH`）；`aws-lc-sys` 0.44 自带

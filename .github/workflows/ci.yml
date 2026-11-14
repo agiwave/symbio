@@ -177,7 +177,7 @@ jobs:
         # 需要时手跑一条命令，见 docs/003-design/016-工程落地与验证.md 的 D-274。
         # ⚠️ 检查项只在 scripts/gate.mjs 里定义一处（CONTRIBUTING 的清单已删），
         #    要加 / 改检查就改脚本，不要在这里另写 cargo 命令。
-        run: node scripts/gate.mjs --only=fmt,backend --ci --profile=${{ matrix.profile }}
+        run: node scripts/gate.mjs --preset=rust --ci --profile=${{ matrix.profile }}
         continue-on-error: false
 
   # MSRV 验证：`rust-version` 声明的最低版本必须**真能编译**。
@@ -217,7 +217,7 @@ jobs:
       - name: MSRV gate
         # 真跑过的信号：日志里是 `34 crates @ 1.91.0` + 一条 `cargo check --all-targets`；
         # 若只看到「跳过（当前生效的是 …）」，说明上面的工具链没装对——那不是通过。
-        run: node scripts/gate.mjs --only=msrv
+        run: node scripts/gate.mjs --preset=msrv
 
   # 架构证据验证：`docs/003-design/verify/` 的 14 个程序**自己证明自己**。
   #
@@ -252,7 +252,7 @@ jobs:
           node-version: '22'
 
       - name: Verify gate（14 个验证程序 + 3 个编译期反例）
-        run: node scripts/gate.mjs --only=verify --ci
+        run: node scripts/gate.mjs --preset=verify --ci
 
   # 前端代码质量检查 (如果存在前端构建工具)
   frontend-checks:
@@ -285,7 +285,7 @@ jobs:
         #    会重写 tauri/dist，与 backend 的 generate_context! 编译期读冲突）；CI 这边
         #    没有并发批的约束，但**两个 id 都要写**——只写 `frontend-static` 是个合法 id，
         #    不会报错，只会**静默丢掉构建**。
-        run: node scripts/gate.mjs --only=frontend-static,frontend-build
+        run: node scripts/gate.mjs --preset=frontend
         continue-on-error: false
 
       - name: Validate package.json
@@ -340,7 +340,7 @@ jobs:
 
       - name: E2E gate
         # 与本地同一条命令；--ci 强制重建 CLI 二进制（runner 无缓存二进制）
-        run: node scripts/gate.mjs --only=e2e --ci
+        run: node scripts/gate.mjs --preset=e2e --ci
         continue-on-error: false
 
   # 文档和配置验证
@@ -384,7 +384,7 @@ jobs:
         # （首推时 before 是全 0，阶段自己会退到上游 / `origin/v2` / `origin/main`，
         # 再取 merge-base；一个都取不到就诚实跳过，不假绿）。阶段内若合并基收敛到 HEAD
         # 且工作树无基线改动，同样诚实跳过——「没有在途变更」判不了，不是通过。
-        run: node scripts/gate.mjs --only=facts-write,docs,facts,baseline,baseline-scope --ci --base="${{ github.event.pull_request.base.sha || github.event.before }}"
+        run: node scripts/gate.mjs --preset=docs-facts --ci --base="${{ github.event.pull_request.base.sha || github.event.before }}"
         continue-on-error: false
 
       - name: Check for obvious documentation issues

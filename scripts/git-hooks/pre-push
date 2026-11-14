@@ -15,9 +15,9 @@
 # 这条钩子是第二层；第一层是 CI 的 docs & facts job（`.github/workflows/ci.yml`，
 # 检查项清单只在 `scripts/gate.mjs` 里，此处不重抄）。
 #
-# 为什么带 `--ci`：CI 模式下这些阶段**不自动修复、有差异即报红**；本地模式它们会自动
-# 改写并暂存——在推送点替人暂存 = 替人决定哪些改动进本次提交（改动可能还没被审过）。
-# 所以这里只报红，修复交给人：`node scripts/gate.mjs --only=facts-write,facts`（会生成并暂存）。
+# 为什么带 `--ci`：门禁默认就只判不改（有差异即红、跑完还原），`--ci` 再钉住「不提交」
+# 这一侧。在推送点替人暂存 = 替人决定哪些改动进本次提交（改动可能还没被审过）。
+# 所以这里只报红，修复交给人：`node scripts/gen.mjs`（生成并暂存）。
 # ⚠️ 生成链（`facts-write`）在 2026-10-23 之前**点不进**这条钩子：它按 `autoWork` 逐格判
 # 差异，而 `registry-audit --write` 先写 `[[编号]]` 记号、`gen-doc-refs` 再展开，中间态
 # 本身就是差异 ⇒ `--ci` 恒红。现在链是一个 `autoChain` 工作（只在末态判差异，见
@@ -30,7 +30,7 @@
 #   等于替人暂存别人的改动，与它「只暂存生成器自己改写的文件」的纪律冲突。
 #   于是 26 个未格式化源码推到了 origin/v2，只在 CI 的 rust-checks 里以
 #   「cargo fmt --all 有 27 处差异」呈现——信号有，但迟了一整轮。
-#   这里同样只报红、不代改（`--ci` 语义）；修复交给人：跑整轮门禁（会自动格式化并暂存）。
+#   这里同样只报红、不代改；修复交给人：跑 `node scripts/gen.mjs`（格式化并暂存）。
 #   已知代价：判据看的是**工作区**，所以推送时若手边有未格式化的 `.rs` 脏改动，
 #   也会红一次（此时该跑门禁把它们格式化）——宁可多红一次，不要漏一次。
 #
@@ -39,4 +39,4 @@
 #
 # ⚠️ 本文件需在 git 里有执行位：git update-index --chmod=+x scripts/git-hooks/pre-push
 
-node scripts/gate.mjs --only=fmt,facts-write,facts --ci
+node scripts/gate.mjs --preset=pre-push --ci

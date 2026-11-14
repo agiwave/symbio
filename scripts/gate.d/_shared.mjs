@@ -315,6 +315,20 @@ export function ratchetOrBump({ actual, baseline, name, kind = '通过数', unit
   return ratchetVerdict({ actual, baseline, name, kind, unit })
 }
 
+/**
+ * 限期豁免是否仍在有效期内。
+ *
+ * `expires` 是**失效日**：当天仍然有效，次日起失效。写成「复核日」会被读成自动续期，
+ * 而「到期未续即红」才是唯一可机读的方向（S2）。日期不是 `YYYY-MM-DD` 即视为无效——
+ * 没有到期日的豁免就是永久豁免，宁红不静默。
+ */
+export function exemptionActive({ expires, today }) {
+  const e = String(expires ?? '')
+  const t = String(today ?? '')
+  if (!/^\d{4}-\d{2}-\d{2}$/.test(e) || !/^\d{4}-\d{2}-\d{2}$/.test(t)) return false
+  return e >= t
+}
+
 export function baselineWaivers(text) {
   const out = new Map()
   for (const m of text.matchAll(/^ {0,2}\/\/ baseline-allow ([A-Za-z][A-Za-z0-9_]*): (\S[^\n]*)$/gm)) {
@@ -700,6 +714,16 @@ function contentHashes(repoRoot, paths) {
 export async function autoWork(ctx, { label, cmd, args = [], cwd }) {
   const before = dirtyPaths(ctx.repoRoot)
   const beforeHash = contentHashes(ctx.repoRoot, before)
+  // 判定模式要在本地还原改写（门禁只判不改），所以总是留一份「跑之前已脏」的快照——
+  // 干净的路径还原到索引内容即可，不必进快照。
+  const snapshot = new Map()
+  for (const p of before) {
+    try {
+      snapshot.set(p, fs.readFileSync(path.join(ctx.repoRoot, p)))
+    } catch {
+      snapshot.set(p, null)
+    }
+  }
 
   const r = await ctx.run({ label, cmd, args, cwd })
   if (!r.ok) {
@@ -718,10 +742,16 @@ export async function autoWork(ctx, { label, cmd, args = [], cwd }) {
   if (touched.length === 0) return { ok: true }
 
   const shown = touched.slice(0, 5).join('、') + (touched.length > 5 ? ` 等 ${touched.length} 个` : '')
-  if (ctx.ci) {
+  if (!ctx.write || ctx.ci) {
+    // 判定模式：把改写还原，红给「跑 gen」。绿 = 树没被改，这是本轮要分开的两件事。
+    const back = restoreTouched(ctx, snapshot, touched)
     return {
       ok: false,
-      note: `已执行但有 ${touched.length} 处差异（${shown}）—— CI 无法提交，请在本地跑一次门禁（会自动修复并暂存）`,
+      note:
+        `已执行但改写了 ${touched.length} 个文件（${shown}）—— 判定模式不代改` +
+        (ctx.ci ? '，CI 无法提交' : '') +
+        (back ? `，且${back}` : '，已还原') +
+        '；请在本地运行 `node scripts/gen.mjs` 修复并暂存',
     }
   }
 
@@ -731,6 +761,34 @@ export async function autoWork(ctx, { label, cmd, args = [], cwd }) {
   }
   console.log(yellow(`      ⚠ 门禁已自动修复并暂存 ${touched.length} 个文件：${shown}`))
   return { ok: true, note: `自动修复 ${touched.length} 个文件（已暂存）` }
+}
+
+/**
+ * 把一次机械工作改写过的路径还原到「跑之前」的样子。
+ *
+ * 跑之前已脏的路径按**内容快照**写回（`git restore` 会恢复索引、抹掉人未暂存的改动）；
+ * 跑之前干净 / 不存在的交给索引：已跟踪的 `git restore --worktree`，新建的直接删。
+ */
+function restoreTouched(ctx, snapshot, touched) {
+  const toIndex = []
+  for (const p of touched) {
+    if (snapshot.has(p)) {
+      const bytes = snapshot.get(p)
+      if (bytes === null) fs.rmSync(path.join(ctx.repoRoot, p), { force: true })
+      else fs.writeFileSync(path.join(ctx.repoRoot, p), bytes)
+    } else toIndex.push(p)
+  }
+  if (!toIndex.length) return null
+  const ls = spawnSync('git', ['ls-files', '--', ...toIndex], { cwd: ctx.repoRoot, encoding: 'utf8' })
+  const tracked = new Set((ls.stdout || '').split('\n').filter(Boolean))
+  for (const p of toIndex) if (!tracked.has(p)) fs.rmSync(path.join(ctx.repoRoot, p), { force: true })
+  const keep = toIndex.filter((p) => tracked.has(p))
+  if (!keep.length) return null
+  const r = spawnSync('git', ['restore', '--worktree', '--', ...keep], {
+    cwd: ctx.repoRoot,
+    encoding: 'utf8',
+  })
+  return r.status === 0 ? null : `还原失败：${(r.stderr || '').trim()}`
 }
 
 /**
@@ -758,14 +816,14 @@ export async function autoWork(ctx, { label, cmd, args = [], cwd }) {
 export async function autoChain(ctx, { label, steps }) {
   const before = dirtyPaths(ctx.repoRoot)
   const beforeHash = contentHashes(ctx.repoRoot, before)
+  // 快照**总是**留：判定模式要在本地还原（门禁只判不改），而 `--write` 模式在链失败时
+  // 也可能需要还原。只拍「跑之前已脏」的路径——干净的路径还原到索引内容即可。
   const snapshot = new Map()
-  if (ctx.ci) {
-    for (const p of before) {
-      try {
-        snapshot.set(p, fs.readFileSync(path.join(ctx.repoRoot, p)))
-      } catch {
-        snapshot.set(p, null)
-      }
+  for (const p of before) {
+    try {
+      snapshot.set(p, fs.readFileSync(path.join(ctx.repoRoot, p)))
+    } catch {
+      snapshot.set(p, null)
     }
   }
   const touchedNow = () => {
@@ -774,30 +832,10 @@ export async function autoChain(ctx, { label, steps }) {
     return [...after].filter((p) => !before.has(p) || beforeHash.get(p) !== afterHash.get(p))
   }
   const restore = () => {
-    // 本地模式不还原：那侧的约定是「生成并暂存」，而 `git restore` 会把人**未提交的改动**
-    // 一起抹掉。链某一步真失败时把现状留给人看，比替他决定该留哪一版更安全。
-    if (!ctx.ci) return null
-    const toIndex = []
-    for (const p of touchedNow()) {
-      // 跑之前已脏：那是人自己的改动，按**内容**写回（`git restore` 恢复到索引会抹掉未暂存改动）。
-      if (snapshot.has(p)) {
-        const bytes = snapshot.get(p)
-        if (bytes === null) fs.rmSync(path.join(ctx.repoRoot, p), { force: true })
-        else fs.writeFileSync(path.join(ctx.repoRoot, p), bytes)
-      } else toIndex.push(p)
-    }
-    if (!toIndex.length) return null
-    // `toIndex` 里可能混着「跑之前不存在」的新文件（生成器新建）：`git restore` 不认它们，删掉。
-    const ls = spawnSync('git', ['ls-files', '--', ...toIndex], { cwd: ctx.repoRoot, encoding: 'utf8' })
-    const tracked = new Set((ls.stdout || '').split('\n').filter(Boolean))
-    for (const p of toIndex) if (!tracked.has(p)) fs.rmSync(path.join(ctx.repoRoot, p), { force: true })
-    const keep = toIndex.filter((p) => tracked.has(p))
-    if (!keep.length) return null
-    const r = spawnSync('git', ['restore', '--worktree', '--', ...keep], {
-      cwd: ctx.repoRoot,
-      encoding: 'utf8',
-    })
-    return r.status === 0 ? null : `还原失败：${(r.stderr || '').trim()}`
+    // 写模式（本地 `gen`）不还原：那侧的约定是「生成并暂存」。链某一步真失败时把现状
+    // 留给人看，比替他决定该留哪一版更安全。
+    if (ctx.write && !ctx.ci) return null
+    return restoreTouched(ctx, snapshot, touchedNow())
   }
 
   for (const s of steps) {
@@ -820,14 +858,16 @@ export async function autoChain(ctx, { label, steps }) {
   const touched = touchedNow()
   if (touched.length === 0) return { ok: true }
   const shown = touched.slice(0, 5).join('、') + (touched.length > 5 ? ` 等 ${touched.length} 个` : '')
-  if (ctx.ci) {
+  if (!ctx.write || ctx.ci) {
+    // 判定模式：门禁**不代改**。先还原（链跑完树是脏的，不能留给后续步骤），再报红。
     const back = restore()
     return {
       ok: false,
       note:
-        `${label} 跑完末态有 ${touched.length} 处差异（${shown}）——生成物没跟上代码，CI 无法提交` +
+        `${label} 跑完末态有 ${touched.length} 处差异（${shown}）——生成物没跟上代码` +
+        (ctx.ci ? '，CI 无法提交' : '') +
         (back ? `，且${back}` : '，工作区已还原') +
-        '；请在本地跑一次该链（会自动生成并暂存）',
+        '；请在本地运行 `node scripts/gen.mjs` 生成并暂存',
     }
   }
   const add = spawnSync('git', ['add', '--', ...touched], { cwd: ctx.repoRoot, encoding: 'utf8' })

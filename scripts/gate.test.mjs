@@ -21,6 +21,7 @@ import { pathToFileURL } from 'node:url'
 import { stripAnsi } from './color.mjs'
 import { derive, fingerprintOf, describe, budget, machine, setBatchLanes, pruneStaleTaskKeys } from './gate.d/_machine.mjs'
 import { CONCURRENCY_CEILING } from './e2e-order.mjs'
+import { PRESETS, presetIds } from './gate.d/_presets.mjs'
 
 const repoRoot = path.resolve(import.meta.dirname, '..')
 const gateScript = path.join(repoRoot, 'scripts', 'gate.mjs')
@@ -89,6 +90,33 @@ test('★ `--only=`（空清单）拒绝：空清单与「没给开关」是两�
   const out = stripAnsi(r.stdout + r.stderr)
   assert.equal(r.status, 2, `空清单应拒绝：${out}`)
   assert.doesNotMatch(out, /══ 门禁 ══/, `不得进入门禁主流程：${out}`)
+})
+
+// 档位名与阶段 id 是两套名字：拼错档位若被当成「没给开关」，就退化成一次全量门禁；
+// 若被当成空清单，就退化成 0 阶段全绿。两种演化都必须当场拒绝。
+test('★ `--preset=<未知档位>` 拒绝：不得退化成全量门禁或 0 个阶段', () => {
+  const r = runGate(['--preset=pre-comit'])
+  const out = stripAnsi(r.stdout + r.stderr)
+  assert.equal(r.status, 2, `未知档位应拒绝：${out}`)
+  assert.match(out, /未知档位/, `应指出档位名不存在：${out}`)
+  assert.match(out, /pre-commit/, `应列出可用档位：${out}`)
+  assert.doesNotMatch(out, /══ 门禁 ══/, `不得进入门禁主流程：${out}`)
+})
+
+test('`--preset=` 与 `--only=` 互斥：两种写法同时给出时不猜哪一个是本意', () => {
+  const r = runGate(['--preset=rust', '--only=backend'])
+  const out = stripAnsi(r.stdout + r.stderr)
+  assert.equal(r.status, 2, `互斥参数应拒绝：${out}`)
+  assert.match(out, /二选一/, `应说清互斥：${out}`)
+})
+
+test('`--list` 把档位与阶段一起列出（档位是唯一组合源，读者不用翻 ci.yml）', () => {
+  const r = runGate(['--list'])
+  const out = stripAnsi(r.stdout)
+  assert.equal(r.status, 0, `--list 应退出 0：${out}`)
+  for (const name of ['pre-commit', 'pre-push', 'rust', 'msrv', 'verify', 'frontend', 'e2e', 'docs-facts']) {
+    assert.match(out, new RegExp(`--preset=${name}\\b`), `--list 应列出档位 ${name}：${out}`)
+  }
 })
 
 test('★ 未识别的参数拒绝：`--only backend`（漏 `=`）不得静默跑全量门禁', () => {
@@ -485,11 +513,19 @@ test('★ 每个阶段都必须在 CI 里有一个点名它的 job：不许出�
   //
   // 这条判据原先是**专为 rustdoc 写的**（「跑 backend 的 job 必须同时点名 rustdoc」）。
   // D-274 废弃 rustdoc 之后，专钉失效了，但那个失效形态还在——所以改成对**全部阶段**
-  // 成立的通用判据：`gate.d/*.mjs` 声明的每个 id 都得在 ci.yml 的某个 `--only=` 里出现。
+  // 成立的通用判据：`gate.d/*.mjs` 声明的每个 id 都得在 ci.yml 的某个门禁调用里出现
+  // （`--only=` 直写，或 `--preset=` 档位展开后含它）。
   // 加阶段而漏进 CI，这条当场红；这是它比「点名 rustdoc」更强的地方。
   const ci = fs.readFileSync(path.join(repoRoot, '.github', 'workflows', 'ci.yml'), 'utf8')
-  const lists = [...ci.matchAll(/--only=([^\s"'`]+)/g)].map((m) => m[1].split(','))
-  assert.ok(lists.length > 0, 'ci.yml 里必须有带 --only= 的门禁调用')
+  const lists = [
+    ...[...ci.matchAll(/--only=([^\s"'`]+)/g)].map((m) => m[1].split(',')),
+    ...[...ci.matchAll(/--preset=([\w-]+)/g)].map((m) => {
+      const ids = presetIds(m[1])
+      assert.notEqual(ids, null, `ci.yml 用了未知档位 --preset=${m[1]}`)
+      return ids
+    }),
+  ]
+  assert.ok(lists.length > 0, 'ci.yml 里必须有带 --only= / --preset= 的门禁调用')
   const named = new Set(lists.flat())
   assert.ok(named.has('backend'), `应有一个 job 跑 backend：${JSON.stringify(lists)}`)
   const dir = path.join(repoRoot, 'scripts', 'gate.d')
@@ -501,8 +537,17 @@ test('★ 每个阶段都必须在 CI 里有一个点名它的 job：不许出�
   assert.deepEqual(
     ids.filter((id) => !named.has(id)),
     [],
-    `这些阶段在 CI 里没有任何 job 跑：${ids.filter((id) => !named.has(id)).join(', ')}（ci.yml 的 --only 名单：${JSON.stringify(lists)}）`,
+    `这些阶段在 CI 里没有任何 job 跑：${ids.filter((id) => !named.has(id)).join(', ')}（ci.yml 的名单：${JSON.stringify(lists)}）`,
   )
+  // 档位里的每个 id 都必须是真实阶段：档位是唯一组合源，写错一个 id 等于让那一路
+  // 悄悄少一个 stage（`--preset` 校验只拦阶段 id 不存在，**不会**拦「这个档位少写了一个」）。
+  for (const [name, presetStageIds] of Object.entries(PRESETS)) {
+    assert.deepEqual(
+      presetStageIds.filter((id) => !ids.includes(id)),
+      [],
+      `档位 --preset=${name} 含不存在的阶段 id：${presetStageIds.filter((id) => !ids.includes(id)).join(', ')}`,
+    )
+  }
 })
 
 test('★ 关键路径：cli release 重建在批内（backend 泳道尾），mod.rs 生成在批前（06 链）', async () => {

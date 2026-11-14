@@ -72,8 +72,10 @@
  * 参数：
  *   node scripts/gate.mjs                       全量
  *   node scripts/gate.mjs --only=id1,id2        只跑指定阶段
+ *   node scripts/gate.mjs --preset=<name>       只跑一个命名档位（组合见 _presets.mjs；--list 列出）
  *   node scripts/gate.mjs --skip=id1,id2        跳过指定阶段
  *   node scripts/gate.mjs --ci                  CI 对齐模式（语义由任务模块自行解释）
+ *   node scripts/gate.mjs --write               允许阶段把机械修复写回并暂存（`gen.mjs` 用）
  *   node scripts/gate.mjs --profile=<p>         附加构建档位（语义由任务模块自行解释）
  *   node scripts/gate.mjs --base=<ref>          棘轮基准版本（只对 baseline / baseline-scope 阶段有意义）
  *   node scripts/gate.mjs --list                只列出阶段与任务，不执行
@@ -99,17 +101,19 @@
  * 从别处调用会静默地门禁另一个仓库（写它的 target/、在它的日志目录里落一轮、替它 git add）。
  * 判据见下方「仓库身份」一节。
  *
- * ## 判定 vs 执行：门禁会**做掉**确定性的机械工作
+ * ## 判定与执行分开：门禁只判，`gen` 才写
  *
  * 格式化（`cargo fmt`）与事实文件生成（`facts/current`）是**函数**不是判断，
- * 对同一份输入永远给同一个输出。把它们写成「检查你有没有跑过」等于让门禁因为
- * **人忘了按一次按钮**而红——报的不是代码有问题，是流程有问题。因此它们由门禁
- * **自动执行**：命令跑成功即通过，命令本身报错才不通过；本地还会把改写的文件
- * **当场暂存**，使修复与本次提交是同一份内容。见 `gate.d/_shared.autoWork`（单步）
- * 与 `autoChain`（有中间态的生成链：只在末态判一次差异）。
+ * 对同一份输入永远给同一个输出。但「执行它」与「判定它」是两件事：
  *
- * （`--fix` 这个开关已删除：它当时的作用就是「允许跑那两个修复动作」，
- * 而它们现在无条件执行。留一个没有任何效果的开关比没有更糟。）
+ * - **判定（默认）**：阶段照常跑修复动作，跑完用内容哈希比对；有改写就**还原**并判红，
+ *   提示跑 `node scripts/gen.mjs`。所以「绿」现在等于「工作树没有被门禁改过」。
+ * - **执行（`--write`，由 `gen.mjs` 使用）**：改写留在工作区并当场暂存，修复与本次提交
+ *   是同一份内容。
+ *
+ * `--ci` 隐含判定：CI 无法提交，有改写就还原并判红（原先本地「自动修复并暂存」的
+ * 形态保留在 `gen.mjs` 这一条显式路径上）。见 `gate.d/_shared.autoWork`（单步）与
+ * `autoChain`（有中间态的生成链：只在末态判一次差异）。
  */
 
 import fs from 'node:fs'
@@ -119,6 +123,7 @@ import { fileURLToPath, pathToFileURL } from 'node:url'
 import { red, green, yellow, dim, bold, stripAnsi } from './color.mjs'
 import { machine, describe, budget, recordRun, measuredMs, stageWallMs, setBatchLanes, setTaskKeyScope } from './gate.d/_machine.mjs'
 import { resolveScope, skipReason } from './gate.d/_scope.mjs'
+import { PRESETS, presetIds } from './gate.d/_presets.mjs'
 import {
   LOGS_DIR_NAME,
   KEEP_RUNS,
@@ -215,6 +220,8 @@ const valOf = (p) => {
 }
 const splitIds = (s) => s.split(',').map((x) => x.trim()).filter(Boolean)
 const CI = hasFlag('--ci')
+/** 允许阶段把机械修复写回并暂存；见头注释「判定与执行分开」。 */
+const WRITE = hasFlag('--write')
 const profile = valOf('--profile=')
 /**
  * 输出粒度开关：`GATE_VERBOSE=1` 恢复「逐条目实时刷输出」的旧行为。
@@ -230,8 +237,13 @@ const VERBOSE = process.env.GATE_VERBOSE === '1'
 // `--only=` 给空值时解析成 `[]`（而不是 null）——**空清单与「没给开关」是两件事**，
 // 前者是「一个阶段都不要跑」，必须被下面的校验拦下，不能静默退化成「跑全部」。
 const onlyRaw = valOf('--only=')
+const presetRaw = valOf('--preset=')
 const skipRaw = valOf('--skip=')
-const only = onlyRaw === null ? null : splitIds(onlyRaw)
+const only = presetRaw === null
+  ? onlyRaw === null
+    ? null
+    : splitIds(onlyRaw)
+  : presetIds(presetRaw)
 const skip = skipRaw === null ? [] : splitIds(skipRaw)
 const listOnly = hasFlag('--list')
 
@@ -239,8 +251,10 @@ const USAGE = `用法：node scripts/gate.mjs [选项]
 
   （无参数）            跑全部阶段
   --only=id1,id2        只跑指定阶段（id 见 --list；拼错会报错，不会静默跑 0 个阶段）
+  --preset=<name>       只跑一个命名档位（组合在 gate.d/_presets.mjs；名字由 --list 列出）
   --skip=id1,id2        跳过指定阶段（id 同上）
   --ci                  CI 对齐模式（语义由各任务模块自行解释；**恒全跑**，不看范围）
+  --write               允许机械修复写回工作区并暂存（只给 scripts/gen.mjs 用）
   --profile=<p>         附加构建档位（语义由各任务模块自行解释）
   --base=<ref>          棘轮基准版本（只对 baseline / baseline-scope 阶段有意义）；**同时是本轮变更范围的基准**
   --full                强制全跑，不看变更范围（范围不可得时本来就全跑）
@@ -286,8 +300,8 @@ if (hasFlag('--help') || hasFlag('-h')) {
 // `--base=<ref>` 由 `35-baseline.mjs` 与 `36-baseline-scope.mjs` 直接读 `process.argv`
 // （棘轮基准的显式覆盖口，见那两份文件），它不经过本文件的解析，但**是**合法参数，
 // 故一并放行并登记进用法。
-const KNOWN_FLAGS = new Set(['--ci', '--list', '--help', '-h', '--full'])
-const KNOWN_PREFIXES = ['--only=', '--skip=', '--profile=', '--base=']
+const KNOWN_FLAGS = new Set(['--ci', '--list', '--help', '-h', '--full', '--write'])
+const KNOWN_PREFIXES = ['--only=', '--preset=', '--skip=', '--profile=', '--base=']
 const unknownArgs = argv.filter(
   (a) => !KNOWN_FLAGS.has(a) && !KNOWN_PREFIXES.some((p) => a.startsWith(p)),
 )
@@ -295,6 +309,16 @@ if (unknownArgs.length) {
   console.error(red(`✗ 无法识别的参数：${unknownArgs.join(' ')}`))
   console.error('')
   console.error(USAGE)
+  process.exit(2)
+}
+if (presetRaw !== null && only === null) {
+  console.error(red(`✗ 未知档位：--preset=${presetRaw}`))
+  console.error(dim(`  可用档位：${Object.keys(PRESETS).join(' / ')}（见 --list）。`))
+  process.exit(2)
+}
+if (presetRaw !== null && onlyRaw !== null) {
+  console.error(red('✗ `--preset=` 与 `--only=` 是两种写法，二选一'))
+  console.error(dim('  档位就是常用组合的别名；要自定义组合请直接写 `--only=`。'))
   process.exit(2)
 }
 if (onlyRaw !== null && only.length === 0) {
@@ -589,6 +613,7 @@ const ctx = {
   scriptDir,
   logDir,
   ci: CI,
+  write: WRITE,
   profile,
   /** 本轮变更范围；阶段用 `needs: [...]` 声明自己吃哪个面（见 `runStage`）。 */
   get scope() {
@@ -767,6 +792,10 @@ const renderPlan = (groups) =>
     .join(' → ')
 
 if (listOnly) {
+  for (const [name, ids] of Object.entries(PRESETS)) {
+    console.log(`${bold(`--preset=${name}`)} — ${ids.join(', ')}`)
+  }
+  console.log('')
   for (const [i, s] of stages.entries()) {
     const tasks = materialize(s)
     console.log(`${i + 1}. ${bold(s.id)} — ${s.title}（${tasks.length} 项）`)

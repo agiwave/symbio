@@ -11,9 +11,9 @@
 # 事故形态：三个功能提交门禁段全写「本次跳过」，INDEX 投影落后两批收口，push 被连挡。
 #
 # 为什么它不违反「提交与门禁解耦（提交要秒级）」：被撤走的是**全量门禁**（10+ 分钟，含
-# 编译测试）；本钩子只跑 `--only=facts-write,facts`（生成链 + 末态复核），实测 1.7s。
-# 且本地的暂存纪律在 `_shared.autoWork` / `autoChain` 里已经立好：**只暂存生成器自己改写
-# 的文件**，提交者其余的脏改动门禁不碰、不替人决定进不进本次提交。
+# 编译测试）；本钩子只跑 `gen.mjs`（生成并暂存）+ `--preset=pre-commit --ci`（末态复核），
+# 秒级。生成侧的暂存纪律在 `_shared.autoWork` / `autoChain` 里已经立好：**只暂存生成器
+# 自己改写的文件**，提交者其余的脏改动门禁不碰、不替人决定进不进本次提交。
 #
 # ⚠️ 这里的阶段 id 名单在 2026-10-23 断过一次，形态值得记：生成链拆出去的那天
 # （`06-facts-write`），本钩子仍写 `--only=facts`——`facts` 这个 id 从此只剩
@@ -41,4 +41,5 @@
 #
 # ⚠️ 本文件需在 git 里有执行位：git update-index --chmod=+x scripts/git-hooks/pre-commit
 
-node scripts/gate.mjs --only=facts-write,facts
+node scripts/gen.mjs || exit $?
+node scripts/gate.mjs --preset=pre-commit --ci || exit $?

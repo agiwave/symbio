@@ -11,7 +11,7 @@ created: 2026-09-11
 ## 先构建
 
 ```bash
-node scripts/build-cli.mjs
+node scripts/build-cli.mjs # 在 crates/symbio-cli/ 下执行
 # 产物：../../target/debug/symbio-cli.exe（仓库根的 target/，见 003-building）
 ```
 
