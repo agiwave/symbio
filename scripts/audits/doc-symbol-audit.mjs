@@ -86,6 +86,7 @@ import { join, dirname, resolve, relative } from 'node:path'
 import { fileURLToPath } from 'node:url'
 import { red, green, dim } from '../color.mjs'
 import { codeTextOf } from '../gate.d/_shared.mjs'
+import { walkFiles } from '../fs-walk.mjs'
 import { cliArtifactRelPath } from '../cli-binary.mjs'
 
 const __dirname = dirname(fileURLToPath(import.meta.url))
@@ -147,17 +148,7 @@ function collectMd (dir, prefix = '') {
 function collectSource (relRoot, isSource) {
   const abs = join(REPO_ROOT, relRoot)
   if (!existsSync(abs)) return []
-  const out = []
-  const walk = (dir) => {
-    for (const ent of readdirSync(dir, { withFileTypes: true })) {
-      if (ent.isDirectory()) {
-        if (SKIP_DIRS.has(ent.name)) continue
-        walk(join(dir, ent.name))
-      } else if (isSource(ent.name)) out.push(join(dir, ent.name))
-    }
-  }
-  walk(abs)
-  return out
+  return walkFiles(abs, { keep: (_abs, name) => isSource(name), skipDirs: SKIP_DIRS })
 }
 
 const isRust = (n) => n.endsWith('.rs')

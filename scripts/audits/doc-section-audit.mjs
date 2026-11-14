@@ -89,6 +89,7 @@ import fs from 'node:fs'
 import path from 'node:path'
 import { fileURLToPath } from 'node:url'
 import { green, red, yellow } from '../color.mjs'
+import { walkFiles } from '../fs-walk.mjs'
 
 const scriptDir = path.dirname(fileURLToPath(import.meta.url))
 const rootArg = process.argv.find((a) => a.startsWith('--root='))
@@ -98,19 +99,9 @@ const SKIP_DIRS = new Set(['node_modules', 'target', '.git', 'tmp', '.workbuddy-
 
 /** 活跃文档：`docs/` 下的 `*.md`（跳过 archive 与垃圾目录） */
 function activeDocs(root) {
-  const out = []
-  const walk = (dir) => {
-    if (!fs.existsSync(dir)) return
-    for (const ent of fs.readdirSync(dir, { withFileTypes: true })) {
-      if (ent.isDirectory()) {
-        if (!SKIP_DIRS.has(ent.name)) walk(path.join(dir, ent.name))
-        continue
-      }
-      if (ent.name.endsWith('.md')) out.push(path.join(dir, ent.name))
-    }
-  }
-  walk(path.join(root, 'docs'))
-  return out.sort()
+  const dir = path.join(root, 'docs')
+  if (!fs.existsSync(dir)) return []
+  return walkFiles(dir, { exts: ['.md'], skipDirs: SKIP_DIRS }).sort()
 }
 
 /** front-matter 的 `id` 短号（`DE-001`）→ 文件，用于解析裸编号锚点 */

@@ -99,6 +99,7 @@ import path from 'node:path'
 import { fileURLToPath } from 'node:url'
 import { green, red, yellow, dim } from '../color.mjs'
 import { blankComments, matchBrace } from '../rust-scan.mjs'
+import { walkFiles } from '../fs-walk.mjs'
 
 const scriptDir = path.dirname(fileURLToPath(import.meta.url))
 const rootArg = process.argv.find((a) => a.startsWith('--root='))
@@ -158,20 +159,13 @@ const SCAN_ROOTS = ['crates', 'crates/symbio-cli/src', 'tauri/src-tauri/src']
 /** 扫 `SCAN_ROOTS` 下的 `.rs`（跳过测试文件与垃圾目录） */
 function rustFiles() {
   const out = []
-  const walk = (dir) => {
-    if (!fs.existsSync(dir)) return
-    for (const ent of fs.readdirSync(dir, { withFileTypes: true })) {
-      const p = path.join(dir, ent.name)
-      if (ent.isDirectory()) {
-        if (!SKIP_DIRS.has(ent.name)) walk(p)
-        continue
-      }
-      // `*.test.rs` 是 Rust 侧的测试落点（本仓约定，`test-layout-audit` 判它）：
-      // 那里的 `owes(...)` 是在**断言行表**，不是在旁路执行，计数会把基线喂爆。
-      if (ent.name.endsWith('.rs') && !ent.name.endsWith('.test.rs')) out.push(p)
-    }
+  for (const r of SCAN_ROOTS) {
+    const dir = path.join(ROOT, r)
+    if (!fs.existsSync(dir)) continue
+    // `*.test.rs` 是 Rust 侧的测试落点（本仓约定，`test-layout-audit` 判它）：
+    // 那里的 `owes(...)` 是在**断言行表**，不是在旁路执行，计数会把基线喂爆。
+    out.push(...walkFiles(dir, { keep: (abs) => abs.endsWith('.rs') && !abs.endsWith('.test.rs'), skipDirs: SKIP_DIRS }))
   }
-  for (const r of SCAN_ROOTS) walk(path.join(ROOT, r))
   return out.sort()
 }
 

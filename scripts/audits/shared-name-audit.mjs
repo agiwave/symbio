@@ -52,6 +52,7 @@ import { fileURLToPath } from 'node:url'
 import { red, green } from '../color.mjs'
 import { pluginDeclarationFaces } from '../facts/events-rs.mjs'
 import { stripComments } from '../rust-scan.mjs'
+import { walkFiles } from '../fs-walk.mjs'
 
 const argv = process.argv.slice(2)
 const rootArg = argv.find((a) => a.startsWith('--root='))
@@ -89,18 +90,13 @@ function isFileName(v) {
  * （见文件头「为什么扫 `test_fixtures.rs`」）。
  */
 function productionFiles(dir) {
-  const out = []
-  const walk = (d) => {
-    if (!fs.existsSync(d)) return
-    for (const e of fs.readdirSync(d, { withFileTypes: true })) {
-      if (e.name === 'target' || e.name.startsWith('.')) continue
-      const p = path.join(d, e.name)
-      if (e.isDirectory()) walk(p)
-      else if (p.endsWith('.rs') && (!/test/i.test(e.name) || e.name === 'test_fixtures.rs')) out.push(p)
-    }
-  }
-  walk(dir)
-  return out
+  if (!fs.existsSync(dir)) return []
+  return walkFiles(dir, {
+    skipHidden: true,
+    skipDirs: new Set(['target']),
+    // `keep` 一旦给出就接管收件判据（`exts` 不再参与），所以后缀写在这里
+    keep: (_abs, name) => name.endsWith('.rs') && (!/test/i.test(name) || name === 'test_fixtures.rs'),
+  })
 }
 
 /**

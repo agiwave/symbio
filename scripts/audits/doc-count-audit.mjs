@@ -58,6 +58,7 @@ import fs from 'node:fs'
 import path from 'node:path'
 import { fileURLToPath } from 'node:url'
 import { green, red } from '../color.mjs'
+import { walkFiles } from '../fs-walk.mjs'
 
 const scriptDir = path.dirname(fileURLToPath(import.meta.url))
 const rootArg = process.argv.find((a) => a.startsWith('--root='))
@@ -171,18 +172,7 @@ function eventGridParity(root) {
 
 /** 递归收集活跃文档（`docs/` + 仓根 `*.md`；跳过 archive 与垃圾目录） */
 function activeDocs(root) {
-  const out = []
-  const walk = (dir) => {
-    for (const ent of fs.readdirSync(dir, { withFileTypes: true })) {
-      if (ent.isDirectory()) {
-        if (!SKIP_DIRS.has(ent.name)) walk(path.join(dir, ent.name))
-        continue
-      }
-      if (ent.name.endsWith('.md')) out.push(path.join(dir, ent.name))
-    }
-  }
-  walk(path.join(root, 'docs'))
-  return out.sort()
+  return walkFiles(path.join(root, 'docs'), { exts: ['.md'], skipDirs: SKIP_DIRS }).sort()
 }
 
 /**
@@ -198,18 +188,7 @@ function activeDocs(root) {
  * 数之前跨过标点而被放掉，误报面与文档侧同宽。
  */
 function activeComments(root) {
-  const out = []
-  const walk = (dir) => {
-    for (const ent of fs.readdirSync(dir, { withFileTypes: true })) {
-      if (ent.isDirectory()) {
-        if (!SKIP_DIRS.has(ent.name)) walk(path.join(dir, ent.name))
-        continue
-      }
-      if (ent.name.endsWith('.rs')) out.push(path.join(dir, ent.name))
-    }
-  }
-  walk(path.join(root, 'crates'))
-  return out.sort()
+  return walkFiles(path.join(root, 'crates'), { exts: ['.rs'], skipDirs: SKIP_DIRS }).sort()
 }
 
 /**

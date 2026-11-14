@@ -83,6 +83,7 @@ import { fileURLToPath } from 'node:url'
 import { green, red, yellow, dim } from '../color.mjs'
 import { exemptionActive, sdkSymbolsIn } from '../gate.d/_shared.mjs'
 import { stripComments } from '../rust-scan.mjs'
+import { walkFiles } from '../fs-walk.mjs'
 
 const scriptDir = path.dirname(fileURLToPath(import.meta.url))
 const rootArg = process.argv.find((a) => a.startsWith('--root='))
@@ -130,16 +131,7 @@ function readJson(rel) {
 /** 递归收集 `.rs`（跳过 `target` 之类的非源码目录不需要：路径已经钉死在 src）。 */
 function collectRs(dir) {
   if (!fs.existsSync(dir)) return null
-  const out = []
-  const walk = (d) => {
-    for (const entry of fs.readdirSync(d, { withFileTypes: true })) {
-      const abs = path.join(d, entry.name)
-      if (entry.isDirectory()) walk(abs)
-      else if (entry.name.endsWith('.rs')) out.push(abs)
-    }
-  }
-  walk(dir)
-  return out
+  return walkFiles(dir, { exts: ['.rs'] })
 }
 
 /**
@@ -264,21 +256,17 @@ function collectCrateLines() {
   const cratesDir = path.join(ROOT, 'crates')
   if (!fs.existsSync(cratesDir)) return null
   const lines = []
-  const walk = (d) => {
-    for (const entry of fs.readdirSync(d, { withFileTypes: true })) {
-      const abs = path.join(d, entry.name)
-      if (entry.isDirectory()) {
-        if (entry.name === 'target' || entry.name === 'node_modules') continue
-        walk(abs)
-      } else if (entry.name.endsWith('.rs') && !entry.name.endsWith('.test.rs') && entry.name !== 'tests.rs') {
-        const text = stripComments(fs.readFileSync(abs, 'utf8'))
-        text.split('\n').forEach((line, i) => {
-          lines.push({ rel: path.relative(ROOT, abs).split(path.sep).join('/'), line: i + 1, text: line.trim() })
-        })
-      }
-    }
+  // `keep` 一旦给出就接管收件判据（`exts` 不再参与），所以后缀写在这里
+  const files = walkFiles(cratesDir, {
+    skipDirs: new Set(['target', 'node_modules']),
+    keep: (_abs, name) => name.endsWith('.rs') && !name.endsWith('.test.rs') && name !== 'tests.rs',
+  })
+  for (const abs of files) {
+    const text = stripComments(fs.readFileSync(abs, 'utf8'))
+    text.split('\n').forEach((line, i) => {
+      lines.push({ rel: path.relative(ROOT, abs).split(path.sep).join('/'), line: i + 1, text: line.trim() })
+    })
   }
-  walk(cratesDir)
   return lines
 }
 

@@ -190,6 +190,7 @@ import fs from 'node:fs'
 import path from 'node:path'
 import { fileURLToPath } from 'node:url'
 import { listSourceFiles, isSourceCommentLine, codeRanges, inCode } from '../gens/gen-doc-refs.mjs'
+import { walkFiles } from '../fs-walk.mjs'
 
 const scriptDir = path.dirname(fileURLToPath(import.meta.url))
 const defaultRoot = path.resolve(scriptDir, '..', '..')
@@ -535,26 +536,12 @@ let evidenceChecked = 0
 function evidenceIndexOnce() {
   if (evidenceIndexBuilt) return
   evidenceIndexBuilt = true
-  const walk = (dir) => {
-    let entries
-    try {
-      entries = fs.readdirSync(dir, { withFileTypes: true })
-    } catch {
-      return
-    }
-    for (const entry of entries) {
-      const abs = path.join(dir, entry.name)
-      if (entry.isDirectory()) {
-        if (!EVIDENCE_SKIP_DIRS.has(entry.name)) walk(abs)
-        continue
-      }
-      const list = evidenceIndex.get(entry.name) ?? []
-      list.push(abs)
-      evidenceIndex.set(entry.name, list)
-      evidencePaths.push(abs.split(path.sep).join('/'))
-    }
+  for (const abs of walkFiles(repoRoot, { skipDirs: EVIDENCE_SKIP_DIRS, tolerant: true })) {
+    const list = evidenceIndex.get(path.basename(abs)) ?? []
+    list.push(abs)
+    evidenceIndex.set(path.basename(abs), list)
+    evidencePaths.push(abs.split(path.sep).join('/'))
   }
-  walk(repoRoot)
 }
 
 function evidenceWaivedLine(lines, i) {
@@ -801,14 +788,7 @@ let anchorsChecked = 0
 let skippedFiles = 0
 
 const walk = (dir) => {
-  for (const entry of fs.readdirSync(dir, { withFileTypes: true })) {
-    if (entry.isDirectory()) {
-      if (SKIP_DIRS.has(entry.name)) continue
-      walk(path.join(dir, entry.name))
-    } else if (entry.name.endsWith('.md')) {
-      check(path.join(dir, entry.name))
-    }
-  }
+  for (const abs of walkFiles(dir, { exts: ['.md'], skipDirs: SKIP_DIRS })) check(abs)
 }
 
 /** D-007 单条锚点判定：fragment 必须是目标文件某标题的 slug */
@@ -1314,32 +1294,17 @@ function waivedD016(lines, i) {
 
 const taskRefs = []
 {
-  const walk = (dir) => {
-    let ents
-    try {
-      ents = fs.readdirSync(dir, { withFileTypes: true })
-    } catch {
-      return
-    }
-    for (const e of ents) {
-      const abs = path.join(dir, e.name)
-      const rel = path.relative(repoRoot, abs).split(path.sep).join('/')
-      if (e.isDirectory()) {
-        if (e.name === 'archive' || e.name === '007-task' || e.name === 'node_modules' || e.name === 'target') continue
-        walk(abs)
-        continue
-      }
-      if (!e.name.endsWith('.md')) continue
-      const lines = fs.readFileSync(abs, 'utf8').split(String.fromCharCode(10))
-      for (let i = 0; i < lines.length; i++) {
-        if (waivedD016(lines, i)) continue
-        const m = /T-(\d{3})/.exec(lines[i])
-        // `T-000` 是 task kind 的**汇总页**自身（投影页，不是过程记录），不判
-        if (m && m[1] !== '000') taskRefs.push({ rel, line: i + 1, token: m[0] })
-      }
+  const skip = new Set(['archive', '007-task', 'node_modules', 'target'])
+  for (const abs of walkFiles(path.join(repoRoot, 'docs'), { exts: ['.md'], skipDirs: skip, tolerant: true })) {
+    const rel = path.relative(repoRoot, abs).split(path.sep).join('/')
+    const lines = fs.readFileSync(abs, 'utf8').split(String.fromCharCode(10))
+    for (let i = 0; i < lines.length; i++) {
+      if (waivedD016(lines, i)) continue
+      const m = /T-(\d{3})/.exec(lines[i])
+      // `T-000` 是 task kind 的**汇总页**自身（投影页，不是过程记录），不判
+      if (m && m[1] !== '000') taskRefs.push({ rel, line: i + 1, token: m[0] })
     }
   }
-  walk(path.join(repoRoot, 'docs'))
   for (const { file, rel, ext } of listSourceFiles(repoRoot)) {
     const lines = fs.readFileSync(file, 'utf8').split(String.fromCharCode(10))
     for (let i = 0; i < lines.length; i++) {

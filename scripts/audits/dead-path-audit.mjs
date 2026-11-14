@@ -54,6 +54,7 @@ import fs from 'node:fs'
 import path from 'node:path'
 import { fileURLToPath } from 'node:url'
 import { red, green, dim } from '../color.mjs'
+import { walkFiles } from '../fs-walk.mjs'
 
 const scriptDir = path.dirname(fileURLToPath(import.meta.url))
 const rootArg = process.argv.find((a) => a.startsWith('--root='))
@@ -115,27 +116,13 @@ function shouldSkip(rel) {
   return rel.endsWith('.test.mjs')
 }
 
-/** 收集目标文件：目录 → 扩展名过滤。 */
+/** 收集目标文件（仓根相对路径）：目录 → 扩展名过滤。 */
 function collect(dir) {
-  const out = []
   const abs = path.join(ROOT, dir)
-  if (!fs.existsSync(abs)) return out
-  const walk = (d) => {
-    for (const e of fs.readdirSync(d, { withFileTypes: true })) {
-      if (e.name === 'target' || e.name === 'node_modules' || e.name === '.git') continue
-      const p = path.join(d, e.name)
-      if (e.isDirectory()) {
-        walk(p)
-        continue
-      }
-      if (!EXTS.some((x) => e.name.endsWith(x))) continue
-      const rel = path.relative(ROOT, p).split(path.sep).join('/')
-      if (shouldSkip(rel)) continue
-      out.push(rel)
-    }
-  }
-  walk(abs)
-  return out
+  if (!fs.existsSync(abs)) return []
+  return walkFiles(abs, { exts: EXTS, skipDirs: new Set(['target', 'node_modules', '.git']) })
+    .map((p) => path.relative(ROOT, p).split(path.sep).join('/'))
+    .filter((rel) => !shouldSkip(rel))
 }
 
 /** 仓内存在的 crate 名（`crates/symbio-<名字>` 的目录名，去 `symbio-` 前缀）。 */
