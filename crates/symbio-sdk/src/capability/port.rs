@@ -609,3 +609,15 @@ pub fn port_result(result: Result<Value, symbio_kernel::plugin::PluginError>) ->
         Err(e) => PortOutcome::failed(PortErrorClass::NonRetryable, e.to_string()),
     }
 }
+
+/// 端口执行体的**缺上下文守卫**（`D-493`）：没有调用方上下文 ⇒ 非重试失败。
+///
+/// 这条判断此前在 17 个工具端口的 `impl PortExecutor::execute` 里各抄一份，连失败文案
+/// 一起——改一句文案要改 17 处，漏一处就出现两种说法。它和 [`port_result`] 同址，因为
+/// 两者都是「执行体入口 / 出口」的约定，不是某个工具的知识。
+pub fn missing_caller() -> PortOutcome {
+    PortOutcome::failed(
+        PortErrorClass::NonRetryable,
+        "工具端口没有调用方上下文，无法拆信封".to_string(),
+    )
+}

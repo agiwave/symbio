@@ -26,8 +26,8 @@ use serde_json::{json, Value};
 use std::sync::{Arc, Weak};
 use symbio_plugin_api::PLUGIN_ID_SESSION;
 use symbio_plugin_api::{
-    port_result, vdfs_context, CapabilityMeta, DynVdfsProvider, ExecEnv, PluginError,
-    PluginInvokeRequest, PluginInvokeRequestExt, PortErrorClass, PortExecContext, PortExecutor,
+    missing_caller, port_result, vdfs_context, CapabilityMeta, DynVdfsProvider, ExecEnv,
+    PluginError, PluginInvokeRequest, PluginInvokeRequestExt, PortExecContext, PortExecutor,
     PortInput, PortOutcome, VdfsContent, VdfsContext, VdfsRequest, VdfsResponse, SESSION_ID,
 };
 
@@ -90,10 +90,7 @@ impl HeartbeatTool {
 impl PortExecutor for HeartbeatTool {
     async fn execute(&self, exec: PortExecContext, input: PortInput) -> PortOutcome {
         let Some(ctx) = exec.ctx else {
-            return PortOutcome::failed(
-                PortErrorClass::NonRetryable,
-                "工具端口没有调用方上下文，无法拆信封".to_string(),
-            );
+            return missing_caller();
         };
         let env = ExecEnv::from_request(&*ctx);
         port_result(self.run(input.payload, &env, ctx).await)

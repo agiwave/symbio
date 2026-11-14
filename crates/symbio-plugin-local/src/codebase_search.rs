@@ -42,9 +42,9 @@ use std::path::{Path, PathBuf};
 use std::sync::Arc;
 use symbio_plugin_api::EmbeddingService;
 use symbio_plugin_api::{
-    creator_create_object, port_result, CapabilityMeta, CapabilityRiskLevel, ExecEnv, PluginError,
-    PluginInvokeRequest, PluginInvokeRequestExt, PluginInvokeResponse, PluginSimpleRequest,
-    PortErrorClass, PortExecContext, PortExecutor, PortInput, PortOutcome, EMBEDDING_LOCAL,
+    creator_create_object, missing_caller, port_result, CapabilityMeta, CapabilityRiskLevel,
+    ExecEnv, PluginError, PluginInvokeRequest, PluginInvokeRequestExt, PluginInvokeResponse,
+    PluginSimpleRequest, PortExecContext, PortExecutor, PortInput, PortOutcome, EMBEDDING_LOCAL,
 };
 
 const CHUNK_LINES: usize = 40;
@@ -944,10 +944,7 @@ impl CodebaseSearchTool {
 impl PortExecutor for CodebaseSearchTool {
     async fn execute(&self, exec: PortExecContext, input: PortInput) -> PortOutcome {
         let Some(ctx) = exec.ctx else {
-            return PortOutcome::failed(
-                PortErrorClass::NonRetryable,
-                "工具端口没有调用方上下文，无法拆信封".to_string(),
-            );
+            return missing_caller();
         };
         let env = ExecEnv::from_request(&*ctx);
         port_result(self.run(input.payload, &env, ctx).await)

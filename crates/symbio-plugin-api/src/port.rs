@@ -11,8 +11,8 @@ pub use symbio_sdk::capability::port::PortReply;
 pub use symbio_sdk::capability::port::{
     check_port_name, register_ports, scoped_port_name, PortBindings, PORT_BINDINGS, PORT_SCOPE,
 };
+pub use symbio_sdk::capability::port::{missing_caller, AuthzVerdict, PendingPrompt, RESULT_KEY};
 pub use symbio_sdk::capability::port::{port_result, PortExecHandles, PortExecutor, PortFact};
-pub use symbio_sdk::capability::port::{AuthzVerdict, PendingPrompt, RESULT_KEY};
 pub use symbio_sdk::capability::port::{PortCapabilities, PortErrorClass, PortExecContext};
 pub use symbio_sdk::capability::port::{PortFactEmit, PortFactReader, PortFactWriter};
 pub use symbio_sdk::capability::port::{PortInput, PortOutcome, PortProvider};

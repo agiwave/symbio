@@ -10,8 +10,8 @@ use async_trait::async_trait;
 use serde_json::{json, Value};
 use std::sync::Arc;
 use symbio_plugin_api::{
-    port_result, CapabilityCategory, CapabilityMeta, CapabilityRiskLevel, ExecEnv, PluginError,
-    PluginInvokeRequest, PortErrorClass, PortExecContext, PortExecutor, PortInput, PortOutcome,
+    missing_caller, port_result, CapabilityCategory, CapabilityMeta, CapabilityRiskLevel, ExecEnv,
+    PluginError, PluginInvokeRequest, PortExecContext, PortExecutor, PortInput, PortOutcome,
 };
 
 use super::behavior::GLOSSARY_RECORD;
@@ -53,10 +53,7 @@ impl GlossaryTool {
 impl PortExecutor for GlossaryTool {
     async fn execute(&self, exec: PortExecContext, input: PortInput) -> PortOutcome {
         let Some(ctx) = exec.ctx else {
-            return PortOutcome::failed(
-                PortErrorClass::NonRetryable,
-                "工具端口没有调用方上下文，无法拆信封".to_string(),
-            );
+            return missing_caller();
         };
         let env = ExecEnv::from_request(&*ctx);
         port_result(self.run(input.payload, &env, ctx).await)

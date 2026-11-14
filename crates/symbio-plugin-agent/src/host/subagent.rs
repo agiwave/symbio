@@ -53,13 +53,14 @@ use symbio_plugin_api::routes::{
     ROUTE_EVENT_BUS_SUBSCRIBE, ROUTE_VDFS_ROOT, ROUTE_VDFS_UNWATCH, ROUTE_VDFS_WATCH,
 };
 use symbio_plugin_api::PLUGIN_ID_SESSION;
-use symbio_plugin_api::{event_bus_resync_of, event_bus_vdfs_change_of, EVENT_BUS_KIND_VDFS};
+use symbio_plugin_api::{
+    event_bus_resync_of, event_bus_vdfs_change_of, missing_caller, EVENT_BUS_KIND_VDFS,
+};
 use symbio_plugin_api::{message_of_node, SEG_MESSAGES};
 use symbio_plugin_api::{
     port_result, ExecAbortSignal, ExecEnv, ExecEventSink, Plugin, PluginError, PluginFrame,
-    PluginInvokeRequest, PluginInvokeRequestExt, PluginPayload, PortErrorClass, PortExecContext,
-    PortExecutor, PortInput, PortOutcome, MODE, PATH, PROVIDER_ID, RISK_LEVEL, SESSION_ID,
-    TOOL_CALL_ID,
+    PluginInvokeRequest, PluginInvokeRequestExt, PluginPayload, PortExecContext, PortExecutor,
+    PortInput, PortOutcome, MODE, PATH, PROVIDER_ID, RISK_LEVEL, SESSION_ID, TOOL_CALL_ID,
 };
 use symbio_plugin_api::{vdfs_context, VdfsError};
 use symbio_plugin_api::{
@@ -170,10 +171,7 @@ impl AgentRunCapability {
 impl PortExecutor for AgentRunCapability {
     async fn execute(&self, exec: PortExecContext, input: PortInput) -> PortOutcome {
         let Some(ctx) = exec.ctx else {
-            return PortOutcome::failed(
-                PortErrorClass::NonRetryable,
-                "工具端口没有调用方上下文，无法拆信封".to_string(),
-            );
+            return missing_caller();
         };
         let env = ExecEnv::from_request(&*ctx);
         port_result(self.run(input.payload, &env, ctx).await)

@@ -17,9 +17,9 @@ use std::collections::BTreeSet;
 use std::path::PathBuf;
 use std::sync::Arc;
 use symbio_plugin_api::{
-    port_result, CapabilityMeta, CapabilityRiskLevel, ExecEnv, PluginError, PluginInvokeRequest,
-    PluginInvokeRequestExt, PluginInvokeResponse, PortErrorClass, PortExecContext, PortExecutor,
-    PortInput, PortOutcome,
+    missing_caller, port_result, CapabilityMeta, CapabilityRiskLevel, ExecEnv, PluginError,
+    PluginInvokeRequest, PluginInvokeRequestExt, PluginInvokeResponse, PortExecContext,
+    PortExecutor, PortInput, PortOutcome,
 };
 
 const MAX_RESULTS: usize = 1000;
@@ -507,10 +507,7 @@ impl ContentSearchTool {
 impl PortExecutor for ContentSearchTool {
     async fn execute(&self, exec: PortExecContext, input: PortInput) -> PortOutcome {
         let Some(ctx) = exec.ctx else {
-            return PortOutcome::failed(
-                PortErrorClass::NonRetryable,
-                "工具端口没有调用方上下文，无法拆信封".to_string(),
-            );
+            return missing_caller();
         };
         let env = ExecEnv::from_request(&*ctx);
         port_result(self.run(input.payload, &env, ctx).await)

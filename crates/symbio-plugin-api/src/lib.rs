@@ -92,9 +92,9 @@ pub use inventory;
 // 提交宏随各自的注册表整块搬进 sdk（D-408 / D-412 / D-413）；门面在根上转出，
 // 插件侧 `symbio_plugin_api::submit_*!` 的写法不变（E-009）。
 pub use port::{
-    port_result, register_ports, scoped_port_name, AuthzVerdict, PortBindings, PortCapabilities,
-    PortErrorClass, PortExecContext, PortExecutor, PortInput, PortOutcome, PortProvider,
-    PORT_BINDINGS, PORT_SCOPE, RESULT_KEY,
+    missing_caller, port_result, register_ports, scoped_port_name, AuthzVerdict, PortBindings,
+    PortCapabilities, PortErrorClass, PortExecContext, PortExecutor, PortInput, PortOutcome,
+    PortProvider, PORT_BINDINGS, PORT_SCOPE, RESULT_KEY,
 };
 pub use rows::{RowHandler, RowRequest, PLUGIN_ROW};
 pub use settle::{Contribution, Contributor, SettleFace, Settling};

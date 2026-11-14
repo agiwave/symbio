@@ -41,8 +41,8 @@ use std::time::Duration;
 use symbio_plugin_api::CapabilityRiskLevel;
 use symbio_plugin_api::{
     chat_node::{ChatNode, MessageContent, NodeKind, NodeStatus},
-    port_result, CapabilityMeta, ExecAbortSignal, ExecEnv, ExecEventSink, PluginError,
-    PluginInvokeRequest, PluginInvokeRequestExt, PortErrorClass, PortExecContext, PortExecutor,
+    missing_caller, port_result, CapabilityMeta, ExecAbortSignal, ExecEnv, ExecEventSink,
+    PluginError, PluginInvokeRequest, PluginInvokeRequestExt, PortExecContext, PortExecutor,
     PortInput, PortOutcome,
 };
 use tokio::io::{AsyncBufReadExt, AsyncRead, BufReader};
@@ -579,10 +579,7 @@ impl ShellTool {
 impl PortExecutor for ShellTool {
     async fn execute(&self, exec: PortExecContext, input: PortInput) -> PortOutcome {
         let Some(ctx) = exec.ctx else {
-            return PortOutcome::failed(
-                PortErrorClass::NonRetryable,
-                "工具端口没有调用方上下文，无法拆信封".to_string(),
-            );
+            return missing_caller();
         };
         let env = ExecEnv::from_request(&*ctx);
         port_result(self.run(input.payload, &env, ctx).await)
