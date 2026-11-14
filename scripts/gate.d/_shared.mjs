@@ -1167,6 +1167,81 @@ export function gensDeclarations(root) {
   return { entries, problems }
 }
 
+// ── @state：判据生命周期状态字（GW-009 读它） ────────────────────────────
+//
+// 与 `@gate` / `@gens` 同构的第三类自声明：一份守卫在头注释里用一行自述**生命周期**——
+//   // @state live                     在役（缺省即此值，不写也行）
+//   // @state redundant: <承继判据码>   已被更强的判据覆盖，不再执行，壳留到下一批删
+//   // @state retired: D-NNN <理由>     正式退役，退役挂在一条能打开的裁决上
+// 缺省 = live 是刻意的：57 份在役脚本一行都不用改——状态字只为**离场**的判据而写，
+// 它与 `@gate`（这条判据跑不跑）正交：`@gate off` 是「现在不跑」，`@state` 回答
+// 「还需要存在吗」。D-492 的豁免到期管「暂时不拦我」，三者合起来才是完整生命周期。
+
+/**
+ * 读一份源码的 `@state` 声明。
+ * 返回 `{ state: 'live' }`（缺省与显式同值）/ `{ state: 'redundant', successor }` /
+ * `{ state: 'retired', decision, reason }` / `{ error, detail }`。
+ * 错误闭集：`duplicate` / `unknown` / `bad-shape` / `empty-arg` / `retired-needs-decision`。
+ * 只看前 80 行（与 `gateDeclOf` 同口径）：掉进正文的「声明」读的人看不见，也不该算。
+ */
+export function stateDeclOf(text) {
+  const hits = []
+  for (const line of text.split(/\r?\n/).slice(0, 80)) {
+    const t = line.trim()
+    if (/^\/\/\s*@state\b/.test(t)) hits.push(t)
+  }
+  if (hits.length === 0) return { state: 'live' }
+  if (hits.length > 1) return { error: 'duplicate', detail: hits.join(' / ') }
+  const m = /^\/\/\s*@state\s+([a-z]+)(?::\s*(.*))?$/i.exec(hits[0])
+  if (!m) return { error: 'bad-shape', detail: hits[0] }
+  const [, kind, arg = ''] = m
+  if (kind.toLowerCase() === 'live') {
+    return arg === '' ? { state: 'live' } : { error: 'bad-shape', detail: hits[0] }
+  }
+  if (kind.toLowerCase() !== 'redundant' && kind.toLowerCase() !== 'retired') {
+    return { error: 'unknown', detail: kind }
+  }
+  if (arg.trim() === '') return { error: 'empty-arg', detail: hits[0] }
+  if (kind.toLowerCase() === 'redundant') return { state: 'redundant', successor: arg.trim() }
+  // retired: `D-NNN <非空理由>`——裁决号是退役的署名点，没有它「退役」就只是一个开关。
+  // 号段与 `decision-anchors.mjs` 的 ANCHOR_RE 同为三位（四位号在锚点登记表里打不开）。
+  const pm = /^(D-\d{3}a?)\s+(.+)$/.exec(arg.trim())
+  if (!pm) return { error: 'retired-needs-decision', detail: hits[0] }
+  return { state: 'retired', decision: pm[1], reason: pm[2] }
+}
+
+/**
+ * 全量扫 `@state`：`{ entries: [{ name, rel, ...声明字段 }], problems: [...] }`。
+ * `entries` 只含**离场**判据（redundant / retired）——在役脚本不写状态字，也就不进表；
+ * `problems` 是声明本身不合格的脚本，由调用方（GW-009）判红。宇宙与 `gateDeclarations`
+ * 相同：非测试、非阶段脚本。
+ */
+export function stateDeclarations(root) {
+  const files = scriptFilesOf(root)
+  if (files === null) return null
+  const entries = []
+  const problems = []
+  for (const rel of files) {
+    if (rel.endsWith('.test.mjs') || isStageFile(rel)) continue
+    const name = rel.replace(/\.mjs$/, '')
+    let text
+    try {
+      text = fs.readFileSync(path.join(root, 'scripts', rel), 'utf8')
+    } catch (e) {
+      problems.push({ name, rel, error: 'unreadable', detail: (e && e.message) || String(e) })
+      continue
+    }
+    const d = stateDeclOf(text)
+    if (d.error) {
+      problems.push({ name, rel, ...d })
+      continue
+    }
+    if (d.state === 'live') continue
+    entries.push({ name, rel, ...d })
+  }
+  return { entries, problems }
+}
+
 
 // ── git 读：五个审计此前各抄一遍的同一个包装器 ──────────────────────────
 //

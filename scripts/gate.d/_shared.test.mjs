@@ -34,6 +34,7 @@ import {
   stringLiteralsOf,
   sdkSymbolsIn,
   gensDeclOf,
+  stateDeclOf,
 } from './_shared.mjs'
 
 const repoRoot = path.resolve(import.meta.dirname, '../..')
@@ -1061,4 +1062,38 @@ test('exemptionActive：次日起失效', () => {
 test('exemptionActive：日期不可解析 ⇒ 无效（没有到期日的豁免就是永久豁免）', () => {
   assert.equal(exemptionActive({ expires: '2027/06/30', today: '2027-06-01' }), false)
   assert.equal(exemptionActive({ expires: undefined, today: '2027-06-01' }), false)
+})
+
+// ================= 判据生命周期状态字（GW-009 的读法） =================
+//
+// `@state` 与 `@gate` 正交：`@gate` 回答「这条判据跑不跑」，`@state` 回答「还需要存在吗」。
+// 缺省即 live 是刻意的（57 份在役脚本一行不写）；闭集与错误形状在这里钉住，
+// 跨脚本的对账（off / 任务表 / 裁决账）归 `gate-wiring-audit` 的 GW-009。
+
+test('stateDeclOf：缺省与显式都是 live（在役脚本不写状态字）', () => {
+  assert.deepEqual(stateDeclOf('// @gate guard\nconst x = 1\n'), { state: 'live' })
+  assert.deepEqual(stateDeclOf('// @gate off\n// @state live\n'), { state: 'live' })
+})
+
+test('stateDeclOf：redundant / retired 的合法形状', () => {
+  assert.deepEqual(stateDeclOf('// @state redundant: GW-001\n'), { state: 'redundant', successor: 'GW-001' })
+  assert.deepEqual(stateDeclOf('// @state retired: D-123 判的是迁走前的旧形状\n'), {
+    state: 'retired',
+    decision: 'D-123',
+    reason: '判的是迁走前的旧形状',
+  })
+})
+
+test('stateDeclOf：声明掉在正文深处不算（前 80 行口径与 @gate 同）', () => {
+  assert.deepEqual(stateDeclOf(`${'// 填充\n'.repeat(90)}// @state retired: D-123 理由\n`), { state: 'live' })
+})
+
+test('stateDeclOf：错误闭集（duplicate / unknown / bad-shape / empty-arg / retired-needs-decision）', () => {
+  assert.equal(stateDeclOf('// @state live\n// @state redundant: GW-001\n').error, 'duplicate')
+  assert.deepEqual(stateDeclOf('// @state gone: 词\n'), { error: 'unknown', detail: 'gone' })
+  assert.deepEqual(stateDeclOf('// @state\n'), { error: 'bad-shape', detail: '// @state' })
+  assert.equal(stateDeclOf('// @state redundant:\n').error, 'empty-arg')
+  // 有裁决号没理由、或裁决号本身不对，都是「退役没署名」
+  assert.equal(stateDeclOf('// @state retired: D-123\n').error, 'retired-needs-decision')
+  assert.equal(stateDeclOf('// @state retired: 理由\n').error, 'retired-needs-decision')
 })

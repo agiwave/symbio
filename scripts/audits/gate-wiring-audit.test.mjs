@@ -540,3 +540,104 @@ test('GW-008 一份 write 一份 check、序数不同 ⇒ 绿（没有阶段文�
   assert.equal(r.status, 0, r.stdout + r.stderr)
   assert.doesNotMatch(r.stdout, /GW-008/)
 })
+
+// ── GW-009 · 判据生命周期（@state 状态字 ↔ off / 任务表 / 裁决账）────────
+// 状态字读法在 `gate.d/_shared.mjs::stateDeclarations`（缺省即 live，entries 只有离场判据）。
+// 夹具里 `--root=` 传入 ⇒ 裁决号锚点面收窄到夹具自己的 `docs/`，与真仓同语义。
+
+/** 一份在役守卫的默认夹具，供各用例叠加离场脚本。 */
+const GREEN_BASE = { 'grep-check': 'guard' }
+
+test('GW-009 retired 状态字 + 能打开的裁决 + off + 不在任何任务表 ⇒ 绿', () => {
+  const r = audit({
+    scripts: GREEN_BASE,
+    tests: ['grep-check'],
+    extra: {
+      'scripts/old-check.mjs': '// @gate off\n// @state retired: D-123 判的是迁走前的旧形状\n',
+      'docs/design.md': '### D-123 退役裁决\n',
+    },
+  })
+  assert.equal(r.status, 0, r.stdout + r.stderr)
+  assert.match(r.stdout, /离场判据 1 条/)
+})
+
+test('GW-009 redundant 状态字 + 非空承继者 + off ⇒ 绿（壳留到下一批删）', () => {
+  const r = audit({
+    scripts: GREEN_BASE,
+    tests: ['grep-check'],
+    extra: {
+      'scripts/old-check.mjs': '// @gate off\n// @state redundant: GW-001\n',
+    },
+  })
+  assert.equal(r.status, 0, r.stdout + r.stderr)
+})
+
+test('GW-009 retired 的裁决打不开 ⇒ 红（退役必须挂在一条设计裁决上）', () => {
+  const r = audit({
+    scripts: GREEN_BASE,
+    tests: ['grep-check'],
+    extra: {
+      'scripts/old-check.mjs': '// @gate off\n// @state retired: D-123 理由\n',
+      'docs/design.md': '### D-120 另一条裁决\n',
+    },
+  })
+  assert.equal(r.status, 1, r.stdout)
+  assert.match(r.stdout, /GW-009 scripts\/old-check\.mjs 自述 `@state retired: D-123`.*锚点在登记面打不开/)
+})
+
+test('GW-009 状态字拼错 ⇒ 红（闭集之外没有第四种状态）', () => {
+  const r = audit({
+    scripts: GREEN_BASE,
+    tests: ['grep-check'],
+    extra: { 'scripts/old-check.mjs': '// @gate off\n// @state gone: 想不出词\n' },
+  })
+  assert.equal(r.status, 1, r.stdout)
+  assert.match(r.stdout, /GW-009 scripts\/old-check\.mjs 的 `@state` 声明不合格（unknown：gone）/)
+})
+
+test('GW-009 两条 @state 声明 ⇒ 红（在不在役没有答案）', () => {
+  const r = audit({
+    scripts: GREEN_BASE,
+    tests: ['grep-check'],
+    extra: { 'scripts/old-check.mjs': '// @gate off\n// @state live\n// @state redundant: GW-001\n' },
+  })
+  assert.equal(r.status, 1, r.stdout)
+  assert.match(r.stdout, /GW-009 scripts\/old-check\.mjs 的 `@state` 声明不合格（duplicate/)
+})
+
+test('GW-009 redundant / retired 缺参数 ⇒ 红（空指向与没有裁决号的退役）', () => {
+  const r = audit({
+    scripts: GREEN_BASE,
+    tests: ['grep-check'],
+    extra: {
+      'scripts/a.mjs': '// @gate off\n// @state redundant:\n',
+      'scripts/b.mjs': '// @gate off\n// @state retired: D-123\n',
+    },
+  })
+  assert.equal(r.status, 1, r.stdout)
+  assert.match(r.stdout, /GW-009 scripts\/a\.mjs 的 `@state` 声明不合格（empty-arg/)
+  assert.match(r.stdout, /GW-009 scripts\/b\.mjs 的 `@state` 声明不合格（retired-needs-decision/)
+})
+
+test('GW-009 自述退场、@gate 却还在跑 ⇒ 红（两行自述互相矛盾）', () => {
+  const r = audit({
+    scripts: GREEN_BASE,
+    tests: ['grep-check'],
+    extra: { 'scripts/old-check.mjs': '// @gate lib\n// @state redundant: GW-001\n' },
+  })
+  assert.equal(r.status, 1, r.stdout)
+  assert.match(r.stdout, /GW-009 scripts\/old-check\.mjs 自述 `@state redundant`，`@gate` 却不是 off/)
+})
+
+test('GW-009 退场判据（或它的测试）仍被任务表跑到 ⇒ 红（退场不等于留壳）', () => {
+  const r = audit({
+    scripts: GREEN_BASE,
+    tests: ['grep-check', 'old-check'],
+    extra: {
+      'scripts/old-check.mjs': '// @gate off\n// @state retired: D-123 判的是迁走前的旧形状\n',
+      'docs/design.md': '### D-123 退役裁决\n',
+    },
+  })
+  assert.equal(r.status, 1, r.stdout)
+  assert.match(r.stdout, /GW-009 scripts\/old-check\.mjs 自述 `@state retired`，却仍被物化出的任务表跑到/)
+})

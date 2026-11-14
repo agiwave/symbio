@@ -38,7 +38,7 @@ lists: [gate-codes=owner]
 | **FA** | 门面（plugin-api）自有实现行数棘轮 | `scripts/audits/facade-loc-audit.mjs` | FA-001–004 | `FA-005` |
 | **FB** | 事实轨边界 | `scripts/audits/facts-boundary-audit.mjs` | FB-001–002 | `FB-003` |
 | **GC** | 判据码命名空间本身 | `scripts/audits/gate-codes-audit.mjs` | GC-001–006 | `GC-007` |
-| **GW** | 门禁接线（脚本自声明与门禁执行的对账） | `scripts/audits/gate-wiring-audit.mjs` | GW-001–008 | `GW-009` |
+| **GW** | 门禁接线（脚本自声明与门禁执行的对账） | `scripts/audits/gate-wiring-audit.mjs` | GW-001–009 | `GW-010` |
 | **HS** | 扩展层插件宿主面 | `scripts/audits/plugin-surface-audit.mjs` | HS-001–006 | `HS-007` |
 | **IM** | 内部请求模型调用（档位闸门的覆盖范围） | `scripts/audits/internal-model-audit.mjs` | IM-001–004 | `IM-005` |
 | **INJ** | 异常注入矩阵 | `scripts/audits/injection-matrix-audit.mjs` | INJ-001–003 | `INJ-004` |
@@ -181,6 +181,7 @@ lists: [gate-codes=owner]
 | **GW-006** | `scripts/audits/gate-wiring-audit.mjs` |
 | **GW-007** | `scripts/audits/gate-wiring-audit.mjs` |
 | **GW-008** | `scripts/audits/gate-wiring-audit.mjs` |
+| **GW-009** | `scripts/audits/gate-wiring-audit.mjs` |
 | **HS-001** | `scripts/audits/plugin-surface-audit.mjs` |
 | **HS-002** | `scripts/audits/plugin-surface-audit.mjs` |
 | **HS-003** | `scripts/audits/plugin-surface-audit.mjs` |

@@ -1,6 +1,6 @@
 #!/usr/bin/env node
 /**
- * gate-wiring-audit — 门禁接线对账（GW-001…GW-008）
+ * gate-wiring-audit — 门禁接线对账（GW-001…GW-009）
  *
  * 治的病：**脚本存在 ≠ 会被门禁跑**。
  *
@@ -56,6 +56,15 @@
  *     按序数排序执行，谁都不点名生成器。所以「加了生成器却没进链」只能在本条判——
  *     序数撞车 / 模式名拼错 / 声明了却不在物化出的任务里（枚举写窄的同一形状）。
  *     反向也判：某个阶段跑了它却没声明，那一步就不在机制的账上。
+ *   - **GW-009**（判据生命周期）头注释里一行 `// @state live|redundant: <承继判据码>|retired: D-NNN <理由>`
+ *     是判据给**生命周期**的自声明（读法只有一处：`gate.d/_shared.mjs::stateDeclarations`，
+ *     缺省即 `live`，在役脚本一行不写——状态字只为离场的判据而写）。离场判据必须：
+ *     ① `@gate off`（退场的判据不再跑）；② 不出现在任何物化出的任务表里（含它自己的
+ *     `--test`——退场连回归测试一起退）；③ `retired` 的裁决号必须能在登记面打开。
+ *     治的是判据序列单调增长、退役却没有对称通道的病：退场必须与新增一样有名有姓，
+ *     且不留下「声明不跑但壳还占着对账面」的空壳（LP-006 的教训）。
+ *     「复查随架构裁决走」（裁决删了被测物就同批检查判据）是流程纪律，挂在
+ *     `arch-change-audit` 的 Core-Change 钩子叙述里，不是本条的机械判定面。
  *
  * 用法：node scripts/audits/gate-wiring-audit.mjs [--root=<仓库根>] [--strict]
  *      （`--strict` 与其他判定型守卫同参数，本脚本没有 WARNING 级判定，带不带同义）
@@ -64,13 +73,14 @@
 // @gate guard
 // 判据码命名空间（登记表 docs/004-ref/GATE_CODES.md 由这些行生成，判据见 gate-codes-audit.mjs）
 // @ns GW 门禁接线（脚本自声明与门禁执行的对账）
-// @codes GW-001 GW-002 GW-003 GW-004 GW-005 GW-006 GW-007 GW-008
+// @codes GW-001 GW-002 GW-003 GW-004 GW-005 GW-006 GW-007 GW-008 GW-009
 
 import fs from 'node:fs'
 import path from 'node:path'
 import { pathToFileURL, fileURLToPath } from 'node:url'
 import { green, red } from '../color.mjs'
-import { gateDeclarations, gensDeclarations, scriptFilesOf } from '../gate.d/_shared.mjs'
+import { gateDeclarations, gensDeclarations, scriptFilesOf, stateDeclarations } from '../gate.d/_shared.mjs'
+import { hasDecisionAnchor } from '../decision-anchors.mjs'
 
 const scriptDir = path.dirname(fileURLToPath(import.meta.url))
 const rootArg = process.argv.find((a) => a.startsWith('--root='))
@@ -206,7 +216,7 @@ async function docsTasksOf(root) {
 }
 
 
-console.log('--- gate-wiring-audit: 门禁接线对账（GW-001…008） ---')
+console.log('--- gate-wiring-audit: 门禁接线对账（GW-001…009） ---')
 
 const decl = gateDeclarations(REPO_ROOT)
 const files = testNamesOf(REPO_ROOT)
@@ -326,6 +336,28 @@ const runNotDeclared = [
   ...stepsRan.filter((n) => !gensWriterDecl.some((e) => e.name === n)).map((n) => ({ n, where: '06-facts-write' })),
   ...checksRan.filter((n) => !gensCheckerDecl.some((e) => e.name === n)).map((n) => ({ n, where: '60-facts' })),
 ]
+
+// GW-009：`@state` 生命周期状态字 ↔ 接线 / 任务表。
+// 读法只有一处：`gate.d/_shared.mjs::stateDeclarations`（缺省即 live，所以 `entries`
+// 只有离场判据——redundant / retired）。三个半句都是对账：状态字对 `@gate`
+// （off 才算真的不跑）、对**物化出的任务表**（不跑还得不占着对账面）、对裁决账
+// （retired 的 D-NNN 要能在登记面打开）。`--root`（夹具）时锚点面收窄到夹具自己的
+// `docs/`，与真仓的三个登记根同语义。
+const DOCS_ROOT = rootArg ? path.join(REPO_ROOT, 'docs') : null
+const state = stateDeclarations(REPO_ROOT) ?? { entries: [], problems: [] }
+const stateErrors = state.problems.map((p) => ({
+  rel: p.rel,
+  detail: `${p.error}${p.detail ? `：${p.detail}` : ''}`,
+}))
+const stateBucketOf = new Map(decl.entries.map((e) => [e.name, e.bucket]))
+// 30-docs 的 --strict / --test、62-weekly、生成链与复核——离场判据不许出现在任何一张里
+// （--test 也算：退场的脚本连它的回归测试一起退）。
+const stateRunAnywhere = new Set([...strictRun, ...testedRun, ...weeklyRan, ...stepsRan, ...checksRan])
+const stateNotOff = state.entries.filter((e) => stateBucketOf.get(e.name) !== 'off')
+const stateStillRun = state.entries.filter((e) => stateRunAnywhere.has(e.name))
+const stateAnchorMissing = state.entries.filter(
+  (e) => e.state === 'retired' && !hasDecisionAnchor(e.decision.slice(2), REPO_ROOT, DOCS_ROOT),
+)
 
 let errors = 0
 for (const p of undeclared) {
@@ -541,6 +573,43 @@ for (const u of runNotDeclared) {
   )
 }
 
+for (const p of stateErrors) {
+  errors++
+  console.log(
+    red(
+      `[ERROR] GW-009 scripts/${p.rel} 的 \`@state\` 声明不合格（${p.detail}）⇒ ` +
+        `状态字读不出，这条判据「还需要存在吗」没有答案（闭集：live / redundant: <承继判据码> / retired: D-NNN <理由>）`,
+    ),
+  )
+}
+for (const e of stateNotOff) {
+  errors++
+  console.log(
+    red(
+      `[ERROR] GW-009 scripts/${e.rel} 自述 \`@state ${e.state}\`，\`@gate\` 却不是 off ⇒ ` +
+        `两行自述互相矛盾：声明退场的判据不能还在跑（先停跑，再退场）`,
+    ),
+  )
+}
+for (const e of stateStillRun) {
+  errors++
+  console.log(
+    red(
+      `[ERROR] GW-009 scripts/${e.rel} 自述 \`@state ${e.state}\`，却仍被物化出的任务表跑到 ⇒ ` +
+        `「声明不跑但壳还占着对账面」——退场同批摘掉它的任务与回归测试，不是换个地方挂空壳`,
+    ),
+  )
+}
+for (const e of stateAnchorMissing) {
+  errors++
+  console.log(
+    red(
+      `[ERROR] GW-009 scripts/${e.rel} 自述 \`@state retired: ${e.decision}\`，但裁决 \`${e.decision}\` 的 \`### ${e.decision}\` 锚点在登记面打不开 ⇒ ` +
+        `退役必须有名有姓地挂在一条设计裁决上（头注释 GW-009 条记的教训：退场不等于留壳）`,
+    ),
+  )
+}
+
 if (errors) {
   console.log(
     `gate-wiring-audit 未通过：${errors} 处接线失效（${decl.entries.length} 份声明 / ` +
@@ -554,6 +623,7 @@ console.log(
       `test ${countOf('test')} / lib ${countOf('lib')} / off ${countOf('off')}），${files.length} 份测试与 ` +
       `${guards.length} 条守卫（30-docs）${countOf('weekly')} 条周档（62-weekly）全部被跑到；生成链 ${gensWriterDecl.length} 步与复核 ${gensCheckerDecl.length} 步` +
       `（@gens 声明 ↔ 物化任务双向对账）；生成阶段 ${lastRegen ? lastRegen.file : '（无）'} 先于只读复核 ` +
-      `${recheckStages.map((m) => m.file).join(' / ') || '（无）'}；${stages.length} 个阶段物化出 ${totalTasks} 项，无空转阶段`,
+      `${recheckStages.map((m) => m.file).join(' / ') || '（无）'}；${stages.length} 个阶段物化出 ${totalTasks} 项，无空转阶段；` +
+      `离场判据 ${state.entries.length} 条（@state ↔ off / 任务表 / 裁决账三向对账）`,
   ),
 )
