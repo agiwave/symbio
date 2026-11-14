@@ -358,6 +358,25 @@ test('ci.yml 里包含 facts 阶段的 gate 调用必须传 --ci', () => {
   }
 })
 
+// `--ci` 的第二个职责：关掉棘轮的**本地自动上调**（`gate.mjs` 把 `ctx.autoBump`
+// 设为 `!ctx.ci`）。CI 若漏写它，`ratchetOrBump` 会在 runner 上把基线写回并 `git add`
+// ——改动随 workspace 丢弃 ⇒ 基线永远涨不上去，而每一轮都「全绿」：判据空转，
+// 且与本文件 `autoWork` 注释「CI 只亮绿灯、不落盘」的契约相反。这条不分档位：
+// CI 的**任何** gate 调用都该带 `--ci`（CI 没有本地门禁「顺手上调」的语境）。
+// 反向判据（实测过）：把 ci.yml 的 frontend job 退回无 `--ci` ⇒ 本条红。
+test('.github/workflows 里每一条 gate 调用都必须传 --ci（棘轮上调是本地动作）', () => {
+  const dir = path.join(repoRoot, '.github', 'workflows')
+  const files = fs.readdirSync(dir).filter((f) => f.endsWith('.yml') || f.endsWith('.yaml'))
+  assert.ok(files.length > 0, 'workflows 目录空——守卫失效了')
+  for (const f of files) {
+    const lines = fs.readFileSync(path.join(dir, f), 'utf8').split('\n')
+    for (const l of lines) {
+      if (!l.includes('gate.mjs') || l.trim().startsWith('#')) continue
+      assert.match(l, /--ci/, `${f} 里这条 gate 调用漏了 --ci（棘轮会在 CI 上调并落盘后丢弃，判据空转）：${l.trim()}`)
+    }
+  }
+})
+
 // ⚠️ 第四条同族失配，2026-10-23 实测：生成链拆成 `06-facts-write` 之后，pre-commit 仍写
 // `--only=facts`。`gate.mjs` 认得的 id 里 `facts` 只剩复核那一项（`gen-facts --check`），
 // 于是钩子跑完 **1/1 全绿**、头注释照写「全部是生成器 + 登记校验」，而汇总页投影落后两个

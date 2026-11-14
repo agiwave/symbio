@@ -217,7 +217,8 @@ jobs:
       - name: MSRV gate
         # 真跑过的信号：日志里是 `34 crates @ 1.91.0` + 一条 `cargo check --all-targets`；
         # 若只看到「跳过（当前生效的是 …）」，说明上面的工具链没装对——那不是通过。
-        run: node scripts/gate.mjs --preset=msrv
+        # `--ci`：CI 侧一律只判不改（棘轮上调不落盘），与其它 job 同一约定。
+        run: node scripts/gate.mjs --preset=msrv --ci
 
   # 架构证据验证：`docs/003-design/verify/` 的 14 个程序**自己证明自己**。
   #
@@ -285,7 +286,11 @@ jobs:
         #    会重写 tauri/dist，与 backend 的 generate_context! 编译期读冲突）；CI 这边
         #    没有并发批的约束，但**两个 id 都要写**——只写 `frontend-static` 是个合法 id，
         #    不会报错，只会**静默丢掉构建**。
-        run: node scripts/gate.mjs --preset=frontend
+        # ⚠️ 必须带 `--ci`：`frontend-static` 的测试数棘轮在本地会「自动上调并落盘」
+        #    （`ratchetOrBump` → `acceptBaseline` 还会 `git add`），CI 没法提交，
+        #    上调只会随着 runner 丢弃 ⇒ 基线永远涨不上去、判据空转。带 `--ci`
+        #    才是「只亮绿灯、报『基线待更新』」的契约形态。
+        run: node scripts/gate.mjs --preset=frontend --ci
         continue-on-error: false
 
       - name: Validate package.json
