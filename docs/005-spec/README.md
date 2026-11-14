@@ -44,7 +44,7 @@ board.columns: [scope]
 > ⚠️ **本区块由 `node scripts/audits/registry-audit.mjs --write` 维护（标记之间），请勿手改标记区内内容。**
 > 状态的唯一登记处是各条目文件本身，本区块是投影。字段规范见 [SP-001](001.md)，机制见 [DE-017 · 登记与汇总机制](../003-design/017-登记与汇总机制.md "DE-017-登记与汇总机制")。
 
-**计数**：active 27 · draft 0 · retired 0（共 27）
+**计数**：active 23 · draft 0 · retired 0（共 23）
 
 ## 现行规范（active）
 
@@ -66,11 +66,7 @@ board.columns: [scope]
 | `SP-015` | 死码承认台账——理由指名消费方 + 棘轮只许降 + 终局基线 8 | 全部 #[allow(dead_code)] 标记；owner = scripts/audits/dead-code-audit.mjs 的 R-002 段 | `scripts/audits/dead-code-audit.mjs` | — | — |
 | `SP-016` | 逐阶出口的口径——用户可见出口必须是 session/stats 真存在的一列 | SLO 出口表与任何「这一阶长出来了」的声称 | `scripts/audits/slo-exit-audit.mjs` | — | — |
 | `SP-017` | CI 断言的口径——每条断言必须落成一条可执行判据 | CI 断言清单与守卫脚本 | `scripts/audits/no-direct-call-audit.mjs` | — | — |
-| `SP-022` | 验证纪律 1——每条声称对应一条可执行断言 | docs/003-design/verify/ 下的验证程序与任何「已证明」的声称 | `scripts/gate.d/55-verify.mjs` | — | — |
-| `SP-023` | 验证纪律 2——断言的输入不得包含结论 | docs/003-design/verify/ 下的验证程序与任何「已证明」的声称 | `scripts/gate.d/_shared.mjs` | — | — |
-| `SP-024` | 验证纪律 3——每条断言配反向用例（改输入，结论必须变） | docs/003-design/verify/ 下的验证程序与任何「已证明」的声称 | `scripts/gate.d/55-verify.mjs` | — | — |
-| `SP-025` | 验证纪律 4——声称「编译期强制」必须附一段已知编译不过的代码 | docs/003-design/verify/ 下的验证程序与任何「已证明」的声称 | `scripts/gate.d/55-verify.mjs` | — | — |
-| `SP-026` | 验证纪律 5——编译期反例必须写在外部模块里 | docs/003-design/verify/ 下的验证程序与任何「已证明」的声称 | `scripts/gate.d/55-verify.mjs` | — | — |
+| `SP-022` | 验证纪律总册——声称、断言、反向用例与编译期反例 | docs/003-design/verify/ 下的验证程序与任何「已证明」的声称 | `scripts/gate.d/55-verify.mjs` | — | — |
 | `SP-028` | doc-link D-004 全文豁免（定义变更史禁区的两处反例措辞） | docs/archive/13-质量改进总纲.md 首行与 docs/README.md 首行的 doc-link-allow D-004 | `scripts/audits/doc-link-audit.mjs` | — | — |
 | `SP-029` | dead-code R-002 契约登记存量（8 处） | scripts/audits/dead-code-audit.mjs 的 R-002 死码承认账本（终局基线 8，见 docs/003-design/016-工程落地与验证.md §3.1） | `scripts/audits/dead-code-audit.mjs` | — | — |
 | `SP-030` | panic-allow 不变量登记（C7，56 个登记项 / 71 处 panic 面） | crates/** 的 panic-allow 注释、scripts/audits/panic-audit.mjs 账本与 scripts/gate.d/_shared.mjs 的 BASELINE.panicSites | `scripts/audits/panic-audit.mjs` | — | — |
