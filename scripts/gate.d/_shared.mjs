@@ -1002,18 +1002,20 @@ export function sdkSymbolsIn(text) {
 // 每个 `scripts/**` 下的脚本在自己的头注释里写一行：
 //
 //     // @gate guard     本体静态跑得出（带 `--strict`）+ 同名回归测试
+//     // @gate weekly    同 guard，但执行方是 `62-weekly`（周档阶段）：风格性 / 布局性 /
+//     //                 低频漂移判据，每周核一次即可，不必每轮提交都判（D-496）
 //     // @gate report    只跑本体（退出码恒 0，结论要人工复核）
 //     // @gate test      只跑回归测试（本体要运行时输入 / 由别的阶段执行 / 根本没有本体）
 //     // @gate lib       只被引用，门禁不跑它
 //     // @gate off       不进门禁（git hook / 人工 / 门禁入口自己）
 //
-// `30-docs` 扫这条声明分组执行，于是**加一条守卫不用改任何名单**——写脚本、写同名
-// `.test.mjs`、写下这一行，下一轮门禁就会跑它。
+// `30-docs` 扫这条声明分组执行（`weekly` 交给 `62-weekly`），于是**加一条守卫不用改任何
+// 名单**——写脚本、写同名 `.test.mjs`、写下这一行，下一轮门禁就会跑它。
 //
 // 声明是自述，所以要有对账（`gate-wiring-audit`）：GW-001 每份脚本都得声明、
 // GW-002 守卫必须真有回归测试、GW-003 / GW-004 声明的东西**是否真的被跑到**。
 // 光有声明没有执行方，就是「看起来接了线」——那正是这份机制唯一的坏法。
-export const GATE_BUCKETS = ['guard', 'report', 'test', 'lib', 'off']
+export const GATE_BUCKETS = ['guard', 'weekly', 'report', 'test', 'lib', 'off']
 
 const GATE_DECL_RE = /^\/\/\s*@gate\s+([A-Za-z]+)\s*$/
 const GATE_SKIP_DIRS = new Set(['node_modules', 'target', '.git', 'tmp', '.workbuddy-ai', '.symbio'])

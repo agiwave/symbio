@@ -3,6 +3,8 @@
 // 每个 `scripts/**` 下的脚本在自己的头注释里写一行 `// @gate <桶>`，本阶段扫描并分组执行：
 //
 //   guard   本体带 `--strict` 跑 + 同名回归测试
+//   weekly  同 guard，但执行方是 `62-weekly`（周档）：风格性 / 布局性 / 低频漂移判据，
+//           每周核一次即可，不必每轮提交都判（裁决与准入标准见 DE-016 D-496）
 //   report  只跑本体（退出码恒 0，结论要人工复核）
 //   test    只跑回归测试（本体要运行时输入 / 由别的阶段执行 / 根本没有本体）
 //   lib     只被引用，本阶段不跑
@@ -50,7 +52,7 @@ const names = (bucket) => decl.entries.filter((e) => e.bucket === bucket).map((e
 
 // 读空即全绿是这套东西唯一的坏法：声明扫不出来时，本阶段会安安静静地只跑回归测试。
 // 真仓现在 107 份脚本有声明，低于 80 就是扫描坏了（路径 / 正则 / 跳过规则），不许它绿。
-const NAMES = names('guard').length + names('test').length + names('lib').length + names('off').length
+const NAMES = names('guard').length + names('weekly').length + names('test').length + names('lib').length + names('off').length
 if (NAMES < 80) {
   throw new Error(
     `docs 阶段读不出 @gate 声明（只读到 ${NAMES} 份，真仓应 ≥ 80）⇒ 判据会静默不跑。` +

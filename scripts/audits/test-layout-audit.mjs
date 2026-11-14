@@ -39,7 +39,7 @@
  *
  * 退出码：0 = 通过；1 = 有 ERROR；2 = 仅 WARNING 且 --strict。
  */
-// @gate guard
+// @gate weekly
 
 import fs from 'node:fs'
 import path from 'node:path'

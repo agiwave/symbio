@@ -36,7 +36,7 @@
  *
  * 约定：平台无关（Node.js ESM、零外部依赖、spawnSync 数组传参）。
  */
-// @gate guard
+// @gate weekly
 
 import fs from 'node:fs';
 import path from 'node:path';

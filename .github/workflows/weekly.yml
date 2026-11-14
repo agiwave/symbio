@@ -1,0 +1,39 @@
+name: Weekly audits
+
+# 周档判据的慢车道（DE-016 D-496）——与 ci.yml 同一个门禁脚本、同一个门禁本体，
+# 只换触发频率：`@gate weekly` 桶（style / test-layout / eol / slo-exit 这一类
+# 风格性 / 布局性 / 低频漂移判据）每周核一次，提交门禁不必每轮都为它们买单。
+#
+# ⚠️ **schedule 只在默认分支（main）上生效**——GitHub 的已知约束，对本仓库意味着
+# `v2` 上的周档判据在此处不会自动触发，靠两种方式补位：
+#   1. 本地全量门禁跑全阶段（`weekly` 阶段在全量跑里），活跃开发不欠账；
+#   2. 本 job 支持手动触发（`workflow_dispatch`），v2 合并前可随时指定分支跑一次。
+# 这与 ci.yml 头部那条「漏跑的代价远大于多跑」是同一课的第四次出现：第一次漏文件类型、
+# 第二次漏分支名单、第三次漏改名，这次是平台行为本身——所以写在这里，而不是等着被发现。
+#
+# 判据条数只增不减：退役周档判据必须同批下调 `scripts/gate.d/62-weekly.mjs` 的
+# `MIN_WEEKLY` 并在退役提交里写明理由（ratchet，不是可按的开关）。
+on:
+  schedule:
+    # 每周一 03:00 UTC。只挑低负载时段，无其他含义。
+    - cron: '0 3 * * 1'
+  workflow_dispatch:
+
+jobs:
+  weekly-audits:
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v5
+        with:
+          # 全量历史：`eol-audit` 等按 git blob 对账，浅克隆会让它走「读不出 ⇒ 判红」。
+          fetch-depth: 0
+
+      - name: Setup Node.js
+        uses: actions/setup-node@v5
+        with:
+          node-version: '22'
+
+      - name: Weekly audits gate
+        # 与本地同一条命令。只跑 weekly 阶段（`@gate weekly` 桶，带 --strict）；
+        # 判据清单在脚本头声明里（此处不重抄，抄了会漂移）。
+        run: node scripts/gate.mjs --preset=weekly --ci

@@ -144,12 +144,15 @@ MSRV 阶段会换编译器（`RUSTUP_TOOLCHAIN` 覆盖 `rust-toolchain.toml`）�
 **不数条数、不写号段**（「四条规矩」「E-001–E-011」这类）——条数会增、号段会跳，
 抄了必然漂移。
 
-**静态审计脚本都在 `scripts/audits/`，进门靠脚本头一行声明**——`// @gate guard|report|test|lib|off`
+**静态审计脚本都在 `scripts/audits/`，进门靠脚本头一行声明**——`// @gate guard|weekly|report|test|lib|off`
 （读它的唯一一处是 `scripts/gate.d/_shared.mjs` 的 `gateDeclarations`）。`30-docs` 只按声明分组
 执行，**没有待维护的清单**：新建一份守卫 = 建 `scripts/audits/x-audit.mjs` + 同名
 `x-audit.test.mjs` + 头里写 `@gate guard`，其余自动。声明漏了 / 写错桶 / 同名两处、
-或声明了却没被 `30-docs` 跑到，[`gate-wiring-audit`](scripts/audits/gate-wiring-audit.mjs)
+或声明了却没被跑到（`30-docs` 跑 `guard`，`62-weekly` 跑 `weekly`），
+[`gate-wiring-audit`](scripts/audits/gate-wiring-audit.mjs)
 （GW-*）判红——这是机制唯一的坏死方式：**枚举写窄了，判据静默不跑**。
+`weekly` 是判据的慢车道：风格性 / 布局性 / 低频漂移判据每周核一次即可（CI 的
+`weekly.yml` schedule 触发），准入标准见 DE-016 D-496——不是「嫌它烦就挪出去」。
 
 找不到某条机制 / 约定写在哪：`node scripts/doc-find.mjs <关键词>`（搜全仓 `*.md` 与源码
 `//!` / `///`）。项目文档是下沉的，**知识只写一处**；发现缺文档就补那一处，不要把摘要抄到别处。
@@ -157,6 +160,9 @@ MSRV 阶段会换编译器（`RUSTUP_TOOLCHAIN` 覆盖 `rust-toolchain.toml`）�
 CI（[.github/workflows/ci.yml](.github/workflows/ci.yml)）跑的是**同一个脚本**，且只引用**命名档位**
 （`--preset=rust --ci --profile=<dev|release>` / `--preset=frontend` / `--preset=docs-facts --ci`
 / `--preset=msrv`——最后一个由独立的 `msrv-check` job 跑，它会先装 1.91 工具链）。
+周档是独立的 [.github/workflows/weekly.yml](.github/workflows/weekly.yml)：
+`--preset=weekly`，schedule 每周触发（GitHub schedule 只在默认分支上生效，手动可
+`workflow_dispatch`）——提交门禁不用为低频判据买单。
 阶段组合只写在 [`scripts/gate.d/_presets.mjs`](scripts/gate.d/_presets.mjs) 一处，
 调用点不另抄清单；漏写档位名会当场报「未知档位」，不会静默少跑一个 job。
 所以本地通过 ≈ CI 通过。注意后两个 `--ci` 不是可选项：`backend` 含 `cargo fmt`——门禁**自动执行**

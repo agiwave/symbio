@@ -40,7 +40,8 @@
  *   05-fmt（屏障，单独跑）
  *     → 06-facts-write（生成器链，串行；docs 读它的产物，故必须是批的前置）
  *     → [10-backend ∥ 20-frontend-static ∥ 30-docs ∥ 35-baseline ∥ 36-baseline-scope ∥ 50-msrv ∥ 55-verify]
- *     → 56-frontend-build → 58-e2e → 60-facts（必须最后）
+ *     → 56-frontend-build → 58-e2e → 60-facts（末态复核）→ 62-weekly（周档，单独批；
+ *       只在 `--preset=weekly` 与全量跑里出现，CI 的 `weekly.yml` 每周触发）
  *
  * ⚠️ **批只由「连续」的 `parallel: true` 阶段组成**：中间夹一个没标 `parallel` 的阶段，
  * 批就在那里断开，两侧各自成批、先后串行。这不是理论风险——生成器阶段曾夹在

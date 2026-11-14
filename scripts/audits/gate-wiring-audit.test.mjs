@@ -55,6 +55,26 @@ const DOCS = [
 ].join('\n') + '\n'
 
 /**
+ * 夹具版 `62-weekly`：与 DOCS 同构，只枚举 `weekly` 桶（与真仓同一形状）。
+ * 自包含——夹具要在临时目录里独立成立，不能 import 真仓的 `_shared.mjs`。
+ */
+const WEEKLY = [
+  "import fs from 'node:fs'",
+  "import path from 'node:path'",
+  "import { fileURLToPath } from 'node:url'",
+  "const scripts = path.resolve(path.dirname(fileURLToPath(import.meta.url)), '..', '..')",
+  'const files = []',
+  "const walk = (d, p) => { for (const e of fs.readdirSync(d, { withFileTypes: true })) { if (e.isDirectory()) { if (e.name !== 'gate.d') walk(path.join(d, e.name), p + e.name + '/') } else if (e.name.endsWith('.mjs') && !e.name.endsWith('.test.mjs')) files.push(p + e.name) } }",
+  "walk(scripts, '')",
+  "const decl = (f) => { for (const l of fs.readFileSync(path.join(scripts, f), 'utf8').split(/\\r?\\n/).slice(0, 80)) { const m = /^\\/\\/\\s*@gate\\s+([A-Za-z]+)\\s*$/.exec(l.trim()); if (m) return m[1] } return null }",
+  "export default { id: 'weekly', *tasks () {",
+  '  for (const f of files.sort()) {',
+  "    if (decl(f) === 'weekly') yield { args: [path.join(scripts, f), '--strict'] }",
+  '  }',
+  '} }',
+].join('\n') + '\n'
+
+/**
  * 造一棵最小仓库。
  * @param {object} o
  * @param {Record<string,string|null>} o.scripts  `{ '名字': 'bucket' }`；值 `null` = 干脆不写声明
@@ -191,6 +211,58 @@ test('GW-004 测试文件在而任务表里没有它 ⇒ 红（这个方向最�
   })
   assert.equal(r.status, 1, r.stdout)
   assert.match(r.stdout, /GW-004 scripts\/stale\.test\.mjs 存在/)
+})
+
+// ── weekly 桶：执行方是 62-weekly，对账口径与 guard 相同 ────────────────
+// 换了执行方，「声明 ↔ 物化任务」的对账要跟着换一次：30-docs 不跑 weekly，
+// 所以 weekly 声明齐不齐要看 62-weekly 的任务表，缺执行方 = 判据静默不跑的同一种病。
+
+test('weekly 接线齐备：62-weekly 产出它的 --strict 任务 ⇒ 通过（exit 0）', () => {
+  const r = audit({
+    scripts: { 'grep-check': 'guard', 'style-check': 'weekly' },
+    tests: ['grep-check', 'style-check'],
+    stages: [
+      { name: '30-docs.mjs', body: DOCS },
+      { name: '62-weekly.mjs', body: WEEKLY },
+    ],
+  })
+  assert.equal(r.status, 0, r.stdout + r.stderr)
+  assert.match(r.stdout, /weekly 1/)
+})
+
+test('GW-002 声明 weekly 却没有同名测试 ⇒ 红（周档守卫一样只是会亮绿灯的脚本）', () => {
+  const r = audit({ scripts: { 'style-check': 'weekly' }, tests: [] })
+  assert.equal(r.status, 1, r.stdout)
+  assert.match(r.stdout, /GW-002 scripts\/style-check\.mjs 声明 .*weekly.*没有/)
+})
+
+test('GW-003 声明 weekly 而 62-weekly 不存在 ⇒ 红（执行方缺席，声明全部落空）', () => {
+  const r = audit({ scripts: { 'style-check': 'weekly' }, tests: ['style-check'] })
+  assert.equal(r.status, 1, r.stdout)
+  assert.match(r.stdout, /GW-003 \/ GW-004 62-weekly 的任务表读不出/)
+})
+
+test('GW-003 62-weekly 跑了没声明 weekly 的脚本 ⇒ 红（这一步不在机制的账上）', () => {
+  const runaway = [
+    "import fs from 'node:fs'",
+    "import path from 'node:path'",
+    "import { fileURLToPath } from 'node:url'",
+    "const scripts = path.resolve(path.dirname(fileURLToPath(import.meta.url)), '..', '..')",
+    'const files = []',
+    "const walk = (d, p) => { for (const e of fs.readdirSync(d, { withFileTypes: true })) { if (e.isDirectory()) { if (e.name !== 'gate.d') walk(path.join(d, e.name), p + e.name + '/') } else if (e.name.endsWith('.mjs') && !e.name.endsWith('.test.mjs')) files.push(p + e.name) } }",
+    "walk(scripts, '')",
+    "export default { id: 'weekly', *tasks () { for (const f of files.sort()) yield { args: [path.join(scripts, f), '--strict'] } } }",
+  ].join('\n') + '\n'
+  const r = audit({
+    scripts: { 'grep-check': 'guard', 'style-check': 'weekly' },
+    tests: ['grep-check', 'style-check'],
+    stages: [
+      { name: '30-docs.mjs', body: DOCS },
+      { name: '62-weekly.mjs', body: runaway },
+    ],
+  })
+  assert.equal(r.status, 1, r.stdout)
+  assert.match(r.stdout, /GW-003 62-weekly 跑了 scripts\/grep-check\.mjs/)
 })
 
 test('子目录按相对名对账：`gate.d/_shared` 声明 test 并真有测试 ⇒ 绿', () => {

@@ -36,7 +36,7 @@
 // 判据码命名空间（登记表 docs/004-ref/GATE_CODES.md 由这些行生成，判据见 gate-codes-audit.mjs）
 // @ns SX SLO 出口表 vs session/stats 读数列（用户可见出口）
 // @codes SX-001 SX-002 SX-003
-// @gate guard
+// @gate weekly
 
 import fs from 'node:fs'
 import path from 'node:path'

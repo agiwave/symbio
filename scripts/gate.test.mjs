@@ -513,19 +513,24 @@ test('★ 每个阶段都必须在 CI 里有一个点名它的 job：不许出�
   //
   // 这条判据原先是**专为 rustdoc 写的**（「跑 backend 的 job 必须同时点名 rustdoc」）。
   // D-274 废弃 rustdoc 之后，专钉失效了，但那个失效形态还在——所以改成对**全部阶段**
-  // 成立的通用判据：`gate.d/*.mjs` 声明的每个 id 都得在 ci.yml 的某个门禁调用里出现
+  // 成立的通用判据：`gate.d/*.mjs` 声明的每个 id 都得在某个 workflow 的门禁调用里出现
   // （`--only=` 直写，或 `--preset=` 档位展开后含它）。
   // 加阶段而漏进 CI，这条当场红；这是它比「点名 rustdoc」更强的地方。
-  const ci = fs.readFileSync(path.join(repoRoot, '.github', 'workflows', 'ci.yml'), 'utf8')
+  // 扫**全部** workflow 文件而不是只读 ci.yml：周档（D-496）是独立 workflow
+  // （`.github/workflows/weekly.yml`，schedule 只在默认分支生效，加进 ci.yml 会触发
+  // 全部 job），「点名」的合法地址从第一天起就不止一个文件。
+  const wfDir = path.join(repoRoot, '.github', 'workflows')
+  const workflows = fs.readdirSync(wfDir).filter((f) => f.endsWith('.yml')).sort()
+  const ci = workflows.map((f) => fs.readFileSync(path.join(wfDir, f), 'utf8')).join('\n')
   const lists = [
     ...[...ci.matchAll(/--only=([^\s"'`]+)/g)].map((m) => m[1].split(',')),
     ...[...ci.matchAll(/--preset=([\w-]+)/g)].map((m) => {
       const ids = presetIds(m[1])
-      assert.notEqual(ids, null, `ci.yml 用了未知档位 --preset=${m[1]}`)
+      assert.notEqual(ids, null, `.github/workflows/ 用了未知档位 --preset=${m[1]}`)
       return ids
     }),
   ]
-  assert.ok(lists.length > 0, 'ci.yml 里必须有带 --only= / --preset= 的门禁调用')
+  assert.ok(lists.length > 0, 'workflows 里必须有带 --only= / --preset= 的门禁调用')
   const named = new Set(lists.flat())
   assert.ok(named.has('backend'), `应有一个 job 跑 backend：${JSON.stringify(lists)}`)
   const dir = path.join(repoRoot, 'scripts', 'gate.d')
@@ -537,7 +542,7 @@ test('★ 每个阶段都必须在 CI 里有一个点名它的 job：不许出�
   assert.deepEqual(
     ids.filter((id) => !named.has(id)),
     [],
-    `这些阶段在 CI 里没有任何 job 跑：${ids.filter((id) => !named.has(id)).join(', ')}（ci.yml 的名单：${JSON.stringify(lists)}）`,
+    `这些阶段在 CI 里没有任何 job 跑：${ids.filter((id) => !named.has(id)).join(', ')}（workflows 的名单：${JSON.stringify(lists)}）`,
   )
   // 档位里的每个 id 都必须是真实阶段：档位是唯一组合源，写错一个 id 等于让那一路
   // 悄悄少一个 stage（`--preset` 校验只拦阶段 id 不存在，**不会**拦「这个档位少写了一个」）。

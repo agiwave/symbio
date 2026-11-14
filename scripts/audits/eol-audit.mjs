@@ -47,7 +47,7 @@
 // 判据码命名空间（登记表 docs/004-ref/GATE_CODES.md 由这些行生成，判据见 gate-codes-audit.mjs）
 // @ns EOL 行尾（工作树 / 入库 / 声明三面一致）
 // @codes EOL-001 EOL-002 EOL-003
-// @gate guard
+// @gate weekly
 
 import fs from 'node:fs'
 import path from 'node:path'

@@ -4,18 +4,20 @@
  *
  * 治的病：**脚本存在 ≠ 会被门禁跑**。
  *
- * 接线由每个脚本自己声明：头注释里一行 `// @gate guard|report|test|lib|off`
- * （读法只有一处：`gate.d/_shared.mjs::gateDeclarations`），`30-docs` 扫声明分组执行。
- * 自述的好处是加一条守卫不用改任何名单；代价是「声明了 ≠ 跑了」——本脚本就是那个对账方。
+ * 接线由每个脚本自己声明：头注释里一行 `// @gate guard|weekly|report|test|lib|off`
+ * （读法只有一处：`gate.d/_shared.mjs::gateDeclarations`），`30-docs` 扫声明分组执行
+ * （`weekly` 桶的执行方是 `62-weekly`，对账口径相同）。自述的好处是加一条守卫不用改任何
+ * 名单；代价是「声明了 ≠ 跑了」——本脚本就是那个对账方。
  *
  * 判据（声明、目录、任务表三方互为对账）：
  *   - **GW-001** `scripts/**` 下每份非测试、非阶段脚本**有且只有一条** `@gate` 声明，
  *     且值在闭集内。缺声明 = 隐形脚本（谁也不会跑它）；拼错 = 落进 `off` 那一桶，
  *     同样静默不跑；两条声明 = 「到底算哪一类」没有答案。
- *   - **GW-002** 声明 `guard` / `report` / `test` 的必须有同名 `.test.mjs`。守卫没有回归
+ *   - **GW-002** 声明 `guard` / `weekly` / `report` / `test` 的必须有同名 `.test.mjs`。守卫没有回归
  *     测试就只是一个「会亮绿灯的脚本」——它腐烂的方式恰恰是规则写错所以永不命中，
  *     而这件事只有注入违规才能发现。`lib` / `off` 不要求。
- *   - **GW-003** 每条 `guard` 声明必须真的出现在 `30-docs` 物化出的 `--strict` 任务里。
+ *   - **GW-003** 每条 `guard` 声明必须真的出现在 `30-docs` 物化出的 `--strict` 任务里，
+ *     `weekly` 声明同理对账 `62-weekly`（两个执行方各有半壁，缺了哪个半壁就是哪半静默）。
  *     这一条守的是本机制唯一的坏法：**枚举写窄**（漏扫一层子目录、正则只认 `-audit`、
  *     跳过规则误伤）时，声明着的守卫会静默不跑，而门禁表上一切正常。
  *   - **GW-004** 每份 `.test.mjs` 必须真的有 `--test` 任务（GW-003 的反方向）。
@@ -221,8 +223,9 @@ const duplicateDecl = decl.problems.filter((p) => p.error === 'duplicate')
 const unknownDecl = decl.problems.filter((p) => p.error === 'unknown')
 const unreadableScript = decl.problems.filter((p) => p.error === 'unreadable')
 
-// GW-002：需要回归测试的三个桶。
-const needsTest = decl.entries.filter((e) => ['guard', 'report', 'test'].includes(e.bucket))
+// GW-002：需要回归测试的四个桶（weekly 与 guard 同判：周档守卫没有回归测试，
+// 一样只是会亮绿灯的脚本——频率低了它腐烂得只会更安静）。
+const needsTest = decl.entries.filter((e) => ['guard', 'weekly', 'report', 'test'].includes(e.bucket))
 const noTest = needsTest.filter((e) => !files.includes(e.name))
 
 // GW-003 / GW-004：声明与目录事实**真的被 30-docs 跑到**。
@@ -243,6 +246,26 @@ for (const t of docs.tasks ?? []) {
 const guards = decl.entries.filter((e) => e.bucket === 'guard')
 const notRunAsGuard = docs.tasks ? guards.filter((e) => !strictRun.has(e.name)) : []
 const notRunAsTest = docs.tasks ? files.filter((n) => !testedRun.has(n)) : []
+
+// weekly 桶的执行方是 `62-weekly` 而不是 `30-docs`——「声明 ↔ 物化任务」对账同一套，
+// 换个执行方就再对一次账。执行方缺席（62-weekly.mjs 不存在 / 导入失败）时 weekly 声明
+// 全部落空，那不是「没有 weekly 判据要跑」，而是**没有任何东西会跑它们** ⇒ 判红。
+const weeklyDecl = decl.entries.filter((e) => e.bucket === 'weekly')
+const weeklyRun = await stageTasksOf(REPO_ROOT, '62-weekly.mjs')
+const weeklyStrict = new Set()
+for (const t of weeklyRun.tasks ?? []) {
+  const a = t?.args ?? []
+  if (a.includes('--strict') && a[0]) weeklyStrict.add(relOf(a[0]))
+}
+const weeklyNotRun = weeklyRun.tasks ? weeklyDecl.filter((e) => !weeklyStrict.has(e.name)) : []
+const weeklyRan = (weeklyRun.tasks ?? []).map((t) => (t?.args?.[0] ? relOf(t.args[0]) : null)).filter(Boolean)
+const weeklyUndeclared = weeklyRun.tasks ? weeklyRan.filter((n) => !weeklyDecl.some((e) => e.name === n)) : []
+const weeklyErrors = [
+  // 「缺执行方」只在**有 weekly 声明**时才构成失效：没有任何周档判据，就不欠一个执行方
+  // （否则每棵夹具仓都要陪葬一份空阶段）。阶段存在但读不出 ⇒ 永远是失效——那是阶段自己坏了。
+  ...(weeklyRun.missing && weeklyDecl.length ? [{ where: '62-weekly', detail: 'scripts/gate.d/62-weekly.mjs 不存在' }] : []),
+  ...(weeklyRun.error ? [{ where: '62-weekly', detail: weeklyRun.error }] : []),
+]
 
 // GW-005：阶段顺序。**判据读自声明字段，不读注释措辞**。
 // 形状与理由见文件头 GW-005 那条（含它为什么不再是「重生成必须排末尾」）。
@@ -309,7 +332,7 @@ for (const p of undeclared) {
   errors++
   console.log(
     red(
-      `[ERROR] GW-001 scripts/${p.rel} 没有 \`// @gate guard|report|test|lib|off\` 声明 ⇒ ` +
+      `[ERROR] GW-001 scripts/${p.rel} 没有 \`// @gate guard|weekly|report|test|lib|off\` 声明 ⇒ ` +
         `它不会被任何阶段跑到，是一份隐形脚本（加一行声明，或者把它删掉）`,
     ),
   )
@@ -324,7 +347,7 @@ for (const p of unknownDecl) {
   errors++
   console.log(
     red(
-      `[ERROR] GW-001 scripts/${p.rel} 的 \`@gate ${p.detail}\` 不在闭集内（guard / report / test / lib / off）⇒ ` +
+      `[ERROR] GW-001 scripts/${p.rel} 的 \`@gate ${p.detail}\` 不在闭集内（guard / weekly / report / test / lib / off）⇒ ` +
         `拼错的声明会落进「不跑」那一桶，静默消失`,
     ),
   )
@@ -338,7 +361,7 @@ for (const e of noTest) {
   console.log(
     red(
       `[ERROR] GW-002 scripts/${e.name}.mjs 声明 \`@gate ${e.bucket}\`，却没有 scripts/${e.name}.test.mjs ⇒ ` +
-        `${e.bucket === 'guard' ? '没有回归测试的守卫只是一个会亮绿灯的脚本' : '这一步跑的是空气'}`,
+        `${e.bucket === 'guard' ? '没有回归测试的守卫只是一个会亮绿灯的脚本' : e.bucket === 'weekly' ? '周档判据没有回归测试，一样只是会亮绿灯的脚本——频率低了它只会烂得更安静' : '这一步跑的是空气'}`,
     ),
   )
 }
@@ -354,6 +377,28 @@ for (const e of notRunAsGuard) {
         `守卫声明着却从不跑（查枚举：漏扫目录 / 跳过规则 / 桶名拼错）`,
     ),
   )
+}
+for (const e of weeklyNotRun) {
+  errors++
+  console.log(
+    red(
+      `[ERROR] GW-003 scripts/${e.name}.mjs 声明 \`@gate weekly\`，但 62-weekly 没有产出它的 \`--strict\` 任务 ⇒ ` +
+        `周档判据声明着却从不跑（查枚举：漏扫目录 / 跳过规则 / 桶名拼错）`,
+    ),
+  )
+}
+for (const n of weeklyUndeclared) {
+  errors++
+  console.log(
+    red(
+      `[ERROR] GW-003 62-weekly 跑了 scripts/${n}.mjs，它却没有 \`@gate weekly\` 声明 ⇒ ` +
+        `这一步不在机制的账上（下一个读声明的人看不到它）`,
+    ),
+  )
+}
+for (const e of weeklyErrors) {
+  errors++
+  console.log(red(`[ERROR] GW-003 / GW-004 ${e.where} 的任务表读不出（${e.detail}）⇒ weekly 声明没有执行方，判「有没有被跑到」无从谈起`))
 }
 for (const n of notRunAsTest) {
   errors++
@@ -505,9 +550,9 @@ if (errors) {
 }
 console.log(
   green(
-    `gate-wiring-audit 通过：${decl.entries.length} 份脚本全部声明（guard ${countOf('guard')} / report ${countOf('report')} / ` +
+    `gate-wiring-audit 通过：${decl.entries.length} 份脚本全部声明（guard ${countOf('guard')} / weekly ${countOf('weekly')} / report ${countOf('report')} / ` +
       `test ${countOf('test')} / lib ${countOf('lib')} / off ${countOf('off')}），${files.length} 份测试与 ` +
-      `${guards.length} 条守卫全部被 30-docs 跑到；生成链 ${gensWriterDecl.length} 步与复核 ${gensCheckerDecl.length} 步` +
+      `${guards.length} 条守卫（30-docs）${countOf('weekly')} 条周档（62-weekly）全部被跑到；生成链 ${gensWriterDecl.length} 步与复核 ${gensCheckerDecl.length} 步` +
       `（@gens 声明 ↔ 物化任务双向对账）；生成阶段 ${lastRegen ? lastRegen.file : '（无）'} 先于只读复核 ` +
       `${recheckStages.map((m) => m.file).join(' / ') || '（无）'}；${stages.length} 个阶段物化出 ${totalTasks} 项，无空转阶段`,
   ),
