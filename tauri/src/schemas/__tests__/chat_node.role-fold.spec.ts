@@ -49,7 +49,7 @@ describe('messageRoleOf：身份只折叠主体（D-147）', () => {
     expect(roleOfPrincipal('system/compactor')).toBe(CHAT_ROLE_SYSTEM)
   })
 
-  it('旧形态字符串不再归一（SP-008：不为旧数据写迁移分支）', () => {
+  it('旧形态字符串不再归一（SP-003 §6：不为旧数据写迁移分支）', () => {
     expect(normalizePrincipal('agent:main')).toBeUndefined()
     expect(normalizePrincipal('user')).toBeUndefined()
   })

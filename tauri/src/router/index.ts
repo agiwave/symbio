@@ -70,7 +70,7 @@ const router = createRouter({
         // 深链与「浏览内部」push 出来的地址页都由本路由承接。
         { path: 'vdfs/:dir(.*)*', name: 'vdfs', component: VdfsView },
         // 旧地址（`entities/:types` / `model-providers` / `mcp` / `skill` / `agent` / `settings`）
-        // 的兼容 redirect 已删：本仓未发布，那些地址只存在于开发机的书签里（`SP-008`：
+        // 的兼容 redirect 已删：本仓未发布，那些地址只存在于开发机的书签里（`SP-003 §6`：
         // 不为既有数据留兼容）。它们今天落到下面的兜底——回首页，由守卫接手落点——
         // 而不是 404 白屏，所以删掉不改变任何**代码可达**的行为。
         // 兜底：**不认识的首段一律回首页**。

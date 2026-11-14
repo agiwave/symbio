@@ -945,7 +945,7 @@ describe('principal 前缀 → 身份呈现（[T-148] 独立表）', () => {
       id: 'session/main',
     })
     expect(nodePrincipal({ principal: undefined })).toBeUndefined()
-    // 旧形态没有任何生产来源（SP-008）：解不出族就当「尚未标身份」
+    // 旧形态没有任何生产来源（SP-003 §6）：解不出族就当「尚未标身份」
     expect(
       nodePrincipal({ principal: 'agent:main' as unknown as { kind: 'agent'; id: string } }),
     ).toBeUndefined()

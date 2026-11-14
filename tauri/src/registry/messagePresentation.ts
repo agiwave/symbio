@@ -93,7 +93,7 @@ export const NODE_KIND_LABELS: Record<string, string> = {
  * 状态 → 文案。
  *
  * 只收**今天写得出**的状态词：`ChatNode.status` 的闭集就是下面这七个（后端
- * `NodeStatus`），`active` 那类旧词没有任何生产写方——按 `SP-008`（不做历史数据兼容）
+ * `NodeStatus`），`active` 那类旧词没有任何生产写方——按 `SP-003 §6`（不做历史数据兼容）
  * 读侧不再为它留别名（缺文案时 `messageStatusLabel` 原样返回，不会崩、也不会误标成别的状态）。
  */
 export const NODE_STATUS_LABELS: Record<string, string> = {

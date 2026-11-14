@@ -71,7 +71,7 @@ export function normalizePrincipal(value: Principal | string | undefined | null)
   // 只解析**地址字符串** `<ns>/<name>`——kind 由 namespace 派生。
   //
   // 旧形态（`agent:main` / `tool:vdfs_write` / 裸 `user`）不再归一：那些是 `ChatNode.principal`
-  // 的历史取值，字段收窄成结构体之后没有任何生产来源（`SP-008`：不为旧数据写迁移分支）。
+  // 的历史取值，字段收窄成结构体之后没有任何生产来源（`SP-003 §6`：不为旧数据写迁移分支）。
   // 后端的 `Principal::from_legacy` 仍认旧形态，但它服务的是另一件事——`ActorSpec.principal`
   // 里的 actor 名（`agent:researcher-01` 这类），不是本字段的兼容层。
   const slash = s.indexOf('/')
@@ -425,7 +425,7 @@ export interface ChatNode {
    * 出现；存量快照里的 `role` 由后端 `message_of_node` 在读边界折成本结构体。
    *
    * 类型只收结构体：历史 `messages.json` 里遗留的裸字符串（`"agent:main"` / `"user"`）
-   * 按 `SP-008`（不做历史数据兼容）不再归一——那类节点落到「尚未标身份」，可见域判据
+   * 按 `SP-003 §6`（不做历史数据兼容）不再归一——那类节点落到「尚未标身份」，可见域判据
    * 把它当可见、角色按缺省（助手）折，与「没接线的写方」同一条路径，不会因为少一次迁移
    * 而消失或报错。字符串仍能进 `normalizePrincipal`：**地址字符串是合法入参**
    * （`person/local` 这类常量、以及只拿到 id 的调用点），不是兼容层。
