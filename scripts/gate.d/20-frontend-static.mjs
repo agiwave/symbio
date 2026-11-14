@@ -1,7 +1,7 @@
 // frontend-static 阶段：vue-tsc / vitest --coverage / eslint。
 //
 // 文件名 `20-` 与 `parallel: true`（2026-10-09）：本阶段进并发批
-// `[10-backend ∥ 20-frontend-static ∥ 30-docs ∥ 35-baseline ∥ 50-msrv ∥ 55-verify]`。
+// `[10-backend ∥ 20-frontend-static ∥ 30-docs ∥ 35-baseline ∥ 36-baseline-scope ∥ 50-msrv ∥ 55-verify]`。
 //
 // ## 为什么它能进批，而同属前端的 `vite build` 不能
 //
@@ -15,7 +15,7 @@
 //                          只打印不落盘 ⇒ 连 `coverage/` 都不写
 //   - `eslint .`           只读（不带 `--fix`）
 // 反过来，批内没有哪个阶段会写本阶段要读的东西（backend 只写 `target/`，docs 只读，
-// baseline 只读 git，msrv 写 `.workbuddy-ai/msrv-target`）。
+// baseline / baseline-scope 只读 git，msrv 写 `.workbuddy-ai/msrv-target`）。
 //
 // ## 收益（2026-10-09 A/B 实测，两轮都先 `touch crates/symbio/src/lib.rs` 强制重编译）
 //
