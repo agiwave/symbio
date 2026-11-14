@@ -18,13 +18,13 @@
 import assert from 'node:assert/strict'
 import { test } from 'node:test'
 import fs from 'node:fs'
-import os from 'node:os'
 import path from 'node:path'
 import { spawnSync } from 'node:child_process'
 import { fileURLToPath } from 'node:url'
 
 import { stripRustCode, findContainerWordTokens, validateExemptions } from './extension-vocab-audit.mjs'
-import { rmTree } from '../fs-walk.mjs'
+import { withTempTree } from '../fs-walk.mjs'
+import { expectAudit } from '../audit-assert.mjs'
 
 const script = fileURLToPath(new URL('./extension-vocab-audit.mjs', import.meta.url))
 
@@ -51,13 +51,7 @@ pub fn run_recall(env: &EffectEnv) -> bool {
 }
 
 function audit(files, env = {}) {
-  const root = fs.mkdtempSync(path.join(os.tmpdir(), 'ext-vocab-'))
-  try {
-    for (const [rel, content] of Object.entries(files)) {
-      const abs = path.join(root, rel)
-      fs.mkdirSync(path.dirname(abs), { recursive: true })
-      fs.writeFileSync(abs, content)
-    }
+  return withTempTree(files, (root) => {
     const result = spawnSync(process.execPath, [script, `--root=${root}`], {
       cwd: root,
       env: { ...process.env, NO_COLOR: '1', ...env },
@@ -66,15 +60,12 @@ function audit(files, env = {}) {
     })
     assert.ifError(result.error)
     return result
-  } finally {
-    rmTree(root)
-  }
+  }, { prefix: 'ext-vocab-' })
 }
 
 test('① 干净夹具 ⇒ 绿', () => {
   const r = audit(CLEAN)
-  assert.equal(r.status, 0, r.stdout + r.stderr)
-  assert.match(r.stdout, /✓ EX-008/)
+  expectAudit(r, 0, [/✓ EX-008/])
 })
 
 test('② 端口形状加一格 `turn: u64` ⇒ 红', () => {

@@ -11,11 +11,11 @@
 import assert from 'node:assert/strict'
 import { test } from 'node:test'
 import fs from 'node:fs'
-import os from 'node:os'
 import path from 'node:path'
 import { spawnSync } from 'node:child_process'
 import { fileURLToPath } from 'node:url'
-import { rmTree } from '../fs-walk.mjs'
+import { withTempTree } from '../fs-walk.mjs'
+import { expectAudit } from '../audit-assert.mjs'
 
 const script = fileURLToPath(new URL('./baseline-scope-audit.mjs', import.meta.url))
 const LP_REL = 'scripts/loop-purity-baseline.json'
@@ -77,8 +77,7 @@ function audit({
   ledgerBase = null,
   base = 'HEAD',
 } = {}) {
-  const root = fs.mkdtempSync(path.join(os.tmpdir(), 'baseline-scope-'))
-  try {
+  return withTempTree({}, (root) => {
     writeTree(root, {
       [LP_REL]: JSON.stringify(baseLp, null, 2),
       [CP_REL]: JSON.stringify(baseCp, null, 2),
@@ -108,9 +107,7 @@ function audit({
       env: { ...process.env, NO_COLOR: '1' },
       encoding: 'utf8',
     })
-  } finally {
-    rmTree(root)
-  }
+  }, { prefix: 'baseline-scope-' })
 }
 
 function assertRed(r, code) {
@@ -122,8 +119,7 @@ function assertRed(r, code) {
 
 test('基线面一字未动 ⇒ 绿', () => {
   const r = audit()
-  assert.equal(r.status, 0, r.stdout + r.stderr)
-  assert.match(r.stdout, /无未署名的格增删 \/ 计数上调 \/ 指纹改写/)
+  expectAudit(r, 0, [/无未署名的格增删 \/ 计数上调 \/ 指纹改写/])
 })
 
 test('计数下调 ⇒ 绿（棘轮往下走不需要 allow）', () => {

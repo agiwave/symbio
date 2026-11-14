@@ -11,10 +11,10 @@
 import assert from 'node:assert/strict'
 import { test } from 'node:test'
 import fs from 'node:fs'
-import os from 'node:os'
 import path from 'node:path'
 import { spawnSync } from 'node:child_process'
 import { fileURLToPath } from 'node:url'
+import { withTempTree } from '../fs-walk.mjs'
 
 const script = fileURLToPath(new URL('./style-audit.mjs', import.meta.url))
 
@@ -25,13 +25,7 @@ const script = fileURLToPath(new URL('./style-audit.mjs', import.meta.url))
  * 为此给它加了 `--root=`（与 `mechanism-audit` 同一约定）。
  */
 function audit(files, { strict = false } = {}) {
-  const root = fs.mkdtempSync(path.join(os.tmpdir(), 'style-audit-'))
-  try {
-    for (const [rel, content] of Object.entries(files)) {
-      const abs = path.join(root, rel)
-      fs.mkdirSync(path.dirname(abs), { recursive: true })
-      fs.writeFileSync(abs, content)
-    }
+  return withTempTree(files, (root) => {
     // ⚠️ 必须显式传 `--root=`：脚本默认按"脚本上一级的仓库根"定位 `tauri/src`，
     // 只设 cwd 不会改变它 ⇒ 漏传就会去审**真实仓库**，于是每条用例都拿到真仓的
     // 结果（当前恰好全绿）⇒ 夹具根本没被测到，测试却全绿。这正是要防的那类假绿。
@@ -42,9 +36,7 @@ function audit(files, { strict = false } = {}) {
     )
     assert.ifError(result.error)
     return result
-  } finally {
-    fs.rmSync(root, { recursive: true, force: true })
-  }
+  }, { prefix: 'style-audit-' })
 }
 
 const vue = (tpl, style = '') => `<template>\n  ${tpl}\n</template>\n${style}`

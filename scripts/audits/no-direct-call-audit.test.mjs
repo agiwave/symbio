@@ -14,23 +14,16 @@
 import assert from 'node:assert/strict'
 import { test } from 'node:test'
 import fs from 'node:fs'
-import os from 'node:os'
 import path from 'node:path'
 import { spawnSync } from 'node:child_process'
 import { fileURLToPath } from 'node:url'
-import { rmTree } from '../fs-walk.mjs'
+import { withTempTree } from '../fs-walk.mjs'
 
 const script = fileURLToPath(new URL('./no-direct-call-audit.mjs', import.meta.url))
 
 
 function audit(files) {
-  const root = fs.mkdtempSync(path.join(os.tmpdir(), 'no-direct-call-'))
-  try {
-    for (const [rel, content] of Object.entries(files)) {
-      const abs = path.join(root, rel)
-      fs.mkdirSync(path.dirname(abs), { recursive: true })
-      fs.writeFileSync(abs, content)
-    }
+  return withTempTree(files, (root) => {
     const result = spawnSync(process.execPath, [script, `ROOT=${root}`], {
       cwd: root,
       env: { ...process.env, NO_COLOR: '1' },
@@ -39,9 +32,7 @@ function audit(files) {
     })
     assert.ifError(result.error)
     return result
-  } finally {
-    rmTree(root)
-  }
+  }, { prefix: 'no-direct-call-' })
 }
 
 const DEFINITION = 'pub struct Reasoner;\n'

@@ -1,11 +1,12 @@
 import assert from 'node:assert/strict'
 import { test } from 'node:test'
 import fs from 'node:fs'
-import os from 'node:os'
 import path from 'node:path'
 import { spawnSync } from 'node:child_process'
 import { fileURLToPath } from 'node:url'
 import { machine, budget } from '../gate.d/_machine.mjs'
+import { withTempTree } from '../fs-walk.mjs'
+import { expectAudit } from '../audit-assert.mjs'
 
 const script = fileURLToPath(new URL('./grep-audit.mjs', import.meta.url))
 const repoRoot = fileURLToPath(new URL('../../', import.meta.url))
@@ -23,8 +24,7 @@ const repoRoot = fileURLToPath(new URL('../../', import.meta.url))
 // 预算退回保守值，不会造成假红。
 const SCAN_TIMEOUT_MS = budget(await machine(), 'docs::grep-audit 回归测试', 120000)
 function audit(source, { waiver = '', strict = false, scope = false } = {}) {
-  const root = fs.mkdtempSync(path.join(os.tmpdir(), 'grep-audit-'))
-  try {
+  return withTempTree({}, (root) => {
     const pluginDir = path.join(root, 'crates/symbio-plugin-other/src')
     fs.mkdirSync(pluginDir, { recursive: true })
     fs.writeFileSync(path.join(pluginDir, 'sample.rs'), source.replace('WAIVER', waiver))
@@ -38,9 +38,7 @@ function audit(source, { waiver = '', strict = false, scope = false } = {}) {
     })
     assert.ifError(result.error)
     return result
-  } finally {
-    fs.rmSync(root, { recursive: true, force: true })
-  }
+  }, { prefix: 'grep-audit-' })
 }
 const suspect = `use std::sync::Mutex;
 async fn example() {
@@ -194,8 +192,7 @@ test('S-009 waiver requires a reason', () => {
 // S-010 的扫描根与 resolveScope 同策略（cwd 有 `crates/` 即视为仓库树），故用
 // 独立的夹具构造器：按相对路径布文件，直接跑脚本。
 function s010Audit(files) {
-  const root = fs.mkdtempSync(path.join(os.tmpdir(), 'grep-audit-s010-'))
-  try {
+  return withTempTree({}, (root) => {
     // 仓库树标记：S-010 以「cwd 下有 `crates/`」判定扫描根，缺了会回落到真实仓库
     fs.mkdirSync(path.join(root, 'crates'), { recursive: true })
     for (const [rel, content] of Object.entries(files)) {
@@ -208,9 +205,7 @@ function s010Audit(files) {
     // 同 `audit()`：fixture 里不比全仓存量，S-014 棘轮基线钉 0
     env.LEGACY_ROLE_WRITE_BASELINE = '0'
     return spawnSync(process.execPath, [script], { cwd: root, env, encoding: 'utf8', timeout: 10000 })
-  } finally {
-    fs.rmSync(root, { recursive: true, force: true })
-  }
+  }, { prefix: 'grep-audit-s010-' })
 }
 
 const S010_SUSPECT_TS = "const x = '.vdfs/session/abc'\n"
@@ -305,9 +300,7 @@ const S012_FILE = 'crates/symbio-sdk/src/actors/mod.rs'
 
 test('S-012 fires on a batch number', () => {
   const r = s010Audit({ [S012_FILE]: '/// 运行器据此停止工具循环（批 2 的恢复前提）。\n' })
-  assert.equal(r.status, 1, r.stdout)
-  assert.match(r.stdout, /S-012/)
-  assert.match(r.stdout, /批次号属施工计划/)
+  expectAudit(r, 1, [/S-012/, /批次号属施工计划/])
 })
 
 test('S-012 fires on a TODO / FIXME marker left in a comment', () => {
@@ -374,8 +367,7 @@ const S013_UNPINNED = `fn collect(workdir: &Path) -> Vec<PathBuf> {
 
 test('S-013 fires on a WalkBuilder construction with no sort in scope', () => {
   const r = s010Audit({ [S013_FILE]: S013_UNPINNED })
-  assert.equal(r.status, 1, r.stdout)
-  assert.match(r.stdout, /S-013 未钉遍历序/)
+  expectAudit(r, 1, [/S-013 未钉遍历序/])
 })
 
 test('S-013 accepts sort_by_file_name and the generic sort_by', () => {
@@ -395,8 +387,7 @@ test('S-013 does not let the next function\'s sort excuse this one', () => {
   // 作用域边界：往后扫到下一个 `fn` 起头为止——别的函数里钉了序，不替这里说话。
   const src = S013_UNPINNED + 'fn other() { let v = x.sort_by_file_name(|a, b| a.cmp(b)); }\n'
   const r = s010Audit({ [S013_FILE]: src })
-  assert.equal(r.status, 1, r.stdout)
-  assert.match(r.stdout, /S-013 未钉遍历序/)
+  expectAudit(r, 1, [/S-013 未钉遍历序/])
 })
 
 test('S-013 waiver requires a reason (same line or the line above)', () => {
@@ -435,8 +426,7 @@ test('S-013 finds every WalkBuilder construction pinned in this repository', () 
 const S014_FILE = 'crates/symbio-plugin-session/src/sample.rs'
 
 function roleAudit(source, baseline) {
-  const root = fs.mkdtempSync(path.join(os.tmpdir(), 'grep-audit-s014-'))
-  try {
+  return withTempTree({}, (root) => {
     // 仓库树标记：扫描根按「cwd 下有 `crates/`」判定，缺了会回落到真实仓库
     const target = path.join(root, S014_FILE)
     fs.mkdirSync(path.dirname(target), { recursive: true })
@@ -449,9 +439,7 @@ function roleAudit(source, baseline) {
       encoding: 'utf8',
       timeout: 10000,
     })
-  } finally {
-    fs.rmSync(root, { recursive: true, force: true })
-  }
+  }, { prefix: 'grep-audit-s014-' })
 }
 
 /**
@@ -488,18 +476,14 @@ test('S-014 fixture 树不比棘轮：扫描根不是真实仓库 ⇒ 跳过', (
 test('S-014 新增直写即红，并点名命中处与改法', () => {
   const src = 'fn n() -> ChatNode {\n    ChatNode { role: Some(NodeRole::Assistant), ..Default::default() }\n}\n'
   const r = roleAudit(src, 0)
-  assert.equal(r.status, 1, r.stdout)
-  assert.match(r.stdout, /S-014 违例：存量 role 格直写 1 处 > 基线 0/)
-  assert.match(r.stdout, /sample\.rs:2/)
-  assert.match(r.stdout, /身份写 .*principal.*，不写 role/)
+  expectAudit(r, 1, [/S-014 违例：存量 role 格直写 1 处 > 基线 0/, /sample\.rs:2/, /身份写 .*principal.*，不写 role/])
 })
 
 test('S-014 存量降了却不挪基线同样判红（棘轮只许留痕地下调）', () => {
   // 这条分支被 `S014_IS_REPO` 限定在真实仓库上跑，所以这里直接把基线置到
   // **超过真实存量**（不动仓里任何存量）：读数 < 基线 ⇒ 该收紧。
   const r = roleAuditRepo(9999)
-  assert.equal(r.status, 1, r.stdout)
-  assert.match(r.stdout, /S-014 基线该收紧：存量 role 格直写 \d+ 处 < 基线 9999/)
+  expectAudit(r, 1, [/S-014 基线该收紧：存量 role 格直写 \d+ 处 < 基线 9999/])
 })
 
 test('S-014 数的是直写形状：字段初始化 / 赋值 / get_or_insert', () => {
@@ -550,8 +534,7 @@ test('S-014 真实仓库的存量与基线持平（读数漂了就红）', () =>
 const S015_FILE = 'crates/symbio-plugin-loop/src/sample.rs'
 
 function gateAudit(source, name = S015_FILE) {
-  const root = fs.mkdtempSync(path.join(os.tmpdir(), 'grep-audit-s015-'))
-  try {
+  return withTempTree({}, (root) => {
     const target = path.join(root, name)
     fs.mkdirSync(path.dirname(target), { recursive: true })
     fs.writeFileSync(target, source)
@@ -563,26 +546,19 @@ function gateAudit(source, name = S015_FILE) {
       encoding: 'utf8',
       timeout: 10000,
     })
-  } finally {
-    fs.rmSync(root, { recursive: true, force: true })
-  }
+  }, { prefix: 'grep-audit-s015-' })
 }
 
 test('S-015 布尔壳 `closure_granted` 复活即红，并点名改法', () => {
   const src = 'fn f() {\n    if !closure_granted(&actor, ClosureKind::Speech) {\n        return;\n    }\n}\n'
   const r = gateAudit(src)
-  assert.equal(r.status, 1, r.stdout)
-  assert.match(r.stdout, /S-015 违例：收束闸被压回布尔形态（1 处）/)
-  assert.match(r.stdout, /sample\.rs:2/)
-  assert.match(r.stdout, /布尔壳 `closure_granted` 已退役/)
-  assert.match(r.stdout, /if let Err\(why\) = closure_gate\(\.\.\)/)
+  expectAudit(r, 1, [/S-015 违例：收束闸被压回布尔形态（1 处）/, /sample\.rs:2/, /布尔壳 `closure_granted` 已退役/, /if let Err\(why\) = closure_gate\(\.\.\)/])
 })
 
 test('S-015 闸被压成布尔或存起来另判即红', () => {
   const boolShape = 'fn f() {\n    if closure_gate(&actor, ClosureKind::Speech).is_ok() {\n        land();\n    }\n}\n'
   const r = gateAudit(boolShape)
-  assert.equal(r.status, 1, r.stdout)
-  assert.match(r.stdout, /闸的调用没当场处理 `Err`/)
+  expectAudit(r, 1, [/闸的调用没当场处理 `Err`/])
   // 拆行写法骗得过「不许 `.is_ok()`」那种行级正则——这条判据按上一行同看挡住它。
   const split = 'fn f() {\n    if let Err(why) =\n        closure_gate(&actor, ClosureKind::Speech)\n    {\n        deny(why);\n    }\n}\n'
   assert.equal(gateAudit(split).status, 0, gateAudit(split).stdout)
@@ -635,8 +611,7 @@ const S016_TARGET = 'crates/symbio-plugin-loop/src/ring/settle.rs'
 const S016_OTHER_CELL = 'crates/symbio-plugin-memory/src/memory_events.rs'
 
 function gateAudit16(source, name = S016_TARGET) {
-  const root = fs.mkdtempSync(path.join(os.tmpdir(), 'grep-audit-s016-'))
-  try {
+  return withTempTree({}, (root) => {
     const target = path.join(root, name)
     fs.mkdirSync(path.dirname(target), { recursive: true })
     fs.writeFileSync(target, source)
@@ -648,14 +623,11 @@ function gateAudit16(source, name = S016_TARGET) {
       encoding: 'utf8',
       timeout: 10000,
     })
-  } finally {
-    fs.rmSync(root, { recursive: true, force: true })
-  }
+  }, { prefix: 'grep-audit-s016-' })
 }
 
 test('S-016 在临时树里扫不到不算红（真仓扫不到才红）', () => {
-  const root = fs.mkdtempSync(path.join(os.tmpdir(), 'grep-audit-s016-empty-'))
-  try {
+  return withTempTree({}, (root) => {
     // 只造 `crates/`（让 `looksLikeRepoTree` 认它是仓树），但不造 plugin-loop。
     fs.mkdirSync(path.join(root, 'crates'), { recursive: true })
     const env = { ...process.env, NO_COLOR: '1' }
@@ -666,11 +638,8 @@ test('S-016 在临时树里扫不到不算红（真仓扫不到才红）', () =>
       encoding: 'utf8',
       timeout: 10000,
     })
-    assert.equal(r.status, 0, r.stdout)
-    assert.match(r.stdout, /S-016 跳过：当前树不是真实仓库/)
-  } finally {
-    fs.rmSync(root, { recursive: true, force: true })
-  }
+    expectAudit(r, 0, [/S-016 跳过：当前树不是真实仓库/])
+  }, { prefix: 'grep-audit-s016-empty-' })
 })
 
 test('S-016 已退役的两个形状各自即红', () => {
@@ -745,8 +714,7 @@ const S017_LOOP = 'crates/symbio-plugin-loop/src'
 
 /** 多文件临时树（这条规则要同时看「文件在不在」与「文件里写了什么」）。 */
 function gateAudit17(files) {
-  const root = fs.mkdtempSync(path.join(os.tmpdir(), 'grep-audit-s017-'))
-  try {
+  return withTempTree({}, (root) => {
     for (const [rel, body] of Object.entries(files)) {
       const target = path.join(root, rel)
       fs.mkdirSync(path.dirname(target), { recursive: true })
@@ -760,9 +728,7 @@ function gateAudit17(files) {
       encoding: 'utf8',
       timeout: 10000,
     })
-  } finally {
-    fs.rmSync(root, { recursive: true, force: true })
-  }
+  }, { prefix: 'grep-audit-s017-' })
 }
 
 test('S-017 `resume_anchor` 回来即红', () => {
@@ -778,9 +744,7 @@ test('S-017 `resume.rs` 回来即红（文件存在本身就是违例）', () =>
   const r = gateAudit17({
     [`${S017_LOOP}/resume.rs`]: 'pub fn resume() {}\n',
   })
-  assert.equal(r.status, 1, r.stdout)
-  assert.match(r.stdout, /S-017 违例：恢复路径的私有旁路回来了/)
-  assert.match(r.stdout, /resume\.rs/)
+  expectAudit(r, 1, [/S-017 违例：恢复路径的私有旁路回来了/, /resume\.rs/])
 })
 
 test('S-017 注释行不判；`resumed` 载荷键不在判据面', () => {

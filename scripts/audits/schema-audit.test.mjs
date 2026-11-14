@@ -16,9 +16,9 @@ import { test } from 'node:test'
 import assert from 'node:assert/strict'
 import { spawnSync } from 'node:child_process'
 import fs from 'node:fs'
-import os from 'node:os'
 import path from 'node:path'
 import { fileURLToPath } from 'node:url'
+import { withTempTree } from '../fs-walk.mjs'
 
 const script = path.join(path.dirname(fileURLToPath(import.meta.url)), 'schema-audit.mjs')
 
@@ -27,8 +27,7 @@ const script = path.join(path.dirname(fileURLToPath(import.meta.url)), 'schema-a
  * @param {Record<string,string>} files 相对路径 -> 内容
  */
 function audit(files) {
-  const root = fs.mkdtempSync(path.join(os.tmpdir(), 'schema-audit-'))
-  try {
+  return withTempTree({}, (root) => {
     // 脚本无条件 walk `tauri/src`，缺了会抛 ⇒ 给个空目录占位
     fs.mkdirSync(path.join(root, 'tauri', 'src', 'schemas'), { recursive: true })
     for (const [rel, content] of Object.entries(files)) {
@@ -43,9 +42,7 @@ function audit(files) {
     })
     assert.equal(r.status, 0, `脚本应恒为 0（报告型）：\n${r.stderr}`)
     return r.stdout
-  } finally {
-    fs.rmSync(root, { recursive: true, force: true })
-  }
+  }, { prefix: 'schema-audit-' })
 }
 
 /** 抠出「前端 schemas 审计」之后的正文：后端那一段只印一句退役说明，不该混进断言。 */

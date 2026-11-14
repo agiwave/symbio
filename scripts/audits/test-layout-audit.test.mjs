@@ -12,24 +12,17 @@
 import assert from 'node:assert/strict'
 import { test } from 'node:test'
 import fs from 'node:fs'
-import os from 'node:os'
 import path from 'node:path'
 import { spawnSync } from 'node:child_process'
 import { fileURLToPath } from 'node:url'
-import { rmTree } from '../fs-walk.mjs'
+import { withTempTree } from '../fs-walk.mjs'
 
 const script = fileURLToPath(new URL('./test-layout-audit.mjs', import.meta.url))
 const repoRoot = path.resolve(path.dirname(script), '..', '..')
 
 
 function audit(files, { strict = false, ratchet = null } = {}) {
-  const root = fs.mkdtempSync(path.join(os.tmpdir(), 'test-layout-'))
-  try {
-    for (const [rel, content] of Object.entries(files)) {
-      const abs = path.join(root, rel)
-      fs.mkdirSync(path.dirname(abs), { recursive: true })
-      fs.writeFileSync(abs, content)
-    }
+  return withTempTree(files, (root) => {
     const result = spawnSync(
       process.execPath,
       [
@@ -42,9 +35,7 @@ function audit(files, { strict = false, ratchet = null } = {}) {
     )
     assert.ifError(result.error)
     return result
-  } finally {
-    rmTree(root)
-  }
+  }, { prefix: 'test-layout-' })
 }
 
 const clean = {

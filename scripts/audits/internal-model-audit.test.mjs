@@ -35,6 +35,7 @@ import path from 'node:path'
 import { spawnSync } from 'node:child_process'
 import { fileURLToPath } from 'node:url'
 import { rmTree } from '../fs-walk.mjs'
+import { expectAudit } from '../audit-assert.mjs'
 
 const script = fileURLToPath(new URL('./internal-model-audit.mjs', import.meta.url))
 const repoRoot = path.resolve(script, '..', '..')
@@ -60,8 +61,7 @@ test('① 干净夹具（没有任何 round_trip 调用）→ 通过', () => {
   const root = makeRoot(fixture('fn a() { let _: u8 = 1; }\n'))
   try {
     const r = run(root)
-    assert.equal(r.status, 0, r.stdout + r.stderr)
-    assert.match(r.stdout, /4\s*处|0\s*处|全部登记/)
+    expectAudit(r, 0, [/4\s*处|0\s*处|全部登记/])
   } finally {
     rmTree(root)
   }
@@ -91,8 +91,7 @@ test('③ 标记写在调用点上一行 → 绿（本判据的登记形态）',
   )
   try {
     const r = run(root)
-    assert.equal(r.status, 0, r.stdout + r.stderr)
-    assert.match(r.stdout, /存量豁免 1 处/)
+    expectAudit(r, 0, [/存量豁免 1 处/])
   } finally {
     rmTree(root)
   }
@@ -257,8 +256,7 @@ test('⑬ 形状按每个调用点自己判（跨文件、两处形状相反）�
     const root = makeRoot(files)
     try {
       const r = run(root)
-      assert.equal(r.status, 0, r.stdout + r.stderr)
-      assert.match(r.stdout, /2 处/)
+      expectAudit(r, 0, [/2 处/])
     } finally {
       rmTree(root)
     }

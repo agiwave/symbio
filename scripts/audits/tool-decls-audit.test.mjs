@@ -21,11 +21,10 @@
 import assert from 'node:assert/strict'
 import { test } from 'node:test'
 import fs from 'node:fs'
-import os from 'node:os'
 import path from 'node:path'
 import { spawnSync } from 'node:child_process'
 import { fileURLToPath } from 'node:url'
-import { rmTree } from '../fs-walk.mjs'
+import { withTempTree } from '../fs-walk.mjs'
 
 const script = fileURLToPath(new URL('./tool-decls-audit.mjs', import.meta.url))
 
@@ -53,8 +52,7 @@ function toolsFixture(names) {
 
 /** 跑一次守卫：`tools` 为工具名夹具，`baseline` 为声明面基线（JSON 数组），`rawRoot` 可给完全空的夹具。 */
 function run({ tools = ['agent_run'], baseline = ['agent_run'], emptyRoot = false } = {}) {
-  const root = fs.mkdtempSync(path.join(os.tmpdir(), 'tool-decls-'))
-  try {
+  return withTempTree({}, (root) => {
     if (!emptyRoot) {
       for (const [rel, content] of Object.entries(toolsFixture(tools))) {
         const abs = path.join(root, rel)
@@ -74,9 +72,7 @@ function run({ tools = ['agent_run'], baseline = ['agent_run'], emptyRoot = fals
     )
     assert.ifError(result.error)
     return result
-  } finally {
-    rmTree(root)
-  }
+  }, { prefix: 'tool-decls-' })
 }
 
 test('干净夹具：两份账逐名相等 ⇒ exit 0', () => {

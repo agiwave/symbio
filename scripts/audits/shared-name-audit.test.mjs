@@ -28,7 +28,8 @@ import os from 'node:os'
 import path from 'node:path'
 import { spawnSync } from 'node:child_process'
 import { fileURLToPath } from 'node:url'
-import { rmTree } from '../fs-walk.mjs'
+import { rmTree, withTempTree } from '../fs-walk.mjs'
+import { expectAudit } from '../audit-assert.mjs'
 
 const script = fileURLToPath(new URL('./shared-name-audit.mjs', import.meta.url))
 
@@ -124,8 +125,7 @@ test('① 干净夹具：两侧都 import，不写字面量 ⇒ 绿', () => {
   })
   try {
     const r = runOn(root)
-    assert.equal(r.status, 0, r.stdout + r.stderr)
-    assert.match(r.stdout, /SV-001/)
+    expectAudit(r, 0, [/SV-001/])
   } finally {
     rmTree(root)
   }
@@ -138,9 +138,7 @@ test('② 同一个有结构名字在两个插件各写一次字面量 ⇒ 红',
   })
   try {
     const r = runOn(root)
-    assert.equal(r.status, 1, r.stdout + r.stderr)
-    assert.match(r.stdout, /SV-001/)
-    assert.match(r.stdout, /vdfs\/write/)
+    expectAudit(r, 1, [/SV-001/, /vdfs\/write/])
   } finally {
     rmTree(root)
   }
@@ -153,9 +151,7 @@ test('③ 同名 const 在两个插件各声明一次 ⇒ 红（无分隔符的�
   })
   try {
     const r = runOn(root)
-    assert.equal(r.status, 1, r.stdout + r.stderr)
-    assert.match(r.stdout, /SV-001/)
-    assert.match(r.stdout, /task_table/)
+    expectAudit(r, 1, [/SV-001/, /task_table/])
   } finally {
     rmTree(root)
   }
@@ -196,10 +192,7 @@ test('⑦ 机制层手写词汇层事件名 ⇒ 红（SV-001 ③）', () => {
   })
   try {
     const r = runOn(root)
-    assert.equal(r.status, 1, r.stdout + r.stderr)
-    assert.match(r.stdout, /SV-001/)
-    assert.match(r.stdout, /vdfs\/write/)
-    assert.match(r.stdout, /symbio-sdk/)
+    expectAudit(r, 1, [/SV-001/, /vdfs\/write/, /symbio-sdk/])
   } finally {
     rmTree(root)
   }
@@ -227,9 +220,7 @@ test('⑬ 手抄 test_fixtures.rs（无生成标记）⇒ 红（正是本判据�
   })
   try {
     const r = runOn(root)
-    assert.equal(r.status, 1, r.stdout + r.stderr)
-    assert.match(r.stdout, /SV-001/)
-    assert.match(r.stdout, /test_fixtures/)
+    expectAudit(r, 1, [/SV-001/, /test_fixtures/])
   } finally {
     rmTree(root)
   }
@@ -261,8 +252,7 @@ test('⑨ 登记与 024 契约表逐行相等 ⇒ 绿（SV-003）', () => {
   })
   try {
     const r = runOn(root)
-    assert.equal(r.status, 0, r.stdout + r.stderr)
-    assert.match(r.stdout, /SV-003/)
+    expectAudit(r, 0, [/SV-003/])
   } finally {
     rmTree(root)
   }
@@ -278,9 +268,7 @@ test('⑩ 契约表有、登记没有 ⇒ 红（SV-003 双向）', () => {
   })
   try {
     const r = runOn(root)
-    assert.equal(r.status, 1, r.stdout + r.stderr)
-    assert.match(r.stdout, /SV-003/)
-    assert.match(r.stdout, /cost/)
+    expectAudit(r, 1, [/SV-003/, /cost/])
   } finally {
     rmTree(root)
   }
@@ -294,9 +282,7 @@ test('⑪ 登记了、契约表里没有 ⇒ 红（SV-003 双向）', () => {
   })
   try {
     const r = runOn(root)
-    assert.equal(r.status, 1, r.stdout + r.stderr)
-    assert.match(r.stdout, /SV-003/)
-    assert.match(r.stdout, /cost/)
+    expectAudit(r, 1, [/SV-003/, /cost/])
   } finally {
     rmTree(root)
   }
@@ -309,22 +295,17 @@ test('⑫ 同一 slot 的 fleet 落点不一致 ⇒ 红', () => {
   })
   try {
     const r = runOn(root)
-    assert.equal(r.status, 1, r.stdout + r.stderr)
-    assert.match(r.stdout, /SV-003/)
-    assert.match(r.stdout, /by_tier/)
+    expectAudit(r, 1, [/SV-003/, /by_tier/])
   } finally {
     rmTree(root)
   }
 })
 
 test('⑥ 范围读不出 ⇒ exit 2', () => {
-  const root = fs.mkdtempSync(path.join(os.tmpdir(), 'shared-name-empty-'))
-  try {
+  return withTempTree({}, (root) => {
     const r = runOn(root)
     assert.equal(r.status, 2, r.stdout + r.stderr)
-  } finally {
-    rmTree(root)
-  }
+  }, { prefix: 'shared-name-empty-' })
 })
 
 test('⑭ 产物的读点用常量取键 ⇒ 绿（SV-004）', () => {
@@ -333,8 +314,7 @@ test('⑭ 产物的读点用常量取键 ⇒ 绿（SV-004）', () => {
   })
   try {
     const r = runOn(root)
-    assert.equal(r.status, 0, r.stdout + r.stderr)
-    assert.match(r.stdout, /SV-004/)
+    expectAudit(r, 0, [/SV-004/])
   } finally {
     rmTree(root)
   }
@@ -347,9 +327,7 @@ test('⑮ 读点读了一格写方不写的键 ⇒ 红（写方改名后读方�
   })
   try {
     const r = runOn(root)
-    assert.equal(r.status, 1, r.stdout + r.stderr)
-    assert.match(r.stdout, /SV-004/)
-    assert.match(r.stdout, /ghost/)
+    expectAudit(r, 1, [/SV-004/, /ghost/])
   } finally {
     rmTree(root)
   }
@@ -370,9 +348,7 @@ test('⑯ 写方把键改名 ⇒ 红（读方仍在读旧键）', () => {
   })
   try {
     const r = runOn(root)
-    assert.equal(r.status, 1, r.stdout + r.stderr)
-    assert.match(r.stdout, /SV-004/)
-    assert.match(r.stdout, /tool/)
+    expectAudit(r, 1, [/SV-004/, /tool/])
   } finally {
     rmTree(root)
   }
@@ -383,8 +359,7 @@ test('⑰ 写方缺失 ⇒ exit 2（规则源读不出不是「没有违规」�
   try {
     fs.unlinkSync(path.join(root, 'crates/symbio-plugin-tool/src/port.rs'))
     const r = runOn(root)
-    assert.equal(r.status, 2, r.stdout + r.stderr)
-    assert.match(r.stdout, /SV-004/)
+    expectAudit(r, 2, [/SV-004/])
   } finally {
     rmTree(root)
   }
@@ -400,8 +375,7 @@ test('⑱ 行为追加格与装配格重名 ⇒ 红（两个写点争同一格�
   })
   try {
     const r = runOn(root)
-    assert.equal(r.status, 1, r.stdout + r.stderr)
-    assert.match(r.stdout, /SV-004/)
+    expectAudit(r, 1, [/SV-004/])
   } finally {
     rmTree(root)
   }
@@ -415,10 +389,7 @@ test('⑲ calls 读点读了元素账上没有的键 ⇒ 红（wire_id 混进派
   })
   try {
     const r = runOn(root)
-    assert.equal(r.status, 1, r.stdout + r.stderr)
-    assert.match(r.stdout, /SV-004/)
-    assert.match(r.stdout, /wire_id/)
-    assert.match(r.stdout, /派发清单格/)
+    expectAudit(r, 1, [/SV-004/, /wire_id/, /派发清单格/])
   } finally {
     rmTree(root)
   }
@@ -440,9 +411,7 @@ test('⑳ calls 写方把条件格改名 ⇒ 红（读方仍读 node_id，静默
   })
   try {
     const r = runOn(root)
-    assert.equal(r.status, 1, r.stdout + r.stderr)
-    assert.match(r.stdout, /SV-004/)
-    assert.match(r.stdout, /node_id/)
+    expectAudit(r, 1, [/SV-004/, /node_id/])
   } finally {
     rmTree(root)
   }
@@ -455,8 +424,7 @@ test('㉑ calls 读段函数不在 ⇒ exit 2（读段改名后判据会恒真�
   })
   try {
     const r = runOn(root)
-    assert.equal(r.status, 2, r.stdout + r.stderr)
-    assert.match(r.stdout, /SV-004/)
+    expectAudit(r, 2, [/SV-004/])
   } finally {
     rmTree(root)
   }
@@ -471,8 +439,7 @@ test('㉒ tool_calls 补写段读 wire_id ⇒ 绿（不登记、不并账——D
   })
   try {
     const r = runOn(root)
-    assert.equal(r.status, 0, r.stdout + r.stderr)
-    assert.match(r.stdout, /派发清单格/)
+    expectAudit(r, 0, [/派发清单格/])
   } finally {
     rmTree(root)
   }
@@ -488,9 +455,7 @@ test('㉓ 会话侧登记读点读账外键 ⇒ 红（D-471 全表登记后，�
   })
   try {
     const r = runOn(root)
-    assert.equal(r.status, 1, r.stdout + r.stderr)
-    assert.match(r.stdout, /SV-004/)
-    assert.match(r.stdout, /card_id/)
+    expectAudit(r, 1, [/SV-004/, /card_id/])
   } finally {
     rmTree(root)
   }

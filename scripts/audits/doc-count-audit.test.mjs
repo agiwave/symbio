@@ -16,17 +16,17 @@
 import assert from 'node:assert/strict'
 import { test } from 'node:test'
 import fs from 'node:fs'
-import os from 'node:os'
 import path from 'node:path'
 import { spawnSync } from 'node:child_process'
 import { fileURLToPath } from 'node:url'
+import { withTempTree } from '../fs-walk.mjs'
+import { expectAudit } from '../audit-assert.mjs'
 
 const script = fileURLToPath(new URL('./doc-count-audit.mjs', import.meta.url))
 
 /** 造一棵最小仓库：`docs/` 一份文档，`invariants` 与 `facts` 两处来源可覆写 */
 function audit ({ doc = 'docs/a.md', body = '# A\n', checkAll = 8, facts = { mechanisms: 10, paramKeys: 11 }, verify = 1, extra = {} } = {}) {
-  const root = fs.mkdtempSync(path.join(os.tmpdir(), 'doc-count-'))
-  try {
+  return withTempTree({}, (root) => {
     const write = (rel, content) => {
       const abs = path.join(root, rel)
       fs.mkdirSync(path.dirname(abs), { recursive: true })
@@ -62,9 +62,7 @@ function audit ({ doc = 'docs/a.md', body = '# A\n', checkAll = 8, facts = { mec
     })
     assert.ifError(r.error)
     return r
-  } finally {
-    fs.rmSync(root, { recursive: true, force: true })
-  }
+  }, { prefix: 'doc-count-' })
 }
 
 const OK = '# A\n\n机制表 10 个顶层键。\n'
@@ -78,32 +76,27 @@ test('文档说对了一个数 ⇒ 通过（exit 0）', () => {
 
 test('DC-001 文档把 check_all 的条数写错 ⇒ 红', () => {
   const r = audit({ body: '# A\n\n`check_all` 八条。\n', checkAll: 7 })
-  assert.equal(r.status, 1, r.stdout)
-  assert.match(r.stdout, /DC-001 .*说 `check_all` 有 8，而代码里是 7/)
+  expectAudit(r, 1, [/DC-001 .*说 `check_all` 有 8，而代码里是 7/])
 })
 
 test('DC-002 文档把顶层键数写错 ⇒ 红（数在名字之前）', () => {
   const r = audit({ body: '# A\n\n机制表 9 个顶层键。\n' })
-  assert.equal(r.status, 1, r.stdout)
-  assert.match(r.stdout, /DC-002/)
+  expectAudit(r, 1, [/DC-002/])
 })
 
 test('DC-003 「登记的键（含子键）」数写错 ⇒ 红（数在名字之后）', () => {
   const r = audit({ body: '# A\n\n§8 登记的键（含子键）12 项。\n' })
-  assert.equal(r.status, 1, r.stdout)
-  assert.match(r.stdout, /DC-003/)
+  expectAudit(r, 1, [/DC-003/])
 })
 
 test('代码里的数变了而文档没跟 ⇒ 红（这是它存在的理由）', () => {
   const r = audit({ body: OK, checkAll: 9, facts: { mechanisms: 11, paramKeys: 12 } })
-  assert.equal(r.status, 1, r.stdout)
-  assert.match(r.stdout, /DC-002/)
+  expectAudit(r, 1, [/DC-002/])
 })
 
 test('DC-004 文档说 3 个验证程序而目录里只有 1 个 ⇒ 红（新程序落地而没人改文档的那种漂移）', () => {
   const r = audit({ body: '# A\n\n证据是 3 个验证程序，全部带反向用例。\n', verify: 1 })
-  assert.equal(r.status, 1, r.stdout)
-  assert.match(r.stdout, /DC-004/)
+  expectAudit(r, 1, [/DC-004/])
 })
 
 test('DC-004 数对得上 ⇒ 绿（数的是目录里那几个会被编译的文件）', () => {
@@ -148,8 +141,7 @@ test('源码注释把条数写错 ⇒ 红（口径不止文档）', () => {
       'crates/symbio-plugin-loop/src/x.test.rs': '/// 且 `check_all` 七条全绿。\nfn t() {}\n',
     },
   })
-  assert.equal(r.status, 1, r.stdout)
-  assert.match(r.stdout, /DC-001 .*x\.test\.rs:1 说 `check_all` 有 7，而代码里是 8/)
+  expectAudit(r, 1, [/DC-001 .*x\.test\.rs:1 说 `check_all` 有 7，而代码里是 8/])
 })
 
 test('源码注释说对了数 ⇒ 绿（扩文件集不是把守卫变成噪音）', () => {
@@ -179,8 +171,7 @@ test('不误报：数与名字之间有实词（读侧 `check_all` 会把同一�
 // ── ③ 读不出即失败 ──────────────────────────────────────────────────
 
 test('来源读不出（invariants 不存在）⇒ exit 2，不是「零违规」的绿灯', () => {
-  const root = fs.mkdtempSync(path.join(os.tmpdir(), 'doc-count-'))
-  try {
+  return withTempTree({}, (root) => {
     fs.mkdirSync(path.join(root, 'docs'), { recursive: true })
     fs.writeFileSync(path.join(root, 'docs', 'a.md'), '# A\n')
     const r = spawnSync(process.execPath, [script, `--root=${root}`], {
@@ -188,16 +179,12 @@ test('来源读不出（invariants 不存在）⇒ exit 2，不是「零违规�
       encoding: 'utf8',
       timeout: 30000,
     })
-    assert.equal(r.status, 2, r.stdout + r.stderr)
-    assert.match(r.stdout, /审计范围读不出/)
-  } finally {
-    fs.rmSync(root, { recursive: true, force: true })
-  }
+    expectAudit(r, 2, [/审计范围读不出/])
+  }, { prefix: 'doc-count-' })
 })
 
 test('来源读不出（facts 生成物缺失 ⇒ 机制键数无从取得）⇒ exit 2', () => {
-  const root = fs.mkdtempSync(path.join(os.tmpdir(), 'doc-count-'))
-  try {
+  return withTempTree({}, (root) => {
     const abs = path.join(root, 'crates', 'symbio-sdk', 'src', 'invariants')
     fs.mkdirSync(abs, { recursive: true })
     fs.writeFileSync(path.join(abs, 'mod.rs'), 'pub fn check_all(e: &[u8]) -> u8 {\n let mut all = a(e);\n all.extend(b(e));\n all\n}\n')
@@ -208,9 +195,6 @@ test('来源读不出（facts 生成物缺失 ⇒ 机制键数无从取得）⇒
       encoding: 'utf8',
       timeout: 30000,
     })
-    assert.equal(r.status, 2, r.stdout + r.stderr)
-    assert.match(r.stdout, /审计范围读不出/)
-  } finally {
-    fs.rmSync(root, { recursive: true, force: true })
-  }
+    expectAudit(r, 2, [/审计范围读不出/])
+  }, { prefix: 'doc-count-' })
 })

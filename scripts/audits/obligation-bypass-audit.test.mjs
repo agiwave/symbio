@@ -27,10 +27,10 @@
 import assert from 'node:assert/strict'
 import { test } from 'node:test'
 import fs from 'node:fs'
-import os from 'node:os'
 import path from 'node:path'
 import { spawnSync } from 'node:child_process'
 import { fileURLToPath } from 'node:url'
+import { withTempTree } from '../fs-walk.mjs'
 
 const script = fileURLToPath(new URL('./obligation-bypass-audit.mjs', import.meta.url))
 
@@ -56,8 +56,7 @@ const ROWS_PATH = 'crates/symbio-plugin-loop/src/loop_rows.rs'
 
 /** 造一棵最小仓库：`files` 是 相对路径 → 内容（`ROWS_PATH` 默认给一份两行表） */
 function audit(files, { baseline = '2', precheck = '9' } = {}) {
-  const root = fs.mkdtempSync(path.join(os.tmpdir(), 'obligation-bypass-'))
-  try {
+  return withTempTree({}, (root) => {
     const all = { [ROWS_PATH]: ROWS_RS, ...files }
     for (const [rel, content] of Object.entries(all)) {
       if (content === null) continue
@@ -77,9 +76,7 @@ function audit(files, { baseline = '2', precheck = '9' } = {}) {
     })
     assert.ifError(r.error)
     return r
-  } finally {
-    fs.rmSync(root, { recursive: true, force: true })
-  }
+  }, { prefix: 'obligation-bypass-' })
 }
 
 const out = (r) => `${r.stdout}${r.stderr}`

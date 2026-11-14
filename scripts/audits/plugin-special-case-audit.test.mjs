@@ -28,11 +28,10 @@
 import assert from 'node:assert/strict'
 import { test } from 'node:test'
 import fs from 'node:fs'
-import os from 'node:os'
 import path from 'node:path'
 import { spawnSync } from 'node:child_process'
 import { fileURLToPath } from 'node:url'
-import { rmTree } from '../fs-walk.mjs'
+import { withTempTree } from '../fs-walk.mjs'
 
 const script = fileURLToPath(new URL('./plugin-special-case-audit.mjs', import.meta.url))
 
@@ -74,8 +73,7 @@ function run({
   docs = DOCS_FIXTURE,
   baseline = {},
 } = {}) {
-  const root = fs.mkdtempSync(path.join(os.tmpdir(), 'plugin-special-case-'))
-  try {
+  return withTempTree({}, (root) => {
     const write = (base, files) => {
       for (const [rel, content] of Object.entries(files)) {
         const abs = path.join(root, base, rel)
@@ -113,9 +111,7 @@ function run({
     )
     assert.ifError(result.error)
     return result
-  } finally {
-    rmTree(root)
-  }
+  }, { prefix: 'plugin-special-case-' })
 }
 
 /** 档案表夹具：SC-003 的名单来源就是它里面的字符串字面量。 */

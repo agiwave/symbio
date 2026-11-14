@@ -28,10 +28,11 @@
 import assert from 'node:assert/strict'
 import { test } from 'node:test'
 import fs from 'node:fs'
-import os from 'node:os'
 import path from 'node:path'
 import { spawnSync } from 'node:child_process'
 import { fileURLToPath } from 'node:url'
+import { withTempTree } from '../fs-walk.mjs'
+import { expectAudit } from '../audit-assert.mjs'
 
 const script = fileURLToPath(new URL('./protocol-mirror-audit.mjs', import.meta.url))
 
@@ -501,13 +502,7 @@ function mirror(overrides = {}, extraArgs = []) {
     if (v === null) delete files[k]
     else files[k] = v
   }
-  const root = fs.mkdtempSync(path.join(os.tmpdir(), 'protocol-mirror-'))
-  try {
-    for (const [rel, content] of Object.entries(files)) {
-      const abs = path.join(root, rel)
-      fs.mkdirSync(path.dirname(abs), { recursive: true })
-      fs.writeFileSync(abs, content)
-    }
+  return withTempTree(files, (root) => {
     const result = spawnSync(process.execPath, [script, `--repo=${root}`, ...extraArgs], {
       env: { ...process.env, NO_COLOR: '1' },
       encoding: 'utf8',
@@ -515,9 +510,7 @@ function mirror(overrides = {}, extraArgs = []) {
     })
     assert.ifError(result.error)
     return result
-  } finally {
-    fs.rmSync(root, { recursive: true, force: true })
-  }
+  }, { prefix: 'protocol-mirror-' })
 }
 
 // ==================== 基线 ====================
@@ -761,8 +754,7 @@ test('线路层信封的容器字段改名、前端没跟 → 变红（信封不
   const r = mirror({
     [TRANSPORT_RS]: rsStruct('PluginMessageWire', 'headers', 'payload'),
   })
-  assert.equal(r.status, 1, r.stdout)
-  assert.match(r.stdout, /前端持有后端不存在的字段：metadata/)
+  expectAudit(r, 1, [/前端持有后端不存在的字段：metadata/])
 })
 
 test('读数行字段改名、前端没跟 → 变红（T-202 守卫真的在看）', () => {
@@ -777,8 +769,7 @@ test('读数语气词表多一档 → 变红（T-202 词表组真的在看）', 
   const r = mirror({
     [READING_TS]: READING_TS_SRC.replace("'normal'", "'normal', 'danger'"),
   })
-  assert.equal(r.status, 1, r.stdout)
-  assert.match(r.stdout, /前端词表多出：danger/)
+  expectAudit(r, 1, [/前端词表多出：danger/])
 })
 
 test('后端结构体字段改名、前端没跟 → 变红', () => {
@@ -983,8 +974,7 @@ test('跨栈导航头指向不存在的文件 → 变红（前端改名后这条
 
 test('跨栈导航头指向真实文件 → 不红（两个方向都判）', () => {
   const r = mirror()
-  assert.equal(r.status, 0, r.stdout)
-  assert.match(r.stdout, /✓ 后端 crates\/symbio-sdk\/src\/event_bus\/mod\.rs:1 → tauri\/src\/schemas\/vdfs\.ts/)
+  expectAudit(r, 0, [/✓ 后端 crates\/symbio-sdk\/src\/event_bus\/mod\.rs:1 → tauri\/src\/schemas\/vdfs\.ts/])
   // 反方向：前端 `Corresponding Backend` 同样有守卫（此前它是免检的）
   assert.match(
     r.stdout,
@@ -1012,8 +1002,7 @@ test('没有任何跨栈导航头 → 不红（没写不违规，写了假指针
     ),
     [HOME_TS]: HOME_TS_SRC.replace('// Corresponding Backend: crates/symbio-plugin-home/src/schemas.rs\n', ''),
   })
-  assert.equal(r.status, 0, r.stdout)
-  assert.match(r.stdout, /E 组 0 条跨栈导航头/)
+  expectAudit(r, 0, [/E 组 0 条跨栈导航头/])
 })
 
 // ==================== G 组：ChatNode 顶层字段消费守卫 ====================

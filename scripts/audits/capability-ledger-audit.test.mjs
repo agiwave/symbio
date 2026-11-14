@@ -16,11 +16,11 @@
 import assert from 'node:assert/strict'
 import { test } from 'node:test'
 import fs from 'node:fs'
-import os from 'node:os'
 import path from 'node:path'
 import { spawnSync } from 'node:child_process'
 import { fileURLToPath } from 'node:url'
-import { rmTree } from '../fs-walk.mjs'
+import { withTempTree } from '../fs-walk.mjs'
+import { expectAudit } from '../audit-assert.mjs'
 
 const script = fileURLToPath(new URL('./capability-ledger-audit.mjs', import.meta.url))
 
@@ -86,17 +86,14 @@ function writeTree(root, files) {
 }
 
 function audit(files) {
-  const root = fs.mkdtempSync(path.join(os.tmpdir(), 'ledger-audit-'))
-  try {
+  return withTempTree({}, (root) => {
     writeTree(root, files)
     return spawnSync(process.execPath, [script, `--root=${root}`], {
       cwd: root,
       env: { ...process.env, NO_COLOR: '1' },
       encoding: 'utf8',
     })
-  } finally {
-    rmTree(root)
-  }
+  }, { prefix: 'ledger-audit-' })
 }
 
 function cleanTree() {
@@ -150,8 +147,7 @@ function assertRed(r, needle) {
 
 test('干净夹具：名册与账本逐行对上，读数是 3 行', () => {
   const r = audit(cleanTree())
-  assert.equal(r.status, 0, r.stdout + r.stderr)
-  assert.match(r.stdout, /名册 3 行 = 账本 3 行（拆 1 · 留守 1 · 撤回 0 · 不做 0 · 待裁决 1）/)
+  expectAudit(r, 0, [/名册 3 行 = 账本 3 行（拆 1 · 留守 1 · 撤回 0 · 不做 0 · 待裁决 1）/])
 })
 
 // ── 实现状态：设计在 / 实现还在，是两个字段 ─────────────────────────
@@ -221,8 +217,7 @@ function withdrawnTree(reason = '设计保留 / 实现撤回 / 待重新实现�
 
 test('撤回写明设计保留与场景、且不挂交付段 ⇒ 绿', () => {
   const r = audit(withdrawnTree())
-  assert.equal(r.status, 0, r.stdout + r.stderr)
-  assert.match(r.stdout, /拆 1 · 留守 0 · 撤回 1 · 不做 0 · 待裁决 1/)
+  expectAudit(r, 0, [/拆 1 · 留守 0 · 撤回 1 · 不做 0 · 待裁决 1/])
 })
 
 test('撤回不写真实使用场景 ⇒ 红（写不出场景就该标 planned-unspecified）', () => {
@@ -262,8 +257,7 @@ test('不做（边界）单列一类，不进拆计数 ⇒ 绿', () => {
     .replace('| 留守 | 1 | 2 |', '| 留守 | 0 | |')
     .replace('| 待裁决 | 1 | 3 |', '| 待裁决 | 1 | 3 |\n| 不做 | 1 | 2 |')
   const r = audit(files)
-  assert.equal(r.status, 0, r.stdout + r.stderr)
-  assert.match(r.stdout, /拆 1 · 留守 0 · 撤回 0 · 不做 1 · 待裁决 1/)
+  expectAudit(r, 0, [/拆 1 · 留守 0 · 撤回 0 · 不做 1 · 待裁决 1/])
 })
 
 test('不做不挂决策号 ⇒ 红（「决定不做」必须是裁决）', () => {

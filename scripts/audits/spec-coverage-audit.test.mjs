@@ -19,12 +19,12 @@
 import assert from 'node:assert/strict'
 import { test } from 'node:test'
 import fs from 'node:fs'
-import os from 'node:os'
 import path from 'node:path'
 import { spawnSync } from 'node:child_process'
 import { fileURLToPath } from 'node:url'
 import { classify } from './spec-coverage-audit.mjs'
-import { rmTree } from '../fs-walk.mjs'
+import { withTempTree } from '../fs-walk.mjs'
+import { expectAudit, onStderr } from '../audit-assert.mjs'
 
 const script = fileURLToPath(new URL('./spec-coverage-audit.mjs', import.meta.url))
 
@@ -49,13 +49,7 @@ function spec(id, judge, { status = 'active' } = {}) {
 }
 
 function audit(files, { baseline = '0:0' } = {}) {
-  const root = fs.mkdtempSync(path.join(os.tmpdir(), 'spec-coverage-'))
-  try {
-    for (const [rel, content] of Object.entries(files)) {
-      const abs = path.join(root, rel)
-      fs.mkdirSync(path.dirname(abs), { recursive: true })
-      fs.writeFileSync(abs, content)
-    }
+  return withTempTree(files, (root) => {
     const r = spawnSync(process.execPath, [script, `--root=${root}`], {
       cwd: root,
       env: { ...process.env, NO_COLOR: '1', SPEC_COVERAGE_BASELINE: baseline },
@@ -64,9 +58,7 @@ function audit(files, { baseline = '0:0' } = {}) {
     })
     assert.ifError(r.error)
     return r
-  } finally {
-    rmTree(root)
-  }
+  }, { prefix: 'spec-coverage-' })
 }
 
 const SCRIPT = 'scripts/foo.mjs'
@@ -113,22 +105,19 @@ test('空理由 ⇒ SPC-002 红（空豁免等于没有判据）', () => {
   const r = audit({
     'docs/005-spec/001.md': spec('SP-001', '无机器判据：——'),
   }, { baseline: '1:0' })
-  assert.equal(r.status, 1, r.stdout)
-  assert.match(r.stderr, /SPC-002/)
+  expectAudit(r, 1, [onStderr(/SPC-002/)])
 })
 
 test('没有 `## 判据` 小节 ⇒ SPC-001 红', () => {
   const r = audit({
     'docs/005-spec/001.md': '---\nkind: spec\nid: SP-001\ntitle: SP-001\nstatus: active\ncreated: 2026-10-25\n---\n\n# x\n',
   })
-  assert.equal(r.status, 1, r.stdout)
-  assert.match(r.stderr, /没有 .## 判据. 小节/)
+  expectAudit(r, 1, [onStderr(/没有 .## 判据. 小节/)])
 })
 
 test('一条活跃规范都没有 ⇒ SPC-003 红（范围读空不是全覆盖）', () => {
   const r = audit({ 'docs/005-spec/001.md': spec('SP-001', 'x', { status: 'done' }) })
-  assert.equal(r.status, 1, r.stdout)
-  assert.match(r.stderr, /一条活跃规范都没读到/)
+  expectAudit(r, 1, [onStderr(/一条活跃规范都没读到/)])
 })
 
 test('编号重复 ⇒ SPC-003 红', () => {
@@ -137,6 +126,5 @@ test('编号重复 ⇒ SPC-003 红', () => {
     'docs/005-spec/002.md': spec('SP-001', '执行方是 `scripts/foo.mjs`。'),
     [SCRIPT]: DECL,
   })
-  assert.equal(r.status, 1, r.stdout)
-  assert.match(r.stderr, /编号 SP-001 重复/)
+  expectAudit(r, 1, [onStderr(/编号 SP-001 重复/)])
 })

@@ -1,10 +1,11 @@
 import assert from 'node:assert/strict'
 import { test } from 'node:test'
 import fs from 'node:fs'
-import os from 'node:os'
 import path from 'node:path'
 import { spawnSync } from 'node:child_process'
 import { fileURLToPath } from 'node:url'
+import { withTempTree } from '../fs-walk.mjs'
+import { expectAudit } from '../audit-assert.mjs'
 
 // `dead-code-audit.mjs` 的 R-001（Rust 声明级）是**判定型**守卫，按本仓教条必须
 // 有「注入真实违规并断言脚本变红」的回归测试——否则规则写错了也不会有人发现。
@@ -16,8 +17,7 @@ import { fileURLToPath } from 'node:url'
 const script = fileURLToPath(new URL('./dead-code-audit.mjs', import.meta.url))
 
 function audit(rustFiles, { waiver = null, env: extraEnv = {}, ts = {} } = {}) {
-  const root = fs.mkdtempSync(path.join(os.tmpdir(), 'dead-code-audit-'))
-  try {
+  return withTempTree({}, (root) => {
     fs.mkdirSync(path.join(root, 'tauri/src'), { recursive: true })
     fs.writeFileSync(
       path.join(root, 'tauri/index.html'),
@@ -47,9 +47,7 @@ function audit(rustFiles, { waiver = null, env: extraEnv = {}, ts = {} } = {}) {
     })
     assert.ifError(result.error)
     return result
-  } finally {
-    fs.rmSync(root, { recursive: true, force: true })
-  }
+  }, { prefix: 'dead-code-audit-' })
 }
 
 test('R-001 fires on a pub declaration nobody mentions', () => {
@@ -188,9 +186,7 @@ test('R-003 fires on an unused export with no acknowledgment', () => {
     {},
     { ts: { 'dead.ts': 'export const NOBODY_CALLS_ME = 1\nexport const USED = 2\nconsole.log(USED)\n' } },
   )
-  assert.equal(r.status, 1, r.stdout)
-  assert.match(r.stdout, /R-003/)
-  assert.match(r.stdout, /dead\.ts :: NOBODY_CALLS_ME/)
+  expectAudit(r, 1, [/R-003/, /dead\.ts :: NOBODY_CALLS_ME/])
   assert.doesNotMatch(r.stdout, /dead\.ts :: USED/, '有人用的那个不报（判据不误伤）')
 })
 
@@ -204,8 +200,7 @@ test('R-003 accepts a file-header acknowledgment with a reason (契约面)', () 
       },
     },
   )
-  assert.equal(r.status, 0, r.stdout)
-  assert.match(r.stdout, /全部已承认/)
+  expectAudit(r, 0, [/全部已承认/])
 })
 
 test('R-003 waiver needs a non-empty reason（写了标记不等于承认）', () => {
@@ -217,9 +212,7 @@ test('R-003 waiver needs a non-empty reason（写了标记不等于承认）', (
       },
     },
   )
-  assert.equal(r.status, 1, r.stdout)
-  assert.match(r.stdout, /R-003/)
-  assert.match(r.stdout, /ROUTE_UNUSED/)
+  expectAudit(r, 1, [/R-003/, /ROUTE_UNUSED/])
 })
 
 test('R-003 承认是**文件作用域**：同文件里新出现的未用导出一并被承认（生成物才有这个待遇）', () => {
@@ -232,6 +225,5 @@ test('R-003 承认是**文件作用域**：同文件里新出现的未用导出�
       },
     },
   )
-  assert.equal(r.status, 0, r.stdout)
-  assert.match(r.stdout, /2 个导出全库无人用，全部已承认/)
+  expectAudit(r, 0, [/2 个导出全库无人用，全部已承认/])
 })

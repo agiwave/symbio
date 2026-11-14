@@ -18,6 +18,7 @@ import os from 'node:os'
 import path from 'node:path'
 import { spawnSync } from 'node:child_process'
 import { fileURLToPath } from 'node:url'
+import { expectAudit, onStderr } from '../audit-assert.mjs'
 
 const script = fileURLToPath(new URL('./port-surface-audit.mjs', import.meta.url))
 const repoRoot = path.resolve(path.dirname(fileURLToPath(import.meta.url)), '..', '..')
@@ -242,8 +243,7 @@ test('PTS-001 带端口的事实名不在协议族里 ⇒ 红', () => {
   })
   try {
     const r = run(root)
-    assert.equal(r.status, 1, r.stdout)
-    assert.match(r.stderr, /PTS-001.*turn\.sent.*不在协议族/s)
+    expectAudit(r, 1, [onStderr(/PTS-001.*turn\.sent.*不在协议族/s)])
   } finally {
     cleanup(root)
   }
@@ -253,8 +253,7 @@ test('PTS-001 协议族常量缺一个 ⇒ 红（协议名必须单点定义）'
   const root = fixture({ event: EVENT_SRC.replace('pub const EVENT_RETRY: &str = "retry";\n', '') })
   try {
     const r = run(root)
-    assert.equal(r.status, 1, r.stdout)
-    assert.match(r.stderr, /PTS-001.*EVENT_RETRY/)
+    expectAudit(r, 1, [onStderr(/PTS-001.*EVENT_RETRY/)])
   } finally {
     cleanup(root)
   }
@@ -267,8 +266,7 @@ test('PTS-001 端口字段名不唯一 ⇒ 红', () => {
   })
   try {
     const r = run(root)
-    assert.equal(r.status, 1, r.stdout)
-    assert.match(r.stderr, /PTS-001.*端口字段名必须唯一/)
+    expectAudit(r, 1, [onStderr(/PTS-001.*端口字段名必须唯一/)])
   } finally {
     cleanup(root)
   }
@@ -311,8 +309,7 @@ test('PTS-002 求解器里出现端口字段名 ⇒ 红', () => {
   })
   try {
     const r = run(root)
-    assert.equal(r.status, 1, r.stdout)
-    assert.match(r.stderr, /PTS-002.*端口字段名/)
+    expectAudit(r, 1, [onStderr(/PTS-002.*端口字段名/)])
   } finally {
     cleanup(root)
   }
@@ -342,8 +339,7 @@ test('PTS-002 求解器函数体里出现端口取值 ⇒ 红（不命名字段�
   })
   try {
     const r = run(root)
-    assert.equal(r.status, 1, r.stdout)
-    assert.match(r.stderr, /PTS-002.*端口取值 `tool`/s)
+    expectAudit(r, 1, [onStderr(/PTS-002.*端口取值 `tool`/s)])
   } finally {
     cleanup(root)
   }
@@ -390,8 +386,7 @@ test('PTS-002 端口名单来自扫描而不是文件路径 ⇒ 换一张表也�
     fs.mkdirSync(path.dirname(moved), { recursive: true })
     fs.writeFileSync(moved, PORTS_SRC, 'utf8')
     const r = run(root)
-    assert.equal(r.status, 1, r.stdout)
-    assert.match(r.stderr, /PTS-002.*端口取值 `tool`/s)
+    expectAudit(r, 1, [onStderr(/PTS-002.*端口取值 `tool`/s)])
   } finally {
     cleanup(root)
   }
@@ -408,8 +403,7 @@ test('PTS-003 求解器字节与基线不符 ⇒ 红（判据 1 的原话）', (
       'utf8',
     )
     const r = run(root)
-    assert.equal(r.status, 1, r.stdout)
-    assert.match(r.stderr, /PTS-003.*字节与基线不符/s)
+    expectAudit(r, 1, [onStderr(/PTS-003.*字节与基线不符/s)])
   } finally {
     cleanup(root)
   }
@@ -419,8 +413,7 @@ test('PTS-003 基线缺失 ⇒ 红（没有基准就没有判据）', () => {
   const root = fixture({ skipBaseline: true })
   try {
     const r = run(root)
-    assert.equal(r.status, 1, r.stdout)
-    assert.match(r.stderr, /PTS-003.*基线/)
+    expectAudit(r, 1, [onStderr(/PTS-003.*基线/)])
   } finally {
     cleanup(root)
   }
@@ -430,8 +423,7 @@ test('PTS-004 基线引用的决策打不开 ⇒ 红', () => {
   const root = fixture({ adr: 'D-999', createAdr: false })
   try {
     const r = run(root)
-    assert.equal(r.status, 1, r.stdout)
-    assert.match(r.stderr, /PTS-004.*D-999/)
+    expectAudit(r, 1, [onStderr(/PTS-004.*D-999/)])
   } finally {
     cleanup(root)
   }
@@ -441,8 +433,7 @@ test('PTS-004 基线的理由为空 ⇒ 红', () => {
   const root = fixture({ reason: '   ' })
   try {
     const r = run(root)
-    assert.equal(r.status, 1, r.stdout)
-    assert.match(r.stderr, /PTS-004.*reason/)
+    expectAudit(r, 1, [onStderr(/PTS-004.*reason/)])
   } finally {
     cleanup(root)
   }
@@ -460,8 +451,7 @@ test('PTS-005 第二个文件落协议格 ⇒ 红（引擎独占变成自觉）'
       'utf8',
     )
     const r = run(root)
-    assert.equal(r.status, 1, r.stdout)
-    assert.match(r.stderr, /PTS-005.*2 个写点文件/)
+    expectAudit(r, 1, [onStderr(/PTS-005.*2 个写点文件/)])
   } finally {
     cleanup(root)
   }
@@ -477,8 +467,7 @@ test('PTS-005 `before` 那一支也算写点（sent 的名字是变量，不是�
       'utf8',
     )
     const r = run(root)
-    assert.equal(r.status, 1, r.stdout)
-    assert.match(r.stderr, /PTS-005/)
+    expectAudit(r, 1, [onStderr(/PTS-005/)])
   } finally {
     cleanup(root)
   }
@@ -488,8 +477,7 @@ test('PTS-005 读不出任何写点 ⇒ 红（协议格没人写是环不转，�
   const root = fixture({ writer: 'pub(crate) fn nothing() {}\n' })
   try {
     const r = run(root)
-    assert.equal(r.status, 1, r.stdout)
-    assert.match(r.stderr, /PTS-005.*全仓找不到协议格的写点/)
+    expectAudit(r, 1, [onStderr(/PTS-005.*全仓找不到协议格的写点/)])
   } finally {
     cleanup(root)
   }
@@ -505,8 +493,7 @@ test('PTS-005 行表里的 `source: EVENT_SENT` 不算写点（模式不是账�
       'utf8',
     )
     const r = run(root)
-    assert.equal(r.status, 0, r.stdout + r.stderr)
-    assert.match(r.stdout, /PTS-005.*协议格写方唯一/)
+    expectAudit(r, 0, [/PTS-005.*协议格写方唯一/])
   } finally {
     cleanup(root)
   }
@@ -518,8 +505,7 @@ test('PTS-006 §3.3 仍写「未启用」⇒ 红（重试已启用，条文与�
   const root = fixture({ plan: `${PLAN_SRC}\n重试通道未启用。\n` })
   try {
     const r = run(root)
-    assert.equal(r.status, 1, r.stdout)
-    assert.match(r.stderr, /PTS-006.*未启用/s)
+    expectAudit(r, 1, [onStderr(/PTS-006.*未启用/s)])
   } finally {
     cleanup(root)
   }
@@ -529,8 +515,7 @@ test('PTS-006 §3.3 不写 retry(attempt+1) ⇒ 红（条文不把重试写出�
   const root = fixture({ plan: PLAN_SRC.replace('retry(attempt+1)', 'retry') })
   try {
     const r = run(root)
-    assert.equal(r.status, 1, r.stdout)
-    assert.match(r.stderr, /PTS-006.*retry\(attempt\+1\)/s)
+    expectAudit(r, 1, [onStderr(/PTS-006.*retry\(attempt\+1\)/s)])
   } finally {
     cleanup(root)
   }
@@ -540,8 +525,7 @@ test('PTS-006 §3.3 小节不在了 ⇒ 红（判据没有输入）', () => {
   const root = fixture({ plan: PLAN_SRC.replace('### 3.3 重放收敛', '### 别的标题') })
   try {
     const r = run(root)
-    assert.equal(r.status, 1, r.stdout)
-    assert.match(r.stderr, /PTS-006.*找不到「### 3\.3 /s)
+    expectAudit(r, 1, [onStderr(/PTS-006.*找不到「### 3\.3 /s)])
   } finally {
     cleanup(root)
   }
@@ -551,8 +535,7 @@ test('PTS-006 重试条文文档读不出 ⇒ 红（不得「没读到 ⇒ 没�
   const root = fixture({ plan: null })
   try {
     const r = run(root)
-    assert.equal(r.status, 1, r.stdout)
-    assert.match(r.stderr, /PTS-006.*读不出/)
+    expectAudit(r, 1, [onStderr(/PTS-006.*读不出/)])
   } finally {
     cleanup(root)
   }
@@ -570,8 +553,7 @@ test('PTS-007 读侧出现 `if port == "model"` ⇒ 红（退化用例）', () =
       'utf8',
     )
     const r = run(root)
-    assert.equal(r.status, 1, r.stdout)
-    assert.match(r.stderr, /PTS-007.*bad\.rs:2.*`model`/s)
+    expectAudit(r, 1, [onStderr(/PTS-007.*bad\.rs:2.*`model`/s)])
   } finally {
     cleanup(root)
   }
@@ -587,8 +569,7 @@ test('PTS-007 读侧用端口常量比较（`port == PORT_TOOL`）⇒ 红', () =
       'utf8',
     )
     const r = run(root)
-    assert.equal(r.status, 1, r.stdout)
-    assert.match(r.stderr, /PTS-007.*bad\.rs:2.*`tool`/s)
+    expectAudit(r, 1, [onStderr(/PTS-007.*bad\.rs:2.*`tool`/s)])
   } finally {
     cleanup(root)
   }
@@ -634,8 +615,7 @@ test('PTS-007 三个读侧树读不出 ⇒ 红（不得「没什么可判 ⇒ �
       fs.rmSync(path.join(root, rel), { recursive: true, force: true })
     }
     const r = run(root)
-    assert.equal(r.status, 1, r.stdout)
-    assert.match(r.stderr, /PTS-007.*读侧判据没有输入/s)
+    expectAudit(r, 1, [onStderr(/PTS-007.*读侧判据没有输入/s)])
   } finally {
     cleanup(root)
   }
@@ -647,8 +627,7 @@ test('事件名字表读不出 ⇒ 红（不得「没读到 ⇒ 没什么可判�
   try {
     fs.rmSync(path.join(root, EVENT_REL))
     const r = run(root)
-    assert.equal(r.status, 1, r.stdout)
-    assert.match(r.stderr, /PTS-001.*读不出事件名字表/)
+    expectAudit(r, 1, [onStderr(/PTS-001.*读不出事件名字表/)])
   } finally {
     cleanup(root)
   }
@@ -659,8 +638,7 @@ test('事实声明表读不出 ⇒ 红', () => {
   try {
     fs.rmSync(path.join(root, DECL_REL))
     const r = run(root)
-    assert.equal(r.status, 1, r.stdout)
-    assert.match(r.stderr, /PTS-001.*读不出事实声明表/)
+    expectAudit(r, 1, [onStderr(/PTS-001.*读不出事实声明表/)])
   } finally {
     cleanup(root)
   }
@@ -671,8 +649,7 @@ test('求解器里没有 `fn owed` ⇒ 红（判据没有输入）', () => {
   try {
     fs.writeFileSync(path.join(root, SOLVER_REL), 'pub(crate) fn nothing() {}\n', 'utf8')
     const r = run(root)
-    assert.equal(r.status, 1, r.stdout)
-    assert.match(r.stderr, /PTS-00[23].*fn owed/)
+    expectAudit(r, 1, [onStderr(/PTS-00[23].*fn owed/)])
   } finally {
     cleanup(root)
   }

@@ -23,7 +23,8 @@ import os from 'node:os'
 import path from 'node:path'
 import { spawnSync } from 'node:child_process'
 import { fileURLToPath } from 'node:url'
-import { rmTree } from '../fs-walk.mjs'
+import { rmTree, withTempTree } from '../fs-walk.mjs'
+import { expectAudit } from '../audit-assert.mjs'
 
 const script = fileURLToPath(new URL('./dead-path-audit.mjs', import.meta.url))
 
@@ -54,8 +55,7 @@ test('① 干净夹具通过', () => {
   })
   try {
     const r = runOn(root)
-    assert.equal(r.status, 0, r.stdout + r.stderr)
-    assert.match(r.stdout, /DR-001 现行面/)
+    expectAudit(r, 0, [/DR-001 现行面/])
   } finally {
     rmTree(root)
   }
@@ -65,9 +65,7 @@ test('② 代码里引用不存在的 crate ⇒ 红（DR-001）', () => {
   const root = fixture({ 'crates/symbio-sdk/src/lib.rs': '//! 见 `symbio_gone::Thing`。\n' })
   try {
     const r = runOn(root)
-    assert.equal(r.status, 1, r.stdout + r.stderr)
-    assert.match(r.stdout, /symbio_gone/)
-    assert.match(r.stdout, /DR-001/)
+    expectAudit(r, 1, [/symbio_gone/, /DR-001/])
   } finally {
     rmTree(root)
   }
@@ -77,8 +75,7 @@ test('③ 文档里只有文件路径指向不存在的 crate ⇒ 红（同一�
   const root = fixture({ 'docs/006-guide/x.md': '定义在 `crates/symbio-gone/src/lib.rs`。\n' })
   try {
     const r = runOn(root)
-    assert.equal(r.status, 1, r.stdout + r.stderr)
-    assert.match(r.stdout, /symbio_gone/)
+    expectAudit(r, 1, [/symbio_gone/])
   } finally {
     rmTree(root)
   }
@@ -88,8 +85,7 @@ test('④ 拼错真实 crate 名 ⇒ 红（判据问「打不打得开」，不�
   const root = fixture({ 'crates/symbio-sdk/src/lib.rs': '//! 见 `symbio_kernal::event`。\n' })
   try {
     const r = runOn(root)
-    assert.equal(r.status, 1, r.stdout + r.stderr)
-    assert.match(r.stdout, /symbio_kernal/)
+    expectAudit(r, 1, [/symbio_kernal/])
   } finally {
     rmTree(root)
   }
@@ -101,9 +97,7 @@ test('⑤ 决策记录里出现旧名且无历史标记 ⇒ 红（DR-002）', ()
   })
   try {
     const r = runOn(root)
-    assert.equal(r.status, 1, r.stdout + r.stderr)
-    assert.match(r.stdout, /DR-002/)
-    assert.match(r.stdout, /symbio_gone/)
+    expectAudit(r, 1, [/DR-002/, /symbio_gone/])
   } finally {
     rmTree(root)
   }
@@ -152,22 +146,17 @@ test('⑨ `dead-path-allow:` 后面没有理由 ⇒ 仍红（空理由等于没�
   })
   try {
     const r = runOn(root)
-    assert.equal(r.status, 1, r.stdout + r.stderr)
-    assert.match(r.stdout, /symbio_gone/)
+    expectAudit(r, 1, [/symbio_gone/])
   } finally {
     rmTree(root)
   }
 })
 
 test('⑩ 缺 `crates/` ⇒ exit 2（DR-003：范围读不出必须红）', () => {
-  const root = fs.mkdtempSync(path.join(os.tmpdir(), 'dead-path-bare-'))
-  try {
+  return withTempTree({}, (root) => {
     fs.mkdirSync(path.join(root, 'docs'))
     fs.writeFileSync(path.join(root, 'docs', 'x.md'), '空仓库\n')
     const r = runOn(root)
-    assert.equal(r.status, 2, r.stdout + r.stderr)
-    assert.match(r.stdout, /DR-003|范围读不出/)
-  } finally {
-    rmTree(root)
-  }
+    expectAudit(r, 2, [/DR-003|范围读不出/])
+  }, { prefix: 'dead-path-bare-' })
 })

@@ -30,6 +30,7 @@ import {
   markerErrors,
   rustEdges,
 } from './uninstall-edge-audit.mjs'
+import { withTempTree } from '../fs-walk.mjs'
 
 const script = fileURLToPath(new URL('./uninstall-edge-audit.mjs', import.meta.url))
 const repoRoot = path.resolve(path.dirname(script), '..', '..')
@@ -100,13 +101,10 @@ test('disablablePlugins：排除不可停用与 plugin-api，crate 名转下划�
 })
 
 test('disablablePlugins：目录里一个插件都没有 ⇒ 抛错（范围读空不当作通过）', () => {
-  const root = fs.mkdtempSync(path.join(os.tmpdir(), 'uninstall-edge-empty-'))
-  try {
+  return withTempTree({}, (root) => {
     fs.mkdirSync(path.join(root, 'crates', 'symbio-plugin-api'), { recursive: true })
     assert.throws(() => disablablePlugins(root), /一个插件目录都没有/)
-  } finally {
-    fs.rmSync(root, { recursive: true, force: true })
-  }
+  }, { prefix: 'uninstall-edge-empty-' })
 })
 
 // ── 置空的两把小刀 ────────────────────────────────────────────────────────

@@ -16,10 +16,11 @@
 import assert from 'node:assert/strict'
 import { test } from 'node:test'
 import fs from 'node:fs'
-import os from 'node:os'
 import path from 'node:path'
 import { spawnSync } from 'node:child_process'
 import { fileURLToPath } from 'node:url'
+import { withTempTree } from '../fs-walk.mjs'
+import { expectAudit } from '../audit-assert.mjs'
 
 const script = fileURLToPath(new URL('./gate-wiring-audit.mjs', import.meta.url))
 
@@ -88,8 +89,7 @@ function audit({
   stages = undefined,
   extra = {},
 } = {}) {
-  const root = fs.mkdtempSync(path.join(os.tmpdir(), 'gate-wiring-'))
-  try {
+  return withTempTree({}, (root) => {
     const files = {
       ...Object.fromEntries(
         Object.entries(scripts).map(([n, bucket]) => [
@@ -115,15 +115,12 @@ function audit({
     })
     assert.ifError(r.error)
     return r
-  } finally {
-    fs.rmSync(root, { recursive: true, force: true })
-  }
+  }, { prefix: 'gate-wiring-' })
 }
 
 test('接线齐备：声明、测试、任务表三方一致 ⇒ 通过（exit 0）', () => {
   const r = audit({ scripts: { 'grep-check': 'guard', 'md-table': 'lib' }, tests: ['grep-check'] })
-  assert.equal(r.status, 0, r.stdout + r.stderr)
-  assert.match(r.stdout, /gate-wiring-audit 通过：2 份脚本全部声明/)
+  expectAudit(r, 0, [/gate-wiring-audit 通过：2 份脚本全部声明/])
 })
 
 // ── GW-001 · 声明齐全（缺 / 拼错 / 两条）────────────────────────────────
@@ -131,14 +128,12 @@ test('接线齐备：声明、测试、任务表三方一致 ⇒ 通过（exit 0
 
 test('GW-001 脚本没有 @gate 声明 ⇒ 红（它是隐形脚本）', () => {
   const r = audit({ scripts: { 'grep-check': 'guard', 'orphan-check': null } })
-  assert.equal(r.status, 1, r.stdout)
-  assert.match(r.stdout, /GW-001 scripts\/orphan-check\.mjs 没有/)
+  expectAudit(r, 1, [/GW-001 scripts\/orphan-check\.mjs 没有/])
 })
 
 test('GW-001 桶名拼错 ⇒ 红（它会落进「不跑」那一桶）', () => {
   const r = audit({ scripts: { 'typo-check': 'gaurd' }, tests: ['typo-check'] })
-  assert.equal(r.status, 1, r.stdout)
-  assert.match(r.stdout, /GW-001 scripts\/typo-check\.mjs 的 .*gaurd.* 不在闭集内/)
+  expectAudit(r, 1, [/GW-001 scripts\/typo-check\.mjs 的 .*gaurd.* 不在闭集内/])
 })
 
 test('GW-001 两条 @gate 声明 ⇒ 红（「到底算哪一类」没有答案）', () => {
@@ -146,15 +141,13 @@ test('GW-001 两条 @gate 声明 ⇒ 红（「到底算哪一类」没有答案�
     scripts: { 'grep-check': 'guard' },
     extra: { 'scripts/two-face.mjs': '// @gate guard\n// @gate lib\n' },
   })
-  assert.equal(r.status, 1, r.stdout)
-  assert.match(r.stdout, /GW-001 scripts\/two-face\.mjs 有两条以上/)
+  expectAudit(r, 1, [/GW-001 scripts\/two-face\.mjs 有两条以上/])
 })
 
 test('GW-001 声明掉在正文深处不算（前 80 行之外读不到，人也就看不到）', () => {
   const body = `${'// 填充\n'.repeat(90)}// @gate guard\n`
   const r = audit({ extra: { 'scripts/deep-tag.mjs': body } })
-  assert.equal(r.status, 1, r.stdout)
-  assert.match(r.stdout, /GW-001 scripts\/deep-tag\.mjs 没有/)
+  expectAudit(r, 1, [/GW-001 scripts\/deep-tag\.mjs 没有/])
 })
 
 // ── GW-002 · 守卫必须有回归测试 ────────────────────────────────────────
@@ -162,8 +155,7 @@ test('GW-001 声明掉在正文深处不算（前 80 行之外读不到，人也
 
 test('GW-002 声明 guard 而没有同名测试 ⇒ 红', () => {
   const r = audit({ scripts: { 'gone-check': 'guard' }, tests: [] })
-  assert.equal(r.status, 1, r.stdout)
-  assert.match(r.stdout, /GW-002 scripts\/gone-check\.mjs 声明 .*guard.*没有/)
+  expectAudit(r, 1, [/GW-002 scripts\/gone-check\.mjs 声明 .*guard.*没有/])
 })
 
 test('GW-002 声明 lib 不要求测试 ⇒ 绿（共享库放行对照）', () => {
@@ -190,8 +182,7 @@ test('GW-003 守卫声明着却不在任务表里 ⇒ 红（枚举写窄）', ()
     tests: ['grep-check'],
     stages: [{ name: '30-docs.mjs', body: DOCS_NARROW }],
   })
-  assert.equal(r.status, 1, r.stdout)
-  assert.match(r.stdout, /GW-003 scripts\/grep-check\.mjs 声明 .*guard.*没有产出/)
+  expectAudit(r, 1, [/GW-003 scripts\/grep-check\.mjs 声明 .*guard.*没有产出/])
 })
 
 test('GW-004 测试文件在而任务表里没有它 ⇒ 红（这个方向最贵：早就红了没人知道）', () => {
@@ -209,8 +200,7 @@ test('GW-004 测试文件在而任务表里没有它 ⇒ 红（这个方向最�
     tests: ['grep-check', 'stale'],
     stages: [{ name: '30-docs.mjs', body: docsNoTests }],
   })
-  assert.equal(r.status, 1, r.stdout)
-  assert.match(r.stdout, /GW-004 scripts\/stale\.test\.mjs 存在/)
+  expectAudit(r, 1, [/GW-004 scripts\/stale\.test\.mjs 存在/])
 })
 
 // ── weekly 桶：执行方是 62-weekly，对账口径与 guard 相同 ────────────────
@@ -226,20 +216,17 @@ test('weekly 接线齐备：62-weekly 产出它的 --strict 任务 ⇒ 通过（
       { name: '62-weekly.mjs', body: WEEKLY },
     ],
   })
-  assert.equal(r.status, 0, r.stdout + r.stderr)
-  assert.match(r.stdout, /weekly 1/)
+  expectAudit(r, 0, [/weekly 1/])
 })
 
 test('GW-002 声明 weekly 却没有同名测试 ⇒ 红（周档守卫一样只是会亮绿灯的脚本）', () => {
   const r = audit({ scripts: { 'style-check': 'weekly' }, tests: [] })
-  assert.equal(r.status, 1, r.stdout)
-  assert.match(r.stdout, /GW-002 scripts\/style-check\.mjs 声明 .*weekly.*没有/)
+  expectAudit(r, 1, [/GW-002 scripts\/style-check\.mjs 声明 .*weekly.*没有/])
 })
 
 test('GW-003 声明 weekly 而 62-weekly 不存在 ⇒ 红（执行方缺席，声明全部落空）', () => {
   const r = audit({ scripts: { 'style-check': 'weekly' }, tests: ['style-check'] })
-  assert.equal(r.status, 1, r.stdout)
-  assert.match(r.stdout, /GW-003 \/ GW-004 62-weekly 的任务表读不出/)
+  expectAudit(r, 1, [/GW-003 \/ GW-004 62-weekly 的任务表读不出/])
 })
 
 test('GW-003 62-weekly 跑了没声明 weekly 的脚本 ⇒ 红（这一步不在机制的账上）', () => {
@@ -261,8 +248,7 @@ test('GW-003 62-weekly 跑了没声明 weekly 的脚本 ⇒ 红（这一步不�
       { name: '62-weekly.mjs', body: runaway },
     ],
   })
-  assert.equal(r.status, 1, r.stdout)
-  assert.match(r.stdout, /GW-003 62-weekly 跑了 scripts\/grep-check\.mjs/)
+  expectAudit(r, 1, [/GW-003 62-weekly 跑了 scripts\/grep-check\.mjs/])
 })
 
 test('子目录按相对名对账：`gate.d/_shared` 声明 test 并真有测试 ⇒ 绿', () => {
@@ -295,8 +281,7 @@ test('垃圾目录不算：`node_modules` / `tmp` 下的 .mjs 不进对账', () 
 })
 
 test('审计范围读不出：没有 `30-docs` ⇒ 失败而不是绿灯（exit 2）', () => {
-  const root = fs.mkdtempSync(path.join(os.tmpdir(), 'gate-wiring-'))
-  try {
+  return withTempTree({}, (root) => {
     fs.mkdirSync(path.join(root, 'scripts'), { recursive: true })
     fs.writeFileSync(path.join(root, 'scripts', 'a.test.mjs'), '//\n')
     fs.writeFileSync(path.join(root, 'scripts', 'a.mjs'), '// @gate guard\n')
@@ -305,11 +290,8 @@ test('审计范围读不出：没有 `30-docs` ⇒ 失败而不是绿灯（exit 
       encoding: 'utf8',
       timeout: 30000,
     })
-    assert.equal(r.status, 2, r.stdout + r.stderr)
-    assert.match(r.stdout, /30-docs 的任务表读不出|审计范围读不出/)
-  } finally {
-    fs.rmSync(root, { recursive: true, force: true })
-  }
+    expectAudit(r, 2, [/30-docs 的任务表读不出|审计范围读不出/])
+  }, { prefix: 'gate-wiring-' })
 })
 
 // ── GW-005 · 阶段顺序（读自声明，不读注释措辞）─────────────────────────
@@ -334,8 +316,7 @@ test('GW-005 真实形状：生成在前、只读复核在后 ⇒ 绿（放行�
     { name: '55-verify.mjs', body: PLAIN('verify') },
     { name: '60-facts.mjs', body: RECHK('facts') },
   ])
-  assert.equal(r.status, 0, r.stdout + r.stderr)
-  assert.match(r.stdout, /生成阶段 06-facts-write\.mjs 先于只读复核 60-facts\.mjs/)
+  expectAudit(r, 0, [/生成阶段 06-facts-write\.mjs 先于只读复核 60-facts\.mjs/])
 })
 
 test('GW-005 只读复核排在生成阶段之前 ⇒ 红（它复核的是上一版投影）', () => {
@@ -343,8 +324,7 @@ test('GW-005 只读复核排在生成阶段之前 ⇒ 红（它复核的是上�
     { name: '50-facts.mjs', body: RECHK('facts') },
     { name: '60-facts-write.mjs', body: GEN('facts-write') },
   ])
-  assert.equal(r.status, 1, r.stdout)
-  assert.match(r.stdout, /GW-005 scripts\/gate\.d\/50-facts\.mjs/)
+  expectAudit(r, 1, [/GW-005 scripts\/gate\.d\/50-facts\.mjs/])
 })
 
 test('GW-005 声明 regenerates 却没有调用形状 ⇒ 红（声明是假的）', () => {
@@ -352,8 +332,7 @@ test('GW-005 声明 regenerates 却没有调用形状 ⇒ 红（声明是假的�
     { name: '06-facts-write.mjs', body: `export default { id: "facts-write", regenerates: true, tasks: () => ${ONE} }\n` },
     { name: '60-facts.mjs', body: RECHK('facts') },
   ])
-  assert.equal(r.status, 1, r.stdout)
-  assert.match(r.stdout, /GW-005 scripts\/gate\.d\/06-facts-write\.mjs 声明 .*regenerates.*却没有/)
+  expectAudit(r, 1, [/GW-005 scripts\/gate\.d\/06-facts-write\.mjs 声明 .*regenerates.*却没有/])
 })
 
 test('GW-005 调用了原语却不声明 ⇒ 红（判据看不见这个生成阶段）', () => {
@@ -361,14 +340,12 @@ test('GW-005 调用了原语却不声明 ⇒ 红（判据看不见这个生成�
     { name: '06-facts-write.mjs', body: `export default { id: "facts-write", tasks: () => [{ run: (c) => autoChain(c, {}) }] }\n` },
     { name: '60-facts.mjs', body: RECHK('facts') },
   ])
-  assert.equal(r.status, 1, r.stdout)
-  assert.match(r.stdout, /GW-005 scripts\/gate\.d\/06-facts-write\.mjs 调用/)
+  expectAudit(r, 1, [/GW-005 scripts\/gate\.d\/06-facts-write\.mjs 调用/])
 })
 
 test('GW-005 有生成却没有只读复核 ⇒ 红（没人对整轮末态）', () => {
   const r = run([{ name: '06-facts-write.mjs', body: GEN('facts-write') }, { name: '55-verify.mjs', body: PLAIN('verify') }])
-  assert.equal(r.status, 1, r.stdout)
-  assert.match(r.stdout, /GW-005 1 个阶段声明 .*regenerates.*，却没有一个阶段声明 .*recheck/)
+  expectAudit(r, 1, [/GW-005 1 个阶段声明 .*regenerates.*，却没有一个阶段声明 .*recheck/])
 })
 
 test('GW-005 注释里出现 `autoWork` 一词不影响判定 ⇒ 绿（旧写法的假阳性来源）', () => {
@@ -386,8 +363,7 @@ test('GW-005 同时声明 regenerates 与 recheck ⇒ 红（两条判据合起�
     { name: '06-facts-write.mjs', body: GEN('facts-write') },
     { name: '60-facts.mjs', body: `export default { id: "facts", regenerates: true, recheck: true, tasks: () => [{ run: (c) => autoWork(c, {}) }] }\n` },
   ])
-  assert.equal(r.status, 1, r.stdout)
-  assert.match(r.stdout, /GW-005 scripts\/gate\.d\/60-facts\.mjs 同时声明/)
+  expectAudit(r, 1, [/GW-005 scripts\/gate\.d\/60-facts\.mjs 同时声明/])
 })
 
 test('GW-005 阶段文件读不进（语法错）⇒ 红，不再静默按「没声明」处理', () => {
@@ -395,14 +371,12 @@ test('GW-005 阶段文件读不进（语法错）⇒ 红，不再静默按「没
     { name: '06-facts-write.mjs', body: GEN('facts-write') },
     { name: '60-facts.mjs', body: 'export default { id: "facts", recheck: true,\n' },
   ])
-  assert.equal(r.status, 1, r.stdout)
-  assert.match(r.stdout, /GW-005 scripts\/gate\.d\/60-facts\.mjs 导入失败/)
+  expectAudit(r, 1, [/GW-005 scripts\/gate\.d\/60-facts\.mjs 导入失败/])
 })
 
 test('GW-005 没有生成阶段也没有复核 ⇒ 不判（空表不制造义务）', () => {
   const r = run([{ name: '10-a.mjs', body: PLAIN('a') }, { name: '20-b.mjs', body: PLAIN('b') }])
-  assert.equal(r.status, 0, r.stdout + r.stderr)
-  assert.match(r.stdout, /生成阶段 （无）/)
+  expectAudit(r, 0, [/生成阶段 （无）/])
 })
 
 // ── GW-006 · 阶段不空转（本轮产出 0 项就判红）──────────────────────────────
@@ -415,8 +389,7 @@ const EMPTY = (id, extra = '') =>
 
 test('GW-006 阶段产出 0 项且没声明 ⇒ 红（msrv 空转的最小复刻）', () => {
   const r = run([{ name: '50-msrv.mjs', body: EMPTY('msrv') }])
-  assert.equal(r.status, 1, r.stdout)
-  assert.match(r.stdout, /GW-006 scripts\/gate\.d\/50-msrv\.mjs 产出 0 个检查项/)
+  expectAudit(r, 1, [/GW-006 scripts\/gate\.d\/50-msrv\.mjs 产出 0 个检查项/])
 })
 
 test('GW-006 0 项但声明了一句理由 ⇒ 绿（有名有姓的豁免，放行对照）', () => {
@@ -431,14 +404,12 @@ test('GW-006 0 项但声明了一句理由 ⇒ 绿（有名有姓的豁免，放
 
 test('GW-006 `mayBeEmpty: true` 不算豁免 ⇒ 红（开关三个月后没人记得为什么允许）', () => {
   const r = run([{ name: '58-e2e.mjs', body: EMPTY('e2e', 'mayBeEmpty: true') }])
-  assert.equal(r.status, 1, r.stdout)
-  assert.match(r.stdout, /GW-006 scripts\/gate\.d\/58-e2e\.mjs 声明了 .*mayBeEmpty.*不是一句理由/)
+  expectAudit(r, 1, [/GW-006 scripts\/gate\.d\/58-e2e\.mjs 声明了 .*mayBeEmpty.*不是一句理由/])
 })
 
 test('GW-006 阶段文件没有 default 导出 ⇒ 红（它在阶段目录里，却不是阶段）', () => {
   const r = run([{ name: '40-half-written.mjs', body: '// 忘了写 export default\n' }])
-  assert.equal(r.status, 1, r.stdout)
-  assert.match(r.stdout, /GW-006 scripts\/gate\.d\/40-half-written\.mjs 没有 `export default/)
+  expectAudit(r, 1, [/GW-006 scripts\/gate\.d\/40-half-written\.mjs 没有 `export default/])
 })
 
 test('GW-006 tasks() 物化时抛 ⇒ 报「物化失败」，不伪装成「0 项」', () => {
@@ -449,9 +420,7 @@ test('GW-006 tasks() 物化时抛 ⇒ 报「物化失败」，不伪装成「0 �
       body: 'export default { id: "weird", tasks: (ctx) => { throw new Error("派生路径不存在") } }\n',
     },
   ])
-  assert.equal(r.status, 1, r.stdout)
-  assert.match(r.stdout, /GW-006 scripts\/gate\.d\/45-weird\.mjs 的 tasks\(\) 物化失败/)
-  assert.match(r.stdout, /派生路径不存在/)
+  expectAudit(r, 1, [/GW-006 scripts\/gate\.d\/45-weird\.mjs 的 tasks\(\) 物化失败/, /派生路径不存在/])
   assert.doesNotMatch(r.stdout, /45-weird\.mjs 产出 0 个检查项/)
 })
 
@@ -467,14 +436,12 @@ test('GW-006 有项就完全不介入：正常阶段不因为「本轮 1 项」�
 
 test('GW-007 `-audit` 脚本留在 scripts 根下 ⇒ 红', () => {
   const r = audit({ scripts: { 'legacy-audit': 'guard' }, tests: ['legacy-audit'] })
-  assert.equal(r.status, 1, r.stdout)
-  assert.match(r.stdout, /GW-007 scripts\/legacy-audit\.mjs 名字以 `-audit` 结尾却不在 `scripts\/audits\/` 下/)
+  expectAudit(r, 1, [/GW-007 scripts\/legacy-audit\.mjs 名字以 `-audit` 结尾却不在 `scripts\/audits\/` 下/])
 })
 
 test('GW-007 测试文件也算：脚本搬了、测试留在根下 ⇒ 红', () => {
   const r = audit({ scripts: { 'audits/legacy-audit': 'guard' }, tests: ['audits/legacy-audit', 'legacy-audit'] })
-  assert.equal(r.status, 1, r.stdout)
-  assert.match(r.stdout, /GW-007 scripts\/legacy-audit\.test\.mjs/)
+  expectAudit(r, 1, [/GW-007 scripts\/legacy-audit\.test\.mjs/])
   assert.doesNotMatch(r.stdout, /GW-007 scripts\/audits\/legacy-audit\.mjs/)
 })
 
@@ -504,8 +471,7 @@ test('GW-008 两条声明抢同一个序数 ⇒ 红（链上「谁先跑」没�
       'scripts/g2.mjs': '// @gate lib\n// @gens 10 check\n',
     },
   })
-  assert.equal(r.status, 1, r.stdout)
-  assert.match(r.stdout, /GW-008 scripts\/g2\.mjs 的 `@gens` 声明不合格（duplicate-order/)
+  expectAudit(r, 1, [/GW-008 scripts\/g2\.mjs 的 `@gens` 声明不合格（duplicate-order/])
 })
 
 test('GW-008 模式名拼错 ⇒ 红（拼错的那一档从此不跑，而阶段遍历的就是同一份声明）', () => {
@@ -514,8 +480,7 @@ test('GW-008 模式名拼错 ⇒ 红（拼错的那一档从此不跑，而阶�
     tests: [],
     extra: { 'scripts/g1.mjs': '// @gate lib\n// @gens 10 writes\n' },
   })
-  assert.equal(r.status, 1, r.stdout)
-  assert.match(r.stdout, /GW-008 scripts\/g1\.mjs 的 `@gens` 声明不合格（bad-mode：writes）/)
+  expectAudit(r, 1, [/GW-008 scripts\/g1\.mjs 的 `@gens` 声明不合格（bad-mode：writes）/])
 })
 
 test('GW-008 声明形状不对（缺序数）⇒ 红', () => {
@@ -524,8 +489,7 @@ test('GW-008 声明形状不对（缺序数）⇒ 红', () => {
     tests: [],
     extra: { 'scripts/g1.mjs': '// @gate lib\n// @gens write\n' },
   })
-  assert.equal(r.status, 1, r.stdout)
-  assert.match(r.stdout, /GW-008 scripts\/g1\.mjs 的 `@gens` 声明不合格（bad-shape/)
+  expectAudit(r, 1, [/GW-008 scripts\/g1\.mjs 的 `@gens` 声明不合格（bad-shape/])
 })
 
 test('GW-008 一份 write 一份 check、序数不同 ⇒ 绿（没有阶段文件时不制造义务）', () => {
@@ -557,8 +521,7 @@ test('GW-009 retired 状态字 + 能打开的裁决 + off + 不在任何任务�
       'docs/design.md': '### D-123 退役裁决\n',
     },
   })
-  assert.equal(r.status, 0, r.stdout + r.stderr)
-  assert.match(r.stdout, /离场判据 1 条/)
+  expectAudit(r, 0, [/离场判据 1 条/])
 })
 
 test('GW-009 redundant 状态字 + 非空承继者 + off ⇒ 绿（壳留到下一批删）', () => {
@@ -581,8 +544,7 @@ test('GW-009 retired 的裁决打不开 ⇒ 红（退役必须挂在一条设计
       'docs/design.md': '### D-120 另一条裁决\n',
     },
   })
-  assert.equal(r.status, 1, r.stdout)
-  assert.match(r.stdout, /GW-009 scripts\/old-check\.mjs 自述 `@state retired: D-123`.*锚点在登记面打不开/)
+  expectAudit(r, 1, [/GW-009 scripts\/old-check\.mjs 自述 `@state retired: D-123`.*锚点在登记面打不开/])
 })
 
 test('GW-009 状态字拼错 ⇒ 红（闭集之外没有第四种状态）', () => {
@@ -591,8 +553,7 @@ test('GW-009 状态字拼错 ⇒ 红（闭集之外没有第四种状态）', ()
     tests: ['grep-check'],
     extra: { 'scripts/old-check.mjs': '// @gate off\n// @state gone: 想不出词\n' },
   })
-  assert.equal(r.status, 1, r.stdout)
-  assert.match(r.stdout, /GW-009 scripts\/old-check\.mjs 的 `@state` 声明不合格（unknown：gone）/)
+  expectAudit(r, 1, [/GW-009 scripts\/old-check\.mjs 的 `@state` 声明不合格（unknown：gone）/])
 })
 
 test('GW-009 两条 @state 声明 ⇒ 红（在不在役没有答案）', () => {
@@ -601,8 +562,7 @@ test('GW-009 两条 @state 声明 ⇒ 红（在不在役没有答案）', () => 
     tests: ['grep-check'],
     extra: { 'scripts/old-check.mjs': '// @gate off\n// @state live\n// @state redundant: GW-001\n' },
   })
-  assert.equal(r.status, 1, r.stdout)
-  assert.match(r.stdout, /GW-009 scripts\/old-check\.mjs 的 `@state` 声明不合格（duplicate/)
+  expectAudit(r, 1, [/GW-009 scripts\/old-check\.mjs 的 `@state` 声明不合格（duplicate/])
 })
 
 test('GW-009 redundant / retired 缺参数 ⇒ 红（空指向与没有裁决号的退役）', () => {
@@ -614,9 +574,7 @@ test('GW-009 redundant / retired 缺参数 ⇒ 红（空指向与没有裁决号
       'scripts/b.mjs': '// @gate off\n// @state retired: D-123\n',
     },
   })
-  assert.equal(r.status, 1, r.stdout)
-  assert.match(r.stdout, /GW-009 scripts\/a\.mjs 的 `@state` 声明不合格（empty-arg/)
-  assert.match(r.stdout, /GW-009 scripts\/b\.mjs 的 `@state` 声明不合格（retired-needs-decision/)
+  expectAudit(r, 1, [/GW-009 scripts\/a\.mjs 的 `@state` 声明不合格（empty-arg/, /GW-009 scripts\/b\.mjs 的 `@state` 声明不合格（retired-needs-decision/])
 })
 
 test('GW-009 自述退场、@gate 却还在跑 ⇒ 红（两行自述互相矛盾）', () => {
@@ -625,8 +583,7 @@ test('GW-009 自述退场、@gate 却还在跑 ⇒ 红（两行自述互相矛�
     tests: ['grep-check'],
     extra: { 'scripts/old-check.mjs': '// @gate lib\n// @state redundant: GW-001\n' },
   })
-  assert.equal(r.status, 1, r.stdout)
-  assert.match(r.stdout, /GW-009 scripts\/old-check\.mjs 自述 `@state redundant`，`@gate` 却不是 off/)
+  expectAudit(r, 1, [/GW-009 scripts\/old-check\.mjs 自述 `@state redundant`，`@gate` 却不是 off/])
 })
 
 test('GW-009 退场判据（或它的测试）仍被任务表跑到 ⇒ 红（退场不等于留壳）', () => {
@@ -638,6 +595,5 @@ test('GW-009 退场判据（或它的测试）仍被任务表跑到 ⇒ 红（�
       'docs/design.md': '### D-123 退役裁决\n',
     },
   })
-  assert.equal(r.status, 1, r.stdout)
-  assert.match(r.stdout, /GW-009 scripts\/old-check\.mjs 自述 `@state retired`，却仍被物化出的任务表跑到/)
+  expectAudit(r, 1, [/GW-009 scripts\/old-check\.mjs 自述 `@state retired`，却仍被物化出的任务表跑到/])
 })

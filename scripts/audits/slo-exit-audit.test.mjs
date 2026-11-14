@@ -20,10 +20,11 @@
 import assert from 'node:assert/strict'
 import { test } from 'node:test'
 import fs from 'node:fs'
-import os from 'node:os'
 import path from 'node:path'
 import { spawnSync } from 'node:child_process'
 import { fileURLToPath } from 'node:url'
+import { withTempTree } from '../fs-walk.mjs'
+import { expectAudit } from '../audit-assert.mjs'
 
 const script = fileURLToPath(new URL('./slo-exit-audit.mjs', import.meta.url))
 const PLAN04 = path.join('docs', '003-design', '016-工程落地与验证.md')
@@ -63,8 +64,7 @@ function audit({
   stats = STATS_FIXTURE,
   files = {},
 } = {}) {
-  const root = fs.mkdtempSync(path.join(os.tmpdir(), 'slo-exit-'))
-  try {
+  return withTempTree({}, (root) => {
     const write = (rel, content) => {
       const abs = path.join(root, rel)
       fs.mkdirSync(path.dirname(abs), { recursive: true })
@@ -80,9 +80,7 @@ function audit({
     })
     assert.ifError(r.error)
     return r
-  } finally {
-    fs.rmSync(root, { recursive: true, force: true })
-  }
+  }, { prefix: 'slo-exit-' })
 }
 
 // ── ① 抓得住 ──────────────────────────────────────────────────────────
@@ -121,8 +119,7 @@ test('出口表没有那一列 ⇒ exit 2（读不出规则源，不退化成绿
   const r = audit({
     docBody: ['## 1.3', '', '| 阶 | 出口指标 |', '|---|---|', '| S01 | 某指标 |'].join('\n'),
   })
-  assert.equal(r.status, 2, r.stdout)
-  assert.match(r.stdout, /SX-002|SX-003/)
+  expectAudit(r, 2, [/SX-002|SX-003/])
 })
 
 test('出口表整张不在 ⇒ exit 2', () => {
@@ -134,13 +131,11 @@ test('stats.rs 提不出字段 ⇒ exit 2', () => {
   const r = audit({
     stats: ['// 结构体被改名了', 'pub(crate) struct Readings { pub a: u8 }'].join('\n'),
   })
-  assert.equal(r.status, 2, r.stdout)
-  assert.match(r.stdout, /SX-002/)
+  expectAudit(r, 2, [/SX-002/])
 })
 
 test('stats.rs 不在 ⇒ exit 2', () => {
-  const root = fs.mkdtempSync(path.join(os.tmpdir(), 'slo-exit-'))
-  try {
+  return withTempTree({}, (root) => {
     fs.mkdirSync(path.dirname(path.join(root, PLAN04)), { recursive: true })
     fs.writeFileSync(path.join(root, PLAN04), table(['`invariants`', '—', '—']))
     const r = spawnSync(process.execPath, [script, `--root=${root}`], {
@@ -149,17 +144,14 @@ test('stats.rs 不在 ⇒ exit 2', () => {
       timeout: 30000,
     })
     assert.equal(r.status, 2, r.stdout)
-  } finally {
-    fs.rmSync(root, { recursive: true, force: true })
-  }
+  }, { prefix: 'slo-exit-' })
 })
 
 // ── ③ `—` 不是违规 ────────────────────────────────────────────────────
 
 test('整表都是 `—` ⇒ 通过（不得假红，否则没人再填这一列）', () => {
   const r = audit({ docBody: table(['—', '—', '—']) })
-  assert.equal(r.status, 0, r.stdout)
-  assert.match(r.stdout, /3 行\*\*没有\*\*用户可见读数/)
+  expectAudit(r, 0, [/3 行\*\*没有\*\*用户可见读数/])
 })
 
 test('`-` / 全角破折号也算「没有出口」', () => {

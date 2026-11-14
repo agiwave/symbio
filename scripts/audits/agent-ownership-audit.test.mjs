@@ -1,10 +1,11 @@
 import assert from 'node:assert/strict'
 import { test } from 'node:test'
 import fs from 'node:fs'
-import os from 'node:os'
 import path from 'node:path'
 import { spawnSync } from 'node:child_process'
 import { fileURLToPath } from 'node:url'
+import { withTempTree } from '../fs-walk.mjs'
+import { expectAudit } from '../audit-assert.mjs'
 
 // `agent-ownership-audit.mjs`（AO-001…006）是**判定型**守卫，按本仓教条每条都配
 // 「注入真实违规并断言脚本变红」的回归用例——09 报告 D-4 那 5 处过期描述全是
@@ -61,8 +62,7 @@ const BASE_ASSEMBLY = ['pub const ASSEMBLY_SUB_AGENT_PLUGINS: &[&str] = &[', '  
  * （拿到该文件的现行内容再改），未列出的用基线内容。
  */
 function audit({ readme, modRs, pluginRs, assembly, extraHost = {}, extraPluginDirs = [] } = {}) {
-  const root = fs.mkdtempSync(path.join(os.tmpdir(), 'agent-ownership-audit-'))
-  try {
+  return withTempTree({}, (root) => {
     const agentHost = path.join(root, 'crates/symbio-plugin-agent/src/host')
     fs.mkdirSync(agentHost, { recursive: true })
     for (const name of ['agent', 'memory', 'setting', ...extraPluginDirs]) {
@@ -87,9 +87,7 @@ function audit({ readme, modRs, pluginRs, assembly, extraHost = {}, extraPluginD
     })
     assert.ifError(result.error)
     return result
-  } finally {
-    fs.rmSync(root, { recursive: true, force: true })
-  }
+  }, { prefix: 'agent-ownership-audit-' })
 }
 
 test('一致的那一侧：基线最小仓库全绿', () => {
@@ -103,9 +101,7 @@ test('AO-003：判词说反（`vdfs` 在清单里却写「不在其中」）必�
     readme: BASE_README.replace('## 关联', '- `vdfs` 不在其中：单槽归系统 Agent。\n\n## 关联'),
     extraPluginDirs: ['vdfs'],
   })
-  assert.equal(r.status, 1, r.stdout)
-  assert.match(r.stdout, /AO-003/)
-  assert.match(r.stdout, /vdfs/)
+  expectAudit(r, 1, [/AO-003/, /vdfs/])
 })
 
 test('AO-003 + AO-005：判一个不存在的插件（`work`）与幽灵兄弟目录各红一条', () => {
@@ -115,26 +111,21 @@ test('AO-003 + AO-005：判一个不存在的插件（`work`）与幽灵兄弟�
       '`../work/README.md`',
     ),
   })
-  assert.equal(r.status, 1, r.stdout)
-  assert.match(r.stdout, /AO-003.*work/)
-  assert.match(r.stdout, /AO-005.*work/)
+  expectAudit(r, 1, [/AO-003.*work/, /AO-005.*work/])
 })
 
 test('AO-005：文档指认的 `host/<name>.rs` 必须存在（D-4 的第三处形状）', () => {
   const r = audit({
     readme: BASE_README.replace('## 关联', '| 模块 | `host/instruction.rs` |\n|---|---|\n\n## 关联'),
   })
-  assert.equal(r.status, 1, r.stdout)
-  assert.match(r.stdout, /AO-005/)
-  assert.match(r.stdout, /host\/instruction\.rs/)
+  expectAudit(r, 1, [/AO-005/, /host\/instruction\.rs/])
 })
 
 test('AO-001：归属表的「归谁」指向不存在的插件、或地址首段与归谁不同源都判红', () => {
   const r = audit({
     modRs: BASE_MOD_RS.replace('| `memory` | `<根>/memory/AGENTS.md` |', '| `work` | `<根>/memory/AGENTS.md` |'),
   })
-  assert.equal(r.status, 1, r.stdout)
-  assert.match(r.stdout, /AO-001/)
+  expectAudit(r, 1, [/AO-001/])
 
   const drift = audit({
     modRs: BASE_MOD_RS.replace('| `memory` | `<根>/memory/AGENTS.md` |', '| `memory` | `<根>/work/AGENTS.md` |'),
@@ -148,9 +139,7 @@ test('AO-002：归属表的两份副本漂了就红（改一处忘改另一处�
   const r = audit({
     pluginRs: BASE_PLUGIN_RS.replace('| `memory` | `<根>/memory/AGENTS.md` |', '| `setting` | `<根>/setting/PLUGIN.yml` |'),
   })
-  assert.equal(r.status, 1, r.stdout)
-  assert.match(r.stdout, /AO-002/)
-  assert.match(r.stdout, /智能体自身的记忆/)
+  expectAudit(r, 1, [/AO-002/, /智能体自身的记忆/])
 })
 
 test('AO-004：职责表与实际模块双向判——列了没有的红，加了不登记也红', () => {
@@ -167,9 +156,7 @@ test('AO-004：职责表与实际模块双向判——列了没有的红，加�
 
 test('AO-006：清单写了不存在的插件目录名必红（静默少挂的形状）', () => {
   const r = audit({ assembly: BASE_ASSEMBLY.replace('"memory",', '"memory",\n    "work",') })
-  assert.equal(r.status, 1, r.stdout)
-  assert.match(r.stdout, /AO-006/)
-  assert.match(r.stdout, /work/)
+  expectAudit(r, 1, [/AO-006/, /work/])
 })
 
 test('豁免要留痕：带理由的 `agent-ownership-allow` 放行，空理由仍红', () => {
@@ -187,6 +174,5 @@ test('豁免要留痕：带理由的 `agent-ownership-allow` 放行，空理由�
 
 test('来源读不出时退成 exit 2，不许退化成「没发现违规」', () => {
   const r = audit({ assembly: '// 常量被改名了\n' })
-  assert.equal(r.status, 2, r.stdout)
-  assert.match(r.stdout, /审计范围读不出/)
+  expectAudit(r, 2, [/审计范围读不出/])
 })

@@ -11,10 +11,11 @@
 import assert from 'node:assert/strict'
 import { test } from 'node:test'
 import fs from 'node:fs'
-import os from 'node:os'
 import path from 'node:path'
 import { spawnSync } from 'node:child_process'
 import { fileURLToPath } from 'node:url'
+import { withTempTree } from '../fs-walk.mjs'
+import { expectAudit } from '../audit-assert.mjs'
 
 const script = fileURLToPath(new URL('./mechanism-audit.mjs', import.meta.url))
 
@@ -26,8 +27,7 @@ const script = fileURLToPath(new URL('./mechanism-audit.mjs', import.meta.url))
  * @param {{strict?: boolean}} [opts]
  */
 function audit(files, { strict = false } = {}) {
-  const root = fs.mkdtempSync(path.join(os.tmpdir(), 'mechanism-audit-'))
-  try {
+  return withTempTree({}, (root) => {
     for (const [rel, content] of Object.entries(files)) {
       const abs = rel.startsWith('cli/')
         ? path.join(root, 'crates', 'symbio-cli', 'src', rel.slice('cli/'.length))
@@ -42,9 +42,7 @@ function audit(files, { strict = false } = {}) {
     )
     assert.ifError(result.error)
     return result
-  } finally {
-    fs.rmSync(root, { recursive: true, force: true })
-  }
+  }, { prefix: 'mechanism-audit-' })
 }
 
 /** 一个干净的最小树（每条规则各自只放一个违规文件） */
@@ -54,8 +52,7 @@ const CLEAN = {
 
 test('干净树通过（exit 0）', () => {
   const r = audit(CLEAN)
-  assert.equal(r.status, 0, r.stdout)
-  assert.match(r.stdout, /10 条规则全部通过/)
+  expectAudit(r, 0, [/10 条规则全部通过/])
 })
 
 // ── M-001：组件不得解释后端 meta 字段 ────────────────────────────────────

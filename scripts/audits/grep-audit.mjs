@@ -110,6 +110,32 @@ const scopeAbs = resolveScope()
 /** 显示用路径：相对 cwd，并统一为正斜杠（跨平台一致） */
 const disp = (p) => path.relative(cwd, p).split(path.sep).join('/') || '.'
 
+// ── 共享源码语料：一次遍历、按路径缓存行 ─────────────────────────────────
+/** 六条规则共用的扫描基准与「是不是真实仓库」判定（原先各写一份）。 */
+const BASE = looksLikeRepoTree(cwd) ? cwd : repoRoot
+const IS_REPO = path.resolve(BASE) === path.resolve(repoRoot)
+
+const lineCache = new Map()
+/**
+ * 读一份 .rs 的行数组并缓存；读不到 ⇒ null（与原先各规则 `catch → continue` 同义）。
+ * 扫描根里 `crates` 与 `crates/symbio-cli/src` 重叠，重叠文件过去每条规则各读两遍。
+ * 缓存后只读一次，但**文件表里的重复项照旧保留**——S-014 的棘轮读数依赖它，
+ * 顺手去重会悄悄改掉读数。
+ */
+const linesOfPath = (file) => {
+  if (lineCache.has(file)) return lineCache.get(file)
+  let lines
+  try {
+    lines = fs.readFileSync(file, 'utf8').split(/\r?\n/)
+  } catch {
+    lines = null
+  }
+  lineCache.set(file, lines)
+  return lines
+}
+/** 按根展开文件表：保留 roots 的重叠项与原有顺序，不排序、不去重。 */
+const filesUnder = (roots) => roots.flatMap((r) => walk(path.join(BASE, r)))
+
 // ── 收集 .rs 源文件 ────────────────────────────────────────────────────
 // 生产路径才判：测试文件里 `Mutex::new` + 下一行 `.await` 是常态（锁根本没跨 await 持有），
 // 而 S-002 的 5 行窗口分不出「建锁」与「持锁」——crate 化后扫描面扩到整个 `crates/`，
@@ -118,11 +144,8 @@ const isTestFile = (f) => f.endsWith('.test.rs') || path.basename(f) === 'tests.
 const files = walk(scopeAbs).filter((f) => !isTestFile(f))
 const linesOf = new Map()
 for (const f of files) {
-  try {
-    linesOf.set(f, fs.readFileSync(f, 'utf8').split(/\r?\n/))
-  } catch {
-    /* 读不到就跳过 */
-  }
+  const lines = linesOfPath(f)
+  if (lines) linesOf.set(f, lines)
 }
 
 console.log('=== grep-audit.mjs ===')
@@ -429,182 +452,149 @@ for (const file of s010Files) {
 if (s010 === 0) ok('S-010 通过：根名字面量只在 vdfs 插件内')
 console.log()
 
-// ── S-012: 代码注释不得写只有实施排期含义的话 ──────────────────────────
+// ── 判据运行时：一次遍历、多规则 ─────────────────────────────────────────
 //
-// 注释的边界（`CONTRIBUTING.md` §4）：写「读这个文件需要知道的不变量 / 陷阱 / 为什么」，
-// **不写过程**。过程叙述的危害不是啰嗦，而是**它会变成假的**：「本批未修」的下一批
-// 修了，那句注释就躺在代码里指着一个已不存在的时间点；「批 2 的能力」在批次重排后
-// 无人能解。这类句子没有 owner，也就没人回头改它——而读者只能选择信或不信。
+// S-012…S-017 过去各写一份「BASE 推断 + IS_REPO + roots + walk + readFileSync +
+// 注释跳过 + 双行豁免 + 汇总」：同一份 .rs 被读六遍，roots 里 `crates` 与
+// `crates/symbio-cli/src` 还彼此重叠，重叠部分每条规则再读一遍。这里收成
+// **一份语料缓存 + 一张规则表**：规则只声明「扫哪些根、哪一行算命中、汇总怎么说」。
 //
-// 判据只取**两种无歧义形态**（同 D-004「只收结构标记」的取舍）：
-//   ① 待办标记：注释行以 `TODO` / `FIXME` / `XXX` / `HACK` 起头——待办有自己的
-// 登记处（`docs/007-task/` 下登记条目：引入新待办就登记成条目，
-//      **不是代码注释**），写在注释里就等于「谁也不会再看见」的那一类；
-//   ② 批次号：`批 N` / `批次 N`。批次号属施工计划——代码注释里留下它，读者既不知道
-//      是哪份计划的哪一批，也无人回头改它。
-//
-// **已知边界（刻意不判）**：`本批` / `诚实缺口` / `曾经` 在注释里都可能是**运行期语义**
-// 或**陷阱说明**——「本批未执行的工具调用」说的是这一批工具调用（`tool_executor` 的
-// 收口不变量），as-of 投影里「这条目标曾经声明过吗」是查询语义。实测把它们列进词表：
-// `本批|待接|尚未接` 在 `symbio/src` 命中 50 处、绝大多数是运行期 prose，`曾经` 命中
-// 59 处含真误报——**一条天天误报的守卫最后只会被人用豁免喂死**（本文件反复写的那条）。
-// 范围：`.rs` 的注释行（`symbio/src`、`crates/symbio-cli/src`、`tauri/src-tauri/src`、`docs/003-design/verify`），
-// 测试文件同样参与检查（与 S-002 一致）。
-// 豁免：`// grep-audit-allow S-012: 理由`（写在命中行或其紧邻上一行，理由不可为空，同 S-010）。
-console.log('--- S-012: 代码注释里的实施排期指认 ---')
+// 输出是判据的对外契约：标题、逐条 err、末尾 ok、空行的顺序与文案逐字不动；
+// 重叠 roots 造成的重复项也照旧保留（S-014 的棘轮读数依赖它）。
+const RS_ROOTS = ['crates', 'crates/symbio-cli/src', 'tauri/src-tauri/src', 'docs/003-design/verify']
 
-const S012_ROOTS = ['crates', 'crates/symbio-cli/src', 'tauri/src-tauri/src', 'docs/003-design/verify']
-/** 与 resolveScope 同策略：cwd 是仓库树就用 cwd（回归测试注入临时树），否则退回仓库根 */
-const S012_BASE = looksLikeRepoTree(cwd) ? cwd : repoRoot
-const S012_TODO_RE = /^\s*(?:\/\/[/!]*)\s*(?:TODO|FIXME|XXX|HACK)\b/
-const S012_BATCH_RE = /批(?:次)?\s*\d/
-const WAIVER_S012_RE = /\/\/\s*grep-audit-allow S-012:[^\n]*[A-Za-z0-9\u4e00-\u9fff]/
-
-{
-  const s012Files = S012_ROOTS.flatMap((r) => walk(path.join(S012_BASE, r)))
-  let s012 = 0
-  for (const file of s012Files) {
-    let lines
-    try {
-      lines = fs.readFileSync(file, 'utf8').split(/\r?\n/)
-    } catch {
-      continue
-    }
-    lines.forEach((l, i) => {
-      if (!/^\s*\/\//.test(l)) return
-      if (WAIVER_S012_RE.test(l) || (i > 0 && WAIVER_S012_RE.test(lines[i - 1]))) return
-      const why = S012_TODO_RE.test(l)
-        ? '注释以 TODO / FIXME 起头 ⇒ 待办登记进计划文档，不写进代码注释'
-        : S012_BATCH_RE.test(l)
-          ? '批次号属施工计划 ⇒ 注释只写不变量与陷阱，不写施工过程'
-          : null
-      if (!why) return
-      err(`${disp(file)}:${i + 1}  ${why}`)
-      s012++
-    })
-  }
-  if (s012 === 0) ok('S-012 通过：注释里没有待办标记与批次号')
-}
-console.log()
-
-// ── S-013: `WalkBuilder` 构造点必须钉遍历序 ────────────────────────────
-//
-// `ignore::WalkBuilder` 不配排序时按**文件系统返回的目录项序**遍历：NTFS 上恰是名字序、
-// ext4 上是哈希序。于是同一份代码、同一个查询在两个平台给出行序不同的结果，而下游三处
-// 判定都切在这个序上——`content_search` 的 `offset` / `head_limit` 分页窗口、
-// `MAX_RESULTS` 截断点、`codebase_search` 降级路径的 `limit` 截断。
-// 病灶实例（①）：两条分页单测 Windows 绿、Linux 红，红的是症状，缺陷在实现侧
-// （用户看到的是「换台机器同一查询少几行 / 换一批行」）。这类「判据依赖平台」的病
-// 在本仓已有两次实例（是 shell 工具名，这次是路径序），所以钉在门内而不是靠人记得。
-//
-// 判据：`WalkBuilder::new(` 之后，**同一函数体内**（往后扫到下一个 `fn` 起头为止）
-// 必须出现一次 `.sort_by(` / `.sort_by_file_name(`。
-// **已知边界（刻意）**：只认「构造点之后、同一函数体内」——把 builder 传出去在别处配排序
-// 不判，同函数里两个 builder 共用一次 `sort_by` 也判绿。取这个粒度是因为三处既有代码
-// 都是「构造 + 链式配置同作用域」的形状，而一条天天误报的守卫最后只会被人用豁免喂死
-// （本文件反复写的那条）。跨函数传 builder 真出现时，人会看见这条注释。
-// 范围：`.rs` 源码根（同 S-012：`symbio/src`、`crates/symbio-cli/src`、`tauri/src-tauri/src`、
-// `docs/003-design/verify`），测试文件同样参与。
-// 豁免：`// grep-audit-allow S-013: 理由`（写在构造行或其紧邻上一行，理由不可为空，同 S-010）。
-console.log('--- S-013: WalkBuilder 构造点的遍历序 ---')
-
-const S013_ROOTS = ['crates', 'crates/symbio-cli/src', 'tauri/src-tauri/src', 'docs/003-design/verify']
-const S013_BASE = looksLikeRepoTree(cwd) ? cwd : repoRoot
-const S013_WALK_RE = /WalkBuilder::new\s*\(/
-const S013_SORT_RE = /\.sort_by(?:_file_name)?\s*\(/
-/** 下一个函数起头：扫到它就把上一个 builder 的作用域关掉 */
-const S013_NEXT_FN_RE = /^\s*(?:pub(?:\([^)]*\))?\s+)?(?:async\s+)?fn\s/
-const WAIVER_S013_RE = /\/\/\s*grep-audit-allow S-013:[^\n]*[A-Za-z0-9\u4e00-\u9fff]/
-
-{
-  const s013Files = S013_ROOTS.flatMap((r) => walk(path.join(S013_BASE, r)))
-  let s013 = 0
-  let s013Sites = 0
-  for (const file of s013Files) {
-    let lines
-    try {
-      lines = fs.readFileSync(file, 'utf8').split(/\r?\n/)
-    } catch {
-      continue
-    }
-    lines.forEach((l, i) => {
-      if (!S013_WALK_RE.test(l)) return
-      s013Sites++
-      if (WAIVER_S013_RE.test(l) || (i > 0 && WAIVER_S013_RE.test(lines[i - 1]))) return
-      let pinned = false
-      for (let j = i; j < lines.length; j++) {
-        if (j > i && S013_NEXT_FN_RE.test(lines[j])) break
-        if (S013_SORT_RE.test(lines[j])) {
-          pinned = true
-          break
-        }
-      }
-      if (pinned) return
-      err(
-        `${disp(file)}:${i + 1}  S-013 未钉遍历序：默认遍历序是文件系统返回序` +
-          `（NTFS 名字序 / ext4 哈希序），下游的分页窗口与截断点都切在它上面 ⇒ ` +
-          '补 `.sort_by_file_name(|a, b| a.cmp(b))`，或在构造行写 `grep-audit-allow S-013: 理由`' +
-          '（理由要能指认序在哪里被钉住）',
-      )
-      s013++
-    })
-  }
-  if (s013 === 0)
-    ok(
-      s013Sites === 0
-        ? 'S-013 通过：scope 内没有 WalkBuilder 构造点'
-        : `S-013 通过：${s013Sites} 处 WalkBuilder 构造点都钉了遍历序（或已写豁免理由）`,
-    )
-}
-console.log()
-
-// ── S-014: ChatNode `role`（存量格）的直写只许降 ───────────────────────
-//
-// d-iii / D-147：身份的权威是 `principal.kind`——读侧一律经 `node_role()` 折叠
-// （与前端 `messageRoleOf` 同一判据：**主体在先、残留格兜底**），写侧的每一处 `role`
-// 直写都是待清零的存量债务。它今天还剩的唯一合法用途是「构造期声明族、地址由落库点
-// `attributed` 补」，所以棘轮数的不是「错」，而是**退役还没走完的格数**。
-//
-// 为什么不是字段私有：`ChatNode { .., ..Default::default() }` 的**函数式更新语法
-// 要求每个字段可见**（E0451）——私有化会把全仓数百个不碰 `role` 的构造点一起炸掉。
-// 机制的爆炸半径大于收益，所以约束从「编译期」退到「棘轮」：存量总数钉在基线上，
-// **只许降不许升**；降了要同步下调基线（`35-baseline` 守这个数不被放松）。
-//
-// 命中形状只剩两种（过渡入口 `with_role` / `set_legacy_role` 已随 D-147 档 3 删除，
-// 全仓零命中；它们若复活，字段直写这一形态也拦不住，故由「零出现」的 grep 守）：
-//   · `role: Some(NodeRole::…)` / `role: Some(cm::NodeRole::…)`（字段初始化）
-//   · `.role = Some(…)` / `.role.get_or_insert(…)`（直写）
-//   · `with_role(…)` / `set_legacy_role(…)`（命名过渡入口）
-// 范围：`.rs` 源码根（同 S-012），测试文件同样参与；**不含** `chat_node.rs`
-// （字段定义、折叠与入口的本体在那里）。注释行不判（doc 示例会复述被禁形状）。
-// 也**不含** provider 请求构造：`crates/symbio-plugin-model/src/port.rs` 的
-// `wire_messages` 把 `PromptMessage` 翻成发往 provider 的瞬时线格式（D-305 裁决一：
-// 请求构造归执行体）。那些 `ChatNode` 不落库、没有 `attributed` 落点，`role` 是这条
-// 通道的线协议值（`NativeMessage::from` 经 `node_role()` 折出）——它不是「存量格直写」
-// 的判据面，逐行豁免会让这条棘轮靠豁免活着。
-// 豁免：`// grep-audit-allow S-014: 理由`（本行或紧邻上一行，理由不可为空，同 S-010）。
-// 单测跑在临时 fixture 树里：那里没有真实仓库这么多存量债务，棘轮一比就报「基线该收紧」，
-// 把每条无关用例一起拖红。`LEGACY_ROLE_WRITE_BASELINE` 把基线搬到 fixture 上；扫描根
-// 由下面那条「cwd 下有 `crates/symbio/`」的判定搬运。真实仓库两者都不动 ⇒ 照旧扫全仓。
-console.log('--- S-014: ChatNode 存量 role 格直写棘轮 ---')
-
-const S014_ROOTS = ['crates', 'crates/symbio-cli/src', 'tauri/src-tauri/src', 'docs/003-design/verify']
-const S014_BASE = looksLikeRepoTree(cwd) ? cwd : repoRoot
-// **只在真实仓库树上跑棘轮**：回归测试注入的临时树（`grep-audit.test.mjs` 的
-// `audit()` / `s010Audit()` 写在 `os.tmpdir()`）即使造出 `crates/...` 的几层目录，
-// 存量也恒 0——与基线数字的差是「树不对」，不是「该收紧」。据此报错误把每条断言退出码
-// 0 的 fixture 用例判红，守卫的测试自己成了噪音。判据用 `repoRoot`（脚本自身所在仓库）：
-// 临时树在 tmpdir、真实仓库不是；从真实仓库或其子目录跑都相等。
-const S014_IS_REPO = path.resolve(S014_BASE) === path.resolve(repoRoot)
-const S014_WRITE_RE =
-  /role:\s*Some\((?:cm::)?NodeRole::|\.role\s*=\s*Some\(|\.role\.get_or_insert\(/
-const WAIVER_S014_RE = /\/\/\s*grep-audit-allow S-014:[^\n]*[A-Za-z0-9\u4e00-\u9fff]/
+/** 注释行（`//` / `/*` / 块注释续行）——S-014 / S-015 / S-016 / S-017 的同一种跳过。 */
+const isCommentStart = (l) => /^\s*(?:\/\/|\/\*|\*)/.test(l)
+/** 留痕豁免的统一字形：理由必须含至少一个字母 / 数字 / 汉字，空理由不算豁免。 */
+const waiverRe = (code) =>
+  new RegExp(`\\/\\/\\s*grep-audit-allow ${code}:[^\\n]*[A-Za-z0-9\\u4e00-\\u9fff]`)
+/** 命中行或紧邻上一行写了理由即放行（S-010 / S-012…S-016 同一口径）。 */
+const waived = (re) => (l, i, lines) => re.test(l) || (i > 0 && re.test(lines[i - 1]))
 
 /**
- * provider 请求构造的函数体行区间（`[start, end]`，0 基）——S-014 不判这一段（见上）。
- * 只认 `fn wire_messages(` 的名字：线格式只有这一处入口，改名时这条判据会跟着在
- * 代码评审里被看见，而不是悄悄把整段放回去。
+ * 行级判据执行壳。规则字段：
+ *   `title` 小节标题；`roots` 扫描根（重叠项保留、顺序不变），或 `files()` 直接给文件表；
+ *   `begin(ctx)` 开跑前置；`skipFile(file)` 整份不判；
+ *   `beginFile(file, lines)` 每份文件的附加上下文；`skip(l, i, …)` 行级跳过；
+ *   `hit(l, i, file, lines, per, ctx)` 命中处理；`done(ctx, list)` 汇总输出。
  */
+function runLineRule({ title, roots, files, begin, skipFile, beginFile, skip, hit, done }) {
+  console.log(title)
+  const list = files ? files() : filesUnder(roots)
+  const ctx = {}
+  begin?.(ctx)
+  for (const file of list) {
+    const lines = linesOfPath(file)
+    if (!lines) continue
+    if (skipFile?.(file)) continue
+    const per = beginFile ? beginFile(file, lines) : null
+    lines.forEach((l, i) => {
+      if (skip && skip(l, i, lines, per, ctx)) return
+      hit(l, i, file, lines, per, ctx)
+    })
+  }
+  done(ctx, list)
+  console.log()
+}
+
+const W012 = waived(waiverRe('S-012'))
+const W013 = waived(waiverRe('S-013'))
+const W014 = waived(waiverRe('S-014'))
+const W016 = waived(waiverRe('S-016'))
+
+// ── S-012: 代码注释不得写只有实施排期含义的话 ──────────────────────────────
+//
+// 注释的边界（`CONTRIBUTING.md` §4）：写「读这个文件需要知道的不变量 / 陷阱 / 为什么」，
+// **不写过程**。过程叙述会变成假的：「本批未修」的下一批修了，注释就指着一个不存在的
+// 时间点；批次号在重排后无人能解。这类句子没有 owner，也就没人回头改它。
+//
+// 判据只取两种无歧义形态：注释行以 `TODO` / `FIXME` / `XXX` / `HACK` 起头；或出现
+// `批 N` / `批次 N`。**已知边界（刻意不判）**：`本批` / `曾经` 在注释里常是运行期语义
+// 或陷阱说明，实测列进词表会在 `symbio/src` 命中 50+ 处误报——一条天天误报的守卫
+// 最后只会被人用豁免喂死。
+const S012_TODO_RE = /^\s*(?:\/\/[/!]*)\s*(?:TODO|FIXME|XXX|HACK)\b/
+const S012_BATCH_RE = /批(?:次)?\s*\d/
+
+runLineRule({
+  title: '--- S-012: 代码注释里的实施排期指认 ---',
+  roots: RS_ROOTS,
+  skip: (l) => !/^\s*\/\//.test(l),
+  hit: (l, i, file, lines, per, ctx) => {
+    if (W012(l, i, lines)) return
+    const why = S012_TODO_RE.test(l)
+      ? '注释以 TODO / FIXME 起头 ⇒ 待办登记进计划文档，不写进代码注释'
+      : S012_BATCH_RE.test(l)
+        ? '批次号属施工计划 ⇒ 注释只写不变量与陷阱，不写施工过程'
+        : null
+    if (!why) return
+    err(`${disp(file)}:${i + 1}  ${why}`)
+    ctx.n = (ctx.n ?? 0) + 1
+  },
+  done: (ctx) => {
+    if (!ctx.n) ok('S-012 通过：注释里没有待办标记与批次号')
+  },
+})
+
+// ── S-013: `WalkBuilder` 构造点必须钉遍历序 ────────────────────────────────
+//
+// `ignore::WalkBuilder` 不配排序时按**文件系统返回的目录项序**遍历：NTFS 恰是名字序、
+// ext4 是哈希序。下游三处判定都切在这个序上（`content_search` 的分页窗口、
+// `MAX_RESULTS` 截断点、`codebase_search` 降级路径的 `limit`）。
+// 判据：`WalkBuilder::new(` 之后**同一函数体内**（扫到下一个 `fn` 起头为止）必须出现
+// `.sort_by(` / `.sort_by_file_name(`。**已知边界（刻意）**：跨函数传 builder 不判；
+// 同函数两个 builder 共用一次 sort 也判绿——三处既有代码都是「构造 + 链式配置同作用域」。
+const S013_WALK_RE = /WalkBuilder::new\s*\(/
+const S013_SORT_RE = /\.sort_by(?:_file_name)?\s*\(/
+const S013_NEXT_FN_RE = /^\s*(?:pub(?:\([^)]*\))?\s+)?(?:async\s+)?fn\s/
+
+runLineRule({
+  title: '--- S-013: WalkBuilder 构造点的遍历序 ---',
+  roots: RS_ROOTS,
+  hit: (l, i, file, lines, per, ctx) => {
+    if (!S013_WALK_RE.test(l)) return
+    ctx.sites = (ctx.sites ?? 0) + 1 // 豁免过的构造点也算一处（汇总读这个数）
+    if (W013(l, i, lines)) return
+    let pinned = false
+    for (let j = i; j < lines.length; j++) {
+      if (j > i && S013_NEXT_FN_RE.test(lines[j])) break
+      if (S013_SORT_RE.test(lines[j])) {
+        pinned = true
+        break
+      }
+    }
+    if (pinned) return
+    err(
+      `${disp(file)}:${i + 1}  S-013 未钉遍历序：默认遍历序是文件系统返回序` +
+        `（NTFS 名字序 / ext4 哈希序），下游的分页窗口与截断点都切在它上面 ⇒ ` +
+        '补 `.sort_by_file_name(|a, b| a.cmp(b))`，或在构造行写 `grep-audit-allow S-013: 理由`' +
+        '（理由要能指认序在哪里被钉住）',
+    )
+    ctx.bad = (ctx.bad ?? 0) + 1
+  },
+  done: (ctx) => {
+    if (!ctx.bad)
+      ok(
+        !ctx.sites
+          ? 'S-013 通过：scope 内没有 WalkBuilder 构造点'
+          : `S-013 通过：${ctx.sites} 处 WalkBuilder 构造点都钉了遍历序（或已写豁免理由）`,
+      )
+  },
+})
+
+// ── S-014: ChatNode `role`（存量格）的直写只许降 ──────────────────────────
+//
+// 身份的权威是 `principal.kind`：读侧经 `node_role()` 折叠，写侧每处 `role` 直写都是
+// 待清零的存量债务。字段不能私有化——`ChatNode { .., ..Default::default() }` 的函数式
+// 更新语法要求每个字段可见（E0451），会把数百个构造点一起炸掉。所以约束是**棘轮**：
+// 存量总数钉在基线上，只许降；降了要同步下调基线（`35-baseline` 守这个数不被放松）。
+//
+// **不含** `chat_node.rs`（字段定义本体）；**不含** provider 请求构造
+// `symbio-plugin-model/src/port.rs::wire_messages` —— 那些 `ChatNode` 不落库，`role` 是
+// 线协议值（D-305 裁决一），逐行豁免会让棘轮靠豁免活着，故按函数体整段排除。
+const S014_WRITE_RE =
+  /role:\s*Some\((?:cm::)?NodeRole::|\.role\s*=\s*Some\(|\.role\.get_or_insert\(/
+
+/** provider 请求构造的函数体行区间（0 基 `[start, end]`）；只认 `fn wire_messages(` 这个名字。 */
 function providerWireSpan(lines) {
   const start = lines.findIndex((l) => /^fn\s+wire_messages\s*\(/.test(l))
   if (start < 0) return null
@@ -624,300 +614,206 @@ function providerWireSpan(lines) {
   return null
 }
 // 基线三元形状与 `dead-code-audit` 的 R-002 同构——`35-baseline` 的提取函数按这个形状读格。
-// 151 → 146（d）：`resume.rs` 及其用例整份退役，5 处存量 role 直写随之消失。
-// 146 → 143（D-147 档 1）：三处**真双写**清零——`tool_executor::build_user_prompt_message` /
-// `tool_dispatch` 的工具结果 / `subagent::relabel_for_parent` 原本同处既写 `principal`
-// 又写 `role`。折序改成「主体在先、残留格兜底」之后（D-147），第二份写不再有任何读者：
-// 它既不影响折叠，也不是 `attributed` 的输入，却给了「顺带写反就静默改写失败」的机会。
-// 143 → 0（D-147 档 2 / 档 3）：构造点全部改收主体，测试夹具按「模仿哪个面」归位；
-// 剩下的只有**读边界**（协议形状 / 客户端补丁 / 帧合并 / CLI 快照）与两条**存量格读法**
-// 用例，它们各自带豁免注明理由。清零之后这条棘轮数的就是「新增直写」：任何一处新写
-// 都即红，不必再靠单调下调来追债。
+// 151 → 146 → 143 → 0（D-147 三档）：构造点全部改收主体，剩下的只有读边界与两条
+// 存量格读法用例。清零之后这条棘轮数的就是「新增直写」：任何一处新写都即红。
 const LEGACY_ROLE_WRITE_BASELINE = process.env.LEGACY_ROLE_WRITE_BASELINE
   ? Number(process.env.LEGACY_ROLE_WRITE_BASELINE)
   : 0
-{
-  let s014 = 0
-  const s014List = []
-  for (const file of S014_ROOTS.flatMap((r) => walk(path.join(S014_BASE, r)))) {
-    if (path.basename(file) === 'chat_node.rs') continue
-    let lines
-    try {
-      lines = fs.readFileSync(file, 'utf8').split(/\r?\n/)
-    } catch {
-      continue
-    }
-    const wireSpan = file.split(path.sep).join('/').endsWith('symbio-plugin-model/src/port.rs')
+
+runLineRule({
+  title: '--- S-014: ChatNode 存量 role 格直写棘轮 ---',
+  roots: RS_ROOTS,
+  skipFile: (file) => path.basename(file) === 'chat_node.rs',
+  beginFile: (file, lines) =>
+    file.split(path.sep).join('/').endsWith('symbio-plugin-model/src/port.rs')
       ? providerWireSpan(lines)
-      : null
-    lines.forEach((l, i) => {
-      if (wireSpan && i >= wireSpan[0] && i <= wireSpan[1]) return
-      if (/^\s*(?:\/\/|\/\*|\*)/.test(l)) return
-      if (!S014_WRITE_RE.test(l)) return
-      if (WAIVER_S014_RE.test(l) || (i > 0 && WAIVER_S014_RE.test(lines[i - 1]))) return
-      s014++
-      if (s014List.length < 8) s014List.push(`${disp(file)}:${i + 1}`)
-    })
-  }
-  if (s014 > LEGACY_ROLE_WRITE_BASELINE) {
-    err(
-      `S-014 违例：存量 role 格直写 ${s014} 处 > 基线 ${LEGACY_ROLE_WRITE_BASELINE}——` +
-        `身份写 ` +
-        '`principal`，不写 role（读走 node_role()/legacy_role()）。首批命中：' +
-        s014List.join('、'),
-    )
-  } else if (S014_IS_REPO && s014 < LEGACY_ROLE_WRITE_BASELINE) {
-    err(
-      `S-014 基线该收紧：存量 role 格直写 ${s014} 处 < 基线 ${LEGACY_ROLE_WRITE_BASELINE}——` +
-        `把 LEGACY_ROLE_WRITE_BASELINE 下调到 ${s014}（棘轮只许留痕地下调）`,
-    )
-  } else {
-    ok(
-      S014_IS_REPO
-        ? `S-014 通过：role 格直写存量 ${s014} 处，与基线持平（只许降）`
-        : `S-014 跳过：当前树不是真实仓库（临时 fixture），棘轮不比`,
-    )
-  }
-}
-console.log()
-
-// ── S-015: 收束闸只有一个 owner，且每次调用都当场处理 Err ────────────────
-// 写侧闸今天只有一个函数：`closure_gate(actor, kind) -> Result<(), String>`。
-// 它把「为什么拒」带出来，交给 `deny(…)` 落一条 `authz.denied`。
-//
-// 否定分支若把闸压成布尔或把结果存起来另判，拒绝就又成了「什么都没写」：
-// 日志里「被拒」与「根本没跑完」同形，事后答不出谁/何时/因何被拒，回放重现不出
-// 这次拒绝（相应批次）。
-// 这条不是风格问题——它违反 I1（单通道），而违反的形态**不会有任何东西变红**：
-// 该轮照样留在未收束态，`unresolved_turns` 照样报，看起来和"正常被拒"一样。
-//
-// 判据是**零出现**（不是棘轮）：没有"存量"可言——存量已经全部迁完。两条形状，
-// 各自都还能真的变红：
-// ① 布尔壳 `closure_granted` 零出现。它是 时期 `closure_gate(..).is_ok`
-// 的一行壳，随收束闸收敛到单一 owner（d 删掉它唯一的生产调用点后
-//     一并删除）而退役。复活它就是复活「拒绝不落事实」的那个形态。
-//   ② 闸的调用行必须**当场**处理 `Err`：不许 `.is_ok()` / `.is_err()` 取布尔，
-//     也不许把结果存到别处再判（那种写法拒绝照样不落事实）。
-//
-// 为什么形状②不写成「不许 `.is_ok()`」就够：拆行的写法
-// `let r = closure_gate(..)` + 下一行 `if r.is_ok()` 骗得过行级正则。
-// 「调用行自己带 `if let Err(`」这条判据把那种写法一并挡住（拆行时按上一行同看）。
-console.log('--- S-015: 收束闸单一 owner 且调用当场处理 Err ---')
-{
-  const S015_ROOTS = ['crates']
-  const S015_BASE = looksLikeRepoTree(cwd) ? cwd : repoRoot
-  const S015_IS_REPO = path.resolve(S015_BASE) === path.resolve(repoRoot)
-  const isComment = (l) => {
-    const t = l.trimStart()
-    return t.startsWith('//') || t.startsWith('/*') || t.startsWith('*')
-  }
-  const isWaived = (l) => {
-    const marker = 'grep-audit-allow S-015:'
-    const at = l.indexOf(marker)
-    if (at < 0) return false
-    // 理由必须含**至少一个字母 / 数字 / 汉字**（与 S-010 / S-014 同口径：空理由不算豁免）
-    const rest = l.slice(at + marker.length)
-    return [...rest].some((c) => /[0-9A-Za-z]/.test(c) || c.codePointAt(0) > 127)
-  }
-  /** 形状①：退役的布尔壳。 */
-  const isRetiredShell = (l) => /\bclosure_granted\b/.test(l)
-  /** 形状②：闸的调用行——定义行不算，调用行必须自己带 `if let Err(`。 */
-  const isGateCall = (l) => /\bclosure_gate\s*\(/.test(l) && !/\bfn\s+closure_gate\b/.test(l)
-  const handlesErr = (l) => l.includes('if let Err(')
-  let s015 = 0
-  let s015Calls = 0
-  const s015List = []
-  for (const file of S015_ROOTS.flatMap((r) => walk(path.join(S015_BASE, r)))) {
-    // 测试文件豁免：那里断言的是谓词本身，不是拒绝路径。
-    // 拒绝路径只在生产代码里。
-    if (path.basename(file).endsWith('.test.rs')) continue
-    let text
-    try {
-      text = fs.readFileSync(file, 'utf8')
-    } catch {
-      continue
+      : null,
+  hit: (l, i, file, lines, wireSpan, ctx) => {
+    if (wireSpan && i >= wireSpan[0] && i <= wireSpan[1]) return
+    if (isCommentStart(l)) return
+    if (!S014_WRITE_RE.test(l)) return
+    if (W014(l, i, lines)) return
+    ctx.n = (ctx.n ?? 0) + 1
+    if (!ctx.list) ctx.list = []
+    if (ctx.list.length < 8) ctx.list.push(`${disp(file)}:${i + 1}`)
+  },
+  done: (ctx) => {
+    const n = ctx.n ?? 0
+    const list = ctx.list ?? []
+    if (n > LEGACY_ROLE_WRITE_BASELINE) {
+      err(
+        `S-014 违例：存量 role 格直写 ${n} 处 > 基线 ${LEGACY_ROLE_WRITE_BASELINE}——` +
+          `身份写 ` +
+          '`principal`，不写 role（读走 node_role()/legacy_role()）。首批命中：' +
+          list.join('、'),
+      )
+    } else if (IS_REPO && n < LEGACY_ROLE_WRITE_BASELINE) {
+      err(
+        `S-014 基线该收紧：存量 role 格直写 ${n} 处 < 基线 ${LEGACY_ROLE_WRITE_BASELINE}——` +
+          `把 LEGACY_ROLE_WRITE_BASELINE 下调到 ${n}（棘轮只许留痕地下调）`,
+      )
+    } else {
+      ok(
+        IS_REPO
+          ? `S-014 通过：role 格直写存量 ${n} 处，与基线持平（只许降）`
+          : 'S-014 跳过：当前树不是真实仓库（临时 fixture），棘轮不比',
+      )
     }
-    const lines = text.split(String.fromCharCode(10))
-    lines.forEach((l, i) => {
-      if (isComment(l)) return
-      if (isWaived(l) || (i > 0 && isWaived(lines[i - 1]))) return
-      if (isRetiredShell(l)) {
-        s015++
-        s015List.push(`${disp(file)}:${i + 1}（布尔壳 \`closure_granted\`）`)
-        return
-      }
-      if (!isGateCall(l)) return
-      s015Calls++
-      // 拆行写法：`if let Err(why) =` 上一行、调用在下一行 ⇒ 上一行同看。
-      if (handlesErr(l)) return
-      if (i > 0 && handlesErr(lines[i - 1])) return
-      s015++
-      s015List.push(`${disp(file)}:${i + 1}（闸的调用没当场处理 \`Err\`）`)
-    })
-  }
-  if (s015 > 0) {
-    err(
-      `S-015 违例：收束闸被压回布尔形态（${s015} 处）——` +
-        '布尔壳 `closure_granted` 已退役；闸的每一次调用都要当场 `if let Err(why) = closure_gate(..)` ' +
-        '并调 `deny(..)` 落 `authz.denied`。' +
-        `命中：${s015List.join('、')}`,
-    )
-  } else {
-    ok(
-      S015_IS_REPO
-        ? `S-015 通过：布尔壳零处、${s015Calls} 处闸调用都当场处理 \`Err\`（全部走 closure_gate + deny）`
-        : 'S-015 跳过：当前树不是真实仓库（临时 fixture）',
-    )
-  }
-}
-console.log()
+  },
+})
 
-// ── S-016: 停机原因只有一个形状─────────────────────────────
-// 收束格 / 否定事实的「为什么停」只能写在顶层 `reason`（闭集）。两个已退役的
-// 形状不许复活：
-//   · `terminated.reason` —— 与顶层 `reason` 是同一件事的两份账，必然有一处先漂；
-//   · 停机格载荷里的 `why` —— 自由文本，与 `reason` 语义重叠，读侧要靠猜。
+// ── S-015: 收束闸只有一个 owner，且每次调用都当场处理 Err ──────────────────
 //
-// 判据是**零出现**：这两个形状已经全部迁完，没有存量可言。放任一条回来的代价
-// 不是风格问题——读侧从此要判两个键，而多出来的那个键**不会让任何东西变红**。
-//
-// ## 扫描面（2026-11-13 重指）
-// 原先把范围写死成三个文件（`turn_runner.rs` / `turn_runner/facts.rs` /
-// `turn_runner/settle.rs`）。那三个路径随旧引擎退役**都已不存在**：`readFileSync`
-// 落进 `catch → continue`，判据在真仓里一个字节都没读过、恒绿——正是 `D-280`
-// 点名的「扫描面为空 ⇒ 读不到即全绿」。现改为遍历 `crates/symbio-plugin-loop/src`
-// 下全部 `.rs`（停机格只在这个 crate 里出生），并加一条「一个文件都没扫到即判红」，
-// 让同一个坏法不可能再悄悄发生。
-//
-// 不收窄到「只扫建停机格的那个函数」：`why` 在**别的 crate** 的别的格子上合法
-// （`commitment.breach` / `memory.consolidated` 没有竞争的 `reason` 字段）——那是
-// 它们自己的事；本 crate 里只有一个停机格，这里写 `why` 就是回潮。确需保留的，
-// 就地标 `grep-audit-allow S-016: <理由>`，理由为空不算豁免。
-//
-// 正则要求 `"reason"` / `reason` **带冒号或引号**：否则 `with_terminated(with_reason(..)`
-// 这种合法组合会被 `terminated…reason` 误命中——一条误报就会让人学会忽略这条规则。
-console.log('--- S-016: 停机原因单形状（terminated.reason / why 不许回来）---')
-{
-  const S016_BASE = looksLikeRepoTree(cwd) ? cwd : repoRoot
-  const S016_IS_REPO = path.resolve(S016_BASE) === path.resolve(repoRoot)
-  const S016_FILES = walk(path.join(S016_BASE, 'crates', 'symbio-plugin-loop', 'src'))
-  // 两种写法都要认：`json!({ "why": .. })`（键后冒号）与 `payload["why"] = ..`
-  // （下标赋值）。只认前者会漏掉生产里真正在用的那种。
-  const RETIRED_RE = /terminated[^\n]*(?:"reason"\s*:|\breason\s*:)|"why"\]\s*=|\bwhy"\s*:/
-  const WAIVER_S016_RE = /\/\/\s*grep-audit-allow S-016:[^\n]*[A-Za-z0-9\u4e00-\u9fff]/
-  let s016 = 0
-  const s016List = []
-  for (const file of S016_FILES) {
-    let lines
-    try {
-      lines = fs.readFileSync(file, 'utf8').split(/\r?\n/)
-    } catch {
-      continue
-    }
-    lines.forEach((l, i) => {
-      if (/^\s*(?:\/\/|\/\*|\*)/.test(l)) return
-      if (!RETIRED_RE.test(l)) return
-      if (WAIVER_S016_RE.test(l) || (i > 0 && WAIVER_S016_RE.test(lines[i - 1]))) return
-      s016++
-      s016List.push(`${disp(file)}:${i + 1}`)
-    })
-  }
-  // 「一个文件都没扫到」只在**真仓**判红：回归测试在临时目录里造一棵最小仓树，
-  // 上面本来就没有 `crates/symbio-plugin-loop`，那时按「跳过」处理（与 `S016_IS_REPO`
-  // 同一条件）。真仓里扫不到，说明 crate 改名或路径写错——那必须是红的。
-  if (S016_IS_REPO && S016_FILES.length === 0) {
-    err(
-      'S-016 扫描面为空：`crates/symbio-plugin-loop/src` 下一份 `.rs` 都没扫到 ⇒ ' +
-        '判据读不到任何东西（`D-280`）；路径写错或 crate 改名都要在这里变红，而不是静默变绿。',
-    )
-  } else if (s016 > 0) {
-    err(
-      `S-016 违例：停机原因出现已退役的形状（${s016} 处）——` +
-        '`terminated.reason` 与停机格的 `why` 都已并入顶层 `reason`（闭集）。' +
-        `命中：${s016List.join('、')}`,
-    )
-  } else {
-    ok(
-      S016_IS_REPO
-        ? `S-016 通过：\`plugin-loop/src\` 下 ${S016_FILES.length} 份 .rs 里零处已退役的停机原因形状`
-        : 'S-016 跳过：当前树不是真实仓库（临时 fixture）',
-    )
-  }
+// `closure_gate(actor, kind) -> Result<(), String>` 把「为什么拒」带出来交给 `deny(…)`
+// 落 `authz.denied`。否定分支若把闸压成布尔或把结果存起来另判，拒绝就又成了
+// 「什么都没写」：日志里「被拒」与「根本没跑完」同形，且**不会有任何东西变红**。
+// 判据是**零出现**：① 布尔壳 `closure_granted` 零出现；② 闸的调用行必须当场
+// `if let Err(`——拆行写法由「上一行同看」挡住，不许 `.is_ok()` 取布尔。
+// 测试文件豁免：那里断言的是谓词本身，不是拒绝路径。
+const isWaived015 = (l) => {
+  const marker = 'grep-audit-allow S-015:'
+  const at = l.indexOf(marker)
+  if (at < 0) return false
+  const rest = l.slice(at + marker.length)
+  return [...rest].some((c) => /[0-9A-Za-z]/.test(c) || c.codePointAt(0) > 127)
 }
-console.log()
+const W015 = (l, i, lines) => isWaived015(l) || (i > 0 && isWaived015(lines[i - 1]))
 
-// ── S-017: 恢复路径不许再有旁路（d）─────────────────────────
-// 恢复 / 审批 / 问答三条唤醒路径曾经走 `resume.rs` 的**私有旁路**：它自己写协议
-// 事实、自己跑执行体，绕开行表。旁路退役之后，这条路径的唯一入口是**事实**——
-// 用户动作落成 `request(port=tool)`，之后与批次走同一条授权 / 派发链。
-//
-// 判据是**零出现**（不是棘轮）：旁路已经全部迁完，没有存量可言。放任它回来的
-// 代价不是风格问题——恢复路径会**绕过行表**写事实，于是「这一轮欠了什么」
-// 与「这一轮做了什么」对不上账，而没有任何东西会变红。
-//
-// 扫两样：
-//   · `resume.rs` / `resume.test.rs` 两个文件不许存在；
-//   · 生产代码里 `resume_anchor`（旁路的选债口）零出现。
-//
-// 第三样 `resumed` 已从判据面移除（射程修正）：它如今是召回阶段格的**载荷键**
-// （`StageFact::recall` 自报「本幕是不是续写幕」，`turn_exec/policy.rs` 从事实面
-// 派生、技能行据此不重答），不是旁路分支的名字。旁路本身由上面两样守住——真旁路
-// 要自己写协议事实、自己跑执行体，绕不过 `resume_anchor` / `resume.rs` 这两个载体。
-console.log('--- S-017: 恢复路径不许再有旁路 ---')
-{
-  const S017_BASE = looksLikeRepoTree(cwd) ? cwd : repoRoot
-  const S017_IS_REPO = path.resolve(S017_BASE) === path.resolve(repoRoot)
-  const RETIRED_FILES = [
-    'crates/symbio-plugin-loop/src/resume.rs',
-    'crates/symbio-plugin-loop/src/resume.test.rs',
-  ]
-  let s017 = 0
-  const s017List = []
-  for (const rel of RETIRED_FILES) {
-    if (fs.existsSync(path.join(S017_BASE, rel))) {
-      s017++
-      s017List.push(rel)
-    }
-  }
-  const scan = (rel, re) => {
-    const file = path.join(S017_BASE, rel)
-    let lines
-    try {
-      lines = fs.readFileSync(file, 'utf8').split(/\r?\n/)
-    } catch {
+runLineRule({
+  title: '--- S-015: 收束闸单一 owner 且调用当场处理 Err ---',
+  roots: ['crates'],
+  skipFile: (file) => path.basename(file).endsWith('.test.rs'),
+  hit: (l, i, file, lines, per, ctx) => {
+    if (isCommentStart(l)) return
+    if (W015(l, i, lines)) return
+    if (/\bclosure_granted\b/.test(l)) {
+      ctx.n = (ctx.n ?? 0) + 1
+      if (!ctx.list) ctx.list = []
+      ctx.list.push(`${disp(file)}:${i + 1}（布尔壳 \`closure_granted\`）`)
       return
     }
-    lines.forEach((l, i) => {
-      if (/^\s*(?:\/\/|\/\*|\*)/.test(l)) return
-      if (!re.test(l)) return
-      s017++
-      s017List.push(`${disp(file)}:${i + 1}`)
-    })
-  }
-  // `resume_anchor`：整个生产树（插件 + core 的视图层）都不许再有这个名字。
-  // 扫描根是 `crates`：插件各是一个 crate，与 core 的视图层同在这个根下。
-  for (const file of ['crates'].flatMap((r) =>
-    walk(path.join(S017_BASE, r)),
-  )) {
-    if (path.basename(file).endsWith('.test.rs')) continue
-    scan(path.relative(S017_BASE, file), /\bresume_anchor\b/)
-  }
-  if (s017 > 0) {
-    err(
-      `S-017 违例：恢复路径的私有旁路回来了（${s017} 处）——` +
-        '唤醒 / 续写只能从事实进环：用户动作落成 `request(port=tool)`，' +
-        '之后与批次走同一条授权 / 派发链（`resume.rs` 与 `resume_anchor` 均已退役）。' +
-        `命中：${s017List.join('、')}`,
-    )
-  } else {
-    ok(
-      S017_IS_REPO
-        ? 'S-017 通过：恢复路径零旁路（`resume.rs` 已退役、`resume_anchor` 零出现）'
-        : 'S-017 跳过：当前树不是真实仓库（临时 fixture）',
-    )
-  }
-}
-console.log()
+    if (!/\bclosure_gate\s*\(/.test(l) || /\bfn\s+closure_gate\b/.test(l)) return
+    ctx.calls = (ctx.calls ?? 0) + 1
+    if (l.includes('if let Err(')) return
+    if (i > 0 && lines[i - 1].includes('if let Err(')) return
+    ctx.n = (ctx.n ?? 0) + 1
+    if (!ctx.list) ctx.list = []
+    ctx.list.push(`${disp(file)}:${i + 1}（闸的调用没当场处理 \`Err\`）`)
+  },
+  done: (ctx) => {
+    const n = ctx.n ?? 0
+    const calls = ctx.calls ?? 0
+    const list = ctx.list ?? []
+    if (n > 0) {
+      err(
+        `S-015 违例：收束闸被压回布尔形态（${n} 处）——` +
+          '布尔壳 `closure_granted` 已退役；闸的每一次调用都要当场 `if let Err(why) = closure_gate(..)` ' +
+          '并调 `deny(..)` 落 `authz.denied`。' +
+          `命中：${list.join('、')}`,
+      )
+    } else {
+      ok(
+        IS_REPO
+          ? `S-015 通过：布尔壳零处、${calls} 处闸调用都当场处理 \`Err\`（全部走 closure_gate + deny）`
+          : 'S-015 跳过：当前树不是真实仓库（临时 fixture）',
+      )
+    }
+  },
+})
+
+// ── S-016: 停机原因只有一个形状 ───────────────────────────────────────────
+// 收束格 / 否定事实的「为什么停」只能写在顶层 `reason`（闭集）。两个已退役形状不许
+// 复活：`terminated.reason`（同一件事的两份账）与停机格载荷里的 `why`（自由文本）。
+// 扫描面 2026-11-13 重指为 `crates/symbio-plugin-loop/src` 下全部 `.rs`：原写死的三个
+// 路径随旧引擎退役都已不存在，`readFileSync` 落进 `catch → continue`，判据恒绿——
+// 正是 D-280 的「扫描面为空 ⇒ 读不到即全绿」。故另加「真仓里一个文件都没扫到即判红」。
+// 正则要求 `"reason"` / `reason` 带冒号或引号，否则 `with_terminated(with_reason(..)`
+// 这种合法组合会被误命中。
+const RETIRED_RE = /terminated[^\n]*(?:"reason"\s*:|\breason\s*:)|"why"\]\s*=|\bwhy"\s*:/
+
+runLineRule({
+  title: '--- S-016: 停机原因单形状（terminated.reason / why 不许回来）---',
+  roots: ['crates/symbio-plugin-loop/src'],
+  hit: (l, i, file, lines, per, ctx) => {
+    if (isCommentStart(l)) return
+    if (!RETIRED_RE.test(l)) return
+    if (W016(l, i, lines)) return
+    ctx.n = (ctx.n ?? 0) + 1
+    if (!ctx.list) ctx.list = []
+    ctx.list.push(`${disp(file)}:${i + 1}`)
+  },
+  done: (ctx, list) => {
+    const n = ctx.n ?? 0
+    const hits = ctx.list ?? []
+    if (IS_REPO && list.length === 0) {
+      err(
+        'S-016 扫描面为空：`crates/symbio-plugin-loop/src` 下一份 `.rs` 都没扫到 ⇒ ' +
+          '判据读不到任何东西（`D-280`）；路径写错或 crate 改名都要在这里变红，而不是静默变绿。',
+      )
+    } else if (n > 0) {
+      err(
+        `S-016 违例：停机原因出现已退役的形状（${n} 处）——` +
+          '`terminated.reason` 与停机格的 `why` 都已并入顶层 `reason`（闭集）。' +
+          `命中：${hits.join('、')}`,
+      )
+    } else {
+      ok(
+        IS_REPO
+          ? `S-016 通过：\`plugin-loop/src\` 下 ${list.length} 份 .rs 里零处已退役的停机原因形状`
+          : 'S-016 跳过：当前树不是真实仓库（临时 fixture）',
+      )
+    }
+  },
+})
+
+// ── S-017: 恢复路径不许再有旁路 ───────────────────────────────────────────
+// 恢复 / 审批 / 问答三条唤醒路径曾走 `resume.rs` 的私有旁路：自己写协议事实、自己跑
+// 执行体，绕开行表。旁路退役后唯一入口是事实——用户动作落成 `request(port=tool)`。
+// 判据是**零出现**：① `resume.rs` / `resume.test.rs` 不许存在；② 生产代码里
+// `resume_anchor` 零出现。第三样 `resumed` 已移出判据面：它如今是召回阶段格的载荷键。
+const RETIRED_FILES = [
+  'crates/symbio-plugin-loop/src/resume.rs',
+  'crates/symbio-plugin-loop/src/resume.test.rs',
+]
+
+runLineRule({
+  title: '--- S-017: 恢复路径不许再有旁路 ---',
+  roots: ['crates'],
+  skipFile: (file) => path.basename(file).endsWith('.test.rs'),
+  begin: (ctx) => {
+    for (const rel of RETIRED_FILES) {
+      if (!fs.existsSync(path.join(BASE, rel))) continue
+      ctx.n = (ctx.n ?? 0) + 1
+      if (!ctx.list) ctx.list = []
+      ctx.list.push(rel)
+    }
+  },
+  hit: (l, i, file, lines, per, ctx) => {
+    if (isCommentStart(l)) return
+    if (!/\bresume_anchor\b/.test(l)) return
+    ctx.n = (ctx.n ?? 0) + 1
+    if (!ctx.list) ctx.list = []
+    ctx.list.push(`${disp(file)}:${i + 1}`)
+  },
+  done: (ctx) => {
+    const n = ctx.n ?? 0
+    const list = ctx.list ?? []
+    if (n > 0) {
+      err(
+        `S-017 违例：恢复路径的私有旁路回来了（${n} 处）——` +
+          '唤醒 / 续写只能从事实进环：用户动作落成 `request(port=tool)`，' +
+          '之后与批次走同一条授权 / 派发链（`resume.rs` 与 `resume_anchor` 均已退役）。' +
+          `命中：${list.join('、')}`,
+      )
+    } else {
+      ok(
+        IS_REPO
+          ? 'S-017 通过：恢复路径零旁路（`resume.rs` 已退役、`resume_anchor` 零出现）'
+          : 'S-017 跳过：当前树不是真实仓库（临时 fixture）',
+      )
+    }
+  },
+})
 
 // ── 汇总 ───────────────────────────────────────────────────────────────
 console.log('=== 汇总 ===')

@@ -18,6 +18,7 @@
 // @gate lib
 
 import fs from 'node:fs'
+import os from 'node:os'
 import path from 'node:path'
 
 /** 深度优先遍历目录下的所有文件。目录读不出 ⇒ 返回空（调用方负责判范围存在性）。 */
@@ -156,4 +157,40 @@ export function rmTree(dir) {
     else fs.unlinkSync(p)
   }
   fs.rmdirSync(dir)
+}
+
+/**
+ * 把「相对路径 → 内容」写进一棵树。值为 `null` 表示只建目录，不写文件。
+ * 审计回归测试里这段循环原先各抄一份，现归这里（`withTempTree` 也走它）。
+ */
+export function writeTree(root, files) {
+  for (const [rel, content] of Object.entries(files)) {
+    const abs = path.join(root, rel)
+    fs.mkdirSync(path.dirname(abs), { recursive: true })
+    if (content === null) fs.mkdirSync(abs, { recursive: true })
+    else fs.writeFileSync(abs, content)
+  }
+}
+
+/**
+ * 临时仓夹具运行时：**造树 → 跑回调 → 无条件清理**。
+ *
+ * 审计回归测试此前各写一份 `mkdtempSync` + 逐文件 `mkdirSync/writeFileSync` +
+ * `try/finally` 清理（有的还在每个用例里各写一遍）。回调返回值原样透出、异常原样抛，
+ * `finally` 只负责把树删干净；清理统一走 `rmTree`（`fs.rmSync` 的批量删除会被沙箱拦）。
+ *
+ * @param {Record<string, string|null>} files 相对路径 → 内容（`null` = 只建目录）
+ * @param {(root: string) => unknown} fn 在临时树里跑的回调
+ * @param {{ prefix?: string, dirs?: string[] }} [opts] `prefix` 给 mkdtemp 命名；
+ *   `dirs` 是额外要建的空目录（夹具里「只有目录没有文件」的那类形状）
+ */
+export function withTempTree(files, fn, { prefix = 'audit-', dirs = [] } = {}) {
+  const root = fs.mkdtempSync(path.join(os.tmpdir(), prefix))
+  try {
+    for (const d of dirs) fs.mkdirSync(path.join(root, d), { recursive: true })
+    writeTree(root, files)
+    return fn(root)
+  } finally {
+    rmTree(root)
+  }
 }

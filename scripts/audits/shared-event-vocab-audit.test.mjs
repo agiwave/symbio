@@ -16,11 +16,11 @@
 import assert from 'node:assert/strict'
 import { test } from 'node:test'
 import fs from 'node:fs'
-import os from 'node:os'
 import path from 'node:path'
 import { spawnSync } from 'node:child_process'
 import { fileURLToPath } from 'node:url'
-import { rmTree } from '../fs-walk.mjs'
+import { withTempTree } from '../fs-walk.mjs'
+import { expectAudit } from '../audit-assert.mjs'
 
 const script = fileURLToPath(new URL('./shared-event-vocab-audit.mjs', import.meta.url))
 
@@ -59,13 +59,7 @@ const CONSUMER = {
 }
 
 function audit(files) {
-  const root = fs.mkdtempSync(path.join(os.tmpdir(), 'shared-event-'))
-  try {
-    for (const [rel, content] of Object.entries(files)) {
-      const abs = path.join(root, rel)
-      fs.mkdirSync(path.dirname(abs), { recursive: true })
-      fs.writeFileSync(abs, content)
-    }
+  return withTempTree(files, (root) => {
     const result = spawnSync(process.execPath, [script, `--root=${root}`], {
       cwd: root,
       env: { ...process.env, NO_COLOR: '1' },
@@ -74,9 +68,7 @@ function audit(files) {
     })
     assert.ifError(result.error)
     return result
-  } finally {
-    rmTree(root)
-  }
+  }, { prefix: 'shared-event-' })
 }
 
 const clean = (extra = {}) => ({
@@ -89,9 +81,7 @@ const clean = (extra = {}) => ({
 
 test('① 干净夹具：owner 登记 + owner 声明 + 外部消费方 + 内核表无此行 ⇒ 绿', () => {
   const r = audit(clean())
-  assert.equal(r.status, 0, r.stdout + r.stderr)
-  assert.match(r.stdout, /✓ CS-007/)
-  assert.match(r.stdout, /memory\.encoded←loop→session/)
+  expectAudit(r, 0, [/✓ CS-007/, /memory\.encoded←loop→session/])
 })
 
 test('② 除 owner 外没人引用 ⇒ 红：共享表不许收单消费方的名字', () => {
@@ -153,15 +143,12 @@ test('⑤ 内核表上的多消费方存量：只报数，不判红', () => {
       'crates/symbio-plugin-session/src/hold.rs': 'pub const K: &str = "task.held";\n',
     }),
   )
-  assert.equal(r.status, 0, r.stdout + r.stderr)
-  assert.match(r.stdout, /内核表上的「task\.held」/)
+  expectAudit(r, 0, [/内核表上的「task\.held」/])
 })
 
 test('⑥ CS-011：干净夹具四档都有人住 ⇒ 绿', () => {
   const r = audit(clean())
-  assert.equal(r.status, 0, r.stdout + r.stderr)
-  assert.match(r.stdout, /✓ CS-011/)
-  assert.match(r.stdout, /CountsRework←1/)
+  expectAudit(r, 0, [/✓ CS-011/, /CountsRework←1/])
 })
 
 test('⑥ CS-011：删掉一档角色 ⇒ 红（判据读角色，缺席只让守卫变哑）', () => {
@@ -179,8 +166,7 @@ pub const ROLES: &[FactRole] = &[
 `,
     }),
   )
-  assert.equal(r.status, 1, r.stdout + r.stderr)
-  assert.match(r.stdout, /✗ CS-011 CountsRework/)
+  expectAudit(r, 1, [/✗ CS-011 CountsRework/])
 })
 
 test('⑥ CS-011：角色只写在 `.test.rs` 里不算居住 ⇒ 红', () => {
@@ -201,6 +187,5 @@ pub const ROLES: &[FactRole] = &[
 `,
     }),
   )
-  assert.equal(r.status, 1, r.stdout + r.stderr)
-  assert.match(r.stdout, /✗ CS-011/)
+  expectAudit(r, 1, [/✗ CS-011/])
 })

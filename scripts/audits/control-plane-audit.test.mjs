@@ -30,11 +30,11 @@
 import assert from 'node:assert/strict'
 import { test } from 'node:test'
 import fs from 'node:fs'
-import os from 'node:os'
 import path from 'node:path'
 import { spawnSync } from 'node:child_process'
 import { fileURLToPath } from 'node:url'
-import { rmTree } from '../fs-walk.mjs'
+import { withTempTree } from '../fs-walk.mjs'
+import { expectAudit, onStderr } from '../audit-assert.mjs'
 
 const script = fileURLToPath(new URL('./control-plane-audit.mjs', import.meta.url))
 const BASELINE_REL = 'scripts/baselines/control-plane.json'
@@ -57,8 +57,7 @@ function writeTree(root, files) {
 
 /** 用审计自己的 `--print-baseline` 算一份基线（夹具不手抄指纹）。 */
 function printBaseline(files) {
-  const root = fs.mkdtempSync(path.join(os.tmpdir(), 'cp-baseline-'))
-  try {
+  return withTempTree({}, (root) => {
     writeTree(root, files)
     const r = spawnSync(process.execPath, [script, `--root=${root}`, '--print-baseline'], {
       cwd: root,
@@ -68,9 +67,7 @@ function printBaseline(files) {
     const at = r.stdout.split('\n').findIndex((l) => l === '{')
     assert.notEqual(at, -1, `--print-baseline 没有打印基线：\n${r.stdout}${r.stderr}`)
     return JSON.parse(r.stdout.split('\n').slice(at).join('\n'))
-  } finally {
-    rmTree(root)
-  }
+  }, { prefix: 'cp-baseline-' })
 }
 
 /**
@@ -80,8 +77,7 @@ function printBaseline(files) {
  * `mutate` 改基线本身（指向不存在的文件 / 换掉决策号）。
  */
 function audit(files, { baselineFrom = files, withBaseline = true, mutate } = {}) {
-  const root = fs.mkdtempSync(path.join(os.tmpdir(), 'control-plane-'))
-  try {
+  return withTempTree({}, (root) => {
     if (withBaseline) {
       const b = printBaseline(baselineFrom)
       b.mechanism.adr = 'D-234'
@@ -95,9 +91,7 @@ function audit(files, { baselineFrom = files, withBaseline = true, mutate } = {}
       env: { ...process.env, NO_COLOR: '1' },
       encoding: 'utf8',
     })
-  } finally {
-    rmTree(root)
-  }
+  }, { prefix: 'control-plane-' })
 }
 
 function assertRed(r, code) {
@@ -169,12 +163,7 @@ function cleanTree() {
 
 test('干净夹具：四条判据全绿（循环体 1 段、世界事件名 2 个、端口名 1 个、生产文件 4 份）', () => {
   const r = audit(cleanTree())
-  assert.equal(r.status, 0, r.stdout + r.stderr)
-  assert.match(r.stdout, /CP-001 唯一循环体 1/)
-  assert.match(r.stdout, /CP-004 世界事件名 2 个、端口名 1 个、机制层 0 处/)
-  assert.match(r.stdout, /CP-006 机制面/)
-  assert.match(r.stdout, /（4 文件）/)
-  assert.match(r.stdout, /CP-009 第二推进循环 0/)
+  expectAudit(r, 0, [/CP-001 唯一循环体 1/, /CP-004 世界事件名 2 个、端口名 1 个、机制层 0 处/, /CP-006 机制面/, /（4 文件）/, /CP-009 第二推进循环 0/])
 })
 
 test('注释里的世界域名不算代码（CP-004 读剥注释后的文本）', () => {
@@ -283,8 +272,7 @@ test('CP-006：只改格式（import 顺序 / 空行 / 注释 / 换行 / 尾逗�
   const files = cleanTree()
   files[ENGINE] = formatted
   const r = audit(files, { baselineFrom: cleanTree() })
-  assert.equal(r.status, 0, r.stdout + r.stderr)
-  assert.match(r.stdout, /CP-006 机制面/)
+  expectAudit(r, 0, [/CP-006 机制面/])
 })
 
 test('CP-006：fn plan 加一个条件 ⇒ 红（归一化不抹语义）', () => {
@@ -311,8 +299,7 @@ test('CP-006：控制面多一份生产文件而基线未跟 ⇒ 红', () => {
 
 test('CP-006：基线整个缺失 ⇒ 退 2（判不了不许亮绿灯）', () => {
   const r = audit(cleanTree(), { withBaseline: false })
-  assert.equal(r.status, 2, r.stdout + r.stderr)
-  assert.match(r.stderr, /基线读不出/)
+  expectAudit(r, 2, [onStderr(/基线读不出/)])
 })
 
 test('CP-006：基线指向一个不存在的机制面文件 ⇒ 红（陈旧基线）', () => {
@@ -343,8 +330,7 @@ test('机制面文件读不出 ⇒ 退 2（范围读不出，不是红）', () =
   const files = cleanTree()
   delete files[ENGINE]
   const r = audit(files, { baselineFrom: cleanTree() })
-  assert.equal(r.status, 2, r.stdout + r.stderr)
-  assert.match(r.stderr, /机制面文件读不出/)
+  expectAudit(r, 2, [onStderr(/机制面文件读不出/)])
 })
 
 // ───────────────────────────── CP-009 ─────────────────────────────
@@ -367,6 +353,5 @@ test('CP-009：循环里没有推进调用 ⇒ 仍绿（不判「有没有循环
   files['crates/symbio-sdk/src/job.rs'] =
     'pub fn sum(items: &[u8]) -> u8 {\n    let mut n = 0;\n    for item in items {\n        n += *item;\n    }\n    n\n}\n'
   const r = audit(files)
-  assert.equal(r.status, 0, r.stdout + r.stderr)
-  assert.match(r.stdout, /CP-009 第二推进循环 0/)
+  expectAudit(r, 0, [/CP-009 第二推进循环 0/])
 })

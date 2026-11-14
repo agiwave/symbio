@@ -19,24 +19,18 @@
 import assert from 'node:assert/strict'
 import { test } from 'node:test'
 import fs from 'node:fs'
-import os from 'node:os'
 import path from 'node:path'
 import { spawnSync } from 'node:child_process'
 import { fileURLToPath } from 'node:url'
 import { countSites } from './kind-branch-audit.mjs'
-import { rmTree } from '../fs-walk.mjs'
+import { withTempTree } from '../fs-walk.mjs'
+import { expectAudit, onStderr } from '../audit-assert.mjs'
 
 const script = fileURLToPath(new URL('./kind-branch-audit.mjs', import.meta.url))
 
 
 function audit(files, { baseline = '0:1' } = {}) {
-  const root = fs.mkdtempSync(path.join(os.tmpdir(), 'kind-branch-'))
-  try {
-    for (const [rel, content] of Object.entries(files)) {
-      const abs = path.join(root, rel)
-      fs.mkdirSync(path.dirname(abs), { recursive: true })
-      fs.writeFileSync(abs, content)
-    }
+  return withTempTree(files, (root) => {
     const r = spawnSync(process.execPath, [script, `--root=${root}`], {
       cwd: root,
       env: { ...process.env, NO_COLOR: '1', KIND_BRANCH_BASELINE: baseline },
@@ -45,9 +39,7 @@ function audit(files, { baseline = '0:1' } = {}) {
     })
     assert.ifError(r.error)
     return r
-  } finally {
-    rmTree(root)
-  }
+  }, { prefix: 'kind-branch-' })
 }
 
 const REG = 'tauri/src/registry/messageFacts.ts'
@@ -88,9 +80,7 @@ test('框架层自己认形态 ⇒ KB-001 变红', () => {
     [REG]: REG_SRC,
     'tauri/src/components/Foo.vue': '<script setup lang="ts">\nconst x = kind === NODE_KIND_BODY\n</script>\n',
   }, { baseline: '0:1' })
-  assert.equal(r.status, 1, r.stdout)
-  assert.match(r.stderr, /KB-001/)
-  assert.match(r.stderr, /框架层分支.*实测 1 > 基线 0/)
+  expectAudit(r, 1, [onStderr(/KB-001/), onStderr(/框架层分支.*实测 1 > 基线 0/)])
 })
 
 test('框架层自己认资源类型 ⇒ KB-001 变红', () => {
@@ -98,9 +88,7 @@ test('框架层自己认资源类型 ⇒ KB-001 变红', () => {
     [REG]: REG_SRC,
     'tauri/src/services/session.ts': 'export const keep = (n) => n.ext === VDFS_EXT_SESSION\n',
   }, { baseline: '0:1' })
-  assert.equal(r.status, 1, r.stdout)
-  assert.match(r.stderr, /KB-001/)
-  assert.match(r.stderr, /框架层分支.*实测 1 > 基线 0/)
+  expectAudit(r, 1, [onStderr(/KB-001/), onStderr(/框架层分支.*实测 1 > 基线 0/)])
 })
 
 test('反向：schemas/ 是数据契约，不算分支（多数会误报）', () => {

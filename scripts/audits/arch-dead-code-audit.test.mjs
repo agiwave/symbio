@@ -12,6 +12,7 @@ import {
   judge,
   surfaceErrors,
 } from './arch-dead-code-audit.mjs'
+import { expectAudit } from '../audit-assert.mjs'
 
 const AUDIT = path.resolve(path.dirname(new URL(import.meta.url).pathname.replace(/^\//, '')), 'arch-dead-code-audit.mjs')
 const REPO = path.resolve(path.dirname(new URL(import.meta.url).pathname.replace(/^\//, '')))
@@ -82,8 +83,7 @@ test('调用只出现在测试文件 ⇒ 仍算零生产调用', () => {
 test('use / pub use 行不算调用（转出不是调用）', () => {
   const root = fixture({ caller: 'pub use symbio_sdk::target;\n', baseline: kAndA })
   const r = run(root)
-  assert.equal(r.status, 1, r.stdout + r.stderr)
-  assert.match(r.stdout, /AD-001.*target/)
+  expectAudit(r, 1, [/AD-001.*target/])
 })
 
 test('跨 crate 的普通调用算生产调用', () => {
@@ -190,8 +190,7 @@ test('AD-004：架构树缺失 / 语料过少 ⇒ 退出码 2', () => {
   const root = fixture({ filler: 0 })
   fs.rmSync(path.join(root, 'crates/symbio-kernel'), { recursive: true, force: true })
   const r = run(root)
-  assert.equal(r.status, 2, r.stdout + r.stderr)
-  assert.match(r.stdout, /AD-004/)
+  expectAudit(r, 2, [/AD-004/])
 })
 
 test('AD-004：基线缺失 ⇒ 退出码 2（不按「零违规」通过）', () => {

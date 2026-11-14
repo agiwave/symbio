@@ -8,9 +8,9 @@ import { test } from 'node:test'
 import assert from 'node:assert/strict'
 import { spawnSync } from 'node:child_process'
 import fs from 'node:fs'
-import os from 'node:os'
 import path from 'node:path'
 import { fileURLToPath } from 'node:url'
+import { withTempTree } from '../fs-walk.mjs'
 
 const scriptDir = path.dirname(fileURLToPath(import.meta.url))
 const script = path.join(scriptDir, 'facts-boundary-audit.mjs')
@@ -35,8 +35,7 @@ function repo(extra = {}) {
 }
 
 function audit(files) {
-  const root = fs.mkdtempSync(path.join(os.tmpdir(), 'facts-boundary-audit-'))
-  try {
+  return withTempTree({}, (root) => {
     for (const [rel, content] of Object.entries(files)) {
       const p = path.join(root, rel)
       fs.mkdirSync(path.dirname(p), { recursive: true })
@@ -47,9 +46,7 @@ function audit(files) {
       encoding: 'utf8',
       timeout: 10000,
     })
-  } finally {
-    fs.rmSync(root, { recursive: true, force: true })
-  }
+  }, { prefix: 'facts-boundary-audit-' })
 }
 
 const out = (r) => r.stdout + r.stderr

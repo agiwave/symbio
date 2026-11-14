@@ -1,0 +1,33 @@
+/**
+ * audit-assert — 审计回归测试的共用断言原语。
+ *
+ * 一个判据的对外契约只有两样：退出码，以及 stdout / stderr 里必须出现（或不出现）
+ * 的形状。此前 57 份回归测试把这个契约各写一遍 `assert.equal(r.status, …)` +
+ * 若干 `assert.match(r.stdout|r.stderr, …)`——287 组、652 行样板，改判据输出文案时
+ * 要顺着每个用例改断言写法。这里收成一处：用例只给「期望码 + 一组正则」。
+ *
+ * 只收编**形状完全相同**的组（失败消息为 stdout/stderr、断言变量为 `r`、正则无第三参），
+ * 带自定义失败消息 / 自定义断言的用例保持原样——它们写的不是同一件事。
+ */
+// @gate lib
+
+import assert from 'node:assert/strict'
+
+/** 标一条必须在 **stderr** 出现的形状；默认是 stdout（审计的 ERROR 走 stdout）。 */
+export const onStderr = (re) => ({ stream: 'stderr', re })
+
+/**
+ * @param {{status:number, stdout:string, stderr:string}} r spawnSync 结果
+ * @param {number} status 期望退出码
+ * @param {Array<RegExp | {stream:string, re:RegExp}>} patterns 输出里必须出现的形状
+ */
+export function expectAudit(r, status, patterns = []) {
+  assert.equal(r.status, status, r.stdout + r.stderr)
+  for (const p of patterns) {
+    if (p && typeof p === 'object' && !(p instanceof RegExp) && p.stream === 'stderr') {
+      assert.match(r.stderr, p.re)
+    } else {
+      assert.match(r.stdout, p)
+    }
+  }
+}

@@ -11,10 +11,11 @@
 import assert from 'node:assert/strict'
 import { test } from 'node:test'
 import fs from 'node:fs'
-import os from 'node:os'
 import path from 'node:path'
 import { spawnSync } from 'node:child_process'
 import { fileURLToPath } from 'node:url'
+import { withTempTree } from '../fs-walk.mjs'
+import { expectAudit } from '../audit-assert.mjs'
 
 const script = fileURLToPath(new URL('./doc-link-audit.mjs', import.meta.url))
 
@@ -22,8 +23,7 @@ const script = fileURLToPath(new URL('./doc-link-audit.mjs', import.meta.url))
 const SCAN_ROOTS = ['docs', 'crates', 'tauri', 'cli', 'examples']
 
 function audit(files, argv = []) {
-  const root = fs.mkdtempSync(path.join(os.tmpdir(), 'doc-link-audit-'))
-  try {
+  return withTempTree({}, (root) => {
     for (const d of SCAN_ROOTS) fs.mkdirSync(path.join(root, d), { recursive: true })
     for (const [rel, content] of Object.entries(files)) {
       const abs = path.join(root, rel)
@@ -38,9 +38,7 @@ function audit(files, argv = []) {
     })
     assert.ifError(result.error)
     return result
-  } finally {
-    fs.rmSync(root, { recursive: true, force: true })
-  }
+  }, { prefix: 'doc-link-audit-' })
 }
 
 // ── 命中：指向不存在的文件 ──────────────────────────────────────────────
@@ -55,9 +53,7 @@ test('docs/ 条目里的失效链接照判（迁入 docs/ 后不再单列扫描�
     'docs/a.md': '# A\n',
     'docs/003-design/002-架构总览.md': '# D-001\n\n见 [兄弟](./D-999.md)。\n',
   })
-  assert.equal(r.status, 1, r.stdout)
-  assert.match(r.stdout, /docs\/003-design\/002-架构总览\.md/)
-  assert.match(r.stdout, /D-999\.md/)
+  expectAudit(r, 1, [/docs\/003-design\/002-架构总览\.md/, /D-999\.md/])
 })
 
 test('散文体检不碰 docs/：条目的处理过程天生记历史、引用当时存在的路径', () => {
@@ -105,9 +101,7 @@ test('链接标题（`…"编号"`）是身份载体、不参与路径判定：D
       '# A\n\n见 [某个小节](./b.md#sect "docs/b") 与 [整篇](./b.md "docs/b")。\n',
     'docs/b.md': '# B\n\n## sect\n',
   })
-  assert.equal(r.status, 0, r.stdout)
-  assert.match(r.stdout, /扫描相对链接 2 条/)
-  assert.match(r.stdout, /D-007 站内锚点：判定 1 条，失效 0 条/)
+  expectAudit(r, 0, [/扫描相对链接 2 条/, /D-007 站内锚点：判定 1 条，失效 0 条/])
 })
 
 test('链接标题也挡不住真失效：地址错 / 锚点错照判（反向）', () => {
@@ -116,9 +110,7 @@ test('链接标题也挡不住真失效：地址错 / 锚点错照判（反向�
     'docs/c.md': '# C\n\n[错锚点](./d.md#没有这个小节 "docs/d")\n',
     'docs/d.md': '# D\n',
   })
-  assert.equal(r.status, 1, r.stdout)
-  assert.match(r.stdout, /nope\.md/)
-  assert.match(r.stdout, /没有这个小节/)
+  expectAudit(r, 1, [/nope\.md/, /没有这个小节/])
 })
 
 test('外链 / 空目标一律跳过（不是失效链接）；纯锚点归 D-007 判标题存在性', () => {
@@ -149,8 +141,7 @@ test('D-017：锚点指到的文件在仓内存在 → 通过', () => {
     'docs/a.md': '# A\n\n判据 `foo.rs:12` 与 `foo.rs::real_symbol`。\n',
     'crates/foo.rs': TEN_LINES,
   })
-  assert.equal(r.status, 0, r.stdout)
-  assert.match(r.stdout, /D-017 证据锚点：判定 2 条，失效 0 篇/)
+  expectAudit(r, 0, [/D-017 证据锚点：判定 2 条，失效 0 篇/])
 })
 
 test('D-017：文件已改名 → 失败（反面：这正是它要抓的静默悬空）', () => {
@@ -158,8 +149,7 @@ test('D-017：文件已改名 → 失败（反面：这正是它要抓的静默�
     'docs/a.md': '# A\n\n判据 `gone.rs:3`。\n',
     'crates/foo.rs': TEN_LINES,
   })
-  assert.equal(r.status, 1, r.stdout)
-  assert.match(r.stdout, /gone\.rs:3/)
+  expectAudit(r, 1, [/gone\.rs:3/])
 })
 
 test('D-017：`:行` 超过文件行数 → 失败（文件被拆分/截短）', () => {
@@ -206,8 +196,7 @@ test('D-017：行内豁免必须带理由（写在上一行也生效）', () => 
 // 历史叙述的合法写法是**普通文字**（不加反引号），不是「反引号 + 登记行」。
 test('决策正文的悬空锚点照常判红（没有冻结面）', () => {
   const r = audit({ 'docs/a.md': '# A\n\n### D-100 裁决\n\n证据 `gone.rs::removed`。\n' })
-  assert.equal(r.status, 1, r.stdout)
-  assert.match(r.stdout, /gone\.rs::removed/)
+  expectAudit(r, 1, [/gone\.rs::removed/])
 })
 
 test('历史锚点写成普通文字 ⇒ 不是证据锚点，不判（裁决时点的文件名用叙述形态记名）', () => {
@@ -248,8 +237,7 @@ test('D-002：没有归档这个去处——同样的内容放进 docs/archive/ 
     'docs/archive/review.md': REVIEW_DOC,
     'docs/archive/plan.md': IMPLEMENTED_DOC,
   })
-  assert.equal(r.status, 1, r.stdout)
-  assert.match(r.stdout, /滞留 2 篇/)
+  expectAudit(r, 1, [/滞留 2 篇/])
 })
 
 test('D-002：现行规范不误报（「状态：现行规范」不是过程文档）', () => {
@@ -330,9 +318,7 @@ test('D-003：决策账不计入预算（散文 900 + 决策账 400 > 上限 →
 
 test('D-003：散文仍照判（散文超上限，哪怕同时有决策账 → 失败）', () => {
   const r = audit({ 'docs/fat.md': ledgerDoc(LIMIT + 1, block(400)) })
-  assert.equal(r.status, 1, r.stdout)
-  assert.match(r.stdout, /散文/)
-  assert.match(r.stdout, /决策账/)
+  expectAudit(r, 1, [/散文/, /决策账/])
 })
 
 test('D-003：决策块在下一个一至三级标题处结束 ⇒ 账后的正文照样算散文', () => {
@@ -368,8 +354,7 @@ test('D-004：「不再 / 以前」这类现行语义常用词不误报', () => 
 // 同一件事：数「从几个变成几个」，而变更历史归 `git log`。
 test('D-004：计数箭头（五条 → 七条）判红', () => {
   const r = audit({ 'docs/a.md': '# A\n\n`check_all` 五条 → 七条（并入两条新断言）。\n' })
-  assert.equal(r.status, 1, r.stdout)
-  assert.match(r.stdout, /D-004/)
+  expectAudit(r, 1, [/D-004/])
 })
 
 test('D-004：四格三角色式的箭头同样判红（带量词才算数）', () => {
@@ -444,8 +429,7 @@ test('D-004：正文后的豁免注释不整篇豁免（全文档只认首行非
       '',
     ].join('\n'),
   })
-  assert.equal(r.status, 1, r.stdout)
-  assert.match(r.stdout, /docs\/a\.md:3/)
+  expectAudit(r, 1, [/docs\/a\.md:3/])
   assert.doesNotMatch(r.stdout, /docs\/a\.md:6/, '注释只免它的下一行，第 6 行免、第 3 行不免')
 })
 
@@ -535,9 +519,7 @@ test('D-007：跨册锚点指向不存在的标题 → 失败（D-001 会剥掉 
     'docs/decisions/core.md': '# 平台基座\n\n## D-001: 分形插件架构\n',
     'docs/README.md': '[001](./decisions/core.md#adr-999-不存在的那条)\n',
   })
-  assert.equal(r.status, 1, r.stdout)
-  assert.match(r.stdout, /D-007/)
-  assert.match(r.stdout, /adr-999-不存在的那条/)
+  expectAudit(r, 1, [/D-007/, /adr-999-不存在的那条/])
 })
 
 test('D-007：锚点指向真实标题 → 通过', () => {
@@ -545,8 +527,7 @@ test('D-007：锚点指向真实标题 → 通过', () => {
     'docs/decisions/core.md': '# 平台基座\n\n## D-001: 分形插件架构\n',
     'docs/README.md': '[001](./decisions/core.md#d-001-分形插件架构)\n',
   })
-  assert.equal(r.status, 0, r.stdout)
-  assert.match(r.stdout, /D-007 站内锚点：判定 1 条，失效 0 条/)
+  expectAudit(r, 0, [/D-007 站内锚点：判定 1 条，失效 0 条/])
 })
 
 test('D-007：slug 算法钉住真实形状——加粗 / 反引号 / 全角括号 / —— / + 全被丢，空格逐个转 -', () => {
@@ -570,8 +551,7 @@ test('D-007：` 是 ` 两侧的空格各产生一个连字符（漏了就红—�
     'docs/good.md': '[025-good](./decisions/session.md#d-025-顺序是节点属性delta-是-updated-的传输形态)\n',
     'docs/README.md': '[025-bad](./decisions/session.md#d-025-顺序是节点属性delta-是updated的传输形态)\n',
   })
-  assert.equal(r.status, 1, r.stdout)
-  assert.match(r.stdout, /README\.md.*#d-025-顺序是节点属性delta-是updated的传输形态/s)
+  expectAudit(r, 1, [/README\.md.*#d-025-顺序是节点属性delta-是updated的传输形态/s])
   assert.doesNotMatch(r.stdout, /good\.md/)
 })
 
@@ -600,8 +580,7 @@ test('D-007：重复标题接受 GitHub 的 `-1` 后缀变体（但不超过重�
     ].join('\n'),
   })
   // 2 个同名标题 ⇒ 合法后缀只到 `-1`；`-2` 失败，前两条不算失效
-  assert.equal(r.status, 1, r.stdout)
-  assert.match(r.stdout, /#x-标题-2/)
+  expectAudit(r, 1, [/#x-标题-2/])
   assert.doesNotMatch(r.stdout, /#x-标题-1 /)
 })
 
@@ -631,8 +610,7 @@ test('D-007：docs/archive/ 作为源文件也受查（没有历史快照豁免�
 // ── D-008：裸风险编号 ───────────────────────────────────────────────────
 test('D-008：正文裸 R<数字> → 失败（撞号唯一的机械信号）', () => {
   const r = audit({ 'docs/a.md': '按 R1 的目标形态走。\n' })
-  assert.equal(r.status, 1, r.stdout)
-  assert.match(r.stdout, /D-008 裸风险编号/)
+  expectAudit(r, 1, [/D-008 裸风险编号/])
 })
 
 test('D-008：定义行**首列**的 Rn → 通过（编号只能从这里产生）', () => {
@@ -642,8 +620,7 @@ test('D-008：定义行**首列**的 Rn → 通过（编号只能从这里产生
 
 test('D-008：同一行里首列**之外**的裸编号仍判（首列区间之外不算定义）', () => {
   const r = audit({ 'docs/a.md': '| R1 | 本行另提到 R2 | 高 |\n' })
-  assert.equal(r.status, 1, r.stdout)
-  assert.match(r.stdout, /R2/)
+  expectAudit(r, 1, [/R2/])
 })
 
 test('D-008：紧邻「风险」的限定引用 → 通过', () => {
@@ -661,15 +638,12 @@ test('D-008：不给豁免——头部 `doc-link-allow` 注释也照样判', () 
 // ── D-013：本机绝对路径 ─────────────────────────────────────────────────
 test('D-013：盘符反斜杠路径 → 失败（只对写它的那台机器成立）', () => {
   const r = audit({ 'docs/a.md': '# A\n\n产物在 `D:\\Bing\\symbio\\target`。\n' })
-  assert.equal(r.status, 1, r.stdout)
-  assert.match(r.stdout, /D-013 本机绝对路径/)
-  assert.match(r.stdout, /D:\\Bing\\symbio\\target/)
+  expectAudit(r, 1, [/D-013 本机绝对路径/, /D:\\Bing\\symbio\\target/])
 })
 
 test('D-013：正斜杠盘符路径同样判（形态不分分隔符）', () => {
   const r = audit({ 'docs/a.md': '# A\n\n见 D:/tmp/a.txt。\n' })
-  assert.equal(r.status, 1, r.stdout)
-  assert.match(r.stdout, /D:\/tmp\/a\.txt/)
+  expectAudit(r, 1, [/D:\/tmp\/a\.txt/])
 })
 
 test('D-013：登记条目照判（本机盘符不是「当时的事实」，是换台机器就失效的写法）', () => {
@@ -677,9 +651,7 @@ test('D-013：登记条目照判（本机盘符不是「当时的事实」，是
     'docs/a.md': '# A\n',
     'docs/007-task/001.md': '---\nkind: task\nid: T-001\n---\n\n实测 C:\\Users\\someone\\symbio 可用。\n',
   })
-  assert.equal(r.status, 1, r.stdout)
-  assert.match(r.stdout, /docs\/007-task\/001\.md/)
-  assert.match(r.stdout, /C:\\Users\\someone\\symbio/)
+  expectAudit(r, 1, [/docs\/007-task\/001\.md/, /C:\\Users\\someone\\symbio/])
 })
 
 test('D-013：front-matter（evidence / where）也判——它是文档的一部分', () => {
@@ -688,8 +660,7 @@ test('D-013：front-matter（evidence / where）也判——它是文档的一�
     'docs/007-task/001.md':
       '---\nkind: task\nid: T-001\nevidence: 实测 D:\\work\\repo\\target 可跑\n---\n\n正文。\n',
   })
-  assert.equal(r.status, 1, r.stdout)
-  assert.match(r.stdout, /docs\/007-task\/001\.md:4/)
+  expectAudit(r, 1, [/docs\/007-task\/001\.md:4/])
 })
 
 test('D-013：占位式写法通过（`<盘符>` / `<仓库根>` 不指向任何人的机器）', () => {
@@ -764,10 +735,7 @@ test('D-016：豁免只免本行 / 前一行，不整篇豁免（散文引用照
 // ⇒ 三条判据一起报 0，一个指向已删文档的悬空引用躺了几个月。这组用例钉住它会红。
 test('D-018：`[|docs/…]` 这类丢了地址的路径链接 → 失败（D-001 眼里它不是链接）', () => {
   const r = audit({ 'docs/a.md': '# A\n\n见 [|docs/007-task/048.md] 的处理过程。\n' })
-  assert.equal(r.status, 1, r.stdout)
-  assert.match(r.stdout, /D-018 畸形链接/)
-  assert.match(r.stdout, /docs\/a\.md:3/)
-  assert.match(r.stdout, /docs\/007-task\/048\.md/)
+  expectAudit(r, 1, [/D-018 畸形链接/, /docs\/a\.md:3/, /docs\/007-task\/048\.md/])
 })
 
 test('D-018：`[[编号|标题]]` 双括号引用不误报（机制接管，不是丢了地址）', () => {
@@ -789,10 +757,7 @@ test('D-019：源码注释里标题引号残缺 → 失败（不再静默跳过�
     'docs/a.md': '# A\n',
     'crates/x.rs': '// 见 [设计](../docs/nope.md "某标题)\nfn f() {}\n',
   })
-  assert.equal(r.status, 1, r.stdout)
-  assert.match(r.stdout, /D-019 注释链接的目标形态/)
-  assert.match(r.stdout, /crates\/x\.rs:1/)
-  assert.match(r.stdout, /nope\.md/)
+  expectAudit(r, 1, [/D-019 注释链接的目标形态/, /crates\/x\.rs:1/, /nope\.md/])
 })
 
 test('D-019：标题完整 → 通过（剥掉标题后按相对地址判存在性）', () => {
@@ -809,8 +774,7 @@ test('D-019：路径本身含空格（真有其目录）仍判——相对地址
     'docs/my dir/b.md': '# B\n',
     'crates/x.rs': '// 见 [B](../docs/my dir/b.md)\nfn f() {}\n',
   })
-  assert.equal(r.status, 1, r.stdout)
-  assert.match(r.stdout, /D-019/)
+  expectAudit(r, 1, [/D-019/])
 })
 
 // ── 空树 ────────────────────────────────────────────────────────────────

@@ -18,22 +18,16 @@
 import assert from 'node:assert/strict'
 import { test } from 'node:test'
 import fs from 'node:fs'
-import os from 'node:os'
 import path from 'node:path'
 import { spawnSync } from 'node:child_process'
 import { fileURLToPath } from 'node:url'
+import { withTempTree } from '../fs-walk.mjs'
 
 const script = fileURLToPath(new URL('./doc-section-audit.mjs', import.meta.url))
 
 /** 造一棵最小仓库：`files` 是 相对路径 → 内容 */
 function audit(files) {
-  const root = fs.mkdtempSync(path.join(os.tmpdir(), 'doc-section-'))
-  try {
-    for (const [rel, content] of Object.entries(files)) {
-      const abs = path.join(root, rel)
-      fs.mkdirSync(path.dirname(abs), { recursive: true })
-      fs.writeFileSync(abs, content)
-    }
+  return withTempTree(files, (root) => {
     const r = spawnSync(process.execPath, [script, `--root=${root}`], {
       env: { ...process.env, NO_COLOR: '1' },
       encoding: 'utf8',
@@ -41,9 +35,7 @@ function audit(files) {
     })
     assert.ifError(r.error)
     return r
-  } finally {
-    fs.rmSync(root, { recursive: true, force: true })
-  }
+  }, { prefix: 'doc-section-' })
 }
 
 const out = (r) => `${r.stdout}${r.stderr}`

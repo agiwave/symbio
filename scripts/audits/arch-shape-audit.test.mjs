@@ -21,11 +21,11 @@
 import assert from 'node:assert/strict'
 import { test } from 'node:test'
 import fs from 'node:fs'
-import os from 'node:os'
 import path from 'node:path'
 import { spawnSync } from 'node:child_process'
 import { fileURLToPath } from 'node:url'
-import { rmTree } from '../fs-walk.mjs'
+import { withTempTree } from '../fs-walk.mjs'
+import { expectAudit, onStderr } from '../audit-assert.mjs'
 
 const script = fileURLToPath(new URL('./arch-shape-audit.mjs', import.meta.url))
 
@@ -45,13 +45,7 @@ const ONE = 'pub trait Store {\n    fn one(&self) -> u32;\n}\n'
  * 绝大多数夹具里没有公共数据面，给 `0:0` 让提示噪音不出现在无关用例里。
  */
 function audit(files, { baseline = '1:1:0', vocab, data = '0:0' } = {}) {
-  const root = fs.mkdtempSync(path.join(os.tmpdir(), 'core-shape-'))
-  try {
-    for (const [rel, content] of Object.entries(files)) {
-      const abs = path.join(root, rel)
-      fs.mkdirSync(path.dirname(abs), { recursive: true })
-      fs.writeFileSync(abs, content)
-    }
+  return withTempTree(files, (root) => {
     const env = { ...process.env, NO_COLOR: '1', CORE_SHAPE_BASELINE: baseline, CORE_DATA_BASELINE: data }
     if (vocab !== undefined) env.VOCAB_BASELINE = vocab
     const result = spawnSync(process.execPath, [script, `--root=${root}`], {
@@ -62,9 +56,7 @@ function audit(files, { baseline = '1:1:0', vocab, data = '0:0' } = {}) {
     })
     assert.ifError(result.error)
     return result
-  } finally {
-    rmTree(root)
-  }
+  }, { prefix: 'core-shape-' })
 }
 
 const core = (traitSrc, extra = {}) => ({ [CORE_MOD]: 'mod alpha;\n', [ALPHA]: traitSrc, ...extra })
@@ -454,8 +446,7 @@ function vocab(sources = ['a.one'], cells = ['EVENT_A']) {
 
 test('CS-005：词汇等于基线 ⇒ 通过，且不把协议五格算进业务行', () => {
   const r = audit(core(ONE, vocab()), { baseline: '1:1:0', vocab: '1:1' })
-  assert.equal(r.status, 0, r.stderr + r.stdout)
-  assert.match(r.stdout, /CS-005.*kernelEvents 1\/1.*cellsRows 1\/1/)
+  expectAudit(r, 0, [/CS-005.*kernelEvents 1\/1.*cellsRows 1\/1/])
 })
 
 test('CS-005：新增一个业务事件常量 ⇒ 红（新事件该走 EventDecl）', () => {
@@ -477,20 +468,17 @@ test('CS-005：CELLS 新增一条业务行 ⇒ 红（写闸不再需要改这张
 test('CS-005：grid.rs 已退役 ⇒ cellsRows 0 是目标态，不判「判据输入缺一半」', () => {
   const onlyEvents = { [EVENT_MOD]: vocab()['crates/symbio-kernel/src/event/mod.rs'] }
   const r = audit(core(ONE, onlyEvents), { baseline: '1:1:0', vocab: '1:0' })
-  assert.equal(r.status, 0, r.stderr + r.stdout)
-  assert.match(r.stdout, /cellsRows 0\/0/)
+  expectAudit(r, 0, [/cellsRows 0\/0/])
 })
 
 test('CS-005：退役的 grid.rs 被加回内核 ⇒ 红（名字重新写进语法就是回潮）', () => {
   const r = audit(core(ONE, vocab(['a.one'], ['EVENT_A'])), { baseline: '1:1:0', vocab: '1:0' })
-  assert.equal(r.status, 1, r.stdout)
-  assert.match(r.stderr, /cellsRows 实测 1 > 冻结 0/)
+  expectAudit(r, 1, [onStderr(/cellsRows 实测 1 > 冻结 0/)])
 })
 
 test('CS-005：收到基线下方 ⇒ 通过并提示同步数字', () => {
   const r = audit(core(ONE, vocab([], [])), { baseline: '1:1:0', vocab: '1:1' })
-  assert.equal(r.status, 0, r.stderr + r.stdout)
-  assert.match(r.stdout, /kernelEvents 0<1/)
+  expectAudit(r, 0, [/kernelEvents 0<1/])
 })
 
 // ==================== CS-008 core 生产代码零事件名字面量 ====================
@@ -518,9 +506,7 @@ test('CS-008：core 生产代码写死事件名 ⇒ 红（表归零不等于名�
     baseline: '1:1:0',
     vocab: '1:0',
   })
-  assert.equal(r.status, 1, r.stdout)
-  assert.match(r.stderr, /CS-008/)
-  assert.match(r.stderr, /chat\.assistant\.final/)
+  expectAudit(r, 1, [onStderr(/CS-008/), onStderr(/chat\.assistant\.final/)])
 })
 
 test('CS-008：`#[cfg(test)] mod x;` 声明的夹具文件不算生产代码 ⇒ 不红', () => {
@@ -530,8 +516,7 @@ test('CS-008：`#[cfg(test)] mod x;` 声明的夹具文件不算生产代码 ⇒
     baseline: '1:1:0',
     vocab: '1:0',
   })
-  assert.equal(r.status, 0, r.stderr + r.stdout)
-  assert.match(r.stdout, /CS-008.*剥掉 1 个/)
+  expectAudit(r, 0, [/CS-008.*剥掉 1 个/])
 })
 
 test('CS-008：首段不在 `Entity` 闭集里的点分串 ⇒ 不红（闸靠闭集收窄，不靠豁免）', () => {
@@ -554,9 +539,7 @@ test('CS-006：只有一个插件消费、core 已不读 ⇒ 红（这条名字�
     core(ONE, { ...vocab(), [ALPHA_CRATE]: 'pub fn k() { let _ = EVENT_A; }\n' }),
     { baseline: '1:1:0', vocab: '1:1' },
   )
-  assert.equal(r.status, 1, r.stderr + r.stdout)
-  assert.match(r.stderr, /CS-006/)
-  assert.match(r.stderr, /「a\.one」的唯一生产消费方是 symbio-plugin-alpha/)
+  expectAudit(r, 1, [onStderr(/CS-006/), onStderr(/「a\.one」的唯一生产消费方是 symbio-plugin-alpha/)])
 })
 
 test('CS-006：两个 crate 同时消费 ⇒ 绿（名字不能被任一插件独占，E-009）', () => {
@@ -568,8 +551,7 @@ test('CS-006：两个 crate 同时消费 ⇒ 绿（名字不能被任一插件�
     }),
     { baseline: '1:1:0', vocab: '1:1' },
   )
-  assert.equal(r.status, 0, r.stderr + r.stdout)
-  assert.match(r.stdout, /CS-006.*1 条都不在「单一消费方且 core 不读」这一形态（≥2 crate 消费 1/)
+  expectAudit(r, 0, [/CS-006.*1 条都不在「单一消费方且 core 不读」这一形态（≥2 crate 消费 1/])
 })
 
 test('CS-006：core 生产代码读它 ⇒ 不判红，但账记在「待迁存量」上（迁的移动作在读者那一侧，DE-024 D-203）', () => {
@@ -581,8 +563,7 @@ test('CS-006：core 生产代码读它 ⇒ 不判红，但账记在「待迁存�
     }),
     { baseline: '1:1:0', vocab: '1:1' },
   )
-  assert.equal(r.status, 0, r.stderr + r.stdout)
-  assert.match(r.stdout, /CS-006.*core 读者 1/)
+  expectAudit(r, 0, [/CS-006.*core 读者 1/])
 })
 
 test('CS-006：core 里 `pub use` 转手一个名字不算读者 ⇒ 红（出口是账本，不是归属证据）', () => {
@@ -603,14 +584,12 @@ test('CS-006：谁都不读的业务名 ⇒ 红（内核表里躺着没人读的
     core(ONE, { ...vocab(), [ALPHA_CRATE]: '// 曾经有人读 a.one，现在没有\n' }),
     { baseline: '1:1:0', vocab: '1:1' },
   )
-  assert.equal(r.status, 1, r.stderr + r.stdout)
-  assert.match(r.stderr, /「a\.one」在 core 与插件的生产代码里都没有读者/)
+  expectAudit(r, 1, [onStderr(/「a\.one」在 core 与插件的生产代码里都没有读者/)])
 })
 
 test('CS-006：没有插件 crate 的夹具仓库 ⇒ 不适用，不许静默当成已通过', () => {
   const r = audit(core(ONE, vocab()), { baseline: '1:1:0', vocab: '1:1' })
-  assert.equal(r.status, 0, r.stderr + r.stdout)
-  assert.match(r.stdout, /CS-006.*不适用/)
+  expectAudit(r, 0, [/CS-006.*不适用/])
 })
 
 // ==================== CS-010 内核不含业务名 ====================
@@ -635,18 +614,14 @@ test('CS-010：内核文件集写死能力名 ⇒ 红（能力坐标回流）', 
   const r = audit(bizFiles(ONE + 'pub const C: &str = "judge.intent";\n'), {
     baseline: '1:1:0',
   })
-  assert.equal(r.status, 1, r.stdout)
-  assert.match(r.stderr, /CS-010/)
-  assert.match(r.stderr, /judge\.intent/)
+  expectAudit(r, 1, [onStderr(/CS-010/), onStderr(/judge\.intent/)])
 })
 
 test('CS-010：内核文件集写死 owner ⇒ 红（主体坐标回流）', () => {
   const r = audit(bizFiles(ONE + 'pub const O: &str = "session/main";\n'), {
     baseline: '1:1:0',
   })
-  assert.equal(r.status, 1, r.stdout)
-  assert.match(r.stderr, /CS-010/)
-  assert.match(r.stderr, /session\/main/)
+  expectAudit(r, 1, [onStderr(/CS-010/), onStderr(/session\/main/)])
 })
 
 test('CS-010：同名子串（不带引号）与注释里的名字 ⇒ 不红（判业务坐标，不判措辞）', () => {
@@ -666,13 +641,11 @@ test('CS-010 只量内核文件集：域文件里的业务名字面量不判红'
     bizFiles(ONE, { 'crates/symbio-sdk/src/beta/mod.rs': 'pub const N: &str = "session/main";\n' }),
     { baseline: '1:1:0' },
   )
-  assert.equal(r.status, 0, r.stderr + r.stdout)
-  assert.match(r.stdout, /CS-010.*14 个|CS-010.*1 个 owner/)
+  expectAudit(r, 0, [/CS-010.*14 个|CS-010.*1 个 owner/])
 })
 
 test('CS-010：没有 `principal_*` 声明的夹具仓库 ⇒ 不适用（不是「扫 0 条 = 全绿」）', () => {
   const r = audit(core(ONE), { baseline: '1:1:0' })
-  assert.equal(r.status, 0, r.stderr + r.stdout)
-  assert.match(r.stdout, /CS-010.*不适用/)
+  expectAudit(r, 0, [/CS-010.*不适用/])
 })
 

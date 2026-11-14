@@ -13,7 +13,6 @@
 import assert from 'node:assert/strict'
 import { test } from 'node:test'
 import fs from 'node:fs'
-import os from 'node:os'
 import path from 'node:path'
 import {
   CFG_ATTR_EXEMPT,
@@ -21,18 +20,15 @@ import {
   compareCfgAttr,
   validateCfgAttrExempt,
 } from './session-dead-code-audit.mjs'
-import { rmTree } from '../fs-walk.mjs'
+import { withTempTree } from '../fs-walk.mjs'
 
 
 /** 在临时目录里铺一份 `.rs`，返回检出结果。 */
 function scan(source) {
-  const root = fs.mkdtempSync(path.join(os.tmpdir(), 'session-dead-code-'))
-  try {
+  return withTempTree({}, (root) => {
     fs.writeFileSync(path.join(root, 'fixture.rs'), source)
     return cfgAttrAllowInSource(root).map((h) => ({ ...h, basename: path.basename(h.path) }))
-  } finally {
-    rmTree(root)
-  }
+  }, { prefix: 'session-dead-code-' })
 }
 
 test('SD-002 单行 cfg_attr 包 allow(dead_code) 必须检出（带符号与行号）', () => {

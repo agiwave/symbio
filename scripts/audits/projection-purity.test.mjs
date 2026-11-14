@@ -13,9 +13,9 @@ import { test } from 'node:test'
 import assert from 'node:assert/strict'
 import { spawnSync } from 'node:child_process'
 import fs from 'node:fs'
-import os from 'node:os'
 import path from 'node:path'
 import { fileURLToPath } from 'node:url'
+import { withTempTree } from '../fs-walk.mjs'
 
 const scriptDir = path.dirname(fileURLToPath(import.meta.url))
 const script = path.join(scriptDir, 'projection-purity.mjs')
@@ -42,8 +42,7 @@ function repo(extra = {}) {
 }
 
 function audited(files, env = {}) {
-  const root = fs.mkdtempSync(path.join(os.tmpdir(), 'projection-purity-'))
-  try {
+  return withTempTree({}, (root) => {
     for (const [rel, content] of Object.entries(files)) {
       const p = path.join(root, rel)
       fs.mkdirSync(path.dirname(p), { recursive: true })
@@ -54,9 +53,7 @@ function audited(files, env = {}) {
       encoding: 'utf8',
       timeout: 10000,
     })
-  } finally {
-    fs.rmSync(root, { recursive: true, force: true })
-  }
+  }, { prefix: 'projection-purity-' })
 }
 
 const out = (r) => r.stdout + r.stderr

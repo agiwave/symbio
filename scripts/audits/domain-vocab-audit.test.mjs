@@ -15,32 +15,24 @@
 import assert from 'node:assert/strict'
 import { test } from 'node:test'
 import fs from 'node:fs'
-import os from 'node:os'
 import path from 'node:path'
 import { spawnSync } from 'node:child_process'
 import { fileURLToPath } from 'node:url'
-import { rmTree } from '../fs-walk.mjs'
+import { withTempTree } from '../fs-walk.mjs'
+import { expectAudit } from '../audit-assert.mjs'
 
 const script = fileURLToPath(new URL('./domain-vocab-audit.mjs', import.meta.url))
 
 
 /** 建夹具 → 跑审计 → 返回 spawnSync 结果。`baseline` 默认空（不给任何环放行）。 */
 function audit(files, { baseline = [] } = {}) {
-  const root = fs.mkdtempSync(path.join(os.tmpdir(), 'core-vocab-'))
-  try {
-    for (const [rel, content] of Object.entries(files)) {
-      const abs = path.join(root, rel)
-      fs.mkdirSync(path.dirname(abs), { recursive: true })
-      fs.writeFileSync(abs, content)
-    }
+  return withTempTree(files, (root) => {
     return spawnSync(process.execPath, [script, `--root=${root}`], {
       cwd: root,
       env: { ...process.env, NO_COLOR: '1', CORE_VOCAB_BASELINE: JSON.stringify(baseline) },
       encoding: 'utf8',
     })
-  } finally {
-    rmTree(root)
-  }
+  }, { prefix: 'core-vocab-' })
 }
 
 const CORE = 'crates/symbio-sdk/src'
@@ -56,18 +48,14 @@ function cleanTree() {
 
 test('干净夹具：无 schemas、依赖单向 ⇒ exit 0', () => {
   const r = audit(cleanTree())
-  assert.equal(r.status, 0, r.stdout + r.stderr)
-  assert.match(r.stdout, /✓ V-001/)
-  assert.match(r.stdout, /✓ V-002/)
+  expectAudit(r, 0, [/✓ V-001/, /✓ V-002/])
 })
 
 test('V-001：schemas 目录重新出现 ⇒ exit 1', () => {
   const files = cleanTree()
   files[`${CORE}/schemas/mod.rs`] = `pub struct OldThing;\n`
   const r = audit(files)
-  assert.equal(r.status, 1, r.stdout + r.stderr)
-  assert.match(r.stdout, /V-001/)
-  assert.match(r.stdout, /schemas/)
+  expectAudit(r, 1, [/V-001/, /schemas/])
 })
 
 test('V-002：两域互引 ⇒ exit 1（新环不在基线里）', () => {
@@ -75,17 +63,14 @@ test('V-002：两域互引 ⇒ exit 1（新环不在基线里）', () => {
   // beta 已经用 Alpha；再让 alpha 用 Beta ⇒ alpha ⇄ beta
   files[`${CORE}/alpha/mod.rs`] = `use crate::beta::Beta;\n\npub struct Alpha {\n    _b: Option<Box<Beta>>,\n}\n`
   const r = audit(files)
-  assert.equal(r.status, 1, r.stdout + r.stderr)
-  assert.match(r.stdout, /V-002/)
-  assert.match(r.stdout, /alpha ⇄ beta/)
+  expectAudit(r, 1, [/V-002/, /alpha ⇄ beta/])
 })
 
 test('V-002：登记进基线的环放行（基线只放行登记过的）', () => {
   const files = cleanTree()
   files[`${CORE}/alpha/mod.rs`] = `use crate::beta::Beta;\n\npub struct Alpha {\n    _b: Option<Box<Beta>>,\n}\n`
   const r = audit(files, { baseline: ['alpha|beta'] })
-  assert.equal(r.status, 0, r.stdout + r.stderr)
-  assert.match(r.stdout, /✓ V-002/)
+  expectAudit(r, 0, [/✓ V-002/])
 })
 
 test('注释里的路径不算边（否则文档链接会造假环）', () => {
@@ -94,6 +79,5 @@ test('注释里的路径不算边（否则文档链接会造假环）', () => {
   // 就会凭空造出「alpha → beta」的回边、当场成环。剥掉 ⇒ 只有单向边 ⇒ 绿。
   files[`${CORE}/alpha/mod.rs`] = `//! 与 [\`crate::beta::Beta\`] 的关系写在注释里。\n\npub struct Alpha;\n`
   const r = audit(files)
-  assert.equal(r.status, 0, r.stdout + r.stderr)
-  assert.match(r.stdout, /✓ V-002/)
+  expectAudit(r, 0, [/✓ V-002/])
 })

@@ -18,6 +18,7 @@ import os from 'node:os'
 import path from 'node:path'
 import { spawnSync } from 'node:child_process'
 import { fileURLToPath } from 'node:url'
+import { expectAudit } from '../audit-assert.mjs'
 
 const script = fileURLToPath(new URL('./eol-audit.mjs', import.meta.url))
 
@@ -70,15 +71,12 @@ const ATTR = '* text=auto eol=lf\n'
 
 test('干净仓库（声明 lf、工作树 lf）→ 通过', () => {
   const r = audit({ '.gitattributes': ATTR, 'a.md': '# A\n', 'b.ts': 'export const x = 1\n' })
-  assert.equal(r.status, 0, r.stdout)
-  assert.match(r.stdout, /eol-audit 通过/)
+  expectAudit(r, 0, [/eol-audit 通过/])
 })
 
 test('EOL-001：声明了 lf，工作树却是 CRLF → 红（`git diff` 对此一个字符都不显示）', () => {
   const r = audit({ '.gitattributes': ATTR, 'a.md': '# A\r\n\r\n正文\r\n' })
-  assert.equal(r.status, 1, r.stdout)
-  assert.match(r.stdout, /EOL-001/)
-  assert.match(r.stdout, /a\.md/)
+  expectAudit(r, 1, [/EOL-001/, /a\.md/])
   // 反向确认：这条红的**不是**别的两面——入库 blob 已被 git 归一化成 LF
   assert.match(r.stdout, /EOL-003 入库 blob：带 \\r 0 个/)
 })
@@ -87,9 +85,7 @@ test('EOL-002：文本文件没有任何 `eol` 声明 → 红（新类型从声�
   // 整个仓库**没有** `.gitattributes`：attr 为 `unspecified`，行尾从此「看谁先写」。
   // 这正是新类型进来时的形状——没人会记得去补那一条声明。
   const r = audit({ 'b.weird': 'hello\n' })
-  assert.equal(r.status, 1, r.stdout)
-  assert.match(r.stdout, /EOL-002/)
-  assert.match(r.stdout, /b\.weird/)
+  expectAudit(r, 1, [/EOL-002/, /b\.weird/])
 })
 
 test('EOL-003：先提交 CRLF、后加 `eol=lf` 声明 → 入库 blob 仍带 `\\r`，红', () => {
@@ -136,9 +132,7 @@ test('已跟踪的文件在工作树里读不到 → 红（读不到不能当成
   const r = audit({ '.gitattributes': ATTR, 'gone.md': '# G\n' }, {
     beforeRun: (repo) => fs.rmSync(path.join(repo.root, 'gone.md')),
   })
-  assert.equal(r.status, 1, r.stdout)
-  assert.match(r.stdout, /读不到/)
-  assert.match(r.stdout, /gone\.md/)
+  expectAudit(r, 1, [/读不到/, /gone\.md/])
 })
 
 test('真实仓库当前状态通过（防本守卫在真仓库上误报）', () => {

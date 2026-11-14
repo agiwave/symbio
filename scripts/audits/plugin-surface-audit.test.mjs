@@ -37,7 +37,8 @@ import {
   SDK_BASELINE,
   WHITELIST_BASELINE,
 } from './plugin-surface-audit.mjs'
-import { rmTree } from '../fs-walk.mjs'
+import { rmTree, withTempTree } from '../fs-walk.mjs'
+import { expectAudit } from '../audit-assert.mjs'
 
 const script = fileURLToPath(new URL('./plugin-surface-audit.mjs', import.meta.url))
 
@@ -96,8 +97,7 @@ test('① 干净夹具通过', () => {
   })
   try {
     const r = runOn(root)
-    assert.equal(r.status, 0, r.stdout + r.stderr)
-    assert.match(r.stdout, /HS-001 扩展层零直接依赖/)
+    expectAudit(r, 0, [/HS-001 扩展层零直接依赖/])
   } finally {
     rmTree(root)
   }
@@ -110,9 +110,7 @@ test('② 源码直取 core ⇒ 红', () => {
   })
   try {
     const r = runOn(root)
-    assert.equal(r.status, 1, r.stdout + r.stderr)
-    assert.match(r.stdout, /symbio_sdk::/)
-    assert.match(r.stdout, /HS-001/)
+    expectAudit(r, 1, [/symbio_sdk::/, /HS-001/])
   } finally {
     rmTree(root)
   }
@@ -127,9 +125,7 @@ test('②b 源码直取 kernel ⇒ 红（D-418：语法也走门面）', () => {
   })
   try {
     const r = runOn(root)
-    assert.equal(r.status, 1, r.stdout + r.stderr)
-    assert.match(r.stdout, /symbio_kernel::/)
-    assert.match(r.stdout, /HS-001/)
+    expectAudit(r, 1, [/symbio_kernel::/, /HS-001/])
   } finally {
     rmTree(root)
   }
@@ -194,8 +190,7 @@ test('⑦ 白名单超基线 ⇒ 红（HS-002 只许降）', () => {
   })
   try {
     const r = runOn(root)
-    assert.equal(r.status, 1, r.stdout + r.stderr)
-    assert.match(r.stdout, /HS-002/)
+    expectAudit(r, 1, [/HS-002/])
   } finally {
     rmTree(root)
   }
@@ -250,9 +245,7 @@ test('⑨ 白名单里的空转条目 ⇒ 红（HS-003）', () => {
   })
   try {
     const r = runOn(root)
-    assert.equal(r.status, 1, r.stdout + r.stderr)
-    assert.match(r.stdout, /HS-003/)
-    assert.match(r.stdout, /Ghost/)
+    expectAudit(r, 1, [/HS-003/, /Ghost/])
   } finally {
     rmTree(root)
   }
@@ -273,13 +266,10 @@ test('⑨b `X as _` 算消费方（HS-003 认 `as` 前的门面符号）', () =>
 })
 
 test('⑧ 范围读不出 ⇒ exit 2', () => {
-  const root = fs.mkdtempSync(path.join(os.tmpdir(), 'plugin-surface-empty-'))
-  try {
+  return withTempTree({}, (root) => {
     const r = runOn(root)
     assert.equal(r.status, 2, r.stdout + r.stderr)
-  } finally {
-    rmTree(root)
-  }
+  }, { prefix: 'plugin-surface-empty-' })
 })
 
 test('⑩ 胶水层把嵌入臂设为默认 ⇒ 红（HS-004）', () => {
@@ -290,9 +280,7 @@ test('⑩ 胶水层把嵌入臂设为默认 ⇒ 红（HS-004）', () => {
   })
   try {
     const r = runOn(root)
-    assert.equal(r.status, 1, r.stdout + r.stderr)
-    assert.match(r.stdout, /HS-004/)
-    assert.match(r.stdout, /embedding/)
+    expectAudit(r, 1, [/HS-004/, /embedding/])
   } finally {
     rmTree(root)
   }
@@ -306,9 +294,7 @@ test('⑪ 嵌入臂不是 optional ⇒ 红（HS-004）', () => {
   })
   try {
     const r = runOn(root)
-    assert.equal(r.status, 1, r.stdout + r.stderr)
-    assert.match(r.stdout, /HS-004/)
-    assert.match(r.stdout, /optional/)
+    expectAudit(r, 1, [/HS-004/, /optional/])
   } finally {
     rmTree(root)
   }
@@ -322,8 +308,7 @@ test('⑫ 嵌入臂默认关闭 ⇒ 绿（HS-004 的正例）', () => {
   })
   try {
     const r = runOn(root)
-    assert.equal(r.status, 0, r.stdout + r.stderr)
-    assert.match(r.stdout, /HS-004/)
+    expectAudit(r, 0, [/HS-004/])
   } finally {
     rmTree(root)
   }
@@ -339,8 +324,7 @@ test('⑬ 门面 manifest 依赖旧 core 的 crate 名 ⇒ 红（HS-005，D-276�
   })
   try {
     const r = runOn(root)
-    assert.equal(r.status, 1, r.stdout + r.stderr)
-    assert.match(r.stdout, /HS-005/)
+    expectAudit(r, 1, [/HS-005/])
   } finally {
     rmTree(root)
   }
@@ -355,8 +339,7 @@ test('⑬b HS-005 退化：活跃源码里 `use symbio_core::…` ⇒ 红（守�
   })
   try {
     const r = runOn(root)
-    assert.equal(r.status, 1, r.stdout + r.stderr)
-    assert.match(r.stdout, /HS-005/)
+    expectAudit(r, 1, [/HS-005/])
     assert.match(r.stdout, new RegExp(RETIRED_CORE_MODULE))
   } finally {
     rmTree(root)
@@ -398,9 +381,7 @@ test('⑭ 门面模块级转发超过基线 ⇒ 红（HS-006，D-278）', () => 
   for (const m of mods) fs.writeFileSync(path.join(nsDir, m + '.rs'), 'pub fn x() {}\n')
   try {
     const r = runOn(root)
-    assert.equal(r.status, 1, r.stdout + r.stderr)
-    assert.match(r.stdout, /HS-006/)
-    assert.match(r.stdout, /模块级转发/)
+    expectAudit(r, 1, [/HS-006/, /模块级转发/])
   } finally {
     rmTree(root)
   }
@@ -488,9 +469,7 @@ test('⑮ 机制臂块回到门面 ⇒ 红（HS-002）：判据靠来源分区�
   })
   try {
     const r = runOn(root)
-    assert.equal(r.status, 1, r.stdout + r.stderr)
-    assert.match(r.stdout, /HS-002/)
-    assert.match(r.stdout, /LegacyThing/)
+    expectAudit(r, 1, [/HS-002/, /LegacyThing/])
   } finally {
     rmTree(root)
   }
@@ -505,8 +484,7 @@ test('⑯ 门面一条 `pub use …::` 都读不到 ⇒ 读不出即红（D-280�
   })
   try {
     const r = runOn(root)
-    assert.equal(r.status, 1, r.stdout + r.stderr)
-    assert.match(r.stdout, /读不出/)
+    expectAudit(r, 1, [/读不出/])
   } finally {
     rmTree(root)
   }
