@@ -58,7 +58,11 @@ import path from 'node:path'
 import { fileURLToPath } from 'node:url'
 import { red, green, yellow, dim } from '../color.mjs'
 import { backfillShas, loadBackfill } from '../core-change-backfill.mjs'
-import { gitOut } from '../gate.d/_shared.mjs'
+import {
+  gitOut, GIT_LOG_PRETTY, requiresRange, resolveRange, parseGitLogRecords,
+} from '../gate.d/_shared.mjs'
+// 回归测试直接喂样本的两个纯函数仍从本脚本取，实现已归共享库。
+export { requiresRange, parseGitLogRecords as parseCommitRecords }
 
 const git = (args) => gitOut(args, { cwd: repoRoot })
 
@@ -227,55 +231,6 @@ export function validateBaseline(entries, decisions) {
 
 const BASELINE_SHAS = new Set(BASELINE.map((e) => e.sha))
 
-const REC = '\x01'
-/**
- * 分隔符写成 git 的 `%xNN` 转义而不是字面控制字符：Node 的 `spawn` **拒绝参数里含
- * NUL 字节**（`ERR_INVALID_ARG_VALUE`），而 `%x00` 由 git 在输出里展开，两边都不脏。
- */
-const PRETTY = `%x01%H%x00%B`
-
-/**
- * `--raw` 的一条文件记录：`:100644 100644 3479b6d5 a34de8f1 M\tpath`。
- *
- * 判它**不只看行首的 `:`**——正文里以 `:` 开头的行（列表、`键: 值`）会把 message
- * 拦腰截断，而 `Core-Change:` trailer 住在正文末尾：截断即等于「没写理由」，
- * 一批提交会莫名判红。两个源模式字段是定长 6 位八进制，够把两类行分开。
- */
-const RAW_FILE_LINE_RE = /^:[0-7]{6} [0-7]{6} /
-
-/**
- * 解析 `git log --raw --pretty=format:<REC>%H%x00%B` 的输出。
- *
- * 抽成纯函数并被 `judge` 的回归测试直接喂样本：这一层原先没有测试，注释写的是
- * 「喂进来的形状由门禁实跑覆盖」——而批量化改的**恰恰就是这一层**，实测第一版
- * 把正文切到只剩标题，`Core-Change:` trailer 全丢，23 条提交被误判红。**只有
- * 真跑一遍才会露**，而真跑一遍的代价是整轮门禁，所以判据必须能在函数层面被喂。
- *
- * 两条形状事实（都踩过 / 都会再踩）：
- *  - 文件记录由 `RAW_FILE_LINE_RE` 认出，正文与 trailer 都不匹配它；
- *  - 消息必须取到第一条文件记录**之前**的全部——`Core-Change:` 住在正文末尾。
- */
-export function parseCommitRecords(out) {
-  const commits = []
-  for (const rec of String(out).split(REC)) {
-    if (!rec.trim()) continue
-    const nul = rec.indexOf('\x00')
-    if (nul < 0) continue
-    const sha = rec.slice(0, nul).trim()
-    const lines = rec.slice(nul + 1).split('\n')
-    const firstFile = lines.findIndex((l) => RAW_FILE_LINE_RE.test(l))
-    const message = (firstFile < 0 ? lines : lines.slice(0, firstFile)).join('\n')
-    const files =
-      firstFile < 0
-        ? []
-        : lines
-            .slice(firstFile)
-            .map((l) => l.slice(l.lastIndexOf('\t') + 1).trim())
-            .filter(Boolean)
-    commits.push({ sha, message, files })
-  }
-  return commits
-}
 
 /**
  * 一次 `git log` 拿到范围内**每个提交的 sha、完整信息与改动文件清单**。
@@ -295,11 +250,11 @@ function commitsWithFiles(range) {
     '--reverse',
     '--raw',
     '--no-renames',
-    `--pretty=format:${PRETTY}`,
+    `--pretty=format:${GIT_LOG_PRETTY}`,
     range,
   ])
   if (out === null) return null
-  return parseCommitRecords(out)
+  return parseGitLogRecords(out)
 }
 
 /**
@@ -387,30 +342,6 @@ function subjectsOf(commits) {
   return map
 }
 
-/**
- * 是否自动化环境。GitHub Actions 恒置 `CI=true`，`GITHUB_ACTIONS` 是它的专属变量；
- * 值为空 / `false` / `0` 都算不是（有人本地导出 CI=false 来跑脚本）。
- */
-function isCiEnv(env = process.env) {
-  const v = env.CI ?? env.GITHUB_ACTIONS ?? ''
-  return v !== '' && v !== 'false' && v !== '0'
-}
-
-/** 「无 base 可判」在哪些场合算判红：显式传参，或本身就是自动化 */
-export function requiresRange(args = argv, env = process.env) {
-  return args.includes('--require-range') || isCiEnv(env)
-}
-
-function resolveRange() {
-  const idx = argv.indexOf('--range')
-  if (idx >= 0) return argv[idx + 1] || null
-  if (argv.includes('--last')) return 'HEAD~1..HEAD'
-  for (const base of ['origin/main', 'origin/master', 'main']) {
-    const mb = git(['merge-base', base, 'HEAD'])
-    if (mb && mb.trim()) return `${mb.trim()}..HEAD`
-  }
-  return null
-}
 
 function main() {
   // 豁免名单自己先过一遍形状判据：**判据的红线不能靠它豁免的那几行代码来解释**。
@@ -431,7 +362,7 @@ function main() {
   }
   const BACKFILL_SHAS = backfillShas(backfill.entries, 'CC-001')
 
-  const range = resolveRange()
+  const range = resolveRange(argv, git)
   if (!range) {
     // **无 git 事实可判 ≠ 判据成立**。浅克隆、`actions/checkout` 没拉 base、
     // detached HEAD 都会走到这里；退 0 等于这道闸在那些机器上**静默消失**，而日志里
@@ -440,7 +371,7 @@ function main() {
     // 判红条件是 `--require-range` **或** CI 变量：只靠传参就得有人记得拼，而 workflow
     // 是按脚本名跑门禁的，从没拼过它——那条为 CI 加的红线因此一直没被拉起来。
     // 本地（无 CI 变量）仍按「跳过，不当作通过」，不逼开发者去配 base ref。
-    const forced = requiresRange()
+    const forced = requiresRange(argv)
     const msg =
       '⊘ arch-change-audit：找不到可判的提交范围（无 origin/main 也无 --range）——跳过，不当作通过'
     if (forced) {

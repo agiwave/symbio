@@ -66,7 +66,7 @@ import fs from 'node:fs'
 import path from 'node:path'
 import { fileURLToPath } from 'node:url'
 import { red, green, yellow } from '../color.mjs'
-import { blankTestModules } from '../rust-scan.mjs'
+import { blankComments as blankSourceComments, blankTestModules } from '../rust-scan.mjs'
 import { walkFiles } from '../fs-walk.mjs'
 
 const scriptDir = path.dirname(fileURLToPath(import.meta.url))
@@ -87,64 +87,8 @@ const CALL_RE = /\.round_trip\s*\(/
 const EMPTY_TOOLS = /^&\s*\[\s*\]$/
 
 /** 递归收集 `.rs`（测试文件排除）。 */
-/**
- * 把注释抹成空白、**保留每一个换行**。
- *
- * 为什么不用 `rust-scan.stripComments`：它把跨行的块注释整段吃掉（连换行一起），
- * 后面的行号整体上移——而本守卫的豁免是按行号挂的，行号一错位，豁免就挂到别人身上，
- * 比不豁免更坏（日志会显示「已登记」）。
- */
-function blankComments(text) {
-  let out = ''
-  let i = 0
-  const n = text.length
-  while (i < n) {
-    const two = text[i + 1]
-    if (text[i] === '/' && two === '/') {
-      while (i < n && text[i] !== '\n') {
-        out += ' '
-        i++
-      }
-      continue
-    }
-    if (text[i] === '/' && two === '*') {
-      out += '  '
-      i += 2
-      while (i < n && !(text[i] === '*' && text[i + 1] === '/')) {
-        out += text[i] === '\n' ? '\n' : ' '
-        i++
-      }
-      if (i < n) {
-        out += '  '
-        i += 2
-      }
-      continue
-    }
-    // 字符串字面量：里面的 `//` 与 `/*` 不是注释。形状近似即可——本判据不看字符串内容，
-    // 只需要不让字符串里的注释记号把后面整段吃掉。
-    if (text[i] === '"') {
-      out += '"'
-      i++
-      while (i < n && text[i] !== '"') {
-        if (text[i] === '\\' && i + 1 < n) {
-          out += text[i] + text[i + 1]
-          i += 2
-          continue
-        }
-        out += text[i] === '\n' ? '\n' : text[i]
-        i++
-      }
-      if (i < n) {
-        out += '"'
-        i++
-      }
-      continue
-    }
-    out += text[i]
-    i++
-  }
-  return out
-}
+/** 注释剥离：唯一真源 rust-scan.mjs（保留行结构，返回按行数组）。 */
+const blankComments = (text) => blankSourceComments(text).join('\n')
 
 /**
  * 审计主体（与源根解耦，供回归测试注入夹具）。

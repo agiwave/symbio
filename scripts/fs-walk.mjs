@@ -143,3 +143,17 @@ export function walkFiles(dir, opts = {}) {
   visit(dir)
   return out
 }
+
+/**
+ * 逐个删掉临时夹具目录——**不用** `fs.rmSync({ recursive: true })`：沙箱会拦截批量删除
+ * （见 `test-layout-audit.test.mjs`）。20 份审计回归测试原先各抄一份，现统一归这里。
+ */
+export function rmTree(dir) {
+  if (!fs.existsSync(dir)) return
+  for (const e of fs.readdirSync(dir, { withFileTypes: true })) {
+    const p = path.join(dir, e.name)
+    if (e.isDirectory()) rmTree(p)
+    else fs.unlinkSync(p)
+  }
+  fs.rmdirSync(dir)
+}

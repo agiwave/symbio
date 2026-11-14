@@ -16,27 +16,11 @@ import os from 'node:os'
 import path from 'node:path'
 import { spawnSync } from 'node:child_process'
 import { fileURLToPath } from 'node:url'
+import { rmTree } from '../fs-walk.mjs'
 
 const script = fileURLToPath(new URL('./test-layout-audit.mjs', import.meta.url))
 const repoRoot = path.resolve(path.dirname(script), '..', '..')
 
-/**
- * 删临时目录 —— **逐个删，不用 `fs.rmSync(recursive)`**。
- *
- * 原因（本机踩到，值得记）：带沙箱的开发环境会把"一次递归删掉一整个目录"当成
- * **批量删除**拦截或挂起。本用例会造 50+ 个夹具文件，用 `rmSync(recursive)` 时进程
- * 直接卡死（表现为测试超时、零输出，极难定位）。逐个 `unlinkSync` 则不触发。
- * 同样的坑此前也拦过 `vite build` 清 `dist/` 与 `vitest --coverage` 清 `coverage/`。
- */
-function rmTree(dir) {
-  if (!fs.existsSync(dir)) return
-  for (const e of fs.readdirSync(dir, { withFileTypes: true })) {
-    const p = path.join(dir, e.name)
-    if (e.isDirectory()) rmTree(p)
-    else fs.unlinkSync(p)
-  }
-  fs.rmdirSync(dir)
-}
 
 function audit(files, { strict = false, ratchet = null } = {}) {
   const root = fs.mkdtempSync(path.join(os.tmpdir(), 'test-layout-'))

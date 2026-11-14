@@ -20,6 +20,7 @@ import os from 'node:os'
 import path from 'node:path'
 import { spawnSync } from 'node:child_process'
 import { fileURLToPath } from 'node:url'
+import { rmTree } from '../fs-walk.mjs'
 
 const script = fileURLToPath(new URL('./capability-ledger-audit.mjs', import.meta.url))
 
@@ -75,15 +76,6 @@ const LEDGER_TEXT = [
   '',
 ].join('\n')
 
-function rmTree(dir) {
-  if (!fs.existsSync(dir)) return
-  for (const e of fs.readdirSync(dir, { withFileTypes: true })) {
-    const p = path.join(dir, e.name)
-    if (e.isDirectory()) rmTree(p)
-    else fs.unlinkSync(p)
-  }
-  fs.rmdirSync(dir)
-}
 
 function writeTree(root, files) {
   for (const [rel, content] of Object.entries(files)) {

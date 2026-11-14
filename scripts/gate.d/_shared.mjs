@@ -1258,3 +1258,75 @@ export function gitOut(args, { cwd, maxBuffer = 64 * 1024 * 1024, input, encodin
 export function gitRaw(args, { cwd, maxBuffer = 64 * 1024 * 1024, input, encoding = 'utf8' } = {}) {
   return spawnSync('git', args, { cwd, encoding, input, shell: false, maxBuffer })
 }
+
+
+// ── git 变更审的共用输入面（arch-change / capability-migration / extension-locality） ──
+//
+// 这三份判据此前各抄一份 `REC` / `PRETTY` / `--raw` 记录解析 / 提交范围求值。
+// 口径一改就得三处同步，而不同步的形状恰恰是「同一段历史，三个守卫给出不同答案」。
+// 注意 `extension-locality` 的 `files` 需要 `{status, path}`，它的解析仍是自己那份；
+// 这里收的是**字符串路径数组**那一版（另两份逐字相同）。
+
+// 分隔符写成 git 的 `%xNN` 转义而不是字面控制字符：Node 的 `spawn` **拒绝参数里含
+// NUL 字节**（`ERR_INVALID_ARG_VALUE`），而 `%x00` 由 git 在输出里展开，两边都不脏。
+export const GIT_LOG_REC = '\x01'
+export const GIT_LOG_PRETTY = `%x01%H%x00%B`
+
+// `--raw` 的一条文件记录形如 `:100644 100644 3479b6d5 a34de8f1 M\tpath`。
+// 判它**不只看行首的 `:`**：正文里以 `:` 开头的行（列表、`键: 值`）会把 message
+// 拦腰截断，而 `Core-Change:` trailer 住在正文末尾，截断即等于「没写理由」。
+export const RAW_FILE_LINE_RE = /^:[0-7]{6} [0-7]{6} /
+
+/** 自动化环境：`CI` / `GITHUB_ACTIONS` 的空值 / `false` / `0` 都算不是。 */
+export function isCiEnv(env = process.env) {
+  const v = env.CI ?? env.GITHUB_ACTIONS ?? ''
+  return v !== '' && v !== 'false' && v !== '0'
+}
+
+/** 「无 base 可判」何时算判红：显式要求，或本身就是自动化环境。 */
+export function requiresRange(args, env = process.env) {
+  return args.includes('--require-range') || isCiEnv(env)
+}
+
+/** `--range` / `--last` / merge-base 三选一；`git` 是 `gitOut` 的包装回调。 */
+export function resolveRange(argv, git) {
+  const idx = argv.indexOf('--range')
+  if (idx >= 0) return argv[idx + 1] || null
+  if (argv.includes('--last')) return 'HEAD~1..HEAD'
+  for (const base of ['origin/main', 'origin/master', 'main']) {
+    const mb = git(['merge-base', base, 'HEAD'])
+    if (mb && mb.trim()) return `${mb.trim()}..HEAD`
+  }
+  return null
+}
+
+export function subjectOf(message) {
+  return String(message ?? '').split('\n')[0] ?? ''
+}
+
+/**
+ * `git log --raw --pretty=format:<REC>%H%x00%B` ⇒ `{sha, message, files: string[]}`。
+ * 消息必须取到第一条文件记录**之前**的全部（`Core-Change:` 住在正文末尾）；
+ * 文件记录由 `RAW_FILE_LINE_RE` 认出，正文与 trailer 都不匹配它。
+ */
+export function parseGitLogRecords(out) {
+  const commits = []
+  for (const rec of String(out).split(GIT_LOG_REC)) {
+    if (!rec.trim()) continue
+    const nul = rec.indexOf('\x00')
+    if (nul < 0) continue
+    const sha = rec.slice(0, nul).trim()
+    const lines = rec.slice(nul + 1).split('\n')
+    const firstFile = lines.findIndex((l) => RAW_FILE_LINE_RE.test(l))
+    const message = (firstFile < 0 ? lines : lines.slice(0, firstFile)).join('\n')
+    const files =
+      firstFile < 0
+        ? []
+        : lines
+            .slice(firstFile)
+            .map((l) => l.slice(l.lastIndexOf('\t') + 1).trim())
+            .filter(Boolean)
+    commits.push({ sha, message, files })
+  }
+  return commits
+}

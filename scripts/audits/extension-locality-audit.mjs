@@ -75,7 +75,9 @@ import {
   generatedPaths,
   isRetiredGenerated,
 } from './capability-migration-audit.mjs'
-import { gitOut } from '../gate.d/_shared.mjs'
+import {
+  gitOut, GIT_LOG_REC, GIT_LOG_PRETTY, RAW_FILE_LINE_RE, requiresRange, resolveRange, subjectOf,
+} from '../gate.d/_shared.mjs'
 
 const git = (args) => gitOut(args, { cwd: repoRoot })
 
@@ -178,22 +180,15 @@ export function isMigrationBatch(message) {
   return MIGRATION_RE.test(String(message ?? ''))
 }
 
-const REC = '\x01'
-const PRETTY = `%x01%H%x00%B`
-/**
- * 文件记录的正则：两个定长十六进制模式 + 两个对象号 + 状态 + 制表符 + 路径。
- * 不按行首的 `:` 判——正文里以 `:` 开头的行会把提交信息拦腰截断。
- */
-const RAW_FILE_LINE_RE = /^:[0-7]{6} [0-7]{6} /
 const RAW_FILE_RE = /^:[0-7]{6} [0-7]{6} [0-9a-f]+ [0-9a-f]+ ([A-Z][0-9]*)\t(.*)$/
 
 /**
- * 解析 `git log --raw --pretty=format:<REC>%H%x00%B`。
+ * 解析 `git log --raw --pretty=format:<GIT_LOG_REC>%H%x00%B`。
  * 返回每个提交的 `{ sha, message, files: [{ status, path }] }`。
  */
 export function parseRawCommits(out) {
   const commits = []
-  for (const rec of String(out).split(REC)) {
+  for (const rec of String(out).split(GIT_LOG_REC)) {
     if (!rec.trim()) continue
     const nul = rec.indexOf('\x00')
     if (nul < 0) continue
@@ -311,29 +306,6 @@ function judgeCommit(sha, added, subject) {
   }
 }
 
-function subjectOf(message) {
-  return String(message ?? '').split('\n')[0] ?? ''
-}
-
-function isCiEnv(env = process.env) {
-  const v = env.CI ?? env.GITHUB_ACTIONS ?? ''
-  return v !== '' && v !== 'false' && v !== '0'
-}
-
-export function requiresRange(args = argv, env = process.env) {
-  return args.includes('--require-range') || isCiEnv(env)
-}
-
-function resolveRange() {
-  const idx = argv.indexOf('--range')
-  if (idx >= 0) return argv[idx + 1] || null
-  if (argv.includes('--last')) return 'HEAD~1..HEAD'
-  for (const base of ['origin/main', 'origin/master', 'main']) {
-    const mb = git(['merge-base', base, 'HEAD'])
-    if (mb && mb.trim()) return `${mb.trim()}..HEAD`
-  }
-  return null
-}
 
 function reportFailures(bad, subjects) {
   console.log(red(`\nextension-locality-audit 未通过：${bad.length} 个提交`))
@@ -367,7 +339,7 @@ function main() {
     )
     return 1
   }
-  const fixtureLog = git(['log', '-1', '--raw', '--no-renames', `--pretty=format:${PRETTY}`, FIXTURE.sha])
+  const fixtureLog = git(['log', '-1', '--raw', '--no-renames', `--pretty=format:${GIT_LOG_PRETTY}`, FIXTURE.sha])
   const [fixtureCommit] = parseRawCommits(fixtureLog ?? '')
   if (!fixtureCommit) {
     console.error(red(`✗ extension-locality-audit：夹具提交 ${FIXTURE.sha} 的改动读不出`))
@@ -390,11 +362,11 @@ function main() {
   const fixtureFull = fixtureCommit.sha
 
   // ── 向前判据：范围内的新增能力包提交 ──
-  const range = resolveRange()
+  const range = resolveRange(argv, git)
   if (!range) {
     const msg =
       '⊘ extension-locality-audit：找不到可判的提交范围（无 origin/main 也无 --range）——跳过，不当作通过'
-    if (requiresRange()) {
+    if (requiresRange(argv)) {
       console.error(
         red(
           `✗ extension-locality-audit：${msg.slice(1)}；${argv.includes('--require-range') ? '本次要求有可判范围' : '自动化环境（CI 变量）要求有可判范围'} ⇒ 判红`,
@@ -412,7 +384,7 @@ function main() {
     '--reverse',
     '--raw',
     '--no-renames',
-    `--pretty=format:${PRETTY}`,
+    `--pretty=format:${GIT_LOG_PRETTY}`,
     range,
   ])
   if (log === null) {

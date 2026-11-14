@@ -34,6 +34,7 @@ import os from 'node:os'
 import path from 'node:path'
 import { spawnSync } from 'node:child_process'
 import { fileURLToPath } from 'node:url'
+import { rmTree } from '../fs-walk.mjs'
 
 const script = fileURLToPath(new URL('./control-plane-audit.mjs', import.meta.url))
 const BASELINE_REL = 'scripts/baselines/control-plane.json'
@@ -45,16 +46,6 @@ const EVENTS = 'crates/symbio-plugin-api/src/events.rs'
 const KERNEL = 'crates/symbio-kernel/src/lib.rs'
 const SDK = 'crates/symbio-sdk/src/lib.rs'
 
-/** 逐个删 —— 不用 rmSync(recursive)（沙箱会拦截批量删除）。 */
-function rmTree(dir) {
-  if (!fs.existsSync(dir)) return
-  for (const e of fs.readdirSync(dir, { withFileTypes: true })) {
-    const p = path.join(dir, e.name)
-    if (e.isDirectory()) rmTree(p)
-    else fs.unlinkSync(p)
-  }
-  fs.rmdirSync(dir)
-}
 
 function writeTree(root, files) {
   for (const [rel, content] of Object.entries(files)) {

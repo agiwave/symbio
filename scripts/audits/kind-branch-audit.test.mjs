@@ -24,18 +24,10 @@ import path from 'node:path'
 import { spawnSync } from 'node:child_process'
 import { fileURLToPath } from 'node:url'
 import { countSites } from './kind-branch-audit.mjs'
+import { rmTree } from '../fs-walk.mjs'
 
 const script = fileURLToPath(new URL('./kind-branch-audit.mjs', import.meta.url))
 
-function rmTree(dir) {
-  if (!fs.existsSync(dir)) return
-  for (const e of fs.readdirSync(dir, { withFileTypes: true })) {
-    const p = path.join(dir, e.name)
-    if (e.isDirectory()) rmTree(p)
-    else fs.unlinkSync(p)
-  }
-  fs.rmdirSync(dir)
-}
 
 function audit(files, { baseline = '0:1' } = {}) {
   const root = fs.mkdtempSync(path.join(os.tmpdir(), 'kind-branch-'))

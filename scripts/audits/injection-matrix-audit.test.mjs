@@ -26,18 +26,10 @@ import path from 'node:path'
 import { spawnSync } from 'node:child_process'
 import { fileURLToPath } from 'node:url'
 import { validate, stripComments } from './injection-matrix-audit.mjs'
+import { rmTree } from '../fs-walk.mjs'
 
 const script = fileURLToPath(new URL('./injection-matrix-audit.mjs', import.meta.url))
 
-function rmTree(dir) {
-  if (!fs.existsSync(dir)) return
-  for (const e of fs.readdirSync(dir, { withFileTypes: true })) {
-    const p = path.join(dir, e.name)
-    if (e.isDirectory()) rmTree(p)
-    else fs.unlinkSync(p)
-  }
-  fs.rmdirSync(dir)
-}
 
 const KIND = {
   id: 'x.alpha',

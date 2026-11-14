@@ -53,6 +53,7 @@ import fs from 'node:fs'
 import path from 'node:path'
 import { fileURLToPath } from 'node:url'
 import { green, red, dim } from '../color.mjs'
+import { blankComments as blankSourceComments } from '../rust-scan.mjs'
 
 const scriptDir = path.dirname(fileURLToPath(import.meta.url))
 const rootArg = process.argv.find((a) => a.startsWith('--root='))
@@ -86,42 +87,8 @@ const CRITERIA = [
   },
 ]
 
-/** 剥 `//` 行注释（含 `///` / `//!`）与 C 风格块注释，空白填充、保留换行与字符位。 */
-function blankComments(text) {
-  let out = ''
-  let i = 0
-  let block = 0
-  while (i < text.length) {
-    const two = text.slice(i, i + 2)
-    if (block === 0 && two === '//') {
-      while (i < text.length && text[i] !== '\n') {
-        out += ' '
-        i++
-      }
-      continue
-    }
-    if (block === 0 && two === '/*') {
-      block++
-      out += '  '
-      i += 2
-      continue
-    }
-    if (block > 0) {
-      if (two === '*/') {
-        block--
-        out += '  '
-        i += 2
-        continue
-      }
-      out += text[i] === '\n' ? '\n' : ' '
-      i++
-      continue
-    }
-    out += text[i]
-    i++
-  }
-  return out
-}
+/** 注释剥离：唯一真源 rust-scan.mjs（保留行结构，返回按行数组）。 */
+const blankComments = (text) => blankSourceComments(text).join('\n')
 
 /** 递归收 `crates/` 下的生产 `.rs`（排除 `.test.rs`），相对 ROOT 的正斜杠路径。 */
 function walkProductionRs(absDir, out = []) {

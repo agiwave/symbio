@@ -24,18 +24,10 @@ import path from 'node:path'
 import { spawnSync } from 'node:child_process'
 import { fileURLToPath } from 'node:url'
 import { classify } from './spec-coverage-audit.mjs'
+import { rmTree } from '../fs-walk.mjs'
 
 const script = fileURLToPath(new URL('./spec-coverage-audit.mjs', import.meta.url))
 
-function rmTree(dir) {
-  if (!fs.existsSync(dir)) return
-  for (const e of fs.readdirSync(dir, { withFileTypes: true })) {
-    const p = path.join(dir, e.name)
-    if (e.isDirectory()) rmTree(p)
-    else fs.unlinkSync(p)
-  }
-  fs.rmdirSync(dir)
-}
 
 function spec(id, judge, { status = 'active' } = {}) {
   return [

@@ -37,6 +37,7 @@ import path from 'node:path'
 import { fileURLToPath } from 'node:url'
 import { green, red, yellow } from '../color.mjs'
 import { walkFiles } from '../fs-walk.mjs'
+import { blankComments as blankSourceComments } from '../rust-scan.mjs'
 
 const scriptDir = path.dirname(fileURLToPath(import.meta.url))
 const rootArg = process.argv.find((a) => a.startsWith('--root='))
@@ -141,43 +142,8 @@ function nameTokens(name) {
 
 const SKIP_FILE = /^(test_support\.rs|.*\.test\.rs)$/
 
-/** 注释与字符串里的词不算「环认识世界」：注释由 D-016 管，文档不扫。 */
-function blankComments(text) {
-  let out = ''
-  let i = 0
-  let block = 0
-  while (i < text.length) {
-    const two = text.slice(i, i + 2)
-    const one = text[i]
-    if (block === 0 && two === '//') {
-      while (i < text.length && text[i] !== '\n') {
-        out += ' '
-        i++
-      }
-      continue
-    }
-    if (block === 0 && two === '/*') {
-      block++
-      out += '  '
-      i += 2
-      continue
-    }
-    if (block > 0) {
-      if (two === '*/') {
-        block--
-        out += '  '
-        i += 2
-        continue
-      }
-      out += text[i] === '\n' ? '\n' : ' '
-      i++
-      continue
-    }
-    out += one
-    i++
-  }
-  return out
-}
+/** 注释剥离：唯一真源 rust-scan.mjs（保留行结构，返回按行数组）。 */
+const blankComments = (text) => blankSourceComments(text).join('\n')
 
 function readOrDie(file) {
   try {

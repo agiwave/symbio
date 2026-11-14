@@ -24,19 +24,10 @@ import { spawnSync } from 'node:child_process'
 import { fileURLToPath } from 'node:url'
 
 import { stripRustCode, findContainerWordTokens, validateExemptions } from './extension-vocab-audit.mjs'
+import { rmTree } from '../fs-walk.mjs'
 
 const script = fileURLToPath(new URL('./extension-vocab-audit.mjs', import.meta.url))
 
-/** 删临时目录 —— 逐个删，不用 rmSync(recursive)（沙箱会拦截批量删除，见 no-direct-call-audit.test.mjs）。 */
-function rmTree(dir) {
-  if (!fs.existsSync(dir)) return
-  for (const e of fs.readdirSync(dir, { withFileTypes: true })) {
-    const p = path.join(dir, e.name)
-    if (e.isDirectory()) rmTree(p)
-    else fs.unlinkSync(p)
-  }
-  fs.rmdirSync(dir)
-}
 
 /** 干净夹具：一个端口文件，形状里没有容器词（注释里可以说「这一轮」）。 */
 const CLEAN = {

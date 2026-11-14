@@ -59,6 +59,7 @@ import fs from 'node:fs'
 import path from 'node:path'
 import { fileURLToPath } from 'node:url'
 import { green, red, dim } from '../color.mjs'
+import { blankComments as blankSourceComments } from '../rust-scan.mjs'
 
 const scriptDir = path.dirname(fileURLToPath(import.meta.url))
 const rootArg = process.argv.find((a) => a.startsWith('--root='))
@@ -81,45 +82,8 @@ const MODEL_MESSAGE_TYPE = /\bPromptMessage\b/
 /** 模型侧措辞判定：不进通用端口契约。 */
 const WORDING_VERDICT = /\bneeds_wording_generation\b/
 
-/**
- * 剥掉 `//` 行注释（含 `///` / `//!`）与 C 风格块注释，空白填充、保留换行与字符位——
- * 于是 `code.split('\n')` 与原文逐行对齐，行号可直接回看原文。
- */
-function blankComments(text) {
-  let out = ''
-  let i = 0
-  let block = 0
-  while (i < text.length) {
-    const two = text.slice(i, i + 2)
-    if (block === 0 && two === '//') {
-      while (i < text.length && text[i] !== '\n') {
-        out += ' '
-        i++
-      }
-      continue
-    }
-    if (block === 0 && two === '/*') {
-      block++
-      out += '  '
-      i += 2
-      continue
-    }
-    if (block > 0) {
-      if (two === '*/') {
-        block--
-        out += '  '
-        i += 2
-        continue
-      }
-      out += text[i] === '\n' ? '\n' : ' '
-      i++
-      continue
-    }
-    out += text[i]
-    i++
-  }
-  return out
-}
+/** 注释剥离：唯一真源 rust-scan.mjs（保留行结构，返回按行数组）。 */
+const blankComments = (text) => blankSourceComments(text).join('\n')
 
 /** 在一份文件里逐行找 `re`；返回 `{ rel, line, text }`（`text` 取原文，供点名展示）。 */
 function hitsIn(rel, abs, re) {

@@ -23,19 +23,10 @@ import os from 'node:os'
 import path from 'node:path'
 import { spawnSync } from 'node:child_process'
 import { fileURLToPath } from 'node:url'
+import { rmTree } from '../fs-walk.mjs'
 
 const script = fileURLToPath(new URL('./dead-path-audit.mjs', import.meta.url))
 
-/** 删临时目录 —— 逐个删，不用 rmSync(recursive)（沙箱会拦截批量删除）。 */
-function rmTree(dir) {
-  if (!fs.existsSync(dir)) return
-  for (const e of fs.readdirSync(dir, { withFileTypes: true })) {
-    const p = path.join(dir, e.name)
-    if (e.isDirectory()) rmTree(p)
-    else fs.unlinkSync(p)
-  }
-  fs.rmdirSync(dir)
-}
 
 /** 造一个最小仓库：`crates/symbio-kernel` + 若干给定文件（相对路径 → 内容）。 */
 function fixture(files = {}) {

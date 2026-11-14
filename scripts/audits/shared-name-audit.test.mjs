@@ -28,19 +28,10 @@ import os from 'node:os'
 import path from 'node:path'
 import { spawnSync } from 'node:child_process'
 import { fileURLToPath } from 'node:url'
+import { rmTree } from '../fs-walk.mjs'
 
 const script = fileURLToPath(new URL('./shared-name-audit.mjs', import.meta.url))
 
-/** 删临时目录 —— 逐个删，不用 rmSync(recursive)（沙箱会拦截批量删除）。 */
-function rmTree(dir) {
-  if (!fs.existsSync(dir)) return
-  for (const e of fs.readdirSync(dir, { withFileTypes: true })) {
-    const p = path.join(dir, e.name)
-    if (e.isDirectory()) rmTree(p)
-    else fs.unlinkSync(p)
-  }
-  fs.rmdirSync(dir)
-}
 
 const PLAN_REL = 'docs/003-design/024-能力横向扩充的通路.md'
 /** 默认契约表：表头在、零数据行。各用例要判 SV-003 时自行覆盖。 */

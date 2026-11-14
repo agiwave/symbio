@@ -21,17 +21,8 @@ import {
   compareCfgAttr,
   validateCfgAttrExempt,
 } from './session-dead-code-audit.mjs'
+import { rmTree } from '../fs-walk.mjs'
 
-/** 删临时目录 —— 逐个删，不用 rmSync(recursive)（沙箱会拦截批量删除）。 */
-function rmTree(dir) {
-  if (!fs.existsSync(dir)) return
-  for (const e of fs.readdirSync(dir, { withFileTypes: true })) {
-    const p = path.join(dir, e.name)
-    if (e.isDirectory()) rmTree(p)
-    else fs.unlinkSync(p)
-  }
-  fs.rmdirSync(dir)
-}
 
 /** 在临时目录里铺一份 `.rs`，返回检出结果。 */
 function scan(source) {

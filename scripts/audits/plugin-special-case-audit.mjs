@@ -75,7 +75,7 @@ import path from 'node:path'
 import { fileURLToPath } from 'node:url'
 import { red, green, yellow } from '../color.mjs'
 import { hasDecisionAnchor as anchorExists } from '../decision-anchors.mjs'
-import { blankTestModules } from '../rust-scan.mjs'
+import { blankComments as blankSourceComments, blankTestModules } from '../rust-scan.mjs'
 import { toolFacts } from '../facts/_capability.mjs'
 import { walkFiles } from '../fs-walk.mjs'
 
@@ -149,79 +149,8 @@ const LITERAL_RE = /"((?:[^"\\]|\\.)*)"/g
 const esc = (s) => s.replace(/[.*+?^${}()|[\]\\]/g, '\\$&')
 
 /** 递归收集 `.rs`（测试文件与测试模块排除：测试本来就按名造工具）。 */
-/**
- * 把注释抹成空白、**保留每一个换行**。
- *
- * 为什么不用 `rust-scan.stripComments`：它把跨行的 `/* … *\/` 整段吃掉（连换行一起），
- * 后面的行号整体上移。本守卫的豁免是**按行号**挂的（`// special-case-allow`），
- * 行号一错位，豁免就挂到别人身上——比不豁免更坏，因为日志会显示「已登记」。
- *
- * 字符字面量（`'"'`）必须跳过，否则一个引号字符会把后面整段代码当成字符串；
- * 生命周期（`&'a str`）**不**当字面量——按「单字符 + 收尾引号」的形状判别。
- */
-function blankComments(text) {
-  const out = text.split('')
-  const n = text.length
-  const blank = (from, to) => {
-    for (let k = from; k < to && k < n; k++) if (out[k] !== '\n') out[k] = ' '
-  }
-  let i = 0
-  while (i < n) {
-    const c = text[i]
-    if (c === '/' && text[i + 1] === '/') {
-      let j = i
-      while (j < n && text[j] !== '\n') j++
-      blank(i, j)
-      i = j
-      continue
-    }
-    if (c === '/' && text[i + 1] === '*') {
-      // 块注释在 Rust 里可嵌套
-      let depth = 0
-      let j = i
-      while (j < n) {
-        if (text[j] === '/' && text[j + 1] === '*') {
-          depth++
-          j += 2
-          continue
-        }
-        if (text[j] === '*' && text[j + 1] === '/') {
-          depth--
-          j += 2
-          if (depth === 0) break
-          continue
-        }
-        j++
-      }
-      blank(i, j)
-      i = j
-      continue
-    }
-    if (c === '"') {
-      let j = i + 1
-      while (j < n) {
-        if (text[j] === '\\') {
-          j += 2
-          continue
-        }
-        if (text[j] === '"') {
-          j++
-          break
-        }
-        j++
-      }
-      i = j
-      continue
-    }
-    if (c === "'") {
-      const m = /^'(?:\\.|[^'\\])'/.exec(text.slice(i, i + 4))
-      i += m ? m[0].length : 1
-      continue
-    }
-    i++
-  }
-  return out.join('')
-}
+/** 注释剥离：唯一真源 rust-scan.mjs（保留行结构，返回按行数组）。 */
+const blankComments = (text) => blankSourceComments(text).join('\n')
 
 /** 读一份源码：注释与内联测试模块抹成空白（**行号与原文一一对应**）。 */
 function codeLines(file) {

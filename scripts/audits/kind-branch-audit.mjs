@@ -58,6 +58,7 @@ import fs from 'node:fs'
 import path from 'node:path'
 import { fileURLToPath } from 'node:url'
 import { red, yellow, green, dim } from '../color.mjs'
+import { blankComments as blankSourceComments } from '../rust-scan.mjs'
 
 const argv = process.argv.slice(2)
 const VERBOSE = argv.includes('--verbose')
@@ -90,12 +91,8 @@ const LABEL = {
 const errors = []
 const report = (rule, msg) => errors.push({ rule, msg })
 
-/** 去注释但保留换行（行号与内容位置不变）。 */
-function blankComments(text) {
-  return text
-    .replace(/\/\*[\s\S]*?\*\//g, (m) => m.replace(/[^\n]/g, ' '))
-    .replace(/\/\/[^\n]*/g, (m) => ' '.repeat(m.length))
-}
+/** 注释剥离：唯一真源 rust-scan.mjs（保留行结构，返回按行数组）。 */
+const blankComments = (text) => blankSourceComments(text).join('\n')
 
 const isTestPath = (rel) =>
   rel.includes('/__tests__/') ||

@@ -112,7 +112,9 @@ import { backfillShas, loadBackfill } from '../core-change-backfill.mjs'
 // 红 3 的前提是「扩展插件真在用这条门面路径」：消费方的唯一口径归 HS-003，这里借用它，
 // 不另写一份「谁在用 `symbio_plugin_api::X`」的扫描（D-416）。
 import { CONTROL_PLANE, collectConsumers } from './plugin-surface-audit.mjs'
-import { gitOut } from '../gate.d/_shared.mjs'
+import {
+  gitOut, GIT_LOG_PRETTY, requiresRange, resolveRange, subjectOf, parseGitLogRecords,
+} from '../gate.d/_shared.mjs'
 
 const git = (args) => gitOut(args, { cwd: repoRoot })
 
@@ -1039,32 +1041,6 @@ export function knownDecisions(root) {
   return out
 }
 
-const REC = '\x01'
-const PRETTY = `%x01%H%x00%B`
-const RAW_FILE_LINE_RE = /^:[0-7]{6} [0-7]{6} /
-
-/** 与 extension-locality-audit 同一形状：`git log --raw` 的记录解析。 */
-export function parseRawCommits(out) {
-  const commits = []
-  for (const rec of String(out).split(REC)) {
-    if (!rec.trim()) continue
-    const nul = rec.indexOf('\x00')
-    if (nul < 0) continue
-    const sha = rec.slice(0, nul).trim()
-    const lines = rec.slice(nul + 1).split('\n')
-    const firstFile = lines.findIndex((l) => RAW_FILE_LINE_RE.test(l))
-    const message = (firstFile < 0 ? lines : lines.slice(0, firstFile)).join('\n')
-    const files =
-      firstFile < 0
-        ? []
-        : lines
-            .slice(firstFile)
-            .map((l) => l.slice(l.lastIndexOf('\t') + 1).trim())
-            .filter(Boolean)
-    commits.push({ sha, message, files })
-  }
-  return commits
-}
 
 function patchOf(sha) {
   const out = git([
@@ -1084,29 +1060,6 @@ function touchesAuditedTree(files) {
   return files.some((p) => (inTrees(p, ARCH_TREES) || inTrees(p, CONTROL_TREES)) && p.endsWith('.rs'))
 }
 
-function subjectOf(message) {
-  return String(message ?? '').split('\n')[0] ?? ''
-}
-
-function isCiEnv(env = process.env) {
-  const v = env.CI ?? env.GITHUB_ACTIONS ?? ''
-  return v !== '' && v !== 'false' && v !== '0'
-}
-
-export function requiresRange(args = argv, env = process.env) {
-  return args.includes('--require-range') || isCiEnv(env)
-}
-
-function resolveRange() {
-  const idx = argv.indexOf('--range')
-  if (idx >= 0) return argv[idx + 1] || null
-  if (argv.includes('--last')) return 'HEAD~1..HEAD'
-  for (const base of ['origin/main', 'origin/master', 'main']) {
-    const mb = git(['merge-base', base, 'HEAD'])
-    if (mb && mb.trim()) return `${mb.trim()}..HEAD`
-  }
-  return null
-}
 
 function reportFailures(bad) {
   console.log(red(`\ncapability-migration-audit 未通过：${bad.length} 个提交`))
@@ -1217,10 +1170,10 @@ function main() {
   }
 
   // ── 向前判据：判据起点之后、提交范围之内的提交 ──
-  const range = resolveRange()
+  const range = resolveRange(argv, git)
   if (!range) {
     const msg = '⊘ capability-migration-audit：找不到可判的提交范围（无 origin/main 也无 --range）——跳过，不当作通过'
-    if (requiresRange()) {
+    if (requiresRange(argv)) {
       console.error(
         red(
           `✗ capability-migration-audit：${msg.slice(1)}；${argv.includes('--require-range') ? '本次要求有可判范围' : '自动化环境（CI 变量）要求有可判范围'} ⇒ 判红`,
@@ -1232,7 +1185,7 @@ function main() {
     return 0
   }
 
-  const log = git(['log', '--no-merges', '--reverse', '--raw', '--no-renames', `--pretty=format:${PRETTY}`, range])
+  const log = git(['log', '--no-merges', '--reverse', '--raw', '--no-renames', `--pretty=format:${GIT_LOG_PRETTY}`, range])
   if (log === null) {
     console.error(red(`✗ capability-migration-audit：解析提交范围失败：${range}`))
     return 1
@@ -1243,7 +1196,7 @@ function main() {
     return 1
   }
   const forward = new Set(forwardOut.split('\n').filter(Boolean))
-  const commits = parseRawCommits(log).filter((c) => forward.has(c.sha))
+  const commits = parseGitLogRecords(log).filter((c) => forward.has(c.sha))
 
   // 口径分界（D-404）：`NET_GUARD` 之后的提交才按「净变化」判；之前的按旧口径（逐树新增）。
   const netOut = git(['rev-list', `${NET_GUARD.sha}..HEAD`])
