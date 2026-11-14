@@ -83,6 +83,10 @@ import { fileURLToPath } from 'node:url'
 // `[31m` 而不是红色，而两个回归测试都设了 `NO_COLOR=1`，正好绕过这条分支，
 // 于是「守卫的输出坏了但守卫仍绿」。收成一份实现是唯一能根治这件事的办法。
 import { red, green, yellow, dim } from '../color.mjs'
+import { walkFiles } from '../fs-walk.mjs'
+const walk = (dir) => walkFiles(dir, { exts: ['.ts', '.vue'], skipDirs: new Set(['__tests__']), tolerant: true })
+const walkRs = (dir) => walkFiles(dir, { exts: ['.rs'], tolerant: true })
+
 
 const scriptDir = path.dirname(fileURLToPath(import.meta.url))
 const defaultRepo = path.resolve(scriptDir, '..', '..')
@@ -982,33 +986,7 @@ function tsInterfaceFields(src, name, nsName) {
  * **排除 `__tests__`**：与 mechanism-audit 的既有口径一致——测试持有的是
  * **协议夹具**（把地址钉成字面量正是它的职责），生产代码才不许持有。
  */
-function walk(dir) {
-  const out = []
-  if (!fs.existsSync(dir)) return out
-  for (const e of fs.readdirSync(dir, { withFileTypes: true })) {
-    const abs = path.join(dir, e.name)
-    if (e.isDirectory()) {
-      if (e.name === '__tests__') continue
-      out.push(...walk(abs))
-    } else if (/\.(ts|vue)$/.test(e.name)) {
-      out.push(abs)
-    }
-  }
-  return out
-}
-
 /** 后端侧：全部 `*.rs`（E 组扫跨栈导航头用） */
-function walkRs(dir) {
-  const out = []
-  if (!fs.existsSync(dir)) return out
-  for (const e of fs.readdirSync(dir, { withFileTypes: true })) {
-    const abs = path.join(dir, e.name)
-    if (e.isDirectory()) out.push(...walkRs(abs))
-    else if (e.name.endsWith('.rs')) out.push(abs)
-  }
-  return out
-}
-
 // ==================== 主流程 ====================
 
 let errors = 0

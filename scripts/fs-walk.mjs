@@ -82,3 +82,64 @@ function isCfgTestOnlyModule(file) {
   }
   return false
 }
+
+/**
+ * 带过滤的遍历：**各审计此前各抄一遍的那个循环**（20 处）。
+ *
+ * 口径（每条都对应一份存量实现的语义，不是新发明）：
+ *
+ * | 选项 | 含义 |
+ * |---|---|
+ * | `exts` | 后缀数组（`['.rs']`）；命中任一即收 |
+ * | `keep(abs, name)` | 自定义谓词，**优先于** `exts`（给了它就不再单独判后缀） |
+ * | `skipDirs` | 目录名集合：整棵跳过 |
+ * | `skipName` | 文件名正则：命中即收不进来 |
+ * | `skipHidden` | 跳过 `.` 开头的文件与目录 |
+ * | `rel` | 给出基准 ⇒ 返回相对它的 posix 路径，而不是绝对路径 |
+ * | `tolerant` | 目录读不出时返回已收集的部分而不是抛错 |
+ *
+ * `tolerant` **默认关**，与 [`walk`] 相反：判据的扫描根读不出时，「零份文件」会让
+ * 审计安安静静地全绿，所以默认把「根不存在」当输入缺席、由调用方给非 0 退出；
+ * 只有「目录可能合法地不存在」（夹具 / 换根的回归）才显式打开它。
+ *
+ * 遍历顺序与逐层 `readdirSync` 一致，**不排序**：审计输出的行序不依赖文件顺序，
+ * 而排序会让逐份比对存量输出时出现假的差异。
+ */
+export function walkFiles(dir, opts = {}) {
+  const {
+    exts = null,
+    keep = null,
+    skipDirs = null,
+    skipName = null,
+    skipHidden = false,
+    rel = null,
+    tolerant = false,
+  } = opts
+  const out = []
+  const relOf = (base, abs) => path.relative(base, abs).split(path.sep).join('/')
+  const visit = (abs) => {
+    let entries
+    try {
+      entries = fs.readdirSync(abs, { withFileTypes: true })
+    } catch (err) {
+      if (tolerant) return
+      throw err
+    }
+    for (const e of entries) {
+      if (skipHidden && e.name.startsWith('.')) continue
+      const child = path.join(abs, e.name)
+      if (e.isDirectory()) {
+        if (skipDirs && skipDirs.has(e.name)) continue
+        visit(child)
+        continue
+      }
+      if (!e.isFile()) continue
+      if (skipName && skipName.test(e.name)) continue
+      if (keep ? keep(child, e.name) : !exts || exts.some((x) => e.name.endsWith(x))) {
+        out.push(rel ? relOf(rel, child) : child)
+      }
+    }
+  }
+  visit(dir)
+  return out
+}

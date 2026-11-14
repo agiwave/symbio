@@ -102,7 +102,6 @@
 
 import fs from 'node:fs'
 import path from 'node:path'
-import { spawnSync } from 'node:child_process'
 import { fileURLToPath } from 'node:url'
 import { green, red, yellow, dim } from '../color.mjs'
 import { BASELINE, exemptionActive } from '../gate.d/_shared.mjs'
@@ -113,6 +112,9 @@ import { backfillShas, loadBackfill } from '../core-change-backfill.mjs'
 // 红 3 的前提是「扩展插件真在用这条门面路径」：消费方的唯一口径归 HS-003，这里借用它，
 // 不另写一份「谁在用 `symbio_plugin_api::X`」的扫描（D-416）。
 import { CONTROL_PLANE, collectConsumers } from './plugin-surface-audit.mjs'
+import { gitOut } from '../gate.d/_shared.mjs'
+
+const git = (args) => gitOut(args, { cwd: repoRoot })
 
 const scriptDir = path.dirname(fileURLToPath(import.meta.url))
 const repoRoot = path.resolve(scriptDir, '..', '..')
@@ -1035,17 +1037,6 @@ export function knownDecisions(root) {
   }
   walk(path.join(root, 'docs', '003-design'))
   return out
-}
-
-function git(args) {
-  const r = spawnSync('git', args, {
-    cwd: repoRoot,
-    encoding: 'utf8',
-    shell: false,
-    maxBuffer: 64 * 1024 * 1024,
-  })
-  if (r.status !== 0) return null
-  return r.stdout
 }
 
 const REC = '\x01'

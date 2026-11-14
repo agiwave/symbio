@@ -53,6 +53,10 @@ import fs from 'node:fs'
 import path from 'node:path'
 import { fileURLToPath } from 'node:url'
 import { red, yellow, green } from '../color.mjs'
+import { walkFiles } from '../fs-walk.mjs'
+/** 源码树里的 `.rs`（S-012…S-015 各自的根都由调用方给）。 */
+const walk = (dir) => walkFiles(dir, { exts: ['.rs'], tolerant: true })
+
 
 const scriptDir = path.dirname(fileURLToPath(import.meta.url))
 const repoRoot = path.resolve(scriptDir, '..', '..')
@@ -107,22 +111,6 @@ const scopeAbs = resolveScope()
 const disp = (p) => path.relative(cwd, p).split(path.sep).join('/') || '.'
 
 // ── 收集 .rs 源文件 ────────────────────────────────────────────────────
-function walk(dir) {
-  const out = []
-  let entries
-  try {
-    entries = fs.readdirSync(dir, { withFileTypes: true })
-  } catch {
-    return out
-  }
-  for (const e of entries) {
-    const p = path.join(dir, e.name)
-    if (e.isDirectory()) out.push(...walk(p))
-    else if (e.isFile() && e.name.endsWith('.rs')) out.push(p)
-  }
-  return out
-}
-
 // 生产路径才判：测试文件里 `Mutex::new` + 下一行 `.await` 是常态（锁根本没跨 await 持有），
 // 而 S-002 的 5 行窗口分不出「建锁」与「持锁」——crate 化后扫描面扩到整个 `crates/`，
 // 这条窗口噪声必须先挡住，否则守卫会红在 false positive 上、然后被人豁免到失效。

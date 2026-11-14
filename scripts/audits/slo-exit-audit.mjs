@@ -43,6 +43,7 @@ import path from 'node:path'
 import { fileURLToPath } from 'node:url'
 import { green, red } from '../color.mjs'
 import { plain, tableWithHeader } from '../md-table.mjs'
+import { walkFiles } from '../fs-walk.mjs'
 
 const scriptDir = path.dirname(fileURLToPath(import.meta.url))
 const rootArg = process.argv.find((a) => a.startsWith('--root='))
@@ -118,16 +119,6 @@ export function readColumns(root) {
 }
 
 /** 递归列出目录下的 `.rs` 文件（跳过 `target`）。 */
-function walkRs(dir, out = []) {
-  for (const entry of fs.readdirSync(dir, { withFileTypes: true })) {
-    if (entry.name === 'target' || entry.name === 'node_modules') continue
-    const abs = path.join(dir, entry.name)
-    if (entry.isDirectory()) walkRs(abs, out)
-    else if (entry.isFile() && entry.name.endsWith('.rs')) out.push(abs)
-  }
-  return out
-}
-
 /**
  * 全仓 `submit_reports!` 里登记的 `slot`（`D-387`：报表列的动态来源）。
  *
@@ -138,7 +129,7 @@ export function readReportSlots(root) {
   const cratesDir = path.join(root, 'crates')
   if (!fs.existsSync(cratesDir)) return null
   const slots = new Set()
-  for (const abs of walkRs(cratesDir)) {
+  for (const abs of walkFiles(cratesDir, { exts: ['.rs'], skipDirs: new Set(['target', 'node_modules']) })) {
     const txt = fs
       .readFileSync(abs, 'utf8')
       .replace(/\/\*[\s\S]*?\*\//g, '')

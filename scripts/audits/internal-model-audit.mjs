@@ -67,6 +67,7 @@ import path from 'node:path'
 import { fileURLToPath } from 'node:url'
 import { red, green, yellow } from '../color.mjs'
 import { blankTestModules } from '../rust-scan.mjs'
+import { walkFiles } from '../fs-walk.mjs'
 
 const scriptDir = path.dirname(fileURLToPath(import.meta.url))
 const repoRoot = path.resolve(scriptDir, '..', '..')
@@ -86,17 +87,6 @@ const CALL_RE = /\.round_trip\s*\(/
 const EMPTY_TOOLS = /^&\s*\[\s*\]$/
 
 /** 递归收集 `.rs`（测试文件排除）。 */
-function walk(dir, out = []) {
-  for (const e of fs.readdirSync(dir, { withFileTypes: true })) {
-    const p = path.join(dir, e.name)
-    if (e.isDirectory()) walk(p, out)
-    else if (e.name.endsWith('.rs') && !e.name.endsWith('.test.rs') && !e.name.endsWith('tests.rs')) {
-      out.push(p)
-    }
-  }
-  return out
-}
-
 /**
  * 把注释抹成空白、**保留每一个换行**。
  *
@@ -162,7 +152,10 @@ function blankComments(text) {
  * @returns {{violations: Array, allowed: Map, usedAllows: Set, fatal: string|null, registered: number}}
  */
 export function audit(srcRoot) {
-  const files = walk(srcRoot)
+  const files = walkFiles(srcRoot, {
+    exts: ['.rs'],
+    keep: (abs, name) => name.endsWith('.rs') && !name.endsWith('.test.rs') && !name.endsWith('tests.rs'),
+  })
   if (files.length === 0) {
     return { violations: [], allowed: new Map(), usedAllows: new Set(), fatal: '扫描根下没有 .rs 文件', registered: 0 }
   }

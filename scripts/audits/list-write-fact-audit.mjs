@@ -53,6 +53,7 @@ import fs from 'node:fs'
 import path from 'node:path'
 import { fileURLToPath } from 'node:url'
 import { red, green } from '../color.mjs'
+import { walkFiles } from '../fs-walk.mjs'
 
 const scriptDir = path.dirname(fileURLToPath(import.meta.url))
 const repoRoot = path.resolve(scriptDir, '..', '..')
@@ -82,15 +83,6 @@ const WRITER_SUFFIX = `chat_session${path.sep}write.rs`
 const NEAR = 20
 
 /** 递归收集 `.rs`（测试文件排除：测试是排演驱动方，不受写入口纪律约束）。 */
-function walk(dir, out = []) {
-  for (const e of fs.readdirSync(dir, { withFileTypes: true })) {
-    const p = path.join(dir, e.name)
-    if (e.isDirectory()) walk(p, out)
-    else if (e.name.endsWith('.rs') && !e.name.endsWith('.test.rs')) out.push(p)
-  }
-  return out
-}
-
 /** 一个文件里的原语调用与事实落格调用（行号；**注释剥除后**匹配）。 */
 function parseFile(text) {
   const calls = []
@@ -106,7 +98,7 @@ function parseFile(text) {
 function audit(root, prefix = '') {
   const violations = []
 
-  for (const file of walk(root)) {
+  for (const file of walkFiles(root, { exts: ['.rs'], skipName: /\.test\.rs$/ })) {
     const rel = [prefix, path.relative(root, file).split(path.sep).join('/')].filter(Boolean).join('/')
     const text = fs.readFileSync(file, 'utf8')
     const lines = text.split('\n')

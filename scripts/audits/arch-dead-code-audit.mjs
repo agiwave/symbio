@@ -72,12 +72,14 @@
 
 import fs from 'node:fs'
 import path from 'node:path'
-import { spawnSync } from 'node:child_process'
 import { fileURLToPath } from 'node:url'
 import { green, red, dim } from '../color.mjs'
 import { walk, isTestFile } from '../fs-walk.mjs'
 import { blankComments, blankTestModules } from '../rust-scan.mjs'
 import { hasDecisionAnchor } from '../decision-anchors.mjs'
+import { gitRaw } from '../gate.d/_shared.mjs'
+
+const git = (args) => gitRaw(args, { cwd: ROOT, maxBuffer: 256 * 1024 * 1024 })
 
 const argv = process.argv.slice(2)
 const rootArg = argv.find((a) => a.startsWith('--root='))
@@ -199,14 +201,6 @@ function readTreeFromDisk(root) {
     }
   }
   return [...files].map(([rel, text]) => ({ rel, text }))
-}
-
-function git(args) {
-  return spawnSync('git', args, {
-    cwd: ROOT,
-    encoding: 'utf8',
-    maxBuffer: 256 * 1024 * 1024,
-  })
 }
 
 function readTreeFromGit(rev) {

@@ -51,9 +51,11 @@
 
 import fs from 'node:fs'
 import path from 'node:path'
-import { spawnSync } from 'node:child_process'
 import { fileURLToPath } from 'node:url'
 import { red, green, dim } from '../color.mjs'
+import { gitRaw } from '../gate.d/_shared.mjs'
+
+const git = (args, input) => gitRaw(args, { cwd: ROOT, encoding: 'buffer', input })
 
 const scriptDir = path.dirname(fileURLToPath(import.meta.url))
 const rootArg = process.argv.find((a) => a.startsWith('--root='))
@@ -63,15 +65,6 @@ const SHOW_ALL = process.argv.includes('--list')
 /** 例外：`eol=none` 之类显式「不管行尾」的声明不算缺声明（本仓目前没有，留口子是为了
  *  读得懂——`-eol` 是有人**明确写过**的，与「没人写过」不是一回事）。 */
 const EOL_OK = new Set(['lf'])
-
-function git(args, input) {
-  return spawnSync('git', args, {
-    cwd: ROOT,
-    encoding: 'buffer',
-    input,
-    maxBuffer: 64 * 1024 * 1024,
-  })
-}
 
 /** 受版本控制的文件（`-z`：路径按 NUL 分隔，中文与空格不必转义） */
 function trackedFiles() {

@@ -48,10 +48,12 @@
 
 import fs from 'node:fs'
 import path from 'node:path'
-import { spawnSync } from 'node:child_process'
 import { fileURLToPath } from 'node:url'
 import { red, green, yellow, dim } from '../color.mjs'
 import { backfillShas, loadBackfill } from '../core-change-backfill.mjs'
+import { gitOut } from '../gate.d/_shared.mjs'
+
+const git = (args) => gitOut(args, { cwd: repoRoot })
 
 const scriptDir = path.dirname(fileURLToPath(import.meta.url))
 const repoRoot = path.resolve(scriptDir, '..', '..')
@@ -217,17 +219,6 @@ export function validateBaseline(entries, decisions) {
 }
 
 const BASELINE_SHAS = new Set(BASELINE.map((e) => e.sha))
-
-function git(args) {
-  const r = spawnSync('git', args, {
-    cwd: repoRoot,
-    encoding: 'utf8',
-    shell: false,
-    maxBuffer: 64 * 1024 * 1024,
-  })
-  if (r.status !== 0) return null
-  return r.stdout
-}
 
 const REC = '\x01'
 /**

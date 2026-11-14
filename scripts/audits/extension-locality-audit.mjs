@@ -67,7 +67,6 @@
 
 import { createHash } from 'node:crypto'
 import path from 'node:path'
-import { spawnSync } from 'node:child_process'
 import { fileURLToPath } from 'node:url'
 import { green, red, yellow, dim } from '../color.mjs'
 import {
@@ -76,6 +75,9 @@ import {
   generatedPaths,
   isRetiredGenerated,
 } from './capability-migration-audit.mjs'
+import { gitOut } from '../gate.d/_shared.mjs'
+
+const git = (args) => gitOut(args, { cwd: repoRoot })
 
 const scriptDir = path.dirname(fileURLToPath(import.meta.url))
 const repoRoot = path.resolve(scriptDir, '..', '..')
@@ -174,17 +176,6 @@ export function validateBeforeGuard(entries) {
  */
 export function isMigrationBatch(message) {
   return MIGRATION_RE.test(String(message ?? ''))
-}
-
-function git(args) {
-  const r = spawnSync('git', args, {
-    cwd: repoRoot,
-    encoding: 'utf8',
-    shell: false,
-    maxBuffer: 64 * 1024 * 1024,
-  })
-  if (r.status !== 0) return null
-  return r.stdout
 }
 
 const REC = '\x01'

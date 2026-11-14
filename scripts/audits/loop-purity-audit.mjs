@@ -36,6 +36,7 @@ import fs from 'node:fs'
 import path from 'node:path'
 import { fileURLToPath } from 'node:url'
 import { green, red, yellow } from '../color.mjs'
+import { walkFiles } from '../fs-walk.mjs'
 
 const scriptDir = path.dirname(fileURLToPath(import.meta.url))
 const rootArg = process.argv.find((a) => a.startsWith('--root='))
@@ -139,15 +140,6 @@ function nameTokens(name) {
 }
 
 const SKIP_FILE = /^(test_support\.rs|.*\.test\.rs)$/
-
-function walk(dir, out = []) {
-  for (const ent of fs.readdirSync(dir, { withFileTypes: true })) {
-    const full = path.join(dir, ent.name)
-    if (ent.isDirectory()) walk(full, out)
-    else if (ent.name.endsWith('.rs') && !SKIP_FILE.test(ent.name)) out.push(full)
-  }
-  return out
-}
 
 /** 注释与字符串里的词不算「环认识世界」：注释由 D-016 管，文档不扫。 */
 function blankComments(text) {
@@ -311,7 +303,7 @@ function scan() {
     console.error(red(`没有源目录 ${SRC_REL}——读不出就不亮绿灯`))
     process.exit(2)
   }
-  const files = walk(srcDir)
+  const files = walkFiles(srcDir, { exts: ['.rs'], skipName: SKIP_FILE })
   if (files.length === 0) {
     console.error(red(`扫到 0 个 loop 生产源文件——读不出就不亮绿灯`))
     process.exit(2)

@@ -56,6 +56,14 @@ import fs from 'node:fs'
 import path from 'node:path'
 import { fileURLToPath } from 'node:url'
 import { green, red, yellow } from '../color.mjs'
+import { walkFiles } from '../fs-walk.mjs'
+/** 递归收集**相对路径**（`root/…`）：判据要按相对地址匹配，不要绝对路径。 */
+function walk(absDir, relDir, out) {
+  for (const f of walkFiles(absDir, { rel: absDir, skipDirs: SKIP_DIRS, skipHidden: true, tolerant: true })) {
+    out.push(`${relDir}/${f}`)
+  }
+}
+
 
 const scriptDir = path.dirname(fileURLToPath(import.meta.url))
 const rootArg = process.argv.find((a) => a.startsWith('--root='))
@@ -120,24 +128,6 @@ function isTestFile(rel) {
     /test_fixtures\.rs$/.test(rel) ||
     /\/stubs\.rs$/.test(rel)
   )
-}
-
-function walk(absDir, relDir, out) {
-  let entries
-  try {
-    entries = fs.readdirSync(absDir, { withFileTypes: true })
-  } catch {
-    return
-  }
-  for (const e of entries) {
-    if (e.name.startsWith('.')) continue
-    if (e.isDirectory()) {
-      if (SKIP_DIRS.has(e.name)) continue
-      walk(path.join(absDir, e.name), `${relDir}/${e.name}`, out)
-    } else if (e.isFile()) {
-      out.push(`${relDir}/${e.name}`)
-    }
-  }
 }
 
 /** 去掉注释正文：注释里叙述历史是允许的（D-016），它不是机制面。 */

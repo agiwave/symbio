@@ -1166,3 +1166,19 @@ export function gensDeclarations(root) {
   return { entries, problems }
 }
 
+
+// ── git 读：五个审计此前各抄一遍的同一个包装器 ──────────────────────────
+//
+// `gitOut` 成功返回 stdout、非 0 退出返回 `null`——失败语义由调用方的判据决定
+// （「取不到基线」与「基线是空的」是两件事，不能在这里合并）。
+// 需要自己看退出码 / stderr 的场合（幂等点、范围求值）用 `gitRaw`。
+
+export function gitOut(args, { cwd, maxBuffer = 64 * 1024 * 1024, input, encoding = 'utf8' } = {}) {
+  const r = spawnSync('git', args, { cwd, encoding, input, shell: false, maxBuffer })
+  if (r.status !== 0) return null
+  return r.stdout
+}
+
+export function gitRaw(args, { cwd, maxBuffer = 64 * 1024 * 1024, input, encoding = 'utf8' } = {}) {
+  return spawnSync('git', args, { cwd, encoding, input, shell: false, maxBuffer })
+}

@@ -59,6 +59,10 @@ import fs from 'node:fs'
 import path from 'node:path'
 import { fileURLToPath } from 'node:url'
 import { red, yellow, green, dim } from '../color.mjs'
+import { blankComments } from '../rust-scan.mjs'
+import { walkFiles } from '../fs-walk.mjs'
+const walk = (dir, filter) => walkFiles(dir, { keep: filter, skipDirs: SKIP_DIRS, tolerant: true })
+
 
 const scriptDir = path.dirname(fileURLToPath(import.meta.url))
 const defaultRoot = path.resolve(scriptDir, '..', '..')
@@ -89,89 +93,8 @@ function report(rule, severity, file, line, message) {
 // `.vue` 的组件文档写在文件顶部的 HTML 注释里，而那里正是最常出现 `.vdfs/session`
 // 这类地址字面量的地方（举例说明）。不剥它，M-002 会把满篇文档判成违规——
 // 一个只会误报的守卫，最后一定会被人用豁免注释喂到失效。
-function stripComments(source) {
-  const out = []
-  let line = ''
-  let inBlock = false
-  let inHtml = false
-  let quote = null // 当前字符串定界符（' / " / `）
-  for (let i = 0; i < source.length; i++) {
-    const c = source[i]
-    const n = source[i + 1]
-    if (c === '\n') {
-      out.push(line)
-      line = ''
-      // 块注释与 HTML 注释跨行、字符串不跨行（模板字面量跨行属漏报，见文件头「已知边界」）
-      quote = null
-      continue
-    }
-    if (inBlock) {
-      if (c === '*' && n === '/') {
-        inBlock = false
-        i++
-      }
-      continue
-    }
-    if (inHtml) {
-      if (c === '-' && n === '-' && source[i + 2] === '>') {
-        inHtml = false
-        i += 2
-      }
-      continue
-    }
-    if (quote) {
-      line += c
-      if (c === '\\') {
-        line += n ?? ''
-        i++
-      } else if (c === quote) {
-        quote = null
-      }
-      continue
-    }
-    if (c === '/' && n === '*') {
-      inBlock = true
-      i++
-      continue
-    }
-    if (c === '<' && n === '!' && source[i + 2] === '-' && source[i + 3] === '-') {
-      inHtml = true
-      i += 3
-      continue
-    }
-    if (c === '/' && n === '/') {
-      // 行注释：吞到行尾（换行由上面的分支处理）
-      i++
-      while (i + 1 < source.length && source[i + 1] !== '\n') i++
-      continue
-    }
-    if (c === "'" || c === '"' || c === '`') quote = c
-    line += c
-  }
-  out.push(line)
-  return out
-}
-
 // ── 文件收集 ─────────────────────────────────────────────────────────────
 const SKIP_DIRS = new Set(['node_modules', 'dist', '__tests__', '.git', 'target'])
-
-function walk(dir, filter) {
-  const out = []
-  let entries
-  try {
-    entries = fs.readdirSync(dir, { withFileTypes: true })
-  } catch {
-    return out
-  }
-  for (const e of entries) {
-    const p = path.join(dir, e.name)
-    if (e.isDirectory()) {
-      if (SKIP_DIRS.has(e.name)) continue
-      out.push(...walk(p, filter))
-    } else if (e.isFile() && filter(p)) out.push(p)
-  }
-  return out
-}
 
 const isVue = (p) => p.endsWith('.vue')
 const isTs = (p) => p.endsWith('.ts') && !p.endsWith('.d.ts')
@@ -197,7 +120,7 @@ const GEN_ROUTES = (() => {
   // 一个把实现错误当成「一切正常」亮绿灯的守卫，比没有守卫更糟。
   if (!fs.existsSync(ROUTES_GEN)) return new Set()
   return new Set(
-    stripComments(fs.readFileSync(ROUTES_GEN, 'utf8'))
+    blankComments(fs.readFileSync(ROUTES_GEN, 'utf8'), { html: true })
       .map((line) => line.match(/^\s*export const ROUTE_[A-Z0-9_]+\s*=\s*['"]([^'"]+)['"]/))
       .filter(Boolean)
       .map((m) => m[1]),
@@ -233,7 +156,7 @@ function auditFiles(scopeLabel, files, rules) {
     let code
     try {
       raw = fs.readFileSync(file, 'utf8').split(/\r?\n/)
-      code = stripComments(fs.readFileSync(file, 'utf8'))
+      code = blankComments(fs.readFileSync(file, 'utf8'), { html: true })
     } catch {
       continue
     }

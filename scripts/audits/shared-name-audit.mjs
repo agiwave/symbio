@@ -51,6 +51,7 @@ import { fileURLToPath } from 'node:url'
 
 import { red, green } from '../color.mjs'
 import { pluginDeclarationFaces } from '../facts/events-rs.mjs'
+import { stripComments } from '../rust-scan.mjs'
 
 const argv = process.argv.slice(2)
 const rootArg = argv.find((a) => a.startsWith('--root='))
@@ -80,44 +81,6 @@ function isFileName(v) {
 }
 
 /** 去掉注释但保留字符串字面量（注释里的名字不是代码事实）。 */
-function stripComments(s) {
-  let out = ''
-  let i = 0
-  while (i < s.length) {
-    if (s[i] === '/' && s[i + 1] === '/') {
-      while (i < s.length && s[i] !== '\n') i++
-    } else if (s[i] === '/' && s[i + 1] === '*') {
-      i += 2
-      let depth = 1
-      while (i < s.length && depth) {
-        if (s[i] === '/' && s[i + 1] === '*') {
-          depth++
-          i += 2
-        } else if (s[i] === '*' && s[i + 1] === '/') {
-          depth--
-          i += 2
-        } else i++
-      }
-    } else if (s[i] === '"') {
-      out += s[i++]
-      while (i < s.length) {
-        out += s[i]
-        if (s[i] === '\\') {
-          out += s[i + 1] ?? ''
-          i += 2
-          continue
-        }
-        if (s[i] === '"') {
-          i++
-          break
-        }
-        i++
-      }
-    } else out += s[i++]
-  }
-  return out
-}
-
 /**
  * 生产代码里的 `.rs` 文件（测试文件不算：它们不是跨插件的词汇消费方）。
  *

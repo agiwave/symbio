@@ -39,6 +39,10 @@ import { fileURLToPath } from 'node:url'
 import { green, red, yellow } from '../color.mjs'
 import { hasDecisionAnchor } from '../decision-anchors.mjs'
 import { stripComments as stripCommentsKeepStrings, blankComments, matchBrace } from '../rust-scan.mjs'
+import { walkFiles } from '../fs-walk.mjs'
+const walk = (rel) =>
+  walkFiles(path.join(ROOT, rel), { exts: ['.rs'], skipName: SKIP_FILE, rel: ROOT, tolerant: true })
+
 
 const scriptDir = path.dirname(fileURLToPath(import.meta.url))
 const rootArg = process.argv.find((a) => a.startsWith('--root='))
@@ -78,23 +82,12 @@ function read(rel) {
   }
 }
 
-function walk(rel, out = []) {
-  const abs = path.join(ROOT, rel)
-  if (!fs.existsSync(abs)) return out
-  for (const ent of fs.readdirSync(abs, { withFileTypes: true })) {
-    const child = path.posix.join(rel, ent.name)
-    if (ent.isDirectory()) walk(child, out)
-    else if (ent.name.endsWith('.rs') && !SKIP_FILE.test(ent.name)) out.push(child)
-  }
-  return out
-}
-
 function cratesProd() {
   const out = []
   const crates = path.join(ROOT, 'crates')
   if (!fs.existsSync(crates)) return out
   for (const ent of fs.readdirSync(crates, { withFileTypes: true })) {
-    if (ent.isDirectory()) walk(path.posix.join('crates', ent.name, 'src'), out)
+    if (ent.isDirectory()) out.push(...walk(path.posix.join('crates', ent.name, 'src')))
   }
   return out
 }

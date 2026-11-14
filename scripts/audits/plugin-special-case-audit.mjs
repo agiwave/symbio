@@ -77,6 +77,11 @@ import { red, green, yellow } from '../color.mjs'
 import { hasDecisionAnchor as anchorExists } from '../decision-anchors.mjs'
 import { blankTestModules } from '../rust-scan.mjs'
 import { toolFacts } from '../facts/_capability.mjs'
+import { walkFiles } from '../fs-walk.mjs'
+
+/** 生产 `.rs` 的遍历口径（唯一循环在 `_corpus.walkFiles`）：测试文件不是机制面。 */
+const walk = (dir) =>
+  walkFiles(dir, { exts: ['.rs'], keep: (abs, name) => !name.endsWith('.test.rs') && name !== 'tests.rs' })
 
 const scriptDir = path.dirname(fileURLToPath(import.meta.url))
 const repoRoot = path.resolve(scriptDir, '..', '..')
@@ -144,17 +149,6 @@ const LITERAL_RE = /"((?:[^"\\]|\\.)*)"/g
 const esc = (s) => s.replace(/[.*+?^${}()|[\]\\]/g, '\\$&')
 
 /** 递归收集 `.rs`（测试文件与测试模块排除：测试本来就按名造工具）。 */
-function walk(dir, out = []) {
-  for (const e of fs.readdirSync(dir, { withFileTypes: true })) {
-    const p = path.join(dir, e.name)
-    if (e.isDirectory()) walk(p, out)
-    else if (e.name.endsWith('.rs') && !e.name.endsWith('.test.rs') && e.name !== 'tests.rs') {
-      out.push(p)
-    }
-  }
-  return out
-}
-
 /**
  * 把注释抹成空白、**保留每一个换行**。
  *

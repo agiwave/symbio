@@ -82,6 +82,7 @@ import path from 'node:path'
 import { fileURLToPath } from 'node:url'
 import { green, red, yellow, dim } from '../color.mjs'
 import { exemptionActive, sdkSymbolsIn } from '../gate.d/_shared.mjs'
+import { stripComments } from '../rust-scan.mjs'
 
 const scriptDir = path.dirname(fileURLToPath(import.meta.url))
 const rootArg = process.argv.find((a) => a.startsWith('--root='))
@@ -147,14 +148,6 @@ function collectRs(dir) {
  * 理由与 `port-type-coupling-audit` 同：doc comment 里写「某某已移出」是叙述，不是用法。
  * 不追求字符串里注释符的完美处理（本仓当前 0 处影响本判据）。
  */
-function stripComments(text) {
-  return text
-    .replace(/\/\*[\s\S]*?\*\//g, ' ')
-    .split('\n')
-    .map((line) => line.replace(/\/\/.*$/, ''))
-    .join('\n')
-}
-
 // ==================== SRA-001 / SRA-002 ====================
 
 const exemption = readJson(EXEMPTION_REL)

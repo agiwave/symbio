@@ -35,6 +35,7 @@ import fs from 'node:fs'
 import path from 'node:path'
 import { fileURLToPath } from 'node:url'
 import { red, green } from '../color.mjs'
+import { walkFiles } from '../fs-walk.mjs'
 
 const scriptDir = path.dirname(fileURLToPath(import.meta.url))
 const repoRoot = path.resolve(scriptDir, '..', '..')
@@ -73,17 +74,8 @@ const WORD_RES = PRINCIPALS.map((p) => new RegExp(`\\b${p}\\b`))
  */
 const SYNTAX_VARIANT_RE = new RegExp(`\\bPattern\\s*::\\s*(?:${PRINCIPALS.join('|')})\\b`, 'g')
 
-function walk(dir, out = []) {
-  for (const e of fs.readdirSync(dir, { withFileTypes: true })) {
-    const p = path.join(dir, e.name)
-    if (e.isDirectory()) walk(p, out)
-    else if (e.name.endsWith('.rs')) out.push(p)
-  }
-  return out
-}
-
 function audit(root) {
-  const files = walk(root)
+  const files = walkFiles(root, { exts: ['.rs'] })
   const violations = []
   for (const file of files) {
     const rel = path.relative(root, file).split(path.sep).join('/')

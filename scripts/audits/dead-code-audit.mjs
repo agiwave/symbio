@@ -38,9 +38,10 @@
 // @codes R-001 R-002 R-003
 // @gate guard
 
-import { readdirSync, statSync, readFileSync, existsSync } from 'node:fs'
-import { join, dirname, resolve, relative, extname, basename } from 'node:path'
+import { readdirSync, readFileSync, existsSync } from 'node:fs'
+import { join, dirname, resolve, relative, basename } from 'node:path'
 import { fileURLToPath } from 'node:url'
+import { walkFiles } from '../fs-walk.mjs'
 
 const __dirname = dirname(fileURLToPath(import.meta.url))
 // `--root=` 只为回归测试开的口子：测试在临时目录造一棵最小仓库，好让本脚本的判据
@@ -54,16 +55,7 @@ const EXT = ['.vue', '.ts', '.js', '.tsx', '.mts']
 /** 打印「未被引用的导出」明细（默认只给个数，见文件末段说明） */
 const VERBOSE = process.argv.includes('--verbose')
 
-function walk(dir, out = []) {
-  for (const name of readdirSync(dir)) {
-    const p = join(dir, name)
-    if (statSync(p).isDirectory()) walk(p, out)
-    else if (EXT.includes(extname(p))) out.push(p)
-  }
-  return out
-}
-
-const allFiles = walk(SRC)
+const allFiles = walkFiles(SRC, { exts: EXT })
 const fileSet = new Set(allFiles)
 const rel = (p) => relative(ROOT, p).replace(/\\/g, '/')
 const isTest = (p) => p.includes('__tests__') || /\.(spec|test)\.[cm]?[jt]sx?$/.test(p)

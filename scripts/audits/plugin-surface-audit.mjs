@@ -56,6 +56,7 @@ import path from 'node:path'
 import { fileURLToPath } from 'node:url'
 import { red, green, yellow } from '../color.mjs'
 import { stripRustCode } from './extension-vocab-audit.mjs'
+import { walkFiles } from '../fs-walk.mjs'
 
 /**
  * 控制面：按 DE-026 的影响类运行，认识宿主的容器概念。**逐个名字写死**，不写通配——
@@ -516,7 +517,7 @@ export function collectConsumers(root, pluginNames) {
   for (const name of pluginNames) {
     const srcDir = path.join(root, 'crates', name, 'src')
     if (!fs.existsSync(srcDir)) continue
-    for (const f of walkRs(srcDir)) {
+    for (const f of walkFiles(srcDir, { exts: ['.rs'] })) {
       if (f.endsWith('.test.rs')) continue
       const code = stripRustCode(fs.readFileSync(f, 'utf8'))
       // 统一两形态（D-443 收集器保真度）：
@@ -592,15 +593,6 @@ export function collectModuleReexports(root) {
   return out
 }
 
-function walkRs(dir, out = []) {
-  for (const e of fs.readdirSync(dir, { withFileTypes: true })) {
-    const p = path.join(dir, e.name)
-    if (e.isDirectory()) walkRs(p, out)
-    else if (e.name.endsWith('.rs')) out.push(p)
-  }
-  return out
-}
-
 /** 递归收集 `Cargo.toml` —— HS-005 的另一半扫描面（源码只盖住 `use`，依赖键在 manifest）。 */
 function walkManifests(dir, out = []) {
   for (const e of fs.readdirSync(dir, { withFileTypes: true })) {
@@ -639,7 +631,7 @@ export function run(root) {
 
     const srcDir = path.join(dir, 'src')
     if (!fs.existsSync(srcDir)) continue
-    for (const f of walkRs(srcDir)) {
+    for (const f of walkFiles(srcDir, { exts: ['.rs'] })) {
       // 测试面不判：`*.test.rs` 是插件的**内部验证**，不是它对外承诺的依赖面。
       // 容器测试要扮演一次「轮次派发」才能验证路由转发，那批符号属于控制面的容器
       // 概念（`TurnSpec` / `TurnDispatch` / …），门面白名单里没有也不该有（D-253）。
@@ -736,7 +728,7 @@ export function run(root) {
   // 真实源码；回归用例把两种拼写写进夹具，各自必须红。
   const retiredCoreHits = []
   const nameRe = (name) => new RegExp(`\\b${name.replace(/[-/\\^$*+?.()|[\]{}]/g, '\\$&')}\\b`)
-  const allRs = walkRs(cratesDir)
+  const allRs = walkFiles(cratesDir, { exts: ['.rs'] })
   const allManifests = walkManifests(cratesDir)
   for (const f of allRs) {
     const code = stripRustCode(fs.readFileSync(f, 'utf8'))

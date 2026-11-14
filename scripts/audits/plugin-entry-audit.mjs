@@ -106,6 +106,9 @@ import {
   routeConstPath,
   routeConstName,
 } from '../route-facts.mjs'
+import { walkFiles } from '../fs-walk.mjs'
+const walk = (dir, filter) => walkFiles(dir, { keep: filter, skipDirs: SKIP_DIRS, tolerant: true })
+
 
 const scriptDir = path.dirname(fileURLToPath(import.meta.url))
 const defaultRoot = path.resolve(scriptDir, '..', '..')
@@ -133,24 +136,6 @@ const SKIP_DIRS = new Set(['node_modules', 'dist', '.git', 'target', 'docs', 'ar
 /** 插件目录名：从文件绝对路径取 `crates/symbio-plugin-<id>/` 的 crate 名并去掉前缀 */
 const pluginDirOf = (abs) =>
   path.relative(PLUGINS_DIR, abs).split(/[/\\]/)[0].replace(PLUGIN_CRATE_PREFIX, '')
-
-function walk(dir, filter) {
-  const out = []
-  let entries
-  try {
-    entries = fs.readdirSync(dir, { withFileTypes: true })
-  } catch {
-    return out
-  }
-  for (const e of entries) {
-    const p = path.join(dir, e.name)
-    if (e.isDirectory()) {
-      if (SKIP_DIRS.has(e.name)) continue
-      out.push(...walk(p, filter))
-    } else if (e.isFile() && filter(p)) out.push(p)
-  }
-  return out
-}
 
 const isRs = (p) => p.endsWith('.rs')
 const isCode = (p) => p.endsWith('.rs') || p.endsWith('.ts') || p.endsWith('.vue')

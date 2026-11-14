@@ -45,6 +45,7 @@ import fs from 'node:fs'
 import path from 'node:path'
 import { fileURLToPath } from 'node:url'
 import { red, yellow, green, dim } from '../color.mjs'
+import { walkFiles } from '../fs-walk.mjs'
 
 const scriptDir = path.dirname(fileURLToPath(import.meta.url))
 const repoRoot = path.resolve(scriptDir, '..', '..')
@@ -105,16 +106,7 @@ const warn = (s) => {
   console.log(yellow(`  WARN : ${s}`))
 }
 
-function walk(dir, out = []) {
-  if (!fs.existsSync(dir)) return out
-  for (const e of fs.readdirSync(dir, { withFileTypes: true })) {
-    if (e.name === 'target' || e.name.startsWith('.')) continue
-    const p = path.join(dir, e.name)
-    if (e.isDirectory()) walk(p, out)
-    else if (e.name.endsWith('.rs')) out.push(p)
-  }
-  return out
-}
+const walk = (dir) => walkFiles(dir, { exts: ['.rs'], skipDirs: new Set(['target']), skipHidden: true, tolerant: true })
 
 const rel = (p) => path.relative(repoRoot, p).replace(/\\/g, '/')
 

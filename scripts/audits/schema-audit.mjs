@@ -20,9 +20,13 @@
  * 输出：控制台报告。零外部依赖，纯 Node 实现。
  */
 // @gate report
-import { readFileSync, readdirSync, statSync } from 'node:fs';
+import { readFileSync } from 'node:fs';
 import { join, relative, sep, dirname, resolve } from 'node:path';
 import { fileURLToPath } from 'node:url';
+import { walkFiles } from '../fs-walk.mjs'
+const walk = (dir, exts) =>
+  walkFiles(dir, { exts, skipDirs: new Set(['target', 'node_modules', '.workbuddy']) })
+
 
 // `--root=` 只为回归测试开的口子：测试在临时目录造一棵最小仓库，好让本脚本的报告
 // 能被「注入真实形状并断言报告正确」地验证。报告型脚本坏了没人发现（它不判失败），
@@ -35,19 +39,6 @@ const ROOT = rootArg
   : join(dirname(fileURLToPath(import.meta.url)), '..', '..');
 
 // ---------- 工具 ----------
-function walk(dir, exts, out = []) {
-  for (const name of readdirSync(dir)) {
-    const p = join(dir, name);
-    const st = statSync(p);
-    if (st.isDirectory()) {
-      if (name === 'target' || name === 'node_modules' || name === '.workbuddy') continue;
-      walk(p, exts, out);
-    } else if (exts.some((e) => name.endsWith(e))) {
-      out.push(p);
-    }
-  }
-  return out;
-}
 const rel = (p) => relative(ROOT, p).split(sep).join('/');
 
 // ---------- 后端 ----------

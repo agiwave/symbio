@@ -64,6 +64,12 @@ import { fileURLToPath } from 'node:url'
 import { green, red, dim } from '../color.mjs'
 import { blankComments } from '../rust-scan.mjs'
 import { PLUGIN_CRATE_PREFIX, pluginIds, readPluginManifest } from '../facts/_plugin-yml.mjs'
+import { walkFiles } from '../fs-walk.mjs'
+/** 按**文件名谓词**收文件（判据只关心 `*.rs` / `Cargo.toml` 这类名字）。 */
+function walk(dir, out, names) {
+  out.push(...walkFiles(dir, { keep: (abs, name) => names(name), skipDirs: SKIP_DIRS, tolerant: true }))
+}
+
 
 const scriptDir = path.dirname(fileURLToPath(import.meta.url))
 const repoRoot = path.resolve(scriptDir, '..', '..')
@@ -161,23 +167,6 @@ export function blankStrings(line) {
     out += ch
   }
   return out
-}
-
-function walk(dir, out, names) {
-  let entries
-  try {
-    entries = fs.readdirSync(dir, { withFileTypes: true })
-  } catch {
-    return
-  }
-  for (const e of entries) {
-    if (e.isDirectory()) {
-      if (SKIP_DIRS.has(e.name)) continue
-      walk(path.join(dir, e.name), out, names)
-    } else if (names(e.name)) {
-      out.push(path.join(dir, e.name))
-    }
-  }
 }
 
 function rel(root, abs) {

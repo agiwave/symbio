@@ -49,6 +49,20 @@ import fs from 'node:fs'
 import path from 'node:path'
 import { fileURLToPath } from 'node:url'
 import { green, red, yellow } from '../color.mjs'
+import { walkFiles } from '../fs-walk.mjs'
+/** 收**相对仓库根**的路径：判据里引用的都是 `crates/…` 形态的地址。 */
+function walk(absDir, out, keep) {
+  out.push(
+    ...walkFiles(absDir, {
+      keep: (abs) => keep(abs),
+      skipDirs: new Set(['target', 'node_modules']),
+      skipHidden: true,
+      rel: ROOT,
+      tolerant: true,
+    }),
+  )
+}
+
 
 const scriptDir = path.dirname(fileURLToPath(import.meta.url))
 const rootArg = process.argv.find((a) => a.startsWith('--root='))
@@ -92,25 +106,6 @@ function countRows() {
   let total = 0
   for (const rel of files) total += (read(rel).match(/^\s*Decl \{/gm) || []).length
   return total
-}
-
-function walk(absDir, out, keep) {
-  let entries
-  try {
-    entries = fs.readdirSync(absDir, { withFileTypes: true })
-  } catch {
-    return
-  }
-  for (const e of entries) {
-    if (e.name.startsWith('.')) continue
-    const abs = path.join(absDir, e.name)
-    if (e.isDirectory()) {
-      if (e.name === 'target' || e.name === 'node_modules') continue
-      walk(abs, out, keep)
-    } else if (e.isFile() && keep(path.relative(ROOT, abs).replace(/\r/g, ''))) {
-      out.push(path.relative(ROOT, abs))
-    }
-  }
 }
 
 /** `CollectingWriter` 结构体里 `Mutex<` 字段数。 */
