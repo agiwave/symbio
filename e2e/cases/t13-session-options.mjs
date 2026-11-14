@@ -27,8 +27,8 @@ import './_selfrun.mjs';
 // | `stat` **不带** `schema`、但带 `metadata` | 定义只挂两处载体；`stat` 是热路径，不跑全项目收集 |
 // | 重启进程后值仍在 | 「落库」真的落到了盘上 |
 //
-// ⚠️ 最后一条（`stat` 不带 schema）锁的是一个**刻意的设计选择**（见
-// `docs/archive/session-options-unification.md` §7 / §9 S2 实施注记 3）：定义要经一次
+// ⚠️ 最后一条（`stat` 不带 schema）锁的是一个**刻意的设计选择**（口径见
+// `crates/symbio-plugin-session/src/docs/107-session-options.md`）：定义要经一次
 // 全项目广播（含 agent 目录扫描），挂到 `stat` 上等于给每次变更通知加一次目录 I/O。
 // 若将来确实要改，请同步改设计文档并评估那个代价——不要只是把这条断言删掉。
 import {

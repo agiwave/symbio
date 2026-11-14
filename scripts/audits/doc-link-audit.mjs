@@ -8,9 +8,9 @@
  *
  *   D-001 站内相对链接：文档移动 / 归档（`git mv`）最容易留下静默坏链——阅读时才发现，
  *     而它本可以在提交前被机械地查出来。
- *   D-002 过程文档必须归档：靠文档**头部自述**判定（一次性评审 / 体检 / 已落地实施方案）。
+ *   D-002 过程文档不进仓：靠文档**头部自述**判定（一次性评审 / 体检 / 已落地实施方案）。
  *   D-003 行数预算：活跃文档 **不得超过 `MAX_DOC_LINES`**。
- *   D-004 变更史不得混入活跃文档正文：历史归 `git log` 与 `archive/`。
+ *   D-004 变更史不得混入活跃文档正文：历史只归 `git log`（本仓不设归档目录，D-494）。
  *   D-006 反引号里的文件路径：正文用 `` `path/to/x.md` `` 指路时，目标必须存在。
  *   D-007 站内锚点：链接的 `#fragment` 必须等于目标文件某个标题的 slug（含纯锚点 `#x`）。
  *   D-008 裸风险编号：正文里的 `R\d+` 必须是**定义**（`| Rn |` 表行的首列）或
@@ -145,9 +145,8 @@
  *   （symbio / tauri / cli / scripts / e2e / examples / .github 下的非 .md 源码），
  *   两边共用同一份口径。
  *
- * **整体豁免 `docs/archive/`**：归档记录的是**当时形态**，其中指向的兄弟文档可能
- *   早已被合并 / 删除，改写归档链接等于篡改历史。故该目录整体跳过（跳过文件数会打印）。
- *   活文档（其余全部范围）的失效链接照常报。
+ * **不设历史快照豁免**：本仓没有归档目录（历史只归 `git log`，D-494），所以扫描面里
+ *   不存在「当时形态」的文档，失效链接一律照常报——没有中间态就没有豁免档。
  *
  * 用法：
  *   node scripts/audits/doc-link-audit.mjs              # 审计（任一规矩命中即失败）
@@ -159,7 +158,6 @@
  *       ——失效链接若只在 `--strict` 下失败，而门禁不带该参数 ⇒ 守卫从未真的红过）
  *
  * 豁免：
- *   整体豁免 `docs/archive/`（历史快照，不做逐条留痕）；
  *   散文体检（D-002 / D-003 / D-004 / D-006 / D-008）对 `docs/` **照常判**，只有
  *   `docs/007-task/` 与 `docs/005-spec/` 两个目录整体豁免（那两处的 `## 处理过程`
  *   与闭环条文引用是职责本身，条目由 RG 判据管）；
@@ -173,8 +171,7 @@
  *   只对反引号档生效——链接档是精确判定不给豁免；源码文件不设全文档豁免
  *   （一篇几万行的 .rs 挂整篇豁免等于这片源码永久脱检）。
  *   D-013 **不给豁免**，且扫描范围包含 `docs/` 的登记条目（任务记录引用的是当时撞上的
- *   路径，同样不该带本机盘符——用 `<仓库根>` / `<盘符>` 占位）；只有 `docs/archive/`
- *   这类整体排除的历史归档不判（同文件头）。
+ *   路径，同样不该带本机盘符——用 `<仓库根>` / `<盘符>` 占位）。
  *   D-016 的豁免只有**行内档**（`doc-link-allow D-016: 理由`，本行或前一行），且只对
  *   **机器读的字段**成立——另有判据每轮解析该引用的存在性与可达性，理由须写明是谁。
  *   散文与源码注释里的指路不给豁免（任务收口即删，那里没有机械复核，D-295）。
@@ -208,16 +205,10 @@ const ROOTS = ['docs', 'crates', 'tauri', 'e2e', '.github', 'examples']
 /** 根目录下的散落 Markdown */
 const ROOT_FILES = ['AGENTS.md', 'README.md', 'CONTRIBUTING.md', 'CODE_OF_CONDUCT.md']
 
-/**
- * 整体豁免的目录（相对 repoRoot，以 `/` 结尾）。
- * docs/archive/ = 历史归档，其链接指向的是**当时**的兄弟文档，改写等于篡改历史。
- */
-const EXEMPT_DIRS = ['docs/archive/']
-
 /** 递归时跳过的目录名（构建产物 / 依赖 / 版本库） */
 const SKIP_DIRS = new Set(['node_modules', 'target', '.git', 'dist', 'build', '.venv'])
 
-// ==================== D-002：过程文档必须归档 ====================
+// ==================== D-002：过程文档不进仓 ====================
 /**
  * 归档是**动作**，能保持住的才是机制。
  *
@@ -230,12 +221,11 @@ const SKIP_DIRS = new Set(['node_modules', 'target', '.git', 'dist', 'build', '.
  * `c54158b`（81 文件）各改了 13 / 14 个文档文件，其中一部分改的正是这类记录。
  * 它们描述的是"当时怎么想的"，与现状一致既不必要、又不可能——因为现状已经变了。
  *
- * 判据：文档**头部自述**为一次性 / 评审 / 审计 / 已落地实施方案 ⇒ 必须在 `archive/` 下。
+ * 判据：文档**头部自述**为一次性 / 评审 / 审计 / 已落地实施方案 ⇒ 不得留在活跃目录。
  * 用「自述」而不是文件名匹配：文件名（`-review-` / `-health-check-`）是约定，会漂移；
  * 而这批文档**每一篇都在开头写明了自己的类型**，读它们自己写的话比猜文件名准。
  *
  * 扫描范围覆盖**模块文档**，不只 `docs/`——过程文档同样会沉积在模块目录里：
- * doc-link-allow D-010: 下行引用的是已迁入 archive 的文件当时的路径（叙述历史）
  * `crates/symbio-plugin-session/src/docs/legacy-route-migration.md`（已完成的迁移审计，
  * 每行都是「已删 / 已下线」）就这样在活目录里躺了多轮，每次路由改动都被回改一次。
  * 只扫 `docs/` 时它**永远不会被提示**——这类漏网正是「改一个功能要动十几个文档」的来源之一。
@@ -266,7 +256,7 @@ function processDocMarker(text) {
 
 // ==================== D-003：行数预算 ====================
 /**
- * 活跃文档的**散文**行数上限。**不给豁免**（`docs/archive/` 整体跳过是唯一的例外）：
+ * 活跃文档的**散文**行数上限。**不给豁免**：
  * 超过它不是一个需要解释的特例，而是「内容该归别人了」或「该拆成两篇了」的信号，
  * 而这两个动作都不需要一个理由字段来正当化。
  *
@@ -729,8 +719,7 @@ const isExternal = (t) =>
  *
  * 不判定（各自有更合适的归属，报了只是噪音）：
  *   · 非 `.md` 目标（`x.rs#L10`、`x.html#id`）——行号 / DOM id 不是标题 slug；
- *   · 目标文件不存在——D-001 已经报了；
- *   · `docs/archive/` 下的**源文件**——同 D-001 / D-002 的整体豁免（归档是历史快照）。
+ *   · 目标文件不存在——D-001 已经报了。
  *
  * 重复标题：GitHub 给第 2、3 个同名标题追加 `-1` / `-2`，故接受 `slug` 与 `slug-N`（N < 出现次数）。
  */
@@ -785,7 +774,6 @@ const bad = []
 const badAnchors = []
 let total = 0
 let anchorsChecked = 0
-let skippedFiles = 0
 
 const walk = (dir) => {
   for (const abs of walkFiles(dir, { exts: ['.md'], skipDirs: SKIP_DIRS })) check(abs)
@@ -848,10 +836,6 @@ function scanMalformedBrackets(file, rel, text) {
 
 function check(file) {
   const rel = path.relative(repoRoot, file).split(path.sep).join('/')
-  if (EXEMPT_DIRS.some((d) => rel.startsWith(d))) {
-    skippedFiles += 1
-    return
-  }
   const text = fs.readFileSync(file, 'utf8')
   scanMalformedBrackets(file, rel, text)
   for (const m of text.matchAll(LINK)) {
@@ -978,7 +962,6 @@ function machinePathHits (text) {
 
 function scanBody (file) {
   const rel = path.relative(repoRoot, file).split(path.sep).join('/')
-  if (EXEMPT_DIRS.some((d) => rel.startsWith(d))) return
   const raw = fs.readFileSync(file, 'utf8')
   if (file.endsWith('.rs')) {
     if (BODY_EXEMPT_DIRS.some((d) => rel.startsWith(d))) return
@@ -1148,8 +1131,7 @@ function scanSourceComments() {
 }
 scanSourceComments()
 
-const exemptNote = skippedFiles > 0 ? `（豁免 docs/archive/ 下 ${skippedFiles} 个文件）` : ''
-console.log(`扫描相对链接 ${total} 条，失效 ${bad.length} 条${exemptNote}`)
+console.log(`扫描相对链接 ${total} 条，失效 ${bad.length} 条`)
 for (const { from, to } of bad) {
   console.log(`  ${from}  ->  ${to}`)
 }
@@ -1161,17 +1143,17 @@ if (bad.length > 0) {
 // 从未真的红过）。改的理由是这条判定**不是启发式**：目标文件存在或不存在，没有
 // "疑似" 的中间地带，因此不存在"误报逼人写豁免"那条顾虑——那正是
 // `style-audit` 规则 B 与 `grep-audit` S-002-bonus 保持 WARNING 的理由，此处不适用。
-// 豁免只有一处（`docs/archive/`），且是**整体**豁免，不需要逐条留痕。
+// 本仓不给 D-001 留豁免档（没有归档快照，见文件头）。
 if (bad.length > 0) {
   console.log('\n（失效链接判定为失败：活文档的站内相对链接要么存在、要么不存在，无中间态。）')
 }
 
-console.log(`D-002 过程文档归档：扫描 ${docsScanned} 个活跃文档，应归档 ${misplaced.length} 篇`)
+console.log(`D-002 过程文档：扫描 ${docsScanned} 个活跃文档，滞留 ${misplaced.length} 篇`)
 for (const { rel, why } of misplaced) {
   console.log(`  ✗ ${rel}  自述命中 /${why}/`)
 }
 if (misplaced.length > 0) {
-  console.log('\n提示：过程文档（一次性评审 / 体检 / 已落地的实施方案）请 `git mv` 到 docs/archive/。')
+  console.log('\n提示：过程文档（一次性评审 / 体检 / 已落地的实施方案）不进仓——写完即删，历史归 git log（D-494）。')
   console.log('      它们记录的是「当时怎么想的」，与现状一致既不必要也不可能——而每次重构')
   console.log('      回头改历史，正是「改一个功能要动十几个文档」的一部分来源。')
 }
@@ -1197,7 +1179,7 @@ for (const { rel, hits } of historical) {
 if (historical.length > 0) {
   console.log('\n提示：现行文档只描述「现在是什么」——把过去写成现在，代价是每次重构都要回头改历史，')
   console.log('      而历史改成与现状一致就不再是历史。改为陈述当前行为（需要论证则指向 ADR，')
-  console.log('      需要过程记录则 `git mv` 进 docs/archive/）。确实在引用反例措辞时（如定义该规矩的那篇），')
+  console.log('      需要过程记录就只写在提交信息里）。确实在引用反例措辞时（如定义该规矩的那篇），')
   console.log('      写 `<!-- doc-link-allow D-004: 理由 -->`（理由不可为空）：行内（本行或前一行）只豁免该行；')
   console.log('      全文豁免须写在文件首行非空内容处，且理由写明它买断的是什么。')
 }

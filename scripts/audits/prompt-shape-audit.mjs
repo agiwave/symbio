@@ -6,7 +6,7 @@
  *
  * 「结构化 prompt 对模型是变好还是变坏」这个问题，在有一份形状基线之前**无法回答**——
  * 连「现在送出去的是什么形状」都没有一个可核对的记录，任何「更有效」的说法都是拍板
- * （[13 终点第 2 条](../../docs/archive/13-质量改进总纲.md)、
+ * （终点第 2 条，一次性总纲只在 `git log`；口径见
  * [D-048a](../../crates/symbio-plugin-session/README.md "crates/symbio-plugin-session/src/README")）。
  * 本脚本把那份记录立起来：从**真实链路**（CLI × mock LLM）抓到的请求体里提取形状，
  * 与基线文件逐字段比，改了就红。

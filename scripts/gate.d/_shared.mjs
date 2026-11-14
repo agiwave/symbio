@@ -36,8 +36,7 @@ const REPO_ROOT = path.resolve(SHARED_DIR, '..', '..')
  * 908：流式链路评审 A–D 批的回归锚点——`event_bus` 满通道语义（不摘除订阅 /
  *      `Closed` 才摘除 / resync 标记形状 / 满通道后标记必达）与**扇出不复制载荷**
  *      （`PluginPayload::Data(Arc<Value>)` 的 `Arc::ptr_eq` 断言），外加
- *      `transcript_stream` 的扇出共享与信封可解回事件（该模块已退役）。逐条见
- *      `docs/archive/streaming-chain-review-2026-09-22.md` §0.1。
+ *      `transcript_stream` 的扇出共享与信封可解回事件（该模块已退役）。
  * 901：转写帧日志分级——`FrameLogLevel`（骨架 INFO / 细节 DEBUG）与
  *      `frame_log_of` 的相位判据，折行器新增 `foldable`（骨架帧与首帧不可折）。
  *      新增「骨架帧不可折」「相位分界」「行尾不落空格」用例（3）。
@@ -96,7 +95,7 @@ export const BASELINE = {
   // 新义务环接入**只会回升**：B 类能力每接回一组，对应的 e2e 用例重新落地。
   // baseline-allow e2eCases: 91 → 90（D-318）——`346b3134` 整例退役 t41 技能快路：
   // 它唯一独有的断言依赖 `session.skill_fast_path`，该快路已随 B2 退场，没有生产事实可断；
-  // 能力断言由 t35-skill-compile 承接（退役口径见 `docs/archive/013-e2e实施表.md`，2026-11-04 盘点快照）。
+  // 能力断言由 t35-skill-compile 承接（退役口径见 2026-11-04 一次性盘点，历史在 `git log`）。
   // 收紧基线，不是放松。
   // baseline-allow e2eCases: 97 → 88（D-395）——9 条整例退役（t89/t91/t93/t94/t98/t100/t101/
   // t102/t103），它们钉的是被撤回的专用验证包；判据对象随实现一起消失，通用扩展面由

@@ -34,12 +34,6 @@ impl: done
 | [DE-109-vdfs-session-messages](109-vdfs-session-messages.md "DE-109-vdfs-session-messages") | 现行设计 | 会话消息的 VDFS 化：转写即列表、流式即追加；地址与节点形状、变更语义、不变量 |
 | [DE-107-session-options](107-session-options.md "DE-107-session-options") | 现行规范 | 会话选项 = 会话配置表单：同一份 `DetailDefinition` 的两种渲染形态（选项栏 / 详情页），三条通路（`node.schema` / `attributes.metadata` / `vdfs/write`），收集走统一 `Registry`（选项行）|
 
-> **已归档的过程产物**（一次性审计 / 迁移记录，进 `docs/archive/`）：
-> [`legacy-route-migration.md`](../../../../docs/archive/legacy-route-migration.md)（会话旧路由审计，迁移已全部落地）、
-> [`session-mechanism-audit.md`](../../../../docs/archive/implementation-logs/session-mechanism-audit.md)（机制审计与简化方案，方案已全部落地）
-> 与 [`session-complexity-audit.md`](../../../../docs/archive/implementation-logs/session-complexity-audit.md)（更早的复杂度审计）。
-> 它们的结论已体现在现行代码与上面各文档里，不再驱动任何待做项——**不随重构回改**。
-
 > **主循环旧设计的去向**（原 DE-102「会话核心循环」已退场，实现随环收口删除）：债的挑选与偿还住
 > `crates/symbio-plugin-loop/src/ring/engine.rs`（驱动在 `crates/symbio/src/drive.rs`），一轮的装配与
 > 收尾住 `plugin/turn.rs`，轮的身份是事实源打开时绑定的会话身份（`D-317`），节点状态见 [DE-105](105-node-state-streaming.md "DE-105-node-state-streaming")，
@@ -59,4 +53,4 @@ impl: done
  <!-- doc-link-allow D-006: 以下两个反引号路径是"路径该怎么写"的示意，并非入链 -->
  （`crates/symbio-plugin-session/src/docs/x.md`），插件内部注释可用 `docs/x.md`。
 - **新增文档**：放本目录，并在上表登记一行；改完跑 `node scripts/audits/doc-link-audit.mjs --strict`。
-- **历史实施记录**不写在这里，进 `docs/archive/implementation-logs/`。
+- **历史实施记录**不写在这里——历史归 `git log`（本仓不设归档目录）。

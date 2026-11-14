@@ -54,7 +54,7 @@ symbio/
 ├── tauri/ # Vue 3 桌面端
 │ ├── src/ # 前端代码
 │ └── src-tauri/ # 仅 3 个 Tauri command 的薄适配层
-├── docs/ # 系统级文档（历史归档在 docs/archive/）
+├── docs/ # 系统级文档（历史只留 git log，不设归档目录）
 ├── scripts/ # 门禁与生成脚本（gate.mjs / facts/current.mjs …）
 └── rustfmt.toml · clippy.toml · rust-toolchain.toml # 位于仓库根
 ```
@@ -234,8 +234,8 @@ CI 侧另有 `commit-msg-check` job，用 `--range` 把本次引入的提交逐�
  这些要么属文档、要么属 `git log`——写进注释只会在下次改动时漏掉一处。
 - 文档**不要抄**代码签名与字段表：要清单就读定义（或它的 `//!` 头注释）。手抄的表必然漂移
  ——本仓库已数次出现「文档列的文件早已不存在」。
-- **过程文档必须归档**：一次性评审 / 迁移记录 / 已落地的实施方案一律 `git mv` 进
- `docs/archive/`（**模块目录同样适用**），由 `node scripts/audits/doc-link-audit.mjs` 的 D-002 判定。
+- **过程文档不进仓**：一次性评审 / 迁移记录 / 已落地的实施方案写完即删，历史归 `git log`
+ （本仓不设归档目录，D-494）；留在活跃目录会被 `node scripts/audits/doc-link-audit.mjs` 的 D-002 判红。
 - **活跃文档散文不得超过 1000 行**（D-003）：判据量的是**剥离 front-matter 后的正文、
  再减去所有 `### D-NNN` 决策块**——决策账是只追加的定案记录，长度是项目史的读数，
  读它的人按锚点跳（`decision-anchors` 是那条索引的唯一读法），不该被当成"该拆篇"的信号。

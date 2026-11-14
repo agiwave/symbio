@@ -133,10 +133,9 @@ test('外链 / 空目标一律跳过（不是失效链接）；纯锚点归 D-00
   assert.match(r.stdout, /D-007 站内锚点：判定 1 条，失效 0 条/)
 })
 
-test('docs/archive/ 整体豁免 → 其中的失效链接不判（改写归档等于篡改历史）', () => {
+test('docs/archive/ 不再整体豁免：归档层已退役，其中的失效链接照常判（D-494）', () => {
   const r = audit({ 'docs/archive/old.md': '[当年的兄弟文档](./gone.md)\n' })
-  assert.equal(r.status, 0)
-  assert.match(r.stdout, /豁免/)
+  assert.equal(r.status, 1, r.stdout)
 })
 
 // ── D-017：证据锚点的文件必须存在 ──────────────────────────────────────
@@ -244,13 +243,13 @@ test('D-002：已落地的实施方案留在活跃目录 → 失败', () => {
   assert.equal(r.status, 1)
 })
 
-test('D-002：同样的内容放进 docs/archive/ → 通过', () => {
+test('D-002：没有归档这个去处——同样的内容放进 docs/archive/ 也判滞留（D-494）', () => {
   const r = audit({
     'docs/archive/review.md': REVIEW_DOC,
     'docs/archive/plan.md': IMPLEMENTED_DOC,
   })
-  assert.equal(r.status, 0)
-  assert.match(r.stdout, /应归档 0 篇/)
+  assert.equal(r.status, 1, r.stdout)
+  assert.match(r.stdout, /滞留 2 篇/)
 })
 
 test('D-002：现行规范不误报（「状态：现行规范」不是过程文档）', () => {
@@ -311,8 +310,8 @@ test('D-003：examples/ 不判（是示例包内容，不是项目文档）', ()
   assert.equal(audit({ 'examples/pkg/docs/big.md': longDoc(LIMIT + 100) }).status, 0)
 })
 
-test('D-003：docs/archive/ 不判（归档记录当时形态，改写等于篡改历史）', () => {
-  assert.equal(audit({ 'docs/archive/big.md': longDoc(2000) }).status, 0)
+test('D-003：docs/archive/ 也判（归档层退役后没有「当时形态」的豁免，D-494）', () => {
+  assert.equal(audit({ 'docs/archive/big.md': longDoc(2000) }).status, 1)
 })
 
 // 2026-11-13 口径订正：预算量**散文**，不量 `### D-NNN` 决策账。
@@ -526,8 +525,8 @@ test('D-006：豁免理由为空 → 仍失败（同 D-002 / D-004 的口径）'
   assert.equal(r.status, 1)
 })
 
-test('D-006：docs/archive/ 整体豁免（归档记录当时形态，改写等于篡改历史）', () => {
-  assert.equal(audit({ 'docs/archive/old.md': '# 旧\n\n见 `docs/gone.md`。\n' }).status, 0)
+test('D-006：docs/archive/ 也判（历史只归 git log，死路径没有豁免档，D-494）', () => {
+  assert.equal(audit({ 'docs/archive/old.md': '# 旧\n\n见 `docs/gone.md`。\n' }).status, 1)
 })
 
 // ── D-007：站内锚点 ─────────────────────────────────────────────────────
@@ -621,12 +620,12 @@ test('D-007：目标文件不存在时只报 D-001，锚点不重复报', () => 
   assert.match(r.stdout, /D-007 站内锚点：判定 0 条，失效 0 条/)
 })
 
-test('D-007：docs/archive/ 作为**源文件**整体豁免；作为**目标**仍受查', () => {
+test('D-007：docs/archive/ 作为源文件也受查（没有历史快照豁免，D-494）', () => {
   const r = audit({
-    'docs/archive/old.md': '[坏锚](#不存在)\n\n## 真标题\n', // 源文件被豁免
-    'docs/README.md': '[归档](./archive/old.md#真标题)\n', // 目标受查
+    'docs/archive/old.md': '[坏锚](#不存在)\n\n## 真标题\n',
+    'docs/README.md': '[归档](./archive/old.md#真标题)\n',
   })
-  assert.equal(r.status, 0, r.stdout)
+  assert.equal(r.status, 1, r.stdout)
 })
 
 // ── D-008：裸风险编号 ───────────────────────────────────────────────────
@@ -705,12 +704,12 @@ test('D-013：URL 协议段不误判（`https://` 的 `s:/` 不是盘符）', ()
   assert.equal(r.status, 0, r.stdout)
 })
 
-test('D-013：docs/archive/ 历史归档不判（同整体豁免）', () => {
+test('D-013：docs/archive/ 也判（本机绝对路径没有历史豁免，D-494）', () => {
   const r = audit({
     'docs/a.md': '# A\n',
     'docs/archive/old.md': '当时在 D:\\Bing\\symbio 下跑。\n',
   })
-  assert.equal(r.status, 0, r.stdout)
+  assert.equal(r.status, 1, r.stdout)
 })
 
 // ── D-016：非 task 文档 / 源码注释不得引用 T- 编号（机器读字段可豁免）──────

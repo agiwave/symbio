@@ -17,8 +17,7 @@ impl: done
 `crates/symbio-plugin-session/src/options/mod.rs`（选项宿主：会话自有字段的声明）、
 `tauri/src/schemas/vdfs-form.ts`（前端方言 + 条件求值 / 紧凑取值规则）、
 `tauri/src/composables/useSessionOptionBar.ts` + `tauri/src/components/chat/ChatOptionBar.vue`
-（前端唯一实现）、
-`docs/archive/session-options-unification.md`（本规范的**来由与迁移账**）
+（前端唯一实现）
 
 > 本文件只写**规范与机制**。具体选项（工作目录、智能体、模型、运行模式、
 > 风险等级、心跳任务……）一律属于**范例**（§9），不是机制的组成部分；
@@ -310,4 +309,3 @@ session ──collect_options(parent, ctx)──▶ parent.traverse(available_op
 
 > **不单设「立即心跳」按钮**：它的作用与「在输入框里直接发一条消息」完全重复——
 > 心跳的实质就是往会话发一轮提示词，用户想立刻做一次，在输入框发即可。
-> 论证见 [legacy-route-migration.md §5.1](../../../../docs/archive/legacy-route-migration.md)。

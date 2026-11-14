@@ -24,10 +24,8 @@ deps: [DE-009-VDFS规范]
 > 一律以 `013-vdfs.md` 为准，本文件不重复、不覆盖。凡与本文件冲突，以 `013-vdfs.md`
 > 的机制条款为准。
 >
-> **迁移过程已归档**：S1–S17 每一步的改动、验收与提交号在
-> [`docs/archive/vdfs-frontend-migration.md`](../archive/vdfs-frontend-migration.md)
-> ——含以 `EntityProvider` / `EntityVdfsAdapter` / `EntityStore` 为主语的中间形态
-> （那套抽象**已不存在**）。
+> **迁移过程**（S1–S17 的改动、验收与提交号）只在 `git log`；中间形态
+> （`EntityProvider` / `EntityVdfsAdapter` / `EntityStore`）**已不存在**，不要在代码里找它们。
 
 ---
 
@@ -39,8 +37,7 @@ deps: [DE-009-VDFS规范]
 新增一个 `VdfsProvider`，前端零页面开发。
 
 **已达成**：`entities/*` 无任何路由——前后端只剩 `vdfs/*` 一个资源协议，
-新能力一律接入 VDFS。迁移期两者并存的过程记录见
-[`docs/archive/vdfs-frontend-migration.md`](../archive/vdfs-frontend-migration.md)。
+新能力一律接入 VDFS（迁移期两者并存的过程记录只在 `git log`）。
 
 不变量（承 `013-vdfs.md` §1，前端侧重申）：
 
@@ -395,8 +392,7 @@ pub struct VdfsNewType {
 
 ## 7. 现行形态（前端装配）
 
-> 迁移过程（S1–S17 每一步的改动、验收与提交号）已归档：
-> [`docs/archive/vdfs-frontend-migration.md`](../archive/vdfs-frontend-migration.md)。
+> 迁移过程（S1–S17 每一步的改动、验收与提交号）只在 `git log`。
 > 本节只写**现在是什么**。
 
 - **一个三栏控件**：`components/vdfs/VdfsWorkbench.vue` 是**全 App 唯一**的三栏实现，

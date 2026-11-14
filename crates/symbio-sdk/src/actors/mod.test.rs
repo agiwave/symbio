@@ -225,7 +225,7 @@ fn commitment_records_pair_by_payload_id() {
 ///
 /// 返回 (store, 收束事件 seq)；`reply = None` 模拟**无应答**（走兜底那一支）。
 /// 应答是彩排内的定值——彩排验的是**链路形状**（收到 → 发出 → 收束 → 三查），
-/// 规则语义本身归 [`classify`](../../../../docs/archive/06-会话响应性落地.md) 的规则表。
+/// 规则语义本身归 `classify` 插件的能力声明与规则表。
 fn rehearse_turn(utterance: &str, reply: Option<&str>) -> (EventStore, Result<u64, u64>) {
     let store = EventStore::new();
     // 「收到」：用户消息成为一条事件（turn × opened）。

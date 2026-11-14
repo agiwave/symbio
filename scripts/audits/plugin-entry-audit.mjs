@@ -1517,7 +1517,7 @@ for (const plugin of pluginDirs) {
 // 退役路由的前缀仍然是对的（`session/append` 的 `session` 合法），
 // 而 `hooks/fire` 的 `hooks` 一眼就是错的。
 //
-// 又为什么不是所有 `.md`：`docs/archive/` 与各插件的迁移记录里会有大量历史路径，
+// 又为什么不是所有 `.md`：模块目录里的迁移记录会有大量历史路径，
 // 只扫「自称是当前权威清单」的那几份。
 const ROUTE_AUTHORITY_FILES = [
   path.join(repoRoot, 'docs', '004-ref', '003-ROUTES.md'),
@@ -1596,7 +1596,7 @@ const VOCAB_MD_FILES = (() => {
     }
     for (const e of ents) {
       const p = path.join(dir, e.name)
-      // `docs/archive/` 是历史归档（改写即篡改历史，见 doc-link-audit 的同款豁免）
+      // 历史归档目录（已退役，D-494）：扫描器仍跳过同名目录，避免历史树被重新放入时报假红
       if (e.isDirectory()) {
         if (e.name !== 'archive') scan(p)
         continue

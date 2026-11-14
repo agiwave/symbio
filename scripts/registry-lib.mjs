@@ -74,7 +74,7 @@ export const COMMON_OPTIONAL = ['deps', 'parent', 'lists', 'projection']
  *
  * 为什么按行数而不是按小节名判：小节名是自由文本，判不出「这段是设计还是指向」；
  * 行数是**它在承载多少东西**的代理，且不因改写措辞而失效。历史正文的正确去处是
- * `git log` 与 `docs/archive/`，不是一份标着「不再算数」却仍可照抄的文档。
+ * `git log`，不是一份标着「不再算数」却仍可照抄的文档。
  */
 const RETIRED_MAX_BODY_LINES = 200
 
@@ -1064,7 +1064,7 @@ export function auditEntries(entries, root, projections = [], kinds = {}) {
       }
     }
     // RG-033：**退场档只剩锚点与指向**——退场文档的正文不得再承载设计（D-145）。
-    // 判据的形状：退场是「这篇不再算数」，历史在 `git log` 与 `docs/archive/`；一份
+    // 判据的形状：退场是「这篇不再算数」，历史在 `git log`；一份
     // 退场文档若还揣着几百行目标设计，读者会照它施工，而它已经不作数了——「retired」
     // 于是只剩一个标签。预算按行数判：留下的是裁决锚点与指向，几十行足够。
     // 文档类的 `retired` 是在位归档（编号 = 路径、被引用着），与 RG-031 的「收口即删」不重合。
