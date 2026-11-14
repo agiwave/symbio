@@ -24,7 +24,7 @@ lists: [gate-codes=owner]
 |---|---|---|---|---|
 | **AD** | 架构树零调用判据 | `scripts/audits/arch-dead-code-audit.mjs` | AD-001–004 | `AD-005` |
 | **AO** | Agent 归属表对账（模块文档 ↔ 装配清单 ↔ 插件目录） | `scripts/audits/agent-ownership-audit.mjs` | AO-001–006 | `AO-007` |
-| **BS** | 棘轮基线面的变更审 | `scripts/audits/baseline-scope-audit.mjs` | BS-001–005 | `BS-006` |
+| **BS** | 棘轮基线面的变更审 | `scripts/audits/baseline-scope-audit.mjs` | BS-001–007 | `BS-008` |
 | **CP** | 控制面形状（唯一循环体 / 机制层无域名 / 机制面指纹 / 第二推进循环） | `scripts/audits/control-plane-audit.mjs` | CP-001、CP-004、CP-006、CP-009 | `CP-010` |
 | **CS** | core 形状 | `scripts/audits/arch-shape-audit.mjs` · `scripts/audits/shared-event-vocab-audit.mjs` | CS-001–011 | `CS-012` |
 | **D** | 文档正文与链接 | `scripts/audits/capability-migration-audit.mjs` · `scripts/audits/doc-link-audit.mjs` · `scripts/audits/doc-symbol-audit.mjs` | D-001–014、D-016–020、D-403–404 | `D-405` |
@@ -87,6 +87,8 @@ lists: [gate-codes=owner]
 | **BS-003** | `scripts/audits/baseline-scope-audit.mjs` |
 | **BS-004** | `scripts/audits/baseline-scope-audit.mjs` |
 | **BS-005** | `scripts/audits/baseline-scope-audit.mjs` |
+| **BS-006** | `scripts/audits/baseline-scope-audit.mjs` |
+| **BS-007** | `scripts/audits/baseline-scope-audit.mjs` |
 | **CP-001** | `scripts/audits/control-plane-audit.mjs` |
 | **CP-004** | `scripts/audits/control-plane-audit.mjs` |
 | **CP-006** | `scripts/audits/control-plane-audit.mjs` |

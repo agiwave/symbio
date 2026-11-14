@@ -22,7 +22,7 @@
 // 基准一律经 `git merge-base HEAD <ref>` 收敛——传进来的是「分支 tip」，不是合并基本身。
 //
 // 两条「判不了」必须诚实跳过，不许假绿也不许假红：
-// - 合并基里还没有这两份基线文件（分支从很旧的点切出 / 本地上游过期）⇒ 没有可比的
+// - 合并基里还没有被逐格冻结的那份基线文件（分支从很旧的点切出 / 本地上游过期）⇒ 没有可比的
 //   前态，判不了；
 // - 合并基就是 `HEAD` 且工作树没有基线改动 ⇒ 没有**在途**变更可审，判不了。
 //
@@ -33,10 +33,13 @@ import { fileURLToPath } from 'node:url'
 const scriptDir = path.dirname(fileURLToPath(import.meta.url))
 const repoRoot = path.resolve(scriptDir, '..', '..')
 
-const BASELINE_FILES = [
-  'scripts/loop-purity-baseline.json',
-  'scripts/baselines/control-plane.json',
-]
+// 「在途改动」只看目录：`scripts/baselines/` 下新增一份账本也算基线面有改动，
+// 而逐份枚举会让「新加的文件」落在 dirty 判据之外。
+const BASELINE_FILES = ['scripts/loop-purity-baseline.json', 'scripts/baselines']
+
+// 前态（`ls-tree`）只对**逐格冻结的两份**强求：其余账本缺前态时由审计脚本逐份跳过（
+// `BS-006` 的「没有前态不是通过」），不该让一份新账本把整个阶段拖成「判不了」。
+const PRESTATE_FILES = ['scripts/loop-purity-baseline.json', 'scripts/baselines/control-plane.json']
 
 const git = (ctx, args, label) =>
   // `quiet`：探测类命令（`rev-parse` / `merge-base` / `ls-tree`）的非零退出码是**判据的一部分**
@@ -86,7 +89,7 @@ export default {
             if (!dirty.ok || !dirty.output.trim()) return 'skipped'
           }
 
-          for (const f of BASELINE_FILES) {
+          for (const f of PRESTATE_FILES) {
             // `ls-tree` 在文件不存在时**退出 0、输出为空**（`cat-file -e` 会退 128，那会把
             // 「没有前态」误呈成命令失败）。空输出就是这里要的「判不了」。
             const tree = await git(ctx, ['ls-tree', '--name-only', base, '--', f], `git ls-tree ${f}@${base.slice(0, 8)}`)

@@ -19,6 +19,20 @@
  * | `BS-003` | 基线**删除**键（债已归零）而没有 `baseline-allow` | 红；删除是清债，必须留下决策号 |
  * | `BS-004` | `control-plane.json` 的 `mechanism.file` / `mechanism.hash` 变了而没有 allow | 红；机制面演进必须署名 |
  * | `BS-005` | allow 记录形状不对 / 决策号不存在 / 指向一个没发生的变更 | 红；不许匿名或空头豁免 |
+ * | `BS-006` | `scripts/baselines/*.json`（控制面以外）**新增一格**而没有 `(none)→<格>` allow | 红；账本里长出新的一格就是注册新债，必须署名 |
+ * | `BS-007` | 同一份账本里**计数上调**或**指纹改写**而没有 allow | 红；把基线对齐到现状 = 洗红，必须署名 |
+ *
+ * **为什么 `BS-001` / `BS-002` 不给 allow，而 `BS-006` / `BS-007` 给**：两份被逐格冻结的基线
+ * （`loop-purity` / `control-plane`）的**每一格都挂着自己的判据**，长出一格或抬高一个数，正确
+ * 答案只有一个——把那处红修掉；给它们留 allow 就是把「洗红」做成一条合法命令。其余账本
+ * （`plugin-api-loc` / `arch-dead-code` / `sink-rows` / `tool-names` / `port-surface` /
+ * `tool-surface`）的语义是**登记存量**：它们的判据（`FA-001` / `AD-001` / `SR-001` …）只对
+ * 「生产 vs 基线」发话，同批把基线与生产一起改是**它们自己文档里写明的合法动作**（新增一处
+ * 必须同批登记 `why` / `adr`）。所以这里判的不是「不许改」，而是「改了就必须署名」——
+ * 否则一次 `--print-baseline` 重写就能把「新增一处债」和「修好一处」在 diff 里抹成同一形态。
+ *
+ * 账本面按**目录**发现（`scripts/baselines/*.json`，控制面除外），不维护第二份清单：
+ * 新增一份基线文件自动进入本审计，不需要谁记得登记（`D-491`）。
  *
  * ## `baseline-allow` 的形状
  *
@@ -59,7 +73,7 @@
 
 // 判据码命名空间（登记表 docs/004-ref/GATE_CODES.md 由这些行生成，判据见 gate-codes-audit.mjs）
 // @ns BS 棘轮基线面的变更审
-// @codes BS-001 BS-002 BS-003 BS-004 BS-005
+// @codes BS-001 BS-002 BS-003 BS-004 BS-005 BS-006 BS-007
 // @gate test
 
 import fs from 'node:fs'
@@ -307,6 +321,166 @@ if (baseCp.extension?.productionFiles !== undefined && nowCp.extension?.producti
   compareNumber(CP_REL, 'extension.productionFiles', baseCp.extension.productionFiles, nowCp.extension.productionFiles)
 }
 
+// ────────────────────────── 数据账本基线（BS-006 / BS-007） ──────────────────────────
+
+/**
+ * 数据账本基线：`scripts/baselines/*.json` 里除控制面以外的那几份。
+ *
+ * **按目录发现，不手写清单**：新加一份基线文件自动进入本审计。控制面被排除是因为它走
+ * 的是逐格判据（`BS-004`），两份形状不同、语义也不同。
+ */
+function ledgerBaselines(root) {
+  const dir = path.join(root, 'scripts', 'baselines')
+  if (!fs.existsSync(dir)) return []
+  return fs
+    .readdirSync(dir)
+    .filter((n) => n.endsWith('.json'))
+    .sort()
+    .map((n) => `scripts/baselines/${n}`)
+    .filter((rel) => rel !== CP_REL)
+}
+
+/** 指纹样（`sha256:…` 或长十六进制）：唯一一种「值变了就算改写」的字符串。 */
+const FINGERPRINT_RE = /^(?:sha256:)?[0-9a-f]{16,}$/i
+
+/**
+ * 数组项的稳定身份：把项里出现的语义键**全部**拼起来（`symbol|path`），没有才退到下标。
+ *
+ * 不用「取第一个命中」：同名符号可以住在两个文件里，只取 `symbol` 会让两条不同的账目
+ * 在拍平后撞成同一格，新加的那条就带着旧条目的额度进来了。
+ */
+function identityOf(item, i) {
+  if (item && typeof item === 'object' && !Array.isArray(item)) {
+    const parts = ['name', 'symbol', 'path', 'key', 'id']
+      .map((k) => item[k])
+      .filter((v) => typeof v === 'string' && v.trim())
+      .map((v) => v.trim())
+    if (parts.length) return parts.join('|')
+  }
+  return String(i)
+}
+
+/**
+ * 把任意形状的账本拍成「格 → 值」。
+ *
+ * 只收**数字**（计数 / 行数 / 字节）与**指纹样字符串**：其余字符串是身份（`name` / `path`）
+ * 或散文（`why` / `reason` / `adr`），改写它们不是改存量，逐字比只会让 allowance 被琐事喂死。
+ * 元数据键（`note` / `baseline-allow`）不参与对账。数组项的身份取 `name` / `symbol` / `path` /
+ * `key` / `id`，没有才退回下标。
+ */
+function flattenCells(node, prefix = '', out = new Map()) {
+  if (Array.isArray(node)) {
+    node.forEach((item, i) => {
+      const cell = `${prefix}@${identityOf(item, i)}`
+      const before = out.size
+      flattenCells(item, cell, out)
+      // 条目本身就是一格，但只在它**没有可数的格**时补上：`arch-dead-code` 的每一格只有
+      // 名字与署名，只看数字会让「新增一条零调用符号」隐形成功耗掉额度；而 `plugin-api-loc`
+      // 的文件条目已经有 `lines`，再记一条存在性格只会让一次新增要写两条 allow。
+      if (out.size === before && item && typeof item === 'object' && !Array.isArray(item)) {
+        out.set(cell, 1)
+      }
+    })
+    return out
+  }
+  if (node && typeof node === 'object') {
+    for (const [k, v] of Object.entries(node)) {
+      if (prefix === '' && META.has(k)) continue
+      flattenCells(v, prefix ? `${prefix}.${k}` : k, out)
+    }
+    return out
+  }
+  if (typeof node === 'number' || (typeof node === 'string' && FINGERPRINT_RE.test(node))) {
+    out.set(prefix, node)
+  }
+  return out
+}
+
+function compareLedger(rel, base, now, allow) {
+  const before = flattenCells(base)
+  const after = flattenCells(now)
+  for (const [cell, value] of after) {
+    if (!before.has(cell)) {
+      if (!findAllow(allow.records, '(none)', cell)) {
+        report(
+          'BS-006',
+          rel,
+          `新增格 \`${cell}\` —— 账本里长出新的一格就是登记新债；` +
+            `同批写 \`baseline-allow: (none)→${cell} <理由> D-NNN\` 或把那处红修掉`,
+        )
+      }
+      continue
+    }
+    const was = before.get(cell)
+    if (typeof value === 'number' && typeof was === 'number') {
+      if (value > was && !findAllow(allow.records, `${cell}=${was}`, `${cell}=${value}`)) {
+        report(
+          'BS-007',
+          rel,
+          `\`${cell}\` 的计数 ${was} → ${value} —— 把基线对齐到现状就是洗红；` +
+            `同批写 \`baseline-allow: ${cell}=${was}→${cell}=${value} <理由> D-NNN\``,
+        )
+      }
+      continue
+    }
+    if (value !== was && !findAllow(allow.records, String(was), String(value))) {
+      report(
+        'BS-007',
+        rel,
+        `\`${cell}\` 的指纹被改写（${String(was).slice(0, 20)}… → ${String(value).slice(0, 20)}…）—— ` +
+          `机制面演进必须署名：\`baseline-allow: ${was}→${value} <理由> D-NNN\``,
+      )
+    }
+  }
+  for (const cell of before.keys()) {
+    if (after.has(cell)) continue
+    if (!findAllow(allow.records, cell, '(none)')) {
+      report(
+        'BS-003',
+        rel,
+        `格 \`${cell}\` 从账本删除 —— 清债必须留下 \`baseline-allow: ${cell}→(none) <理由> D-NNN\``,
+      )
+    }
+  }
+}
+
+for (const rel of ledgerBaselines(ROOT)) {
+  const baseText = readAtBase(rel)
+  if (baseText === null) {
+    // 基线文件本身是本分支新加的：没有前态就判不了「变了什么」，但也不能当「通过」说。
+    console.log(dim(`  · ${rel} 在 ${BASE} 里没有前态 —— 本文件跳过（不是通过）`))
+    continue
+  }
+  const baseObj = parse(rel, baseText)
+  const nowText = readNow(rel)
+  if (baseObj === null) {
+    report('BS-003', rel, `前态不是合法 JSON —— 无法对账；先修复 ${BASE} 里的这份文件`)
+    continue
+  }
+  if (nowText === null) {
+    report('BS-003', rel, `整份基线被删除 —— 删掉一格（哪怕是一整个文件）必须留下 allow 记录`)
+    continue
+  }
+  const nowObj = parse(rel, nowText)
+  if (nowObj === null) {
+    report('BS-003', rel, `工作树里的基线不是合法 JSON —— 读不出的账本不上线`)
+    continue
+  }
+  const allow = allowRecords(nowObj)
+  for (const m of allow.malformed) {
+    report('BS-005', rel, `\`baseline-allow\` 记录不合法：${m} —— 必须写「<old>→<new> <理由> D-NNN」`)
+  }
+  compareLedger(rel, baseObj, nowObj, allow)
+  for (const r of allow.records) {
+    if (r.used) continue
+    report(
+      'BS-005',
+      rel,
+      `\`baseline-allow\` 没有命中本轮任何变更：${r.raw} —— 要么变更没发生（空头豁免），要么已落地请删除`,
+    )
+  }
+}
+
 // ─────────────────────── allow 记录本身的形状 ───────────────────────
 
 const landedValues = currentBaselineValues()
@@ -339,8 +513,9 @@ if (errors) {
 }
 console.log(
   green(
-    `baseline-scope-audit 通过：两份棘轮基线相对 ${BASE} 无键增删、无计数上调、` +
-      `无未署名的机制面变化（allow ${lpAllow.records.length + cpAllow.records.length} 条）`,
+    `baseline-scope-audit 通过：棘轮基线相对 ${BASE} 无未署名的格增删 / 计数上调 / 指纹改写，` +
+      `无未署名的机制面变化（allow ${lpAllow.records.length + cpAllow.records.length} 条；` +
+      `账本面 ${ledgerBaselines(ROOT).length} 份）`,
   ),
 )
 if (lpAllow.records.length + cpAllow.records.length === 0) {

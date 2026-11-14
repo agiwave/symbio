@@ -62,13 +62,35 @@ function cpBaseline() {
   }
 }
 
+const LEDGER_REL = 'scripts/baselines/plugin-api-loc.json'
+
+/** 数据账本夹具：一行一格 + 一格合计。`files` / `total` 可整体替换。 */
+function ledger({ files, total = 5 } = {}) {
+  return {
+    note: '夹具：行数棘轮',
+    files: files ?? [{ path: 'effects.rs', lines: 2, adr: 'D-321' }],
+    total: { lines: total, adr: 'D-321' },
+  }
+}
+
+const withAllow = (obj, records) => ({ ...obj, 'baseline-allow': records })
+
 /** 建仓 → 提交基线 → 写工作树改动 → 跑审计。 */
-function audit({ lp = lpBaseline(), cp = cpBaseline(), baseLp = lpBaseline(), baseCp = cpBaseline(), base = 'HEAD' } = {}) {
+function audit({
+  lp = lpBaseline(),
+  cp = cpBaseline(),
+  baseLp = lpBaseline(),
+  baseCp = cpBaseline(),
+  ledgerNow = null,
+  ledgerBase = null,
+  base = 'HEAD',
+} = {}) {
   const root = fs.mkdtempSync(path.join(os.tmpdir(), 'baseline-scope-'))
   try {
     writeTree(root, {
       [LP_REL]: JSON.stringify(baseLp, null, 2),
       [CP_REL]: JSON.stringify(baseCp, null, 2),
+      ...(ledgerBase === null ? {} : { [LEDGER_REL]: JSON.stringify(ledgerBase, null, 2) }),
       'docs/003-design/048.md': '### D-321 撤销 D-320\n',
     })
     spawnSync('git', ['init'], { cwd: root, encoding: 'utf8' })
@@ -84,6 +106,11 @@ function audit({ lp = lpBaseline(), cp = cpBaseline(), baseLp = lpBaseline(), ba
       [CP_REL]: JSON.stringify(cp, null, 2),
       'docs/003-design/048.md': '### D-321 撤销 D-320\n',
     })
+    if (ledgerNow !== null) {
+      writeTree(root, { [LEDGER_REL]: JSON.stringify(ledgerNow, null, 2) })
+    } else if (ledgerBase === null) {
+      fs.rmSync(path.join(root, LEDGER_REL), { force: true })
+    }
     return spawnSync(process.execPath, [script, `--root=${root}`, `--base=${base}`], {
       cwd: root,
       env: { ...process.env, NO_COLOR: '1' },
@@ -104,7 +131,7 @@ function assertRed(r, code) {
 test('基线面一字未动 ⇒ 绿', () => {
   const r = audit()
   assert.equal(r.status, 0, r.stdout + r.stderr)
-  assert.match(r.stdout, /无键增删、无计数上调/)
+  assert.match(r.stdout, /无未署名的格增删 \/ 计数上调 \/ 指纹改写/)
 })
 
 test('计数下调 ⇒ 绿（棘轮往下走不需要 allow）', () => {
@@ -227,6 +254,79 @@ test('BS-005：to 不等于当前值、相对 base 有变更并带 allow ⇒ 绿
   cp['baseline-allow'] = ['sha256:old→sha256:new 驱动循环体随 D-321 迁移 D-321']
   // base 是旧值（`sha256:old`）：改动尚未落地 ⇒ 这条 allow 正在起作用。
   const r = audit({ cp })
+  assert.equal(r.status, 0, r.stdout + r.stderr)
+})
+
+// ─────────────────────── BS-006 / BS-007：数据账本 ───────────────────────
+
+test('BS-006：账本里新增一格（新文件）而没有 allow ⇒ 红', () => {
+  const now = ledger({
+    files: [
+      { path: 'effects.rs', lines: 2, adr: 'D-321' },
+      { path: 'new.rs', lines: 3, adr: 'D-321' },
+    ],
+  })
+  const r = audit({ ledgerBase: ledger(), ledgerNow: now })
+  assertRed(r, 'BS-006')
+  assert.match(r.stdout, /files@new\.rs\.lines/)
+})
+
+test('BS-006：新增一格并带 `(none)→<格>` allow + D-321 ⇒ 绿（新增是合法动作，但必须署名）', () => {
+  const now = withAllow(
+    ledger({
+      files: [
+        { path: 'effects.rs', lines: 2, adr: 'D-321' },
+        { path: 'new.rs', lines: 3, adr: 'D-321' },
+      ],
+    }),
+    ['(none)→files@new.rs.lines 新文件确实带行，登记存量 D-321'],
+  )
+  const r = audit({ ledgerBase: ledger(), ledgerNow: now })
+  assert.equal(r.status, 0, r.stdout + r.stderr)
+})
+
+test('BS-006：只有名字与署名的条目（零调用符号）新增也判红——条目本身就是一格', () => {
+  const now = ledger({
+    files: [
+      { path: 'effects.rs', lines: 2, adr: 'D-321' },
+      { path: 'ghost.rs', lines: 0, adr: 'D-321' },
+    ],
+  })
+  const r = audit({ ledgerBase: ledger(), ledgerNow: now })
+  assertRed(r, 'BS-006')
+  assert.match(r.stdout, /files@ghost\.rs/)
+})
+
+test('BS-007：账本计数上调而没有 allow ⇒ 红', () => {
+  const now = ledger({ total: 8 })
+  const r = audit({ ledgerBase: ledger(), ledgerNow: now })
+  assertRed(r, 'BS-007')
+  assert.match(r.stdout, /total\.lines=5→total\.lines=8/)
+})
+
+test('BS-007：指纹被改写而没有 allow ⇒ 红', () => {
+  const baseObj = { solver: { hash: 'sha256:aaaaaaaaaaaaaaaaaaaa', adr: 'D-321' } }
+  const nowObj = { solver: { hash: 'sha256:bbbbbbbbbbbbbbbbbbbb', adr: 'D-321' } }
+  const r = audit({ ledgerBase: baseObj, ledgerNow: nowObj })
+  assertRed(r, 'BS-007')
+  assert.match(r.stdout, /指纹被改写/)
+})
+
+test('BS-003：从账本删掉一格而没有 allow ⇒ 红', () => {
+  const now = ledger({ files: [] })
+  const r = audit({ ledgerBase: ledger(), ledgerNow: now })
+  assertRed(r, 'BS-003')
+})
+
+test('BS-005：账本里的 allow 没有命中任何变更 ⇒ 红（空头豁免）', () => {
+  const now = withAllow(ledger(), ['(none)→files@ghost.rs.lines 幽灵条目 D-321'])
+  const r = audit({ ledgerBase: ledger(), ledgerNow: now })
+  assertRed(r, 'BS-005')
+})
+
+test('账本计数下调 ⇒ 绿（棘轮往下走不需要 allow）', () => {
+  const now = ledger({ total: 4 })
+  const r = audit({ ledgerBase: ledger(), ledgerNow: now })
   assert.equal(r.status, 0, r.stdout + r.stderr)
 })
 
