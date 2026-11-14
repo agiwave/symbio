@@ -26,7 +26,6 @@ impl: done
 
 | 文档 | 状态 | 一句话 |
 |---|---|---|
-| [DE-102-core-loop](102-core-loop.md "DE-102-core-loop") | 现行设计 | LLM × 工具会话主循环的结构与四个收口点（`gate_turn` / `collect_reads` + `prepare_request_sections`（含接缝行 `prepare-turn`）/ `policy.compress` 的执行体 / `finish_turn`）；§6 记执行期出口/信号双原语（`EventSink` + `AbortSignal`） |
 | [DE-104-module-layout](104-module-layout.md "DE-104-module-layout") | 现行规范 | 插件怎么分域：五个判据、编排层/领域层落点、测试布局、可见性与共享面、纯搬移自证 |
 | [DE-101-context-compression-design](101-context-compression-design.md "DE-101-context-compression-design") | 现行设计总览 | 上下文压缩 L0–L6 分层机制、优先取舍、不变量（实现细节见 `../README.md`） |
 | [DE-108-turn-tool-mechanisms](108-turn-tool-mechanisms.md "DE-108-turn-tool-mechanisms") | 现行机制 | 工具失败如何回传（信息性、不中断循环）、Turn 终态如何定 |
@@ -41,9 +40,14 @@ impl: done
 > 与 [`session-complexity-audit.md`](../../../../docs/archive/implementation-logs/session-complexity-audit.md)（更早的复杂度审计）。
 > 它们的结论已体现在现行代码与上面各文档里，不再驱动任何待做项——**不随重构回改**。
 
+> **主循环旧设计的去向**（原 DE-102「会话核心循环」已退场，实现随环收口删除）：债的挑选与偿还住
+> `crates/symbio-plugin-loop/src/ring/engine.rs`（驱动在 `crates/symbio/src/drive.rs`），一轮的装配与
+> 收尾住 `plugin/turn.rs`，轮的身份是事实源打开时绑定的会话身份（`D-317`），节点状态见 [DE-105](105-node-state-streaming.md "DE-105-node-state-streaming")，
+> 模块拆分见 [DE-104](104-module-layout.md "DE-104-module-layout")。历史在 `git log`。
+
 ## 建议阅读路径
 
-- **要改核心循环** → [`015-core-loop.md`](102-core-loop.md "DE-102-core-loop") → [`../README.md`](../../README.md "crates/symbio-plugin-session/README") 五大策略 → [`017-module-layout.md`](104-module-layout.md "DE-104-module-layout") 找文件落点
+- **要改核心循环** → [`../../loop/README.md`](../../../symbio-plugin-loop/README.md "crates/symbio-plugin-loop/README")（环的形状与收口点）→ [`../README.md`](../../README.md "crates/symbio-plugin-session/README") 五大策略 → [`017-module-layout.md`](104-module-layout.md "DE-104-module-layout") 找文件落点
 - **要改压缩** → [`014-context-compression-design.md`](101-context-compression-design.md "DE-101-context-compression-design")（分层与不变量）→ [`../README.md`](../../README.md "crates/symbio-plugin-session/README")（阈值与函数）
 - **要查历史为什么这么改** → 已归档的审计与迁移记录（见上表下方），以及 `git log --grep=<词>` / `git log -S<符号>`（本仓库不另维护变更日志）
 - **要动前端转写/会话列表** → [`019-perf.md`](106-perf.md "DE-106-perf") → [`022-vdfs-session-messages.md`](109-vdfs-session-messages.md "DE-109-vdfs-session-messages")

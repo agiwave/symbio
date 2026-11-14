@@ -61,7 +61,7 @@ impl: done
 |---|---|---|---|---|---|
 | [goal · 目标](001-goal/README.md "GO-000-目标汇总") | 编号前缀 `GO-` | 要达成什么——产品 / 技术 / 工程三个大目标，各挂可度量判据 | 3 | draft 0 · active 3 · retired 0 | — |
 | [scene · 场景](002-scene/README.md "SC-000-场景汇总") | 编号前缀 `SC-` | 用户拿它做什么——角色、情境与用户判据 | 2 | draft 1 · active 1 · retired 0 | — |
-| [design · 设计](003-design/README.md "DE-000-设计总览") | 编号前缀 `DE-` | 产品与系统怎么设计——现状、目标形态与关键取舍（每篇的时态由 impl 标注） | 98 | draft 0 · active 96 · retired 2 | — |
+| [design · 设计](003-design/README.md "DE-000-设计总览") | 编号前缀 `DE-` | 产品与系统怎么设计——现状、目标形态与关键取舍（每篇的时态由 impl 标注） | 97 | draft 0 · active 96 · retired 1 | — |
 | [ref · 参考](004-ref/README.md "RE-000-参考汇总") | 编号前缀 `RE-` | 查数据——路由 / 错误码 / 配置等权威表 | 13 | draft 0 · active 13 · retired 0 | — |
 | [spec · 规范](005-spec/README.md "SP-000-规范汇总") | 编号前缀 `SP-` | 必须成立的条文——机制与判据的规范面 | 9 | draft 0 · active 9 · retired 0 | — |
 | [guide · 指南](006-guide/README.md "GU-000-指南汇总") | 编号前缀 `GU-` | 怎么用——上手 / 贡献 / 排障 | 14 | draft 0 · active 14 · retired 0 | — |
@@ -143,7 +143,7 @@ D-004 判**措辞标记**而不判**叙事**（`曾经` / `已改为` / `修订�
 | 错误码 | [RE-002-ERROR_CODES](004-ref/002-ERROR_CODES.md "RE-002-ERROR_CODES") | PROTOCOLS 不再列错误码表 |
 | 配置项 | [RE-001-CONFIGURATION](004-ref/001-CONFIGURATION.md "RE-001-CONFIGURATION") | 模块 `README.md` 只写机制 + 指向它 |
 | 判据码（各守卫的编号地址） | [RE-008-判据码登记表](004-ref/GATE_CODES.md)（脚本声明生成） | 守卫脚本只写自己判什么，不抄全表 |
-| 出厂 prompt 的**形状基线** | [ref/PROMPT_SHAPE.md](./004-ref/PROMPT_SHAPE.md)（真实链路生成，不手改） | 口径在 [DE-102](../crates/symbio-plugin-session/src/docs/102-core-loop.md "DE-102-core-loop") |
+| 出厂 prompt 的**形状基线** | [ref/PROMPT_SHAPE.md](./004-ref/PROMPT_SHAPE.md)（真实链路生成，不手改） | 口径在 [该模块 README 的 D-057](../crates/symbio-plugin-session/README.md "crates/symbio-plugin-session/README") |
 | 协议线上形状（帧 / 载荷 / 通道 / 线格式） | [design/005-协议规范.md](003-design/005-协议规范.md "DE-005-协议规范") | — |
 | 系统拓扑（谁挂在谁下面） | [design/004-系统地图.md](003-design/004-系统地图.md "DE-004-系统地图") | 其它图只画自己那一层 |
 | 排障链路（一次请求经过哪些代码） | [design/003-数据流与调用链.md](003-design/003-数据流与调用链.md "DE-003-数据流与调用链") | — |

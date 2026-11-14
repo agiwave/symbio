@@ -140,7 +140,7 @@ session:
  续写次数不是内核常量——它由上层按需再发一轮决定。
 * **为什么这一层不设软上限**：主循环读不到工具轮数——工具在 v2 运行器的环体里一批批跑完
  （turn_runner.rs（B2 退场，[DE-048](../../docs/003-design/048-端口机制裁决.md "DE-048-端口机制裁决") 的 `D-318`），步骤序列与批次边界见
- [DE-102-core-loop](src/docs/102-core-loop.md "DE-102-core-loop") §4.1），本轮请求侧只有一个
+ [`crates/symbio-plugin-loop/README.md`](../symbio-plugin-loop/README.md "crates/symbio-plugin-loop/README") 的环与行表一节），本轮请求侧只有一个
  「发过几次请求」的计数（续写才让它 >1）。一个判不到真实轮数的
  上限等于**没有上限**，却会让人以为设过：它与「默认不限制」逐字等价，配错与没配长得一样，
  没有任何信号能区分。真要这道上限，位置在 2e（结果接进 `exchange`）与 2f（轮内注入）之间，

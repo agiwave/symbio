@@ -223,7 +223,7 @@ impl MyTool {
 `execute` 期间的事件与中止走**执行期环境** `ExecEnv`（`env.sink` / `env.abort`），
 不要用 `PluginPayload::Session` 回传——那条通道是**跨进程传输原语**（前端实时面 / CLI / 网关），
 理由见 [D-020](../003-design/001-核心架构.md "DE-001-核心架构") 与
-[`crates/symbio-plugin-session/src/docs/102-core-loop.md`](../../crates/symbio-plugin-session/src/docs/102-core-loop.md "DE-102-core-loop") §7、§9。
+[DE-018 的 `exec` 行](../003-design/018-模块架构.md "DE-018-模块架构")（出口 / 中止 / 帧序的唯一落点）。
 
 ### 4. 让它被装配
 

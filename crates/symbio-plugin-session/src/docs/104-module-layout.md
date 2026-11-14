@@ -16,8 +16,7 @@ impl: done
 > （`session` 按域重组）与 [D-086](../../../../docs/003-design/014-单环一表.md "DE-014-单环一表")
 > （驱动器成片、跨墙通货闭族）；文件清单与行数属**结构事实**，由代码生成，
 > 见 [当前事实表](../../../../docs/004-ref/006-当前事实表.md "RE-006-当前事实表")，本文件不抄。
-> 相关：[`./015-core-loop.md`](102-core-loop.md "DE-102-core-loop")（主循环结构与收口点）、
-> [`../../loop/README.md`](../../../symbio-plugin-loop/README.md "crates/symbio-plugin-loop/README")（驱动器插件）、
+> 相关：[`../../loop/README.md`](../../../symbio-plugin-loop/README.md "crates/symbio-plugin-loop/README")（环的形状与收口点，主循环的现行 owner）、
 > [`../README.md`](../../README.md "crates/symbio-plugin-session/README")（现行机制与配置面）
 
 ---
@@ -190,7 +189,7 @@ X/mod.rs + X/tests.rs 模块文件是 mod.rs 的（如 store/、workdir/）：
 
 - **不动机制语义**：分工只回答「代码落在哪」，不改判定、阈值、文案、执行顺序。
 - **不动单点结构**：`persist_turn` 与压缩内核的内部结构是「单一实现」约束的落点，
- 拆开会让两条入口各自维护一套流水线——见 [`./015-core-loop.md`](102-core-loop.md "DE-102-core-loop")。
+ 拆开会让两条入口各自维护一套流水线——见 [`../../loop/README.md`](../../../symbio-plugin-loop/README.md "crates/symbio-plugin-loop/README") 的环体一节。
 - **不顺手收窄 / 放宽可见性**：搬移阶段只做归位；可见性调整是独立决策，
  要有跨域共享面或域内分工的判据支撑（§3）。
 - **不抄结构快照**：文件数、行数、代码规模一律以

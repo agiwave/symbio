@@ -49,7 +49,7 @@
  *      判定它们会让守卫满屏误报。
  *
  * **给豁免**（与 D-001 / D-003 的「不给豁免」不同）：本规则是**启发式**——
- *   缩写式引用（`` `session/docs/core-loop.md` `` 指 `crates/symbio-plugin-session/src/docs/102-core-loop.md`）
+ *   缩写式引用（`` `session/docs/104-module-layout.md` `` 指 `crates/symbio-plugin-session/src/docs/104-module-layout.md`）
  *   与「示意性路径」（`` `.vite/license.md` ``）在文本上与真断链无法区分。
  *   硬判会让作者被迫改写正确的简写，故提供豁免
  *   `<!-- doc-link-allow D-006: 理由 -->`（理由不可为空，同 D-002 / D-004）。
@@ -1230,7 +1230,7 @@ for (const { rel, dead } of backtickBad) {
 if (backtickBad.length > 0) {
   console.log('\n提示：行内反引号写出的文件路径 D-001 看不见（它只认 `[文字](目标)`）。两种处置：')
   console.log('      · 真断链 → 改正路径（多为文件移动 / 改名后未更新入链）；')
-  console.log('      · 缩写 / 示意性路径（如 `session/docs/core-loop.md` 指插件内同名文件）→')
+  console.log('      · 缩写 / 示意性路径（如 `session/docs/104-module-layout.md` 指插件内同名文件）→')
   console.log('        改为完整路径，或写 `<!-- doc-link-allow D-006: 理由 -->`（理由不可为空）：')
   console.log('        行内（本行或前一行）只豁免该行，全文豁免须写在文件首行非空内容处。')
 }
