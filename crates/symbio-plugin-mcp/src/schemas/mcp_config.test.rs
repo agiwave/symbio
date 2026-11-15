@@ -4,6 +4,33 @@
 
 use super::*;
 
+/// 默认超时是 30s（stdio / HTTP 共用同一口径）
+#[test]
+fn effective_timeout_default() {
+    let cfg = McpServerConfig::default();
+    assert_eq!(cfg.effective_timeout(), std::time::Duration::from_secs(30));
+}
+
+/// `timeout_secs` 显式给出时按它
+#[test]
+fn effective_timeout_custom() {
+    let cfg = McpServerConfig {
+        timeout_secs: Some(120),
+        ..Default::default()
+    };
+    assert_eq!(cfg.effective_timeout(), std::time::Duration::from_secs(120));
+}
+
+/// 0 落成 1 秒下限，不落成 0（0 会让每次读都立刻超时）
+#[test]
+fn effective_timeout_zero_fallback() {
+    let cfg = McpServerConfig {
+        timeout_secs: Some(0),
+        ..Default::default()
+    };
+    assert_eq!(cfg.effective_timeout(), std::time::Duration::from_secs(1));
+}
+
 /// McpServerConfig 序列化时 transport_type 序列化为 "type"
 #[test]
 fn mcp_server_config_serializes_transport_type_as_type() {

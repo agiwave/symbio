@@ -31,10 +31,9 @@ use super::types::{
     JsonRpcRequest, JsonRpcResponse, ListToolsResult, McpInitializeResponse, McpTool,
     McpToolCallResponse, RequestId, DEFAULT_PROTOCOL_VERSION, SUPPORTED_PROTOCOL_VERSIONS,
 };
-use crate::schemas::mcp_config::{McpServerConfig, DEFAULT_HTTP_TIMEOUT_SECS};
+use crate::schemas::mcp_config::McpServerConfig;
 use serde::Serialize;
 use serde_json::{json, Value};
-use std::time::Duration;
 use tracing::{debug, info, warn};
 
 /// MCP JSON-RPC 错误码：会话未找到（server 已清理）
@@ -107,18 +106,6 @@ fn apply_custom_headers(
     req
 }
 
-/// BUG-MR31：按 config 调整 HTTP 客户端超时
-///
-/// 默认 `DEFAULT_HTTP_TIMEOUT_SECS`（30s），可通过 `McpServerConfig.timeout_secs` 覆盖。
-fn effective_timeout(config: &McpServerConfig) -> Duration {
-    Duration::from_secs(
-        config
-            .timeout_secs
-            .unwrap_or(DEFAULT_HTTP_TIMEOUT_SECS)
-            .max(1),
-    )
-}
-
 /// 构造带标准头 + 自定义头 + 超时的 POST 请求
 fn build_request(
     client: &reqwest::Client,
@@ -130,7 +117,7 @@ fn build_request(
         .post(url)
         .header("Content-Type", "application/json")
         .header("Accept", "application/json, text/event-stream")
-        .timeout(effective_timeout(config))
+        .timeout(config.effective_timeout())
         .json(body);
     apply_custom_headers(req, config)
 }

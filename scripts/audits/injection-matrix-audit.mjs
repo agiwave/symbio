@@ -63,7 +63,7 @@ const BASELINE = process.env.INJECTION_MATRIX_BASELINE
       const [unassigned, deferred] = process.env.INJECTION_MATRIX_BASELINE.split(':').map((n) => Number(n))
       return { unassigned, deferred }
     })()
-  : { unassigned: 0, deferred: 1 }
+  : { unassigned: 0, deferred: 0 }
 
 const nonSpace = (s) => (s ?? '').replace(/\s+/g, '').length
 

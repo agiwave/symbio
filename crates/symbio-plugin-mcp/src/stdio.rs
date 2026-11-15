@@ -53,9 +53,6 @@ use tokio::io::{AsyncBufReadExt, AsyncWriteExt};
 use tokio::process::Command;
 use tracing::{debug, info, warn};
 
-/// stdio 读超时（discover / call 各 30s）
-const STDIO_READ_TIMEOUT: Duration = Duration::from_secs(30);
-
 /// graceful shutdown 等待时间（先关闭 stdin，超时后强制终止）
 const GRACEFUL_SHUTDOWN_TIMEOUT: Duration = Duration::from_secs(2);
 
@@ -98,14 +95,15 @@ impl McpManager {
             stdio_handshake(config).await?;
 
         // 4) BUG-MR21：显式调用 `tools/list`，因为很多 server 不在 initialize 响应中返回 tools
-        let tools = match stdio_tools_list(&mut child, &mut stdout, STDIO_READ_TIMEOUT).await {
-            Ok(t) => t,
-            Err(e) => {
-                // 优雅关闭后返回错误（list 失败不阻塞）
-                shutdown_child_graceful(&mut child).await;
-                return Err(e);
-            }
-        };
+        let tools =
+            match stdio_tools_list(&mut child, &mut stdout, config.effective_timeout()).await {
+                Ok(t) => t,
+                Err(e) => {
+                    // 优雅关闭后返回错误（list 失败不阻塞）
+                    shutdown_child_graceful(&mut child).await;
+                    return Err(e);
+                }
+            };
 
         // 5) graceful shutdown
         shutdown_child_graceful(&mut child).await;
@@ -124,13 +122,14 @@ impl McpManager {
     ) -> Result<TestConnectionResult, String> {
         let (mut child, mut stdout, negotiated, server_name, server_version, instructions) =
             stdio_handshake(config).await?;
-        let tools = match stdio_tools_list(&mut child, &mut stdout, STDIO_READ_TIMEOUT).await {
-            Ok(t) => t,
-            Err(e) => {
-                shutdown_child_graceful(&mut child).await;
-                return Err(e);
-            }
-        };
+        let tools =
+            match stdio_tools_list(&mut child, &mut stdout, config.effective_timeout()).await {
+                Ok(t) => t,
+                Err(e) => {
+                    shutdown_child_graceful(&mut child).await;
+                    return Err(e);
+                }
+            };
         shutdown_child_graceful(&mut child).await;
         Ok(TestConnectionResult {
             tool_count: tools.len(),
@@ -178,7 +177,7 @@ impl McpManager {
 
         // 3) 读取 tools/call 响应
         let response: JsonRpcResponse =
-            read_one_jsonrpc_line(&mut stdout, STDIO_READ_TIMEOUT).await?;
+            read_one_jsonrpc_line(&mut stdout, config.effective_timeout()).await?;
 
         shutdown_child_graceful(&mut child).await;
 
@@ -301,7 +300,8 @@ async fn stdio_handshake(
         .take()
         .ok_or("child has no stdout".to_string())?;
     let mut stdout = tokio::io::BufReader::new(stdout);
-    let response: JsonRpcResponse = read_one_jsonrpc_line(&mut stdout, STDIO_READ_TIMEOUT).await?;
+    let response: JsonRpcResponse =
+        read_one_jsonrpc_line(&mut stdout, config.effective_timeout()).await?;
     debug!(resp_id = %response.id_display(), "initialize 响应");
 
     let result = response

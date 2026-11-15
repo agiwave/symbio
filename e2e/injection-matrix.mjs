@@ -127,7 +127,7 @@ export const KINDS = [
     mock: 'e2e/mock-mcp.mjs',
     field: 'onCall.sleepMs',
     inMock: /\bplan\.sleepMs\b/,
-    usage: /\bsleepMs\s*:\s*\S/,
+    usage: /\bsleepMs\s*:\s*\S|mock-actions-delay\.json/,
   },
 ]
 
@@ -173,10 +173,7 @@ export const CELLS = [
   {
     kind: 'mcp.tool_delay',
     face: 'tools',
-    gap: {
-      owner: 'DE-039',
-      reason: 'MCP stdio 读超时已接线（固定 30s）；要钉住它得让用例等 31s，按门禁成本暂缓，待超时可配置后补用例',
-    },
+    cases: ['t111'],
   },
 
   // ── compression ─────────────────────────────────────────────────────

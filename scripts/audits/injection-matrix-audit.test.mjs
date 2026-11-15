@@ -107,11 +107,13 @@ test('na 太短 ⇒ INJ-002；写清理由 ⇒ 绿', () => {
   assert.deepEqual(ok.errors, [])
 })
 
-test('gap owner 不存在 ⇒ INJ-002；指向存在的任务 ⇒ 绿', () => {
+test('gap owner 不存在 ⇒ INJ-002；指向存在 ⇒ 只受基线约束（不再报 INJ-002）', () => {
   const bad = run({ 'e2e/cases/t1-alpha.mjs': null, 'e2e/cases/t9-empty.mjs': '' }, [{ kind: KIND.id, face: 'dialog', gap: { owner: 'T-404', reason: '待接线批次补用例。' } }])
   assert.ok(bad.errors.some((e) => e.rule === 'INJ-002' && /owner/.test(e.msg)))
+  // 基线是 0：合法 owner 的 gap 仍会撞 INJ-001（已登记缺口 1 > 0），
+  // 但 INJ-002 的「归属有效」不应再报——两件事分开判。
   const ok = run({ 'e2e/cases/t1-alpha.mjs': null, 'e2e/cases/t9-empty.mjs': '' }, [{ kind: KIND.id, face: 'dialog', gap: { owner: 'T-999', reason: '待接线批次补用例。' } }])
-  assert.deepEqual(ok.errors, [])
+  assert.ok(!ok.errors.some((e) => e.rule === 'INJ-002'), JSON.stringify(ok.errors))
 })
 
 test('夹具里找不到字段 ⇒ INJ-003（矩阵在描述不存在的注入）', () => {

@@ -2,7 +2,7 @@
 //!
 //! 设计基准 = `McpServerConfig`（server.json）的字段全集：
 //! - 传输类型 select 联动字段显隐（stdio → command/args/env；
-//!   http → url/headers/timeout，经 `visible_when` 条件显隐）
+//!   http → url/headers，经 `visible_when` 条件显隐）；`timeout_secs` 两种传输共用
 //! - list / map 结构化控件（args 每行一项、env·headers 每行 KEY=VALUE，
 //!   序列化约定见 DetailForm 渲染器，两侧一致）
 //! - 工具白/黑名单折叠分区、启用开关
@@ -54,7 +54,7 @@ fn when_stdio() -> DetailCondition {
     cond("type", Some(serde_json::json!("stdio")), None)
 }
 
-/// HTTP 专属字段显隐条件（type != "stdio"：url/headers/timeout 只在远程传输下出现）
+/// HTTP 专属字段显隐条件（type != "stdio"：url/headers 只在远程传输下出现）
 fn when_remote() -> DetailCondition {
     cond("type", None, Some(serde_json::json!("stdio")))
 }
@@ -135,13 +135,12 @@ pub fn mcp_detail_definition() -> DetailDefinition {
                         )
                     },
                     DetailField {
-                        visible_when: Some(when_remote()),
                         min: Some(1.0),
                         placeholder: Some("30".into()),
                         ..field(
                             "timeout_secs",
                             "请求超时（秒）",
-                            "留空使用默认 30 秒；stdio 不使用此字段",
+                            "留空使用默认 30 秒；stdio 与 HTTP 共用",
                             "number",
                         )
                     },

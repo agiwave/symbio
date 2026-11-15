@@ -28,7 +28,7 @@ fn definition_covers_mcp_form_surface() {
         })
         .count();
     assert_eq!(stdio_count, 3); // command / args / env
-    assert_eq!(remote_count, 3); // url / headers / timeout_secs
+    assert_eq!(remote_count, 2); // url / headers（timeout_secs 两种传输共用，不在此列）
                                  // 动作：test/save/delete 全齐
     let ids: Vec<&str> = def.actions.iter().map(|a| a.id.as_str()).collect();
     assert!(ids.contains(&"test") && ids.contains(&"save") && ids.contains(&"delete"));

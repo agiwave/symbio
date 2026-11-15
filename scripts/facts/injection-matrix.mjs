@@ -81,7 +81,12 @@ function render({ root = ROOT } = {}) {
   L.push('## 3. 读数')
   L.push('')
   L.push(`- ${KINDS.length} 种注入 × ${FACES.length} 个面 = **${total} 格**：用例 ${cases} 格 · 不适用 ${na} 格 · 已登记缺口 ${gap} 格。`)
-  L.push(`- 缺口 owner 全部为 \`DE-039\`（外部执行与熔断）：mock 夹具已具备编排能力，接线前不写判据，理由见 ${refLink('RE-005-e2e覆盖矩阵', 'RE-005-覆盖矩阵')} 的缺口节。`)
+  if (gap) {
+    const owners = [...new Set(CELLS.filter((c) => c.gap).map((c) => c.gap.owner))]
+    L.push(`- 缺口 owner：${owners.map((o) => `\`${o}\``).join(' · ')}——mock 夹具已具备编排能力，接线前不写判据，理由见 ${refLink('RE-005-e2e覆盖矩阵', 'RE-005-覆盖矩阵')} 的缺口节。`)
+  } else {
+    L.push('- 没有缺口格：每格都落到用例或不适用的理由上。')
+  }
   L.push('- 本表的正常 / 异常覆盖面按**能力域**看另一张表：`RE-005`；本表只回答「每种注入在每个面上有没有锚」。')
   L.push('')
   return L.join('\n')

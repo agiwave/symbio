@@ -44,7 +44,11 @@ test('每一格都渲染出归属，na / gap 不会被排版吃掉', () => {
   }
   const out = render()
   assert.ok(out.includes('— 工具轮的 provider 错误'), 'na 格必须渲染理由')
-  assert.ok(out.includes('**缺口**：DE-039'), 'gap 格必须渲染 owner')
+  // 缺口格用合成输入判排版：真实矩阵当前是 0 缺口，拿它当夹具会让这条判据空转。
+  assert.ok(
+    cellText({ gap: { owner: 'DE-039', reason: '合成夹具' } }).includes('**缺口**：DE-039'),
+    'gap 格必须渲染 owner',
+  )
 })
 
 test('front-matter 的 title 与首个 H1 一致', () => {

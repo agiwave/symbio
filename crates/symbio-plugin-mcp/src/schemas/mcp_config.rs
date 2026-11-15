@@ -91,10 +91,11 @@ pub struct McpServerConfig {
     #[serde(skip_serializing_if = "Option::is_none")]
     pub exclude_tools: Option<Vec<String>>,
 
-    /// BUG-MR31：HTTP transport 请求超时（秒），None = 使用默认值 30s
+    /// 请求超时（秒），None = 使用默认值 30s；stdio 与 HTTP 共用
     ///
     /// 不同 server 工具耗时差异大（filesystem ~ms vs docker inspect ~10s），
-    /// 暴露此字段供用户按需调整。stdio transport 不使用此字段（受 `STDIO_READ_TIMEOUT` 约束）。
+    /// 暴露此字段供用户按需调整。stdio 用它约束 initialize / tools/list / tools/call
+    /// 的读超时——e2e 因此能在秒级钉住「server 卡住」的形态，而不必等默认 30s。
     #[serde(skip_serializing_if = "Option::is_none")]
     pub timeout_secs: Option<u64>,
 
@@ -120,8 +121,17 @@ impl Default for McpServerConfig {
     }
 }
 
-/// BUG-MR31：默认 HTTP 超时
-pub const DEFAULT_HTTP_TIMEOUT_SECS: u64 = 30;
+/// 默认请求超时（秒）：stdio 读一行 / HTTP 一次请求共用
+pub const DEFAULT_TIMEOUT_SECS: u64 = 30;
+
+impl McpServerConfig {
+    /// 本次请求实际使用的超时：`timeout_secs` 显式给出时按它（下限 1 秒），否则默认 30 秒。
+    ///
+    /// stdio 与 HTTP 走同一个口径——同一个字段在两处各解释一遍，就会有一处开始漂。
+    pub fn effective_timeout(&self) -> std::time::Duration {
+        std::time::Duration::from_secs(self.timeout_secs.unwrap_or(DEFAULT_TIMEOUT_SECS).max(1))
+    }
+}
 
 fn default_true() -> bool {
     true

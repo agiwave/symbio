@@ -115,46 +115,6 @@ fn apply_custom_headers_filters_reserved() {
     // （实际请求中由 build_request 显式设置）
 }
 
-/// effective_timeout 使用默认 30s
-#[test]
-fn effective_timeout_default() {
-    use crate::schemas::mcp_config::McpServerConfig;
-    let cfg = McpServerConfig::default();
-    assert_eq!(
-        super::effective_timeout(&cfg),
-        std::time::Duration::from_secs(30)
-    );
-}
-
-/// effective_timeout 读取 timeout_secs
-#[test]
-fn effective_timeout_custom() {
-    use crate::schemas::mcp_config::McpServerConfig;
-    let cfg = McpServerConfig {
-        timeout_secs: Some(120),
-        ..Default::default()
-    };
-    assert_eq!(
-        super::effective_timeout(&cfg),
-        std::time::Duration::from_secs(120)
-    );
-}
-
-/// effective_timeout 0/None fallback 到默认
-#[test]
-fn effective_timeout_zero_fallback() {
-    use crate::schemas::mcp_config::McpServerConfig;
-    let cfg = McpServerConfig {
-        timeout_secs: Some(0),
-        ..Default::default()
-    };
-    // .max(1) 保证至少 1 秒
-    assert_eq!(
-        super::effective_timeout(&cfg),
-        std::time::Duration::from_secs(1)
-    );
-}
-
 /// SSE 响应中取最后一个 data: 行的 JSON
 #[test]
 fn sse_parse_takes_last_data_line() {

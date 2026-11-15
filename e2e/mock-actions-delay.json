@@ -1,0 +1,12 @@
+{
+  "tools": [
+    {
+      "name": "slow",
+      "description": "睡 8 秒的 mock 工具（超过客户端 3s 读超时）",
+      "inputSchema": { "type": "object", "properties": {}, "required": [] }
+    }
+  ],
+  "onCall": {
+    "slow": { "sleepMs": 8000 }
+  }
+}
