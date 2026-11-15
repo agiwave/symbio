@@ -14,6 +14,12 @@ use symbio_kernel::event::{Entity, Event, Verb};
 use symbio_plugin_api::effects::FileOp;
 use symbio_plugin_api::events::EVENT_ARTIFACT_ADDED;
 
+// 测试夹具：会话 crate 的测试二进制不链接 vdfs 插件，虚拟根的判据需要一条静态
+// 声明才测得到。名字取测试专用值——根名的字面量只归 vdfs 插件（`fs::VDFS_ADDR_ROOT`）。
+symbio_plugin_api::inventory::submit! {
+    symbio_plugin_api::AddrRootDecl(".test-vdfs-root")
+}
+
 /// 一条成功的写（`args` 按生产形状给 JSON 文本）。
 fn ok(id: &str, op: &str, args: serde_json::Value) -> Event {
     artifact(id, "vdfs_write", Some(op), args, true, "{}")
@@ -219,7 +225,6 @@ fn noop_edit_is_not_a_change() {
 
 /// 工作目录外 / 虚拟根 / 形状不对的路径一律不计——它们不是「工作目录的变更」。
 #[test]
-#[ignore = "跨 crate 拆分：依赖 vdfs 插件的静态声明，不在 core 的测试二进制里"]
 fn paths_outside_the_workdir_are_skipped() {
     let outside = [
         "",

@@ -72,3 +72,34 @@ fn tools_cover_all_ops() {
         ]
     );
 }
+
+/// 静态声明可达（本 crate 编译进了 vdfs 插件，它提交了根名）。
+/// 具体的名字归本插件——这里只钉「声明机制在工作」，并把归一化结果钉在常量上。
+#[test]
+fn declaration_is_reachable_and_normalized() {
+    let root = symbio_plugin_api::descend_addr("", "");
+    assert_eq!(root, VDFS_ADDR_ROOT);
+    assert!(
+        !root.ends_with('/') && !root.starts_with('/'),
+        "应已归一化: {root}"
+    );
+}
+
+/// 转发跳的改写规则：顶层落到声明的根；嵌套时在当前父地址上续接
+#[test]
+fn descend_starts_at_root_then_layers() {
+    // 顶层（转发方自己没有父地址）→ 根 + 本级名
+    assert_eq!(
+        symbio_plugin_api::descend_addr("", "session"),
+        format!("{VDFS_ADDR_ROOT}/session")
+    );
+    assert_eq!(
+        symbio_plugin_api::descend_addr("  ", "session"),
+        format!("{VDFS_ADDR_ROOT}/session")
+    );
+    // 嵌套（转发方已有父地址）→ 原地续接，不回落到根
+    assert_eq!(
+        symbio_plugin_api::descend_addr("@elsewhere/agent/b1", "sub"),
+        "@elsewhere/agent/b1/sub"
+    );
+}
