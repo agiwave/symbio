@@ -17,8 +17,8 @@ use symbio_plugin_api::events::{
 };
 use symbio_plugin_api::vocab;
 use symbio_sdk::invariants::check_all;
-use symbio_sdk::projection::prompt_fidelity::verify as verify_prompt_fidelity;
 use symbio_sdk::projection::transcript::transcript;
+use symbio_testkit::prompt_fidelity::verify as verify_prompt_fidelity;
 
 /// 造一条 pending 事件（入库前无 seq；带溯源与正文载荷）。
 fn ev(id: &str, kind: &str, entity: Entity, verb: Verb, _turn: u64, text: &str) -> Event {

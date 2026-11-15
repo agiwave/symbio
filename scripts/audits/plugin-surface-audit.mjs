@@ -166,7 +166,7 @@ export const WHITELIST_BASELINE = 0
 // 跨插件词汇。留下的请求侧（`PromptMessage` / `PromptToolCall`）与 `dialog` 的三个消费方
 // 没变，所以这是一个**净减**，不是搬臂。
 // 138 → 131（`D-443`）：按「谁在用」压缩——`fact_source` 登记面五条的唯一插件消费方
-// 是控制面 session（owner），按 D-253 / D-428 分档走 session 的 sdk 限期豁免直取本体，
+// 是控制面 session（owner），按 D-253 / D-428 分档走 session 的 sdk 豁免（冻结账，D-499）直取本体，
 // 不占扩展层门面计件；测试面消费不再续命（通道归 `symbio-testkit`）。
 // 133 → 132（2026-11-12 同步）：`D-469` 把协议命名的规则收进模型插件时，sdk 的副本与
 // 门面的转出行同批删除，实测臂已降到 132 而基线没跟（守卫的 △ 提示）；基线跟着降，

@@ -4,7 +4,7 @@
  * 判据面（SRA-001/002/003，见 D-451）：
  *  - SRA-001：豁免账里每条符号都必须在 `symbio-plugin-session/src` 里**真被用到**；
  *  - SRA-002：符号条数 ≤ 基线（只许降）；
- *  - SRA-003：`expires` 是**将来的**合法日期、`retire` 写明删除动作、`knife` 形如登记号。
+ *  - SRA-003：删除承诺要求 `expires` 是**将来的**合法日期；保留 / 冻结承诺要求 `reviewed` 是已发生的复核日、不得再带 `expires`；`retire` 写明可兑现处置、`knife` 形如登记号。
  *
  * 这把尺最危险的失效是**读数失真**：
  *   ① 余量留在账上却没人报（E-009 只判「用了的必须在账上」——正是这个单向判据让
@@ -33,7 +33,7 @@ const script = fileURLToPath(new URL('./session-retire-audit.mjs', import.meta.u
 const EXEMPTION_REL = 'scripts/exemptions/plugin-session-sdk.json'
 const SESSION_SRC_REL = 'crates/symbio-plugin-session/src'
 
-/** 干净夹具：两条符号都真被用、到期日在将来、`retire` 写明删除、`knife` 是登记号。 */
+/** 干净夹具：两条符号都真被用、永久冻结记了复核日、`knife` 是登记号。 */
 function cleanFiles() {
   return {
     [EXEMPTION_REL]: JSON.stringify(
@@ -41,9 +41,9 @@ function cleanFiles() {
         rule: 'E-009',
         crate: 'symbio-plugin-session',
         dependency: 'symbio-sdk',
-        expires: '2099-12-31',
-        knife: 'D-460',
-        retire: '随身份 `session` 保留（D-460）；条数只许降；2027-06-30 是复核日',
+        reviewed: '2026-11-15',
+        knife: 'D-499',
+        retire: '随身份 `session` 永久保留（D-499 复核）；条数只许降；复核由符号面变化触发',
         reason: '夹具',
         symbols: ['ClockNow', 'ReportDraft'],
       },
@@ -99,6 +99,15 @@ function withExemption(files, patch) {
   const d = JSON.parse(files[EXEMPTION_REL])
   patch(d)
   return { ...files, [EXEMPTION_REL]: JSON.stringify(d, null, 2) }
+}
+
+/** 删除承诺夹具：到期日仍在将来、`retire` 写明删除。 */
+function deletionFiles() {
+  return withExemption(cleanFiles(), (d) => {
+    delete d.reviewed
+    d.expires = '2099-12-31'
+    d.retire = '到期删除（D-460）'
+  })
 }
 
 test('干净夹具树 ⇒ 通过，且三条判据都读到输入', () => {
@@ -173,7 +182,7 @@ test('SRA-001：符号只出现在注释里 ⇒ 仍红（注释不是用法）',
 })
 
 test('SRA-002：符号条数超过基线 ⇒ 红（这条边只许收窄）', () => {
-  // 基线是 50：造 52 条**都真被用**的符号，把 SRA-001 摘干净，只看 SRA-002。
+  // 基线是 48：造 52 条**都真被用**的符号，把 SRA-001 摘干净，只看 SRA-002。
   const symbols = Array.from({ length: 52 }, (_, i) => `Sym${i}`)
   const files = withExemption(cleanFiles(), (d) => {
     d.symbols = symbols
@@ -183,16 +192,16 @@ test('SRA-002：符号条数超过基线 ⇒ 红（这条边只许收窄）', ()
   try {
     const r = run(box.root)
     assert.equal(r.status, 1, r.out)
-    assert.match(r.out, /SRA-002.*52 条 > 基线 50/s)
+    assert.match(r.out, /SRA-002.*52 条 > 基线 48/s)
     assert.doesNotMatch(r.out, /SRA-001/)
   } finally {
     box.cleanup()
   }
 })
 
-test('SRA-003：到期日已过 ⇒ 红（限期豁免过期即红）', () => {
+test('SRA-003：删除承诺的到期日已过 ⇒ 红（限期豁免过期即红）', () => {
   const box = sandbox(
-    withExemption(cleanFiles(), (d) => {
+    withExemption(deletionFiles(), (d) => {
       d.expires = '2000-01-01'
     }),
   )
@@ -205,9 +214,9 @@ test('SRA-003：到期日已过 ⇒ 红（限期豁免过期即红）', () => {
   }
 })
 
-test('SRA-003：到期日不可解析 ⇒ 红（没有到期日就是永久豁免）', () => {
+test('SRA-003：删除承诺的到期日不可解析 ⇒ 红（删除承诺必须有到期日）', () => {
   const box = sandbox(
-    withExemption(cleanFiles(), (d) => {
+    withExemption(deletionFiles(), (d) => {
       d.expires = '待定'
     }),
   )
@@ -215,6 +224,51 @@ test('SRA-003：到期日不可解析 ⇒ 红（没有到期日就是永久豁�
     const r = run(box.root)
     assert.equal(r.status, 1, r.out)
     assert.match(r.out, /SRA-003.*不是可解析的日期/s)
+  } finally {
+    box.cleanup()
+  }
+})
+
+test('SRA-003：永久冻结缺复核日 ⇒ 红', () => {
+  const box = sandbox(
+    withExemption(cleanFiles(), (d) => {
+      delete d.reviewed
+    }),
+  )
+  try {
+    const r = run(box.root)
+    assert.equal(r.status, 1, r.out)
+    assert.match(r.out, /SRA-003.*reviewed/s)
+  } finally {
+    box.cleanup()
+  }
+})
+
+test('SRA-003：永久冻结的复核日是将来 ⇒ 红（复核记录已发生的裁决）', () => {
+  const box = sandbox(
+    withExemption(cleanFiles(), (d) => {
+      d.reviewed = '2099-12-31'
+    }),
+  )
+  try {
+    const r = run(box.root)
+    assert.equal(r.status, 1, r.out)
+    assert.match(r.out, /SRA-003.*将来日期/s)
+  } finally {
+    box.cleanup()
+  }
+})
+
+test('SRA-003：永久冻结又带 expires ⇒ 红（两种日期口径互斥）', () => {
+  const box = sandbox(
+    withExemption(cleanFiles(), (d) => {
+      d.expires = '2099-12-31'
+    }),
+  )
+  try {
+    const r = run(box.root)
+    assert.equal(r.status, 1, r.out)
+    assert.match(r.out, /SRA-003.*不应再带.*expires/s)
   } finally {
     box.cleanup()
   }
@@ -528,7 +582,7 @@ test('SRA-003：写「保留」但没给依据决策号 ⇒ 红（一句话没�
   try {
     const r = run(box.root)
     assert.equal(r.status, 1, r.out)
-    assert.match(r.out, /SRA-003.*可兑现的处置/s)
+    assert.match(r.out, /SRA-003.*没写出依据的决策号/s)
   } finally {
     box.cleanup()
   }
@@ -541,9 +595,9 @@ test('SRA-003：写「保留 + 依据决策号」⇒ 绿（这是本账今天的
       rule: 'E-009',
       crate: 'symbio-plugin-session',
       dependency: 'symbio-sdk',
-      expires: '2099-12-31',
-      knife: 'D-460',
-      retire: '随身份 `session` 保留（D-460）；条数只许降',
+      reviewed: '2026-11-15',
+      knife: 'D-499',
+      retire: '随身份 `session` 永久保留（D-499 复核）；条数只许降',
       reason: '夹具',
       symbols: ['ClockNow', 'ReportDraft'],
     },

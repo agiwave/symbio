@@ -34,6 +34,7 @@ pub use symbio_sdk::event_bus::EVENT_BUS_RESYNC_MARKER_TYPE;
 pub use symbio_sdk::invariants::check_all;
 pub use symbio_sdk::keys::PRINCIPAL_MAIN;
 pub use symbio_sdk::plugin::fact_source;
+pub use symbio_sdk::projection::prompt_fidelity;
 
 #[cfg(test)]
 #[path = "lib.test.rs"]

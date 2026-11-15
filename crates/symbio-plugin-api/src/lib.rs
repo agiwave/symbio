@@ -85,7 +85,7 @@ pub use effects::{
 pub use symbio_sdk::plugin::drive_entry::publish_deployment_root;
 // fact_source 登记面（`FactSource` / `FactSourceOpener` / `FACT_SOURCE` / `Fact` /
 // `declared_fact_source_opener`）不上门面（D-443）：唯一插件消费方是控制面 session
-// （owner），按 D-253 / D-428 分档走其 sdk 限期豁免直取本体；`Principal` 留下（扩展层在用）。
+// （owner），按 D-253 / D-428 分档走其 sdk 豁免（冻结账，D-499）直取本体；`Principal` 留下（扩展层在用）。
 pub use symbio_sdk::plugin::fact_source::Principal;
 // 宏用 `$crate::inventory` 展开（卫生），与 `symbio_sdk` 的 `submit_object_creator!` 同形。
 pub use inventory;

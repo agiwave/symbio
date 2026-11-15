@@ -364,7 +364,7 @@ fn deployment_verdicts(snapshots: &[Vec<Event>]) -> Vec<Event> {
                 .payload
                 .get("capability")
                 .and_then(Value::as_str)
-                .unwrap_or(symbio_sdk::authz::CAP_ASSIGN_WORK);
+                .unwrap_or(symbio_plugin_api::vocab::CAP_ASSIGN_WORK);
             match event.payload.get("change").and_then(Value::as_str) {
                 Some("revoke") | Some("restore") => {}
                 _ => continue,

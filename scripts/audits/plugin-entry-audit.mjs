@@ -33,7 +33,7 @@
  * | E-006 | **权威清单**（`003-ROUTES.md` / `CURRENT.md` / 插件 README）里的路径前缀必须合法 | `hooks/fire` 只出现在文档里，只扫代码的守卫会完整地漏掉它 |
  * | E-007 | 插件不得按**强引用**持有兄弟插件实例（`Arc<dyn Plugin>` 字段）  | 跨插件调用必须经 `ctx.parent()` 走容器；按值持有会绕过地址分发、并在插件重建后钉住旧实例（`telegram` 的 `llm_plugin` 就是这么烂掉的） |
  * | E-008 | 文档里标了 `<!-- vocab:PREFIX_ -->` 的**词表行**必须与代码常量逐字一致 | 闭集的第二份真相常驻文档：`013-vdfs.md` 的 status 行曾一直写 `error`，而代码早已改名为 `failed`——漂移会从文档**流回**代码 |
- * | E-009 | 插件依赖边闭集：**`[dependencies]` 的 `symbio-*` 按身份分档——扩展层只许 `plugin-api` / `providers`（+ 第三方），控制面另许 `kernel`**；兄弟插件、`symbio` 宿主门面（只许 dev）、`include!`/`#[path]` 跨 crate、源码 `symbio_plugin_<兄弟>` 一律禁，**测试代码同样判**；例外只有一条**限期豁免**（`scripts/exemptions/plugin-session-sdk.json`：crate / 依赖精确匹配、`expires` 到点即红、`symbols` 符号级冻结） | 「插件之间互不可见」是架构公理，但它的**载体换过一次而判据没跟**。拆 crate 前兄弟插件是同 crate 的私有模块，`crate::plugins::web` 编得过（Rust 私有可见性包含"定义模块的后代"），旧实现判的就是这个形态。拆 crate（D-191）后兄弟插件是独立 crate，该路径**不可能存在**——约束由 cargo 的依赖图物理给出，但它的物理位置也搬到了 `Cargo.toml`：现在能让插件互可见的唯一动作是加一行依赖，而旧实现从不读清单 ⇒ 本条**静默空转**（全仓 4 处 `crate::plugins` 全是注释），绿灯是假的。现判六条通路：清单闭集（含 `alias = { package }` 改名与 `.workspace = true` 继承两种绕法；`symbio-sdk` / `symbio-deploy` 是应用侧门面，插件依赖它就是「插件→应用」反向耦合，控制面插件不豁免；扩展层直连 `symbio-kernel` 同样红——共享语法走门面的语法臂，`D-418`）· 源码裸 `symbio_plugin_<x>` · 旧路径兜底 · `symbio` 宿主门面（`pub use` 全部插件，只许 dev）· `include!`/`#[path]`（不需要依赖也能搬源码）· `symbio-providers` 的三条准入条件（自身不依赖插件 / 不含端口名 / 不含业务事实名）。唯一例外是 `plugin-session` 的 `symbio-sdk` 限期豁免（session 退役时同批删除）：对象、到期日、符号集都是**数据**，过期 / 扩散 / 新增用法三者任一即红。测试也判：让它对仓内可见去喂一条测试，隔离已经先被拆掉了一个模块 |
+ * | E-009 | 插件依赖边闭集：**`[dependencies]` 的 `symbio-*` 按身份分档——扩展层只许 `plugin-api` / `providers`（+ 第三方），控制面另许 `kernel`**；兄弟插件、`symbio` 宿主门面（只许 dev）、`include!`/`#[path]` 跨 crate、源码 `symbio_plugin_<兄弟>` 一律禁，**测试代码同样判**；例外只有一条**冻结豁免**（`scripts/exemptions/plugin-session-sdk.json`：crate / 依赖精确匹配、`symbols` 符号级冻结；删除承诺看 `expires` 到点即红，保留承诺看 `reviewed` 已复核） | 「插件之间互不可见」是架构公理，但它的**载体换过一次而判据没跟**。拆 crate 前兄弟插件是同 crate 的私有模块，`crate::plugins::web` 编得过（Rust 私有可见性包含"定义模块的后代"），旧实现判的就是这个形态。拆 crate（D-191）后兄弟插件是独立 crate，该路径**不可能存在**——约束由 cargo 的依赖图物理给出，但它的物理位置也搬到了 `Cargo.toml`：现在能让插件互可见的唯一动作是加一行依赖，而旧实现从不读清单 ⇒ 本条**静默空转**（全仓 4 处 `crate::plugins` 全是注释），绿灯是假的。现判六条通路：清单闭集（含 `alias = { package }` 改名与 `.workspace = true` 继承两种绕法；`symbio-sdk` / `symbio-deploy` 是应用侧门面，插件依赖它就是「插件→应用」反向耦合，控制面插件不豁免；扩展层直连 `symbio-kernel` 同样红——共享语法走门面的语法臂，`D-418`）· 源码裸 `symbio_plugin_<x>` · 旧路径兜底 · `symbio` 宿主门面（`pub use` 全部插件，只许 dev）· `include!`/`#[path]`（不需要依赖也能搬源码）· `symbio-providers` 的三条准入条件（自身不依赖插件 / 不含端口名 / 不含业务事实名）。唯一例外是 `plugin-session` 的 `symbio-sdk` 冻结豁免（session 退役时同批删除）：对象、日期口径（删除承诺 `expires` / 保留承诺 `reviewed`）、符号集都是**数据**，过期 / 扩散 / 新增用法三者任一即红。测试也判：让它对仓内可见去喂一条测试，隔离已经先被拆掉了一个模块 |
  * | E-013 | `crates/symbio-plugin-loop/src/**` 的 import 根 ⊆ 闭族（core 端口 / 通用库 / 自身 `super` / owner 声明表 / owner 自己的折叠），**测试同样判** | 驱动器片跨墙只准用 [D-083 §4](../../docs/003-design/001-核心架构.md "D-083") 的闭族通货：宿主机制面 `symbio_sdk::` + 封闭语法 `symbio_kernel::` + 通用库 + crate 根日志/工厂宏 + 本插件自己的模块根。它一旦 import 会话模块（或任何兄弟插件），切片就退回「搬家」：卸载 loop 时编译面仍钉着会话内部类型。E-009 已拦兄弟插件的全部依赖通路（清单 / 源码 / 宿主门面），但拦不住 `crate::providers` / 第三方 crate 这类**族外根**；本条把闭族写成枚举白名单，族外新增必须先回到 D-083 §4 论证「它代表哪条事实，或哪个方向的世界端口」 |
  * | E-011 | 纯配置挂载点插件不得手写 `impl VdfsProvider`                    | 「挂载根 = 一份配置文档」的插件（`CONFIG_MOUNT_PLUGINS`）四臂 dispatch 骨架逐字相同，机制侧已提供唯一实现（`symbio_sdk::PluginConfigMount` 的泛型 blanket impl）。手写一份 = 把同一段语义复制出去：四份副本改一条错误文案要改四处，新增插件「记得抄对每条分支」是纯人肉负担。本条与行数棘轮互补——棘轮在**事后**度量规模，本条在**事前**禁止把已收口的语义再摊开 |
  * | E-012 | `ROUTE_*` 常量：**名**去掉前缀后逐字等于**值**的大写，且**值**必须是真实分发目标 | 名字与值分叉 ⇒ 照名字拼出的地址不存在；值不在 `route()` 的臂也不在 `VDFS_OPS` ⇒ 登记的是一条没人能到达的地址（`AGENT_CHAT` 就是这个形态）。E-005 判「引用」不判「定义」，这两条此前无守卫，而 `route.rs` 的文档还声称有 |
@@ -832,7 +832,8 @@ function depNameOf(code) {
 //
 //   ① 对象只有一个：`crate` / `dependency` 精确匹配。写成别的 crate 不生效且判红
 //      （豁免不能扩散到 `loop` 或任何扩展插件）；
-//   ② 日期是数据：`expires`（YYYY-MM-DD）到点即红，不靠人记得；
+//   ② 日期是数据：删除承诺的 `expires`（YYYY-MM-DD）到点即红；保留承诺的 `reviewed`
+//      必须是已发生的复核日（D-499），且不得再带 `expires`；
 //   ③ 用法冻结：`symbols` 是**符号级**白名单，既有符号放行，未见过的 `symbio_sdk::…`
 //      符号即红（新增一条导入 / 调用都抓得住）。
 //
@@ -881,17 +882,32 @@ function loadSdkExemption() {
     )
   }
 
-  // ② 日期是数据，过期即红
-  if (!/^\d{4}-\d{2}-\d{2}$/.test(data.expires ?? '')) {
-    return fail(
-      `限期豁免缺少可比较的 \`expires\`（YYYY-MM-DD）——到点必须能直接判红，不靠人记得`,
-    )
-  }
-  if (!exemptionActive({ expires: data.expires, today: todayIso() })) {
-    return fail(
-      `限期豁免已过期（expires=${data.expires}，今天 ${todayIso()}）——` +
-        `失效日是最后一天；到期未续即红（续期须新决策），session 退役时同批删除本豁免（D-253）`,
-    )
+  // ② 日期是数据：删除承诺过期即红；保留承诺记 `reviewed`，不按日期续期
+  const freeze =
+    typeof data.retire === 'string' &&
+    /保留|冻结/.test(data.retire) &&
+    /D-\d{3}/.test(data.retire)
+  if (freeze) {
+    if (!/^\d{4}-\d{2}-\d{2}$/.test(data.reviewed ?? '')) {
+      return fail(
+        `冻结豁免缺少可比较的 \`reviewed\`（YYYY-MM-DD）——复核日必须是一次已发生的裁决日期`,
+      )
+    }
+    if (String(data.reviewed) > todayIso()) {
+      return fail(`冻结豁免的 \`reviewed\`（${data.reviewed}）不能是将来日期——它记录的是已经做过的裁决`)
+    }
+  } else {
+    if (!/^\d{4}-\d{2}-\d{2}$/.test(data.expires ?? '')) {
+      return fail(
+        `限期豁免缺少可比较的 \`expires\`（YYYY-MM-DD）——到点必须能直接判红，不靠人记得`,
+      )
+    }
+    if (!exemptionActive({ expires: data.expires, today: todayIso() })) {
+      return fail(
+        `限期豁免已过期（expires=${data.expires}，今天 ${todayIso()}）——` +
+          `失效日是最后一天；到期未续即红（续期须新决策），session 退役时同批删除本豁免（D-253）`,
+      )
+    }
   }
 
   // ③ 符号集必须是非空的显式名单（空集合 = 没有冻结）

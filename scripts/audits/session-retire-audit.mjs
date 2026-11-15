@@ -12,7 +12,7 @@
  * |---|---|---|
  * | SRA-001 | 豁免账 `symbols` 里**每一条**都必须真被 `symbio-plugin-session` 用到（去注释后至少命中一次） | `scripts/exemptions/plugin-session-sdk.json` × `crates/symbio-plugin-session/src/**` |
  * | SRA-002 | `symbols` 条数 ≤ 基线（**只许降**；要涨必须回 sdk / 内核侧解决，不是往账上加） | 同上 |
- * | SRA-003 | 豁免三字段自洽：`expires` 是**将来的**合法失效日（当天仍有效，次日起红）、`retire` 写明**可兑现的处置**（删除，或「保留 / 冻结 + 依据决策号」）、`knife` 形如登记号 | 同上 |
+ * | SRA-003 | 豁免字段自洽：删除承诺要求 `expires` 是**将来的**合法失效日（当天仍有效，次日起红）；保留 / 冻结承诺要求 `reviewed` 是**已发生的**复核日且不得再带 `expires`；`retire` 写明可兑现的处置（删除，或「保留 / 冻结 + 依据决策号」）、`knife` 形如登记号 | 同上 |
  * | SRA-004 | 事实源开面**恰好一家**：生产 `.rs` 里 `submit_fact_source_opener!` 的登记点必须是 1 处 | `crates/` 下全部 `.rs`（去测试） |
  * | SRA-005 | 地址根**至多一家**：生产 `.rs` 里 `AddrRootDecl(…)` 的声明点 `≥ 2` 即红；`0` 绿 + 提示（合法降级） | 同上 |
  *
@@ -23,8 +23,9 @@
  * 「session 退役」在仓里被七处决策引用（`D-349` / `D-358` / `D-413` / `D-416` / `D-427` /
  * `D-428` / `D-438` / `D-443` 都写着「随 session 退役同批删除」），但它自己的范围与出口
  * **从来没有登记过**：它挂的刀（一个任务号）早已随「收口即删」消失，只剩豁免 JSON 里的
- * `expires: 2027-06-30` 一条日期。没有出口的「将来会删」等于不会删——2027-06-30 到点时
- * 能做的只有续期。
+ * 一条日期口径。没有出口的「将来会删」等于不会删——按日期到点能做的只有续期。
+ * `D-499` 把复核提前到 2026-11-15 并做完：剩余符号随身份永久保留，账本改记 `reviewed`
+ * 复核日、不再按日期续期，复核由符号面变化触发。
  *
  * 退役的终态是**一条依赖边消失**：`symbio-plugin-session → symbio-sdk` 不再需要豁免，
  * 于是那一整份 `symbols` 与它的 `reason` 一起被删。这条边今天由 E-009 冻结成一份
@@ -106,7 +107,7 @@ const SESSION_SRC_REL = 'crates/symbio-plugin-session/src'
  * `session_chat` / `rebuild` / `SKILL_TAG` / `commitment_records` /
  * `VdfsChangeSubscriptions` / `DriveEntry` / 词汇结构体）**不上门面**，不因换径退场。
  */
-const SYMBOL_BASELINE = 50
+const SYMBOL_BASELINE = 48
 
 const errors = []
 const notes = []
@@ -198,25 +199,36 @@ if (exemption && files) {
 // ==================== SRA-003 ====================
 
 if (exemption) {
-  const { expires, retire, knife } = exemption
+  const { expires, reviewed, retire, knife } = exemption
+  const today = new Date().toISOString().slice(0, 10)
+  const freeze = typeof retire === 'string' && /保留|冻结/.test(retire) && /D-\d{3}/.test(retire)
 
-  // 失效日含当天：统一由 `exemptionActive` 判（同一原语也被 E-009 用），
-  // 这里不另写一份日期比较——两份比较的边界迟早会差一天。
-  if (!/^\d{4}-\d{2}-\d{2}$/.test(String(expires ?? ''))) {
-    report('SRA-003', `\`expires\` 不是可解析的日期（${JSON.stringify(expires)}）——没有到期日的豁免就是永久豁免`)
-  } else if (!exemptionActive({ expires, today: new Date().toISOString().slice(0, 10) })) {
+  if (freeze) {
+    // 永久冻结（D-499）：复核日记录的是已经做过的裁决，不是将来要兑现的删除承诺。
+    if (!/^\d{4}-\d{2}-\d{2}$/.test(String(reviewed ?? ''))) {
+      report('SRA-003', `\`reviewed\` 不是可解析的复核日（${JSON.stringify(reviewed)}）——永久冻结必须记下复核发生的日期`)
+    } else if (String(reviewed) > today) {
+      report('SRA-003', `\`reviewed\`（${reviewed}）不能是将来日期——复核日记录的是已经做过的裁决`)
+    }
+    if (Object.prototype.hasOwnProperty.call(exemption, 'expires')) {
+      report('SRA-003', '永久冻结不应再带 `expires`——「到期续期」与「复核由符号面变化触发」是互斥口径')
+    }
+  } else if (!/^\d{4}-\d{2}-\d{2}$/.test(String(expires ?? ''))) {
+    // 删除承诺：失效日含当天，统一由 `exemptionActive` 判（同一原语也被 E-009 用），
+    // 这里不另写一份日期比较——两份比较的边界迟早会差一天。
+    report('SRA-003', `\`expires\` 不是可解析的日期（${JSON.stringify(expires)}）——删除承诺必须有到期日`)
+  } else if (!exemptionActive({ expires, today })) {
     report('SRA-003', `\`expires\`（${expires}）已过期——失效日是最后一天，到期未续即红，续期要有新决策`)
   }
 
   if (typeof retire !== 'string' || !retire.trim()) {
     report('SRA-003', '`retire` 为空——写不出处置（删除或保留）的豁免，既不会删也不会被复核')
+  } else if (freeze) {
+    // 保留承诺（`D-499`）：终态是「随身份留下、只许降」时，「将来删除」是不可兑现的承诺。
   } else if (/删/.test(retire)) {
     // 删除承诺：退场的动作只有删，照旧。
-  } else if (/保留|冻结/.test(retire) && /D-\d{3}/.test(retire)) {
-    // 保留承诺（`D-460`）：终态是「随身份留下、只许降」时，「将来删除」是不可兑现的承诺
-    // ——`D-458` / `D-459` 已判存储与地址面都不能换 owner，session 这条依赖边不会归零。
-    // 允许它写「保留」而不是假装会删，但必须同时写出**依据的决策号**：一句没有决策的
-    // 「保留」是谁都不用负责的话，与本脚本存在的理由正好相反。
+  } else if (/保留|冻结/.test(retire)) {
+    report('SRA-003', `\`retire\` 写了保留 / 冻结，但没写出依据的决策号（${JSON.stringify(retire)}）——一句没有决策的「保留」是谁都不用负责的话`)
   } else {
     report(
       'SRA-003',
@@ -231,7 +243,7 @@ if (exemption) {
     notes.push(`这条账的 \`knife\` 是 ${knife}；任务按「收口即删」会消失，届时请确认主人换成了谁`)
   }
 
-  notes.push(`到期日 ${expires}；${retire}`)
+  notes.push(freeze ? `复核日 ${reviewed}；${retire}` : `到期日 ${expires}；${retire}`)
 }
 
 // ==================== SRA-004：事实源开面是单槽 ====================
@@ -511,7 +523,7 @@ const addrRootLine =
 console.log(
   `${green('✓')} SRA-001 豁免账零余量：${exemption.symbols.length} 条符号在 session 源码里都有真实用法\n` +
     `${green('✓')} SRA-002 只许降：${exemption.symbols.length} 条 ≤ 基线 ${SYMBOL_BASELINE}\n` +
-    `${green('✓')} SRA-003 豁免自洽：到期日 ${exemption.expires} · ${exemption.retire}\n` +
+    `${green('✓')} SRA-003 豁免自洽：${exemption.reviewed ? `复核日 ${exemption.reviewed}` : `到期日 ${exemption.expires}`} · ${exemption.retire}\n` +
     `${green('✓')} SRA-004 事实源开面单槽：1 家（${openerSites[0].rel}:${openerSites[0].line}）\n` +
     addrRootLine,
 )
