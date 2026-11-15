@@ -94,12 +94,6 @@ impl CapabilityMeta {
         self.behaviors.contains(&name)
     }
 
-    /// 构造带 category 分类的元数据
-    pub fn with_category(mut self, kind: CapabilityCategory) -> Self {
-        self.category = Some(kind);
-        self
-    }
-
     /// 构造带风险等级的元数据
     pub fn with_risk(mut self, risk: CapabilityRiskLevel) -> Self {
         self.risk = Some(risk);

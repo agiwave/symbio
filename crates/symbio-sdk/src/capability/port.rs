@@ -486,11 +486,6 @@ impl AuthzVerdict {
         }
     }
 
-    /// 是否被拒绝。
-    pub fn is_denied(&self) -> bool {
-        matches!(self, Self::Denied { .. })
-    }
-
     /// 拒绝因（通过 ⇒ `None`）。
     pub fn denial(&self) -> Option<&str> {
         match self {
@@ -542,12 +537,6 @@ impl PortOutcome {
             error: None,
             reply: PortReply::default(),
         }
-    }
-
-    /// 覆盖授权结论（执行体自判后把结论放进结果）。
-    pub fn with_authz(mut self, verdict: AuthzVerdict) -> Self {
-        self.authz = verdict;
-        self
     }
 
     /// 这一笔成功与否。

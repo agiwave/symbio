@@ -111,7 +111,7 @@ export const KINDS = [
     mock: 'e2e/mock-mcp.mjs',
     field: 'onCall.disconnect',
     inMock: /\bplan\.disconnect\b/,
-    usage: /\bdisconnect\s*:\s*true/,
+    usage: /mock-actions-disconnect\.json|\bdisconnect\s*:\s*true/,
   },
   {
     id: 'mcp.initialize_failure',
@@ -119,7 +119,7 @@ export const KINDS = [
     mock: 'e2e/mock-mcp.mjs',
     field: 'failInitialize',
     inMock: /\bscript\.failInitialize\b/,
-    usage: /\bfailInitialize\s*:\s*true/,
+    usage: /mock-actions-fail-init\.json|\bfailInitialize\s*:\s*true/,
   },
   {
     id: 'mcp.tool_delay',
@@ -163,25 +163,19 @@ export const CELLS = [
   {
     kind: 'mcp.disconnect',
     face: 'tools',
-    gap: {
-      owner: 'DE-039',
-      reason: 'mock-mcp 已支持 `onCall.disconnect`，但外部执行 / 熔断的上游接线在 DE-039 阶段；RE-005 已判定接线前不补用例，先补会测到 mock 的想象行为',
-    },
+    cases: ['t109'],
   },
   {
     kind: 'mcp.initialize_failure',
     face: 'tools',
-    gap: {
-      owner: 'DE-039',
-      reason: '握手失败后的插件降级路径同样属于外部执行接线；mock-mcp 已支持 `failInitialize`，待接线批次配用例',
-    },
+    cases: ['t110'],
   },
   {
     kind: 'mcp.tool_delay',
     face: 'tools',
     gap: {
       owner: 'DE-039',
-      reason: '工具挂死的超时 / 熔断由 DE-039 接管；mock-mcp 的 `onCall.sleepMs` 已具备编排能力，接线前不写判据',
+      reason: 'MCP stdio 读超时已接线（固定 30s）；要钉住它得让用例等 31s，按门禁成本暂缓，待超时可配置后补用例',
     },
   },
 

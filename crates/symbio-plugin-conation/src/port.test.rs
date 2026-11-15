@@ -92,7 +92,7 @@ async fn run(events: Vec<Event>) -> (PortOutcome, Arc<Mutex<Vec<FactDraft>>>) {
 async fn the_executor_opens_one_long_task_anchored_to_the_intent() {
     let (outcome, captured) = run(vec![want("want-1", 42, Some(1))]).await;
     assert!(
-        !outcome.authz.is_denied(),
+        outcome.authz.denial().is_none(),
         "正常装配里授权通过：{:?}",
         outcome.authz
     );

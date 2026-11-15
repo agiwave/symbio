@@ -1,0 +1,12 @@
+{
+  "tools": [
+    {
+      "name": "boom",
+      "description": "调用即断连的 mock 工具",
+      "inputSchema": { "type": "object", "properties": {}, "required": [] }
+    }
+  ],
+  "onCall": {
+    "boom": { "disconnect": true }
+  }
+}
