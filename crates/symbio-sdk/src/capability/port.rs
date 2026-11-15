@@ -333,8 +333,6 @@ pub struct PortExecContext {
     /// 本次执行所服务的**触发事实标识**（`request` 事实的幂等键）：
     /// 同一批派发里的不同调用各有各的标识，可由执行体用作产物的命名基准。
     pub subject: String,
-    /// 应答组（宿主原样交值，不透明；不参与配对）。
-    pub group: String,
     /// 会话身份（宿主原样交值）：执行体需要会话身份时读这一格，不读 `subject`。
     pub session_id: String,
     /// 产生方（归属序号）；`None` = 无归属。

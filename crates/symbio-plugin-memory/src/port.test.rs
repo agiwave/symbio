@@ -67,7 +67,6 @@ async fn run(events: Vec<Event>) -> (bool, Arc<Mutex<Vec<FactDraft>>>) {
         emit: PortFactEmit::new(Arc::new(Captured(captured.clone()))),
         ctx: None,
         subject: "memory:memory-consolidate:1".to_string(),
-        group: String::new(),
         session_id: "s-1".to_string(),
         origin: None,
         scratch_dir: None,

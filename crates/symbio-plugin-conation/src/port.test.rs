@@ -63,7 +63,6 @@ fn call(events: Vec<Event>) -> (PortExecContext, PortInput, Arc<Mutex<Vec<FactDr
         emit: PortFactEmit::new(Arc::new(Captured(captured.clone()))),
         ctx: None,
         subject: "conation:want-1:1".to_string(),
-        group: String::new(),
         session_id: "s-1".to_string(),
         origin: None,
         scratch_dir: None,

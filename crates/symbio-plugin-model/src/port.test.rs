@@ -134,7 +134,6 @@ fn exec_context() -> symbio_plugin_api::port::PortExecContext {
         )),
         subject: String::new(),
         session_id: "s".to_string(),
-        group: String::new(),
         origin: None,
         scratch_dir: None,
         source: String::new(),

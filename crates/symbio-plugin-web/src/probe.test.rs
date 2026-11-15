@@ -53,7 +53,6 @@ async fn the_probe_debt_and_executor_close_inside_the_capability_crate() {
         emit: PortFactEmit::silent(),
         ctx: None,
         subject: spec.id.clone(),
-        group: String::new(),
         session_id: "s-probe".to_string(),
         origin: None,
         scratch_dir: None,

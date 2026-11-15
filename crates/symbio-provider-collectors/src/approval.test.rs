@@ -97,7 +97,6 @@ fn exec_ctx(c: Arc<dyn PluginInvokeRequest>) -> PortExecContext {
         emit: PortFactEmit::silent(),
         ctx: Some(c),
         subject: String::new(),
-        group: String::new(),
         session_id: "s".to_string(),
         origin: None,
         scratch_dir: None,

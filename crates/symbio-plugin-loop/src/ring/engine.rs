@@ -725,7 +725,6 @@ async fn dispatch(
         emit: PortFactEmit::new(writer.clone()),
         ctx: handles.ctx,
         subject: format!("{}:{}:{}", row.port, row.id, attempt),
-        group: String::new(),
         origin: None,
         scratch_dir: handles.scratch_dir,
         session_id: handles.session_id,
