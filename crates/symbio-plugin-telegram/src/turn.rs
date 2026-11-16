@@ -56,9 +56,9 @@ use symbio_plugin_api::{message_of_node, SEG_MESSAGES};
 use symbio_plugin_api::{PluginPayload, PLUGIN_ID_SESSION};
 use tokio::sync::mpsc;
 
-/// 等待一轮结束的上限。与 `crates/symbio-cli/src/client.rs` 的 `TURN_TIMEOUT` 同量级：一轮里
+/// 等待一轮结束的上限。与 `crates/symbio-cli/src/client.rs` 的 `ROUND_TIMEOUT` 同量级：一轮里
 /// 可能有长工具调用（构建 / 测试），超时是**兜底**，不是预期路径。
-const TURN_TIMEOUT: Duration = Duration::from_secs(900);
+const ROUND_TIMEOUT: Duration = Duration::from_secs(900);
 
 /// 收件箱段名（地址契约 `<会话>/inbox` 的一段）。
 ///
@@ -79,7 +79,7 @@ const CHANNEL_MODE: &str = "auto";
 /// 三态而不是 `Result`：**「本轮以错误结束」与「实时面没接上」是两件事**——前者是
 /// 会话跑完给出的结论（用户该看到那句话），后者是本插件自己没接上（该留下运维痕迹）。
 /// 压成 `Err(String)` 之后调用方无从区分，只能二选一地把两类原因讲成一种。
-pub(super) enum TurnOutcome {
+pub(super) enum RoundOutcome {
     /// 本轮正常收尾。`text` 是最后一条**已完成**的助手正文（可能为空串）。
     Replied(String),
     /// 本轮以错误结束：`error` 取自会话节点。
@@ -99,7 +99,7 @@ pub(super) async fn run_turn(
     ctx: &Arc<dyn PluginInvokeRequest>,
     session_id: &str,
     text: &str,
-) -> TurnOutcome {
+) -> RoundOutcome {
     // ── ① 根地址 ──
     // 根叫什么**归 vdfs 插件**，使用方不写死：问一次，之后一律从父地址往下拼
     // （与 `cli` 的 `fetch_root_addr`、`agent_run` 的 `session_vdfs_addr` 同款）。
@@ -112,10 +112,10 @@ pub(super) async fn run_turn(
                 .filter(|s| !s.is_empty());
             match p {
                 Some(p) => p,
-                None => return TurnOutcome::Broken(format!("vdfs/root 未返回根地址：{v}")),
+                None => return RoundOutcome::Broken(format!("vdfs/root 未返回根地址：{v}")),
             }
         }
-        Err(e) => return TurnOutcome::Broken(e),
+        Err(e) => return RoundOutcome::Broken(e),
     };
     let session_addr = format!("{root}/{PLUGIN_ID_SESSION}/{session_id}");
 
@@ -133,7 +133,7 @@ pub(super) async fn run_turn(
     )
     .await
     {
-        return TurnOutcome::Broken(e);
+        return RoundOutcome::Broken(e);
     }
 
     // ── ③ 开实时面（**先于入队**，否则首帧会丢）──
@@ -158,7 +158,7 @@ pub(super) async fn run_turn(
     let mut bus_rx = match opened {
         Ok(rx) => rx,
         // 订阅失败与开闸失败同一条出口；订阅摘除随收件端 drop 走插件清理
-        Err(e) => return TurnOutcome::Broken(e),
+        Err(e) => return RoundOutcome::Broken(e),
     };
 
     // ── ④ 入队 ──
@@ -174,22 +174,22 @@ pub(super) async fn run_turn(
     .await;
     if let Err(e) = queued {
         unwatch(&router, ctx, session_id, &session_addr).await;
-        return TurnOutcome::Broken(e);
+        return RoundOutcome::Broken(e);
     }
 
     // ── ⑤ 收帧直到本轮结束 ──
     let mut acc = Accumulator::default();
-    let deadline = Instant::now() + TURN_TIMEOUT;
+    let deadline = Instant::now() + ROUND_TIMEOUT;
     let outcome = loop {
         let left = deadline.saturating_duration_since(Instant::now());
         if left.is_zero() {
-            break TurnOutcome::Broken("等待会话响应超时".to_string());
+            break RoundOutcome::Broken("等待会话响应超时".to_string());
         }
         let frame = match tokio::time::timeout(left, bus_rx.recv()).await {
             // 超时：会话没在本插件的等待窗口内收尾。可能仍在跑（长工具调用），
             // 但调用方需要一个答复，如实报出来比无限等下去好。
-            Err(_) => break TurnOutcome::Broken("等待会话响应超时".to_string()),
-            Ok(None) => break TurnOutcome::Broken("实时面已关闭".to_string()),
+            Err(_) => break RoundOutcome::Broken("等待会话响应超时".to_string()),
+            Ok(None) => break RoundOutcome::Broken("实时面已关闭".to_string()),
             Ok(Some(f)) => f,
         };
 
@@ -241,7 +241,7 @@ pub(super) async fn run_turn(
 }
 
 /// 会话节点视图 → 本轮结局。
-fn finish(node: &VdfsNode, acc: Accumulator) -> TurnOutcome {
+fn finish(node: &VdfsNode, acc: Accumulator) -> RoundOutcome {
     // 结局从节点属性读：`error` 非空即失败（与 `cli` 的 `turn_end_of` 同一判据）。
     if let Some(err) = node
         .attributes
@@ -249,12 +249,12 @@ fn finish(node: &VdfsNode, acc: Accumulator) -> TurnOutcome {
         .and_then(Value::as_str)
         .filter(|e| !e.is_empty())
     {
-        return TurnOutcome::Failed(err.to_string());
+        return RoundOutcome::Failed(err.to_string());
     }
     if node.status == VDFS_STATUS_FAILED {
-        return TurnOutcome::Failed("本轮以错误结束".to_string());
+        return RoundOutcome::Failed("本轮以错误结束".to_string());
     }
-    TurnOutcome::Replied(acc.final_text())
+    RoundOutcome::Replied(acc.final_text())
 }
 
 /// 助手正文的累积器：按消息 id 攒，最终取**最后一条已完成的助手正文**。

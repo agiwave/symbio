@@ -114,7 +114,7 @@ impl ModelProvider for BoundProvider {
         // 模型、消息数、工具数、根节点，加上实际端点与报文体量。**只打一条**：拆成
         // 相邻两条同名「请求发起」（一条在此、一条在 `execute_post_with_abort` 内）
         // 会每次请求刷两行、语义重复。
-        let turn_started = std::time::Instant::now();
+        let round_started = std::time::Instant::now();
         let body =
             self.protocol
                 .prepare_request(&self.cfg, system_prompt, messages, tools, aliases);
@@ -157,7 +157,7 @@ impl ModelProvider for BoundProvider {
                 plugin_info!(
                     "model",
                     "[LLM] 轮次中止 (耗时 {:?})",
-                    turn_started.elapsed()
+                    round_started.elapsed()
                 );
                 // 半截流的清除不在本层（见下）：这里没有可携带的半截产出。
                 return Err(PluginError::Aborted);
@@ -166,7 +166,7 @@ impl ModelProvider for BoundProvider {
                 plugin_warn!(
                     "model",
                     "[LLM] Response context lost (400). Retrying turn without response_ids... (耗时 {:?})",
-                    turn_started.elapsed()
+                    round_started.elapsed()
                 );
                 // 半截流的清除不在本层：返回错误后由 chat_loop 的重试分支对被废弃的
                 // Streaming 节点逐条发**删除帧**（`status = removed` 的状态迁移，前端
@@ -177,7 +177,7 @@ impl ModelProvider for BoundProvider {
                 plugin_error!(
                     "model",
                     "[LLM] 轮次失败：{msg} (耗时 {:?})",
-                    turn_started.elapsed()
+                    round_started.elapsed()
                 );
                 return Err(PluginError::InternalError(msg));
             }
@@ -185,7 +185,7 @@ impl ModelProvider for BoundProvider {
                 plugin_error!(
                     "model",
                     "[LLM] 轮次失败：限流 (耗时 {:?})",
-                    turn_started.elapsed()
+                    round_started.elapsed()
                 );
                 return Err(PluginError::RateLimited(msg));
             }
@@ -193,7 +193,7 @@ impl ModelProvider for BoundProvider {
                 plugin_info!(
                     "model",
                     "[LLM] 响应已受理，开始接收流 (耗时 {:?})",
-                    turn_started.elapsed()
+                    round_started.elapsed()
                 );
                 resp
             }
@@ -304,7 +304,7 @@ impl ModelProvider for BoundProvider {
                             plugin_error!(
                                 "model",
                                 "[LLM] 流重发失败（请求级）：{m} (总耗时 {:?})",
-                                turn_started.elapsed()
+                                round_started.elapsed()
                             );
                             return Err(PluginError::StreamError(m));
                         }
@@ -312,7 +312,7 @@ impl ModelProvider for BoundProvider {
                             plugin_info!(
                                 "model",
                                 "[LLM] 轮次中止 (耗时 {:?})",
-                                turn_started.elapsed()
+                                round_started.elapsed()
                             );
                             // 半截流的清除不在本层（见 `PostResult::Aborted` 首次分支）。
                             return Err(PluginError::Aborted);
@@ -335,7 +335,7 @@ impl ModelProvider for BoundProvider {
                         "model",
                         "[LLM] 轮次异常结束：{} (总耗时 {:?}, 流重发 {} 次)",
                         fail.message,
-                        turn_started.elapsed(),
+                        round_started.elapsed(),
                         stream_attempt
                     );
                     return Err(PluginError::StreamError(fail.message));

@@ -157,7 +157,7 @@ fn append_payload_nodes(messages: &mut Vec<PromptMessage>, payload: &serde_json:
 ///
 /// 返回值第四格是本轮**第几次**模型请求（0 = 首幕）：`message.added` 与省略区间
 /// 都需要它之外的历史，而发言级上下文段只在首幕取一次（D-220 / D-252）。
-fn turn_input(
+fn round_input(
     facts: &[PortFact],
     events: &[symbio_plugin_api::Event],
 ) -> (
@@ -569,7 +569,7 @@ impl PortExecutor for ModelExecutor {
             .as_ref()
             .map(|reader| reader.facts())
             .unwrap_or_default();
-        let (system_prompt, tools, messages, round, tool_aliases) = turn_input(&facts, &events);
+        let (system_prompt, tools, messages, round, tool_aliases) = round_input(&facts, &events);
         let provider = request
             .provider
             .as_deref()
@@ -1034,7 +1034,7 @@ fn outcome_payload(
             "tools"
         });
         // `id` 是节点身份（流式面上那张调用卡），**不参与任何匹配**；匹配只认
-        // `wire_id`（provider 交回的 tool_call_id，见 `turn_input` 的声明装配）。
+        // `wire_id`（provider 交回的 tool_call_id，见 `round_input` 的声明装配）。
         payload["tool_calls"] = serde_json::json!(o
             .tool_calls
             .iter()

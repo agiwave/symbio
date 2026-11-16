@@ -532,7 +532,7 @@ impl Convergence {
         // 段折出。只喂终答一格会把工具轮（没有 `chat.assistant.final` 的那一半）
         // 的节点整段丢掉——实时面只剩 user.message 与 final。
         let final_seq = final_event.seq.map(|seq| seq.value()).unwrap_or(u64::MAX);
-        let turn_events: Vec<_> = events
+        let round_events: Vec<_> = events
             .iter()
             .filter(|e| {
                 e.seq
@@ -541,7 +541,7 @@ impl Convergence {
             .cloned()
             .collect();
         let nodes: Vec<cm::ChatNode> =
-            symbio_sdk::projection::rebuild::rebuild(&turn_events, &CHAT_VOCAB, &MESSAGE_VOCAB)
+            symbio_sdk::projection::rebuild::rebuild(&round_events, &CHAT_VOCAB, &MESSAGE_VOCAB)
                 .into_iter()
                 .map(|mut node| {
                     // seq 由存储在临界区内权威分配；折叠给的是「从这份切片起」的局部号。

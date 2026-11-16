@@ -55,7 +55,7 @@ pub struct ActiveSessionStateInner {
     ///
     /// **字段私有**：生产侧的写点只有 `ActiveSessionState` 上的迁移方法
     /// （`begin_turn` / `finish_turn`），它们都经 [`WorkingState::apply`] 并把
-    /// 「由忙变闲」交给 `turn_done` 唤醒。收件箱消费者因此不再轮询。
+    /// 「由忙变闲」交给 `round_done` 唤醒。收件箱消费者因此不再轮询。
     working: WorkingState,
     /// 在途 Turn 的中止信号（登记后中止动作直接置位，无需投帧）。
     ///
@@ -147,7 +147,7 @@ pub struct ActiveSessionState {
     /// 收件箱消费者挂在它上面等「某个排队会话让出」，取代此前的 50ms 轮询。
     /// 用 `notify_one` 而不是 `notify_waiters`：前者会给**尚未挂起**的等待者留一个
     /// 许可，而「收轮恰好发生在消费者重新挂起之前」正是轮询当初要兜的那个窗口。
-    pub(crate) turn_done: Arc<Notify>,
+    pub(crate) round_done: Arc<Notify>,
 }
 
 impl Default for ActiveSessionState {
@@ -181,14 +181,14 @@ impl ActiveSessionState {
                 session_id,
                 Arc::new(changes),
             ))),
-            turn_done: Arc::new(Notify::new()),
+            round_done: Arc::new(Notify::new()),
         }
     }
 
     /// 工作态**由忙变闲**时叫醒收件箱消费者（一次迁移至多一次唤醒）。
     fn wake_if_idle(&self, became_idle: bool) {
         if became_idle {
-            self.turn_done.notify_one();
+            self.round_done.notify_one();
         }
     }
 

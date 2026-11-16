@@ -2,8 +2,8 @@
   "target": 0,
   "faces": {
     "F1": {
-      "prod": 90,
-      "test": 139
+      "prod": 38,
+      "test": 135
     },
     "F2": {
       "prod": 11,
@@ -23,6 +23,11 @@
     }
   },
   "adjustments": [
+    {
+      "date": "2026-11-16",
+      "faces": "F1.prod / F1.test",
+      "reason": "模块内部标识符改名（`TurnOutcome`→`RoundOutcome`、`TURN_TIMEOUT`→`ROUND_TIMEOUT`、`turn_started/turn_id/turn_end_of/turn_done/turn_input/turn_events`→`round_*`，完全类比 `D-436` 的 `TurnOutput`→`RoundOutput`）：同名产物/计时/局部形参/私有字段，非 serde 载体、载荷无同名字符串、事件名未动、读侧无垫片。`SP-003` 纪律 0——模块内部修改不算架构调整、不需裁决单，收窄不需批准。F1 生产面 90 → 38、测试面 139 → 135 为**实测收窄**；目标 0 不变。余下 38 处为 `turn_root` 协议键 / `turn_root_of` pub API / `symbio-sdk/turn` 目录路径（D-259）/ serde alias（D-317）/ `session.close-turn` 事件名，均需各自裁决，不在本批。"
+    },
     {
       "date": "2026-11-10",
       "faces": "F1.prod",

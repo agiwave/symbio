@@ -131,8 +131,8 @@ impl<'a> RequestTree<'a> {
     }
 
     /// 本轮的思考还留着吗（只有最近 N 条 Turn 的思考进请求视图）
-    pub(super) fn retains_reasoning(&self, turn_id: &str) -> bool {
-        self.retained_reasoning.contains(turn_id)
+    pub(super) fn retains_reasoning(&self, round_id: &str) -> bool {
+        self.retained_reasoning.contains(round_id)
     }
 
     /// 在 ToolCall 下查找响应结果节点：

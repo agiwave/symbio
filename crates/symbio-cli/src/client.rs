@@ -65,7 +65,7 @@ use symbio::symbio_kernel::present::{ReadingPanel, ReadingTone};
 use crate::render::Renderer;
 
 /// 单轮等待上限。取一个远大于真实模型耗时的值，只在「后端彻底无响应」时兜底失败。
-const TURN_TIMEOUT: Duration = Duration::from_secs(900);
+const ROUND_TIMEOUT: Duration = Duration::from_secs(900);
 
 static SEQ: AtomicU64 = AtomicU64::new(0);
 
@@ -533,7 +533,7 @@ impl SymbioClient {
         let mut last_status: Option<String> = None;
 
         loop {
-            let next = tokio::time::timeout(TURN_TIMEOUT, self.events.recv())
+            let next = tokio::time::timeout(ROUND_TIMEOUT, self.events.recv())
                 .await
                 .map_err(|_| "等待模型响应超时".to_string())?;
             let Some(frame) = next else {
@@ -545,13 +545,13 @@ impl SymbioClient {
                 //
                 // 消息正文已打印、不可回收，但**运行态可恢复**——它是一次 `stat`
                 // 就能取回的当前值。少了这一步，「漏掉收尾帧」就退化成静默挂起：
-                // 会话早已结束，CLI 却一直等到 `TURN_TIMEOUT` 才报错。
+                // 会话早已结束，CLI 却一直等到 `ROUND_TIMEOUT` 才报错。
                 // 回读一次是**有代价的**，因此它只挂在「后端明示漏帧」这个信号上，
                 // 而不是挂在每一帧无载荷的会话变更上（见 `session_state_of_change`）。
                 Frame::Resync => {
                     r.warn("⚠ vdfs 频道背压（后端已重同步），本轮输出可能不完整");
                     if let Some(node) = self.stat_node(&self.session_addr()).await {
-                        if let Some(outcome) = Self::turn_end_of(&node) {
+                        if let Some(outcome) = Self::round_end_of(&node) {
                             if node.attributes.get("outcome").and_then(Value::as_str)
                                 == Some(OUTCOME_ABORTED)
                             {
@@ -597,7 +597,7 @@ impl SymbioClient {
                         {
                             r.on_abort();
                         }
-                        business_error = Self::turn_end_of(&node).and_then(Result::err);
+                        business_error = Self::round_end_of(&node).and_then(Result::err);
                         break;
                     }
                     // ── 消息：`data` 就是那条 ChatNode，按字段落地 ──
@@ -680,7 +680,7 @@ impl SymbioClient {
     ///
     /// 收成一处是因为它有**两个**触发点：实时面上的收尾帧，与 `Frame::Resync`
     /// 之后的那次回读。两处各写一遍「什么算结束」正是最容易分叉的写法。
-    fn turn_end_of(node: &VdfsNode) -> Option<Result<(), String>> {
+    fn round_end_of(node: &VdfsNode) -> Option<Result<(), String>> {
         if node.status == VDFS_STATUS_WORKING {
             return None;
         }

@@ -4,7 +4,7 @@
 //!
 //! 转播桥的循环体本身要 provider / sink / abort 信号才跑得动，端到端覆盖在
 //! `e2e/cases/t15-subagent-inbox.mjs`；这里钉的是**编排之外的四组判据**——
-//! 「本轮是否结束」（[`turn_end_of`]：两个读数来源共用一份判据）、地址形状（[`is_message_item_addr`]）、
+//! 「本轮是否结束」（[`round_end_of`]：两个读数来源共用一份判据）、地址形状（[`is_message_item_addr`]）、
 //! 冒泡识别（[`pending_bubble_of`]）、消息过滤（[`message_fate`]）与节点改写
 //! （[`relabel_for_parent`]，含「主体改写排在角色改写之后」那条顺序依赖）。
 //! 拆出来才有单测可言：判据住在 238 行的循环体里时，「审批冒泡的判据是什么」无处引用。
@@ -26,14 +26,14 @@ fn session_node(status: &str, error: Option<&str>) -> VdfsNode {
 /// 仍在 `working` ⇒ `None`（继续等）。这一格判错会表现为「子会话没跑完就收尾」。
 #[test]
 fn working_session_is_not_an_end() {
-    assert_eq!(turn_end_of(&session_node(VDFS_STATUS_WORKING, None)), None);
+    assert_eq!(round_end_of(&session_node(VDFS_STATUS_WORKING, None)), None);
 }
 
 /// 离开 `working` ⇒ `Some(_)`；无 `error` 属性时是正常收尾 `Some(None)`。
 #[test]
 fn finished_session_ends_without_error() {
     assert_eq!(
-        turn_end_of(&session_node(VDFS_STATUS_ACTIVE, None)),
+        round_end_of(&session_node(VDFS_STATUS_ACTIVE, None)),
         Some(None),
         "会话节点离开 working 就是本轮结束的唯一判据（与 telegram / cli 同一条）"
     );
@@ -43,7 +43,7 @@ fn finished_session_ends_without_error() {
 #[test]
 fn failed_session_carries_its_error() {
     assert_eq!(
-        turn_end_of(&session_node(VDFS_STATUS_FAILED, Some("模型不可用"))),
+        round_end_of(&session_node(VDFS_STATUS_FAILED, Some("模型不可用"))),
         Some(Some("模型不可用".to_string())),
     );
 }

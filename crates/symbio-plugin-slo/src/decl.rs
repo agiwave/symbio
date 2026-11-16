@@ -90,7 +90,7 @@ pub(crate) const VIEWS: &[ViewDecl] = &[
 /// - `Some(b)` ⇒ 只认 seq `< b` 的声明（兜底 / 收束事件要归到**它之前**那一幕的档位）；
 /// - `None` ⇒ 不限 seq，取**最早**一条派发格——开轮事件的分母按「这一轮以哪一档开局」归位
 ///   （续写幕可以换档，那是另一幕的事实）。
-fn declared_tier(events: &[Event], turn_id: &str, before_seq: Option<u64>) -> String {
+fn declared_tier(events: &[Event], round_id: &str, before_seq: Option<u64>) -> String {
     let before = |e: &Event| before_seq.is_none_or(|b| e.seq.is_some_and(|s| s.value() < b));
     events
         .iter()
@@ -99,7 +99,7 @@ fn declared_tier(events: &[Event], turn_id: &str, before_seq: Option<u64>) -> St
             d.entity == Entity::Scope
                 && d.verb == Verb::Asserted
                 && d.kind.as_str() == EVENT_TURN_DISPATCH
-                && d.payload.get("root_id").and_then(Value::as_str) == Some(turn_id)
+                && d.payload.get("root_id").and_then(Value::as_str) == Some(round_id)
                 && before(d)
         })
         .and_then(|d| d.payload.get("tier").and_then(Value::as_str))
@@ -162,12 +162,12 @@ fn latency(events: &[Event], now: i64) -> Value {
         {
             continue;
         }
-        let turn_id = e
+        let round_id = e
             .payload
             .get("root_id")
             .and_then(Value::as_str)
             .unwrap_or("");
-        let tier = declared_tier(events, turn_id, e.seq.map(|s| s.value()));
+        let tier = declared_tier(events, round_id, e.seq.map(|s| s.value()));
         by_tier.entry(tier).or_default().push(e.cost_ms);
     }
     json!({ "by_tier": latency_rows(by_tier) })
@@ -245,12 +245,12 @@ fn fallback(events: &[Event], now: i64) -> Value {
                 if e.kind.as_str() != EVENT_CHAT_ASSISTANT_FALLBACK {
                     continue;
                 }
-                let turn_id = e
+                let round_id = e
                     .payload
                     .get("root_id")
                     .and_then(Value::as_str)
                     .unwrap_or("");
-                let tier = declared_tier(events, turn_id, e.seq.map(|s| s.value()));
+                let tier = declared_tier(events, round_id, e.seq.map(|s| s.value()));
                 by_tier.entry(tier).or_default().1 += 1;
             }
             _ => {}

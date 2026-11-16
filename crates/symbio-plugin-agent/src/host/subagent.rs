@@ -780,7 +780,7 @@ async fn relay_bridge(b: RelayBridge, sink: ExecEventSink, abort: ExecAbortSigna
                     // 一旦漏掉，本轮结束就没人宣告：子会话早已收尾，这里却一直等到父会话中止。
                     if event_bus_resync_of(&frame, EVENT_BUS_KIND_VDFS) {
                         if let Some(node) = stat_node(&provider, &invoke_ctx, &rel_base).await {
-                            if let Some(err) = turn_end_of(&node) {
+                            if let Some(err) = round_end_of(&node) {
                                 relay_error = err;
                                 break;
                             }
@@ -797,7 +797,7 @@ async fn relay_bridge(b: RelayBridge, sink: ExecEventSink, abort: ExecAbortSigna
                         None => stat_node(&provider, &invoke_ctx, &rel_base).await,
                     };
                     let Some(node) = node else { continue; };
-                    if let Some(err) = turn_end_of(&node) {
+                    if let Some(err) = round_end_of(&node) {
                         // 子会话以错误结束时，错误本身仍是子会话节点的持久状态，
                         // 这里只把它取出来作为本桥的结局（不再经错误帧转播）。
                         relay_error = err;
@@ -1044,8 +1044,8 @@ fn relabel_for_parent(message: &mut ChatNode, tool_call_id: &str) {
 ///
 /// 本桥对「结束」有**两个读数来源**——会话变更帧自带的载荷、以及收到背压重同步指令后的
 /// 回读——判据因此只许有一份：各写一遍就会漂，而漂的那一侧表现为「子会话早已收尾、
-/// 父会话却仍在等」。结局错误取节点属性（与 `cli` 的 `turn_end_of`、telegram 的 `finish` 同判据）。
-fn turn_end_of(node: &VdfsNode) -> Option<Option<String>> {
+/// 父会话却仍在等」。结局错误取节点属性（与 `cli` 的 `round_end_of`、telegram 的 `finish` 同判据）。
+fn round_end_of(node: &VdfsNode) -> Option<Option<String>> {
     if node.status == VDFS_STATUS_WORKING {
         return None;
     }

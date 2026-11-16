@@ -89,7 +89,7 @@ async fn begin_turn_clears_the_previous_round() {
 //
 // 收件箱消费者此前靠 50ms 轮询兜底，因为它无法知道「哪条收尾路径把工作态复位了」。
 // 现在工作态迁移是闭集：任何一次「由忙变闲」都在 `WorkingState::apply` 里被判定，
-// 并由 `turn_done` 通知一次。这条用例钉的正是那个契约。
+// 并由 `round_done` 通知一次。这条用例钉的正是那个契约。
 
 /// 收轮必须叫醒等待方（收件箱消费者据此取下一条）。
 #[tokio::test]
@@ -97,7 +97,7 @@ async fn finish_turn_wakes_the_waiter() {
     let st = ActiveSessionState::with_session_id("s".into(), VdfsChangeSubscriptions::default());
     st.begin_turn().await;
 
-    let waiter = st.turn_done.notified();
+    let waiter = st.round_done.notified();
     st.finish_turn(OUTCOME_COMPLETED, None).await;
 
     tokio::time::timeout(std::time::Duration::from_secs(1), waiter)

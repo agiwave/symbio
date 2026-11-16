@@ -471,12 +471,12 @@ impl TelegramPlugin {
             // 而它恒为 `{"status":"accepted"}`，于是回复永远是「无响应」。
             let response = match ctx.parent().and_then(|w| w.upgrade()) {
                 Some(router) => match super::turn::run_turn(router, &ctx, &chat_id, &text).await {
-                    super::turn::TurnOutcome::Replied(t) if t.trim().is_empty() => {
+                    super::turn::RoundOutcome::Replied(t) if t.trim().is_empty() => {
                         "（本轮没有产生文本输出）".to_string()
                     }
-                    super::turn::TurnOutcome::Replied(t) => t,
-                    super::turn::TurnOutcome::Failed(e) => format!("本轮以错误结束：{e}"),
-                    super::turn::TurnOutcome::Broken(e) => format!("回复失败：{e}"),
+                    super::turn::RoundOutcome::Replied(t) => t,
+                    super::turn::RoundOutcome::Failed(e) => format!("本轮以错误结束：{e}"),
+                    super::turn::RoundOutcome::Broken(e) => format!("回复失败：{e}"),
                 },
                 None => "未挂载到插件容器，无法调用会话".to_string(),
             };
