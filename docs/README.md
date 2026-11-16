@@ -46,7 +46,7 @@ impl: done
 ---
 ```
 
-- **`kind` 回答「这篇文档在回答什么问题」**——七类，各有自己的目录与汇总页。每类的形状
+- **`kind` 回答「这篇文档在回答什么问题」**——八类，各有自己的目录与汇总页。每类的形状
  （编号前缀 / 状态机 / 汇总版式）由**该 kind 目录 `README.md` 的 meta 自描述**，机制不内建
  任何类型清单；下面的总账块由脚本投影生成：
 
@@ -66,6 +66,7 @@ impl: done
 | [spec · 规范](005-spec/README.md "SP-000-规范汇总") | 编号前缀 `SP-` | 必须成立的条文——机制与判据的规范面 | 9 | draft 0 · active 9 · retired 0 | — |
 | [guide · 指南](006-guide/README.md "GU-000-指南汇总") | 编号前缀 `GU-` | 怎么用——上手 / 贡献 / 排障 | 15 | draft 0 · active 15 · retired 0 | — |
 | [task · 任务](007-task/README.md "T-000-任务汇总") | 编号前缀 `T-` | 要做什么、做到哪一步——可勾销的最小工作单元，收口即删（只留 git 历史） | 0 | todo 0 · doing 0 · done 0 · wont 0 | — |
+| [release · 发布版本](008-release/README.md "RV-000-发布版本汇总") | 编号前缀 `RV-` | 发布说明——一篇一个已发布版本；active 条目即需要数据兼容的版本集合 | 0 | draft 0 · active 0 · retired 0 | — |
 
 <!-- registry:summary end -->
 
@@ -154,6 +155,7 @@ D-004 判**措辞标记**而不判**叙事**（`曾经` / `已改为` / `修订�
 | **用户拿它做什么（角色 / 场景 / 用户判据）** | [SC-000-场景汇总](002-scene/README.md "SC-000-场景汇总") | 其余文档只引用编号 |
 | **必须成立的条文与它的判据** | [spec/](005-spec/README.md "SP-000-规范汇总") 下的单文档（`## 规范` + `## 判据`） | 条文不复述，只引 `SP-` 编号 |
 | 条目级登记（任务 / 规范的编号、状态、优先级、依赖、处理过程） | `docs/<kind>/` 下的**单文档**（汇总页由脚本生成） | 各处不手抄条目清单 |
+| **已发布版本与需要兼容的版本号** | [发布版本说明](008-release/README.md "RV-000-发布版本汇总") 的自动汇总区（`active` 组） | 其它文档只引用编号，不复述版本清单 |
 | 变更历史（改了什么、何时改的） | `git log` | **现行文档不写变更史** |
 | 一次性评审 / 迁移记录 / 体检报告 / 已退场的决策 | `git log` | 不进仓，也不保留在活文档里（D-494） |
 
@@ -188,7 +190,8 @@ owner 从各文档 front-matter 的 `lists: [<id>=owner]` 读（与 [RE-007-清�
 | 查找路由路径 / 理解错误码 / 配置系统 | [RE-003-ROUTES](004-ref/003-ROUTES.md "RE-003-ROUTES") · [RE-002-ERROR_CODES](004-ref/002-ERROR_CODES.md "RE-002-ERROR_CODES") · [RE-001-CONFIGURATION](004-ref/001-CONFIGURATION.md "RE-001-CONFIGURATION") |
 | 给门禁加一条判据、要挑不撞的号 | [RE-008-判据码登记表](004-ref/GATE_CODES.md) |
 | 快速上手 / 开发新插件 / 排查问题 | [GU-006-QUICK_START](006-guide/006-QUICK_START.md "GU-006-QUICK_START") · [GU-005-PLUGIN_DEVELOPMENT](006-guide/005-PLUGIN_DEVELOPMENT.md "GU-005-PLUGIN_DEVELOPMENT") · [GU-007-TROUBLESHOOTING](006-guide/007-TROUBLESHOOTING.md "GU-007-TROUBLESHOOTING") |
-| 看**全项目登记总账**（七类 kind × 条目数 × 状态分布） | 本页上方总账块（生成）；查询台 `node scripts/registry-board.mjs` |
+| 看**全项目登记总账**（八类 kind × 条目数 × 状态分布） | 本页上方总账块（生成）；查询台 `node scripts/registry-board.mjs` |
+| 查已发布版本 / 需要兼容的版本号 | [发布版本说明](008-release/README.md "RV-000-发布版本汇总") 的自动汇总区 |
 | 了解平台**要达成什么** / **用户拿它做什么** | [GO-001 · 产品目标](001-goal/001-产品目标.md "GO-001-产品目标") · [GO-002 · 技术目标](001-goal/002-技术目标.md "GO-002-技术目标") · [SC-000 · 场景总览](002-scene/README.md "SC-000-场景汇总") |
 | 看**目标形态**与尚未落地的设计 | `node scripts/registry-board.mjs --kind=design --status=active`（`impl` 的合法取值见 [SP-001](005-spec/001.md "SP-001")） |
 | 看**某条纪律与它的判据** | [spec/](005-spec/README.md "SP-000-规范汇总")（每条 `## 规范` + `## 判据`） |
@@ -205,6 +208,7 @@ owner 从各文档 front-matter 的 `lists: [<id>=owner]` 读（与 [RE-007-清�
 | `docs/005-spec/` | 规范条文与判据（每条一个单文档，`## 规范` + `## 判据`） |
 | `docs/006-guide/` | 上手 / 插件开发 / 排障 |
 | `docs/007-task/` | 在办任务（过程类；完成后由提交者删除，`git log` 保留） |
+| `docs/008-release/` | 发布版本说明（一篇一个版本；`active` 组即需要数据兼容的版本清单，自动生成） |
 | 模块目录 | `crates/symbio-plugin-<plugin>/README.md`（+ `docs/`）、`crates/*/README.md`、`tauri/`、`e2e/`——就近放置，同一套登记机制管 |
 
 **加一篇文档 = 建文件 + 写 front-matter**（`kind` / `id` / `title` / `status` / `created`，设计再加 `impl`），

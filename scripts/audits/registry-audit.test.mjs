@@ -1055,3 +1055,27 @@ test('RG-033：退场档只剩锚点与指向——正文超预算即红，activ
   assert.deepEqual(errsOf(short), [], '几十行的退场档不判')
 })
 
+test('release kind：一篇一个发布版本，active 组是兼容版本清单（空表也合法）', () => {
+  assert.equal(REPO_KINDS.release?.prefix, 'RV', 'release kind 未在 docs/008-release/README.md 注册')
+
+  const empty = renderKindIndex('release', [], REPO_KINDS)
+  assert.match(empty, /已发布版本/)
+  assert.match(empty, /（无）/)
+
+  const base = caseRoot({
+    '008-release/001-1.0.0.md': docDoc('008-release/001-1.0.0.md', {
+      kind: 'release',
+      id: 'RV-001-1.0.0',
+      title: 'Symbio 1.0.0 发布说明',
+      status: 'active',
+      created: '2026-11-16',
+    }),
+  })
+  const { entries, errors } = loadEntries(base)
+  assert.deepEqual(errors, [])
+  assert.deepEqual(auditEntries(entries, base, [], REPO_KINDS), [])
+  const rendered = renderKindIndex('release', entries, REPO_KINDS)
+  assert.match(rendered, /RV-001-1\.0\.0/)
+  assert.match(rendered, /已发布版本/)
+})
+
