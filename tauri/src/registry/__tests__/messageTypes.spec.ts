@@ -854,10 +854,9 @@ describe('messageTypeOf：wire 五值归一（读边界唯一折叠点）', () =
     expect(messageTypeOf({ type: NODE_KIND_TYPING })).toBe(NODE_KIND_TYPING)
   })
 
-  it('旧业务词一次性折叠到五值——reasoning/compression→notice，turn/tool_call→skeleton', () => {
+  it('旧业务词一次性折叠到五值——reasoning/compression→notice，tool_call→skeleton', () => {
     expect(messageTypeOf({ type: 'reasoning' as NodeKind })).toBe(NODE_KIND_NOTICE)
     expect(messageTypeOf({ type: 'compression' as NodeKind })).toBe(NODE_KIND_NOTICE)
-    expect(messageTypeOf({ type: 'turn' as NodeKind })).toBe(NODE_KIND_SKELETON)
     expect(messageTypeOf({ type: 'tool_call' as NodeKind })).toBe(NODE_KIND_SKELETON)
     expect(messageTypeOf({ type: 'text' as NodeKind })).toBe(NODE_KIND_BODY)
     expect(messageTypeOf({ type: 'user_prompt' as NodeKind })).toBe(NODE_KIND_INTERACTION)
@@ -875,7 +874,7 @@ describe('messageTypeOf：wire 五值归一（读边界唯一折叠点）', () =
   })
 
   it('折叠结果可直接进渲染分派', () => {
-    expect(messageRendererKey(facets({ type: messageTypeOf({ type: 'turn' as NodeKind }) }))).toBe(
+    expect(messageRendererKey(facets({ type: messageTypeOf({ type: 'tool_call' as NodeKind }) }))).toBe(
       'skeleton',
     )
     expect(messageRendererKey(facets({ type: messageTypeOf({ type: 'reasoning' as NodeKind }) }))).toBe(

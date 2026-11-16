@@ -200,7 +200,6 @@ describe('消息帧：语义全在 data 的字段上（信封没有操作枚举�
         principal: { kind: 'agent', id: 'session/main' },
         type: NODE_KIND_SKELETON,
         status: 'streaming',
-        meta: { turn: 0 },
       })
     )
     await vi.advanceTimersByTimeAsync(48)

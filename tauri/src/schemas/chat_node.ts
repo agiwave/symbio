@@ -200,17 +200,17 @@ export type NodeKind = (typeof NODE_KINDS)[number]
 /**
  * 历史业务词 → wire 五值的一次性折叠（读边界唯一实现）。
  *
- * 存量快照与后端旧转写把形态写成业务词（`turn` / `tool_call` / `text` / `reasoning` /
- * `compression` / `user_prompt`）；新协议一律发五值。本函数在**读取那一刻**把旧词归到
- * 五值，此后前端内部只有五值——业务词不再进入任何判定。`reasoning` 与 `compression`
- * 都归 `notice`（同格），`turn` 与 `tool_call` 都归 `skeleton`（同格），折叠即合流。
- * 已是五值 / 未知取值原样返回（交给渲染兜底，不判红）。
+ * 后端旧转写可能把形态写成业务词（`tool_call` / `text` / `reasoning` / `compression` /
+ * `user_prompt`）；新协议一律发五值。本函数在**读取那一刻**把旧词归到五值，此后前端
+ * 内部只有五值——业务词不再进入任何判定。`reasoning` 与 `compression` 都归 `notice`
+ * （同格），已是五值 / 未知取值原样返回（交给渲染兜底，不判红）。
+ *
+ * `turn` 旧业务词已随 `D-502`/B7 退场（未发布产品、无存量需兼容），不再折叠。
  */
 const LEGACY_TYPE_TO_NODE_KIND: Record<string, NodeKind> = {
   text: NODE_KIND_BODY,
   reasoning: NODE_KIND_NOTICE,
   compression: NODE_KIND_NOTICE,
-  turn: NODE_KIND_SKELETON, // turn-migration-allow T-032: 存量清迁后删
   tool_call: NODE_KIND_SKELETON,
   sub_agent: NODE_KIND_SKELETON,
   user_prompt: NODE_KIND_INTERACTION,

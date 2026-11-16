@@ -1,17 +1,17 @@
 /**
  * 分支组读数 —— `registry/messageFacts` 的三个分支读法单测。
  *
- * 这一层是前端**唯一**认识后端 `meta.branch` / `meta.turn_root` 的地方（机制审计 M-001：
+ * 这一层是前端**唯一**认识后端 `meta.branch` / `meta.scope_root` 的地方（机制审计 M-001：
  * `components/**` 不得读 meta）。它出错的表现不是报错，是**画错控件**：
  * - 形状不齐却读出一个对象 ⇒ 渲染器画出一个点了不知道会切到哪里的切换器；
  * - `candidates` 被读成下标 ⇒ 组件开始自己算边界，切换动作发错 id；
- * - `turn_root` 被忽略 ⇒ `flat` 档升根的那批节点在藏支时漏在外面（未选中支的子孙
+ * - `scope_root` 被忽略 ⇒ `flat` 档升根的那批节点在藏支时漏在外面（未选中支的子孙
  *   还看得见，等于模型和界面各读一套）。
  * 所以这里按「什么形状读成 `null`」逐条钉，而不是只钉正常路径。
  */
 
 import { describe, expect, it } from 'vitest'
-import { messageBranchNeighbor, messageBranchOf, messageTurnRoot } from '../messageFacts'
+import { messageBranchNeighbor, messageBranchOf, messageScopeRoot } from '../messageFacts'
 
 /** 一条正常盖章的成员根（默认：两支里的第二支，且它正在被读）。 */
 function stamped(meta: Record<string, any> = {}) {
@@ -44,7 +44,7 @@ describe('messageBranchOf：只有形状齐了才读成一组', () => {
     expect(messageBranchOf({})).toBeNull()
     expect(messageBranchOf({ meta: undefined })).toBeNull()
     expect(messageBranchOf({ meta: {} })).toBeNull()
-    expect(messageBranchOf({ meta: { turn_root: 't1' } })).toBeNull()
+    expect(messageBranchOf({ meta: { scope_root: 't1' } })).toBeNull()
     // 后端把这一格写成非对象（脏数据 / 别的键占了这个名）⇒ 读不出任何字段
     expect(messageBranchOf({ meta: { branch: 't1' } })).toBeNull()
     expect(messageBranchOf({ meta: { branch: null } })).toBeNull()
@@ -96,15 +96,15 @@ describe('messageBranchNeighbor：给出的是候选 id，不是下标', () => {
   })
 })
 
-describe('messageTurnRoot：`flat` 档升根的节点靠它认回自己的轮', () => {
+describe('messageScopeRoot：`flat` 档升根的节点靠它认回自己的轮', () => {
   it('读出记号', () => {
-    expect(messageTurnRoot({ meta: { turn_root: 'tb' } })).toBe('tb')
+    expect(messageScopeRoot({ meta: { scope_root: 'tb' } })).toBe('tb')
   })
 
   it('缺失 / 空串都读成 null（空串是「没记」，不是「记了个空根」）', () => {
-    expect(messageTurnRoot({})).toBeNull()
-    expect(messageTurnRoot({ meta: {} })).toBeNull()
-    expect(messageTurnRoot({ meta: { turn_root: '' } })).toBeNull()
-    expect(messageTurnRoot({ meta: { turn_root: 7 } })).toBeNull()
+    expect(messageScopeRoot({})).toBeNull()
+    expect(messageScopeRoot({ meta: {} })).toBeNull()
+    expect(messageScopeRoot({ meta: { scope_root: '' } })).toBeNull()
+    expect(messageScopeRoot({ meta: { scope_root: 7 } })).toBeNull()
   })
 })

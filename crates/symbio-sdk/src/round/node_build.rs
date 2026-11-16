@@ -20,7 +20,7 @@
 //! |---|---|
 //! | [`dialog_node`] | [`crate::round::facts::ReportDraft::to_message`]（汇报落格；调用口在 loop 侧 `report_exec`） |
 //! | [`llm_build_text_node`] / [`llm_build_tool_call_node`] / [`tool_call_args_text`] / [`llm_build_tool_message`] | 落库构造 · 工具分发 · 重建引擎 |
-//! | [`PresentationTree`] / [`flatten_whole_tree`] / [`turn_root_of`] | 读侧投影（`PresentationTree` 的解析与整树折叠） |
+//! | [`PresentationTree`] / [`flatten_whole_tree`] / [`scope_root_of`] | 读侧投影（`PresentationTree` 的解析与整树折叠） |
 //!
 //! core 侧**没有任何东西反过来调本模块**——方向永远是消费方 → core。
 
@@ -195,9 +195,9 @@ pub fn llm_build_tool_message(
 // 有自己的骨架」，与建树策略正交）。前端只看 `parent_id`、**不知道这个开关**——
 // 切档零代码改动是本任务的判据核心。
 //
-// 脱父子节点带 `meta.turn_root = <骨架 id>`：后端两个「本轮工作」子树遍历器
+// 脱父子节点带 `meta.scope_root = <骨架 id>`：后端两个「本轮工作」子树遍历器
 // （`resume::process_retry_subtree` 的 BFS、`failure::subtree_of`）按 `parent_id`
-// 收集后代，脱父子节点够不着。记号让「本轮工作 = 骨架 ∪ {turn_root==骨架}」与
+// 收集后代，脱父子节点够不着。记号让「本轮工作 = 骨架 ∪ {scope_root==骨架}」与
 // grouped 的「骨架子树」逐字等价，遍历器多一条并集即可。`grouped` 从不写这个键，
 // 存量数据零字节改动，两档各自可独立回退。
 
@@ -277,15 +277,15 @@ pub fn flatten_whole_tree(nodes: &mut [ChatNode], mode: PresentationTree) {
             _ => continue,
         };
         n.parent_id = None;
-        n.meta = merge_turn_root(n.meta.take(), &p);
+        n.meta = merge_scope_root(n.meta.take(), &p);
     }
 }
 
-/// 读 `meta.turn_root`（遍历器并集用）。
-pub fn turn_root_of(node: &ChatNode) -> Option<&str> {
+/// 读 `meta.scope_root`（遍历器并集用）。
+pub fn scope_root_of(node: &ChatNode) -> Option<&str> {
     node.meta
         .as_ref()
-        .and_then(|m| m.get("turn_root"))
+        .and_then(|m| m.get("scope_root"))
         .and_then(|v| v.as_str())
 }
 
@@ -296,13 +296,13 @@ pub fn turn_root_of(node: &ChatNode) -> Option<&str> {
 /// （`projection::branch::branch_hide_unselected`）。各写一遍的后果是其中一份漏掉
 /// `flat` 档：那一档下本轮响应骨架的直接子节点升了根（`parent_id: None`），只按
 /// `parent_id` 收集够不着它们，于是「删不干净 / 藏不干净」在某一档静默发生。
-/// 记号 `meta.turn_root` 因此与 `parent_id` 一起构成**同一条并集**，这里一次收口。
+/// 记号 `meta.scope_root` 因此与 `parent_id` 一起构成**同一条并集**，这里一次收口。
 pub fn subtree_of(messages: &[ChatNode], root: &str) -> std::collections::HashSet<String> {
     let mut ids = std::collections::HashSet::new();
     ids.insert(root.to_string());
     let mut queue = vec![root.to_string()];
     for m in messages {
-        if turn_root_of(m) == Some(root) && ids.insert(m.id.clone()) {
+        if scope_root_of(m) == Some(root) && ids.insert(m.id.clone()) {
             queue.push(m.id.clone());
         }
     }
@@ -316,11 +316,11 @@ pub fn subtree_of(messages: &[ChatNode], root: &str) -> std::collections::HashSe
     ids
 }
 
-/// 把 `turn_root` 合并进已有 meta（不覆盖其它键）。
-fn merge_turn_root(meta: Option<serde_json::Value>, root_id: &str) -> Option<serde_json::Value> {
+/// 把 `scope_root` 合并进已有 meta（不覆盖其它键）。
+fn merge_scope_root(meta: Option<serde_json::Value>, root_id: &str) -> Option<serde_json::Value> {
     let mut m = meta.unwrap_or_else(|| serde_json::json!({}));
     if let Some(obj) = m.as_object_mut() {
-        obj.insert("turn_root".to_string(), serde_json::json!(root_id));
+        obj.insert("scope_root".to_string(), serde_json::json!(root_id));
     }
     Some(m)
 }

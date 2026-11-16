@@ -408,14 +408,15 @@ export function messageParentSessionId(node: Pick<ChatNode, 'meta'>): string | u
 
 /**
  * 建树策略 `flat` 档下，本轮响应骨架的直接子节点**升了根**（`parent_id` 被摘掉），
- * 靠这个记号认回它属于哪一轮（后端 `node_build::turn_root_of` 的镜像）。
+ * 靠这个记号认回它属于哪一轮（后端 `node_build::scope_root_of` 的镜像）。
  *
  * 前端为什么必须认它：不认的话「这一支的子孙」在 `flat` 档下够不着，切换分支时
  * 旧支只藏掉了根、子孙全部留在屏幕上——后端为此把子树收集写成单点实现
- * （`parent_id ∪ turn_root` 一条并集），前端同一条判据不能只按 `parent_id` 走。
+ * （`parent_id ∪ scope_root` 一条并集），前端同一条判据不能只按 `parent_id` 走。
  */
-export function messageTurnRoot(node: Pick<ChatNode, 'meta'>): string | null {
-  const raw = (node.meta as Record<string, unknown> | undefined)?.turn_root
+export function messageScopeRoot(node: Pick<ChatNode, 'meta'>): string | null {
+  const meta = node.meta as Record<string, unknown> | undefined
+  const raw = meta?.scope_root
   return typeof raw === 'string' && raw !== '' ? raw : null
 }
 

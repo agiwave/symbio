@@ -181,12 +181,12 @@ describe('messageTree — 从 store 派生', () => {
   it('带子节点的空内容容器**保留**（它是容器不是占位）', () => {
     hoisted.store = makeStore({
       getSessionMessages: vi.fn(() => [
-        msg({ id: 'turn', type: NODE_KIND_SKELETON, content: '', seq: 1 }),
-        msg({ id: 'child', parent_id: 'turn', content: 'x', seq: 2 }),
+        msg({ id: 'skel', type: NODE_KIND_SKELETON, content: '', seq: 1 }),
+        msg({ id: 'child', parent_id: 'skel', content: 'x', seq: 2 }),
       ]),
     })
     const c = conn()
-    expect(c.messageTree.value.map((m) => m.id)).toEqual(['turn'])
+    expect(c.messageTree.value.map((m) => m.id)).toEqual(['skel'])
   })
 
   it('非正文 / 折叠叶的空内容节点不过滤（如空骨架有意义）', () => {

@@ -207,8 +207,8 @@ describe('dropUnselectedBranches：未选中支连同整棵子树一起让位（
       id,
       meta: { branch: { group: candidates[0], candidates, index, total: candidates.length, selected } },
     })
-  const child = (id: string, parent?: string, turnRoot?: string) =>
-    msg({ id, parent_id: parent, meta: turnRoot ? { turn_root: turnRoot } : undefined })
+  const child = (id: string, parent?: string, scopeRoot?: string) =>
+    msg({ id, parent_id: parent, meta: scopeRoot ? { scope_root: scopeRoot } : undefined })
   const ids = (list: ChatNode[]) => list.map((m) => m.id)
 
   it('没有分支标注 ⇒ 原样返回**同一个**数组引用（每一次可见消息计算都跑它，不能白复制）', () => {
@@ -227,7 +227,7 @@ describe('dropUnselectedBranches：未选中支连同整棵子树一起让位（
     expect(ids(dropUnselectedBranches(list))).toEqual(['u1', 't2', 'r2'])
   })
 
-  it('`flat` 档升根的子孙（`parent_id` 为空、靠 `meta.turn_root` 认回）一起藏', () => {
+  it('`flat` 档升根的子孙（`parent_id` 为空、靠 `meta.scope_root` 认回）一起藏', () => {
     // 这一支的工具结果在呈现树里被升成了根：只按 `parent_id` 收子树会把它漏在外面，
     // 于是模型与界面各读一套——界面少了这一条，模型多读一条矛盾的答复。
     const list = [

@@ -189,7 +189,7 @@ pub fn branch_candidates(node: &ChatNode) -> Option<Vec<String>> {
 /// 转写投影）不经过这里，见 [`unselected_roots`]。
 ///
 /// 子树收集用 [`subtree_of`]——`flat` 档下本轮节点升了根（`parent_id: None` +
-/// `meta.turn_root` 记号），只按 `parent_id` 够不着它们。
+/// `meta.scope_root` 记号），只按 `parent_id` 够不着它们。
 pub fn branch_hide_unselected(messages: &mut Vec<ChatNode>) {
     let unselected: Vec<String> = messages
         .iter()

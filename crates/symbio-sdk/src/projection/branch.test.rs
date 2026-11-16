@@ -204,9 +204,9 @@ fn 隐藏丢掉未选中支的整棵子树() {
     let mut a = node("ta");
     a.meta = Some(serde_json::json!({}));
     let mut nodes = vec![node("u1"), a, node("tb"), node("ra"), node("rb")];
-    // ta 的子孙挂 parent_id；tb 的子孙是 `flat` 档升根的（靠 `meta.turn_root` 认回）
+    // ta 的子孙挂 parent_id；tb 的子孙是 `flat` 档升根的（靠 `meta.scope_root` 认回）
     nodes[3].parent_id = Some("ta".to_string());
-    nodes[4].meta = Some(serde_json::json!({ "turn_root": "tb" }));
+    nodes[4].meta = Some(serde_json::json!({ "scope_root": "tb" }));
     stamped(&mut nodes, &[branch("a", "ta", "tb")]);
     // 默认选中 tb ⇒ 丢掉 ta 那一支**连同它的子孙**，`u1`（共同的分支点）留着
     branch_hide_unselected(&mut nodes);
@@ -223,14 +223,14 @@ fn 隐藏对没有分支的列表是空操作() {
 #[test]
 fn 点名的那一支连同子孙一起被剪掉而另一支不动() {
     // `branch_hide_unselected` 用的那把尺单独钉一次：判据是**点名的根**，不看标注。
-    // `flat` 档升根的子孙（没有 `parent_id`，只带 `meta.turn_root`）也必须够得着，
+    // `flat` 档升根的子孙（没有 `parent_id`，只带 `meta.scope_root`）也必须够得着，
     // 否则模型在同一份历史里读到两条矛盾的答复。
     let mut nodes = vec![node("u1"), node("ta"), node("tb"), node("ra"), node("rb")];
     nodes[3].parent_id = Some("ta".to_string());
     nodes[4].parent_id = Some("tb".to_string());
     // 还有一条 `flat` 档升了根的
     let mut wa = node("wa");
-    wa.meta = Some(serde_json::json!({ "turn_root": "ta" }));
+    wa.meta = Some(serde_json::json!({ "scope_root": "ta" }));
     nodes.push(wa);
     drop_branch_subtrees(&mut nodes, &["ta".to_string()]);
     assert_eq!(ids(&nodes), vec!["u1", "tb", "rb"]);

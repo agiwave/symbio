@@ -76,7 +76,7 @@ describe('VdfsMessageDetail（转写列表项的只读视图）', () => {
 
   it('组合节点无正文时给出说明而不是空白', () => {
     const w = mount(VdfsMessageDetail, {
-      props: { node: messageNode({ type: 'turn' }), data: '' },
+      props: { node: messageNode({ type: 'tool_call' }), data: '' },
     })
     expect(w.find('.msg-body').exists()).toBe(false)
     expect(w.find('.msg-empty').exists()).toBe(true)

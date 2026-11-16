@@ -18,7 +18,7 @@
  *    是哪种形态——一轮响应的根既可能是骨架容器，也可能直接就是一个正文节点。
  * 5. **分支收敛**（重试留下的并存两支）——未选中那一支**连同整棵子树**不渲染。
  *    与后端的 `branch_hide_unselected` 同一条判据：只藏根不藏子孙，会把旧支的
- *    工具结果留在屏幕上跟新支并列；漏认 `meta.turn_root`，`flat` 档下正是这个症状。
+ *    工具结果留在屏幕上跟新支并列；漏认 `meta.scope_root`，`flat` 档下正是这个症状。
  *
  * 这些规则原先只能通过「造一个 Pinia store + 喂一串 patch」间接验证。抽成纯函数后
  * 每条规则都能直接断言（见 `__tests__/sessionTranscript.spec.ts`），
@@ -35,7 +35,7 @@ import {
   type ChatNode,
 } from '@/schemas/chat_node'
 import { isContentKind } from '@/registry/messageTypes'
-import { messageBranchOf, messageTurnRoot } from '@/registry/messageFacts'
+import { messageBranchOf, messageScopeRoot } from '@/registry/messageFacts'
 
 /** 缩略卡预览的最大字符数（超出截断并加省略号） */
 export const PREVIEW_MAX = 60
@@ -199,10 +199,10 @@ export function isBlankContentNode(msg: Pick<ChatNode, 'type' | 'content'>): boo
  * 是**呈现**判定，得有人在前端执行它，否则两支答复并排画在会话流里，用户看到的是
  * 两条互相矛盾的助手发言。
  *
- * ## 子树判据是 `parent_id ∪ meta.turn_root`，不是只看 `parent_id`
+ * ## 子树判据是 `parent_id ∪ meta.scope_root`，不是只看 `parent_id`
  *
  * `flat` 档下本轮响应骨架的直接子节点**升了根**（`parent_id` 被摘掉，靠
- * `meta.turn_root` 记号认回）。只按 `parent_id` 收集，那一档下旧支只剩根节点被藏掉，
+ * `meta.scope_root` 记号认回）。只按 `parent_id` 收集，那一档下旧支只剩根节点被藏掉，
  * 它的工具结果与正文全部留在屏幕上——这条缺陷不报错，只是「切了分支但没换干净」。
  *
  * 没有任何分支标注时**原样返回**（同一个数组引用）：绝大多数会话没有并存两支，
@@ -215,7 +215,7 @@ export function dropUnselectedBranches(messages: ChatNode[]): ChatNode[] {
   })
   if (hiddenRoots.length === 0) return messages
 
-  // 子边 = `parent_id` 与 `turn_root` 的**并集**（与后端 `node_build::subtree_of` 同源）
+  // 子边 = `parent_id` 与 `scope_root` 的**并集**（与后端 `node_build::subtree_of` 同源）
   const children = new Map<string, ChatNode[]>()
   const link = (pid: string | null | undefined, child: ChatNode) => {
     if (pid == null || pid === '') return
@@ -225,7 +225,7 @@ export function dropUnselectedBranches(messages: ChatNode[]): ChatNode[] {
   }
   for (const n of messages) {
     link(n.parent_id, n)
-    link(messageTurnRoot(n), n)
+    link(messageScopeRoot(n), n)
   }
 
   const gone = new Set<string>()

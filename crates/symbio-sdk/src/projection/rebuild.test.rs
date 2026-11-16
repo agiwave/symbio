@@ -213,7 +213,7 @@ fn final_event(payload: serde_json::Value) -> Event {
 // ── ① 一轮对话的树 ────────────────────────────────────────────────────
 
 #[test]
-fn final_builds_turn_root_with_reasoning_and_text_children() {
+fn final_builds_scope_root_with_reasoning_and_text_children() {
     let events = vec![
         user_event("u-node", "问 A"),
         final_event(serde_json::json!({
@@ -334,7 +334,7 @@ fn final_without_context_payload_leaves_the_skeleton_meta_empty() {
 /// 真实形状：`root_id` 就是发起这一轮的用户消息 id，Turn 骨架因此与用户节点**同 id**
 /// 被「同 id 只认首次」合并掉——水位必须补到存活的那个节点上，否则读数丢失。
 #[test]
-fn final_context_survives_when_the_turn_root_is_the_user_message() {
+fn final_context_survives_when_the_scope_root_is_the_user_message() {
     let events = vec![
         user_event("T1", "问 A"),
         final_event(serde_json::json!({
@@ -977,7 +977,7 @@ fn reported_mirrors_the_persisted_shape() {
 ///
 /// 根级会让结构轴递归把它排到整轮子树之后——开场白从「第一声」变成「轮末补的一句」。
 #[test]
-fn opening_hangs_under_the_turn_root() {
+fn opening_hangs_under_the_scope_root() {
     let ev = Event::pending(
         "op-1",
         CHAT.opening,

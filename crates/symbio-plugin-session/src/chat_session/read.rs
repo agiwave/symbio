@@ -20,7 +20,7 @@ impl PersistentChatSession {
         messages.sort_by_key(|m| m.seq.unwrap_or(i64::MAX));
         // 建树策略投影：重建核心 config-free、从事件 `root_id` 一律重derive
         // 成 grouped（哪怕落库/消息文件写的是 flat）。`flat` 档在这里把本轮响应骨架的
-        // 直接子节点升根并打 `turn_root` 记号——与 live 流式帧、`session_content` 呈现
+        // 直接子节点升根并打 `scope_root` 记号——与 live 流式帧、`session_content` 呈现
         // 同一个投影，三格锁步。`grouped` 档下 `flatten_whole_tree` 立即返回，零改动。
         symbio_sdk::round::node_build::flatten_whole_tree(
             &mut messages,

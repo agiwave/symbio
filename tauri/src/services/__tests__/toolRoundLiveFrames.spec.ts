@@ -19,7 +19,7 @@
  *
  * | # | 落地帧（形状）                                  | 后端发射点                  |
  * |---|---------------------------------------------------|-----------------------------|
- * | 1 | 根级骨架（streaming + meta.turn）                 | `emit_streaming_start`      |
+ * | 1 | 根级骨架（streaming 流式占位）                 | `emit_streaming_start`      |
  * | 2 | 折叠叶（身份 + 首段正文）                         | 首条 `apply`                |
  * | 3 | 折叠叶 `delta` ×N                                 | `delta` → `updated`+`delta` |
  * | 4 | 工具子骨架（身份 + 首段参数）                     | `apply`                     |
@@ -28,7 +28,7 @@
  * | 7 | 工具子骨架（+meta.started_at）                    | `emit_tool_running`         |
  * | 8 | 结果子节点（completed，非流式一次给全）           | `process_tool_calls_async`  |
  * | 9 | 工具子骨架（completed）                           | `emit_parent_finalized`     |
- * |10 | 根级骨架 `status=completed`                       | `finalize_turn_root`        |
+ * |10 | 根级骨架 `status=completed`                       | `finalize_scope_root`        |
  *
  * 两条结构约束（都由本文件的断言钉住，勿再退回）：
  * - **根级骨架的终态在最后**：它是组合节点，终态必须**跟随子树**（#9 之后），
@@ -73,8 +73,8 @@ beforeEach(() => {
 
 describe('工具轮实时帧序列 → store 终态', () => {
   it('结果子节点落 store、工具子骨架父节点终态 completed', () => {
-    // ── 1. 根级骨架（emit_streaming_start：streaming + meta.turn）──
-    feed({ id: TURN, principal: AS_AGENT, type: NODE_KIND_SKELETON, status: 'streaming', meta: { turn: 0 } })
+    // ── 1. 根级骨架（emit_streaming_start：streaming 流式占位）──
+    feed({ id: TURN, principal: AS_AGENT, type: NODE_KIND_SKELETON, status: 'streaming' })
 
     // ── 2. 折叠叶首帧（身份 + 首段正文）──
     feed({
@@ -143,11 +143,11 @@ describe('工具轮实时帧序列 → store 终态', () => {
       meta: { started_at: 1726900000000, success: true, tool_name: 'local/read' },
     })
 
-    // ── 10. 根级骨架终态（finalize_turn_root：**子树收敛之后**才发出）──
+    // ── 10. 根级骨架终态（finalize_scope_root：**子树收敛之后**才发出）──
     // 此前它在 `finalize_assistant_turn`（LLM 流结束那一刻）发出，比子树早整整
     // 一个执行窗口——容器"已完成"而其中的工具调用仍在运行。现在移到 `close_turn`
     // 归来之后；发出的即 `llm_build_assistant_messages` 构建的那条（pending 落库的
-    // 同一份），因此不带流式占位期的 `meta.turn`。
+    // 同一份），因此不带流式占位期的临时标记。
     feed({ id: TURN, principal: AS_AGENT, type: NODE_KIND_SKELETON, status: 'completed' })
 
     const store = useSessionsStore()

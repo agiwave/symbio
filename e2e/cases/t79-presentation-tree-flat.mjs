@@ -17,15 +17,15 @@ import './_selfrun.mjs';
 // - 一轮的可见锚是**用户消息节点**（`parent_id = null`，其 id 就是本轮分组 id）；
 //   没有独立的轮骨架节点——轮信息并入用户消息节点。
 // - 本轮其余节点（思考 / 正文 / ToolCall 骨架）`parent_id = null`、
-//   `meta.turn_root = <用户消息节点 id>`——升到根、靠记号认回本轮。
+//   `meta.scope_root = <用户消息节点 id>`——升到根、靠记号认回本轮。
 // - Tool 结果节点 `parent_id = <tool_call id>`——**不升根**，与建树策略正交。
 //
 // ## 失败→重试的并集在哪里钉
 //
-// 脱父子节点靠 `meta.turn_root` 被后端的子树遍历器（`failure::subtree_of`、
+// 脱父子节点靠 `meta.scope_root` 被后端的子树遍历器（`failure::subtree_of`、
 // `resume::process_retry_subtree`）认回——若那并集没接上，重试删不干净、残留下一次
 // 重建。这是 flat 相对 grouped 唯一新增的**后端行为**，由 Rust 单测
-// `failure.test.rs::subtree_of_flats_reaches_detached_children_via_turn_root` 直接锁
+// `failure.test.rs::subtree_of_flats_reaches_detached_children_via_scope_root` 直接锁
 // （本 e2e 用例专注呈现出口的形状，不重跑一次失败/恢复）。
 //
 // 对话面按 `DIALOG_FACE_OFF` 钉死（与建树正交，见该常量）。
@@ -55,7 +55,7 @@ import {
 const SID = 'e2e-t79';
 
 export default defineCase(
-  'T79 建树策略 flat：本轮子节点升会话根（带 turn_root 记号）、工具结果仍挂 tool_call、无孤儿',
+  'T79 建树策略 flat：本轮子节点升会话根（带 scope_root 记号）、工具结果仍挂 tool_call、无孤儿',
   async () => {
     const llm = await new MockLlm([
       {
@@ -142,18 +142,18 @@ export default defineCase(
           );
         }
 
-        // 主判据②：每个子节点（工具结果除外）的 turn_root 等于用户消息节点 id
+        // 主判据②：每个子节点（工具结果除外）的 scope_root 等于用户消息节点 id
         const kids = msgs.filter(
           (m) => m.id !== anchor.id && msgRoleOf(m) !== 'tool' && msgTypeOf(m) !== 'user_prompt',
         );
         assert(kids.length > 0, 'flat：本轮至少有一个升根的子节点');
         for (const k of kids) {
-          assertEq(k.meta?.turn_root, anchor.id, `flat：${msgTypeOf(k)} 的 turn_root 应指向用户消息节点`);
+          assertEq(k.meta?.scope_root, anchor.id, `flat：${msgTypeOf(k)} 的 scope_root 应指向用户消息节点`);
         }
 
         // ToolCall 骨架既升根、又认得本轮。
         const tc = toolCalls[0];
-        assertEq(tc.meta?.turn_root, anchor.id, 'flat：tool_call 靠 turn_root 认回本轮');
+        assertEq(tc.meta?.scope_root, anchor.id, 'flat：tool_call 靠 scope_root 认回本轮');
 
         // flat 判据③：工具结果**不升根**，仍挂自己的 tool_call 下（建树策略正交）。
         const result = msgs.find((m) => m.parent_id === tc.id && msgRoleOf(m) === 'tool');

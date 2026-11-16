@@ -835,7 +835,7 @@ pub(crate) fn session_content(
         &crate::declarations::CHAT_VOCAB,
     );
     // 呈现投影（与 `get_messages` 同一函数、同一档位）：重建 core config-free、
-    // 从事件 `root_id` 一律重derive 成 grouped，`flat` 档在这里升根 + 打 `turn_root`
+    // 从事件 `root_id` 一律重derive 成 grouped，`flat` 档在这里升根 + 打 `scope_root`
     // 记号，令 live↔reload↔呈现三格锁步。`overlay_live`/`ordered` 只按 id 重排/
     // 整条替换、从不改写 `parent_id`，投影叠在其上仍正确。
     symbio_sdk::round::node_build::flatten_whole_tree(&mut messages, mode);

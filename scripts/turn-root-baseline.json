@@ -2,8 +2,8 @@
   "target": 0,
   "faces": {
     "F1": {
-      "prod": 23,
-      "test": 74
+      "prod": 17,
+      "test": 59
     },
     "F2": {
       "prod": 11,
@@ -14,15 +14,25 @@
       "test": 0
     },
     "F4": {
-      "prod": 2,
-      "test": 9
+      "prod": 0,
+      "test": 0
     },
     "F5": {
-      "prod": 1,
+      "prod": 0,
       "test": 0
     }
   },
   "adjustments": [
+    {
+      "date": "2026-11-16",
+      "faces": "F1.prod / F4.prod / F4.test / F5.prod",
+      "reason": "`D-502`/B7（项目方确认未发布产品、无存量需兼容）：删 `chat_node.ts` 的 `turn: NODE_KIND_SKELETON` 折叠键与 F5 allow（F5 1→0、allow[] 清空）；删 `Entity::Scope` 上的 `#[serde(alias=\"Turn\",alias=\"turn\")]` 及其兼容注释（F1.prod −2），并把 `event/mod.test.rs` 的旧词反序列化测试改写为「写侧只写当前词」（F1.test −4）；前端测试里 `type:'turn'`/`meta:{turn:0}`/`id:'turn'` 等夹具改五值或中性值（F4.test 9→0）；SkeletonNode.vue 注释里的业务词举例改中性表述（F4.prod 2→0，该处是 HTML 注释未被 stripComments 剥离）。F1 生产面 19 → 17、测试面 63 → 59、F4 生产 2 → 0、测试 9 → 0、F5 1 → 0 均为实测收窄；目标 0 不变。余下 F1 17 + F1.test 59 + F2 15 见 D-502 裁决三（wire 事件名）与纯私有形参。"
+    },
+    {
+      "date": "2026-11-16",
+      "faces": "F1.prod / F1.test",
+      "reason": "`D-502`/B6：数据键 `meta.turn_root` → `meta.scope_root` 全栈改名（项目方确认：未发布正式产品、无存量数据需兼容，故不设读侧 alias，旧键直接删除）。后端 node_build.rs 写口 `merge_turn_root`→`merge_scope_root` 写 scope_root、读口 `turn_root_of`→`scope_root_of` 只读 scope_root；前端 `messageTurnRoot`→`messageScopeRoot` 读点同步；e2e t79、前端/后端测试的数据字面与函数名同批改 scope_root。protocol-mirror-audit 的 META_KEYS 登记键 turn_root→scope_root、owner 字面同步。F1 生产面 23 → 19、测试面 74 → 63 为**实测收窄**；目标 0 不变。余下 19 处见 D-502 裁决三~五（wire 事件名 / serde alias / session.close-turn / 私有形参）。"
+    },
     {
       "date": "2026-11-16",
       "faces": "F1.prod",
@@ -129,14 +139,6 @@
       "reason": "D-317（B1a）落地：`Entity::Turn` 变体删除、全仓改挂 `Entity::Scope`，信封 `turn` 字段改名 `scope`，行判据键随视图改 `scope`。F1 1454/1208 → 1271/870、F2 188/560 → 114/264 全部为实测收窄；F2 余量不是实体词（`Entity::Turn` 实测 0），而是内核角色名（`FinalizesScope` / `StopsScope`）与老层视图名（`turn_head` / `turn_stages` / `turn_closed` 等），归 B2。"
     }
   ],
-  "allow": [
-    {
-      "face": "F5",
-      "file": "tauri/src/schemas/chat_node.ts",
-      "pattern": "turn:\\s*NODE_KIND_SKELETON",
-      "reason": "存量快照/旧转写的读边界折叠（数据迁移通道，不是展示保留）；存量清迁后基线降 0 并删本条",
-      "until": "B3 后存量清迁"
-    }
-  ],
+  "allow": [],
   "pending": []
 }
