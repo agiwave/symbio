@@ -21,6 +21,10 @@
           :class="`toast--${t.type}`"
           role="status"
           @click="dismiss(t.id)"
+          @mouseenter="pause(t.id)"
+          @mouseleave="resume(t.id)"
+          @focusin="pause(t.id)"
+          @focusout="resume(t.id)"
         >
           <span class="toast__icon" aria-hidden="true">
             <!-- success -->
@@ -70,6 +74,13 @@
             </svg>
           </span>
           <span class="toast__text">{{ t.text }}</span>
+          <!-- 关闭必须有可聚焦的语义控件：整块 @click 对键盘用户不存在 -->
+          <button
+            type="button"
+            class="toast__close"
+            aria-label="关闭通知"
+            @click.stop="dismiss(t.id)"
+          >×</button>
         </div>
       </TransitionGroup>
     </div>
@@ -79,7 +90,7 @@
 <script setup lang="ts">
 import { useToast } from '@/composables/useToast'
 
-const { toasts, dismiss } = useToast()
+const { toasts, dismiss, pause, resume } = useToast()
 </script>
 
 <style scoped>
@@ -145,6 +156,31 @@ const { toasts, dismiss } = useToast()
   flex: 1;
   min-width: 0;
   word-break: break-word;
+}
+
+.toast__close {
+  flex-shrink: 0;
+  display: inline-flex;
+  align-items: center;
+  justify-content: center;
+  width: 1.25rem;
+  height: 1.25rem;
+  padding: 0;
+  border: none;
+  border-radius: var(--radius-sm);
+  background: transparent;
+  color: var(--text-muted);
+  font-size: 0.95rem;
+  line-height: 1;
+  cursor: pointer;
+}
+.toast__close:hover {
+  background: var(--surface-hover);
+  color: var(--text-primary);
+}
+.toast__close:focus-visible {
+  outline: 2px solid var(--accent);
+  outline-offset: 1px;
 }
 
 .toast-enter-active,

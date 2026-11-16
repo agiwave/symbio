@@ -3,6 +3,7 @@ import { runVdfsAction, writeVdfs } from '@/services/vdfs'
 import { ensureSessionScheme } from '@/services/vdfsScheme'
 import { messageTextOf, type ChatNode, type ResumeAction } from '@/schemas/chat_node'
 import { logger } from '@/utils/logger'
+import { useToast } from '@/composables/useToast'
 import { useSessionsStore } from '@/stores/sessions'
 import { useReleasedSkeletonsStore, subtreeOf, statsOf, type ReleasedSummary } from '@/stores/skeletonLazy'
 import {
@@ -223,6 +224,9 @@ export const ALLOW_FOREVER_KEY: InjectionKey<
  */
 export function useChatConnection(options: UseChatConnectionOptions): UseChatConnectionReturn {
   const store = useSessionsStore()
+  // 异步动作失败必须对用户出声：日志只有开发者看得到，而用户看到的会是
+  // 「点了没反应」或「界面和后端分叉」（同一个出口与其余前端提示一致）。
+  const { showToast } = useToast()
   const released = useReleasedSkeletonsStore()
 
   const { onSendComplete } = options
@@ -584,12 +588,15 @@ export function useChatConnection(options: UseChatConnectionOptions): UseChatCon
       ])
       if (stopped.status === 'rejected') {
         logger.error('useChatConnection', 'Failed to abort:', stopped.reason)
+        showToast('error', '停止未生效，请重试')
       } else if (!stopped.value.ok) {
         // 「本来就没在跑」不是错误，但也不该静默——回执的文案直接可读
         logger.warn('useChatConnection', `[${sid}] abort 未生效：${stopped.value.message}`)
+        showToast('info', stopped.value.message || '当前没有正在运行的请求')
       }
       if (cleared.status === 'rejected') {
         logger.error('useChatConnection', 'Failed to clear inbox:', cleared.reason)
+        showToast('error', '排队消息未清除，请重试')
       }
     })()
   }
@@ -728,15 +735,18 @@ export function useChatConnection(options: UseChatConnectionOptions): UseChatCon
             `[${sid}] expand_skeleton 取回 0 条，但账本记着 ${summary!.count} 条` +
               '——数据可能已被截断，保持折叠态（可重试）',
           )
+          showToast('error', '展开失败：未取回已释放的步骤，可重试')
           return
         }
         store.applyTranscriptMessages(sid, nodes)
         released.markExpanded(sid, mid)
       } else {
         logger.warn('useChatConnection', `[${sid}] expand_skeleton 未生效：${resp.message}`)
+        showToast('error', `展开失败：${resp.message || '未知原因'}`)
       }
     } catch (err: any) {
       logger.error('useChatConnection', 'Failed to expand skeleton:', err)
+      showToast('error', `展开失败：${err instanceof Error ? err.message : String(err)}`)
     }
   }
 
@@ -763,9 +773,11 @@ export function useChatConnection(options: UseChatConnectionOptions): UseChatCon
         // 「没改成」必须出声：目标不在同一组 / 消息已被截断，用户点完看到的还是原来那一支，
         // 界面与后端的差异只有这句话能补上。
         logger.warn('useChatConnection', `[${sid}] switch_branch 未生效：${resp.message}`)
+        showToast('error', `切换分支失败：${resp.message || '未知原因'}`)
       }
     } catch (err: any) {
       logger.error('useChatConnection', 'Failed to switch branch:', err)
+      showToast('error', `切换分支失败：${err instanceof Error ? err.message : String(err)}`)
     }
   }
 

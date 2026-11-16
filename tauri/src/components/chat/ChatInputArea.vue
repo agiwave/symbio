@@ -8,13 +8,25 @@
         class="image-item"
       >
         <img :src="img.thumbnailUrl" :alt="img.fileName || '图片'" />
-        <button class="remove-image" @click="removeImage(index)" title="移除图片">×</button>
+        <button
+          class="remove-image"
+          type="button"
+          title="移除图片"
+          aria-label="移除图片"
+          @click="removeImage(index)"
+        >×</button>
       </div>
     </div>
     
     <div class="input-wrapper">
       <!-- 图片上传按钮 -->
-      <button class="attach-btn" @click="triggerImageUpload" title="上传图片">
+      <button
+        class="attach-btn"
+        type="button"
+        title="上传图片"
+        aria-label="上传图片"
+        @click="triggerImageUpload"
+      >
         <svg viewBox="0 0 24 24" width="20" height="20" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round">
           <rect x="3" y="3" width="18" height="18" rx="2" ry="2"></rect>
           <circle cx="8.5" cy="8.5" r="1.5"></circle>
@@ -68,6 +80,13 @@
 import { ref, watch, nextTick, onMounted, onUnmounted } from 'vue'
 import type { ImageAttachment } from '@/types'
 import { logger } from '@/utils/logger'
+import { useToast } from '@/composables/useToast'
+
+/** 附件上限：前端先拦，避免大图 / 连贴把内存吃满后才由后端拒绝 */
+const MAX_IMAGES = 10
+const MAX_IMAGE_BYTES = 10 * 1024 * 1024
+
+const { showToast } = useToast()
 
 const props = defineProps<{
   isLoading: boolean
@@ -101,6 +120,10 @@ defineExpose({ resetHeight, textarea: textareaRef })
 // 正在进行的生成，是这里最容易发生的误操作。中止有它自己的入口（那个红色方块
 // 按钮）。因此运行中回车就是换行，用户可以先把下一句写下来。
 function handleKeydown(e: KeyboardEvent) {
+  // 输入法组合态：中文等 IME 下按 Enter 是**选词 / 上屏**，不是发送。
+  // `isComposing` 是标准判据；`keyCode === 229` 覆盖旧 WebView 在组合期间
+  // 只报 229 的情形。漏掉这一条会把用户正在打的字直接发出去。
+  if (e.isComposing || e.keyCode === 229) return
   if (props.isLoading) return
   if (!e.shiftKey) {
     e.preventDefault()
@@ -179,15 +202,44 @@ onUnmounted(() => {
   window.removeEventListener('paste', handleGlobalPaste)
 })
 
+/**
+ * 读成 base64；三种终止事件都必须 settle。
+ *
+ * 此前只挂了 `onload`：读取失败（权限、文件被移走、OOM）时 Promise 永不 settle，
+ * 图片静默丢失，外层的 try/catch 也接不住。
+ */
+function readFileAsBase64(file: File): Promise<string> {
+  return new Promise<string>((resolve, reject) => {
+    const reader = new FileReader()
+    reader.onload = () => {
+      const result = typeof reader.result === 'string' ? reader.result : ''
+      const comma = result.indexOf(',')
+      if (comma < 0) {
+        reject(new Error('读取结果为空'))
+        return
+      }
+      resolve(result.slice(comma + 1))
+    }
+    reader.onerror = () => reject(reader.error ?? new Error('读取失败'))
+    reader.onabort = () => reject(new Error('读取已取消'))
+    reader.readAsDataURL(file)
+  })
+}
+
 async function processImageFiles(files: File[]) {
   const newImages = [...attachedImages.value]
+  const failures: string[] = []
   for (const file of files) {
+    if (newImages.length >= MAX_IMAGES) {
+      failures.push(`${file.name}：最多附加 ${MAX_IMAGES} 张图片`)
+      continue
+    }
+    if (file.size > MAX_IMAGE_BYTES) {
+      failures.push(`${file.name}：超过 ${MAX_IMAGE_BYTES / 1024 / 1024}MB 上限`)
+      continue
+    }
     try {
-      const reader = new FileReader()
-      const base64 = await new Promise<string>((resolve) => {
-        reader.onload = () => resolve((reader.result as string).split(',')[1])
-        reader.readAsDataURL(file)
-      })
+      const base64 = await readFileAsBase64(file)
       const thumbnailUrl = URL.createObjectURL(file)
       newImages.push({
         base64,
@@ -197,9 +249,12 @@ async function processImageFiles(files: File[]) {
       })
     } catch (err) {
       logger.error('ChatInputArea', '处理图片失败', err)
+      failures.push(`${file.name}：读取失败`)
     }
   }
   attachedImages.value = newImages
+  // 一个坏文件不该吞掉整批：成功的仍然加入，失败的逐条说出来
+  if (failures.length) showToast('error', failures.join('；'))
 }
 
 function removeImage(index: number) {
@@ -288,6 +343,14 @@ textarea::placeholder {
 .attach-btn { background: transparent; color: var(--text-muted); }
 .attach-btn:hover { background: var(--surface-hover); color: var(--text-secondary); }
 
+/* 键盘焦点必须可见：两个按钮在视觉上都不是输入框，Tab 到它们时要有落点 */
+.attach-btn:focus-visible,
+.send-btn:focus-visible,
+.remove-image:focus-visible {
+  outline: 2px solid var(--accent);
+  outline-offset: 1px;
+}
+
 .images-preview {
   display: flex;
   flex-wrap: wrap;
@@ -318,5 +381,9 @@ textarea::placeholder {
   opacity: 0; transition: opacity 0.2s;
 }
 
-.image-item:hover .remove-image { opacity: 1; }
+/* 移除按钮默认隐藏，但**聚焦时也必须出现**——否则键盘会停在一个看不见的按钮上 */
+.image-item:hover .remove-image,
+.image-item:focus-within .remove-image {
+  opacity: 1;
+}
 </style>

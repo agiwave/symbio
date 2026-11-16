@@ -30,6 +30,8 @@
       class="option-btn"
       :class="{ 'is-disabled': isDisabled(f), open: openKey === f.key }"
       :title="tooltip(f)"
+      :aria-expanded="opensMenu(f) ? openKey === f.key : undefined"
+      :aria-haspopup="opensMenu(f) ? 'menu' : undefined"
       @click.stop="onFieldClick(f, $event)"
     >
       <span class="opt-icon">{{ fieldIcon(f.icon) }}</span>
@@ -39,7 +41,14 @@
 
     <!-- 候选菜单（一层；`select` 的扁平候选） -->
     <Transition name="dropdown">
-      <div v-if="openField" class="opt-menu" :style="{ left: `${menuLeft}px` }" @click.stop>
+      <div
+        v-if="openField"
+        class="opt-menu"
+        role="menu"
+        :aria-label="openField.label"
+        :style="{ left: `${menuLeft}px` }"
+        @click.stop
+      >
         <!-- 候选为空是**可达状态**（还没配模型 / 还没建技能），不是异常。
              只说「暂无可选项」用户会困惑于"那我该做什么"，故补一句去向。
 
@@ -59,8 +68,10 @@
             v-for="o in menuOptions"
             :key="o.value"
             type="button"
+            role="menuitem"
             class="menu-item"
             :class="{ active: isSelected(openField, o.value) }"
+            :aria-current="isSelected(openField, o.value) ? 'true' : undefined"
             :title="o.description || o.label"
             @click.stop="choose(openField, o.value)"
           >
@@ -95,7 +106,7 @@
  * 出站只在 `useSessionOptionBar.save`（写会话 metadata）与 `services/nativePick`
  * （原生取值原语）两处。
  */
-import { computed, inject, onBeforeUnmount, onMounted, ref } from 'vue'
+import { computed, inject, onBeforeUnmount, onMounted, ref, type Ref } from 'vue'
 import { routerKey } from 'vue-router'
 import OptionFormDialog from './OptionFormDialog.vue'
 import { useSessionOptionBar } from '@/composables/useSessionOptionBar'
@@ -187,6 +198,8 @@ function scopeOf(key: string): unknown {
 const openKey = ref<string | null>(null)
 const menuLeft = ref(0)
 const formField = ref<DetailField | null>(null)
+/** 打开菜单的触发按钮：关闭时焦点要回到它，而不是丢到 body 上 */
+const menuTrigger: Ref<HTMLElement | null> = ref(null)
 
 const visibleFields = computed(() => fields.value.filter((f) => isVisible(f)))
 const openField = computed(() => fields.value.find((f) => f.key === openKey.value) ?? null)
@@ -218,7 +231,8 @@ function tooltip(f: DetailField): string {
   return parts.join('\n')
 }
 
-function closeMenu() {
+function closeMenu(restoreFocus = false) {
+  if (openKey.value && restoreFocus) menuTrigger.value?.focus()
   openKey.value = null
 }
 
@@ -242,10 +256,15 @@ async function commit(f: DetailField, value: unknown) {
 async function onFieldClick(f: DetailField, ev: MouseEvent) {
   if (isDisabled(f) || busy.value) return
 
-  // ① 原生取值原语：后端唤不起原生对话框，由前端取值后直接写入
+  // ① 原生取值原语：后端唤不起原生对话框，由前端取值后直接写入。
+  //    取值本身也可能失败（权限 / 路径失效 / 原生接口异常），失败必须说出来。
   if (f.pick) {
-    const picked = await pickNative(f.pick as DetailPick)
-    if (picked != null) await commit(f, picked)
+    try {
+      const picked = await pickNative(f.pick as DetailPick)
+      if (picked != null) await commit(f, picked)
+    } catch (e) {
+      showToast('error', `${f.label}取值失败：${e instanceof Error ? e.message : String(e)}`)
+    }
     return
   }
 
@@ -257,7 +276,8 @@ async function onFieldClick(f: DetailField, ev: MouseEvent) {
     }
     formField.value = null
     openKey.value = f.key
-    menuLeft.value = (ev.currentTarget as HTMLElement | null)?.offsetLeft ?? 0
+    menuTrigger.value = (ev.currentTarget as HTMLElement | null) ?? null
+    menuLeft.value = menuTrigger.value?.offsetLeft ?? 0
     return
   }
 
@@ -290,8 +310,21 @@ function onDocClick() {
   closeMenu()
 }
 
-onMounted(() => document.addEventListener('click', onDocClick))
-onBeforeUnmount(() => document.removeEventListener('click', onDocClick))
+/** ESC 关闭候选菜单（页面交互规范承诺的关闭键）；只处理自己开着的那一层 */
+function onDocKeydown(e: KeyboardEvent) {
+  if (e.key !== 'Escape' || !openKey.value) return
+  e.stopPropagation()
+  closeMenu(true)
+}
+
+onMounted(() => {
+  document.addEventListener('click', onDocClick)
+  document.addEventListener('keydown', onDocKeydown)
+})
+onBeforeUnmount(() => {
+  document.removeEventListener('click', onDocClick)
+  document.removeEventListener('keydown', onDocKeydown)
+})
 </script>
 
 <style scoped>

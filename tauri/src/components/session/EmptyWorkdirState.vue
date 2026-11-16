@@ -14,8 +14,13 @@
     <button class="primary-btn" @click="onPick" :disabled="picking">
       {{ picking ? '选择中…' : '选择工作目录' }}
     </button>
-    <button v-if="store.lastUsedWorkdir" class="secondary-btn" @click="onUseLast">
-      使用最近的工作目录
+    <button
+      v-if="store.lastUsedWorkdir"
+      class="secondary-btn"
+      :disabled="picking"
+      @click="onUseLast"
+    >
+      {{ picking ? '应用中…' : '使用最近的工作目录' }}
     </button>
     <p v-if="lastError" class="error-text">{{ lastError }}</p>
   </div>
@@ -55,8 +60,22 @@ async function onPick() {
 }
 
 async function onUseLast() {
-  if (!store.lastUsedWorkdir) return
-  await store.setActiveWorkdir(store.lastUsedWorkdir)
+  const dir = store.lastUsedWorkdir
+  if (!dir || picking.value) return
+  if (!store.activeId) {
+    lastError.value = '请先选择或创建一个会话'
+    return
+  }
+  // 与 onPick 同一套：忙态防连点并发写入，失败要给出原因而不是静默未处理
+  picking.value = true
+  lastError.value = ''
+  try {
+    await store.setActiveWorkdir(dir)
+  } catch (e) {
+    lastError.value = e instanceof Error ? e.message : String(e)
+  } finally {
+    picking.value = false
+  }
 }
 </script>
 
@@ -125,8 +144,12 @@ async function onUseLast() {
   cursor: pointer;
 }
 
-.secondary-btn:hover {
+.secondary-btn:hover:not(:disabled) {
   background: var(--surface-sunken);
+}
+.secondary-btn:disabled {
+  opacity: 0.5;
+  cursor: not-allowed;
 }
 
 .error-text {

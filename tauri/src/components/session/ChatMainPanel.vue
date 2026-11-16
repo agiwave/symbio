@@ -11,8 +11,8 @@
           class="rename-input"
           aria-label="会话标题"
           spellcheck="false"
-          @keyup.enter="submitRename"
-          @keyup.esc="cancelRename"
+          @keydown.enter="onRenameEnter"
+          @keydown.esc="onRenameEsc"
           @blur="cancelRename"
         />
         <template v-else>
@@ -47,6 +47,7 @@
         <button
           class="header-btn"
           :class="{ 'is-active': changesOpen }"
+          :aria-expanded="changesOpen"
           title="变更"
           :disabled="!hasActive"
           @click="changesOpen = !changesOpen"
@@ -63,6 +64,7 @@
         <button
           class="header-btn"
           :class="{ 'is-active': panelOpen }"
+          :aria-expanded="panelOpen"
           title="读数"
           :disabled="!hasActive"
           @click="panelOpen = !panelOpen"
@@ -179,6 +181,7 @@
 import { computed, nextTick, ref, watch } from 'vue'
 import { useSessionsStore } from '@/stores/sessions'
 import { logger } from '@/utils/logger'
+import { useToast } from '@/composables/useToast'
 import EmptyWorkdirState from './EmptyWorkdirState.vue'
 import ModelChatPanel from '../ModelChatPanel.vue'
 import VdfsActions from '@/components/vdfs/VdfsActions.vue'
@@ -325,8 +328,25 @@ async function startRename() {
   renameInputRef.value?.select()
 }
 
+const { showToast } = useToast()
+
 function cancelRename() {
   renaming.value = false
+}
+
+/**
+ * 重命名的 Enter 走 `keydown` 而不是 `keyup`：输入法上屏发生在 keyup 之前，
+ * keyup 时组合态往往已经结束，`isComposing` 会漏判（选词的回车会误提交）。
+ */
+function onRenameEnter(e: KeyboardEvent) {
+  if (e.isComposing || e.keyCode === 229) return
+  e.preventDefault()
+  void submitRename()
+}
+
+function onRenameEsc(e: KeyboardEvent) {
+  if (e.isComposing || e.keyCode === 229) return
+  cancelRename()
 }
 
 /** 提交重命名（空标题或与原名相同视为放弃——不做无意义的往返） */
@@ -334,9 +354,20 @@ async function submitRename() {
   const id = store.activeId
   if (!id || !renaming.value) return
   const title = draftTitle.value.trim()
-  renaming.value = false
-  if (!title || title === store.activeTitle) return
-  await store.rename(id, title)
+  if (!title || title === store.activeTitle) {
+    renaming.value = false
+    return
+  }
+  try {
+    await store.rename(id, title)
+    renaming.value = false
+  } catch (e) {
+    // 失败时**保留编辑态与输入内容**：关掉输入框会让用户连重试的机会都没有，
+    // 而他刚刚打进去的标题会一起消失。
+    showToast('error', `重命名失败：${e instanceof Error ? e.message : String(e)}`)
+    await nextTick()
+    renameInputRef.value?.focus()
+  }
 }
 
 // ── 读数抽屉（P4）────────────────────────────────────────────────────────
