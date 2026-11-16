@@ -25,7 +25,9 @@ impl: done
 ## 路由
 
 **无自有路由**（`route` 恒 `NotFound` 并指路到 VDFS）。人格的编辑面是
-`<根>/persona/PLUGIN.yml`（`ext = form`，由 `PluginConfigMount` 的四臂提供）——
+`<根>/persona/PLUGIN.yml`（`ext = form`，由 `PluginConfigMount` 的四臂提供）；
+挂载点声明 `hidden`，入口在**设置页**（`plugin_manager` 的 persona 条目），
+不进左侧主导航——人格只有一份配置文档，没有列表内容。
 与 `web` / `memory` 同一取舍：宿主与用户走同一条链路，不为一份配置再造一条协议。
 
 ## 平凡值

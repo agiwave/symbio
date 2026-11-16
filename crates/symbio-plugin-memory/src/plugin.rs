@@ -31,6 +31,7 @@
 
 use super::config::MemoryConfig;
 use super::memory::{self, PLUGIN_TITLE, SEGMENT_NAME};
+use super::vdfs::AGENT_MEMORY_FIELD;
 use super::workspace;
 use async_trait::async_trait;
 use serde_json::json;
@@ -56,6 +57,22 @@ fn config_definition() -> DetailDefinition {
     DetailDefinition::form(
         PLUGIN_TITLE,
         vec![
+            // 智能体记忆的**正文**不是配置项（配置文档只存闸门），但设置页要能改它：
+            // 表单因此多一个投影字段，读 / 写时由 VDFS 侧并到 / 拆自 `AGENTS.md`
+            // （见 `vdfs.rs` 的同名常量）。工作区记忆**不在此列**——它随工作区路径变，
+            // 没有「一处设置」可言。
+            DetailField {
+                key: AGENT_MEMORY_FIELD.to_string(),
+                label: "智能体记忆（AGENTS.md）".to_string(),
+                description: Some(
+                    "这个智能体跨会话记得的事。工作区记忆随工作区路径不同，不在这里设置。"
+                        .to_string(),
+                ),
+                widget: "textarea".to_string(),
+                rows: Some(12),
+                full_width: true,
+                ..Default::default()
+            },
             DetailField::toggle(
                 "workspace_enabled",
                 "注入工作区记忆",
@@ -143,6 +160,9 @@ impl MemoryPlugin {
             .with_icon(PLUGIN_ID_MEMORY)
             // 根可列举 + 可递归遍历（记忆文件在根下，树视图要能走到它）
             .with_root_access(VdfsAccess::LIST_TRAVERSE)
+            // 入口在**设置页**（plugin_manager 的 memory 条目），不进侧边栏：
+            // 记忆没有列表内容，用户要改的是智能体记忆正文与闸门，不是浏览一个资源集合。
+            .with_hidden(true)
     }
 
     /// 宿主目录 = **本插件目录的父目录**（智能体记忆落位规则的唯一出处，见

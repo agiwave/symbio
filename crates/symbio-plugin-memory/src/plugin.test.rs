@@ -44,6 +44,12 @@ fn plugin_in(host: &Path) -> Arc<MemoryPlugin> {
     ))
 }
 
+/// 入口在设置页，不在左侧主导航：记忆没有列表内容，`hidden` 由容器在列表层过滤。
+#[test]
+fn mount_is_hidden_from_sidebar() {
+    assert!(MemoryPlugin::metadata().hidden, "memory 不应出现在主导航");
+}
+
 // ==================== 智能体腿（分形） ====================
 
 /// 系统树实例：`<homedir>/memory` ⇒ 记忆落在 `<homedir>/AGENTS.md`

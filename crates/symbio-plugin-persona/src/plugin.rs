@@ -117,6 +117,9 @@ impl PersonaPlugin {
         PluginMeta::new(PLUGIN_ID_PERSONA, PLUGIN_TITLE)
             .with_description("人格：一处定义「我是谁」，轮内正文与对话措辞读同一段。")
             .with_version("0.1.0")
+            // 入口在**设置页**（plugin_manager 的 persona 条目），不进侧边栏：
+            // 人格只有一份配置文档，没有列表内容；左侧导航是资源集合的入口，不是设置项。
+            .with_hidden(true)
     }
 
     /// 当前生效的人格正文（空 ⇒ `None`）。

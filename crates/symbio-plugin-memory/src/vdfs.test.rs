@@ -365,6 +365,91 @@ async fn config_write_leaves_memory_and_disk_in_agreement() {
     assert!(!restarted.workspace_enabled);
 }
 
+/// 设置页视图：配置文档的读**并出**智能体记忆正文，写则把正文送回 `AGENTS.md`，
+/// 而配置文档本身只存闸门——正文只有一个落盘处。
+#[tokio::test]
+async fn settings_view_round_trips_agent_memory_and_gates() {
+    let tmp = TempDir::new().unwrap();
+    let p = plugin_in(tmp.path());
+
+    // 先经记忆文件的写口写一段正文
+    p.dispatch(
+        &vctx(None),
+        MEMORY_FILE,
+        VdfsRequest::Write {
+            content: VdfsContent::text("记住：部署走蓝绿。"),
+        },
+    )
+    .await
+    .unwrap();
+
+    // 读设置页视图：正文在，闸门也在
+    let content = p
+        .dispatch(&vctx(None), PLUGIN_FILE, VdfsRequest::Read)
+        .await
+        .unwrap()
+        .into_read()
+        .unwrap();
+    let model: serde_json::Value =
+        serde_json::from_str(content.as_text().unwrap_or_default()).unwrap();
+    assert_eq!(model[AGENT_MEMORY_FIELD], "记住：部署走蓝绿。");
+    assert!(model.get("memory_max_bytes").is_some());
+
+    // 写设置页视图：正文与闸门各回各的落盘处
+    p.dispatch(
+        &vctx(None),
+        PLUGIN_FILE,
+        VdfsRequest::Write {
+            content: VdfsContent::text(r#"{"agent_memory":"新的一条","memory_max_bytes":777}"#),
+        },
+    )
+    .await
+    .unwrap();
+
+    assert_eq!(p.agent_store().await.read().unwrap(), "新的一条");
+    assert_eq!(p.config_slot().read().await.memory_max_bytes, 777);
+    // 正文不落进配置文档
+    let on_disk = p
+        .config_file()
+        .dir()
+        .load::<super::super::config::MemoryConfig>()
+        .unwrap()
+        .unwrap();
+    assert_eq!(on_disk.memory_max_bytes, 777);
+}
+
+/// 正文超限时配置一个字节都不动：先校验、再写正文、最后落配置
+#[tokio::test]
+async fn oversized_agent_memory_does_not_change_gates() {
+    let tmp = TempDir::new().unwrap();
+    let cfg = super::super::config::MemoryConfig {
+        memory_max_bytes: 4,
+        ..Default::default()
+    };
+    let p = MemoryPlugin::new(
+        symbio_plugin_api::PluginDir::at(tmp.path().join(PLUGIN_ID_MEMORY), PLUGIN_ID_MEMORY),
+        cfg,
+    );
+
+    let err = p
+        .dispatch(
+            &vctx(None),
+            PLUGIN_FILE,
+            VdfsRequest::Write {
+                content: VdfsContent::text(
+                    r#"{"agent_memory":"超过四个字节","memory_max_bytes":999}"#,
+                ),
+            },
+        )
+        .await
+        .unwrap_err();
+    assert!(
+        format!("{err:?}").contains("超过四个字节") || format!("{err:?}").contains("上限"),
+        "{err:?}"
+    );
+    assert_eq!(p.config_slot().read().await.memory_max_bytes, 4);
+}
+
 /// 未知路径如实报未知（不为「看起来像记忆」的路径编造语义）
 #[tokio::test]
 async fn unknown_path_is_not_found() {

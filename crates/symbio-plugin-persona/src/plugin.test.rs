@@ -239,6 +239,12 @@ async fn announces_its_config_document() {
     );
 }
 
+/// 入口在设置页，不在左侧主导航：人格只有一份配置文档，没有列表内容。
+#[test]
+fn mount_is_hidden_from_sidebar() {
+    assert!(PersonaPlugin::metadata().hidden, "persona 不应出现在主导航");
+}
+
 /// 挂载点存在（人格的编辑面是 VDFS，不是路由）
 #[tokio::test]
 async fn exposes_a_vdfs_mount() {
