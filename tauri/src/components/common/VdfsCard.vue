@@ -17,7 +17,7 @@
     :tabindex="disabled ? -1 : 0"
     :aria-selected="isActive"
     :aria-disabled="disabled"
-    :aria-label="title"
+    :aria-label="accessibleLabel"
     @click="$emit('click')"
     @keydown.enter="$emit('click')"
     @keydown.space.prevent="$emit('click')"
@@ -89,6 +89,17 @@ defineEmits<{
 
 const statusClass = computed(() => `status-${props.status}`)
 const badgeClass = computed(() => `kind-${props.badgeKind}`)
+
+/**
+ * 可访问名称带上状态：状态点只有鼠标 `title`，读屏用户只看得到标题，
+ * 听不到「运行中 / 失败 / 已禁用」。
+ */
+const accessibleLabel = computed(() => {
+  const parts = [props.title]
+  if (props.statusTitle) parts.push(props.statusTitle)
+  else if (props.badge) parts.push(props.badge)
+  return parts.join('，')
+})
 </script>
 
 <style scoped>

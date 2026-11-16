@@ -78,10 +78,20 @@ function hasLabelFor(template, attrs) {
   )
 }
 
-/** 控件是否被 `<label>` 包住（粗略但足够：最近一个 `<label` 之后没有闭合） */
+/**
+ * 控件是否被**带可见文字的** `<label>` 包住。
+ *
+ * 只看「有没有 label 标签」会放过空包装：`<label class="toggle"><input /><span /></label>`
+ * 里的 label 没有任何文字，读屏仍然只会报「复选框」。判据必须落到文字上。
+ */
 function hasWrappingLabel(template, index) {
   const before = template.slice(0, index)
-  return before.lastIndexOf('<label') > before.lastIndexOf('</label>')
+  const open = before.lastIndexOf('<label')
+  if (open === -1 || open < before.lastIndexOf('</label>')) return false
+  const close = template.indexOf('</label>', index)
+  const inner = template.slice(open, close === -1 ? template.length : close)
+  const body = inner.replace(/^<label\b[^>]*>/, '')
+  return visibleText(body) !== ''
 }
 
 function auditFile(file) {
@@ -117,7 +127,7 @@ function auditFile(file) {
     if (hasLabelFor(template, attrs)) continue
     if (hasWrappingLabel(template, m.index)) continue
     errors.push(
-      `${red} ${name}:${lineAt(m.index)} UX-003 <${tag}> 缺少可访问名称（aria-label / label[for] / 包裹 label）`,
+      `${red} ${name}:${lineAt(m.index)} UX-003 <${tag}> 缺少可访问名称（aria-label / label[for] / 含文字的包裹 label）`,
     )
   }
 

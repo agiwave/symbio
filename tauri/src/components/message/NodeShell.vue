@@ -20,23 +20,24 @@
 <template>
   <div class="msg" :class="[typeClass, statusClass, isUser ? 'user' : '', nested ? 'nested' : '']">
     <!--
-      节点头 = 折叠开关。用 button 语义而非 div+click：键盘可达是折叠控件的
-      底线（此前是裸 div，Tab 永远走不到，只能用鼠标展开工具调用）。
-      用 role="button" 而不是换成 <button> 元素：头部里有嵌套的 <button>
-      （编辑 / 重试 / 删除），button 不能嵌套 button。
+      节点头 = 折叠开关。用真正的 <button>：键盘可达是折叠控件的底线
+      （此前是裸 div，Tab 永远走不到，只能用鼠标展开工具调用）。
+      操作按钮（编辑 / 重试 / 删除）**不能**嵌在它里面——button 不能嵌套 button，
+      读屏会把内部按钮当成无意义内容。于是拆成同一行的兄弟：开关按钮 + 操作区。
     -->
-    <div
-      v-if="!facets.responseText"
-      class="node-head"
-      :class="headClass"
-      role="button"
-      tabindex="0"
-      :aria-expanded="effectiveOpen"
-      :aria-label="`${title}，${effectiveOpen ? '收起' : '展开'}`"
-      @click="toggle"
-      @keydown.enter.prevent="toggle"
-      @keydown.space.prevent="toggle"
-    >
+    <div v-if="!facets.responseText" class="node-head-row">
+      <button
+        type="button"
+        class="node-head"
+        :class="headClass"
+        role="button"
+        tabindex="0"
+        :aria-expanded="effectiveOpen"
+        :aria-label="headAriaLabel"
+        @click="toggle"
+        @keydown.enter.prevent="toggle"
+        @keydown.space.prevent="toggle"
+      >
       <span class="node-icon">{{ icon }}</span>
       <span class="node-title">{{ title }}</span>
       <span v-if="isHeartbeat" class="node-heartbeat" title="系统心跳任务自动发送">♥ 心跳</span>
@@ -55,6 +56,8 @@
         }}<span v-if="isRunningAction && runningDuration" class="tag-elapsed">{{ runningDuration }}</span>
       </span>
       <span v-if="showsLiveBadge" class="node-live">回复中…</span>
+      </button>
+
       <!-- 分支切换器：同一个问题的第几支答复。**常驻**而非悬停——「还有另一支」
            是这条回答的状态，藏进 hover 就等于没有（用户不会去悬停一条他以为
            只有一份答案的消息）。两端都到头时按钮置灰而不是消失：读数 `1/2`
@@ -250,6 +253,25 @@ const runningDuration = computed(() => {
   if (s < 60) return `${s}s`
   return `${Math.floor(s / 60)}m${String(s % 60).padStart(2, '0')}s`
 })
+
+/**
+ * 头部可访问名称：原来只有「标题，展开/收起」，覆盖了内部状态文本——
+ * 读屏用户听不到「运行中 12 秒 / 失败 / 第 2 支共 3 支」。
+ */
+const headAriaLabel = computed(() => {
+  const parts: string[] = [title.value]
+  if (isHeartbeat.value) parts.push('心跳任务')
+  if (statusTag.value) {
+    parts.push(
+      isRunningAction.value && runningDuration.value
+        ? `${statusTag.value} ${runningDuration.value}`
+        : statusTag.value,
+    )
+  }
+  if (branch.value) parts.push(`第 ${branch.value.index + 1} 支，共 ${branch.value.total} 支`)
+  parts.push(effectiveOpen.value ? '收起' : '展开')
+  return parts.join('，')
+})
 </script>
 
 <style scoped>
@@ -285,7 +307,16 @@ const runningDuration = computed(() => {
 }
 
 /* ── 统一节点头部（所有节点一致）── */
+/* 头部一行 = 折叠按钮（占满剩余宽度）+ 分支切换 + 操作区（同为兄弟节点，
+   避免 button 嵌套 button 的非法结构）。 */
+.node-head-row {
+  display: flex;
+  align-items: center;
+  gap: 0.25rem;
+}
 .node-head {
+  flex: 1;
+  min-width: 0;
   display: flex;
   align-items: center;
   gap: 0.4rem;
@@ -293,8 +324,13 @@ const runningDuration = computed(() => {
   user-select: none;
   padding: 0.16rem 0.3rem;
   margin: 0 -0.3rem;
+  border: none;
   border-radius: 0.375rem;
+  background: transparent;
+  color: inherit;
+  font: inherit;
   font-size: 0.8rem;
+  text-align: left;
   transition: background 0.12s ease;
 }
 .node-head:hover {
@@ -412,8 +448,8 @@ const runningDuration = computed(() => {
   margin-left: 0.25rem;
   flex-shrink: 0;
 }
-.msg:hover > .node-head .node-actions,
-.node-head:focus-within .node-actions {
+.msg:hover > .node-head-row .node-actions,
+.node-head-row:focus-within .node-actions {
   display: inline-flex;
 }
 /* ── 分支切换器（常驻，非悬停）──

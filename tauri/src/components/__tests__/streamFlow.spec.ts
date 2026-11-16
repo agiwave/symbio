@@ -190,7 +190,7 @@ describe('流式端到端：根级骨架 / 折叠叶在多轮工具场景的可�
     const w = mountTree(tree)
 
     // 容器默认单行折叠：展开两轮根级骨架才能看到各自子流（工具子骨架随之现形）
-    for (const head of w.findAll('.msg.type-skeleton > .node-head')) {
+    for (const head of w.findAll('.msg.type-skeleton > .node-head-row > .node-head')) {
       await head.trigger('click')
     }
 
@@ -211,7 +211,7 @@ describe('流式端到端：根级骨架 / 折叠叶在多轮工具场景的可�
     const tree = buildTree(store.getSessionMessages(SID))
     const w = mountTree(tree)
     // 根级骨架默认折叠，展开才能看到子流
-    await w.find('.msg.type-skeleton > .node-head').trigger('click')
+    await w.find('.msg.type-skeleton > .node-head-row > .node-head').trigger('click')
     // 根级骨架已有子节点 → 不显示等待骨架
     expect(w.findAll('.skeleton-pending').length).toBe(0)
     // 折叠叶头部存在且是"处理中…"态
@@ -261,7 +261,7 @@ describe('流式端到端：根级骨架 / 折叠叶在多轮工具场景的可�
     const tree = buildTree(store.getSessionMessages(SID))
     const w = mountTree(tree)
     // 根级骨架默认折叠；展开各轮才能看到等待脉动（T0 已完成无等待，T1 有）
-    for (const head of w.findAll('.msg.type-skeleton > .node-head')) {
+    for (const head of w.findAll('.msg.type-skeleton > .node-head-row > .node-head')) {
       await head.trigger('click')
     }
     expect(w.findAll('.skeleton-pending').length).toBe(1)
@@ -341,7 +341,7 @@ describe('渲染层回归：增量必须进 DOM（不只进 store）', () => {
     feed({ id: 'R1', delta: '，第二段思考' })
     await nextTick()
     // 容器默认折叠：展开后子流才进 DOM
-    await w.find('.msg.type-skeleton > .node-head').trigger('click')
+    await w.find('.msg.type-skeleton > .node-head-row > .node-head').trigger('click')
     await nextTick()
     // 分派类名由 registry 给出 ⇒ 钉住「思考是独立折叠叶，没有被并进正文」
     expect(w.find('.type-notice').exists(), '思考必须是独立节点').toBe(true)
@@ -362,7 +362,7 @@ describe('渲染层回归：增量必须进 DOM（不只进 store）', () => {
       })
     await nextTick()
     // 容器默认折叠：展开才能看到折叠叶头部的「处理中」
-    await w.find('.msg.type-skeleton > .node-head').trigger('click')
+    await w.find('.msg.type-skeleton > .node-head-row > .node-head').trigger('click')
     await nextTick()
     expect(w.text()).toContain('处理中')
     // 最小状态帧（后端 `llm_state_frame` 同构）：不带正文，落地是合并
@@ -420,7 +420,7 @@ describe('渲染层回归：工具子骨架按帧即时可见（对照 e2e 实�
     feed(rootSkeleton('T1'))
     await nextTick()
     // 根级骨架默认折叠：展开后等待骨架才可见
-    await w.find('.msg.type-skeleton > .node-head').trigger('click')
+    await w.find('.msg.type-skeleton > .node-head-row > .node-head').trigger('click')
     await nextTick()
     expect(w.findAll('.skeleton-pending').length, '尚无子节点 → 等待骨架').toBe(1)
 
@@ -432,7 +432,7 @@ describe('渲染层回归：工具子骨架按帧即时可见（对照 e2e 实�
     expect(w.text()).toContain('mcp__mockserv__echo')
     // 根级骨架的等待骨架已消失（它有了子节点），但工具骨架自身仍在等结果子节点——
     // 骨架格一视同仁：streaming 且无可见子流就脉冲。全树仍只有 1 个等待态。
-    await w.findAll('.msg.type-skeleton > .node-head')[1].trigger('click')
+    await w.findAll('.msg.type-skeleton > .node-head-row > .node-head')[1].trigger('click')
     await nextTick()
     expect(w.findAll('.skeleton-pending').length, '等待态由根级骨架接棒到工具骨架').toBe(1)
 
@@ -441,7 +441,7 @@ describe('渲染层回归：工具子骨架按帧即时可见（对照 e2e 实�
     await nextTick()
     feed({ id: 'TC1', delta: 'ock 回显内容"}' })
     await nextTick()
-    await w.find('.msg.type-skeleton .msg.type-body > .node-head').trigger('click')
+    await w.find('.msg.type-skeleton .msg.type-body > .node-head-row > .node-head').trigger('click')
     await nextTick()
     expect(
       w.find('.json.req').text(),
@@ -455,7 +455,7 @@ describe('渲染层回归：工具子骨架按帧即时可见（对照 e2e 实�
     feed(toolSkeleton('TC1', 'T1', 'read_file', '{"path":"a.rs"}'))
     await nextTick()
     // 根级骨架默认折叠：展开后工具子骨架的头部标签才可见
-    await w.find('.msg.type-skeleton > .node-head').trigger('click')
+    await w.find('.msg.type-skeleton > .node-head-row > .node-head').trigger('click')
     await nextTick()
     expect(w.find('.tag-elapsed').exists(), '尚无 started_at → 不编一个时长').toBe(false)
 
@@ -518,7 +518,7 @@ describe('渲染层回归：收起态摘要在流式中显示最新内容', () =
     feed(noticeLeaf('R1', 'T1', OPEN + '甲'.repeat(80)))
     await nextTick()
     // 容器默认折叠：展开根级骨架才能看到子流里的思考行
-    await w.find('.msg.type-skeleton > .node-head').trigger('click')
+    await w.find('.msg.type-skeleton > .node-head-row > .node-head').trigger('click')
     await nextTick()
 
     // 流式增量：摘要必须跟着长，且显示的是**新到的那一段**
@@ -546,7 +546,7 @@ describe('渲染层回归：收起态摘要在流式中显示最新内容', () =
     await nextTick()
 
     // 根级骨架默认折叠——展开它，让（默认已收起的）工具骨架成为唯一可见的摘要行
-    await w.find('.msg.type-skeleton > .node-head').trigger('click')
+    await w.find('.msg.type-skeleton > .node-head-row > .node-head').trigger('click')
     await nextTick()
 
     feed({ id: 'TC1', delta: '甲'.repeat(80) + '"}' })

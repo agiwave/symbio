@@ -59,11 +59,14 @@
 
     <!-- 表单主体：分区（可折叠）+ 字段行 -->
     <div class="form-body">
+      <!-- 必填预检的错误行：后端校验仍是最终权威，这里只差一步往返与定位 -->
+      <p v-if="requiredError" class="form-required-error" role="alert">{{ requiredError }}</p>
       <template v-for="(sec, si) in definition.sections" :key="si">
         <button
           v-if="sec.title"
           type="button"
           class="advanced-toggle"
+          :aria-expanded="!collapsed[si]"
           @click="toggleSection(si)"
         >
           <span class="chevron" :class="{ open: !collapsed[si] }">▸</span>
@@ -73,7 +76,7 @@
           <template v-for="f in sec.fields" :key="f.key">
             <div v-if="fieldVisible(f)" class="setting-item" :class="{ column: widgetIsFullWidth(f) }">
             <div class="setting-info">
-              <label>{{ f.label }}<span v-if="f.required" class="required">*</span></label>
+              <label :for="isLabelable(f) ? fieldControlId(f) : undefined">{{ f.label }}<span v-if="f.required" class="required">*</span></label>
               <p v-if="f.description" class="setting-desc">{{ f.description }}</p>
             </div>
 
@@ -99,13 +102,19 @@
 
             <!-- toggle -->
             <label v-else-if="specOf(f).tag === 'toggle'" class="toggle">
-              <input type="checkbox" v-model="form[f.key]" :disabled="fieldDisabled(f)" />
+              <input
+                type="checkbox"
+                v-model="form[f.key]"
+                :aria-label="f.label"
+                :disabled="fieldDisabled(f)"
+              />
               <span class="toggle-slider" />
             </label>
 
             <!-- select（静态或预设动态选项） -->
             <select
               v-else-if="specOf(f).tag === 'select'"
+              :id="fieldControlId(f)"
               v-model="form[f.key]"
               :aria-label="f.label"
               :disabled="fieldDisabled(f)"
@@ -117,6 +126,7 @@
             <!-- textarea / list（每行一项）/ map（每行 KEY=VALUE） -->
             <textarea
               v-else-if="specOf(f).tag === 'textarea'"
+              :id="fieldControlId(f)"
               v-model="form[f.key]"
               :aria-label="f.label"
               :rows="f.rows ?? 3"
@@ -128,6 +138,7 @@
             <!-- text / password / number / datalist / path（path 可带原生取值入口） -->
             <div v-else-if="specOf(f).revealable" class="input-row">
               <input
+                :id="fieldControlId(f)"
                 v-model="form[f.key]"
                 :type="reveal[f.key] ? 'text' : 'password'"
                 :aria-label="f.label"
@@ -153,6 +164,7 @@
 
             <input
               v-else-if="specOf(f).inputType === 'number'"
+              :id="fieldControlId(f)"
               v-model.number="form[f.key]"
               type="number"
               :aria-label="f.label"
@@ -165,6 +177,7 @@
 
             <div v-else-if="specOf(f).datalist" class="input-wrap">
               <input
+                :id="fieldControlId(f)"
                 v-model="form[f.key]"
                 type="text"
                 :list="`dl-${uid}-${f.key}`"
@@ -179,6 +192,7 @@
 
             <div v-else class="input-row">
               <input
+                :id="fieldControlId(f)"
                 v-model="form[f.key]"
                 :type="specOf(f).inputType ?? 'text'"
                 :aria-label="f.label"
@@ -234,7 +248,7 @@
 </template>
 
 <script setup lang="ts">
-import { computed, onMounted, reactive, ref, watch } from 'vue'
+import { computed, nextTick, onMounted, reactive, ref, watch } from 'vue'
 import DetailShell from './DetailShell.vue'
 import BaseModal from '@/components/common/BaseModal.vue'
 import { pickNative } from '@/services/nativePick'
@@ -482,6 +496,38 @@ function specOf(f: DetailField) {
   return widgetSpecOf(f.widget)
 }
 
+/** 控件 id：让字段标签可以 `for` 到它（点击标签即聚焦控件） */
+function fieldControlId(f: DetailField): string {
+  return `df-${uid}-${f.key}`
+}
+
+/** 该字段是否有可被 label 关联的单一控件（static / form / toggle 各自成立，不挂 for） */
+function isLabelable(f: DetailField): boolean {
+  const tag = specOf(f).tag
+  return tag !== 'static' && tag !== 'form' && tag !== 'toggle'
+}
+
+/** 必填预检的错误信息（空 = 没有未填的必填项） */
+const requiredError = ref('')
+
+/**
+ * 保存前的必填预检：只查**当前可见且可编辑**的必填字段。
+ *
+ * 后端 `validate_manifest` 仍是最终权威（格式、跨字段约束等都在那里）；
+ * 这里只把「空着没填」这一种最常见的错误提前一步，并聚焦到第一个出错控件。
+ */
+function firstMissingRequired(): DetailField | null {
+  for (const sec of props.definition.sections) {
+    for (const f of sec.fields) {
+      if (!f.required || !fieldVisible(f) || fieldDisabled(f)) continue
+      if (specOf(f).tag === 'static') continue
+      const v = form[f.key]
+      if (v == null || v === '' || (Array.isArray(v) && v.length === 0)) return f
+    }
+  }
+  return null
+}
+
 /** static 只读展示：options 值→标签映射，数组/对象友好展开 */
 function staticDisplay(f: DetailField): string {
   const v = form[f.key]
@@ -582,6 +628,17 @@ function runAction(a: DetailAction) {
     case 'save': {
       // info 只读：没有 save 语义
       if (isInfo.value) return
+      const missing = firstMissingRequired()
+      if (missing) {
+        requiredError.value = `请填写「${missing.label}」`
+        void nextTick(() => {
+          const el = document.getElementById(fieldControlId(missing))
+          el?.scrollIntoView({ block: 'center' })
+          el?.focus()
+        })
+        return
+      }
+      requiredError.value = ''
       const values = buildSave(saveCtx())
       if (!isUpload.value) {
         // 数据来自外部的绑定：只交回纯字段值，不让动作载荷污染它
@@ -825,6 +882,15 @@ watch(
 
 .required { color: var(--danger-fg); }
 
+.form-required-error {
+  margin: 0 0 var(--space-2);
+  padding: var(--space-1) var(--space-2);
+  border-radius: var(--radius-md);
+  background: var(--danger-bg);
+  color: var(--danger-fg);
+  font-size: var(--font-size-sm);
+}
+
 /* static 只读展示（info 绑定概览字段） */
 .static-value {
   font-size: var(--font-size-base);
@@ -988,6 +1054,12 @@ watch(
 }
 .toggle input:checked + .toggle-slider { background: var(--accent); }
 .toggle input:checked + .toggle-slider::before { transform: translateX(1rem); }
+/* 原生 checkbox 被隐藏（opacity: 0），焦点环必须画在可见的滑轨上——
+   否则键盘 Tab 到这里完全看不出焦点在哪。 */
+.toggle input:focus-visible + .toggle-slider {
+  outline: 2px solid var(--accent);
+  outline-offset: 2px;
+}
 
 @media (max-width: 45rem) {
   .setting-item { flex-direction: column; align-items: stretch; gap: 0.4rem; }
