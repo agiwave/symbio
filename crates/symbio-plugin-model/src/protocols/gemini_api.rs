@@ -295,10 +295,20 @@ impl SseLineParser for GeminiProtocol {
                     .get("promptTokenCount")
                     .and_then(|v| v.as_u64())
                     .map(|v| v as u32);
-                let output = um
+                // 思考模型的 `candidatesTokenCount` 不含 `thoughtsTokenCount`；两者都是
+                // 输出侧计费 / 读数，分开丢掉会把 2.5 thinking 的 output 少算一大截。
+                let candidates = um
                     .get("candidatesTokenCount")
                     .and_then(|v| v.as_u64())
                     .map(|v| v as u32);
+                let thoughts = um
+                    .get("thoughtsTokenCount")
+                    .and_then(|v| v.as_u64())
+                    .map(|v| v as u32);
+                let output = match (candidates, thoughts) {
+                    (None, None) => None,
+                    (c, t) => Some(c.unwrap_or(0).saturating_add(t.unwrap_or(0))),
+                };
                 if input.is_some() || output.is_some() {
                     evs.push(ModelProtocolEvent::Usage(ModelUsage { input, output }));
                 }

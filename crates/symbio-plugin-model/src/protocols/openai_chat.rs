@@ -130,6 +130,12 @@ impl ModelProtocol for OpenaiChatProtocol {
             "messages": openai_msgs,
             "temperature": cfg.temperature,
             "stream": true,
+            // 流式下 `usage` 只在最后一个 chunk 出现，且 OpenAI 兼容端点要求显式开启
+            // 才会发。不开的后果不是「少一个统计」：compact 的水位读
+            // `context.request_tokens`，缺席 ⇒ 整格不写 ⇒ 压缩永远不触发；
+            // `session/stats` 的用量列也恒为 0。这里发的是 OpenAI 规范字段，
+            // 兼容端点要么实现、要么忽略，不会改变对话语义。
+            "stream_options": { "include_usage": true },
         });
 
         // 处理 OpenAI Reasoning (o1/o3 等)

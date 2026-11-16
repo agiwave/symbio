@@ -125,7 +125,9 @@ const hd = makeHomedir({
         max_tokens: 8192,
         max_context_tokens: MAX_CONTEXT_TOKENS,
         // 推理模型会把 max_tokens 先花在 reasoning 上；压到 low，避免每轮被长度截断。
-        reasoning: { effort: 'low' },
+        // Anthropic 的 `reasoning` 是另一套形态（开 thinking + 预算），不在压测入口里
+        // 冒充同一个字段；需要时由 provider 自己的配置决定。
+        ...(PROTOCOL === 'openai_chat' ? { reasoning: { effort: 'low' } } : {}),
         enabled: true,
       },
     },
@@ -212,6 +214,11 @@ try {
   const wallMs = Date.now() - startedAt;
   assert(wallMs <= MAX_WALL_MS, `墙钟上界触发：${wallMs}ms > ${MAX_WALL_MS}ms`);
 
+  if (Number(kinds.failed ?? 0) > 0) {
+    console.error(
+      `--- 本轮有 ${kinds.failed} 条 failed 事实（CLI stderr 尾部） ---\n${rt.cli.out.stderr.slice(-1600)}`,
+    );
+  }
   console.log(
     JSON.stringify(
       {
@@ -221,6 +228,7 @@ try {
         turn_ms: turnMs,
         event_count: stats.checkpoint?.event_count,
         compactions: Number(kinds['session.consolidated'] ?? 0),
+        context: stats.context,
         tiers: tiers.map((r) => ({ tier: r.tier, turns: r.turns, p99: r.p99, samples: r.samples })),
         usage,
         kind_counts: kinds,

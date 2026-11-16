@@ -28,6 +28,45 @@ fn partial_json_matches_full_line_at_every_chunk_boundary() {
 }
 
 /// `text` / `partial_json` 这些字段名在别的 `type` 下含义完全不同：
+/// LM Studio 的 `/v1/messages` 在 message_start / message_delta 都带 usage；
+/// `input_tokens` 不含缓存读写，读面必须把 `cache_*` 折进 input，否则压缩水位少算。
+#[test]
+fn usage_folds_cache_tokens_into_input() {
+    let p = AnthropicProtocol::new();
+    let _ = p.parse_line("event: message_start");
+    let evs = p.parse_line(
+        r#"data: {"type":"message_start","message":{"usage":{"input_tokens":11,"cache_read_input_tokens":7,"cache_creation_input_tokens":2}}}"#,
+    );
+    let usage = evs
+        .iter()
+        .find_map(|e| match e {
+            ModelProtocolEvent::Usage(u) => Some(*u),
+            _ => None,
+        })
+        .expect("message_start 应产出 Usage");
+    assert_eq!(usage.input, Some(20), "11 + 7 + 2：缓存读写也占上下文");
+    assert_eq!(usage.output, None, "起始帧没有输出用量");
+
+    let _ = p.parse_line("event: message_delta");
+    let evs = p.parse_line(
+        r#"data: {"type":"message_delta","delta":{"stop_reason":"end_turn"},"usage":{"input_tokens":11,"output_tokens":8,"cache_read_input_tokens":7}}"#,
+    );
+    let usage = evs
+        .iter()
+        .find_map(|e| match e {
+            ModelProtocolEvent::Usage(u) => Some(*u),
+            _ => None,
+        })
+        .expect("message_delta 应产出 Usage");
+    assert_eq!(
+        usage.input,
+        Some(18),
+        "message_delta 也再报一遍输入时不能丢"
+    );
+    assert_eq!(usage.output, Some(8));
+}
+
+/// `text` / `partial_json` 这些字段名在别的 `type` 下含义完全不同：
 /// `message_delta.delta` 里若出现 `text`，按字段名匹配就会凭空吐出正文
 /// （完整行路径不产出任何文本 ⇒ 前端多出一段内容）。顶层 `type` 是唯一护栏。
 #[test]

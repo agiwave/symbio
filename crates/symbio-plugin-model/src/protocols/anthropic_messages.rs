@@ -312,6 +312,26 @@ impl ModelProtocol for AnthropicProtocol {
     }
 }
 
+/// Anthropic 的 `input_tokens` **不含**缓存读写：语义上它是「未命中缓存的输入」，
+/// 上下文窗口与总 prompt 用量要加上 `cache_read_input_tokens` /
+/// `cache_creation_input_tokens`。`ModelUsage` 没有缓存分桶，这里折进 `input`：
+/// 压缩水位读的是 `request_tokens`，少算缓存会让长会话迟迟不触发压缩。
+fn anthropic_input_tokens(usage: &Value) -> Option<u32> {
+    let mut total: u64 = 0;
+    let mut seen = false;
+    for key in [
+        "input_tokens",
+        "cache_read_input_tokens",
+        "cache_creation_input_tokens",
+    ] {
+        if let Some(v) = usage.get(key).and_then(Value::as_u64) {
+            total = total.saturating_add(v);
+            seen = true;
+        }
+    }
+    seen.then(|| total.min(u32::MAX as u64) as u32)
+}
+
 // === 行解析（core 契约） ===
 
 impl SseLineParser for AnthropicProtocol {
@@ -341,16 +361,16 @@ impl SseLineParser for AnthropicProtocol {
             match etype.as_str() {
                 "message_start" => {
                     // 携带 input_tokens（与 message_delta 的 output_tokens 合并为 ModelUsage）
-                    if let Some(in_tok) = json
-                        .get("message")
-                        .and_then(|m| m.get("usage"))
-                        .and_then(|u| u.get("input_tokens"))
-                        .and_then(|v| v.as_u64())
-                    {
-                        evs.push(ModelProtocolEvent::Usage(ModelUsage {
-                            input: Some(in_tok as u32),
-                            output: None,
-                        }));
+                    if let Some(usage) = json.get("message").and_then(|m| m.get("usage")) {
+                        if let Some(input) = anthropic_input_tokens(usage) {
+                            evs.push(ModelProtocolEvent::Usage(ModelUsage {
+                                input: Some(input),
+                                output: usage
+                                    .get("output_tokens")
+                                    .and_then(|v| v.as_u64())
+                                    .map(|v| v as u32),
+                            }));
+                        }
                     }
                 }
                 "message_delta" => {
@@ -364,16 +384,18 @@ impl SseLineParser for AnthropicProtocol {
                             ModelFinishReason::from_provider(Some(stop)),
                         ));
                     }
-                    // 携带 output_tokens
-                    if let Some(out_tok) = json
-                        .get("usage")
-                        .and_then(|u| u.get("output_tokens"))
-                        .and_then(|v| v.as_u64())
-                    {
-                        evs.push(ModelProtocolEvent::Usage(ModelUsage {
-                            input: None,
-                            output: Some(out_tok as u32),
-                        }));
+                    // 携带 output_tokens；部分端点（LM Studio 的 /v1/messages）在这里把
+                    // input_tokens / cache_* 再报一遍，一并读——缺了 message_start 的端点
+                    // 也不会把输入用量丢成缺席。
+                    if let Some(usage) = json.get("usage") {
+                        let input = anthropic_input_tokens(usage);
+                        let output = usage
+                            .get("output_tokens")
+                            .and_then(|v| v.as_u64())
+                            .map(|v| v as u32);
+                        if input.is_some() || output.is_some() {
+                            evs.push(ModelProtocolEvent::Usage(ModelUsage { input, output }));
+                        }
                     }
                 }
                 "content_block_start" => {

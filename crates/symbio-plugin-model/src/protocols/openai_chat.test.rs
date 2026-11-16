@@ -191,6 +191,11 @@ fn prepared_request_carries_exactly_one_system_message() {
     assert_eq!(arr[0]["role"], "system", "它在最前");
     assert_eq!(arr[0]["content"], "基础\n\n记忆段", "两段文本都在，没丢");
     assert_eq!(arr[1]["role"], "user", "后续消息原序跟进");
+    assert_eq!(req["stream"], true, "仍走流式");
+    assert_eq!(
+        req["stream_options"]["include_usage"], true,
+        "流式必须显式要 usage：缺了它，用量列与压缩水位都会静默缺席"
+    );
 }
 
 /// D-444：下行 tools 清单的 function name 按装配期别名表取，命中用别名；

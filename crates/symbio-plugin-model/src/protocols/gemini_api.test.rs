@@ -13,6 +13,22 @@ fn text_delta_matches_full_line_at_every_chunk_boundary() {
     assert_partial_matches_full_line(&GeminiProtocol, TEXT);
 }
 
+/// 思考模型的 `candidatesTokenCount` 不含 `thoughtsTokenCount`；输出读数要相加。
+#[test]
+fn usage_output_includes_thoughts_tokens() {
+    let line = r#"{"usageMetadata":{"promptTokenCount":10,"candidatesTokenCount":5,"thoughtsTokenCount":3}}"#;
+    let evs = GeminiProtocol.parse_line(line);
+    let usage = evs
+        .iter()
+        .find_map(|e| match e {
+            ModelProtocolEvent::Usage(u) => Some(*u),
+            _ => None,
+        })
+        .expect("usageMetadata 应产出 Usage");
+    assert_eq!(usage.input, Some(10));
+    assert_eq!(usage.output, Some(8), "5 个候选 + 3 个思考 token");
+}
+
 /// 一行里多个 `parts` 都要吐，且顺序与完整行一致。
 #[test]
 fn multiple_parts_are_all_extracted_in_order() {
