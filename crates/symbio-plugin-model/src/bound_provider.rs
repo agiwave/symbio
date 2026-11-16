@@ -24,6 +24,7 @@ use std::collections::BTreeMap;
 
 use crate::round::RoundOutput;
 use async_trait::async_trait;
+use serde_json::Value;
 use std::sync::Arc;
 use symbio_plugin_api::chat_node::ChatNode;
 use symbio_plugin_api::plugin_error;
@@ -223,7 +224,7 @@ impl ModelProvider for BoundProvider {
         //
         // 只重发**瞬时**故障（`StreamFailure::transient`）：协议帧里的 `error` 事件是
         // 上游明确拒绝，原样重发只会再被拒，白等 N 次。
-        const MAX_STREAM_RETRIES: u32 = 2;
+        const MAX_STREAM_RETRIES: u32 = 3;
         let mut stream_attempt: u32 = 0;
         let mut out = RoundOutput::default();
         let mut reuse_node_ids: Vec<String> = Vec::new();
@@ -260,8 +261,8 @@ impl ModelProvider for BoundProvider {
                     stream_attempt += 1;
                     plugin_warn!(
                         "model",
-                        "[LLM] 流中途断线，第{stream_attempt}/{MAX_STREAM_RETRIES}次原样重发\
-                         （已建 {} 个工具调用节点将复用 id）",
+                        "[LLM] 流重发，第{stream_attempt}/{MAX_STREAM_RETRIES}次\
+                         （temperature 上调一档，已建 {} 个工具调用节点将复用 id）",
                         out.tool_calls.len()
                     );
                     // 本批播种了却没被触碰的槽位先撤掉：下一批的播种集合只含本批真正
@@ -290,10 +291,17 @@ impl ModelProvider for BoundProvider {
                     }
                     // 响应体已被上一批读掉（`bytes_stream` 消费），必须重新 POST。
                     // 重发请求不再递归重试：请求级语义（含它自己的 4 次重试）已覆盖。
+                    //
+                    // **不再逐字节原样**：空流（200 + finish=stop + 零内容）可能是
+                    // 温度过低采到退化样本，也可能是 prompt cache 把同一请求又喂回
+                    // 同一个 EOS。每次流重试把请求体里的 `temperature` 上调一档
+                    // （封顶 1.0），既保留原提示语义，又强制重新采样。断流重试同样受益。
+                    let retry_body =
+                        retry_body_with_bumped_temperature(&body_bytes, stream_attempt);
                     match execute_post_with_abort(
                         &self.protocol.get_api_url(&self.cfg),
                         self.protocol.get_headers(&self.cfg),
-                        &body_bytes,
+                        &retry_body,
                         abort,
                     )
                     .await
@@ -344,3 +352,51 @@ impl ModelProvider for BoundProvider {
         }
     }
 }
+
+/// 流重试时把请求体里的 `temperature` 上调 `0.2 × attempt`（封顶 1.0）。
+///
+/// 空流与断流都可能由「同一请求再次采到同一个退化样本」造成；原样重发连提示
+/// 缓存都打不破。这里只改采样温度，不改消息、工具表或任何世界语义。请求体不是
+/// JSON（理论上不会）或没有温度字段时原样返回，由调用方按原逻辑重发。
+fn retry_body_with_bumped_temperature(body: &[u8], attempt: u32) -> Vec<u8> {
+    let Ok(mut value) = serde_json::from_slice::<Value>(body) else {
+        return body.to_vec();
+    };
+    if !bump_temperature(&mut value, attempt) {
+        return body.to_vec();
+    }
+    serde_json::to_vec(&value).unwrap_or_else(|_| body.to_vec())
+}
+
+fn bump_temperature(value: &mut Value, attempt: u32) -> bool {
+    match value {
+        Value::Object(map) => {
+            let mut changed = false;
+            if let Some(Value::Number(n)) = map.get_mut("temperature") {
+                if let Some(t) = n.as_f64() {
+                    let next = (t + 0.2 * attempt as f64).min(1.0);
+                    if let Some(bumped) = serde_json::Number::from_f64(next) {
+                        *n = bumped;
+                        changed = true;
+                    }
+                }
+            }
+            for child in map.values_mut() {
+                changed |= bump_temperature(child, attempt);
+            }
+            changed
+        }
+        Value::Array(items) => {
+            let mut changed = false;
+            for child in items {
+                changed |= bump_temperature(child, attempt);
+            }
+            changed
+        }
+        _ => false,
+    }
+}
+
+#[cfg(test)]
+#[path = "bound_provider.test.rs"]
+mod tests;

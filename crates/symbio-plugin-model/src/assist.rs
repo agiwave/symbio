@@ -27,6 +27,7 @@ use std::sync::Arc;
 use serde_json::{json, Value};
 use symbio_plugin_api::chat_node::{ChatNode, MessageContent};
 use symbio_plugin_api::events::{EVENT_CHAT_ASSISTANT_FINAL, EVENT_USER_MESSAGE};
+use symbio_plugin_api::plugin_warn;
 use symbio_plugin_api::port::{
     PortErrorClass, PortExecContext, PortExecutor, PortFact, PortInput, PortOutcome, PortProvider,
 };
@@ -138,7 +139,7 @@ impl PortExecutor for AssistExecutor {
         // 对话线投影：一条事实一条节点，角色由事实给；正文原样交出，由 provider 侧的
         // `flatten_chat_messages` 折成协议消息。这里**不再拼**「用户：…助手：…」——
         // 那会造出第二个投影器，请求形状与主线漂移（t61 / LC-007）。
-        let wire = if request.user.trim().is_empty() {
+        let mut wire = if request.user.trim().is_empty() {
             let facts = exec
                 .reader
                 .as_ref()
@@ -162,6 +163,26 @@ impl PortExecutor for AssistExecutor {
         // 一条消息、无工具表、静默出口：问答不参与对话轮，也不往展示面写帧。
         if wire.is_empty() {
             return PortOutcome::ok();
+        }
+        ensure_user_tail(&mut wire);
+        if std::env::var("SYMBIO_LLM_RAW_DEBUG").is_ok() {
+            let shape = wire
+                .iter()
+                .map(|n| {
+                    (
+                        format!("{:?}", n.principal.as_ref().map(|p| &p.kind)),
+                        n.content
+                            .as_ref()
+                            .map(|c| c.to_text().chars().count())
+                            .unwrap_or(0),
+                    )
+                })
+                .collect::<Vec<_>>();
+            plugin_warn!(
+                "model",
+                "[assist] system_len={} wire={shape:?}",
+                request.system.chars().count()
+            );
         }
         let env = ExecEnv::new(ExecEventSink::silent(), exec.abort.clone());
         let started = std::time::Instant::now();
@@ -211,6 +232,28 @@ impl PortExecutor for AssistExecutor {
             }
             Err(error) => PortOutcome::failed(PortErrorClass::NonRetryable, error.to_string()),
         }
+    }
+}
+
+/// 问答线从事实投影时最后一条通常是**助手终答**。模型看到「已经答完的对话」会直接
+/// 收尾：LM Studio 的 lfm2.5 实测回过 `200 + finish=stop + 1` 个 completion token
+/// （零正文、零推理），压缩因此永远拿不到摘要。补一条用户侧收束指令，把请求还原成
+/// 完整问答；它只是本请求的提示，不落事实、不改世界语义，也不关闭 reasoning。
+fn ensure_user_tail(wire: &mut Vec<ChatNode>) {
+    let ends_with_agent = wire
+        .last()
+        .and_then(|n| n.principal.as_ref())
+        .map(|p| matches!(p.kind, PrincipalKind::Agent))
+        .unwrap_or(false);
+    if ends_with_agent {
+        wire.push(ChatNode {
+            id: llm_short_id(),
+            principal: Some(Principal::new(PrincipalKind::Person, "person/local")),
+            content: Some(MessageContent::Text(
+                "请按 system 指令给出最终答复。".into(),
+            )),
+            ..Default::default()
+        });
     }
 }
 

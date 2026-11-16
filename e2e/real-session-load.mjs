@@ -71,6 +71,7 @@ const MAX_CONTEXT_TOKENS = numArg(
   'max-context-tokens',
   Number(process.env.SYMBIO_LOAD_MAX_CONTEXT_TOKENS ?? 32_768),
 );
+const AWAIT_COMPACTION_MS = numArg('await-compaction-ms', 0);
 const API_BASE = process.env.SYMBIO_LOAD_API_BASE;
 const API_KEY = process.env.SYMBIO_LOAD_API_KEY ?? '';
 const MODEL = process.env.SYMBIO_LOAD_MODEL;
@@ -173,12 +174,27 @@ try {
     turnMs.push(Date.now() - t0);
   }
 
-  const statsResp = await cli.invoke('session/stats', {}, { session_id: SID });
-  stats = statsResp.body?.data;
-  assert(
-    stats,
-    `session/stats 应带 data 载荷（status=${statsResp.status}, body=${JSON.stringify(statsResp.body)?.slice(0, 600)}）`,
-  );
+  const readStats = async () => {
+    const resp = await cli.invoke('session/stats', {}, { session_id: SID });
+    assert(
+      resp.body?.data,
+      `session/stats 应带 data 载荷（status=${resp.status}, body=${JSON.stringify(resp.body)?.slice(0, 600)}）`,
+    );
+    return resp.body.data;
+  };
+  stats = await readStats();
+  if (AWAIT_COMPACTION_MS > 0) {
+    // 压缩由 turn 收束后的债处理触发，可能晚于「会话 settle」；等它落格再读数，
+    // 否则会把「还在跑」误判成「没有压缩」。
+    const deadline = Date.now() + AWAIT_COMPACTION_MS;
+    while (
+      Date.now() < deadline &&
+      Number(stats.checkpoint?.kind_counts?.['session.consolidated'] ?? 0) === 0
+    ) {
+      await new Promise((r) => setTimeout(r, 500));
+      stats = await readStats();
+    }
+  }
   assert(stats.has_wal, '跑过真实轮次 ⇒ 事实源应在');
   assert(
     Array.isArray(stats.invariants) && stats.invariants.length === 0,
@@ -214,7 +230,9 @@ try {
   const wallMs = Date.now() - startedAt;
   assert(wallMs <= MAX_WALL_MS, `墙钟上界触发：${wallMs}ms > ${MAX_WALL_MS}ms`);
 
-  if (Number(kinds.failed ?? 0) > 0) {
+  if (process.env.SYMBIO_LLM_RAW_DEBUG) {
+    console.error(rt.cli.out.stderr);
+  } else if (Number(kinds.failed ?? 0) > 0) {
     console.error(
       `--- 本轮有 ${kinds.failed} 条 failed 事实（CLI stderr 尾部） ---\n${rt.cli.out.stderr.slice(-1600)}`,
     );

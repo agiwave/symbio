@@ -290,6 +290,8 @@ pub async fn parse_sse_stream(
     let mut first_content_logged = false;
     let mut chunk_count: u64 = 0;
     let mut total_bytes: u64 = 0;
+    let raw_debug = std::env::var("SYMBIO_LLM_RAW_DEBUG").is_ok();
+    let mut raw_tail: Vec<String> = Vec::new();
 
     let mut progress = LineProgress::default();
     // 超限调用集合（见 `dispatch_and_track` 的 ToolCallDelta 分支）。
@@ -390,6 +392,12 @@ pub async fn parse_sse_stream(
             let line_bytes = buffer.drain(..p + 1).collect::<Vec<_>>();
             let line_str = String::from_utf8_lossy(&line_bytes);
             let trimmed = line_str.trim();
+            if raw_debug && !trimmed.is_empty() {
+                if raw_tail.len() >= 6 {
+                    raw_tail.remove(0);
+                }
+                raw_tail.push(trimmed.chars().take(400).collect());
+            }
             if !trimmed.is_empty() {
                 for mut event in parser.parse_line(trimmed) {
                     // 扣除已经通过增量模式发送的部分
@@ -539,14 +547,36 @@ pub async fn parse_sse_stream(
     if abort.is_aborted() {
         // 中止已在上方记录，此处不重复。
     } else if out.text.is_empty() && out.reasoning.is_empty() && out.tool_calls.is_empty() {
+        // 空流不是「成功的空回答」：没有正文、没有推理、没有工具调用，调用方拿不到
+        // 任何可落格的东西。上游偶发返回这种流（200 + finish=stop + 零内容）时，
+        // 原样重发是安全的（`bound_provider` 的流重试轴）；停在 Ok 会把一次瞬时故障
+        // 变成下游的 `non_retryable_empty_summary`，压缩因此永久少一段。
+        // `finish=length` 的零内容更像确定性截断，重发只是白等，标非瞬时。
+        let message = format!(
+            "上游返回空流（root={}, {} chunks / {} bytes, finish={:?}）：没有正文、推理或工具调用",
+            root_id, chunk_count, total_bytes, out.finish
+        );
         plugin_warn!(
             "model",
-            "[LLM] 流结束但未产出任何内容（空流，{} chunks / {} bytes, 耗时 {:?}, finish={:?}）——上游可能返回了错误页或空响应",
-            chunk_count,
-            total_bytes,
-            started.elapsed(),
-            out.finish
+            "[LLM] {}——按{}故障处理",
+            message,
+            if out.finish.is_length() {
+                "非瞬时"
+            } else {
+                "瞬时"
+            }
         );
+        if raw_debug {
+            plugin_warn!(
+                "model",
+                "[LLM] 空流原始行（SYMBIO_LLM_RAW_DEBUG）：{}",
+                raw_tail.join(" ⏎ ")
+            );
+        }
+        return Err(StreamFailure {
+            message,
+            transient: !out.finish.is_length(),
+        });
     } else {
         plugin_info!(
             "model",

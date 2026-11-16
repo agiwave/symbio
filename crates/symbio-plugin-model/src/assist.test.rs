@@ -114,3 +114,29 @@ fn text_of(node: &ChatNode) -> String {
         .map(MessageContent::to_text)
         .unwrap_or_default()
 }
+
+/// 一次性问答以 Agent 终答结尾时，模型会把它当成「已答完」而直接 EOS；
+/// 补的用户回合必须只在 Agent 结尾发生，且不重复追加。
+#[test]
+fn ensure_user_tail_appends_only_after_agent() {
+    let mut wire = vec![ChatNode {
+        principal: Some(Principal::new(PrincipalKind::Person, "person/local")),
+        content: Some(MessageContent::Text("问".into())),
+        ..Default::default()
+    }];
+    ensure_user_tail(&mut wire);
+    assert_eq!(wire.len(), 1, "已经是用户结尾，不得追加");
+
+    wire.push(ChatNode {
+        principal: Some(Principal::new(PrincipalKind::Agent, "session/main")),
+        content: Some(MessageContent::Text("答".into())),
+        ..Default::default()
+    });
+    ensure_user_tail(&mut wire);
+    ensure_user_tail(&mut wire);
+    assert_eq!(wire.len(), 3, "只补一条，重复调用不得叠加");
+    assert!(matches!(
+        wire.last().unwrap().principal.as_ref().unwrap().kind,
+        PrincipalKind::Person
+    ));
+}
