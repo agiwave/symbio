@@ -9,6 +9,7 @@
         <textarea
           v-model="editing.content"
           class="edit-area"
+          aria-label="编辑消息内容"
           :placeholder="editing.isJson ? 'JSON 内容' : '消息内容'"
         />
         <div class="edit-btns">

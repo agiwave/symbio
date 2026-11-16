@@ -77,7 +77,7 @@ node e2e/run-tests.mjs # 端到端：mock LLM / MCP / HTTP，不需要真 API Ke
 symbio/
 ├── crates/ # Rust：symbio-kernel（语法）· symbio-contract（插件 ABI 契约）· symbio-sdk（机制）· symbio-plugin-api（门面）· 插件与 provider 各一 crate · symbio-cli
 ├── tauri/ # Vue 3 桌面端（src-tauri = 3 命令的薄适配层）
-├── docs/ # 系统级文档（目标 / 场景 / 计划 / 架构 / 参考 / 指南 / 规范 / 任务 / 决策，历史在 archive/）
+├── docs/ # 系统级文档（目标 / 场景 / 计划 / 架构 / 参考 / 指南 / 规范 / 任务 / 决策；历史只在 git log）
 ├── e2e/ # 端到端用例（mock LLM / MCP / HTTP + 网关 WS）
 ├── examples/ # Agent 示例包
 └── scripts/ # 事实表生成、判据审计与门禁

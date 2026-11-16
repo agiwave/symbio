@@ -74,6 +74,7 @@
                 v-model="customInput[q.id]"
                 class="up-other-input"
                 type="text"
+                aria-label="其他回答"
                 placeholder="请输入…"
                 :disabled="isAnswered || !isChosen(q.id, MESSAGE_PROMPT_OTHER)"
               />

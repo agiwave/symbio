@@ -15,6 +15,7 @@
       ref="textareaRef"
       v-model="content"
       class="code-textarea"
+      aria-label="代码内容"
       :placeholder="'输入内容...'"
       :readonly="readonly"
       @input="onInput"

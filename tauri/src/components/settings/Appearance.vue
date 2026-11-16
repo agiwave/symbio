@@ -123,6 +123,7 @@
         <input
           v-model.number="sound.volume"
           class="volume-input"
+          aria-label="提示音音量"
           type="range"
           min="0"
           max="1"

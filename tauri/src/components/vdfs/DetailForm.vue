@@ -107,6 +107,7 @@
             <select
               v-else-if="specOf(f).tag === 'select'"
               v-model="form[f.key]"
+              :aria-label="f.label"
               :disabled="fieldDisabled(f)"
               @change="onPresetFieldChange(f)"
             >
@@ -117,6 +118,7 @@
             <textarea
               v-else-if="specOf(f).tag === 'textarea'"
               v-model="form[f.key]"
+              :aria-label="f.label"
               :rows="f.rows ?? 3"
               :placeholder="widgetPlaceholderOf(f)"
               :disabled="fieldDisabled(f)"
@@ -128,6 +130,7 @@
               <input
                 v-model="form[f.key]"
                 :type="reveal[f.key] ? 'text' : 'password'"
+                :aria-label="f.label"
                 :placeholder="f.placeholder"
                 :disabled="fieldDisabled(f)"
               />
@@ -152,6 +155,7 @@
               v-else-if="specOf(f).inputType === 'number'"
               v-model.number="form[f.key]"
               type="number"
+              :aria-label="f.label"
               :min="f.min"
               :max="f.max"
               :step="f.step"
@@ -164,6 +168,7 @@
                 v-model="form[f.key]"
                 type="text"
                 :list="`dl-${uid}-${f.key}`"
+                :aria-label="f.label"
                 :placeholder="f.placeholder"
                 :disabled="fieldDisabled(f)"
               />
@@ -176,6 +181,7 @@
               <input
                 v-model="form[f.key]"
                 :type="specOf(f).inputType ?? 'text'"
+                :aria-label="f.label"
                 :placeholder="widgetPlaceholderOf(f)"
                 :disabled="fieldDisabled(f)"
               />
@@ -221,6 +227,7 @@
       class="pack-input"
       tabindex="-1"
       aria-hidden="true"
+      aria-label="选择动作载荷文件"
       @change="onPackChange"
     />
   </DetailShell>

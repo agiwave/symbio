@@ -76,6 +76,7 @@
           <textarea
             v-model="supplyArgsText"
             class="supply-textarea"
+            aria-label="补充工具参数（JSON）"
             placeholder='{"key":"value"}  (与原参数浅合并)'
             rows="4"
           />

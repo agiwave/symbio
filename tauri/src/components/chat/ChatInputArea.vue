@@ -27,11 +27,13 @@
         accept="image/*"
         multiple
         style="display: none"
+        aria-label="选择图片"
         @change="handleImageSelect"
       />
       <textarea
         ref="textareaRef"
         v-model="modelValue"
+        aria-label="消息输入"
         placeholder="输入消息... (可粘贴图片)"
         @keydown.enter.exact="handleKeydown"
         @paste="handlePaste"

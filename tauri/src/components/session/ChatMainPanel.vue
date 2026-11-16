@@ -9,6 +9,7 @@
           ref="renameInputRef"
           v-model="draftTitle"
           class="rename-input"
+          aria-label="会话标题"
           spellcheck="false"
           @keyup.enter="submitRename"
           @keyup.esc="cancelRename"
