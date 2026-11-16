@@ -23,16 +23,16 @@ const PRINCIPAL: &str = "session/main";
 ///
 /// `root_id` 指向这一轮的开轮事实（`user.message` 的 event id）；本文件里测试把
 /// 第 1 个参数当作**轮的身份**，收束格与它同名，于是配对与生产同构。
-fn dispatch(turn_id: &str, tier: &str, seq: u64, ts: i64) -> Event {
+fn dispatch(round_id: &str, tier: &str, seq: u64, ts: i64) -> Event {
     let mut e = Event::pending(
-        format!("{turn_id}.dispatch"),
+        format!("{round_id}.dispatch"),
         EVENT_TURN_DISPATCH,
         Entity::Scope,
         Verb::Asserted,
         PRINCIPAL,
     )
     .with_ts(ts)
-    .with_payload(json!({ "root_id": turn_id, "tier": tier, "principal": PRINCIPAL }));
+    .with_payload(json!({ "root_id": round_id, "tier": tier, "principal": PRINCIPAL }));
     e.seq = Some(Seq::new(seq));
     e
 }
@@ -53,7 +53,7 @@ fn user_message(id: &str, seq: u64, ts: i64) -> Event {
 }
 
 /// 成功收束（`chat.assistant.final`），带实测耗时；`root_id` 是它所属的开轮事实 id。
-fn final_reply(id: &str, turn_id: &str, cost_ms: u64, seq: u64, ts: i64) -> Event {
+fn final_reply(id: &str, round_id: &str, cost_ms: u64, seq: u64, ts: i64) -> Event {
     let mut e = Event::pending(
         id,
         EVENT_CHAT_ASSISTANT_FINAL,
@@ -63,13 +63,13 @@ fn final_reply(id: &str, turn_id: &str, cost_ms: u64, seq: u64, ts: i64) -> Even
     )
     .with_ts(ts)
     .with_cost_ms(cost_ms)
-    .with_payload(json!({ "text": "答", "root_id": turn_id }));
+    .with_payload(json!({ "text": "答", "root_id": round_id }));
     e.seq = Some(Seq::new(seq));
     e
 }
 
 /// 兜底收束（`chat.assistant.fallback`），同样带耗时——但它**不是**时延样本。
-fn fallback_reply(id: &str, turn_id: &str, cost_ms: u64, seq: u64, ts: i64) -> Event {
+fn fallback_reply(id: &str, round_id: &str, cost_ms: u64, seq: u64, ts: i64) -> Event {
     let mut e = Event::pending(
         id,
         EVENT_CHAT_ASSISTANT_FALLBACK,
@@ -79,7 +79,7 @@ fn fallback_reply(id: &str, turn_id: &str, cost_ms: u64, seq: u64, ts: i64) -> E
     )
     .with_ts(ts)
     .with_cost_ms(cost_ms)
-    .with_payload(json!({ "text": "兜底", "root_id": turn_id }));
+    .with_payload(json!({ "text": "兜底", "root_id": round_id }));
     e.seq = Some(Seq::new(seq));
     e
 }

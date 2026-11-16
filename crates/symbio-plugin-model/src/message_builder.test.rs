@@ -18,7 +18,7 @@ use super::*;
 
 use symbio_plugin_api::chat_node::{NodeKind, NodeStatus};
 
-const TURN_ID: &str = "turn-0001";
+const ROUND_ID: &str = "turn-0001";
 
 /// 身份写 `principal`（D-147）：本文件的树模仿**落库面**（见文件头），
 /// `role` 只是反序列化落点，不是写侧的身份来源。
@@ -34,9 +34,9 @@ fn principal_for(role: NodeRole) -> symbio_plugin_api::principal::Principal {
 
 /// 本地构造一棵落库树（Turn 根 + 传入的子节点），形状同
 /// `llm_build_assistant_messages` 的产物——形状契约见文件头说明。
-fn turn_tree(children: Vec<ChatNode>) -> Vec<ChatNode> {
+fn round_tree(children: Vec<ChatNode>) -> Vec<ChatNode> {
     let mut msgs = vec![ChatNode {
-        id: TURN_ID.to_string(),
+        id: ROUND_ID.to_string(),
         parent_id: None,
         principal: Some(principal_for(NodeRole::Assistant)),
         msg_type: Some(NodeKind::Skeleton),
@@ -50,11 +50,11 @@ fn turn_tree(children: Vec<ChatNode>) -> Vec<ChatNode> {
     msgs
 }
 
-/// 落库树的一个子节点（`parent_id` 指向 [`TURN_ID`]）。
+/// 落库树的一个子节点（`parent_id` 指向 [`ROUND_ID`]）。
 fn child(id: &str, ty: NodeKind, text: &str) -> ChatNode {
     ChatNode {
         id: id.to_string(),
-        parent_id: Some(TURN_ID.to_string()),
+        parent_id: Some(ROUND_ID.to_string()),
         principal: Some(principal_for(NodeRole::Assistant)),
         msg_type: Some(ty),
         content: Some(MessageContent::Text(text.into())),
@@ -71,8 +71,8 @@ fn child(id: &str, ty: NodeKind, text: &str) -> ChatNode {
 #[test]
 fn tool_call_args_passthrough_as_string_without_reserialize() {
     // ToolCall 必须挂在根级 Turn（assistant）之下才会被聚合成 tool_calls。
-    let turn = ChatNode {
-        id: TURN_ID.to_string(),
+    let round = ChatNode {
+        id: ROUND_ID.to_string(),
         parent_id: None,
         principal: Some(principal_for(NodeRole::Assistant)),
         msg_type: Some(NodeKind::Skeleton),
@@ -83,7 +83,7 @@ fn tool_call_args_passthrough_as_string_without_reserialize() {
 
     let tc = ChatNode {
         id: "tc-1".to_string(),
-        parent_id: Some(TURN_ID.to_string()),
+        parent_id: Some(ROUND_ID.to_string()),
         principal: Some(principal_for(NodeRole::Assistant)),
         msg_type: Some(NodeKind::Skeleton),
         meta: Some(serde_json::json!({"style_tag": "tool", "tool_name": "echo"})),
@@ -94,7 +94,7 @@ fn tool_call_args_passthrough_as_string_without_reserialize() {
         ..Default::default()
     };
 
-    let native = flatten_chat_messages(&[turn, tc]);
+    let native = flatten_chat_messages(&[round, tc]);
     let tool_calls = native
         .iter()
         .find_map(|m| m.tool_calls.as_ref())
@@ -121,7 +121,7 @@ fn tool_call_args_passthrough_as_string_without_reserialize() {
 #[test]
 fn reasoning_only_flattens_to_single_assistant_message() {
     let reasoning = "只有思考";
-    let msgs = turn_tree(vec![child("turn-0001-reason", NodeKind::Body, reasoning)]);
+    let msgs = round_tree(vec![child("turn-0001-reason", NodeKind::Body, reasoning)]);
 
     let natives = flatten_chat_messages(&msgs);
     assert_eq!(natives.len(), 1, "应只产生一条 assistant native message");
@@ -142,7 +142,7 @@ fn reasoning_only_flattens_to_single_assistant_message() {
 /// `crates/symbio-plugin-loop/src/message_build.test.rs` 的用例 B（见文件头说明）。
 #[test]
 fn reasoning_with_reply_flattens_into_content_and_reasoning_content() {
-    let msgs = turn_tree(vec![
+    let msgs = round_tree(vec![
         child("turn-0001-reason", NodeKind::Notice, "思考过程")
             .with_style_tag(symbio_plugin_api::chat_node::CHAT_STYLE_TAG_REASONING),
         child("turn-0001-text", NodeKind::Body, "正常回复"),
@@ -164,10 +164,10 @@ fn reasoning_with_reply_flattens_into_content_and_reasoning_content() {
 /// 防止上下文完全没有思考时模型重复思考，同时避免全量回传浪费 token。
 #[test]
 fn flatten_keeps_only_recent_reasoning_in_request_view() {
-    let mk_turn = |turn_id: &str, reasoning: &str, reply: &str| -> Vec<ChatNode> {
+    let mk_turn = |round_id: &str, reasoning: &str, reply: &str| -> Vec<ChatNode> {
         vec![
             ChatNode {
-                id: turn_id.into(),
+                id: round_id.into(),
                 parent_id: None,
                 principal: Some(principal_for(NodeRole::Assistant)),
                 msg_type: Some(NodeKind::Skeleton),
@@ -178,8 +178,8 @@ fn flatten_keeps_only_recent_reasoning_in_request_view() {
                 ..Default::default()
             },
             ChatNode {
-                id: format!("{turn_id}-reason"),
-                parent_id: Some(turn_id.into()),
+                id: format!("{round_id}-reason"),
+                parent_id: Some(round_id.into()),
                 principal: Some(principal_for(NodeRole::Assistant)),
                 msg_type: Some(NodeKind::Notice),
                 meta: Some(serde_json::json!({"style_tag": "reasoning"})),
@@ -189,8 +189,8 @@ fn flatten_keeps_only_recent_reasoning_in_request_view() {
                 ..Default::default()
             },
             ChatNode {
-                id: format!("{turn_id}-text"),
-                parent_id: Some(turn_id.into()),
+                id: format!("{round_id}-text"),
+                parent_id: Some(round_id.into()),
                 principal: Some(principal_for(NodeRole::Assistant)),
                 msg_type: Some(NodeKind::Body),
                 content: Some(MessageContent::Text(reply.into())),
@@ -251,7 +251,7 @@ fn flatten_keeps_only_recent_reasoning_in_request_view() {
 /// 会携带非法 tool_call_id → provider 报 400 "messages[N]: data did not match any variant"。
 #[test]
 fn orphan_tool_result_is_dropped() {
-    let turn_id = "turn-orphan";
+    let round_id = "turn-orphan";
     let dead_tc_id = "tc-already-filtered"; // 该 tool_call 已被上下文过滤，列表中不存在
 
     let msgs = vec![
@@ -266,7 +266,7 @@ fn orphan_tool_result_is_dropped() {
             ..Default::default()
         },
         ChatNode {
-            id: turn_id.into(),
+            id: round_id.into(),
             parent_id: None,
             principal: Some(principal_for(NodeRole::Assistant)),
             msg_type: Some(NodeKind::Skeleton),
@@ -278,7 +278,7 @@ fn orphan_tool_result_is_dropped() {
         },
         ChatNode {
             id: "r1".into(),
-            parent_id: Some(turn_id.into()),
+            parent_id: Some(round_id.into()),
             principal: Some(principal_for(NodeRole::Assistant)),
             msg_type: Some(NodeKind::Body),
             content: Some(MessageContent::Text("ok".into())),
@@ -310,7 +310,7 @@ fn orphan_tool_result_is_dropped() {
 /// 防止清洗逻辑误伤正常链路。
 #[test]
 fn linked_tool_result_is_retained() {
-    let turn_id = "turn-linked";
+    let round_id = "turn-linked";
     let tc_id = "tc-linked";
 
     let msgs = vec![
@@ -325,7 +325,7 @@ fn linked_tool_result_is_retained() {
             ..Default::default()
         },
         ChatNode {
-            id: turn_id.into(),
+            id: round_id.into(),
             parent_id: None,
             principal: Some(principal_for(NodeRole::Assistant)),
             msg_type: Some(NodeKind::Skeleton),
@@ -337,7 +337,7 @@ fn linked_tool_result_is_retained() {
         },
         ChatNode {
             id: "r1".into(),
-            parent_id: Some(turn_id.into()),
+            parent_id: Some(round_id.into()),
             principal: Some(principal_for(NodeRole::Assistant)),
             msg_type: Some(NodeKind::Body),
             content: Some(MessageContent::Text("let me read".into())),
@@ -347,7 +347,7 @@ fn linked_tool_result_is_retained() {
         },
         ChatNode {
             id: tc_id.into(),
-            parent_id: Some(turn_id.into()),
+            parent_id: Some(round_id.into()),
             principal: Some(principal_for(NodeRole::Assistant)),
             msg_type: Some(NodeKind::Skeleton),
             meta: Some(serde_json::json!({"style_tag": "tool", "tool_name": "read_file"})),
@@ -626,10 +626,10 @@ fn interrupted_tool_call_gets_placeholder_result() {
 /// 触发 Anthropic tool_result 的 is_error=true；成功的工具结果保持 None。
 #[test]
 fn failed_tool_result_sets_success_false() {
-    let mk_turn_with_tool = |turn_id: &str, tc_id: &str, res_id: &str, failed: bool| {
+    let mk_turn_with_tool = |round_id: &str, tc_id: &str, res_id: &str, failed: bool| {
         vec![
             ChatNode {
-                id: turn_id.into(),
+                id: round_id.into(),
                 parent_id: None,
                 principal: Some(principal_for(NodeRole::Assistant)),
                 msg_type: Some(NodeKind::Skeleton),
@@ -641,7 +641,7 @@ fn failed_tool_result_sets_success_false() {
             },
             ChatNode {
                 id: tc_id.into(),
-                parent_id: Some(turn_id.into()),
+                parent_id: Some(round_id.into()),
                 principal: Some(principal_for(NodeRole::Assistant)),
                 msg_type: Some(NodeKind::Skeleton),
                 meta: Some(serde_json::json!({"style_tag": "tool", "tool_name": "read_file"})),

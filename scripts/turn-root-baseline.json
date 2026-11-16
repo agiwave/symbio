@@ -3,7 +3,7 @@
   "faces": {
     "F1": {
       "prod": 38,
-      "test": 135
+      "test": 74
     },
     "F2": {
       "prod": 11,
@@ -23,6 +23,11 @@
     }
   },
   "adjustments": [
+    {
+      "date": "2026-11-16",
+      "faces": "F1.test",
+      "reason": "测试私有符号改名（常量 `TURN_ID`→`ROUND_ID`、私有 fn `turn_tree`→`round_tree`、闭包形参/局部变量 `turn_id`/`turn`→`round_*`、测试函数名 `turn_window_eviction...`→`round_window_eviction...`）：全部是 `*.test.rs` 内的私有符号，非 serde 载体、非数据字面量、非跨模块引用，`SP-003` 纪律 0——模块内部修改不算架构调整、不需裁决单。同步改了 `rebuild.test.rs` 里 `let turn` 的两个字段访问以保编译。字符串字面量（`\"turn-0001\"`/`\"port\":\"turn\"`/`\"turn-orphan\"`）、对生产符号 `turn_root_of` 的 9 处引用、以及复述旧概念的断言文案均未动，属数据契约/待生产面裁决，不在本批。F1 测试面 135 → 74 为**实测收窄**；目标 0 不变。"
+    },
     {
       "date": "2026-11-16",
       "faces": "F1.prod / F1.test",

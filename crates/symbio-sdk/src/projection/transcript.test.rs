@@ -37,9 +37,9 @@ fn entries(events: &[Event]) -> Vec<(String, String)> {
         .collect()
 }
 
-fn user(turn: u64, node: &str, text: &str) -> Event {
+fn user(round: u64, node: &str, text: &str) -> Event {
     Event::pending(
-        format!("u-{turn}"),
+        format!("u-{round}"),
         EVENT_USER_MESSAGE,
         Entity::Scope,
         Verb::Opened,
@@ -49,9 +49,9 @@ fn user(turn: u64, node: &str, text: &str) -> Event {
 }
 
 /// 一条收束格。`text_id` 就是它在读侧的**节点身份**（与写侧 `produced_payload` 同源）。
-fn assistant(turn: u64, text_id: &str, text: &str) -> Event {
+fn assistant(round: u64, text_id: &str, text: &str) -> Event {
     Event::pending(
-        format!("f-{turn}"),
+        format!("f-{round}"),
         EVENT_CHAT_ASSISTANT_FINAL,
         Entity::Scope,
         Verb::Closed,
@@ -60,7 +60,7 @@ fn assistant(turn: u64, text_id: &str, text: &str) -> Event {
     .with_payload(serde_json::json!({
         "text": text,
         "model": "deep",
-        "root_id": format!("t-{turn}"),
+        "root_id": format!("t-{round}"),
         "text_id": text_id,
     }))
 }

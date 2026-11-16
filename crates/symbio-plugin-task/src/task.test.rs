@@ -88,14 +88,14 @@ fn snapshot_node(id: &str) -> symbio_plugin_api::chat_node::ChatNode {
 /// 走的是**生产那条通路**（DE-025 D-207）：拼一次调用的纯值 → 交效果端口问
 /// 能力包要草稿 → 经唯一写入口落格。测试因此同时钉住两件事：任务的成格判据，
 /// 以及「这条效果确实由 `task_table` 的声明选出来」。
-fn write_all(store: &EventStore, turn: u64, decls: &[Decl]) {
+fn write_all(store: &EventStore, round: u64, decls: &[Decl]) {
     // 任务事件的溯源锚 = 本轮用户格。夹具此前写死 `0`：日志从 0 起时那条边
     // 指向**自己**（I2 只查非空所以一直是绿的）。没有根就先种一条，锚点取它。
     let anchor = match store.range(Seq::new(0)).first() {
         Some(e) => e.seq.map(|s| s.value()).unwrap_or(0),
         None => store
             .append(Event::pending(
-                format!("u-{turn}"),
+                format!("u-{round}"),
                 symbio_plugin_api::events::EVENT_USER_MESSAGE,
                 Entity::Scope,
                 Verb::Opened,
@@ -107,7 +107,7 @@ fn write_all(store: &EventStore, turn: u64, decls: &[Decl]) {
     let items: Vec<TaskItem> = decls.iter().flat_map(|d| d.0.clone()).collect();
     let input = EffectInput {
         tool: "local/todo_write".into(),
-        call_id: format!("call-{turn}"),
+        call_id: format!("call-{round}"),
         args: args_of(&items),
         success: true,
         result: String::new(),
@@ -115,7 +115,7 @@ fn write_all(store: &EventStore, turn: u64, decls: &[Decl]) {
         declared: &[TASK_TABLE_BEHAVIOR],
     };
     let snapshot = store.range(Seq::new(0));
-    let stem = format!("t{turn}");
+    let stem = format!("t{round}");
     let env = EffectEnv {
         anchor: &stem,
         user_seq: anchor,
@@ -652,7 +652,7 @@ fn effect(call_id: &str, args: serde_json::Value, success: bool) -> EffectInput 
 /// 走一次效果端口：拿草稿、落格。返回本次落下的 kind 序列。
 fn apply_effects(
     store: &EventStore,
-    turn: u64,
+    round: u64,
     anchor: u64,
     inputs: &[EffectInput],
 ) -> Vec<String> {
@@ -660,7 +660,7 @@ fn apply_effects(
     let mut kinds = Vec::new();
     for input in inputs {
         let snapshot = store.range(Seq::new(0));
-        let stem = format!("t{turn}");
+        let stem = format!("t{round}");
         let env = EffectEnv {
             anchor: &stem,
             user_seq: anchor,

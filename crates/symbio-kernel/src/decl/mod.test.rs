@@ -14,10 +14,10 @@ use super::*;
 
 /// 未入库事件默认 `seq = None`；视图的幕锚 / 阶段折叠读的是确切的序号，
 /// 因此用例里的每条事件都按**调用顺序**分配一个递增序号。
-fn ev(turn: u64, kind: &str, payload: Value) -> Event {
+fn ev(round: u64, kind: &str, payload: Value) -> Event {
     static NEXT: AtomicU64 = AtomicU64::new(1);
     let mut e = Event::pending(
-        format!("{kind}-{turn}-{}", payload.to_string().len()),
+        format!("{kind}-{round}-{}", payload.to_string().len()),
         kind,
         Entity::Scope,
         Verb::Asserted,

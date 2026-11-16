@@ -428,13 +428,13 @@ fn fallback_carries_the_failure_reason_onto_the_turn_node() {
             .any(|m| m.id == "u-node" && m.msg_type == Some(NodeKind::Skeleton)),
         "不存在独立的 Turn 骨架：它就是用户节点"
     );
-    let turn = got
+    let round = got
         .iter()
         .find(|m| m.id == "u-node")
         .expect("用户节点即轮节点");
-    assert_eq!(turn.status, Some(NodeStatus::Failed));
+    assert_eq!(round.status, Some(NodeStatus::Failed));
     assert_eq!(
-        turn.error.as_deref(),
+        round.error.as_deref(),
         Some("model returned empty text"),
         "失败原因进轮节点的 error——否则交代条只有一句话都没有"
     );

@@ -46,20 +46,20 @@ fn request_messages(view: &TranscriptView) -> Vec<TranscriptEntry> {
         .collect()
 }
 
-fn user_turn(turn: u64, text: &str) -> Event {
+fn user_turn(round: u64, text: &str) -> Event {
     Event::pending(
-        format!("u-{turn}"),
+        format!("u-{round}"),
         EVENT_USER_MESSAGE,
         Entity::Scope,
         Verb::Opened,
         "user",
     )
-    .with_payload(serde_json::json!({ "text": text, "tier": "deep", "id": format!("u-{turn}") }))
+    .with_payload(serde_json::json!({ "text": text, "tier": "deep", "id": format!("u-{round}") }))
 }
 
-fn assistant_turn(turn: u64, text: &str) -> Event {
+fn assistant_turn(round: u64, text: &str) -> Event {
     Event::pending(
-        format!("f-{turn}"),
+        format!("f-{round}"),
         EVENT_CHAT_ASSISTANT_FINAL,
         Entity::Scope,
         Verb::Closed,
@@ -68,14 +68,14 @@ fn assistant_turn(turn: u64, text: &str) -> Event {
     .with_payload(serde_json::json!({
         "text": text,
         "model": "deep",
-        "root_id": format!("t-{turn}"),
-        "text_id": format!("f-{turn}-text"),
+        "root_id": format!("t-{round}"),
+        "text_id": format!("f-{round}-text"),
     }))
 }
 
-fn artifact(turn: u64, tool: &str, text: &str) -> Event {
+fn artifact(round: u64, tool: &str, text: &str) -> Event {
     Event::pending(
-        format!("a-{turn}-0"),
+        format!("a-{round}-0"),
         EVENT_ARTIFACT_ADDED,
         Entity::Artifact,
         Verb::Asserted,
@@ -181,9 +181,9 @@ fn the_fidelity_check_reports_every_gap_it_claims_to() {
 }
 
 /// 轮边界汇报一格事实。
-fn report(turn: u64, text: &str) -> Event {
+fn report(round: u64, text: &str) -> Event {
     Event::pending(
-        format!("r-{turn}"),
+        format!("r-{round}"),
         EVENT_CHAT_ASSISTANT_REPORTED,
         Entity::Scope,
         Verb::Asserted,

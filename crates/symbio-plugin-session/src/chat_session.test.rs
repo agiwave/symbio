@@ -499,7 +499,7 @@ async fn prune_on_write_lands_a_removed_fact() {
 
 /// **同一判据的另一半**：轮次窗口淘汰（`max_messages`）同样是列表变更，必须落事实。
 #[tokio::test]
-async fn turn_window_eviction_lands_a_removed_fact() {
+async fn round_window_eviction_lands_a_removed_fact() {
     let config = SessionConfig {
         max_messages: 2,
         prune_tool_history: false,

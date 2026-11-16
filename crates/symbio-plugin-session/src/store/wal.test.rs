@@ -934,9 +934,9 @@ fn an_artifact_round_is_complete_after_reopen() {
 //    表上没这个名字、或这个名字不住在这一格——两条都是 `OffGrid`，不是 `Invariant`。
 
 /// 一条**没有** `produced_by` 的 final（I2 的反例）。
-fn final_without_provenance(turn: u64) -> Event {
+fn final_without_provenance(round: u64) -> Event {
     Event::pending(
-        format!("f-{turn}"),
+        format!("f-{round}"),
         symbio_plugin_api::events::EVENT_CHAT_ASSISTANT_FINAL,
         Entity::Scope,
         Verb::Closed,
