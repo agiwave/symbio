@@ -163,6 +163,17 @@ export function widgetIsReadonly(widget: string | undefined): boolean {
   return widgetSpecOf(widget).readonly
 }
 
+/** static（只读展示）/ form（嵌套）/ toggle（自带 label）这几种呈现组不挂 `<label for>`。 */
+const NON_LABELABLE_TAGS: ReadonlySet<FormWidgetTag> = new Set(['static', 'form', 'toggle'])
+
+/**
+ * 该 widget 的呈现组是否有单一可控控件可被 `<label for>` 关联。
+ * 形态判据归本 registry，调用方只问本谓词、不自己认 tag。
+ */
+export function widgetIsLabelable(widget: string | undefined): boolean {
+  return !NON_LABELABLE_TAGS.has(widgetSpecOf(widget).tag)
+}
+
 /** 编辑态空值是否应省略该键（见 `omitWhenEmpty`） */
 export function widgetOmitsWhenEmpty(widget: string | undefined): boolean {
   return Boolean(widgetSpecOf(widget).omitWhenEmpty)

@@ -337,11 +337,12 @@ pub async fn parse_sse_stream(
         };
 
         if first_chunk_at.is_none() {
-            first_chunk_at = Some(std::time::Instant::now());
+            let now = std::time::Instant::now();
+            first_chunk_at = Some(now);
             plugin_info!(
                 "model",
                 "[LLM] 首个数据块到达 (首字节延迟 {:?})",
-                first_chunk_at.unwrap().duration_since(started)
+                now.duration_since(started)
             );
         }
         chunk_count += 1;
@@ -793,7 +794,6 @@ fn safe_substring(s: &str, start: usize) -> String {
 // 本文件每一处 `unwrap` / `expect` / `panic!` / `unreachable!` 的理由。登记放在
 // 文件内而不是集中一张表：理由与它解释的那段代码会一起被 review、一起被删。
 // 判据是 `scripts/audits/panic-audit.mjs`：**加一处 panic 必须同时加一行登记，理由非空**。
-// panic-allow crates/symbio-plugin-model/src/stream.rs::parse_sse_stream: 前序步骤已记下该值，取不到说明本函数的前置条件被破坏，属代码缺陷。
 #[cfg(test)]
 #[path = "stream.test.rs"]
 mod tests;

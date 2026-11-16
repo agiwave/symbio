@@ -23,7 +23,7 @@ desc: 怎么用——上手 / 贡献 / 排障
 
 `guide`（指南）的条目**在位存放**：文件本身就是登记，`title` 逐字等于正文首个 H1（RG-021 两面对账）。
 
-**计数**：active 15 · draft 0 · retired 0（共 15）
+**计数**：active 16 · draft 0 · retired 0（共 16）
 
 ## 现行文档（active）
 
@@ -39,6 +39,7 @@ desc: 怎么用——上手 / 贡献 / 排障
 | [`GU-005-PLUGIN_DEVELOPMENT`](005-PLUGIN_DEVELOPMENT.md) | Symbio 插件开发指南 |
 | [`GU-006-QUICK_START`](006-QUICK_START.md) | Symbio 快速上手 |
 | [`GU-007-TROUBLESHOOTING`](007-TROUBLESHOOTING.md) | Symbio 故障排查指南 |
+| [`GU-008-ORIENTATION`](008-ORIENTATION.md) | Symbio 心智模型入门（30 分钟） |
 | [`README`](../../README.md) | Symbio |
 | [`crates/symbio-cli/README`](../../crates/symbio-cli/README.md) | symbio-cli |
 | [`crates/symbio-cli/docs/README`](../../crates/symbio-cli/docs/README.md) | symbio-cli 文档中心 |

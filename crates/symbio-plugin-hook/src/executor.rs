@@ -37,8 +37,7 @@ impl HookExecutor {
             }
 
             if let Some(ctx) = result.output.context {
-                if aggregated_output.context.is_some() {
-                    let existing = aggregated_output.context.take().unwrap();
+                if let Some(existing) = aggregated_output.context.take() {
                     aggregated_output.context = Some(format!("{existing}\n\n{ctx}"));
                 } else {
                     aggregated_output.context = Some(ctx);
@@ -295,4 +294,3 @@ mod tests;
 // 本文件每一处 `unwrap` / `expect` / `panic!` / `unreachable!` 的理由。登记放在
 // 文件内而不是集中一张表：理由与它解释的那段代码会一起被 review、一起被删。
 // 判据见 `scripts/audits/panic-audit.mjs`。**加一处 panic 必须同时加一行登记，理由非空。**
-// panic-allow crates/symbio-plugin-hook/src/executor.rs::execute: 前序步骤已记下该值，取不到说明本函数的前置条件被破坏，属代码缺陷。

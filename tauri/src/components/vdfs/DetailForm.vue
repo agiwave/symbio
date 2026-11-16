@@ -266,6 +266,7 @@ import {
 import {
   widgetInitialOf,
   widgetIsFullWidth,
+  widgetIsLabelable,
   widgetPlaceholderOf,
   widgetSpecOf,
   widgetToEdit,
@@ -510,10 +511,9 @@ function fieldControlId(f: DetailField): string {
   return `df-${uid}-${f.key}`
 }
 
-/** 该字段是否有可被 label 关联的单一控件（static / form / toggle 各自成立，不挂 for） */
+/** 该字段是否有可被 label 关联的单一控件（形态判据在 registry/formWidgets） */
 function isLabelable(f: DetailField): boolean {
-  const tag = specOf(f).tag
-  return tag !== 'static' && tag !== 'form' && tag !== 'toggle'
+  return widgetIsLabelable(f.widget)
 }
 
 /** 必填预检的错误信息（空 = 没有未填的必填项） */
