@@ -84,6 +84,26 @@ test('recordTimes / loadTimes 往返：只留正有限数，写读一致', () =>
   }
 })
 
+test('★ recordTimes 是**合并**：单例复跑不得把耗时表塌缩成 1 条', () => {
+  // 单独复跑 t34（`node e2e/run-tests.mjs t34`）只测得一条——旧实现整体覆盖，
+  // 表里只剩 { t34: 4008 }，下一轮全量的并发度被「总工作量/最慢单例 = 1」压成
+  // 串行、排期退回文件名序。合并后旧条目保留；同名条目以本轮实测为准。
+  const root = fs.mkdtempSync(path.join(os.tmpdir(), 'e2e-order-'))
+  try {
+    recordTimes(root, { a: 1000, b: 2000, c: 3000 })
+    recordTimes(root, { t34: 4008 })
+    assert.deepEqual(loadTimes(root), { a: 1000, b: 2000, c: 3000, t34: 4008 })
+    // 同名条目：本轮实测覆盖旧值
+    recordTimes(root, { a: 1500 })
+    assert.deepEqual(loadTimes(root), { a: 1500, b: 2000, c: 3000, t34: 4008 })
+    // 脏数据（被跳过 / 超时兜底的 ms=0）不写入，也不冲掉旧值
+    recordTimes(root, { b: 0 })
+    assert.equal(loadTimes(root).b, 2000)
+  } finally {
+    fs.rmSync(root, { recursive: true, force: true })
+  }
+})
+
 test('缓存缺失或损坏 ⇒ loadTimes 返回空表，不抛（排期坏了不该弄红门禁）', () => {
   const root = fs.mkdtempSync(path.join(os.tmpdir(), 'e2e-order-'))
   try {

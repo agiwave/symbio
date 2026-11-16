@@ -111,11 +111,25 @@ export function suggestConcurrency({ cases, times = {}, machineSlots, fallback =
 /**
  * 记下本轮实测耗时，供下一轮排期。
  *
+ * **合并**而不是整体覆盖：单独复跑一个用例（`node e2e/run-tests.mjs tNN`）只测得
+ * 一条耗时——若是覆盖，耗时表就从几十条塌缩成 1 条，下一轮全量的并发度会被
+ * 「总工作量 / 最慢单例 = 1」压成串行、排期退回文件名序（实测踩过：单独复跑 t34
+ * 之后，耗时表就只剩它一条）。旧条目无害：`suggestConcurrency` /
+ * `orderForStart` 只按**当前用例名**取数，已删用例的残键不参与任何计算；
+ * 同名条目以本轮实测为准。
+ *
  * 只写**真跑过**的（`ms > 0`）：被跳过、被杀、超时兜底的那几条不该用自己的意外
  * 时长去影响下一轮的顺序。写失败不抛——排期是优化，不是判据。
  */
 export function recordTimes(repoRoot, measured) {
-  const out = {}
+  let prev = {}
+  try {
+    const o = JSON.parse(fs.readFileSync(path.join(repoRoot, TIMES_FILE), 'utf8'))
+    if (o && typeof o === 'object' && !Array.isArray(o)) prev = o
+  } catch {
+    /* 没有旧表（首次跑 / 文件损坏）就从空表起，与改动前行为一致 */
+  }
+  const out = { ...prev }
   for (const [name, ms] of Object.entries(measured ?? {})) if (usable(ms)) out[name] = Math.round(ms)
   try {
     const file = path.join(repoRoot, TIMES_FILE)

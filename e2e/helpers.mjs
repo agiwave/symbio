@@ -7,6 +7,7 @@
 // - 每个用例独立的临时 homedir + 独立 mock 实例，互不串扰。
 
 import { spawn } from 'node:child_process';
+import net from 'node:net';
 import { mkdtempSync, writeFileSync, mkdirSync, readFileSync, readdirSync, statSync, existsSync, rmSync } from 'node:fs';
 import { tmpdir } from 'node:os';
 import { join, resolve, dirname } from 'node:path';
@@ -62,8 +63,54 @@ export const MOCK_HTTP = join(HERE, 'mock-http.mjs');
  * `run-tests.mjs` 串行跑，都只有一个进程在用这段，安全。
  */
 let portCursor = Number(process.env.E2E_PORT_BASE) || 18080;
+
+/** 探测出 bind 不掉的端口（被占 / TIME_WAIT）；`nextPort()` 跳过它们。 */
+const blockedPorts = new Set();
+
 export function nextPort() {
-  return ++portCursor;
+  let p;
+  do {
+    p = ++portCursor;
+  } while (blockedPorts.has(p));
+  return p;
+}
+
+/**
+ * ## 为什么确定性分段还需要可用性探测（2026-11-16）
+ *
+ * 分段防的是「用例**之间**互撞」，防不了「用例**和自己的上一轮**相撞」：分配是
+ * 确定性的，同一用例每一轮都绑同一批端口，而上一轮的连接在 Windows 上以
+ * TIME_WAIT 滞留 60s+，不设 `SO_REUSEADDR` 的 bind 撞上它就是 `WSAEADDRINUSE`
+ * （os error 10048）。实测症状：单跑必绿、**连续复跑必随机红一条**——t13 的
+ * gateway 起不来等超时，t25 / t4 各红一轮，四轮门禁红四条互不相同的用例而单跑
+ * 逐条秒绿。抖动源不在用例，在**复跑节奏**。
+ *
+ * 对策：自执行模式在用例体求值之前探测本段全部端口，bind 不掉的标进黑名单。
+ * 探测是纯监听 socket（无连接即关），自己不制造 TIME_WAIT；探过的端口随后被
+ * 真实服务 bind 不会二撞。每段 100 口并发探测是毫秒级，成本可忽略。
+ */
+function probePort(port) {
+  return new Promise((resolve) => {
+    const srv = net.createServer();
+    srv.once('error', () => resolve(false));
+    srv.once('listening', () => srv.close(() => resolve(true)));
+    srv.listen(port, '127.0.0.1');
+  });
+}
+
+/** 探测 `[from, from + count)` 并把不可用的端口标进黑名单，返回黑名单大小。 */
+export async function blockUnusablePorts(from = Number(process.env.E2E_PORT_BASE) || 18080, count = 100) {
+  const usable = await Promise.all(Array.from({ length: count }, (_, i) => probePort(from + i)));
+  usable.forEach((ok, i) => {
+    if (!ok) blockedPorts.add(from + i);
+  });
+  return blockedPorts.size;
+}
+
+// 顶层 await：用例体（含**模块顶层**的 `nextPort()` 调用，如 t104 / t95）必须在本段
+// 探测完成之后才求值——晚一步，顶层拿到的就是黑名单里的坏口。
+if (process.env.E2E_CASE_SELF === '1') {
+  await blockUnusablePorts();
 }
 
 // ---------- 等待口径与静止检测 ----------
