@@ -20,7 +20,7 @@ use symbio_kernel::exec::ExecAbortSignal;
 use symbio_kernel::LatencyTier;
 use symbio_plugin_api::capability_take_errors;
 use symbio_plugin_api::debt::{session_config_id, session_recall_id};
-use symbio_plugin_api::events::{EVENT_SESSION_CONFIG, EVENT_TURN_DISPATCH, EVENT_USER_MESSAGE};
+use symbio_plugin_api::events::{EVENT_SCOPE_DISPATCH, EVENT_SESSION_CONFIG, EVENT_USER_MESSAGE};
 use symbio_plugin_api::retrieval::{retrieve_all, RetrievalRequest};
 use symbio_plugin_api::FactDraft;
 use symbio_plugin_api::PRINCIPAL_USER;
@@ -226,8 +226,8 @@ impl SessionPlugin {
             .append(
                 PRINCIPAL_MAIN.to_string(),
                 FactDraft {
-                    key: format!("{EVENT_TURN_DISPATCH}:{}", item.id),
-                    kind: EVENT_TURN_DISPATCH.to_string(),
+                    key: format!("{EVENT_SCOPE_DISPATCH}:{}", item.id),
+                    kind: EVENT_SCOPE_DISPATCH.to_string(),
                     entity: Entity::Scope,
                     verb: Verb::Asserted,
                     payload: json!({
@@ -240,7 +240,7 @@ impl SessionPlugin {
                     produced_by: Some(seq),
                 },
             )
-            .map_err(|e| PluginError::InternalError(format!("turn.dispatch 落格失败: {e}")))?;
+            .map_err(|e| PluginError::InternalError(format!("scope.dispatch 落格失败: {e}")))?;
 
         // 轮首装配的收尾：`session.config`（系统提示词 + 工具表 + 本轮生效设置）。
         //

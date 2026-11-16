@@ -65,7 +65,7 @@ pub struct TranscriptView {
 /// | `message.removed` | 按节点身份**丢条目** |
 /// | `session.consolidated` | **换基**：此前整段历史由载荷里那份列表取代 |
 ///
-/// 同一趟折叠还认**分支格**（`turn.branch` / `turn.branch_selected`）：它们改的不是正文
+/// 同一趟折叠还认**分支格**（`scope.branch` / `scope.branch_selected`）：它们改的不是正文
 /// 而是**读法**——不选中那一支的助手侧条目照样进转写（用户切回去还看得见），只是标成
 /// 不进请求包。少了这一段，重试在模型眼里等于没发生：新旧两支的答复同时躺在请求包里，
 /// 而下一轮读的还是被用户刚刚不要的那一份。

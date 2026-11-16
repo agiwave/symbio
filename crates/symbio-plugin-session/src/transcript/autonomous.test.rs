@@ -218,7 +218,7 @@ use crate::declarations::EVENT_SYSTEM_TRIGGERED;
 use crate::store::EventWalStore;
 use symbio_kernel::store::EventStore;
 use symbio_kernel::Seq;
-use symbio_plugin_api::events::EVENT_TURN_DISPATCH;
+use symbio_plugin_api::events::EVENT_SCOPE_DISPATCH;
 use symbio_plugin_api::PRINCIPAL_AUTONOMOUS;
 use symbio_plugin_api::PRINCIPAL_USER;
 
@@ -261,11 +261,11 @@ fn scheduled_trigger_produces_event_not_side_channel() {
 
 /// DE-042 §6 验收 3 + 4：长目标超过自主层预算 → 必须被看见；预算改小 → 判定改变。
 ///
-/// 预算的**唯一来源**是 `turn.dispatch` 那一格（`DeclaresBudget`，`C5` 读它），所以这里
+/// 预算的**唯一来源**是 `scope.dispatch` 那一格（`DeclaresBudget`，`C5` 读它），所以这里
 /// 走 `check_all`——生产读侧（`stats.rs`）用的同一个入口，预算由它自己从事实里读。
 ///
 /// 原先这条用例直接调 `budget_exceeded(&snapshot, Some(86.4M))`，预算由**测试自己塞**：
-/// 那样验的只是「谓词照传入的值判」，`declared_budget_ms` 读不到 `turn.dispatch` 也不会
+/// 那样验的只是「谓词照传入的值判」，`declared_budget_ms` 读不到 `scope.dispatch` 也不会
 /// 有测试红——用例的注释声称在钉「升格产物形状 → 预算读数」，实际把最该验的那一跳绕开了
 /// （`D-455`）。
 #[test]
@@ -279,7 +279,7 @@ fn long_goal_overrun_is_visible_and_budget_param_is_live() {
             .append(
                 Event::pending(
                     "d-hb-1",
-                    EVENT_TURN_DISPATCH,
+                    EVENT_SCOPE_DISPATCH,
                     Entity::Scope,
                     Verb::Asserted,
                     PRINCIPAL_AUTONOMOUS,

@@ -977,7 +977,7 @@ fn watch_changes(p: &SessionPlugin) -> std::sync::Arc<std::sync::Mutex<Vec<VdfsC
     seen
 }
 
-/// 种一条 `turn.branch`：`into` 是 `of` 的另一支。
+/// 种一条 `scope.branch`：`into` 是 `of` 的另一支。
 ///
 /// 生产里这一格由 `loop::stage::prepare` 落（新根的 id 到备输入那一步才存在），
 /// 本文件只需要它的**结果**——事实源上有并列的两支。溯源锚取切片末尾那条的 seq
@@ -985,7 +985,7 @@ fn watch_changes(p: &SessionPlugin) -> std::sync::Arc<std::sync::Mutex<Vec<VdfsC
 async fn seed_branch_fact(p: &SessionPlugin, id: &str, of: &str, into: &str) {
     use symbio_kernel::event::{Entity, Seq, Verb};
     use symbio_kernel::store::Store as _;
-    use symbio_plugin_api::events::EVENT_TURN_BRANCH;
+    use symbio_plugin_api::events::EVENT_SCOPE_BRANCH;
     let dir = p
         .get_store()
         .await
@@ -1002,7 +1002,7 @@ async fn seed_branch_fact(p: &SessionPlugin, id: &str, of: &str, into: &str) {
     fs.append(
         symbio_kernel::event::Event::pending(
             format!("branch-{into}"),
-            EVENT_TURN_BRANCH,
+            EVENT_SCOPE_BRANCH,
             Entity::Scope,
             Verb::Asserted,
             symbio_plugin_api::PRINCIPAL_USER,
@@ -1053,11 +1053,11 @@ async fn switch_branch(
 // ── 分支切换（[D-173]）────────────────────────────────────────────────────
 
 /// 切到另一支：**只改读法**。两支都留在转写里、正文一条没动，事实源上多一条
-/// `turn.branch_selected`（而不是 `message.removed`），进模型的那一份换成另一支。
+/// `scope.branch_selected`（而不是 `message.removed`），进模型的那一份换成另一支。
 #[tokio::test]
 async fn switch_branch_changes_the_reading_not_the_facts() {
     use crate::declarations::EVENT_MESSAGE_REMOVED;
-    use crate::declarations::EVENT_TURN_BRANCH_SELECTED;
+    use crate::declarations::EVENT_SCOPE_BRANCH_SELECTED;
     use symbio_sdk::projection::branch::branch_selected;
     let (_dir, p) = fixture();
     let id = unique_id("branch-switch");
@@ -1098,7 +1098,7 @@ async fn switch_branch_changes_the_reading_not_the_facts() {
     assert_eq!(
         kinds
             .iter()
-            .filter(|k| k.as_str() == EVENT_TURN_BRANCH_SELECTED)
+            .filter(|k| k.as_str() == EVENT_SCOPE_BRANCH_SELECTED)
             .count(),
         1,
         "一次切换一条选择格：{kinds:?}"
@@ -1124,7 +1124,7 @@ async fn switch_branch_changes_the_reading_not_the_facts() {
 /// 写成事实，而这件事没人要读。
 #[tokio::test]
 async fn switch_branch_to_the_current_candidate_writes_nothing() {
-    use crate::declarations::EVENT_TURN_BRANCH_SELECTED;
+    use crate::declarations::EVENT_SCOPE_BRANCH_SELECTED;
     let (_dir, p) = fixture();
     let id = unique_id("branch-idem");
     seed_messages(&p, &id, &["问", "第一次答", "重试的答"]).await;
@@ -1142,7 +1142,7 @@ async fn switch_branch_to_the_current_candidate_writes_nothing() {
     assert!(
         !after
             .iter()
-            .any(|k| k.as_str() == EVENT_TURN_BRANCH_SELECTED),
+            .any(|k| k.as_str() == EVENT_SCOPE_BRANCH_SELECTED),
         "本例从头到尾没做过一次**有效**切换：{after:?}"
     );
     let changes = seen.lock().unwrap().clone();
@@ -1155,7 +1155,7 @@ async fn switch_branch_to_the_current_candidate_writes_nothing() {
 /// 允许跨组，就会在事实源上盖一条**读不出来**的选择格（重建按组算选中态）。
 #[tokio::test]
 async fn switch_branch_rejects_anything_that_is_not_a_sibling() {
-    use crate::declarations::EVENT_TURN_BRANCH_SELECTED;
+    use crate::declarations::EVENT_SCOPE_BRANCH_SELECTED;
     let (_dir, p) = fixture();
     let id = unique_id("branch-reject");
     seed_messages(&p, &id, &["问", "第一次答", "重试的答", "后一轮"]).await;
@@ -1178,7 +1178,7 @@ async fn switch_branch_rejects_anything_that_is_not_a_sibling() {
     assert!(
         !kinds
             .iter()
-            .any(|k| k.as_str() == EVENT_TURN_BRANCH_SELECTED),
+            .any(|k| k.as_str() == EVENT_SCOPE_BRANCH_SELECTED),
         "被拒的切换不得落格：{kinds:?}"
     );
     assert_eq!(

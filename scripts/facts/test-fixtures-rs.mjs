@@ -40,8 +40,8 @@ const GROUPS = [
       'chat.assistant.final',
       'chat.assistant.fallback',
       'chat.assistant.progress',
-      'turn.branch',
-      'turn.branch_selected',
+      'scope.branch',
+      'scope.branch_selected',
       'model.speech.denied',
     ],
   },
@@ -181,8 +181,8 @@ export function render({ root }) {
   L.push('pub const CHAT: ChatVocab = ChatVocab {')
   for (const [field, constName] of [
     ['user_message', 'EVENT_USER_MESSAGE'],
-    ['branch', 'EVENT_TURN_BRANCH'],
-    ['branch_selected', 'EVENT_TURN_BRANCH_SELECTED'],
+    ['branch', 'EVENT_SCOPE_BRANCH'],
+    ['branch_selected', 'EVENT_SCOPE_BRANCH_SELECTED'],
     ['reported', 'EVENT_CHAT_ASSISTANT_REPORTED'],
     ['opening', 'EVENT_CHAT_ASSISTANT_OPENING'],
     ['final_reply', 'EVENT_CHAT_ASSISTANT_FINAL'],

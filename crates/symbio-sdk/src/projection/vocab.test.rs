@@ -6,8 +6,8 @@ use super::{ChatVocab, CommitmentVocab, MessageVocab};
 /// 夹具表：值就是线上名字。用例不引内核常量——那正是这三张表要替掉的东西。
 pub(super) const CHAT: ChatVocab = ChatVocab {
     user_message: "user.message",
-    branch: "turn.branch",
-    branch_selected: "turn.branch_selected",
+    branch: "scope.branch",
+    branch_selected: "scope.branch_selected",
     reported: "chat.assistant.reported",
     opening: "chat.assistant.opening",
     final_reply: "chat.assistant.final",

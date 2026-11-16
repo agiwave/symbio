@@ -2,12 +2,12 @@
   "target": 0,
   "faces": {
     "F1": {
-      "prod": 17,
+      "prod": 16,
       "test": 59
     },
     "F2": {
-      "prod": 11,
-      "test": 4
+      "prod": 0,
+      "test": 0
     },
     "F3": {
       "prod": 0,
@@ -23,6 +23,11 @@
     }
   },
   "adjustments": [
+    {
+      "date": "2026-11-16",
+      "faces": "F1.prod / F2.prod / F2.test",
+      "reason": "`D-502`/B5（项目方确认未发布产品、无存量需兼容）：wire 事件名 `turn.branch`/`turn.branch_selected`/`turn.dispatch` → `scope.*`、`session.close-turn` → `session.close-scope`（作用域语义，按裁决三归 scope 而非 round），常量 `EVENT_TURN_*`→`EVENT_SCOPE_*`、`SESSION_CLOSE_TURN`→`SESSION_CLOSE_SCOPE` 全仓引用同步。源在 PLUGIN.yml 的 shared_events 与 session 的 EventDecl；events.rs / test_fixtures.rs 为生成物，重跑 gen-facts 产出，生成器 test-fixtures-rs.mjs 的夹具名与常量映射同批改。slo 读点、commands/transcript/port/vocab 的引用与测试夹具同批改。F2 生产面 11 → 0、测试面 4 → 0（**全清**）、F1 生产面 17 → 16 为**实测收窄**；目标 0 不变。余下 F1 16 + F1.test 59 为模块路径（mod turn / plugin/turn / close_turn / super::turn）与测试私有符号，见 D-502 裁决二之外与裁决三尾款。"
+    },
     {
       "date": "2026-11-16",
       "faces": "F1.prod / F4.prod / F4.test / F5.prod",

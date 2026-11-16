@@ -446,11 +446,11 @@ fn a_snapshot_report_node_stays_out_of_the_request_package() {
 // 这一组钉的是「**送给模型的那一份**只有一支」——它是重试唯一的外部可见效果。
 // 标注与选中态本身在 `projection::branch` 的用例里钉，这里只钉折叠之后的**请求包**。
 
-/// 一条 `turn.branch`：`into` 那一支接管读法。
+/// 一条 `scope.branch`：`into` 那一支接管读法。
 fn branch(of: &str, into: &str) -> Event {
     Event::pending(
         format!("branch-{into}"),
-        crate::test_fixtures::EVENT_TURN_BRANCH,
+        crate::test_fixtures::EVENT_SCOPE_BRANCH,
         Entity::Scope,
         Verb::Asserted,
         "person/local",
@@ -502,7 +502,7 @@ fn switching_back_moves_the_request_package_back() {
     events.push(
         Event::pending(
             "sel-1",
-            crate::test_fixtures::EVENT_TURN_BRANCH_SELECTED,
+            crate::test_fixtures::EVENT_SCOPE_BRANCH_SELECTED,
             Entity::Scope,
             Verb::Asserted,
             "person/local",

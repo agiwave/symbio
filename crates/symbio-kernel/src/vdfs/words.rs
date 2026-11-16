@@ -149,7 +149,7 @@ pub const VDFS_ACTION_EXPAND_SKELETON: &str = "expand_skeleton";
 ///
 /// 入参 `{ to: <同一组里另一支的根 id> }`（`meta.branch.candidates` 里的那一个——
 /// 前端不认识组结构，它把后端交回来的 id 原样传回）。它落一条
-/// `EVENT_TURN_BRANCH_SELECTED`，**不开轮**：这是它与恢复动词
+/// `EVENT_SCOPE_BRANCH_SELECTED`，**不开轮**：这是它与恢复动词
 /// （`retry_subtree` / `approve` / …）的分界——那些是「让这一轮接着走」，这一条只是
 /// 「我刚读的是这一支」。
 ///
@@ -161,7 +161,7 @@ pub const VDFS_ACTION_SWITCH_BRANCH: &str = "switch_branch";
 /// 节点动作标识：**重试另一支**（写操作，落在那一支的轮锚——用户消息节点上）。
 ///
 /// 入参无（`{}`）：动作自己从落点读出问题与旧支，不需要调用方再给一份内容。
-/// 它落一条 `turn.branch{of, into}`（[D-173] 立的目标事实：新旧两支并存、
+/// 它落一条 `scope.branch{of, into}`（[D-173] 立的目标事实：新旧两支并存、
 /// 默认读新的一支）并由会话复开一轮，**不是**在这里重跑模型（[D-358]）。
 ///
 /// 与 [`VDFS_ACTION_SWITCH_BRANCH`] 是一对：那条只改读法、不开轮；这条开轮、

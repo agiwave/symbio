@@ -16,9 +16,9 @@ use symbio_plugin_api::context::{
 };
 use symbio_plugin_api::debt::{STAMP_KEY, STAMP_ROLE};
 use symbio_plugin_api::events::{
-    EVENT_ARTIFACT_ADDED, EVENT_CHAT_ASSISTANT_FINAL, EVENT_MESSAGE_ADDED, EVENT_SESSION_CONFIG,
-    EVENT_TOOL_CALL_REQUESTED, EVENT_TOOL_REQUESTED, EVENT_TURN_BRANCH, EVENT_TURN_BRANCH_SELECTED,
-    EVENT_USER_MESSAGE,
+    EVENT_ARTIFACT_ADDED, EVENT_CHAT_ASSISTANT_FINAL, EVENT_MESSAGE_ADDED, EVENT_SCOPE_BRANCH,
+    EVENT_SCOPE_BRANCH_SELECTED, EVENT_SESSION_CONFIG, EVENT_TOOL_CALL_REQUESTED,
+    EVENT_TOOL_REQUESTED, EVENT_USER_MESSAGE,
 };
 use symbio_plugin_api::port::{
     PortErrorClass, PortExecContext, PortExecutor, PortFact, PortFactEmit, PortInput, PortOutcome,
@@ -210,8 +210,8 @@ fn round_input(
     let hidden_branches = unselected_roots(
         events,
         |id| !removed.contains(id),
-        EVENT_TURN_BRANCH,
-        EVENT_TURN_BRANCH_SELECTED,
+        EVENT_SCOPE_BRANCH,
+        EVENT_SCOPE_BRANCH_SELECTED,
     );
 
     let mut messages = Vec::new();
@@ -805,7 +805,7 @@ impl PortExecutor for ModelExecutor {
             }
         };
         // 收束闸 · 发言臂（D-067）：主体未持 `reply.*` ⇒ 不落 `chat.assistant.final`。
-        // `session.close-turn` 以它为欠债来源（`Decl.owes.source`），不落它 ⇒ 本轮
+        // `session.close-scope` 以它为欠债来源（`Decl.owes.source`），不落它 ⇒ 本轮
         // 派生事实（记忆 / 任务 / 承诺）与 `session.settled` 都不产生——拒绝要落到
         // 收束层（t73）。答案仍经 `reply` 回给调用方：收束格是记录，不是呈现。
         //

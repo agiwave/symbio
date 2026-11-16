@@ -174,13 +174,13 @@ pub(crate) fn watches(event: &Event) -> bool {
 
 /// 这条事实是否**开启**一段在飞窗口——轮占位该出现（`D-425`）。
 ///
-/// `turn.dispatch` 是用户消息之后的第一条回合事实，分类 / 措辞这些内部往返都在它之后：
+/// `scope.dispatch` 是用户消息之后的第一条回合事实，分类 / 措辞这些内部往返都在它之后：
 /// 骨架从这里起，等待窗口从第一秒就可见；每次 reader `request` 再起一次，是同一轮里
 /// 每段模型往返各自的锚点（旧占位先撤）。
 fn starts_round(event: &Event) -> bool {
     let rooted = root_of(event).is_some();
     rooted
-        && (event.kind == symbio_plugin_api::events::EVENT_TURN_DISPATCH
+        && (event.kind == symbio_plugin_api::events::EVENT_SCOPE_DISPATCH
             || event.kind == symbio_plugin_api::EVENT_REQUEST)
 }
 

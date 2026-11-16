@@ -36,7 +36,7 @@
 //!
 //! ## 字段为什么按算法角色命名
 //!
-//! `turn.branch` 与 `chat.assistant.reported` 同落 `Turn × Asserted`，`chat.assistant.final`
+//! `scope.branch` 与 `chat.assistant.reported` 同落 `Turn × Asserted`，`chat.assistant.final`
 //! 与 `chat.assistant.fallback` 同落 `Turn × Closed`，`commitment.released` 与
 //! `commitment.broken` 同落 `Commitment × Closed`——按格子命名字段会撞名，按事件名命名
 //! 字段则这张表退化成名字表的别名。按「这一格在折叠里算什么」命名，才是真正的闭集。

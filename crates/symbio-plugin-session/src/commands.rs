@@ -400,7 +400,7 @@ impl SessionPlugin {
     ///
     /// 「同一个问题的另一支答复」是**读法**，不是新事实：它不产生消息、不开轮、
     /// 不动任何一条节点的正文，只在事实源上盖一条「这一组现在读 `to` 这一支」
-    /// （[`EVENT_TURN_BRANCH_SELECTED`]）。重建是纯函数，所以这条事实落下之后，
+    /// （[`EVENT_SCOPE_BRANCH_SELECTED`]）。重建是纯函数，所以这条事实落下之后，
     /// 「哪一支在当前历史里」从事实里读得出来——不需要某个调用方记得传参数。
     ///
     /// ## 边界：只在**同组**内跳
@@ -409,7 +409,7 @@ impl SessionPlugin {
     /// 标注，不是再算一遍组）。跨组不是「换一支读」，是跳到另一条历史——那是
     /// `truncate` / 重试各自的动作面，本动作不冒充它们。
     ///
-    /// ## 为什么目标节点必须已经有 `turn.branch` 事实
+    /// ## 为什么目标节点必须已经有 `scope.branch` 事实
     ///
     /// 那条事实是这一支**存在的记录**，也是本次选择的溯源锚（I2：断言类事件必须
     /// 带 `produced_by`，且不许悬空）。没有它 = 这一支从未诞生 = 不能选它读。
@@ -420,9 +420,9 @@ impl SessionPlugin {
         to: &str,
         actor: &str,
     ) -> Result<(), PluginError> {
-        use crate::declarations::EVENT_TURN_BRANCH_SELECTED;
+        use crate::declarations::EVENT_SCOPE_BRANCH_SELECTED;
         use symbio_kernel::event::{Entity, Verb};
-        use symbio_plugin_api::events::EVENT_TURN_BRANCH;
+        use symbio_plugin_api::events::EVENT_SCOPE_BRANCH;
         use symbio_plugin_api::FactDraft;
         use symbio_sdk::projection::branch::{branch_candidates, branch_selected};
         let chat_session = self.open_chat_session(session_id).await?;
@@ -456,7 +456,7 @@ impl SessionPlugin {
         let source = self.fact_source(session_id).await?;
         let snapshot = source.range(0);
         let carrier = snapshot.iter().find(|e| {
-            e.kind == EVENT_TURN_BRANCH
+            e.kind == EVENT_SCOPE_BRANCH
                 && e.payload.get("into").and_then(Value::as_str) == Some(member.as_str())
         });
         // 溯源锚：优先「这一支存在」的那条事实，退化到切片末尾（与
@@ -475,11 +475,11 @@ impl SessionPlugin {
         // `Duplicate`（按下不表），而「切回去再切回来」是两次不同的动作、各有各的号。
         let n = snapshot
             .iter()
-            .filter(|e| e.kind == EVENT_TURN_BRANCH || e.kind == EVENT_TURN_BRANCH_SELECTED)
+            .filter(|e| e.kind == EVENT_SCOPE_BRANCH || e.kind == EVENT_SCOPE_BRANCH_SELECTED)
             .count();
         let draft = FactDraft {
             key: format!("branch-selected-{member}-{n}"),
-            kind: EVENT_TURN_BRANCH_SELECTED.to_string(),
+            kind: EVENT_SCOPE_BRANCH_SELECTED.to_string(),
             entity: Entity::Scope,
             verb: Verb::Asserted,
             payload: json!({ "selected": member }),
@@ -515,7 +515,7 @@ impl SessionPlugin {
     // ==================== 分支重试 ====================
 
     /// 重试另开一支（D-358）：校验落点是**那一支的轮锚**（用户消息节点），铸新根 id，
-    /// 落一条 `turn.branch{of, into}`，返回**换上新根 id 的那条用户消息**。
+    /// 落一条 `scope.branch{of, into}`，返回**换上新根 id 的那条用户消息**。
     ///
     /// 开轮不在这里：本域只管写语义（「动作 → 事实」）。调用方（地址面）把返回的
     /// 节点入队并按空闲规则开轮——与 `write(<A>/inbox)` 用的是同一个开轮单元。
@@ -526,7 +526,7 @@ impl SessionPlugin {
         actor: &str,
     ) -> Result<cm::ChatNode, PluginError> {
         use symbio_kernel::event::{Entity, Verb};
-        use symbio_plugin_api::events::EVENT_TURN_BRANCH;
+        use symbio_plugin_api::events::EVENT_SCOPE_BRANCH;
         use symbio_plugin_api::FactDraft;
 
         let chat_session = self.open_chat_session(session_id).await?;
@@ -569,7 +569,7 @@ impl SessionPlugin {
         // 重复。反过来，同一次动作重放也不会凭空多出第二条。
         let draft = FactDraft {
             key: format!("branch-{mid}-{new_id}"),
-            kind: EVENT_TURN_BRANCH.to_string(),
+            kind: EVENT_SCOPE_BRANCH.to_string(),
             entity: Entity::Scope,
             verb: Verb::Asserted,
             payload: json!({ "of": mid, "into": new_id }),

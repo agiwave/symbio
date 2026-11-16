@@ -4,7 +4,7 @@
 //! 登记，避免共享词汇表断裂。它们**不是环的机制**：环不读、不写、不按它们选债。
 //!
 //! 所有权按接入顺序逐条移交，**已完成**：会话簿记接管 `chat.*` / `user.message`
-//! 与 `session.config` / `turn.branch` / `turn.dispatch`（`session::declarations`），
+//! 与 `session.config` / `scope.branch` / `scope.dispatch`（`session::declarations`），
 //! 记忆接管 `memory.*`（`memory::decl`），工具接管 `authz.granted` / `authz.denied`
 //! / `task.controlled`（`tool::declarations`），代理接管 `commitment.*`
 //! （`agent::declarations`）。本模块如今只剩两条**机制私有名**（`plugin.row.asked`

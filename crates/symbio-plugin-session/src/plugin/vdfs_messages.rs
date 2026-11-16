@@ -198,7 +198,7 @@ impl SessionPlugin {
                     // ── 分支切换（`switch_branch`，载荷 `{to}`）──
                     //
                     // 落点与 `truncate`/`expand_skeleton` 同一个位置，语义却相反：那两个
-                    // 改的是**节点**，这个只改**读法**——落一条 `turn.branch_selected`，
+                    // 改的是**节点**，这个只改**读法**——落一条 `scope.branch_selected`，
                     // 不开轮、不产生消息（[D-173](../../../../docs/003-design/001-核心架构.md "DE-001-核心架构")）。
                     //
                     // 必须排在下面的恢复 catch-all **之前**：`switch_branch` 不在
@@ -222,12 +222,12 @@ impl SessionPlugin {
                     //
                     // 与 `switch_branch` 是一对，方向相反：那条只改读法、不开轮；这条
                     // 只开轮、不改既有节点。**动作 → 事实 → 环派发**：写侧落一条
-                    // `turn.branch{of, into}`（D-173 的目标事实），随后**复用写收件箱
+                    // `scope.branch{of, into}`（D-173 的目标事实），随后**复用写收件箱
                     // 的那一个开轮单元**（`user.message` → `session.config`，由事实源
                     // 的写口踢驱动）——不另造第二种「开轮」接法，也不在这里重跑模型。
                     //
                     // 新支的请求因此天然不带旧支的产出：`of` 是旧支的轮锚，投影按
-                    // `turn.branch` 折出「当前读哪一支」，旧支子树在请求装配时被裁掉。
+                    // `scope.branch` 折出「当前读哪一支」，旧支子树在请求装配时被裁掉。
                     (Some(mid), VDFS_ACTION_RETRY_SUBTREE, _payload) => {
                         let host = vdfs_host_ctx(ctx)?;
                         let actor = symbio_sdk::authz::request_principal(&*host);

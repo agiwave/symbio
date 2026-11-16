@@ -8,7 +8,7 @@ use super::*;
 use symbio_kernel::chat::chat_node::{NodeKind, NodeStatus, CHAT_STYLE_TAG_RUN};
 use symbio_kernel::event::{Entity, Verb, EVENT_FAILED, EVENT_REQUEST, EVENT_RESPONSE};
 use symbio_plugin_api::events::{
-    EVENT_ARTIFACT_ADDED, EVENT_CHAT_ASSISTANT_FINAL, EVENT_TOOL_REQUESTED, EVENT_TURN_DISPATCH,
+    EVENT_ARTIFACT_ADDED, EVENT_CHAT_ASSISTANT_FINAL, EVENT_SCOPE_DISPATCH, EVENT_TOOL_REQUESTED,
 };
 
 use crate::declarations::{EVENT_SESSION_SETTLED, EVENT_SESSION_TERMINATED};
@@ -356,7 +356,7 @@ fn dispatch_projects_placeholder_immediately() {
     let mut index = LiveIndex::new();
     let dispatch = event(
         "e-dispatch",
-        EVENT_TURN_DISPATCH,
+        EVENT_SCOPE_DISPATCH,
         Entity::Scope,
         Verb::Asserted,
         serde_json::json!({
@@ -388,7 +388,7 @@ fn closing_facts_retire_placeholder() {
         let mut index = LiveIndex::new();
         let dispatch = event(
             "e-dispatch",
-            EVENT_TURN_DISPATCH,
+            EVENT_SCOPE_DISPATCH,
             Entity::Scope,
             Verb::Asserted,
             serde_json::json!({ "root_id": "u1", "principal": "session/main" }),

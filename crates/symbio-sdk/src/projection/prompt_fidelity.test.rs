@@ -436,11 +436,11 @@ fn a_snapshot_entry_missing_from_the_prompt_is_reported() {
 // 它若自己算一遍读法，重试过的会话就会每次请求报一串「丢事实」——恒红的守卫与没有
 // 守卫等价；而它若跟着投影一起松掉，「旧支泄漏进请求包」就没人看着了。
 
-/// 一条 `turn.branch`：`into` 那一支接管读法。
+/// 一条 `scope.branch`：`into` 那一支接管读法。
 fn branch(of: &str, into: &str) -> Event {
     Event::pending(
         format!("branch-{into}"),
-        crate::test_fixtures::EVENT_TURN_BRANCH,
+        crate::test_fixtures::EVENT_SCOPE_BRANCH,
         Entity::Scope,
         Verb::Asserted,
         "person/local",

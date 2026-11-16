@@ -22,7 +22,7 @@ use super::{
     branch_candidates, branch_hide_unselected, branch_selected, drop_branch_subtrees,
     stamp_branches, unselected_roots, META_BRANCH,
 };
-use crate::test_fixtures::{CHAT, EVENT_TURN_BRANCH, EVENT_TURN_BRANCH_SELECTED};
+use crate::test_fixtures::{CHAT, EVENT_SCOPE_BRANCH, EVENT_SCOPE_BRANCH_SELECTED};
 use crate::{Entity, Event, Verb};
 use symbio_kernel::chat::chat_node::ChatNode;
 
@@ -33,11 +33,11 @@ fn node(id: &str) -> ChatNode {
     }
 }
 
-/// 一条 `turn.branch`：`into` 是 `of` 的另一支。
+/// 一条 `scope.branch`：`into` 是 `of` 的另一支。
 fn branch(id: &str, of: &str, into: &str) -> Event {
     Event::pending(
         format!("branch-{id}"),
-        EVENT_TURN_BRANCH,
+        EVENT_SCOPE_BRANCH,
         Entity::Scope,
         Verb::Asserted,
         "person/local",
@@ -45,11 +45,11 @@ fn branch(id: &str, of: &str, into: &str) -> Event {
     .with_payload(serde_json::json!({ "of": of, "into": into }))
 }
 
-/// 一条 `turn.branch_selected`：这一组现在读 `selected`。
+/// 一条 `scope.branch_selected`：这一组现在读 `selected`。
 fn picked(id: &str, selected: &str) -> Event {
     Event::pending(
         format!("branch-selected-{id}"),
-        EVENT_TURN_BRANCH_SELECTED,
+        EVENT_SCOPE_BRANCH_SELECTED,
         Entity::Scope,
         Verb::Asserted,
         "person/local",
@@ -176,7 +176,7 @@ fn 跨组并进来时收成一组并读最后落地的分支格() {
     stamped(&mut nodes, &events);
     assert_eq!(branch_of(&nodes[3]).unwrap()["total"], 4);
     assert_eq!(branch_of(&nodes[3]).unwrap()["group"], "t1");
-    // 最后落地的是 `turn.branch{of:t1, into:u1}` ⇒ 读 u1；被并掉那组的旧记录不再作数
+    // 最后落地的是 `scope.branch{of:t1, into:u1}` ⇒ 读 u1；被并掉那组的旧记录不再作数
     // （一条组只能有一个答案）。
     assert!(branch_selected(&nodes[2]));
     assert!(!branch_selected(&nodes[1]));

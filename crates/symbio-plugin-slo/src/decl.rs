@@ -24,7 +24,7 @@ use std::collections::BTreeMap;
 use serde_json::{json, Value};
 
 use symbio_plugin_api::events::{
-    EVENT_CHAT_ASSISTANT_FALLBACK, EVENT_CHAT_ASSISTANT_FINAL, EVENT_TURN_DISPATCH,
+    EVENT_CHAT_ASSISTANT_FALLBACK, EVENT_CHAT_ASSISTANT_FINAL, EVENT_SCOPE_DISPATCH,
     EVENT_USER_MESSAGE,
 };
 use symbio_plugin_api::reports::{ReportCtx, ReportDecl};
@@ -49,10 +49,10 @@ pub(crate) const VIEWS: &[ViewDecl] = &[
     ViewDecl {
         name: SLO_LATENCY,
         ver: 1,
-        // 档位只读派发格 `turn.dispatch` 的 `tier`（`D-282`：它是档位的唯一来源；
+        // 档位只读派发格 `scope.dispatch` 的 `tier`（`D-282`：它是档位的唯一来源；
         // `user.message` 上的 `tier` 是历史形态，新写入不再带它）。`cost_ms` 是**信封**
         // 字段，不是载荷，`reads` 表达不了也不该表达。
-        reads: &[(EVENT_TURN_DISPATCH, "tier")],
+        reads: &[(EVENT_SCOPE_DISPATCH, "tier")],
         // 读数不替任何事实关门。
         evidence: &[],
         cost: COST,
@@ -62,7 +62,7 @@ pub(crate) const VIEWS: &[ViewDecl] = &[
     ViewDecl {
         name: SLO_FALLBACK,
         ver: 1,
-        reads: &[(EVENT_TURN_DISPATCH, "tier")],
+        reads: &[(EVENT_SCOPE_DISPATCH, "tier")],
         evidence: &[],
         cost: COST,
         eval: fallback,
@@ -80,7 +80,7 @@ pub(crate) const VIEWS: &[ViewDecl] = &[
     },
 ];
 
-/// 本轮声明的档位：读派发格（`turn.dispatch`，`turn × asserted`）载荷的 `tier`；
+/// 本轮声明的档位：读派发格（`scope.dispatch`，`turn × asserted`）载荷的 `tier`；
 /// 缺失 / 未知 ⇒ [`UNSPECIFIED`]。
 ///
 /// `root_id` 是**触发这一轮的事实身份**（`user.message` 的 event id，也就是派发格与
@@ -98,7 +98,7 @@ fn declared_tier(events: &[Event], round_id: &str, before_seq: Option<u64>) -> S
         .find(|d| {
             d.entity == Entity::Scope
                 && d.verb == Verb::Asserted
-                && d.kind.as_str() == EVENT_TURN_DISPATCH
+                && d.kind.as_str() == EVENT_SCOPE_DISPATCH
                 && d.payload.get("root_id").and_then(Value::as_str) == Some(round_id)
                 && before(d)
         })
@@ -223,7 +223,7 @@ fn rate(turns: u64, fallbacks: u64) -> f64 {
 /// 兜底率（单片）。
 ///
 /// - **turn** = `user.message`（`turn × opened`）——用户消息开启一轮；
-/// - **档位** = 该轮派发格（`turn.dispatch`）的 `tier`；
+/// - **档位** = 该轮派发格（`scope.dispatch`）的 `tier`；
 /// - **兜底** = `chat.assistant.fallback`（`turn × closed`）——生成失败也必须有输出，
 ///   fallback 落在哪档就是哪档的兜底。
 fn fallback(events: &[Event], now: i64) -> Value {

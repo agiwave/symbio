@@ -19,14 +19,14 @@ use symbio_testkit::Seq;
 
 const PRINCIPAL: &str = "session/main";
 
-/// 一轮的派发格（`turn.dispatch`）：本幕以哪一档跑。**档位的唯一来源。**
+/// 一轮的派发格（`scope.dispatch`）：本幕以哪一档跑。**档位的唯一来源。**
 ///
 /// `root_id` 指向这一轮的开轮事实（`user.message` 的 event id）；本文件里测试把
 /// 第 1 个参数当作**轮的身份**，收束格与它同名，于是配对与生产同构。
 fn dispatch(round_id: &str, tier: &str, seq: u64, ts: i64) -> Event {
     let mut e = Event::pending(
         format!("{round_id}.dispatch"),
-        EVENT_TURN_DISPATCH,
+        EVENT_SCOPE_DISPATCH,
         Entity::Scope,
         Verb::Asserted,
         PRINCIPAL,
@@ -320,7 +320,7 @@ fn the_views_declare_both_halves_and_read_only_what_they_use() {
         assert!(v.evidence.is_empty(), "读数不替任何事实关门");
         for (fact, field) in v.reads {
             assert!(
-                (*fact, *field) == (EVENT_TURN_DISPATCH, "tier"),
+                (*fact, *field) == (EVENT_SCOPE_DISPATCH, "tier"),
                 "`{}` 读了意外的格：{fact}::{field}",
                 v.name
             );

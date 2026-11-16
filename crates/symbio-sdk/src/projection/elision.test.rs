@@ -3,7 +3,7 @@
 use super::*;
 use crate::event::{Entity, Event, Seq, Verb};
 use crate::test_fixtures::{
-    CHAT, EVENT_MESSAGE_ADDED, EVENT_TURN_BRANCH, EVENT_USER_MESSAGE, MESSAGE,
+    CHAT, EVENT_MESSAGE_ADDED, EVENT_SCOPE_BRANCH, EVENT_USER_MESSAGE, MESSAGE,
 };
 
 fn sequenced(kind: &str, seq: u64) -> Event {
@@ -109,7 +109,7 @@ fn a_malformed_range_hides_nothing() {
 fn an_unselected_branch_still_elides_through_the_same_judgement() {
     let branch = Event::pending(
         "b-1",
-        EVENT_TURN_BRANCH,
+        EVENT_SCOPE_BRANCH,
         Entity::Scope,
         Verb::Asserted,
         "user",

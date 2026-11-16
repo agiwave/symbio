@@ -17,7 +17,9 @@ use symbio_plugin_api::rows::{RowHandler, RowRequest, RowStep};
 use symbio_plugin_api::settle::{contributors, SettleFace, Settling};
 use symbio_plugin_api::{Entity, Verb};
 
-use crate::declarations::{EVENT_SESSION_RECALL, EVENT_SESSION_SETTLED, OWNER, SESSION_CLOSE_TURN};
+use crate::declarations::{
+    EVENT_SESSION_RECALL, EVENT_SESSION_SETTLED, OWNER, SESSION_CLOSE_SCOPE,
+};
 
 pub(crate) struct CloseTurn;
 
@@ -27,7 +29,7 @@ impl RowHandler for CloseTurn {
     }
 
     fn row(&self) -> &'static str {
-        SESSION_CLOSE_TURN
+        SESSION_CLOSE_SCOPE
     }
 
     fn writes(&self) -> &'static [&'static str] {

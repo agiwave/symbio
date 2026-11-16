@@ -40,9 +40,9 @@ pub(crate) const EVENT_CHAT_ASSISTANT_REPORTED: &str = "chat.assistant.reported"
 pub(crate) use symbio_plugin_api::events::{EVENT_MESSAGE_REMOVED, EVENT_SESSION_CONSOLIDATED};
 
 /// 用户点切换器时的断言；同样只有本插件读写（`commands` 落格、折叠读回）。
-pub(crate) const EVENT_TURN_BRANCH_SELECTED: &str = "turn.branch_selected";
+pub(crate) const EVENT_SCOPE_BRANCH_SELECTED: &str = "scope.branch_selected";
 
-/// 收束完成的断言：`session.close-turn` 行在终答之后落它，行据此关账（D-250 / D-252）。
+/// 收束完成的断言：`session.close-scope` 行在终答之后落它，行据此关账（D-250 / D-252）。
 ///
 /// 载荷只有 `root_id`：与 `chat.assistant.final` 的键**同名字段、同取值**，
 /// 债键才能对上（`Key` 按字段名比）。
@@ -61,7 +61,7 @@ pub(crate) const EVENT_SESSION_RECALL: &str = symbio_plugin_api::events::EVENT_S
 
 /// 收束行：终答落格之后，把能力交出的收束贡献（任务调度 / 记忆编码 …）落成事实。
 /// 实现见 `close_turn`（行注册表按名解析，`D-306`）。
-pub(crate) const SESSION_CLOSE_TURN: &str = "session.close-turn";
+pub(crate) const SESSION_CLOSE_SCOPE: &str = "session.close-scope";
 
 /// 终止事实的**归宿行**（开不出账）：只给 `session.terminated` 一个声明期读方
 /// （`OrphanFact`），不参与派发。实际写方是宿主侧簿记写方（`termination.rs`）。
@@ -94,13 +94,13 @@ pub(crate) const EVENTS: &[EventDecl] = &[
     EventDecl::new("message.removed", (Entity::Message, Verb::Closed)),
     EventDecl::new("session.consolidated", (Entity::Message, Verb::Progressed)),
     // 用户点了切换器：一次「关于这一轮的断言」，不是收束也不是开轮。
-    EventDecl::new(EVENT_TURN_BRANCH_SELECTED, (Entity::Scope, Verb::Asserted)),
+    EventDecl::new(EVENT_SCOPE_BRANCH_SELECTED, (Entity::Scope, Verb::Asserted)),
     // 用户答复（`kind ∈ answer|approve|deny`）：外部动作落事实，宿主再驱动一环
     // 前缀 `user.` 是既有族（与 `user.message` 同前缀）。
     // 若将来出现**非用户**的答复（如超时自动拒绝），这个前缀会不够用——那属策略层，
     // 真出现再议，**现在不预留**。
     EventDecl::new("user.answer", (Entity::Scope, Verb::Asserted)),
-    // 收束完成：`session.close-turn` 落完能力贡献之后写它，行据此关账。
+    // 收束完成：`session.close-scope` 落完能力贡献之后写它，行据此关账。
     EventDecl::new(EVENT_SESSION_SETTLED, (Entity::Scope, Verb::Progressed)),
     // 一个 scope 算完：终答 ∧ 无未还债（后者由宿主的 `NoDebt` 交回，D-367）。
     EventDecl::new(EVENT_SESSION_TERMINATED, (Entity::Scope, Verb::Closed)),
@@ -123,7 +123,7 @@ pub(crate) const EVENTS: &[EventDecl] = &[
     EventDecl::new("chat.assistant.opening", (Entity::Scope, Verb::Asserted)),
     EventDecl::new("chat.assistant.progress", (Entity::Scope, Verb::Progressed)),
     EventDecl::new("chat.assistant.reported", (Entity::Scope, Verb::Asserted)),
-    // 用户发言。`tier` 的旧落点仍带 `DeclaresBudget`：新写入的档位只读 `turn.dispatch`，
+    // 用户发言。`tier` 的旧落点仍带 `DeclaresBudget`：新写入的档位只读 `scope.dispatch`，
     // 历史 WAL 里缺 `budget_ms` 时回退到 `tier`，`C5` 仍要读得到预算。
     EventDecl::host_with_roles(
         "user.message",
@@ -136,11 +136,11 @@ pub(crate) const EVENTS: &[EventDecl] = &[
     // （`model` 的隐藏分支、`slo` 的档位、能力包读 `session.config`）。格位 / 载荷原样
     // 照抄，迁移只改归属。
     EventDecl::new("session.config", (Entity::Scope, Verb::Asserted)),
-    EventDecl::new("turn.branch", (Entity::Scope, Verb::Asserted)),
+    EventDecl::new("scope.branch", (Entity::Scope, Verb::Asserted)),
     // 幕级派发格（D-223 / D-262 / D-282）：载荷 `tier` / `budget_ms` / `principal` /
     // `root_id`，是档位的唯一来源，也是 `C5` 读预算的那一格（`DeclaresBudget`）。
     EventDecl::with_roles(
-        "turn.dispatch",
+        "scope.dispatch",
         (Entity::Scope, Verb::Asserted),
         &[FactRole::DeclaresBudget],
     ),
@@ -152,7 +152,7 @@ pub(crate) const EVENTS: &[EventDecl] = &[
 /// 没有这一行，`task.ready` / `task.assigned`（就绪视图的输入）永远不会在收束时落格。
 pub(crate) const ROWS: &[Decl] = &[
     Decl {
-        name: SESSION_CLOSE_TURN,
+        name: SESSION_CLOSE_SCOPE,
         reads: &[],
         expand: None,
         owes: Pattern {
@@ -226,7 +226,7 @@ pub(crate) const FACTS: &[FactDecl] = &[
         port: None,
         key: &[],
         expand: &[],
-        // `root_id`：`session.close-turn` 行的 `key`（`seal` 的行检查要它在这里）；
+        // `root_id`：`session.close-scope` 行的 `key`（`seal` 的行检查要它在这里）；
         // `text`：读方按它回灌正文（终答也要进下一轮对话线）。`final_id` 已删——
         // 它不是载荷字段，而是这条事实 **id 的拼法**（`chat.assistant.final:<user_id>`，
         // 见 `compact` 的换基债）；写成字段名会让「声明里有、两个写方都写不出」。
@@ -238,7 +238,7 @@ pub(crate) const FACTS: &[FactDecl] = &[
 ///
 /// 折叠（`transcript` / `rebuild` / `prompt_fidelity` / `branch` / `mutations` /
 /// `slo` / `commitment_records` …）住在 core，两个插件都调它，所以拼写只能来自
-/// **清单生成物**——本插件是 `message.*`、`session.consolidated` / `turn.branch_selected`
+/// **清单生成物**——本插件是 `message.*`、`session.consolidated` / `scope.branch_selected`
 /// 与 `chat.*` / `user.message` 的 owner；`authz.granted` 的 owner 是
 /// `crates/symbio-plugin-tool`、`commitment.*` 的 owner 是 `crates/symbio-plugin-agent`
 /// （E-009 禁兄弟插件依赖，故只引用清单生成物）；任务族
@@ -257,8 +257,8 @@ pub(crate) const FACTS: &[FactDecl] = &[
 pub(crate) const CHAT_VOCAB: symbio_sdk::projection::vocab::ChatVocab =
     symbio_sdk::projection::vocab::ChatVocab {
         user_message: symbio_plugin_api::events::EVENT_USER_MESSAGE,
-        branch: symbio_plugin_api::events::EVENT_TURN_BRANCH,
-        branch_selected: EVENT_TURN_BRANCH_SELECTED,
+        branch: symbio_plugin_api::events::EVENT_SCOPE_BRANCH,
+        branch_selected: EVENT_SCOPE_BRANCH_SELECTED,
         reported: EVENT_CHAT_ASSISTANT_REPORTED,
         opening: EVENT_CHAT_ASSISTANT_OPENING,
         final_reply: symbio_plugin_api::events::EVENT_CHAT_ASSISTANT_FINAL,

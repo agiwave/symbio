@@ -35,8 +35,8 @@ pub const EVENT_CHAT_ASSISTANT_OPENING: &str = "chat.assistant.opening";
 pub const EVENT_CHAT_ASSISTANT_FINAL: &str = "chat.assistant.final";
 pub const EVENT_CHAT_ASSISTANT_FALLBACK: &str = "chat.assistant.fallback";
 pub const EVENT_CHAT_ASSISTANT_PROGRESS: &str = "chat.assistant.progress";
-pub const EVENT_TURN_BRANCH: &str = "turn.branch";
-pub const EVENT_TURN_BRANCH_SELECTED: &str = "turn.branch_selected";
+pub const EVENT_SCOPE_BRANCH: &str = "scope.branch";
+pub const EVENT_SCOPE_BRANCH_SELECTED: &str = "scope.branch_selected";
 pub const EVENT_MODEL_SPEECH_DENIED: &str = "model.speech.denied";
 
 // ── 工具派发面 ──
@@ -76,8 +76,8 @@ pub const EVENTS: &[EventDecl] = &[
     EventDecl::host_with_roles(EVENT_CHAT_ASSISTANT_FINAL, (Entity::Scope, Verb::Closed), &[FactRole::FinalizesScope]), // chat.assistant.final ← session
     EventDecl::new(EVENT_CHAT_ASSISTANT_FALLBACK, (Entity::Scope, Verb::Closed)), // chat.assistant.fallback ← session
     EventDecl::new(EVENT_CHAT_ASSISTANT_PROGRESS, (Entity::Scope, Verb::Progressed)), // chat.assistant.progress ← session
-    EventDecl::new(EVENT_TURN_BRANCH, (Entity::Scope, Verb::Asserted)), // turn.branch ← session
-    EventDecl::new(EVENT_TURN_BRANCH_SELECTED, (Entity::Scope, Verb::Asserted)), // turn.branch_selected ← session
+    EventDecl::new(EVENT_SCOPE_BRANCH, (Entity::Scope, Verb::Asserted)), // scope.branch ← session
+    EventDecl::new(EVENT_SCOPE_BRANCH_SELECTED, (Entity::Scope, Verb::Asserted)), // scope.branch_selected ← session
     EventDecl::with_roles(EVENT_MODEL_SPEECH_DENIED, (Entity::Scope, Verb::Asserted), &[FactRole::StopsScope]), // model.speech.denied ← model
     EventDecl::host(EVENT_TOOL_REQUESTED, (Entity::Scope, Verb::Asserted)), // tool.requested ← model
     EventDecl::host(EVENT_ARTIFACT_ADDED, (Entity::Artifact, Verb::Asserted)), // artifact.added ← tool
@@ -95,8 +95,8 @@ pub const EVENTS: &[EventDecl] = &[
 /// 对话发言面（8 条事件 + 1 个端口名）。
 pub const CHAT: ChatVocab = ChatVocab {
     user_message: EVENT_USER_MESSAGE,
-    branch: EVENT_TURN_BRANCH,
-    branch_selected: EVENT_TURN_BRANCH_SELECTED,
+    branch: EVENT_SCOPE_BRANCH,
+    branch_selected: EVENT_SCOPE_BRANCH_SELECTED,
     reported: EVENT_CHAT_ASSISTANT_REPORTED,
     opening: EVENT_CHAT_ASSISTANT_OPENING,
     final_reply: EVENT_CHAT_ASSISTANT_FINAL,
