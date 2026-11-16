@@ -4,7 +4,7 @@ import './_selfrun.mjs';
 // ## 本用例钉的是什么
 //
 // 今天**没有抢占**：判定面已删（`D-388`），忙窗里插话一律排队到轮末，任务留在
-// 就绪集里不被挂起。文件名沿用历史场景名；改名会牵动矩阵引用，不值当。
+// 就绪集里不被挂起。
 //
 // 切主后（D-049）e2e 只读用户可见面（读通道禁令），本用例判据落在：
 //
@@ -68,7 +68,7 @@ async function readysetTaskIds(api) {
 }
 
 export default defineCase(
-  'T34 忙窗抢占判定：忙窗里入队插话 ⇒ 插话轮照常收束、历史完整',
+  'T34 忙窗插话：忙窗里入队插话 ⇒ 不抢占、插话轮照常收束、历史完整',
   async () => {
     const llm = await new MockLlm([
       // 第一轮：声明一个在跑任务（`once` 防工具循环，与 T31 同款）。
@@ -105,7 +105,7 @@ export default defineCase(
           inbound_token: '',
           inbound_readonly: false,
         },
-        // 抢占的写方挂在**收束落格**与收件箱上。
+        // 事实写方挂在**收束落格**上；收件箱由 gateway 的 `vdfs/write` 边界写入。
         ...dialogFaceOff(),
       },
     });
