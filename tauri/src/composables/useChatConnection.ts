@@ -91,7 +91,7 @@ export interface UseChatConnectionReturn {
    *  由那个空间自己在空闲时取出才落库。因此调用返回 ≠ 消息已进流——它出现在
    *  消息列表里，是后端消费后发权威帧那一刻（前端不做乐观回显，见 `send` 实现）。
    *  等待期间的反馈是 working 状态（空白流 + working ⇒ 补一条等待骨架）。 */
-  send: (message: ChatNode) => void
+  send: (message: ChatNode) => Promise<boolean>
   abort: () => void
   removeMessage: (messageId: string) => void
   resume: (payload: ResumePayload) => void
@@ -490,7 +490,14 @@ export function useChatConnection(options: UseChatConnectionOptions): UseChatCon
     return msgs.some(msg => isWaitingStatus(msg.status))
   })
 
-  async function send(msg: ChatNode) {
+  /**
+   * 发言 = 往会话收件箱写一条。
+   *
+   * 返回**是否真的入队成功**：调用方（输入区）据此决定要不要恢复草稿——
+   * 失败时此前已经把输入框清空了，用户看到的只有一条错误提示，想重发还得
+   * 重新打一遍。返回值让「内容不丢」这件事由输入区负责，本层不做 UI。
+   */
+  async function send(msg: ChatNode): Promise<boolean> {
     const outgoing: ChatNode = { ...msg }
     const sid = options.sessionId
     logger.info('useChatConnection', `[${sid}] Sending message`)
@@ -522,7 +529,7 @@ export function useChatConnection(options: UseChatConnectionOptions): UseChatCon
       store.setSessionStatus(sid, VDFS_STATUS_FAILED)
       store.setSessionError(sid, errText)
       onSendComplete?.()
-      return
+      return false
     }
 
     try {
@@ -559,7 +566,9 @@ export function useChatConnection(options: UseChatConnectionOptions): UseChatCon
 
       logger.error('useChatConnection', 'Failed to send', err)
       onSendComplete?.()
+      return false
     }
+    return true
   }
 
   /**

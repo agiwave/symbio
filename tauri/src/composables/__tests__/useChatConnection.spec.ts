@@ -286,7 +286,8 @@ describe('派生状态 — isLoading / isWaitingApproval', () => {
 describe('send — 写收件箱条目 + 乐观置位', () => {
   it('写 `<A>/inbox/<消息 id>`，正文就是那条消息，ctx 带 workdir', async () => {
     const c = conn()
-    await c.send(msg({ id: 'u1', content: '你好' }))
+    // 返回值 = 是否真的入队成功：输入区据此决定要不要恢复草稿
+    await expect(c.send(msg({ id: 'u1', content: '你好' }))).resolves.toBe(true)
     expect(hoisted.writes).toHaveLength(1)
     const w = hoisted.writes[0]
     // 落点是**地址**：条目 id 就是消息 id（地址即身份）
@@ -326,7 +327,7 @@ describe('send — 写收件箱条目 + 乐观置位', () => {
     // 既没有调用方给的地址，store 的寻址镜像也查不到 ⇒ 无从寻址
     hoisted.store = makeStore({ mountDirOf: vi.fn(() => undefined) })
     const c = conn({ sessionAddr: '', onSendComplete })
-    await c.send(msg({ id: 'u1' }))
+    await expect(c.send(msg({ id: 'u1' }))).resolves.toBe(false)
     expect(hoisted.writes).toHaveLength(0)
     expect(hoisted.store.setSessionError).toHaveBeenCalledWith(
       's1',
@@ -339,7 +340,7 @@ describe('send — 写收件箱条目 + 乐观置位', () => {
     hoisted.writeVdfs.mockRejectedValueOnce(new Error('IPC 断了'))
     const onSendComplete = vi.fn()
     const c = conn({ onSendComplete })
-    await c.send(msg({ id: 'u1' }))
+    await expect(c.send(msg({ id: 'u1' }))).resolves.toBe(false)
     expect(hoisted.store.putStatus).toHaveBeenCalledWith(
       's1',
       expect.objectContaining({ status: VDFS_STATUS_FAILED }),

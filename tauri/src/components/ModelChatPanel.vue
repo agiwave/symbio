@@ -98,6 +98,19 @@
             @dismiss="sessionsStore.setSessionError(props.sessionId, null)"
           />
         </div>
+
+        <!-- 上翻阅读时的回到最新入口：流还在尾部增长，没有它只能自己滚回底部。
+             位置在消息区右下、输入区之上，不遮挡正文；只是「回到最新」，不改变阅读位置记录。 -->
+        <button
+          v-if="!isUserAtBottom"
+          class="scroll-bottom"
+          type="button"
+          title="回到最新消息"
+          aria-label="回到最新消息"
+          @click="jumpToBottom"
+        >
+          ↓ 最新
+        </button>
       </section>
     </div>
 
@@ -199,7 +212,7 @@ const attachedImages = ref<ImageAttachment[]>([])
 const editing = ref<{ id: string; content: string; isJson: boolean } | null>(null)
 
 // --- Composables ---
-const { scrollToBottom, scrollToGap, gapFromBottom, smartScroll, handleScroll } = useChatScroll(messagesRef)
+const { isUserAtBottom, scrollToBottom, scrollToGap, gapFromBottom, smartScroll, handleScroll } = useChatScroll(messagesRef)
 
 /**
  * 滚动事件：先按 `useChatScroll` 的规则重算「是否贴底」，再把位置记进
@@ -403,9 +416,24 @@ const optionScope = computed<Record<string, unknown>>(() => ({
    *  带这个 id（前端按 id 合并，不会出现两份）。
    *  仅用于"无失败根级骨架"的兜底错误；有失败根级骨架时错误由其节点承载、走 handleRetry。 */
   function handleSessionRetry() {
+    sessionsStore.setSessionError(props.sessionId, null)
+
+    // 优先重发**刚才没入队的那一条**。此前这里只回看转写里最后一条 user 消息：
+    // 而发送失败意味着它根本没落库，于是“重试”会把上一轮已经成功发送的内容
+    // 再发一遍——用户以为在重试失败的消息，实际又跑了一轮旧对话。
+    const failed = lastFailedSend.value
+    if (failed) {
+      lastFailedSend.value = null
+      // 失败时内容已经还给输入区；重试成功后再留着就等于同一内容可以发两次。
+      // 只在输入区未被用户改过时清空（改过就说明他正在写别的）。
+      const failedText = messageTextOf(failed.content)
+      if (failedText && inputText.value === failedText) inputText.value = ''
+      void dispatchSend(failed)
+      return
+    }
+
     const msgs = sessionsStore.getSessionMessages(props.sessionId)
     const lastUser = [...msgs].reverse().find((m) => messageRoleOf(m) === CHAT_ROLE_USER)
-    sessionsStore.setSessionError(props.sessionId, null)
     if (!lastUser) return
     const retryMsg: ChatNode = {
       id: lastUser.id, // 复用原 user 消息 id：重发而非新建节点
@@ -413,7 +441,7 @@ const optionScope = computed<Record<string, unknown>>(() => ({
       content: lastUser.content,
       timestamp: Date.now(),
     }
-    chat.send(retryMsg)
+    void dispatchSend(retryMsg)
   }
 
   // --- 方法 ---
@@ -438,7 +466,7 @@ onMounted(() => {
   if (pending) {
     inputText.value = pending.text
     if (pending.images?.length) attachedImages.value = pending.images
-    handleSend()
+    void handleSend()
   }
 })
 
@@ -455,12 +483,22 @@ function handleSendOrAbort() {
     // While loading, only allow abort (no queuing new messages)
     chat.abort()
   } else if (inputText.value.trim() || attachedImages.value.length > 0) {
-    handleSend()
+    void handleSend()
   }
 }
 
+/** 最近一条**没入队成功**的消息：错误条的「重试」据此发对那一条 */
+const lastFailedSend = ref<ChatNode | null>(null)
+
+/** 发送并记录失败目标（成功时清空，避免错误条重发旧内容） */
+async function dispatchSend(msg: ChatNode): Promise<boolean> {
+  const ok = await chat.send(msg)
+  lastFailedSend.value = ok ? null : msg
+  return ok
+}
+
 // 核心发送逻辑
-function handleSend() {
+async function handleSend() {
   const text = inputText.value.trim()
   const images = [...attachedImages.value]
   if (!text && images.length === 0) return
@@ -485,9 +523,9 @@ function handleSend() {
     timestamp: Date.now()
   }
 
-  // 重置输入状态
+  // 重置输入状态。**附件先不 revoke**：入队失败时要原样还给用户，
+  // 提前 revoke 会让恢复出来的缩略图变成裂图。
   inputText.value = ''
-  attachedImages.value.forEach(img => img.thumbnailUrl && URL.revokeObjectURL(img.thumbnailUrl))
   attachedImages.value = []
   composerRef.value?.resetHeight()
 
@@ -500,7 +538,28 @@ function handleSend() {
     timestamp: userMessage.timestamp
   }
 
-  chat.send(chatMessage)
+  const ok = await dispatchSend(chatMessage)
+  if (ok) {
+    // 入队成功，正文与图片所有权到此结束
+    images.forEach(img => img.thumbnailUrl && URL.revokeObjectURL(img.thumbnailUrl))
+    return
+  }
+
+  // 失败：内容已经不在输入框里了，必须还给用户——他刚刚打的字不能只留在
+  // 一条错误提示里。图片同理（object URL 未 revoke，直接挂回去）。
+  const restoredToInput = !inputText.value
+  if (restoredToInput) inputText.value = text
+  if (images.length) attachedImages.value = [...attachedImages.value, ...images]
+  showToast(
+    'error',
+    restoredToInput ? '消息未发出，内容已保留，可重试' : '消息未发出，可在错误提示里重试',
+  )
+}
+
+/** 回到最新：上翻阅读时流还在长，没有这个入口用户只能自己一路滚回底部 */
+function jumpToBottom() {
+  scrollToBottom()
+  handleScroll()
 }
 
 
@@ -663,11 +722,35 @@ watch(sessionError, (now) => {
 }
 
 .chat-column {
+  position: relative;
   display: flex;
   flex-direction: column;
   flex: 1 1 0;
   min-width: 0;
   min-height: 0;
+}
+
+/* 回到最新：贴在消息区右下角，与输入区隔开一点，避免盖住最后一条气泡 */
+.scroll-bottom {
+  position: absolute;
+  right: 1rem;
+  bottom: 0.75rem;
+  z-index: 2;
+  display: inline-flex;
+  align-items: center;
+  gap: 0.25rem;
+  padding: 0.3rem 0.7rem;
+  border: 1px solid var(--border-default);
+  border-radius: 999px;
+  background: var(--surface-overlay);
+  color: var(--text-secondary);
+  box-shadow: var(--shadow-1);
+  font-size: 0.75rem;
+  cursor: pointer;
+}
+.scroll-bottom:hover {
+  color: var(--text-primary);
+  background: var(--surface-hover);
 }
 
 .column-body {
