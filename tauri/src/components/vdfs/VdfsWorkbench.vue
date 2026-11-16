@@ -115,13 +115,15 @@
              ⚠️ 筛选态下**必须保留**：命中可能落在更早的页里，去掉这个入口
              就会把「还没找到」误报成「不存在」。 -->
         <div v-if="hasMore && filteredItems.length > 0" class="list-more">
+          <!-- 续页失败不能把入口藏起来：保留按钮就是保留重试，错误行说明为什么没动。 -->
+          <p v-if="loadMoreError" class="list-more-error" role="alert">{{ loadMoreError }}</p>
           <button
             v-if="!loadingMore"
             class="more-btn"
             :disabled="loading"
             @click="loadMore"
           >
-            加载更早
+            {{ loadMoreError ? '重试' : '加载更早' }}
           </button>
           <span v-else class="more-hint">加载中…</span>
         </div>
@@ -195,12 +197,26 @@
       </div>
     </template>
   </Workbench>
+
+  <!-- 删除确认：目录是递归删除，节点内容不可撤销。与消息删除同一套确认件。 -->
+  <ConfirmDialog
+    :visible="pendingDelete"
+    title="删除资源"
+    :message="deleteConfirmMessage"
+    :confirm-text="deleteTargetIsDir ? '递归删除' : '删除'"
+    danger
+    icon="🗑"
+    icon-kind="danger"
+    @confirm="confirmDelete"
+    @cancel="pendingDelete = false"
+  />
 </template>
 
 <script setup lang="ts">
 import { computed, ref, watch } from 'vue'
 import Workbench from '@/components/common/Workbench.vue'
 import VdfsCard from '@/components/common/VdfsCard.vue'
+import ConfirmDialog from '@/components/common/ConfirmDialog.vue'
 import SkeletonBlock from '@/components/common/SkeletonBlock.vue'
 import { useHotkeys } from '@/composables/useHotkeys'
 import { useVdfs } from '@/composables/useVdfs'
@@ -267,6 +283,7 @@ const {
   loadError,
   hasMore,
   loadingMore,
+  loadMoreError,
   refresh,
   loadMore,
   select,
@@ -526,7 +543,26 @@ function onSave(payload: unknown) {
   else void saveText()
 }
 
+/** 删除确认：确认前不动数据（目录是递归删除，节点内容不可撤销） */
+const pendingDelete = ref(false)
+const deleteTargetIsDir = computed(() => Boolean(selectedNode.value && isVdfsDir(selectedNode.value)))
+
+const deleteConfirmMessage = computed(() => {
+  const node = selectedNode.value
+  if (!node) return ''
+  const name = node.title || node.name
+  return deleteTargetIsDir.value
+    ? `将递归删除目录「${name}」及其全部内容，此操作无法撤销。`
+    : `将删除「${name}」，此操作无法撤销。`
+})
+
 function onDelete() {
+  if (!selectedNode.value) return
+  pendingDelete.value = true
+}
+
+function confirmDelete() {
+  pendingDelete.value = false
   void removeSelected()
 }
 
@@ -707,6 +743,13 @@ async function onCreated(id: string) {
   opacity: 0.5;
   cursor: default;
 }
+.list-more-error {
+  margin: 0 0 0.35rem;
+  font-size: 0.72rem;
+  color: var(--danger-fg);
+  text-align: center;
+}
+
 .more-hint {
   font-size: 0.8125rem;
   color: var(--text-muted);

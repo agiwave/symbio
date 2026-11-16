@@ -19,6 +19,20 @@
       </template>
     </BaseModal>
 
+    <!-- 删除确认：删除一条消息会连同其后所有消息一起截断（store 的级联口径与后端
+         同源），这是一次不可撤销的写操作，不能一点就删。单条也确认。 -->
+    <ConfirmDialog
+      :visible="!!pendingDelete"
+      title="删除消息"
+      :message="pendingDeleteMessage"
+      :confirm-text="pendingDelete && pendingDelete.count > 1 ? '删除这些消息' : '删除'"
+      danger
+      icon="🗑"
+      icon-kind="danger"
+      @confirm="confirmDelete"
+      @cancel="pendingDelete = null"
+    />
+
     <!-- 消息区：恒为单列——一个会话线程一个显示区域（呈现合流定案见 ADR-063 §2.3：
          会话里没有第二条线程，收件箱 FIFO + 单写者 + 单转写只允许一条线；
          完整转发直排：正文 / 思考 / 工具调用与轮次过程在同一列按时间轴展开）。 -->
@@ -142,6 +156,8 @@ import SkeletonPending from './message/SkeletonPending.vue'
 import InboxPending from './message/InboxPending.vue'
 import ChatComposer from './chat/ChatComposer.vue'
 import BaseModal from './common/BaseModal.vue'
+import ConfirmDialog from './common/ConfirmDialog.vue'
+import { useToast } from '@/composables/useToast'
 
 // Props（多会话缩略窗口架构下，ModelChatPanel 只接收会话身份）
 const props = defineProps<{
@@ -500,24 +516,60 @@ function handleRetry(messageId: string) {
   chat.resume({ targetId: target.targetId, action: target.action })
 }
 
-/** 删除单条消息（由 store 调后端持久化）；若为 user 消息，删除后将其内容回填输入框 */
-async function handleDelete(messageId: string) {
-  // 删除前先取出消息：回填空需要其内容
-  const msg = sessionsStore.getSessionMessages(props.sessionId).find(m => m.id === messageId)
-  const isUserMsg = msg ? messageRoleOf(msg) === CHAT_ROLE_USER : false
-  // 删除前先取出正文（回填空需要其内容）；取值走契约层唯一实现，不在此另写形状判定
-  const userText = isUserMsg ? messageTextOf(msg?.content) : ''
+const { showToast } = useToast()
 
+/** 待确认的删除（打开确认框后才有值；确认前不动本地/后端任何数据） */
+interface PendingDelete {
+  id: string
+  isUser: boolean
+  userText: string
+  /** 本次会被删除的条数（目标 + 其后全部） */
+  count: number
+}
+const pendingDelete = ref<PendingDelete | null>(null)
+
+const pendingDeleteMessage = computed(() => {
+  const p = pendingDelete.value
+  if (!p) return ''
+  if (p.count > 1) {
+    return `会删除这条消息以及它之后的 ${p.count - 1} 条消息（共 ${p.count} 条），此操作无法撤销。`
+  }
+  return '此操作无法撤销。'
+})
+
+/** 删除入口：先取消息（回填与条数都要用），再弹确认 */
+function handleDelete(messageId: string) {
+  const msgs = sessionsStore.getSessionMessages(props.sessionId)
+  const idx = msgs.findIndex(m => m.id === messageId)
+  const msg = idx >= 0 ? msgs[idx] : undefined
+  const isUserMsg = msg ? messageRoleOf(msg) === CHAT_ROLE_USER : false
+  // 取值走契约层唯一实现，不在此另写形状判定
+  const userText = isUserMsg ? messageTextOf(msg?.content) : ''
+  pendingDelete.value = {
+    id: messageId,
+    isUser: isUserMsg,
+    userText,
+    count: idx >= 0 ? msgs.length - idx : 1,
+  }
+}
+
+/** 确认后执行删除（由 store 调后端持久化）；若为 user 消息，删除后将其内容回填输入框 */
+async function confirmDelete() {
+  const p = pendingDelete.value
+  pendingDelete.value = null
+  if (!p) return
   try {
-    await sessionsStore.deleteMessage(props.sessionId, messageId)
+    await sessionsStore.deleteMessage(props.sessionId, p.id)
     // 仅当用户消息被删时，把其内容回填到输入框，方便用户修改后重发（不自动发送）
-    if (isUserMsg && userText) {
+    if (p.isUser && p.userText) {
       const cur = inputText.value ?? ''
       const sep = cur.trim().length > 0 ? '\n\n' : ''
-      inputText.value = cur + sep + userText
+      inputText.value = cur + sep + p.userText
     }
   } catch (e) {
     logger.error('ModelChatPanel', 'deleteMessage 失败', e)
+    // store 已把消息放回本地；这里必须说明“为什么闪了一下又回来”
+    showToast('error', `删除失败：${e instanceof Error ? e.message : String(e)}`)
   }
 }
 
@@ -531,7 +583,14 @@ function handleEdit(messageId: string) {
   editing.value = { id: messageId, content: text, isJson }
 }
 
-/** 保存编辑：更新 store + 持久化到后端 */
+/**
+ * 保存编辑：更新 store + 持久化到后端。
+ *
+ * `updateMessage` 是「先本地应用、再写后端」：写失败时本地已经是新内容，
+ * 若不回滚就会界面与后端分叉（关掉浮层后用户以为改成了）。失败时把原消息
+ * 重新落回本地（`applyTranscriptMessage`，与实时流同一条路径），并保留编辑态
+ * 让用户能重试。
+ */
 async function saveEdit() {
   if (!editing.value) return
   const { id, content } = editing.value
@@ -541,10 +600,17 @@ async function saveEdit() {
     return
   }
   const newContent: MessageContent = content
-  await sessionsStore.updateMessage(props.sessionId, {
-    ...msg,
-    content: newContent,
-  } as ChatNode)
+  try {
+    await sessionsStore.updateMessage(props.sessionId, {
+      ...msg,
+      content: newContent,
+    } as ChatNode)
+  } catch (e) {
+    sessionsStore.applyTranscriptMessage(props.sessionId, msg)
+    logger.error('ModelChatPanel', 'updateMessage 失败', e)
+    showToast('error', `保存失败：${e instanceof Error ? e.message : String(e)}`)
+    return
+  }
   editing.value = null
   nextTick(() => scrollToBottom())
 }

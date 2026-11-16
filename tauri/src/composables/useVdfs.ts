@@ -217,11 +217,19 @@ export function useVdfs(opts: UseVdfsOptions) {
    */
   const hasMore = ref(false)
   const loadingMore = ref(false)
+  /**
+   * 「加载更早」的失败信息（与 `loadError` 分开：首屏失败与续页失败是两件事）。
+   *
+   * 失败时**保留 `hasMore`**——把它置 false 会让按钮直接消失，而用户会把这读成
+   * 「已经到底了」，同时也失去了重试入口。
+   */
+  const loadMoreError = ref('')
 
   /** 加载当前目录（**有界**：默认只取最新一页） */
   async function refresh() {
     loading.value = true
     loadError.value = ''
+    loadMoreError.value = ''
     try {
       const resp = await listVdfs(READBACK_REASON.VDFS_BROWSER, cwd.value, {
         limit: VDFS_PAGE_SIZE,
@@ -265,6 +273,7 @@ export function useVdfs(opts: UseVdfsOptions) {
     const last = items.value[items.value.length - 1]
     if (!last) return
     loadingMore.value = true
+    loadMoreError.value = ''
     try {
       const resp = await listVdfs(READBACK_REASON.VDFS_BROWSER, cwd.value, {
         limit: VDFS_PAGE_SIZE,
@@ -276,7 +285,7 @@ export function useVdfs(opts: UseVdfsOptions) {
       hasMore.value = fresh.length > 0 && resp.items.length >= VDFS_PAGE_SIZE
     } catch (err) {
       logger.error('useVdfs', `加载更早失败 ${cwd.value}:`, err)
-      hasMore.value = false
+      loadMoreError.value = '加载更早的条目失败，请重试'
     } finally {
       loadingMore.value = false
     }
@@ -619,8 +628,12 @@ export function useVdfs(opts: UseVdfsOptions) {
     if (isVdfsDraft(node)) return
 
     const r = resolveVdfsRenderer(node)
-    if (!rendererReadsNodeText(r))
+    if (!rendererReadsNodeText(r)) {
+      // 选中变化**必须**让在途正文响应作废——即使新渲染器不消费这些数据。
+      // 否则上一次慢响应仍会落地，写进新节点的 nodeText/formData。
+      detailGuard.advance()
       return
+    }
 
     // 读取代次令牌：连点多项时，慢响应不得覆盖新选中项的数据
     const token = detailGuard.advance()
@@ -730,7 +743,14 @@ export function useVdfs(opts: UseVdfsOptions) {
         // 生成），地址由「当前目录 + 名字」构成——但中栏刚重载过，按名字找回即可
         // （名字是目录内的路径段，唯一）。
         const created = items.value.find((n) => n.name === resp.name)
-        if (created) await select(created)
+        if (created) {
+          await select(created)
+        } else {
+          // 回执没给名字 / 名字被 provider 归一化：不能停在已失效的草稿页上却
+          // 只说「已新建」。告诉用户已创建但未定位，并保留列表已刷新的事实。
+          logger.warn('useVdfs', `新建成功但未能定位条目：${resp.name}`)
+          showToast('info', '已新建，但未能在列表中定位，请从列表中选择')
+        }
       }
       return true
     } catch (err) {
@@ -1056,6 +1076,7 @@ export function useVdfs(opts: UseVdfsOptions) {
     loadError,
     hasMore,
     loadingMore,
+    loadMoreError,
     refresh,
     loadMore,
     reload,
