@@ -35,19 +35,24 @@
       type="text"
       placeholder="搜索资源，或回车进入某一类…"
       aria-label="搜索资源"
+      role="combobox"
+      aria-controls="palette-results"
+      :aria-expanded="true"
+      :aria-activedescendant="activeOptionId"
       spellcheck="false"
-      @keydown.down.prevent="move(1)"
-      @keydown.up.prevent="move(-1)"
-      @keydown.enter.prevent="activate()"
+      @keydown.down="onMove(1, $event)"
+      @keydown.up="onMove(-1, $event)"
+      @keydown.enter="onEnter"
     />
 
-    <div ref="listRef" class="pa-list" role="listbox" aria-label="结果">
+    <div id="palette-results" ref="listRef" class="pa-list" role="listbox" aria-label="结果">
       <p v-if="loading" class="pa-note">正在取资源清单…</p>
       <template v-else>
-        <section v-for="g in groups" :key="g.name" class="pa-group">
-          <p class="pa-group-name">{{ g.name }}</p>
+        <section v-for="g in groups" :key="g.name" class="pa-group" role="group" :aria-label="g.name">
+          <p class="pa-group-name" aria-hidden="true">{{ g.name }}</p>
           <button
             v-for="e in g.entries"
+            :id="optionIdOf(e.key)"
             :key="e.key"
             class="pa-row"
             :class="{ 'is-active': e.key === activeKey }"
@@ -77,6 +82,7 @@
 <script setup lang="ts">
 import { computed, nextTick, ref, watch } from 'vue'
 import { useRouter } from 'vue-router'
+import { isImeComposing } from '@/utils/keyboard'
 import BaseModal from './BaseModal.vue'
 import { treeVdfs } from '@/services/vdfs'
 import { READBACK_REASON } from '@/services/readback'
@@ -102,6 +108,12 @@ const DEPTH = 2
 
 const groups = computed(() => buildPalette(nodes.value, { root: vdfsRoot(), query: query.value }))
 const flat = computed(() => flattenGroups(groups.value))
+
+/** 结果行的 DOM id（按摊平序编，避免用路径做 id） */
+const optionIds = computed(() => new Map(flat.value.map((e, i) => [e.key, `pa-opt-${i}`])))
+const optionIdOf = (key: string): string | undefined => optionIds.value.get(key)
+/** 输入框留在原地，用 `aria-activedescendant` 告诉读屏当前高亮的是哪一行 */
+const activeOptionId = computed(() => optionIdOf(activeKey.value))
 
 async function load() {
   loading.value = true
@@ -142,6 +154,25 @@ watch(
 
 /** 高亮格当前在摊平清单里的位置 */
 const activeIndex = computed(() => flat.value.findIndex((e) => e.key === activeKey.value))
+
+/**
+ * 上下移动高亮。
+ *
+ * 组合态必须让路：输入法用 ↑↓ 在候选词之间选择，抢走它会让中文/日文用户
+ * 只剩鼠标可用。`preventDefault` 也放在判据之后（见 `utils/keyboard`）。
+ */
+function onMove(step: number, e: KeyboardEvent) {
+  if (isImeComposing(e)) return
+  e.preventDefault()
+  move(step)
+}
+
+/** Enter 同理：组合态的回车是选词上屏，不是打开结果 */
+function onEnter(e: KeyboardEvent) {
+  if (isImeComposing(e)) return
+  e.preventDefault()
+  activate()
+}
 
 function move(step: number) {
   const list = flat.value

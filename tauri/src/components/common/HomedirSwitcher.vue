@@ -24,15 +24,17 @@
 
       <div class="modal-body">
         <!-- 模式切换 -->
-        <div class="seg">
+        <div class="seg" role="group" aria-label="连接方式">
           <button
             class="seg-btn"
             :class="{ active: mode === 'local' }"
+            :aria-pressed="mode === 'local'"
             @click="mode = 'local'"
           >本地目录</button>
           <button
             class="seg-btn"
             :class="{ active: mode === 'remote' }"
+            :aria-pressed="mode === 'remote'"
             @click="mode = 'remote'"
           >远端地址</button>
         </div>
@@ -48,7 +50,7 @@
                 class="text-input mono"
                 type="text"
                 placeholder="例如 ~/.symbio 或 /path/to/your/homedir"
-                @keydown.enter="handleSubmit"
+                @keydown.enter="onKeyEnter"
               />
               <button class="btn" @click="handleBrowse" :disabled="browsing">浏览…</button>
             </div>
@@ -70,7 +72,7 @@
               class="text-input mono"
               type="text"
               placeholder="http://host:port 或 http://host:port?token=KEY"
-              @keydown.enter="handleSubmit"
+              @keydown.enter="onKeyEnter"
             />
             <div class="hint">
               直接粘贴远端地址；若地址内含访问密钥，可写成
@@ -85,7 +87,7 @@
               class="text-input mono"
               type="text"
               placeholder="Bearer Token（留空则仅用地址中的 key）"
-              @keydown.enter="handleSubmit"
+              @keydown.enter="onKeyEnter"
             />
           </div>
           <div class="hint warn" v-if="currentIsRemote">
@@ -142,6 +144,7 @@ import {
 } from '@/services/systemLocation'
 import { reloadGatewayTransport } from '@/services/plugin'
 import { logger } from '@/utils/logger'
+import { isImeComposing } from '@/utils/keyboard'
 import { useToast } from '@/composables/useToast'
 import BaseModal from './BaseModal.vue'
 import ConfirmDialog from './ConfirmDialog.vue'
@@ -232,9 +235,16 @@ async function handleBrowse() {
     }
   } catch (err) {
     logger.error('sysdir-switcher', 'Browse failed:', err)
+    showToast('error', `选择目录失败：${err instanceof Error ? err.message : String(err)}`)
   } finally {
     browsing.value = false
   }
+}
+
+/** 路径可能含中文：回车先让给输入法上屏，再谈提交 */
+function onKeyEnter(e: KeyboardEvent) {
+  if (isImeComposing(e)) return
+  handleSubmit()
 }
 
 function handleSubmit() {

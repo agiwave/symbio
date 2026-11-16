@@ -181,6 +181,7 @@
 import { computed, nextTick, ref, watch } from 'vue'
 import { useSessionsStore } from '@/stores/sessions'
 import { logger } from '@/utils/logger'
+import { isImeComposing } from '@/utils/keyboard'
 import { useToast } from '@/composables/useToast'
 import EmptyWorkdirState from './EmptyWorkdirState.vue'
 import ModelChatPanel from '../ModelChatPanel.vue'
@@ -317,6 +318,8 @@ function dismissError() {
 
 /** 内联重命名（原地编辑标题；不用浏览器原生 prompt） */
 const renaming = ref(false)
+/** 提交中：防止连续 Enter 在同一个标题上叠出多次写请求 */
+const renameBusy = ref(false)
 const draftTitle = ref('')
 const renameInputRef = ref<HTMLInputElement | null>(null)
 
@@ -339,25 +342,26 @@ function cancelRename() {
  * keyup 时组合态往往已经结束，`isComposing` 会漏判（选词的回车会误提交）。
  */
 function onRenameEnter(e: KeyboardEvent) {
-  if (e.isComposing || e.keyCode === 229) return
+  if (isImeComposing(e)) return
   e.preventDefault()
   void submitRename()
 }
 
 function onRenameEsc(e: KeyboardEvent) {
-  if (e.isComposing || e.keyCode === 229) return
+  if (isImeComposing(e)) return
   cancelRename()
 }
 
 /** 提交重命名（空标题或与原名相同视为放弃——不做无意义的往返） */
 async function submitRename() {
   const id = store.activeId
-  if (!id || !renaming.value) return
+  if (!id || !renaming.value || renameBusy.value) return
   const title = draftTitle.value.trim()
   if (!title || title === store.activeTitle) {
     renaming.value = false
     return
   }
+  renameBusy.value = true
   try {
     await store.rename(id, title)
     renaming.value = false
@@ -367,6 +371,8 @@ async function submitRename() {
     showToast('error', `重命名失败：${e instanceof Error ? e.message : String(e)}`)
     await nextTick()
     renameInputRef.value?.focus()
+  } finally {
+    renameBusy.value = false
   }
 }
 

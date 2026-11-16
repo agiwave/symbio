@@ -80,6 +80,7 @@
 import { ref, watch, nextTick, onMounted, onUnmounted } from 'vue'
 import type { ImageAttachment } from '@/types'
 import { logger } from '@/utils/logger'
+import { isImeComposing } from '@/utils/keyboard'
 import { useToast } from '@/composables/useToast'
 
 /** 附件上限：前端先拦，避免大图 / 连贴把内存吃满后才由后端拒绝 */
@@ -121,9 +122,8 @@ defineExpose({ resetHeight, textarea: textareaRef })
 // 按钮）。因此运行中回车就是换行，用户可以先把下一句写下来。
 function handleKeydown(e: KeyboardEvent) {
   // 输入法组合态：中文等 IME 下按 Enter 是**选词 / 上屏**，不是发送。
-  // `isComposing` 是标准判据；`keyCode === 229` 覆盖旧 WebView 在组合期间
-  // 只报 229 的情形。漏掉这一条会把用户正在打的字直接发出去。
-  if (e.isComposing || e.keyCode === 229) return
+  // 判据统一在 `utils/keyboard`（全站同一个口径）。
+  if (isImeComposing(e)) return
   if (props.isLoading) return
   if (!e.shiftKey) {
     e.preventDefault()
@@ -180,6 +180,9 @@ async function handlePaste(event: ClipboardEvent) {
 
 // Global paste listener: captures pasted images anywhere in the page, as long as another text field is not active.
 function handleGlobalPaste(event: ClipboardEvent) {
+  // 有弹层开着时不吃粘贴：全局监听只服务「聊天页没有焦点也在输入」，
+  // 用户此刻在确认框 / 设置弹窗里，图片贴到背后的聊天输入框是意料之外的副作用。
+  if (document.querySelector('.modal-mask')) return
   const activeEl = document.activeElement
   if (
     activeEl &&
