@@ -27,30 +27,39 @@ fn sse_data_rejects_non_data_lines() {
 }
 
 #[test]
-fn protocol_aliases_resolve_to_registered_ids() {
+fn registered_protocol_ids_resolve_to_themselves() {
     assert_eq!(
-        resolve_protocol_id("chat"),
+        resolve_protocol_id(MODEL_PROTOCOL_OPENAI_CHAT),
         Some(MODEL_PROTOCOL_OPENAI_CHAT)
     );
     assert_eq!(
-        resolve_protocol_id("responses"),
+        resolve_protocol_id(MODEL_PROTOCOL_OPENAI_RESPONSES),
         Some(MODEL_PROTOCOL_OPENAI_RESPONSES)
     );
     assert_eq!(
-        resolve_protocol_id("anthropic"),
+        resolve_protocol_id(MODEL_PROTOCOL_ANTHROPIC_MESSAGES),
         Some(MODEL_PROTOCOL_ANTHROPIC_MESSAGES)
     );
     assert_eq!(
-        resolve_protocol_id("gemini"),
+        resolve_protocol_id(MODEL_PROTOCOL_GEMINI_API),
         Some(MODEL_PROTOCOL_GEMINI_API)
     );
 }
 
 /// 未识别值**不兜底**：写错的配置必须在保存 / 收集期可见，而不是悄悄变成
-/// `openai_chat` 请求体（兜底反转）。
+/// `openai_chat` 请求体（兜底反转）。短别名属历史兼容（SP-003 §6 已禁），同样不认。
 #[test]
 fn unknown_protocol_is_rejected_not_defaulted() {
-    for bad in ["bogus", "", "OpenAI", "anthropic-messages"] {
+    for bad in [
+        "bogus",
+        "",
+        "OpenAI",
+        "anthropic-messages",
+        "chat",
+        "responses",
+        "anthropic",
+        "gemini",
+    ] {
         assert_eq!(
             resolve_protocol_id(bad),
             None,

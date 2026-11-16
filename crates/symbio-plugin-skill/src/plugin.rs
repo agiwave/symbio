@@ -43,15 +43,12 @@ impl SkillPlugin {
         let dir = plugin_dir_from_ctx(&*ctx, PLUGIN_ID_SKILL);
 
         // 配置真源是**本插件自己的目录**（D-427）：`<根>/skill/PLUGIN.yml`。
-        // `ctx.config()` 保留为兼容回退（旧装配可能把配置随请求注入）；两者都缺席
-        // 才用出厂值。默认值只有 `SkillConfig::default()` 一份，不再在装配处
-        // 复制一份路径表——那两份此前就漂过一次（少一条作用域级目录）。
+        // 未发布产品、无存量配置需兼容（SP-003 §6），不再回退读请求注入的
+        // `ctx.config()`：缺席即用出厂值。默认值只有 `SkillConfig::default()` 一份，
+        // 不再在装配处复制一份路径表——那两份此前就漂过一次（少一条作用域级目录）。
         let mut config: SkillConfig = match dir.load::<SkillConfig>() {
             Ok(Some(c)) => c,
-            Ok(None) => ctx
-                .config()
-                .and_then(|v| serde_json::from_value(v).ok())
-                .unwrap_or_default(),
+            Ok(None) => SkillConfig::default(),
             Err(e) => {
                 symbio_plugin_api::plugin_warn!("skill", "读取自身配置失败，改用默认值：{e}");
                 SkillConfig::default()

@@ -3,9 +3,9 @@ use std::collections::HashMap;
 
 /// MCP 传输类型
 ///
-/// 只有两条**真实存在**的路径：本地子进程与 HTTP。旧配置里的 `sse` 仍能读入，
-/// 但会按 HTTP 解释并在日志里提示迁移——变体不再承诺一条没有实现的传输。
-#[derive(Debug, Clone, Copy, Default, Serialize, PartialEq, Eq)]
+/// 只有两条**真实存在**的路径：本地子进程与 HTTP。未发布产品、无存量配置需兼容
+/// （SP-003 §6），旧值 `sse` 不再读入。
+#[derive(Debug, Clone, Copy, Default, Serialize, Deserialize, PartialEq, Eq)]
 #[serde(rename_all = "lowercase")]
 pub enum McpTransportType {
     /// 本地进程通信（spawn 子进程 + stdin/stdout JSON-RPC）
@@ -15,37 +15,10 @@ pub enum McpTransportType {
     Http,
 }
 
-impl<'de> Deserialize<'de> for McpTransportType {
-    fn deserialize<D>(deserializer: D) -> Result<Self, D::Error>
-    where
-        D: serde::Deserializer<'de>,
-    {
-        /// 线上词表：`sse` 只作为**读入**别名保留，写回时归一成 `http`。
-        #[derive(Deserialize)]
-        #[serde(rename_all = "lowercase")]
-        enum Wire {
-            Stdio,
-            Http,
-            Sse,
-        }
-
-        match Wire::deserialize(deserializer)? {
-            Wire::Stdio => Ok(Self::Stdio),
-            Wire::Http => Ok(Self::Http),
-            Wire::Sse => {
-                tracing::warn!(
-                    "MCP 配置的传输类型 `sse` 已退役（实现与 http 相同）——按 `http` 解释；保存后写回 `http`"
-                );
-                Ok(Self::Http)
-            }
-        }
-    }
-}
-
 /// MCP 服务器配置（持久化层权威定义）
 ///
 /// 字段设计：
-/// - `transport_type`：决定使用 stdio / http 哪条 transport 路径（旧值 `sse` 读入时归一为 http）
+/// - `transport_type`：决定使用 stdio / http 哪条 transport 路径
 /// - `command` + `args` + `env`：stdio transport 必需
 /// - `url`：http transport 必需
 /// - `include_tools` / `exclude_tools`：工具过滤
@@ -55,7 +28,7 @@ impl<'de> Deserialize<'de> for McpTransportType {
 /// 前端只做配置的增删改查；后端在 agent 真正需要某个工具时按需加载 transport。
 #[derive(Debug, Clone, Serialize, Deserialize)]
 pub struct McpServerConfig {
-    /// 传输类型（stdio / http；旧值 `sse` 读入时按 http）
+    /// 传输类型（stdio / http）
     #[serde(rename = "type", default)]
     pub transport_type: McpTransportType,
 

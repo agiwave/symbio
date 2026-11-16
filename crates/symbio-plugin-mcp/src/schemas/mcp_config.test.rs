@@ -102,17 +102,15 @@ fn mcp_server_config_deserializes_all_fields_snake_case() {
     assert!(!cfg.enabled);
 }
 
-/// 存量 `sse` 迁移：读取时按 `http` 解释（SSE 响应解析本来就是 http transport 的一部分），
-/// 重新保存即写回 `http`——退役的变体不再从出口流出。
+/// 退役的 `sse` 不再读入（未发布、无存量需兼容，SP-003 §6）：它既不是 stdio 也不是
+/// http，反序列化必须报错，而不是悄悄按某条路径解释。
 #[test]
-fn legacy_sse_type_is_read_as_http_and_rewritten() {
+fn legacy_sse_type_is_rejected() {
     let json = r#"{"type": "sse", "url": "http://x/sse"}"#;
-    let cfg: McpServerConfig = serde_json::from_str(json).unwrap();
-    assert_eq!(cfg.transport_type, McpTransportType::Http);
-
-    let v: serde_json::Value = serde_json::to_value(&cfg).unwrap();
-    assert_eq!(v["type"], "http");
-    assert_eq!(v["url"], "http://x/sse");
+    assert!(
+        serde_json::from_str::<McpServerConfig>(json).is_err(),
+        "`sse` 是已退役的传输类型，不应再被接受"
+    );
 }
 
 /// McpConfig 缺省为空
