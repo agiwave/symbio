@@ -438,5 +438,9 @@ jobs:
         # 这是**既有配置错误**——此前从未暴露，因为 cargo-audit 自己就装不上
         # （见上一步：工具被 rust-toolchain.toml 的 pin 拖住）。两层壳剥掉一层，
         # 才露出里面这层。
-        run: cargo audit --ignore RUSTSEC-2020-0058 --ignore RUSTSEC-2021-0099
-        # 忽略一些已知的误报或低严重性问题
+        run: cargo audit
+        # 不保留 ignore 名单：历史那两条（RUSTSEC-2020-0058 `stream-cipher`、
+        # RUSTSEC-2021-0099 `cosmos_sdk`）都是「crate 改名」的 INFO 级通告，且
+        # 这两个 crate 已不在 `Cargo.lock` 里。留着只会让下一个人以为仓库有两条
+        # 需要长期容忍的漏洞；真出现新的上游通告时，按「修 / 换依赖 / 写明豁免理由
+        # 与到期条件」三选一处理，不要顺手加 ignore。

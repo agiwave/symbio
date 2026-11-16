@@ -66,6 +66,7 @@ lists: [gate-codes=owner]
 | **SX** | SLO 出口表 vs session/stats 读数列（用户可见出口） | `scripts/audits/slo-exit-audit.mjs` | SX-001–003 | `SX-004` |
 | **TD** | 工具自声明行为位（声明面基线对账） | `scripts/audits/tool-decls-audit.mjs` | TD-001–002 | `TD-003` |
 | **TR** | turn 词根冻结（废弃概念的存量棘轮） | `scripts/audits/turn-root-audit.mjs` | TR-001–004 | `TR-005` |
+| **UX** | 前端可用性（原生弹窗 / 可访问名称 / 图片替代文本） | `scripts/audits/frontend-ux-audit.mjs` | UX-001–004 | `UX-005` |
 | **V** | 分域形状 | `scripts/audits/domain-vocab-audit.mjs` | V-001–002 | `V-003` |
 
 ## 2. 逐码归属
@@ -328,5 +329,9 @@ lists: [gate-codes=owner]
 | **TR-002** | `scripts/audits/turn-root-audit.mjs` |
 | **TR-003** | `scripts/audits/turn-root-audit.mjs` |
 | **TR-004** | `scripts/audits/turn-root-audit.mjs` |
+| **UX-001** | `scripts/audits/frontend-ux-audit.mjs` |
+| **UX-002** | `scripts/audits/frontend-ux-audit.mjs` |
+| **UX-003** | `scripts/audits/frontend-ux-audit.mjs` |
+| **UX-004** | `scripts/audits/frontend-ux-audit.mjs` |
 | **V-001** | `scripts/audits/domain-vocab-audit.mjs` |
 | **V-002** | `scripts/audits/domain-vocab-audit.mjs` |

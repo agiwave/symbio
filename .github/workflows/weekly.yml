@@ -37,3 +37,38 @@ jobs:
         # 与本地同一条命令。只跑 weekly 阶段（`@gate weekly` 桶，带 --strict）；
         # 判据清单在脚本头声明里（此处不重抄，抄了会漂移）。
         run: node scripts/gate.mjs --preset=weekly --ci
+
+  # 跨平台 Rust 门禁：日常 ci.yml 只在 ubuntu 上跑 workspace 测试，Windows /
+  # macOS 的编译差异（cfg、路径分隔符、平台 TLS、Tauri 平台前置）只有发布时才
+  # 第一次暴露。放在周档而不是每次提交：平台漂移不随单次提交变化，每周一次足以
+  # 在累积成发布阻塞前抓住（与 D-496 的分频纪律同源）。
+  platform-rust:
+    name: Rust gate (${{ matrix.os }})
+    strategy:
+      fail-fast: false
+      matrix:
+        os: [windows-latest, macos-latest]
+    runs-on: ${{ matrix.os }}
+    steps:
+      - uses: actions/checkout@v5
+
+      - name: Setup Node.js
+        uses: actions/setup-node@v5
+        with:
+          node-version: '22'
+          cache: 'npm'
+          cache-dependency-path: tauri/package-lock.json
+
+      - name: Install frontend dependencies
+        working-directory: tauri
+        run: npm ci
+
+      - name: Build frontend assets
+        # `tauri::generate_context!` 在编译期读 `frontendDist: ../dist`；
+        # 缺产物时 workspace 的 cargo test / clippy 会在 proc macro 处全红。
+        working-directory: tauri
+        run: npm run build
+
+      - name: Rust gate
+        # 与 ci.yml 的 rust-checks 同一条命令；检查项只在 gate.mjs 里定义一处。
+        run: node scripts/gate.mjs --preset=rust --ci
