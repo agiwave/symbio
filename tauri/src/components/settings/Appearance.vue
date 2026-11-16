@@ -10,13 +10,14 @@
         <label>主题</label>
         <p class="setting-desc">选择应用的主题风格</p>
       </div>
-      <div class="segmented">
+      <div class="segmented" role="group" aria-label="主题">
         <button
           v-for="opt in themeOptions"
           :key="opt.value"
           type="button"
           class="seg-btn"
           :class="{ active: appearance.theme === opt.value }"
+          :aria-pressed="appearance.theme === opt.value"
           @click="appearance.theme = opt.value"
         >
           {{ opt.label }}
@@ -29,13 +30,14 @@
         <label>字体大小</label>
         <p class="setting-desc">调整界面文字大小</p>
       </div>
-      <div class="segmented">
+      <div class="segmented" role="group" aria-label="字体大小">
         <button
           v-for="opt in fontSizeOptions"
           :key="opt.value"
           type="button"
           class="seg-btn"
           :class="{ active: appearance.fontSize === opt.value }"
+          :aria-pressed="appearance.fontSize === opt.value"
           @click="appearance.fontSize = opt.value"
         >
           {{ opt.label }}
@@ -48,13 +50,14 @@
         <label>会话结束提示音</label>
         <p class="setting-desc">任何会话结束（完成 / 中止 / 失败）时播放提示音，不同结束类型音色不同</p>
       </div>
-      <div class="segmented">
+      <div class="segmented" role="group" aria-label="会话结束提示音">
         <button
           v-for="(opt, i) in soundToggleOptions"
           :key="i"
           type="button"
           class="seg-btn"
           :class="{ active: sound.enabled === opt.value }"
+          :aria-pressed="sound.enabled === opt.value"
           @click="sound.enabled = opt.value"
         >
           {{ opt.label }}
@@ -74,6 +77,7 @@
             type="button"
             class="seg-btn"
             :class="{ active: sound.kinds.completed }"
+            :aria-pressed="sound.kinds.completed"
             @click="sound.kinds.completed = !sound.kinds.completed"
           >
             {{ sound.kinds.completed ? '开' : '关' }}
@@ -91,6 +95,7 @@
             type="button"
             class="seg-btn"
             :class="{ active: sound.kinds.aborted }"
+            :aria-pressed="sound.kinds.aborted"
             @click="sound.kinds.aborted = !sound.kinds.aborted"
           >
             {{ sound.kinds.aborted ? '开' : '关' }}
@@ -108,6 +113,7 @@
             type="button"
             class="seg-btn"
             :class="{ active: sound.kinds.failed }"
+            :aria-pressed="sound.kinds.failed"
             @click="sound.kinds.failed = !sound.kinds.failed"
           >
             {{ sound.kinds.failed ? '开' : '关' }}

@@ -6,12 +6,11 @@
     <div class="about-info">
       <img :src="logoUrl" alt="Symbio" class="app-logo" />
       <h1>Symbio</h1>
-      <p class="version">版本 0.1.0</p>
+      <p class="version">版本 {{ version }}</p>
       <p class="description">在做中学：生信分析的互动学习平台</p>
+      <!-- 此前这里有「文档 / GitHub / 反馈」三个 `href="#"`：点了什么也不会发生
+           （或把应用跳到一个空 hash）。未接入系统浏览器打开能力之前不放无效入口。 -->
       <div class="links">
-        <a href="#" class="link-btn">文档</a>
-        <a href="#" class="link-btn">GitHub</a>
-        <a href="#" class="link-btn">反馈</a>
         <!-- 引导的重开入口：它只弹一次（且只在尚未配好时），但随时可以回来看 -->
         <button class="link-btn" type="button" @click="onboarding.openManually()">
           查看首次引导
@@ -24,10 +23,14 @@
 <script setup lang="ts">
 import SettingsFormShell from './SettingsFormShell.vue'
 import logoUrl from '../../assets/logo.svg'
+import pkg from '../../../package.json'
 import { useOnboardingStore } from '@/stores/onboarding'
 import type { VdfsRendererProps } from '@/components/vdfs/rendererContract'
 
 const onboarding = useOnboardingStore()
+
+/** 版本号取自 package.json：此前写死 0.1.0，发版后与实际版本永久脱节 */
+const version = pkg.version
 
 // 声明渲染器统一契约的**全量** props：页面恒传 node / data / testing /
 // mechanism-actions…，声明了才不会被透传到根 DOM（不需要 inheritAttrs 兜底）。
@@ -72,7 +75,6 @@ defineProps<VdfsRendererProps>()
   color: var(--text-primary);
   text-decoration: none;
   transition: background var(--motion-fast) var(--motion-ease);
-  /* 同一排里既有 <a> 也有 <button>：字体与光标必须对齐，否则按钮显得是外来物 */
   font: inherit;
   cursor: pointer;
 }
