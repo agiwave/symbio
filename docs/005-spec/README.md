@@ -53,7 +53,7 @@ board.columns: [scope]
 | `SP-001` | 登记条目 front-matter 与状态规范 | 仓内全部活跃 `.md` 文档（kind 闭集由各目录 README meta 自注册；豁免名单见 `scripts/registry-lib.mjs`） | 人工 | — | — |
 | `SP-003` | 提交纪律总册——顺序、中间态、原子批、e2e、架构必需、不做兼容、完成判据 | 全部代码与文档改动、批次划分与提交信息 | `scripts/audits/slo-exit-audit.mjs` | — | — |
 | `SP-010` | 施工纪律总册——只写目标态、机制优先、不新增真相、出口可核对、豁免必有清除任务 | 全部活跃文档与源码注释、改进批次、批次出口与守卫豁免 | `scripts/audits/grep-audit.mjs` | — | — |
-| `SP-015` | 死码承认台账——理由指名消费方 + 棘轮只许降 + 终局基线 8 | 全部 #[allow(dead_code)] 标记；owner = scripts/audits/dead-code-audit.mjs 的 R-002 段 | `scripts/audits/dead-code-audit.mjs` | — | — |
+| `SP-015` | 死码承认台账——理由指名消费方 + 棘轮只许降 + 终局基线 7 | 全部 #[allow(dead_code)] 标记；owner = scripts/audits/dead-code-audit.mjs 的 R-002 段 | `scripts/audits/dead-code-audit.mjs` | — | — |
 | `SP-016` | 出口口径总册——逐阶出口必须是用户可见的一列，CI 断言必须是可执行判据 | SLO 出口表、任何「这一阶长出来了」的声称、CI 断言清单与守卫脚本 | `scripts/audits/slo-exit-audit.mjs` | — | — |
 | `SP-022` | 验证纪律总册——声称、断言、反向用例与编译期反例 | docs/003-design/verify/ 下的验证程序与任何「已证明」的声称 | `scripts/gate.d/55-verify.mjs` | — | — |
 | `SP-028` | 判据豁免与存量登记——四处「该豁免存在」的登记与它们的清除任务 | doc-link D-004 全文豁免 / dead-code R-002 账本 / panic-allow 登记 / color 守卫自指豁免 | `scripts/audits/doc-link-audit.mjs` | — | — |

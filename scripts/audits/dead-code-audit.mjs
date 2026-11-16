@@ -396,9 +396,10 @@ if (rustWaived.length) {
 //      判据只能是理由里那个非空名字（口径登记在 `SP-015`）。
 const R002_BASELINE = process.env.DEAD_CODE_R002_BASELINE
   ? Number(process.env.DEAD_CODE_R002_BASELINE)
-  : 8
-  // 8 = 全部为 C 类结构性承认（消费方在前端镜像 / 协议文档 / 审计脚本）。下调就在这里
-  // 写理由；上调不合法——新死码要么接上、要么删掉。`TurnRunner` 族下沉时基线**未动**：
+  : 7
+  // 7 = 全部为 C 类结构性承认（消费方在前端镜像 / 协议文档 / 审计脚本）。下调就在这里
+  // 写理由；上调不合法——新死码要么接上、要么删掉。2026-11-16 实测 7（D-505）：旧基线
+  // 8 的一格是已退场条目留下的余量，按「余量不白留给下一次」同批钉到实测。`TurnRunner` 族下沉时基线**未动**：
   // `ActorSpec` 的字段失去经 `TurnInput` 的顺带可达性后，处置是把它升为根 `pub use` +
   // `core-export-audit` C-003 的单消费方豁免（1 个生产消费方 `crates/symbio-plugin-session`，
   // 属「接缝」），不是 R-002——R-002 只收**零生产消费方**的冻结契约名。
