@@ -52,26 +52,6 @@ impl PluginFrame {
         }
     }
 
-    pub fn into_value(self) -> Value {
-        match self {
-            // 独占时直接解包（零拷贝）；仍有其它持有者才退化为深拷贝。
-            PluginFrame::Data(v) => Arc::try_unwrap(v).unwrap_or_else(|shared| (*shared).clone()),
-            _ => serde_json::json!({}),
-        }
-    }
-
-    /// 尝试将 Data 帧解析为指定的业务事件模型。
-    ///
-    /// **不克隆载荷**：用 `&Value` 自身的 `Deserializer` 实现（与
-    /// `serde_json::from_value` 走同一条路径，只是不要求所有权）。
-    pub fn try_into_event<T: DeserializeOwned>(&self) -> Result<T, String> {
-        match self {
-            PluginFrame::Data(v) => T::deserialize(v.as_ref())
-                .map_err(|e| format!("Failed to deserialize frame data: {e}")),
-            PluginFrame::Error(msg, _) => Err(format!("Cannot deserialize Error frame: {msg}")),
-        }
-    }
-
     /// 读取 `Error` 帧携带的机器可读错误码。
     ///
     /// 消费侧据此分派（中止 / 上下文丢失重试 / 普通失败），**不得**对

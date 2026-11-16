@@ -4,18 +4,17 @@
 
 use super::*;
 
-use symbio_kernel::vdfs::VdfsChange;
+use symbio_kernel::vdfs::{VdfsChange, VdfsResponse};
 
 #[tokio::test]
 async fn ops_mirror_the_disk_shapes() {
     let m = MemoryVdfs::new("model");
     let ctx = VdfsContext::empty();
 
-    assert!(m
-        .dispatch(&ctx, "", VdfsRequest::List {})
-        .await
-        .unwrap()
-        .is_list());
+    assert!(matches!(
+        m.dispatch(&ctx, "", VdfsRequest::List {}).await.unwrap(),
+        VdfsResponse::List(_)
+    ));
     let r = m
         .dispatch(
             &ctx,

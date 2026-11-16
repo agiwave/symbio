@@ -195,30 +195,6 @@ impl VdfsResponse {
         Self::List(nodes.into_iter().map(Into::into).collect())
     }
 
-    pub fn is_list(&self) -> bool {
-        matches!(self, Self::List(_))
-    }
-
-    pub fn is_stat(&self) -> bool {
-        matches!(self, Self::Stat(_))
-    }
-
-    pub fn is_read(&self) -> bool {
-        matches!(self, Self::Read(_))
-    }
-
-    pub fn is_write(&self) -> bool {
-        matches!(self, Self::Write(_))
-    }
-
-    pub fn is_action(&self) -> bool {
-        matches!(self, Self::Action(_))
-    }
-
-    pub fn is_unit(&self) -> bool {
-        matches!(self, Self::Unit)
-    }
-
     // ---- 取值器：转发方 / 访问层从响应中取出与请求变体对应的载荷 ----
     //
     // 变体不匹配返回 `None`（实现方返回错型响应是 bug，由调用方决定报错方式），

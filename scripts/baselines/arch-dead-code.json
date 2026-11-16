@@ -74,18 +74,6 @@
       "evidence": "docs/003-design/007-第三方插件体系.md"
     },
     {
-      "symbol": "into_value",
-      "path": "crates/symbio-kernel/src/plugin/transport.rs",
-      "why": "契约实现：类型自带的公开构造/查询口，由实现方与插件按需调用；本仓生产面当前未直调",
-      "evidence": "docs/003-design/007-第三方插件体系.md"
-    },
-    {
-      "symbol": "try_into_event",
-      "path": "crates/symbio-kernel/src/plugin/transport.rs",
-      "why": "契约实现：类型自带的公开构造/查询口，由实现方与插件按需调用；本仓生产面当前未直调",
-      "evidence": "docs/003-design/007-第三方插件体系.md"
-    },
-    {
       "symbol": "has_warn",
       "path": "crates/symbio-kernel/src/present/reading.rs",
       "why": "契约实现：类型自带的公开构造/查询口，由实现方与插件按需调用；本仓生产面当前未直调",
@@ -164,42 +152,6 @@
       "evidence": "docs/003-design/009-VDFS规范.md"
     },
     {
-      "symbol": "is_action",
-      "path": "crates/symbio-kernel/src/vdfs/request.rs",
-      "why": "契约实现：类型自带的公开构造/查询口，由实现方与插件按需调用；本仓生产面当前未直调",
-      "evidence": "docs/003-design/009-VDFS规范.md"
-    },
-    {
-      "symbol": "is_list",
-      "path": "crates/symbio-kernel/src/vdfs/request.rs",
-      "why": "契约实现：类型自带的公开构造/查询口，由实现方与插件按需调用；本仓生产面当前未直调",
-      "evidence": "docs/003-design/009-VDFS规范.md"
-    },
-    {
-      "symbol": "is_read",
-      "path": "crates/symbio-kernel/src/vdfs/request.rs",
-      "why": "契约实现：类型自带的公开构造/查询口，由实现方与插件按需调用；本仓生产面当前未直调",
-      "evidence": "docs/003-design/009-VDFS规范.md"
-    },
-    {
-      "symbol": "is_stat",
-      "path": "crates/symbio-kernel/src/vdfs/request.rs",
-      "why": "契约实现：类型自带的公开构造/查询口，由实现方与插件按需调用；本仓生产面当前未直调",
-      "evidence": "docs/003-design/009-VDFS规范.md"
-    },
-    {
-      "symbol": "is_unit",
-      "path": "crates/symbio-kernel/src/vdfs/request.rs",
-      "why": "契约实现：类型自带的公开构造/查询口，由实现方与插件按需调用；本仓生产面当前未直调",
-      "evidence": "docs/003-design/009-VDFS规范.md"
-    },
-    {
-      "symbol": "is_write",
-      "path": "crates/symbio-kernel/src/vdfs/request.rs",
-      "why": "契约实现：类型自带的公开构造/查询口，由实现方与插件按需调用；本仓生产面当前未直调",
-      "evidence": "docs/003-design/009-VDFS规范.md"
-    },
-    {
       "symbol": "is_known",
       "path": "crates/symbio-sdk/src/plugin/behaviors.rs",
       "why": "契约实现：类型自带的公开构造/查询口，由实现方与插件按需调用；本仓生产面当前未直调",
@@ -257,6 +209,14 @@
   "baseline-allow": [
     "symbols@with_category|crates/symbio-kernel/src/capability/mod.rs→(none) 零读者便捷构造口，删掉不留垫片 D-498",
     "symbols@is_denied|crates/symbio-sdk/src/capability/port.rs→(none) 与 denial().is_some() 同义且仅测试在用 D-498",
-    "symbols@with_authz|crates/symbio-sdk/src/capability/port.rs→(none) 全仓零引用，PortOutcome::denied 已覆盖 D-498"
+    "symbols@with_authz|crates/symbio-sdk/src/capability/port.rs→(none) 全仓零引用，PortOutcome::denied 已覆盖 D-498",
+    "symbols@into_value|crates/symbio-kernel/src/plugin/transport.rs→(none) 全仓零引用（含测试）；Error 帧返回空对象是丢失语义的转换 D-500",
+    "symbols@try_into_event|crates/symbio-kernel/src/plugin/transport.rs→(none) 全仓零引用（含测试）；反序列化由调用方直接走 serde D-500",
+    "symbols@is_list|crates/symbio-kernel/src/vdfs/request.rs→(none) 唯一测试调用已改 matches!，谓词族整体退场 D-500",
+    "symbols@is_stat|crates/symbio-kernel/src/vdfs/request.rs→(none) 全仓零引用，matches! 已覆盖 D-500",
+    "symbols@is_read|crates/symbio-kernel/src/vdfs/request.rs→(none) 全仓零引用，matches! 已覆盖 D-500",
+    "symbols@is_write|crates/symbio-kernel/src/vdfs/request.rs→(none) 全仓零引用，matches! 已覆盖 D-500",
+    "symbols@is_action|crates/symbio-kernel/src/vdfs/request.rs→(none) 全仓零引用，matches! 已覆盖 D-500",
+    "symbols@is_unit|crates/symbio-kernel/src/vdfs/request.rs→(none) 全仓零引用，matches! 已覆盖 D-500"
   ]
 }
