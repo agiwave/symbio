@@ -49,11 +49,78 @@ pub struct ReasoningConfig {
 #[derive(Debug, Clone, Serialize, Deserialize, PartialEq)]
 pub struct ModelPricing {
     /// 每 100 万输入 token 的单价（`currency` 计）。
+    ///
+    /// 缺席 / `null` / 空串都按 0 读：详情页的计价是**可选子表单**，用户不填时
+    /// 前端只会提交一个空的 `pricing` 对象；把「没填」变成 `missing field` 错误，
+    /// 等于让可选参数阻塞整条保存链路。规范化的「空币种 + 零单价 ⇒ 未配置」在
+    /// `ModelPlugin::normalize_pricing` 一处收口。
+    #[serde(default, deserialize_with = "de_f64_or_zero")]
     pub input_per_million: f64,
     /// 每 100 万输出 token 的单价（`currency` 计）。
+    #[serde(default, deserialize_with = "de_f64_or_zero")]
     pub output_per_million: f64,
     /// 币种代码（如 `USD` / `CNY`）。只作账本分组标签，不做汇率换算。
+    #[serde(default, deserialize_with = "de_string_or_empty")]
     pub currency: String,
+}
+
+/// 可选数字输入的统一读法：缺席 / `null` / 空串 = 0，数字或数字字符串照读。
+///
+/// 表单的 `number` widget 在编辑态用空串表示「没填」；这条边界与
+/// [`de_opt_u32`] 同源——外部输入（磁盘配置 / 前端表单）的「空」不是类型错误。
+fn de_f64_or_zero<'de, D>(deserializer: D) -> Result<f64, D::Error>
+where
+    D: serde::Deserializer<'de>,
+{
+    use serde::de::Error;
+    match Option::<serde_json::Value>::deserialize(deserializer)? {
+        None | Some(serde_json::Value::Null) => Ok(0.0),
+        Some(serde_json::Value::Number(n)) => n
+            .as_f64()
+            .ok_or_else(|| Error::custom("单价超出 f64 可表示范围")),
+        Some(serde_json::Value::String(s)) if s.trim().is_empty() => Ok(0.0),
+        Some(serde_json::Value::String(s)) => s.trim().parse::<f64>().map_err(Error::custom),
+        Some(other) => Err(Error::custom(format!("单价必须是数字，得到 {other}"))),
+    }
+}
+
+/// 文本输入的宽容读法：`null` = 空串（`currency` 的空值语义就是「未填写」）。
+fn de_string_or_empty<'de, D>(deserializer: D) -> Result<String, D::Error>
+where
+    D: serde::Deserializer<'de>,
+{
+    use serde::de::Error;
+    match Option::<serde_json::Value>::deserialize(deserializer)? {
+        None | Some(serde_json::Value::Null) => Ok(String::new()),
+        Some(serde_json::Value::String(s)) => Ok(s),
+        Some(other) => Err(Error::custom(format!("币种必须是字符串，得到 {other}"))),
+    }
+}
+
+/// `max_tokens` 的宽容读法：缺席 / `null` / 空串 = 不限制（`None`）。
+///
+/// 「不限制」是**缺键**而不是一个哨兵数值：协议层据此决定「省略字段，交给
+/// 供应商默认」；只有 Anthropic 这类必填协议才回落到协议档案的缺省值。
+fn de_opt_u32<'de, D>(deserializer: D) -> Result<Option<u32>, D::Error>
+where
+    D: serde::Deserializer<'de>,
+{
+    use serde::de::Error;
+    match Option::<serde_json::Value>::deserialize(deserializer)? {
+        None | Some(serde_json::Value::Null) => Ok(None),
+        Some(serde_json::Value::Number(n)) => n
+            .as_u64()
+            .and_then(|v| u32::try_from(v).ok())
+            .map(Some)
+            .ok_or_else(|| Error::custom("max_tokens 必须是 u32 范围内的整数")),
+        Some(serde_json::Value::String(s)) if s.trim().is_empty() => Ok(None),
+        Some(serde_json::Value::String(s)) => {
+            s.trim().parse::<u32>().map(Some).map_err(Error::custom)
+        }
+        Some(other) => Err(Error::custom(format!(
+            "max_tokens 必须是整数，得到 {other}"
+        ))),
+    }
 }
 
 impl ModelPricing {
@@ -105,6 +172,7 @@ pub struct ModelProviderConfig {
     pub model: String,
     #[serde(default = "default_temperature")]
     pub temperature: f64,
+    #[serde(default, deserialize_with = "de_opt_u32")]
     pub max_tokens: Option<u32>,
     pub system_prompt: Option<String>,
     #[serde(default = "default_max_context_tokens")]

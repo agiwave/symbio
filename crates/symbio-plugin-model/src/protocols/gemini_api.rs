@@ -151,10 +151,13 @@ impl ModelProtocol for GeminiProtocol {
             "contents": contents,
             "systemInstruction": {"parts": [{"text": system}]},
             "generationConfig": {
-                "temperature": cfg.temperature,
-                "maxOutputTokens": cfg.max_tokens.unwrap_or(profile::GEMINI_API.default)
+                "temperature": cfg.temperature
             }
         });
+        // 同 openai_chat：缺省不限制 ⇒ 不写 `maxOutputTokens`。
+        if let Some(max_tokens) = cfg.max_tokens {
+            req["generationConfig"]["maxOutputTokens"] = json!(max_tokens);
+        }
         if !tools.is_empty() {
             req["tools"] = json!([{
                 "functionDeclarations": tools.iter().map(|t| json!({

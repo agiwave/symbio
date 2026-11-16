@@ -11,7 +11,7 @@
  */
 
 import type { DetailDefinition, DetailField, VdfsNode } from '@/schemas/vdfs'
-import { widgetFromEdit, widgetIsReadonly } from '@/registry/formWidgets'
+import { widgetFromEdit, widgetIsReadonly, widgetOmitsWhenEmpty } from '@/registry/formWidgets'
 
 /** 保存载荷派生所需的全部输入（组件一侧的当前值快照）。 */
 export interface SaveContext {
@@ -64,6 +64,9 @@ function buildValues(ctx: SaveContext, ignoreVisibility: boolean): Record<string
     for (const f of sec.fields) {
       if (widgetIsReadonly(f.widget)) continue
       if (!ignoreVisibility && !ctx.isVisible(f)) continue
+      // 数字字段的编辑态空串 = 没填：省略键，让后端的 `serde(default)` 决定
+      // 「不限制 / 取默认」。提交空串会让 `Option<u32>` / `f64` 反序列化失败。
+      if (widgetOmitsWhenEmpty(f.widget) && isEmpty(ctx.form[f.key])) continue
       out[f.key] = widgetFromEdit(f.widget, ctx.form[f.key])
     }
   }

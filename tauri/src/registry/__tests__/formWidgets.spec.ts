@@ -9,7 +9,8 @@
  * 3. **初始值**——开关是 `false`、其余是 `''`，且字段 `default` 优先；
  * 4. **编解码往返**——list / map 的编辑态文本与存储态结构能来回转换；
  * 5. **整行与只读**——结构化 widget 天然整行，`static` 唯一只读（不参与保存）；
- * 6. 占位提示的优先级（字段显式 > widget 缺省）。
+ * 6. **空数字是「没填」**——`number` 的编辑态空串在保存时省略键；
+ * 7. 占位提示的优先级（字段显式 > widget 缺省）。
  */
 
 import { describe, expect, it } from 'vitest'
@@ -19,6 +20,7 @@ import {
   widgetInitialOf,
   widgetIsFullWidth,
   widgetIsReadonly,
+  widgetOmitsWhenEmpty,
   widgetPlaceholderOf,
   widgetSpecOf,
   widgetToEdit,
@@ -121,6 +123,13 @@ describe('formWidgets：整行 / 只读 / 占位', () => {
     expect(widgetIsReadonly('static')).toBe(true)
     for (const w of ['text', 'select', 'toggle', 'list', 'map']) {
       expect(widgetIsReadonly(w)).toBe(false)
+    }
+  })
+
+  it('空数字省略键：number 的空串是「没填」，文本的空串是「清空」', () => {
+    expect(widgetOmitsWhenEmpty('number')).toBe(true)
+    for (const w of ['text', 'password', 'textarea', 'select', 'list', 'map', 'form']) {
+      expect(widgetOmitsWhenEmpty(w), w).toBe(false)
     }
   })
 

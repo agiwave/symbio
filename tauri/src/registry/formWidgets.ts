@@ -80,6 +80,15 @@ export interface FormWidgetSpec {
   revealable?: boolean
   /** 附带 `<datalist>` 建议 */
   datalist?: boolean
+  /**
+   * 编辑态空值 = 「没填」，保存时**省略该键**。
+   *
+   * 只给 `number` 用：空串不是合法的数字，提交上去会让后端的 `Option<u32>` /
+   * `f64` 反序列化失败（用户看到的是一句「missing field / invalid type」）。
+   * 省略键后，后端自己的 `#[serde(default)]` 才能表达「不限制 / 取默认」。
+   * 文本类不标它：空串是用户明确清空该字段，与「没填」是两件事。
+   */
+  omitWhenEmpty?: boolean
 }
 
 /** 透传：编辑态与存储态同形（多数 widget 如此） */
@@ -92,7 +101,7 @@ const WIDGET_SPECS: Record<FormWidget, FormWidgetSpec> = {
     tag: 'input', initial: '', toEdit: identity, fromEdit: identity,
     fullWidth: false, readonly: false, inputType: 'password', revealable: true,
   },
-  number: { tag: 'input', initial: '', toEdit: identity, fromEdit: identity, fullWidth: false, readonly: false, inputType: 'number' },
+  number: { tag: 'input', initial: '', toEdit: identity, fromEdit: identity, fullWidth: false, readonly: false, inputType: 'number', omitWhenEmpty: true },
   datalist: {
     tag: 'input', initial: '', toEdit: identity, fromEdit: identity,
     fullWidth: false, readonly: false, inputType: 'text', datalist: true,
@@ -152,6 +161,11 @@ export function widgetFromEdit(widget: string | undefined, v: unknown): unknown 
 /** 该 widget 是否只读展示（只读字段不参与保存） */
 export function widgetIsReadonly(widget: string | undefined): boolean {
   return widgetSpecOf(widget).readonly
+}
+
+/** 编辑态空值是否应省略该键（见 `omitWhenEmpty`） */
+export function widgetOmitsWhenEmpty(widget: string | undefined): boolean {
+  return Boolean(widgetSpecOf(widget).omitWhenEmpty)
 }
 
 /** 整行布局：字段显式声明，或该 widget 天然占整行 */

@@ -130,7 +130,6 @@ default_provider_id: openai_main
  "model": "gpt-4o",
  "api_protocol": "openai_responses",
  "temperature": 0.7,
- "max_tokens": 4096,
  "rate_limit_ms": 1000,
  "enabled": true
 }
@@ -145,7 +144,7 @@ default_provider_id: openai_main
 | `api_key` | String | ❌ | API 密钥 |
 | `model` | String | ✅ | 模型名称 |
 | `api_protocol` | String | ❌ | `openai_chat` / `openai_responses` / `anthropic_messages` / `gemini_api`（缺省 `openai_responses`） |
-| `temperature` / `max_tokens` | Float / Int | ❌ | 采样温度 / 最大输出 token 数 |
+| `temperature` / `max_tokens` | Float / Int | ❌ | 采样温度 / 最大输出 token 数。`max_tokens` 缺省 = 不限制（请求里省略该字段，由供应商默认决定）；Anthropic Messages 必填，缺省回落 8192 |
 | `rate_limit_ms` | Int | ❌ | 最小请求间隔（限流），0 = 不限制 |
 | `enabled` | Bool | ❌ | 是否可被选为活动 Provider（缺省 `true`） |
 

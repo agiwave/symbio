@@ -505,12 +505,11 @@ pub fn model_detail_definition() -> DetailDefinition {
                     DetailField {
                         min: Some(100.0),
                         max: Some(128000.0),
-                        placeholder: Some("4096".into()),
-                        default: Some(serde_json::json!(4096)),
+                        placeholder: Some("不限制".into()),
                         ..field(
                             "max_tokens",
                             "Max Tokens",
-                            "单次回复最大 token 数（留空使用默认）",
+                            "单次回复最大 token 数；留空 = 不限制（由协议/模型决定，Anthropic 协议必填，缺省 8192）",
                             "number",
                         )
                     },

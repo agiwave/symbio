@@ -75,6 +75,37 @@ describe('DetailForm upload 绑定：list / map 序列化', () => {
   })
 })
 
+describe('DetailForm 保存：空数字不提交空串', () => {
+  it('number 字段留空 ⇒ 键缺席（后端 serde(default) 才能表达「不限制 / 取默认」）', async () => {
+    const definition = def({
+      sections: [
+        {
+          fields: [
+            { key: 'max_tokens', label: 'Max Tokens', widget: 'number' },
+            { key: 'name', label: '名称', widget: 'text' },
+          ],
+        },
+      ],
+      actions: [{ id: 'save', label: '保存', style: 'primary' }],
+    })
+
+    const w = mount(DetailForm, {
+      props: {
+        definition,
+        node: node({ name: 'openai' }),
+        values: {},
+        capabilities: { mutable: true },
+      },
+    })
+
+    await w.find('button[title="保存"]').trigger('click')
+    const payload = w.emitted('save')![0][0] as Record<string, unknown>
+    expect(payload).not.toHaveProperty('max_tokens')
+    // 文本空串仍然提交：清空文本字段是用户意图，不能与「没填」混为一谈
+    expect(payload.name).toBe('')
+  })
+})
+
 describe('DetailForm visible_when：字段条件显隐', () => {
   const transportDef = () =>
     def({

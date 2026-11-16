@@ -137,7 +137,11 @@ impl ModelProtocol for OpenaiChatProtocol {
             req["reasoning_effort"] = json!(reasoning.effort);
         }
 
-        req["max_tokens"] = json!(cfg.max_tokens.unwrap_or(profile::OPENAI_CHAT.default));
+        // 用户没填 `max_tokens` ⇒ 省略该键，交给供应商默认（行业惯例是「不限」）。
+        // 只有用户显式填了才发；不要用一个本地常量冒充用户意图。
+        if let Some(max_tokens) = cfg.max_tokens {
+            req["max_tokens"] = json!(max_tokens);
+        }
         if !tools.is_empty() {
             req["tools"] = json!(tools
                 .iter()

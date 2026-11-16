@@ -237,6 +237,53 @@ fn empty_pricing_means_not_configured() {
     assert!(p.pricing.is_none(), "没填不得被记成「明确免费」");
 }
 
+/// 回归（用户可见）：新建 Provider 时未填可选的计价，提交的是 `pricing: {}`。
+/// 它必须在**反序列化**阶段就被读成「未配置」，而不是 `missing field
+/// 'input_per_million'` 把整次保存打回。
+#[test]
+fn empty_pricing_object_deserializes_as_not_configured() {
+    let mut value = serde_json::to_value(sample()).expect("sample 可序列化");
+    value["pricing"] = json!({});
+    let mut p: ModelProviderConfig =
+        serde_json::from_value(value).expect("空 pricing 是合法输入，不是缺字段错误");
+    ModelPlugin::normalize_pricing(&mut p).unwrap();
+    assert!(p.pricing.is_none(), "空对象 = 没填，不产生金额读数");
+}
+
+/// 空串 / `null` 是表单的「没填」形态：单价按 0、币种按空串读。
+///
+/// 前端已把空数字键省略，但外部配置（手写 `provider.json`、旧版本表单）仍可能
+/// 送来空串；这条边界由 deserializer 自己守住，不靠调用方保证。
+#[test]
+fn pricing_tolerates_empty_strings_and_null() {
+    let mut value = serde_json::to_value(sample()).expect("sample 可序列化");
+    value["pricing"] = json!({
+        "input_per_million": "",
+        "output_per_million": null,
+        "currency": null
+    });
+    let mut p: ModelProviderConfig = serde_json::from_value(value).expect("空值按 0 / 空串读");
+    ModelPlugin::normalize_pricing(&mut p).unwrap();
+    assert!(p.pricing.is_none(), "空币种 + 零单价 = 未配置");
+}
+
+/// `max_tokens` 留空 = 不限制：空串 / `null` / 缺键都读成 `None`。
+#[test]
+fn blank_max_tokens_means_unlimited() {
+    for raw in [
+        json!({ "max_tokens": "" }),
+        json!({ "max_tokens": null }),
+        json!({}),
+    ] {
+        let mut value = serde_json::to_value(sample()).expect("sample 可序列化");
+        for (k, v) in raw.as_object().expect("object").clone() {
+            value[k] = v;
+        }
+        let p: ModelProviderConfig = serde_json::from_value(value).expect("空 max_tokens 合法");
+        assert_eq!(p.max_tokens, None);
+    }
+}
+
 /// 币种去空白并大写：台账按币种分桶，`usd` 与 `USD` 必须是同一个桶。
 #[test]
 fn pricing_currency_is_trimmed_and_uppercased() {

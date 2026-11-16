@@ -188,8 +188,10 @@ impl ModelProtocol for OpenaiResponsesProtocol {
         if let Some(ref pid) = previous_response_id {
             req["previous_response_id"] = json!(pid);
         }
-        req["max_output_tokens"] =
-            json!(cfg.max_tokens.unwrap_or(profile::OPENAI_RESPONSES.default));
+        // 同 openai_chat：缺省不限制 ⇒ 省略字段，不拿本地常量冒充用户意图。
+        if let Some(max_tokens) = cfg.max_tokens {
+            req["max_output_tokens"] = json!(max_tokens);
+        }
         if !tools.is_empty() {
             req["tools"] = json!(tools
                 .iter()

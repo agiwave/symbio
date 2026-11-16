@@ -24,7 +24,11 @@ use serde_json::Value;
 /// 两个数各有各的用途，**不是一个全局常量**：生成要够大，探测要够小（省钱），
 /// 而两者都必须过网关的下限。
 pub(crate) struct MaxTokensProfile {
-    /// 生成时调用方没给 `max_tokens` 的缺省值。
+    /// **协议必填时**的缺省值。
+    ///
+    /// 可选协议（OpenAI Chat / Responses / Gemini）在调用方没给 `max_tokens`
+    /// 时直接省略字段，交给供应商默认——「不限制」不能用一个本地数字冒充。
+    /// 只有 Anthropic Messages 这类 `max_tokens` 必填的协议才用这个数。
     pub default: u32,
     /// 连通性探测（`ping`）用的输出上限。
     ///
