@@ -115,7 +115,6 @@ fn cadence_selects_which_providers_are_asked() {
     let live = LiveInputs {
         tools: &live_tools,
         delegate: DelegateVerdict::Idle,
-        workers: &[],
     };
     let mut req = request(&f, None);
     req.live = Some(&live);
@@ -153,7 +152,6 @@ fn live_inputs_carry_the_collected_values() {
         delegate: DelegateVerdict::Start {
             reason: "explicit_prefix",
         },
-        workers: &[],
     };
     let mut req = request(&f, None);
     req.live = Some(&live);

@@ -54,23 +54,6 @@ pub struct FleetSnapshot {
     pub events: Vec<Event>,
 }
 
-/// Q3 · 单个 worker 的进展投影。
-///
-/// 两个字段与 B2（前端把「过程段」收起成的那行状态）**逐字同名**：`in_flight` /
-/// `steps`。同名约束的是**字段名与语义**，不是算法——后端只见磁盘，
-/// 前端还看得见父工具状态（B2 判据 1 的 OR 式），两端各自用可见信息判定同一语义。
-#[derive(Debug, Clone, PartialEq, Eq, Default, Serialize, Deserialize)]
-pub struct WorkerProgress {
-    /// 子会话 id（`metadata.parent_session_id` 归属本会话）。
-    pub id: String,
-    /// 标题；存量文件缺投影字段时为空，装配时以 [`Self::id`] 兜底。
-    pub title: String,
-    /// 该 worker 是否仍在运行（末条消息**未见终态**即为真）。
-    pub in_flight: bool,
-    /// 非空内容节点产出的步骤；**无内容节点不产出步骤**（B2 判据 3）。
-    pub steps: Vec<String>,
-}
-
 /// 折进消息的元数据键（写侧、重建侧与读侧共用；`projection::rebuild` 需要它们）。
 pub const META_SUPPLEMENT: &str = "supplement";
 pub const META_SUPPLEMENT_IDS: &str = "supplement_ids";

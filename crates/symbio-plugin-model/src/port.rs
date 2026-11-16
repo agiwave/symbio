@@ -457,7 +457,6 @@ fn context_sections(
         tools,
         // Q1 的判定归控制面；模型端口这里只负责「请求已经发出」，不代判委派。
         delegate: DelegateVerdict::NotJudged,
-        workers: &[],
     };
     let with_live = ContextRequest {
         live: Some(&live),

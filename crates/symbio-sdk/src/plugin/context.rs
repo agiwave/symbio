@@ -52,7 +52,6 @@
 //! 不按插件名 / 段名特判。放不下的段在这里被裁掉并计入 [`SectionFit`]，宿主据此出声
 //! （裁了谁、超了多少）；「谁更重要」仍是声明方的判断，本模块不做第二遍。
 
-use crate::round::facts::WorkerProgress;
 use symbio_kernel::capability::CapabilityMeta;
 use symbio_kernel::event::Event;
 
@@ -131,15 +130,13 @@ pub enum Cadence {
 /// 请求级（[`Cadence::Request`]）才有的输入：收集完成后的本轮产物。
 ///
 /// 这些值在发言级收集时还不存在——工具清单是收集的**产物**（遍历期取集合会漏掉尚未
-/// 访问到的兄弟插件），worker 进展读自存储。宿主在收集完成后一次取齐、按值递入。
+/// 访问到的兄弟插件）。宿主在收集完成后一次取齐、按值递入。
 #[derive(Debug, Clone, Copy)]
 pub struct LiveInputs<'a> {
     /// 本轮最终发给模型的工具清单（收集完成后的快照，与请求体是同一份）。
     pub tools: &'a [CapabilityMeta],
     /// 委派判定（Q1）的结论——控制面判完，provider 只落笔。
     pub delegate: DelegateVerdict<'a>,
-    /// 各 worker 的进展（控制面从存储侧取好的值）。
-    pub workers: &'a [WorkerProgress],
 }
 
 /// 委派判定（Q1）的结论。
