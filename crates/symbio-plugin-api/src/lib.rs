@@ -214,7 +214,7 @@ pub use symbio_sdk::projection::task_vocab::TaskVocab;
 pub use symbio_sdk::projection::vocab::CommitmentVocab;
 /// 插件默认的并发任务容量出厂值（平凡值 = 串行 FIFO）。
 pub const TASK_CAP: usize = 1;
-pub use symbio_sdk::turn::node_build;
+pub use symbio_sdk::round::node_build;
 pub use symbio_sdk::vdfs::address::{absolute_addr, descend_addr, join_addr, AddrRootDecl};
 pub use symbio_sdk::vdfs::host::{
     vdfs_context, vdfs_from_plugin_error, vdfs_host_ctx, vdfs_notify_change, vdfs_unwatch_changes,

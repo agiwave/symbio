@@ -27,7 +27,7 @@ use symbio_sdk::capability::ApprovalGrants;
 // 裁决三）：写侧构造
 // 词表被留守与驱动器两个插件共用，隔着 E-009 的插件墙只能住 core；配置面在这里
 // **续一发短路径**——`plugin.rs` / `state.rs` / `tool_dispatch.rs` 等既有引用不经改动。
-pub use symbio_sdk::turn::node_build::PresentationTree;
+pub use symbio_sdk::round::node_build::PresentationTree;
 
 /// 会话配置 —— 本插件的旋钮（字段真源）。
 ///

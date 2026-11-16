@@ -568,7 +568,7 @@ const META_KEYS = [
   {
     // `flat` 档升根的节点没有 `parent_id`，子树同一性靠它补上（D-173「子树同一性只有一份实现」）。
     key: 'turn_root',
-    owner: 'crates/symbio-sdk/src/turn/node_build.rs',
+    owner: 'crates/symbio-sdk/src/round/node_build.rs',
     what: '本轮升根节点的轮骨架锚：子树口径 = `parent_id` ∪ 本键，两侧各写一份必漂',
   },
   {

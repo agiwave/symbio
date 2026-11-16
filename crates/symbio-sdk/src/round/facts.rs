@@ -16,11 +16,11 @@
 //! 那个插件——core 的数据面只装真的跨插件的东西。
 //!
 //! 与 `types::Session` 一族同判：**存储的记录类型，归属随数据 owner，跨插件者上移**。
-//! 本模块只装**数据与纯构造**（[`ReportDraft::to_message`] 经 [`crate::turn::node_build`]
+//! 本模块只装**数据与纯构造**（[`ReportDraft::to_message`] 经 [`crate::round::node_build`]
 //! 的同一构造器）；记账判据（`note_*` 的门与 `behaviors` 里的 `delegation_promise` 声明）与
 //! 派发机制（行表 / 绑定表 / 执行体）都不在这里——它们是机制不是词汇，随各自的 owner 住插件侧。
 
-use crate::turn::node_build::dialog_node;
+use crate::round::node_build::dialog_node;
 use symbio_kernel::chat::chat_node::ChatNode;
 
 use serde::{Deserialize, Serialize};

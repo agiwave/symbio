@@ -25,7 +25,7 @@
 //! ## 为什么不出根符号面里的「大而全」
 //!
 //! 两个模块各自是一个**主题命名空间**（§1.2 登记的模块形态），符号走模块路径：
-//! `symbio_sdk::turn::node_build::dialog_node` / `symbio_sdk::turn::facts::ReportDraft`。
+//! `symbio_sdk::round::node_build::dialog_node` / `symbio_sdk::round::facts::ReportDraft`。
 
 pub mod facts;
 pub mod node_build;

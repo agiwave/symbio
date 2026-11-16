@@ -27,7 +27,7 @@ use symbio_plugin_api::PRINCIPAL_USER;
 use symbio_sdk::authz::PRINCIPAL_MAIN;
 use symbio_sdk::plugin::drive_entry::DriveEntry;
 use symbio_sdk::plugin::fact_source::FactSource;
-use symbio_sdk::turn::facts::FleetSnapshot;
+use symbio_sdk::round::facts::FleetSnapshot;
 
 /// 工具表的**去重**：子 Agent 作用域会把同一能力再注册一遍，而 `PrefixedCapability`
 /// 只改名、执行原样透传（`crates/symbio-plugin-agent/src/host/scope.rs`），所以对模型

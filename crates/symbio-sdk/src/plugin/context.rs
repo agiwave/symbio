@@ -52,7 +52,7 @@
 //! 不按插件名 / 段名特判。放不下的段在这里被裁掉并计入 [`SectionFit`]，宿主据此出声
 //! （裁了谁、超了多少）；「谁更重要」仍是声明方的判断，本模块不做第二遍。
 
-use crate::turn::facts::WorkerProgress;
+use crate::round::facts::WorkerProgress;
 use symbio_kernel::capability::CapabilityMeta;
 use symbio_kernel::event::Event;
 

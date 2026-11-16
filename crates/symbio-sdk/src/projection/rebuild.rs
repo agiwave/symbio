@@ -26,8 +26,8 @@
 //!
 //! | 节点 | 形状的单点定义 | 重建怎么拿到 |
 //! |---|---|---|
-//! | Turn / Reasoning / Text / ToolCall / 工具结果 | [`crate::turn::node_build`] 的 `llm_build_*` | 直接调用 |
-//! | 对话面节点（首响 / 汇报 / 答话） | [`crate::turn::node_build::dialog_node`]、[`crate::turn::facts::ReportDraft::to_message`] | 直接调用 |
+//! | Turn / Reasoning / Text / ToolCall / 工具结果 | [`crate::round::node_build`] 的 `llm_build_*` | 直接调用 |
+//! | 对话面节点（首响 / 汇报 / 答话） | [`crate::round::node_build::dialog_node`]、[`crate::round::facts::ReportDraft::to_message`] | 直接调用 |
 //! | 用户发言 / 补充 | **写入侧内联构造**（入站请求体 / 会话的补充路径） | 逐字复刻（无共享构造器） |
 //!
 //! 「逐字复刻」那两格是**已知的脆弱点**：没有共享构造器可调，只能靠判据钉住
@@ -95,8 +95,8 @@ use symbio_kernel::event::payload_str;
 
 // 节点形状与汇报格的单点定义都在 core 词汇表（[D-082](../../../../docs/003-design/014-单环一表.md#d-082-6b驱动器成片落为独立插件-loop触发走地址面服务走端口词表先上移分四刀 "DE-014-单环一表") 裁决三）：
 // 写侧（落库）与重建侧（回放）引的是同一个构造器，留守层因此不必反向够驱动器。
-use crate::turn::facts::ReportDraft;
-use crate::turn::node_build::{
+use crate::round::facts::ReportDraft;
+use crate::round::node_build::{
     dialog_node, llm_build_text_node, llm_build_tool_call_node, llm_build_tool_message,
 };
 use symbio_kernel::chat::principal::Principal;
@@ -592,7 +592,7 @@ fn reported_node(e: &Event) -> ChatNode {
 
 /// 对话面开场白（`turn × asserted`）：`Escalate` 首响。
 ///
-/// 形状经 [`crate::turn::node_build::dialog_node`] **同一构造器**复刻（与 [`dialog_node`]
+/// 形状经 [`crate::round::node_build::dialog_node`] **同一构造器**复刻（与 [`dialog_node`]
 /// 及 `reported_node` 同一条纪律：构造只有一份，漂移才不可能）。理由码与
 /// `exclude_from_context` 从载荷读——它们是这条节点的形状（`meta.reason` /
 /// `meta.exclude_from_context`），由写侧 `apply_verdict` 原样透传。

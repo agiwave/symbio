@@ -18,7 +18,7 @@
 //!
 //! | 符号 | 消费方 |
 //! |---|---|
-//! | [`dialog_node`] | [`crate::turn::facts::ReportDraft::to_message`]（汇报落格；调用口在 loop 侧 `report_exec`） |
+//! | [`dialog_node`] | [`crate::round::facts::ReportDraft::to_message`]（汇报落格；调用口在 loop 侧 `report_exec`） |
 //! | [`llm_build_text_node`] / [`llm_build_tool_call_node`] / [`tool_call_args_text`] / [`llm_build_tool_message`] | 落库构造 · 工具分发 · 重建引擎 |
 //! | [`PresentationTree`] / [`flatten_whole_tree`] / [`turn_root_of`] | 读侧投影（`PresentationTree` 的解析与整树折叠） |
 //!

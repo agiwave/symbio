@@ -49,7 +49,7 @@ use symbio_plugin_api::rows::{RowHandler, RowRequest, RowStep, PLUGIN_ROW};
 use symbio_plugin_api::{
     Entity, ExecEventSink, FactDraft, PluginInvokeRequest, RunSnapshot, Verb, Verdict,
 };
-use symbio_sdk::turn::facts::ReportDraft;
+use symbio_sdk::round::facts::ReportDraft;
 
 use crate::config::{
     default_progress_enabled, default_progress_interval_ms, default_progress_lease_ms,
