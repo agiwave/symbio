@@ -29,7 +29,7 @@ const script = fileURLToPath(new URL('./dynamic-port-registration-audit.mjs', im
 const PORT_RS = 'crates/symbio-sdk/src/capability/port.rs'
 const HOST_LIB = 'crates/symbio-host/src/lib.rs'
 const TOOL_PORT = 'crates/symbio-plugin-tool/src/port.rs'
-const TURN_RS = 'crates/symbio-plugin-session/src/plugin/turn.rs'
+const TURN_RS = 'crates/symbio-plugin-session/src/plugin/round.rs'
 const TOOL_PORT_TEST = 'crates/symbio-plugin-tool/src/port.test.rs'
 
 /**

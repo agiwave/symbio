@@ -26,7 +26,7 @@ const LOOP_SRC = 'crates/symbio-plugin-loop/src'
 const TABLE = 'crates/symbio-plugin-loop/src/ring/table.rs'
 const ENGINE = 'crates/symbio-plugin-loop/src/ring/engine.rs'
 const DRIVE = 'crates/symbio/src/drive.rs'
-const TURN = 'crates/symbio-plugin-session/src/plugin/turn.rs'
+const TURN = 'crates/symbio-plugin-session/src/plugin/round.rs'
 
 /** 与基线等量的干净夹具：0 行 / 1 通道 / 0 处全量读。 */
 function cleanFiles() {

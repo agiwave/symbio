@@ -35,14 +35,14 @@ pub(super) struct RunOutput {
 ///
 /// 失败 Turn（`status=Failed`）在这里交棒给 [`degrade::append_interrupt_note`]：
 /// 半截输出照常聚合，只在正文尾部附加中断说明段落。
-pub(super) fn aggregate_run(turn: &ChatNode, tree: &RequestTree<'_>) -> RunOutput {
-    let mut native: NativeMessage = turn.clone().into();
+pub(super) fn aggregate_run(round: &ChatNode, tree: &RequestTree<'_>) -> RunOutput {
+    let mut native: NativeMessage = round.clone().into();
     native.role = NodeRole::Assistant;
     // 根节点自带的正文也要算：**请求线格式**的 run 根把本轮正文放在自己的
     // `content` 上（`wire_messages` 与 adapter 两侧同形状）；落库树则是「run 根 +
     // Text 子节点」。只认子节点会把工具轮的中途正文从请求里抹掉（t55：第三次
     // 请求的 assistant 正文为空）。
-    native.content = turn
+    native.content = round
         .content
         .clone()
         .filter(|content| !content.to_text().trim().is_empty());
@@ -51,11 +51,11 @@ pub(super) fn aggregate_run(turn: &ChatNode, tree: &RequestTree<'_>) -> RunOutpu
 
     let mut tool_results: Vec<NativeMessage> = Vec::new();
 
-    if let Some(kids) = tree.kids(turn.id.as_str()) {
+    if let Some(kids) = tree.kids(round.id.as_str()) {
         for child in kids {
             if child.is_reasoning()
                         // 仅最近 N 条思考进入请求视图
-                        && tree.retains_reasoning(turn.id.as_str())
+                        && tree.retains_reasoning(round.id.as_str())
             {
                 native.reasoning_content = child.content.as_ref().map(|c| c.to_text());
             }
@@ -64,7 +64,7 @@ pub(super) fn aggregate_run(turn: &ChatNode, tree: &RequestTree<'_>) -> RunOutpu
             }
             if child.is_tool_call() {
                 // 请求参数直接来自 ToolCall 节点自身的 content（JSON 文本）。
-                // 该文本在落库时（turn.rs:645）已由 `tc.arguments.to_string()`
+                // 该文本在落库时（round.rs:645）已由 `tc.arguments.to_string()`
                 // 规范化——即 serde_json 输出，故 re-parse 再 re-serialize 幂等。
                 // 因此**以字符串原样透传**：下游 types.rs 的 `is_string()` 快路径
                 // 会直接发出这段文本，省掉一次 Value 物化 + re-serialize（评审 §3.2）。
@@ -121,8 +121,8 @@ pub(super) fn aggregate_run(turn: &ChatNode, tree: &RequestTree<'_>) -> RunOutpu
     // 注：本 Turn 的全部子孙 id 已在预处理遍（consumed 预扫描）中收集，
     // 主循环开头的 `if is_consumed { continue; }` 会跳过它们，
     // 因此此处无需再单独标记，避免重复代码与潜在误标记。
-    if turn.status == Some(NodeStatus::Failed) {
-        degrade::append_interrupt_note(&mut native, turn);
+    if round.status == Some(NodeStatus::Failed) {
+        degrade::append_interrupt_note(&mut native, round);
     }
 
     RunOutput {

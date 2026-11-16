@@ -518,10 +518,10 @@ impl PortExecutor for DraftFailure {
     async fn execute(&self, _ctx: PortExecContext, _input: PortInput) -> PortOutcome {
         PortOutcome {
             facts: vec![json!({
-                "root_id": "turn-1",
+                "root_id": "round-1",
                 "text": "",
                 "reasoning": "先读三处，再逐段列数字",
-                "reasoning_id": "turn-1-reasoning",
+                "reasoning_id": "round-1-reasoning",
                 "answer": "",
                 "truncated": true,
             })],
@@ -825,7 +825,7 @@ async fn unless_gate_reads_the_same_surface_as_when() {
 
     let rows = vec![
         DebtRow::new("a", "p1", "a", json!({})),
-        DebtRow::new("b", "p1", "b", json!({})).unless("turn.done"),
+        DebtRow::new("b", "p1", "b", json!({})).unless("round.done"),
     ];
     // 种类事实缺席 ⇒ 两行都欠（同一圈可以两笔在飞）。
     let ctx = TestCtx::with_source(Box::new(Gated {
@@ -839,7 +839,7 @@ async fn unless_gate_reads_the_same_surface_as_when() {
     // 种类事实存在 ⇒ 排除行不欠（非五类事实也算，「同一条读面」）。
     let ctx = TestCtx::with_source(Box::new(Gated {
         rows: rows.clone(),
-        kinds: vec!["turn.done"],
+        kinds: vec!["round.done"],
         ids: Vec::new(),
     }))
     .with_executor("p1", Arc::new(Stub::ok()));
@@ -849,7 +849,7 @@ async fn unless_gate_reads_the_same_surface_as_when() {
     // 因种类不同不命中（可重试失败后的重试轮不会被提前跳过）。
     let rows = vec![
         DebtRow::new("a", "p1", "a", json!({})),
-        DebtRow::new("b", "p1", "b", json!({})).unless_id("turn.done", "turn.done:b"),
+        DebtRow::new("b", "p1", "b", json!({})).unless_id("round.done", "round.done:b"),
     ];
     let ledger = vec![
         Fact::new(FactKind::Request, DebtKey::new("p1", "b", 1), json!({}), 0),
@@ -873,7 +873,7 @@ async fn unless_gate_reads_the_same_surface_as_when() {
     let ctx = TestCtx::with_source(Box::new(Gated {
         rows,
         kinds: Vec::new(),
-        ids: vec![("turn.done", "turn.done:b".to_string())],
+        ids: vec![("round.done", "round.done:b".to_string())],
     }))
     .with_executor("p1", Arc::new(Stub::ok()));
     assert_eq!(drive(&ctx).await.dispatched, 1);

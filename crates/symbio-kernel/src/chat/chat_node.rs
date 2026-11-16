@@ -79,7 +79,6 @@ pub fn legacy_shape_to_style_tag(word: &str) -> Option<(NodeKind, Option<&'stati
         // [D-070 §决策 3]：reasoning 归 `Notice`（折叠叶），与 compression 同格——
         // 前端渲染二者完全一样，style_tag 只是后端业务注记。
         "reasoning" => (NodeKind::Notice, Some(CHAT_STYLE_TAG_REASONING)),
-        "turn" => (NodeKind::Skeleton, Some(CHAT_STYLE_TAG_RUN)),
         "tool_call" => (NodeKind::Skeleton, Some(CHAT_STYLE_TAG_TOOL)),
         "user_prompt" => (NodeKind::Interaction, None),
         "compression" => (NodeKind::Notice, Some(CHAT_STYLE_TAG_COMPRESSION)),

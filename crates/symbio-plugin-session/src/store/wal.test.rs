@@ -1178,7 +1178,7 @@ fn injected_declarations_are_the_grid_the_gate_reads() {
             Verb::Closed,
             "session/main",
         ))
-        .expect_err("表上住 Turn/Progressed，自述 Turn/Closed 不得入库");
+        .expect_err("表上住 Round/Progressed，自述 Round/Closed 不得入库");
     assert!(
         matches!(
             err,

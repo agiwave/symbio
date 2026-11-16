@@ -151,11 +151,11 @@ impl<'a> RequestTree<'a> {
             return Some(direct);
         }
         // 2. 被 Turn(Tool) 包装（子 agent 会话）
-        if let Some(turn) = kids
+        if let Some(round) = kids
             .iter()
             .find(|c| c.is_run() && c.node_role() == Some(NodeRole::Tool))
         {
-            if let Some(tkids) = self.children.get(turn.id.as_str()) {
+            if let Some(tkids) = self.children.get(round.id.as_str()) {
                 return tkids.iter().find(|c| c.is_text()).copied();
             }
         }

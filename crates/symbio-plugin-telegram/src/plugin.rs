@@ -466,17 +466,17 @@ impl TelegramPlugin {
             // ctx，`fork()` 会原样保留它）。直接调兄弟实例的 `route` 既绕过容器，
             // 又会在插件重建后钉住旧实例——这正是更早的写法。
             //
-            // 调用形状（地址面入队 + 实时面取答复）见 [`super::turn`] 的模块文档。
+            // 调用形状（地址面入队 + 实时面取答复）见 [`super::round`] 的模块文档。
             // 这里曾按 `session_chat::Response` 解析 `session/chat/send` 的回包，
             // 而它恒为 `{"status":"accepted"}`，于是回复永远是「无响应」。
             let response = match ctx.parent().and_then(|w| w.upgrade()) {
-                Some(router) => match super::turn::run_turn(router, &ctx, &chat_id, &text).await {
-                    super::turn::RoundOutcome::Replied(t) if t.trim().is_empty() => {
+                Some(router) => match super::round::run_turn(router, &ctx, &chat_id, &text).await {
+                    super::round::RoundOutcome::Replied(t) if t.trim().is_empty() => {
                         "（本轮没有产生文本输出）".to_string()
                     }
-                    super::turn::RoundOutcome::Replied(t) => t,
-                    super::turn::RoundOutcome::Failed(e) => format!("本轮以错误结束：{e}"),
-                    super::turn::RoundOutcome::Broken(e) => format!("回复失败：{e}"),
+                    super::round::RoundOutcome::Replied(t) => t,
+                    super::round::RoundOutcome::Failed(e) => format!("本轮以错误结束：{e}"),
+                    super::round::RoundOutcome::Broken(e) => format!("回复失败：{e}"),
                 },
                 None => "未挂载到插件容器，无法调用会话".to_string(),
             };

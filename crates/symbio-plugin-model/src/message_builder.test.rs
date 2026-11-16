@@ -18,7 +18,7 @@ use super::*;
 
 use symbio_plugin_api::chat_node::{NodeKind, NodeStatus};
 
-const ROUND_ID: &str = "turn-0001";
+const ROUND_ID: &str = "round-0001";
 
 /// 身份写 `principal`（D-147）：本文件的树模仿**落库面**（见文件头），
 /// `role` 只是反序列化落点，不是写侧的身份来源。
@@ -32,7 +32,7 @@ fn principal_for(role: NodeRole) -> symbio_plugin_api::principal::Principal {
     }
 }
 
-/// 本地构造一棵落库树（Turn 根 + 传入的子节点），形状同
+/// 本地构造一棵落库树（Round 根 + 传入的子节点），形状同
 /// `llm_build_assistant_messages` 的产物——形状契约见文件头说明。
 fn round_tree(children: Vec<ChatNode>) -> Vec<ChatNode> {
     let mut msgs = vec![ChatNode {
@@ -70,7 +70,7 @@ fn child(id: &str, ty: NodeKind, text: &str) -> ChatNode {
 /// 同时钉死「不会把合法参数静默改成 `{}`」——这是改动前的行为保真要求。
 #[test]
 fn tool_call_args_passthrough_as_string_without_reserialize() {
-    // ToolCall 必须挂在根级 Turn（assistant）之下才会被聚合成 tool_calls。
+    // ToolCall 必须挂在根级 Round（assistant）之下才会被聚合成 tool_calls。
     let round = ChatNode {
         id: ROUND_ID.to_string(),
         parent_id: None,
@@ -121,7 +121,7 @@ fn tool_call_args_passthrough_as_string_without_reserialize() {
 #[test]
 fn reasoning_only_flattens_to_single_assistant_message() {
     let reasoning = "只有思考";
-    let msgs = round_tree(vec![child("turn-0001-reason", NodeKind::Body, reasoning)]);
+    let msgs = round_tree(vec![child("round-0001-reason", NodeKind::Body, reasoning)]);
 
     let natives = flatten_chat_messages(&msgs);
     assert_eq!(natives.len(), 1, "应只产生一条 assistant native message");
@@ -143,9 +143,9 @@ fn reasoning_only_flattens_to_single_assistant_message() {
 #[test]
 fn reasoning_with_reply_flattens_into_content_and_reasoning_content() {
     let msgs = round_tree(vec![
-        child("turn-0001-reason", NodeKind::Notice, "思考过程")
+        child("round-0001-reason", NodeKind::Notice, "思考过程")
             .with_style_tag(symbio_plugin_api::chat_node::CHAT_STYLE_TAG_REASONING),
-        child("turn-0001-text", NodeKind::Body, "正常回复"),
+        child("round-0001-text", NodeKind::Body, "正常回复"),
     ]);
 
     let natives = flatten_chat_messages(&msgs);
@@ -159,12 +159,12 @@ fn reasoning_with_reply_flattens_into_content_and_reasoning_content() {
 
 /// 请求视图只保留最近 RETAINED_RECENT_REASONING 条思考。
 ///
-/// 3 个携带 Reasoning 子节点的 Turn 依序出现时，最早 1 条的 reasoning_content
+/// 3 个携带 Reasoning 子节点的 Round 依序出现时，最早 1 条的 reasoning_content
 /// 必须被剥离（但正文保留、消息不得整条消失），最近 2 条完整回传——
 /// 防止上下文完全没有思考时模型重复思考，同时避免全量回传浪费 token。
 #[test]
 fn flatten_keeps_only_recent_reasoning_in_request_view() {
-    let mk_turn = |round_id: &str, reasoning: &str, reply: &str| -> Vec<ChatNode> {
+    let mk_round = |round_id: &str, reasoning: &str, reply: &str| -> Vec<ChatNode> {
         vec![
             ChatNode {
                 id: round_id.into(),
@@ -211,9 +211,9 @@ fn flatten_keeps_only_recent_reasoning_in_request_view() {
         timestamp: Some(0),
         ..Default::default()
     }];
-    msgs.extend(mk_turn("turn-1", "思考一", "回复一"));
-    msgs.extend(mk_turn("turn-2", "思考二", "回复二"));
-    msgs.extend(mk_turn("turn-3", "思考三", "回复三"));
+    msgs.extend(mk_round("round-1", "思考一", "回复一"));
+    msgs.extend(mk_round("round-2", "思考二", "回复二"));
+    msgs.extend(mk_round("round-3", "思考三", "回复三"));
 
     let natives = flatten_chat_messages(&msgs);
 
@@ -221,7 +221,7 @@ fn flatten_keeps_only_recent_reasoning_in_request_view() {
         .iter()
         .filter(|n| n.role == NodeRole::Assistant)
         .collect();
-    assert_eq!(assistant.len(), 3, "三个 Turn 都应聚合为 assistant 消息");
+    assert_eq!(assistant.len(), 3, "三个 Round 都应聚合为 assistant 消息");
 
     let by_content = |reply: &str| -> &NativeMessage {
         assistant
@@ -251,7 +251,7 @@ fn flatten_keeps_only_recent_reasoning_in_request_view() {
 /// 会携带非法 tool_call_id → provider 报 400 "messages[N]: data did not match any variant"。
 #[test]
 fn orphan_tool_result_is_dropped() {
-    let round_id = "turn-orphan";
+    let round_id = "round-orphan";
     let dead_tc_id = "tc-already-filtered"; // 该 tool_call 已被上下文过滤，列表中不存在
 
     let msgs = vec![
@@ -306,11 +306,11 @@ fn orphan_tool_result_is_dropped() {
     );
 }
 
-/// 反向控制：合法关联（Turn → ToolCall → Tool 结果）的 tool 结果必须保留，
+/// 反向控制：合法关联（Round → ToolCall → Tool 结果）的 tool 结果必须保留，
 /// 防止清洗逻辑误伤正常链路。
 #[test]
 fn linked_tool_result_is_retained() {
-    let round_id = "turn-linked";
+    let round_id = "round-linked";
     let tc_id = "tc-linked";
 
     let msgs = vec![
@@ -390,7 +390,7 @@ fn empty_assistant_turn_is_dropped() {
             ..Default::default()
         },
         ChatNode {
-            id: "turn-empty".into(),
+            id: "round-empty".into(),
             parent_id: None,
             principal: Some(principal_for(NodeRole::Assistant)),
             msg_type: Some(NodeKind::Skeleton),
@@ -461,7 +461,7 @@ fn to_api_value_keeps_null_for_assistant_with_tool_calls() {
 
 // ── "继续会话"中断可见性 ─────────────────────────────────────────────
 
-/// 失败 Turn 的半截输出必须进入 LLM 请求包，并附加中断说明：
+/// 失败 Round 的半截输出必须进入 LLM 请求包，并附加中断说明：
 /// 模型应看到「上次输出 → 中断说明 → 用户新消息」的连贯序列
 /// （等价于用户打断了模型说话，然后继续）。
 #[test]
@@ -478,7 +478,7 @@ fn failed_turn_visible_with_interrupt_note() {
             ..Default::default()
         },
         ChatNode {
-            id: "turn-x".into(),
+            id: "round-x".into(),
             parent_id: None,
             principal: Some(principal_for(NodeRole::Assistant)),
             msg_type: Some(NodeKind::Skeleton),
@@ -490,8 +490,8 @@ fn failed_turn_visible_with_interrupt_note() {
             ..Default::default()
         },
         ChatNode {
-            id: "turn-x-text".into(),
-            parent_id: Some("turn-x".into()),
+            id: "round-x-text".into(),
+            parent_id: Some("round-x".into()),
             principal: Some(principal_for(NodeRole::Assistant)),
             msg_type: Some(NodeKind::Body),
             content: Some(MessageContent::Text("Go 的 channel 是…".into())),
@@ -526,7 +526,7 @@ fn failed_turn_visible_with_interrupt_note() {
     assert!(text.contains("用户中止"), "中断说明应包含失败原因");
 }
 
-/// 中断发生在任何输出之前（失败 Turn 无子节点）：Turn 因中断说明非空而保留，
+/// 中断发生在任何输出之前（失败 Round 无子节点）：Round 因中断说明非空而保留，
 /// 不得被「空 assistant 回合」清洗误删——否则模型不知道上一轮发生过中断。
 #[test]
 fn failed_turn_without_children_survives_with_note() {
@@ -542,7 +542,7 @@ fn failed_turn_without_children_survives_with_note() {
             ..Default::default()
         },
         ChatNode {
-            id: "turn-empty".into(),
+            id: "round-empty".into(),
             parent_id: None,
             principal: Some(principal_for(NodeRole::Assistant)),
             msg_type: Some(NodeKind::Skeleton),
@@ -555,7 +555,7 @@ fn failed_turn_without_children_survives_with_note() {
     ];
 
     let natives = flatten_chat_messages(&msgs);
-    assert_eq!(natives.len(), 2, "失败 Turn 携带中断说明，不得被清洗丢弃");
+    assert_eq!(natives.len(), 2, "失败 Round 携带中断说明，不得被清洗丢弃");
     assert_eq!(natives[1].role, NodeRole::Assistant);
     let text = natives[1].content.as_ref().map(|c| c.to_text()).unwrap();
     assert!(text.contains("本轮回复被中断"));
@@ -577,7 +577,7 @@ fn interrupted_tool_call_gets_placeholder_result() {
             ..Default::default()
         },
         ChatNode {
-            id: "turn-tc".into(),
+            id: "round-tc".into(),
             parent_id: None,
             principal: Some(principal_for(NodeRole::Assistant)),
             msg_type: Some(NodeKind::Skeleton),
@@ -590,7 +590,7 @@ fn interrupted_tool_call_gets_placeholder_result() {
         },
         ChatNode {
             id: "tc-x".into(),
-            parent_id: Some("turn-tc".into()),
+            parent_id: Some("round-tc".into()),
             principal: Some(principal_for(NodeRole::Assistant)),
             msg_type: Some(NodeKind::Skeleton),
             meta: Some(serde_json::json!({"style_tag": "tool", "tool_name": "run_tests"})),
@@ -614,7 +614,7 @@ fn interrupted_tool_call_gets_placeholder_result() {
     let assistant = natives
         .iter()
         .find(|n| n.role == NodeRole::Assistant)
-        .expect("失败 Turn 仍应聚合为 assistant");
+        .expect("失败 Round 仍应聚合为 assistant");
     assert_eq!(
         assistant.tool_calls.as_ref().map(|c| c.len()),
         Some(1),
@@ -667,8 +667,8 @@ fn failed_tool_result_sets_success_false() {
         ]
     };
 
-    let mut msgs = mk_turn_with_tool("turn-f", "tc-f", "res-f", true);
-    msgs.extend(mk_turn_with_tool("turn-s", "tc-s", "res-s", false));
+    let mut msgs = mk_turn_with_tool("round-f", "tc-f", "res-f", true);
+    msgs.extend(mk_turn_with_tool("round-s", "tc-s", "res-s", false));
 
     let natives = flatten_chat_messages(&msgs);
     let failed_tool = natives
@@ -840,12 +840,12 @@ fn tool_call(id: &str, parent: &str, name: &str, wire: Option<&str>) -> ChatNode
 /// 整轮恢复不回来。占位结果同样要配这个 id——「有请求无响应」的形状必须自洽。
 #[test]
 fn resumed_request_view_pairs_everything_with_the_providers_wire_id() {
-    let mut tc = tool_call("tc-node", "turn-r", "run_tests", Some("call-77"));
+    let mut tc = tool_call("tc-node", "round-r", "run_tests", Some("call-77"));
     tc.timestamp = Some(2);
     let msgs = vec![
         cell("u1", None, NodeRole::User, "", NodeKind::Body, "跑下测试"),
         cell(
-            "turn-r",
+            "round-r",
             None,
             NodeRole::Assistant,
             "run",
@@ -888,7 +888,7 @@ fn resumed_request_view_pairs_everything_with_the_providers_wire_id() {
     );
 }
 
-/// **t38 那半**：工具结果被一个 `Turn`(role=Tool) 包着（子 agent 会话整包回写的形状）
+/// **t38 那半**：工具结果被一个 `Round`(role=Tool) 包着（子 agent 会话整包回写的形状）
 /// 时也要配得上——`find_tool_result` 的第 2 条路径。认不出来就等于「跨轮看不见
 /// 上一轮的工具结果」，模型会重跑同一个工具。
 #[test]
@@ -903,14 +903,14 @@ fn tool_result_wrapped_by_a_subagent_turn_is_still_paired() {
             "问一下子 agent",
         ),
         cell(
-            "turn-a",
+            "round-a",
             None,
             NodeRole::Assistant,
             "run",
             NodeKind::Skeleton,
             "",
         ),
-        tool_call("tc-a", "turn-a", "agent_run", Some("call-a")),
+        tool_call("tc-a", "round-a", "agent_run", Some("call-a")),
         cell(
             "wrap",
             Some("tc-a"),
@@ -949,14 +949,14 @@ fn tool_result_wrapped_by_a_subagent_turn_is_still_paired() {
 fn empty_direct_tool_result_is_kept_instead_of_becoming_a_placeholder() {
     let msgs = vec![
         cell(
-            "turn-e",
+            "round-e",
             None,
             NodeRole::Assistant,
             "run",
             NodeKind::Skeleton,
             "",
         ),
-        tool_call("tc-e", "turn-e", "write_file", Some("call-e")),
+        tool_call("tc-e", "round-e", "write_file", Some("call-e")),
         ChatNode {
             content: None,
             ..cell(

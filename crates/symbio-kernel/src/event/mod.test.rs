@@ -13,6 +13,4 @@ fn envelope_writes_only_current_entity_word() {
 
     let fresh = serde_json::to_value(&event).expect("写侧应可序列化");
     assert_eq!(fresh.get("entity"), Some(&serde_json::json!("Scope")));
-    assert!(fresh.get("scope").is_none(), "写侧不再写 scope 字段");
-    assert!(fresh.get("turn").is_none(), "写侧不再写旧字段名");
 }

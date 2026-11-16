@@ -50,8 +50,8 @@ pub(super) fn mark_failed_result(native: &mut NativeMessage, result: &ChatNode) 
 /// 模型在上下文中看到「上次输出 → 中断说明 → 用户新消息」的连贯序列，避免思维链
 /// 断裂（等价于用户打断了模型说话，然后继续）。有 `error` 就把原因带进说明——
 /// 「为什么断」比「断了」信息量大，而它已经在树上（`ChatNode::error`），没有理由不印。
-pub(super) fn append_interrupt_note(native: &mut NativeMessage, turn: &ChatNode) {
-    let note = match turn.error.as_deref() {
+pub(super) fn append_interrupt_note(native: &mut NativeMessage, round: &ChatNode) {
+    let note = match round.error.as_deref() {
         Some(err) if !err.trim().is_empty() => format!(
             "[本轮回复被中断（原因：{err}）。以上是中断前的部分输出，仅供参考；请结合用户接下来的消息继续。]"
         ),

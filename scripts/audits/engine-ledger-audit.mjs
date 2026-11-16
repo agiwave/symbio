@@ -19,7 +19,7 @@
  * |---|---|---|
  * | `EL-001` | 引擎自持的行数 | `crates/symbio-plugin-loop/src/**`（生产 `.rs`）里 `Decl {` 的出现次数（行数据已由应用交来，环侧目标 0） |
  * | `EL-002` | 分发方的出参通道数 | `ring/engine.rs` 的 `CollectingWriter` 结构体里 `Mutex<` 字段数 |
- * | `EL-003` | 驱动 / 回合路径的全量读点数 | `ring/engine.rs`、`crates/symbio/src/drive.rs`、`session/plugin/turn.rs` 三处的 `range(…Seq::new(0))` |
+ * | `EL-003` | 驱动 / 回合路径的全量读点数 | `ring/engine.rs`、`crates/symbio/src/drive.rs`、`session/plugin/round.rs` 三处的 `range(…Seq::new(0))` |
  *
  * **账本只有这三格**：`TurnState` 那一格随对象下线一并消失，不再有第四个读数
  * （`CS-010` 同时退役，见 `GATE_CODES.md` 的退役列）。
@@ -77,7 +77,7 @@ const ROOT = rootArg ? path.resolve(rootArg.slice('--root='.length)) : path.reso
  * `channels = 1`：`CollectingWriter` 只有一条跨 await 累积的 `collected: Mutex<…>`；
  * 同步返回的端口结果不是通道。
  * `fullScans = 0`：驱动 / 回合路径三处（`ring/engine.rs`、`crates/symbio/src/drive.rs`、
- * `session/plugin/turn.rs`）都不再从 0 扫全量——终答投影随会话基底改写为按 `scope`
+ * `session/plugin/round.rs`）都不再从 0 扫全量——终答投影随会话基底改写为按 `scope`
  * 读视图，`ring/engine.rs` 只读当前站的 `FactView`，`drive.rs` 按 `head - 1` 续读。
  * 基线已随实测收到 0：留着的余量会被下一次新增正好填进来。
  */
@@ -88,7 +88,7 @@ const DISPATCH = 'crates/symbio-plugin-loop/src/ring/engine.rs'
 const SCAN_FILES = [
   'crates/symbio-plugin-loop/src/ring/engine.rs',
   'crates/symbio/src/drive.rs',
-  'crates/symbio-plugin-session/src/plugin/turn.rs',
+  'crates/symbio-plugin-session/src/plugin/round.rs',
 ]
 
 const read = (rel) => {

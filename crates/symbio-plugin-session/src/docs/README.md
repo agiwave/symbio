@@ -36,7 +36,7 @@ impl: done
 
 > **主循环旧设计的去向**（原 DE-102「会话核心循环」已退场，实现随环收口删除）：债的挑选与偿还住
 > `crates/symbio-plugin-loop/src/ring/engine.rs`（驱动在 `crates/symbio/src/drive.rs`），一轮的装配与
-> 收尾住 `plugin/turn.rs`，轮的身份是事实源打开时绑定的会话身份（`D-317`），节点状态见 [DE-105](105-node-state-streaming.md "DE-105-node-state-streaming")，
+> 收尾住 `plugin/round.rs`，轮的身份是事实源打开时绑定的会话身份（`D-317`），节点状态见 [DE-105](105-node-state-streaming.md "DE-105-node-state-streaming")，
 > 模块拆分见 [DE-104](104-module-layout.md "DE-104-module-layout")。历史在 `git log`。
 
 ## 建议阅读路径

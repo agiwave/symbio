@@ -445,7 +445,7 @@ fn eval_respects_the_declared_cost() {
     let one = vec![ev(
         1,
         EVENT_SENT,
-        json!({"port": "turn", "id": "a", "attempt": 1}),
+        json!({"port": "round", "id": "a", "attempt": 1}),
     )];
     assert!(frozen.eval("probe", &one, 0).is_some());
     let two = vec![
@@ -453,7 +453,7 @@ fn eval_respects_the_declared_cost() {
         ev(
             1,
             EVENT_SENT,
-            json!({"port": "turn", "id": "b", "attempt": 1}),
+            json!({"port": "round", "id": "b", "attempt": 1}),
         ),
     ];
     assert_eq!(frozen.eval("probe", &two, 0), None);

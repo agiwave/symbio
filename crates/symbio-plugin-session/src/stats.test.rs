@@ -119,7 +119,7 @@ fn seed(tag: &str) -> PathBuf {
         Verb::Opened,
         "user",
     )
-    .with_payload(serde_json::json!({ "text": "你好", "tier": "deep", "turn_ref": "u-0" }));
+    .with_payload(serde_json::json!({ "text": "你好", "tier": "deep", "round_ref": "u-0" }));
     let s0 = store.append(u0).unwrap().value();
     store
         .append(
@@ -144,7 +144,7 @@ fn seed(tag: &str) -> PathBuf {
         Verb::Opened,
         "user",
     )
-    .with_payload(serde_json::json!({ "text": "再问", "tier": "deep", "turn_ref": "u-1" }));
+    .with_payload(serde_json::json!({ "text": "再问", "tier": "deep", "round_ref": "u-1" }));
     let s1 = store.append(u1).unwrap().value();
     store
         .append(
@@ -1046,7 +1046,7 @@ fn a_matrix_member_reads_shared_content_and_an_outsider_still_cannot() {
         Verb::Opened,
         "user",
     )
-    .with_payload(serde_json::json!({ "text": "你好", "tier": "deep", "turn_ref": "u-0" }));
+    .with_payload(serde_json::json!({ "text": "你好", "tier": "deep", "round_ref": "u-0" }));
     let s0 = store.append(u0).unwrap().value();
     store
         .append(
@@ -1417,7 +1417,7 @@ fn readyset_column_is_absent_when_no_owner_registers_it() {
 /// **生产二进制里读得到真数**归 e2e（`t35-skill-compile.mjs`
 /// 按已知轮次钉 `by_skill` 的 `uses`）。
 ///
-/// 观测仍按**写方落下的真实形状**造（`Memory × Asserted`、`turn = 0`、`produced_by` 指向本轮
+/// 观测仍按**写方落下的真实形状**造（`Memory × Asserted`、`round = 0`、`produced_by` 指向本轮
 /// 用户格）：本插件不认识这些字段，带着它们才试得出「不认识」是不是真的。格位由
 /// `declarations.test.rs` 的夹具交（写闸 fail-closed，没声明的名字落不进环），**报表不登记**
 /// ⇒ 这一列整条不出。

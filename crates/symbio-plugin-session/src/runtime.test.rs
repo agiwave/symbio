@@ -4,7 +4,7 @@ use super::*;
 use serde_json::json;
 use symbio_kernel::event::{Entity, Verb};
 
-/// 一条生命周期事件（`turn` 分桶与投影无关，取 1）。
+/// 一条生命周期事件（`round` 分桶与投影无关，取 1）。
 fn ev(kind: &str, verb: Verb, payload: serde_json::Value) -> Event {
     Event::pending("e", kind, Entity::Scope, verb, "test").with_payload(payload)
 }
@@ -231,7 +231,7 @@ fn a_non_root_run_node_is_not_evidence() {
     assert_eq!(
         outcome(&[
             opened(),
-            edited(run_node("failed", Some("子轮失败"), Some("turn-1")))
+            edited(run_node("failed", Some("子轮失败"), Some("round-1")))
         ]),
         None,
         "只有轮次骨架的定稿才是结局证据（persist_failure 只写根）"

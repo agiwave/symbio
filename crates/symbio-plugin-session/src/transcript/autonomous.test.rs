@@ -274,7 +274,7 @@ fn long_goal_overrun_is_visible_and_budget_param_is_live() {
     let overruns = |budget_ms: u64, cost_ms: u64| -> Vec<String> {
         let store = EventStore::new();
         let src = seed_root(&store);
-        // 幕级派发格：`tier` / `budget_ms` 的写侧形状照 `plugin/turn.rs`。
+        // 幕级派发格：`tier` / `budget_ms` 的写侧形状照 `plugin/round.rs`。
         store
             .append(
                 Event::pending(

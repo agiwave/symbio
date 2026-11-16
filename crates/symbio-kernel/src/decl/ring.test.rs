@@ -33,7 +33,7 @@ fn ready_view(events: &[Event], now: i64) -> Value {
         .and_then(|e| e.payload.get("id"))
         .cloned()
     {
-        Some(id) => json!({ "turn": 1, "id": id, "ready": now >= 100 }),
+        Some(id) => json!({ "round": 1, "id": id, "ready": now >= 100 }),
         None => Value::Null,
     }
 }
@@ -98,7 +98,7 @@ fn declare(actors: &[ActorDecl]) -> Builder {
             port: None,
             key: &[],
             expand: &[],
-            fields: &["id", "x", "turn"],
+            fields: &["id", "x", "round"],
         });
     }
     b.view(ViewDecl {
@@ -717,7 +717,7 @@ fn port_world(actors: &[ActorDecl]) -> Builder {
 fn a_port_is_declared_once_and_found_by_name() {
     const PORTS: &[PortDecl] = &[
         PortDecl {
-            port: "turn",
+            port: "round",
             before: "sent",
             lease_ms: 600_000,
             max_attempts: 3,
@@ -731,7 +731,7 @@ fn a_port_is_declared_once_and_found_by_name() {
             concurrency: 4,
         },
     ];
-    assert_eq!(port_of(PORTS, "turn").map(|p| p.lease_ms), Some(600_000));
+    assert_eq!(port_of(PORTS, "round").map(|p| p.lease_ms), Some(600_000));
     assert_eq!(port_of(PORTS, "tool").map(|p| p.max_attempts), Some(2));
     // 并发许可是端口级声明的一部分，与租约 / 尝试上限同处一次声明。
     assert_eq!(port_of(PORTS, "tool").map(|p| p.concurrency), Some(4));
@@ -749,7 +749,7 @@ fn declare_batch() -> Builder {
         port: None,
         key: &[],
         expand: &["calls"],
-        fields: &["id", "calls", "turn"],
+        fields: &["id", "calls", "round"],
     });
     b.fact(FactDecl {
         name: "done",
@@ -957,11 +957,11 @@ fn a_pattern_field_must_be_declared_by_the_fact() {
 #[test]
 fn the_envelope_fields_need_no_declaration() {
     let rows = [row(
-        "by-turn",
+        "by-round",
         10,
         None,
-        pattern("f", &["turn"], &[]),
-        &[pattern("g", &["turn", "seq", "ts"], &[])],
+        pattern("f", &["round"], &[]),
+        &[pattern("g", &["round", "seq", "ts"], &[])],
         &[],
     )];
     let gaps = seal_gaps(&rows, &[ACT]);
@@ -1109,7 +1109,7 @@ fn a_row_that_closes_itself_is_not_a_cycle() {
 
 /// 同一族事实的**不同档**不成边（正例）。
 ///
-/// 一格名字可以有好几档（`turn.stage` 的判决 / 召回 / 压缩各写自己那一档）。只按
+/// 一格名字可以有好几档（`round.stage` 的判决 / 召回 / 压缩各写自己那一档）。只按
 /// 事实名配边就把「同族」读成「同格」：两行都出口在这一族上 ⇒ 互相等待 ⇒ 装载红，
 /// 而运行期谁都不等谁。这一条钉的就是那次红（接回压缩行时撞上的 `cycle`）。
 #[test]

@@ -9,7 +9,7 @@ impl: done
 
 # Unified Session & Memory Orchestration Architecture (会话与记忆系统化管理架构说明书)
 
-Session 插件是 Symbio 架构中的**会话持久化与生命周期中心**：持有事实源、转写与运行态，负责加载历史、**解析**系统提示词（收集各插件经提示词段行注册的段，本层不自己拼）、经 `Registry`（收集口，put/get/list 三方法）汇集工具与选项，并在**一轮的边界**上派发 / 等待 / 收尾（[D-086](../../docs/003-design/014-单环一表.md "DE-014-单环一表")）。一轮的执行本体（主循环）住在独立插件 [`crates/symbio-plugin-loop`](../symbio-plugin-loop/README.md "crates/symbio-plugin-loop/README")：它是不动点驱动，**由宿主 `symbio-host` 起唯一一次**，行数据由会话侧在装配期交来、环只按行还债，事实经 `Host.source` 落库；一轮的装配与收尾仍在会话插件的 `plugin/turn.rs`。Model 插件是**无状态 LLM 网关**（按上下文注册 Provider + 协议适配），对 session 零依赖。
+Session 插件是 Symbio 架构中的**会话持久化与生命周期中心**：持有事实源、转写与运行态，负责加载历史、**解析**系统提示词（收集各插件经提示词段行注册的段，本层不自己拼）、经 `Registry`（收集口，put/get/list 三方法）汇集工具与选项，并在**一轮的边界**上派发 / 等待 / 收尾（[D-086](../../docs/003-design/014-单环一表.md "DE-014-单环一表")）。一轮的执行本体（主循环）住在独立插件 [`crates/symbio-plugin-loop`](../symbio-plugin-loop/README.md "crates/symbio-plugin-loop/README")：它是不动点驱动，**由宿主 `symbio-host` 起唯一一次**，行数据由会话侧在装配期交来、环只按行还债，事实经 `Host.source` 落库；一轮的装配与收尾仍在会话插件的 `plugin/round.rs`。Model 插件是**无状态 LLM 网关**（按上下文注册 Provider + 协议适配），对 session 零依赖。
 
 本文档将系统性地阐述 Symbio 的会话保存、内容压缩、工具迭代限制以及发送过滤策略，说明其具体规则、参数配置及 Rust 底层实现策略。
 

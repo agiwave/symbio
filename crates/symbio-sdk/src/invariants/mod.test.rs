@@ -405,7 +405,7 @@ fn closure_reason_denied_on_a_denial_fact_passes() {
 
 #[test]
 fn non_closure_cells_are_not_asked_for_a_reason() {
-    // `turn × progressed`（等待用户）**没有停**，不该被问「为什么停」。
+    // `round × progressed`（等待用户）**没有停**，不该被问「为什么停」。
     let events = vec![Event::pending(
         "p0",
         "chat.assistant.progress",
@@ -672,6 +672,6 @@ fn a_stop_fact_is_a_grid_cell_or_a_declared_role() {
             VOCAB,
             &pending("u-1", "fixture.other", Entity::Scope, Verb::Asserted, 1)
         ),
-        "没声明角色的 `turn × asserted` 不是停机事实——角色表就是这一臂的唯一入口"
+        "没声明角色的 `round × asserted` 不是停机事实——角色表就是这一臂的唯一入口"
     );
 }

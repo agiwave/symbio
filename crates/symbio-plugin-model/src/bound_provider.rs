@@ -165,7 +165,7 @@ impl ModelProvider for BoundProvider {
             PostResult::RetryWithoutContextId => {
                 plugin_warn!(
                     "model",
-                    "[LLM] Response context lost (400). Retrying turn without response_ids... (耗时 {:?})",
+                    "[LLM] Response context lost (400). Retrying round without response_ids... (耗时 {:?})",
                     round_started.elapsed()
                 );
                 // 半截流的清除不在本层：返回错误后由 chat_loop 的重试分支对被废弃的

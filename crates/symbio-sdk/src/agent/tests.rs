@@ -236,9 +236,9 @@ fn the_slot_round_trips_through_forks() {
     assert_eq!(published.id, "reviewer");
 
     // 轮 ctx 把同一个 Arc 挂回去（collect_capabilities 的那一步），工具再 fork。
-    let turn = collector.fork();
-    turn.set(AGENT_PERMS, collector.get(AGENT_PERMS).unwrap());
-    let tool = turn.fork();
+    let round = collector.fork();
+    round.set(AGENT_PERMS, collector.get(AGENT_PERMS).unwrap());
+    let tool = round.fork();
     assert_eq!(
         agent_perms_of(tool.as_ref()).map(|s| s.id).as_deref(),
         Some("reviewer"),

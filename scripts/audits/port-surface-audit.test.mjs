@@ -224,7 +224,7 @@ test('真仓当前状态通过，且各格判据都数得出非零输入', () =>
   // 取值一侧也要数得出名单（否则「扫端口表」扫空了没人知道，判据静默变回只判字段名）。
   const values = /端口取值（名单 ([^）]*)）/.exec(r.stdout)
   assert.ok(values, '通过信息里没有「端口取值名单」⇒ 取值一侧可能没有输入')
-  for (const v of ['turn', 'model', 'tool']) {
+  for (const v of ['round', 'model', 'tool']) {
     assert.ok(values[1].includes(v), `端口取值名单里没有 ${v}：提取器与端口表脱节`)
   }
   // PTS-006 的输入也要真的存在（真仓里那份文档不是夹具自动补的）。

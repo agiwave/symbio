@@ -634,5 +634,5 @@ fn memory_visible(e: &Event, own: bool, viewer: &str) -> bool {
 }
 
 #[cfg(test)]
-#[path = "turn.test.rs"]
+#[path = "round.test.rs"]
 mod tests;

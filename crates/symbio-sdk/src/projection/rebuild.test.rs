@@ -1,7 +1,7 @@
 //! `rebuild` 的判据。
 //!
 //! 这个模块的失效形态是**静默的形状漂移**：重建出的树与落库树长得像但不一样
-//! （父节点接错、`msg_type` 差一档、工具结果挂到 Turn 根而不是 ToolCall 上）。
+//! （父节点接错、`msg_type` 差一档、工具结果挂到 Round 根而不是 ToolCall 上）。
 //! 它不报错、不告警，前端只是把工具卡片渲染成一条普通正文。所以这里逐条钉
 //! **结构**而不是内容：
 //!
@@ -271,7 +271,7 @@ fn final_builds_scope_root_with_reasoning_and_text_children() {
     );
 }
 
-/// 终答载荷的 `context` 复刻到 Turn 骨架的 `meta.context`——会话读数扫的就是这一格。
+/// 终答载荷的 `context` 复刻到 Round 骨架的 `meta.context`——会话读数扫的就是这一格。
 #[test]
 fn final_payload_context_folds_into_the_turn_skeleton_meta() {
     let events = vec![
@@ -291,7 +291,7 @@ fn final_payload_context_folds_into_the_turn_skeleton_meta() {
     ];
 
     let nodes = rebuild(&events, &CHAT, &MESSAGE);
-    let root = nodes.iter().find(|n| n.id == "T1").expect("Turn 骨架");
+    let root = nodes.iter().find(|n| n.id == "T1").expect("Round 骨架");
     assert_eq!(root.msg_type, Some(NodeKind::Skeleton));
     let meta = root.meta.as_ref().expect("水位随载荷入格");
     assert_eq!(meta["context"]["request_tokens"], 4096);
@@ -318,7 +318,7 @@ fn final_without_context_payload_leaves_the_skeleton_meta_empty() {
     ];
 
     let nodes = rebuild(&events, &CHAT, &MESSAGE);
-    let root = nodes.iter().find(|n| n.id == "T1").expect("Turn 骨架");
+    let root = nodes.iter().find(|n| n.id == "T1").expect("Round 骨架");
     // 骨架的 `meta` 一定有 `style_tag`（那是节点的形状，不是水位）；
     // 「缺数不出行」判的是 `meta.context` 这一格不出现。
     assert!(
@@ -331,7 +331,7 @@ fn final_without_context_payload_leaves_the_skeleton_meta_empty() {
     );
 }
 
-/// 真实形状：`root_id` 就是发起这一轮的用户消息 id，Turn 骨架因此与用户节点**同 id**
+/// 真实形状：`root_id` 就是发起这一轮的用户消息 id，Round 骨架因此与用户节点**同 id**
 /// 被「同 id 只认首次」合并掉——水位必须补到存活的那个节点上，否则读数丢失。
 #[test]
 fn final_context_survives_when_the_scope_root_is_the_user_message() {
@@ -379,12 +379,12 @@ fn reasoning_only_does_not_duplicate_the_paragraph() {
         })),
     ];
     let got = shapes(&rebuild(&events, &CHAT, &MESSAGE));
-    assert_eq!(got.len(), 3, "user + Turn + 一条 Text，实得 {got:?}");
+    assert_eq!(got.len(), 3, "user + Round + 一条 Text，实得 {got:?}");
     assert_eq!(got[2].id, "T1-reason", "reasoning-only 时复用推理子节点 id");
     assert_eq!(got[2].ty, NodeForm::Body);
 }
 
-/// 兜底格的 `why`（失败原因）必须折回 Turn 节点的 `error`。
+/// 兜底格的 `why`（失败原因）必须折回 Round 节点的 `error`。
 ///
 /// 存在的理由是一条实测事故：一轮跑了 18 个工具轮后模型吐了空正文，整轮落兜底格，
 /// 重建把 `rounds[]` 的 18 段思考摊成子节点，却**没人把「为什么失败」带出来**——
@@ -426,7 +426,7 @@ fn fallback_carries_the_failure_reason_onto_the_turn_node() {
     assert!(
         !got.iter()
             .any(|m| m.id == "u-node" && m.msg_type == Some(NodeKind::Skeleton)),
-        "不存在独立的 Turn 骨架：它就是用户节点"
+        "不存在独立的 Round 骨架：它就是用户节点"
     );
     let round = got
         .iter()
@@ -610,13 +610,13 @@ fn artifact_builds_call_and_result_under_the_call() {
 
     let got = shapes(&rebuild(&events, &CHAT, &MESSAGE));
     assert_eq!(got.len(), 3);
-    // 调用卡：ToolCall，挂在 Turn 根下，正文是**已定稿的参数文本**
+    // 调用卡：ToolCall，挂在 Round 根下，正文是**已定稿的参数文本**
     assert_eq!(got[1].id, "T-016");
     assert_eq!(got[1].parent, Some("T1".into()));
     assert_eq!(got[1].ty, NodeForm::Tool);
     assert_eq!(got[1].identity, Some(NodeRole::Assistant));
     assert_eq!(got[1].text, "{\"path\":\"a.md\"}");
-    // 结果卡：role=Tool，挂在**调用**下（不是 Turn 根）
+    // 结果卡：role=Tool，挂在**调用**下（不是 Round 根）
     assert_eq!(got[2].id, "T-016-result", "结果 id 由调用 id 派生");
     assert_eq!(got[2].parent, Some("T-016".into()));
     assert_eq!(got[2].identity, Some(NodeRole::Tool));
@@ -1222,7 +1222,7 @@ fn a_removal_drops_the_nodes_and_leaves_seq_gaps() {
         final_event(serde_json::json!({
             "text": "第一答", "root_id": "T1", "text_id": "T1-text", "status": "completed",
         })),
-        // 从 Turn 根起截断（起点 + 其子节点，与 `truncate_messages` 的区间同形）
+        // 从 Round 根起截断（起点 + 其子节点，与 `truncate_messages` 的区间同形）
         removed_event(&["T1", "T1-text"]),
     ];
 

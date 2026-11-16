@@ -71,7 +71,7 @@
  *
  * 分桶按**文件的活**，不按目录名猜；判不出的文件落「没有归属」并逐条列出，不静默归并。
  * 已知偏差写在按钮旁边：装配的折叠函数（`exposed_tools` / `dedup_declared_twins`）住在
- * `plugin/turn.rs` 里，按文件口径整份记在「开轮序列」一侧——偏差方向是**边二读数偏小**，
+ * `plugin/round.rs` 里，按文件口径整份记在「开轮序列」一侧——偏差方向是**边二读数偏小**，
  * 也就是不会把这条边说大。
  *
  * 用法：node scripts/audits/session-retire-audit.mjs [--root=<仓库根>] [--verbose] [--breakdown] [--coverage]
@@ -447,7 +447,7 @@ const COVERAGE_BUCKETS = [
   {
     id: 'turn',
     label: '开轮序列（装配的折叠住这里）',
-    match: (rel) => rel === 'plugin/turn.rs',
+    match: (rel) => rel === 'plugin/round.rs',
   },
 ]
 
@@ -497,9 +497,9 @@ function printCoverage() {
   )
   console.log(dim('\n  「没有归属」逐文件（判不出就列出来，不静默并进别的桶）：'))
   for (const r of other.files.sort()) console.log(dim(`    ${r}`))
-  if (rows.some((r) => r.id === 'turn' && r.files.includes('plugin/turn.rs'))) {
+  if (rows.some((r) => r.id === 'turn' && r.files.includes('plugin/round.rs'))) {
     console.log(dim('  ⚠ 分桶偏差：装配的折叠（exposed_tools / dedup_declared_twins）住在'))
-    console.log(dim('    plugin/turn.rs 里，整份记在「开轮序列」⇒ 边二读数偏小，不偏大。'))
+    console.log(dim('    plugin/round.rs 里，整份记在「开轮序列」⇒ 边二读数偏小，不偏大。'))
   }
 }
 

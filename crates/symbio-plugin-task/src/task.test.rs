@@ -83,7 +83,7 @@ fn snapshot_node(id: &str) -> symbio_plugin_api::chat_node::ChatNode {
 }
 
 /// 一次「收束」级别的写入：取现有切片 → 按当前轮号入格。
-/// `turn` 每调一次递增（与真实桥的行为同形：一轮一格）。
+/// `round` 每调一次递增（与真实桥的行为同形：一轮一格）。
 ///
 /// 走的是**生产那条通路**（DE-025 D-207）：拼一次调用的纯值 → 交效果端口问
 /// 能力包要草稿 → 经唯一写入口落格。测试因此同时钉住两件事：任务的成格判据，
@@ -926,7 +926,7 @@ fn an_unbound_subagent_is_refused_the_task_table() {
 // ==================== 收束贡献：调度不再由宿主代劳（DE-025 D-250） ====================
 //
 // 三条判据：只走生成轮（答话轮没有新声明）、事件号与归属由能力拼出
-// （`t3-s{n}` / 调度者 / 本轮开口格）、以及信封（`turn` / `ts`）不进端口——
+// （`t3-s{n}` / 调度者 / 本轮开口格）、以及信封（`round` / `ts`）不进端口——
 // 草稿交出去时不带信封，由宿主的写口盖章（D-252）。
 
 /// 一条已就绪的任务 + 本轮开口格。
@@ -977,7 +977,7 @@ fn the_contributor_lands_ready_and_assigned_on_a_generated_turn() {
             .map(|d| d.fact.key.as_str())
             .collect::<Vec<_>>(),
         vec!["t3-s0", "t3-s1"],
-        "事件号词干由宿主给的不透明锚拼出（与旧的 `t{{turn}}-s` 同形）"
+        "事件号词干由宿主给的不透明锚拼出（与旧的 `t{{round}}-s` 同形）"
     );
     for draft in &drafts {
         assert_eq!(draft.fact.entity, Entity::Task);
@@ -989,7 +989,7 @@ fn the_contributor_lands_ready_and_assigned_on_a_generated_turn() {
     }
 }
 
-/// 信封不进端口：草稿交出来时 `turn` / `ts` 都是 0，由宿主写口盖章（D-252）。
+/// 信封不进端口：草稿交出来时 `round` / `ts` 都是 0，由宿主写口盖章（D-252）。
 #[test]
 fn the_draft_carries_no_envelope() {
     let store = EventStore::new();

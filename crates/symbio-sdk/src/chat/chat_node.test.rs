@@ -81,7 +81,6 @@ fn legacy_wire_words_fold_to_shape_and_style_tag() {
             NodeKind::Notice,
             Some(CHAT_STYLE_TAG_REASONING),
         ),
-        ("turn", NodeKind::Skeleton, Some(CHAT_STYLE_TAG_RUN)),
         ("tool_call", NodeKind::Skeleton, Some(CHAT_STYLE_TAG_TOOL)),
         ("user_prompt", NodeKind::Interaction, None),
         (
@@ -183,16 +182,16 @@ fn vdfs_with_attrs(name: &str, attrs: serde_json::Value) -> symbio_kernel::vdfs:
     }
 }
 
-/// 旧六词的历史数据（VDFS `attributes.type`）经 `message_of_node` 折成新形态 +
+/// 旧词的历史数据（VDFS `attributes.type`）经 `message_of_node` 折成新形态 +
 /// 注入 `style_tag`——谓词在折叠结果上必须命中，且既有 meta 键不丢。
 #[test]
 fn message_of_node_folds_legacy_words() {
     let m = message_of_node(
-        &vdfs_with_attrs("a", serde_json::json!({"type": "turn"})),
+        &vdfs_with_attrs("a", serde_json::json!({"type": "tool_call"})),
         String::new(),
     )
     .unwrap();
-    assert!(m.is_run(), "旧词 turn 必须折成 run 骨架");
+    assert!(m.is_tool_call(), "旧词 tool_call 必须折成 tool 骨架");
 
     let m = message_of_node(
         &vdfs_with_attrs(

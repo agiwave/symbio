@@ -2,8 +2,8 @@
   "target": 0,
   "faces": {
     "F1": {
-      "prod": 16,
-      "test": 59
+      "prod": 0,
+      "test": 0
     },
     "F2": {
       "prod": 0,
@@ -23,6 +23,11 @@
     }
   },
   "adjustments": [
+    {
+      "date": "2026-11-16",
+      "faces": "F1.prod / F1.test（turn 词根五面归零）",
+      "reason": "`D-502` 收尾（项目方确认未发布产品、无存量需兼容；并明确『架构删除无用代码不需裁决，修改/添加才需裁决控制』）：①纯删除——后端 chat_node.rs 的 `\"turn\" => Skeleton` 旧 wire 折叠键（净减，无裁决）；②纪律 0 模块内部符号改名——model 的 message_builder 私有形参/局部 id/文案、bound_provider 日志文案、sdk 私有形参与测试私有符号；③模块路径改名——telegram 与 session 的 `mod turn` 连同文件 git mv 为 round/round.test.rs，Rust 路径、文档锚点（22 处活引用）、审计脚本硬编码路径（engine-ledger/session-retire/dynamic-port-registration）同批迁移（D-502 裁决二授权）；④测试自造数据字面量（port 名/payload 键/id 前缀/断言文案）改 round，生产无对应契约。F1 生产面 16 → 0、测试面 59 → 0，**turn 词根五面（F1~F5）全部归零**，target 0 达成。全程只删与模块内部/测试私有改名，未新增任何形状或协议。"
+    },
     {
       "date": "2026-11-16",
       "faces": "F1.prod / F2.prod / F2.test",

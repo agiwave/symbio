@@ -63,7 +63,7 @@
 //! 载荷里带这一组的产出身份与中途产出序列；`artifact.added` 带 `tool_call_id` /
 //! `args` / `success`（**不复制分组标识**：分组按 `tool_call_id` 从发起这批调用的
 //! 那条事实的 `calls[]` 反查）；
-//! `turn.supplemented` 带 `id` / `ids`。结果节点 id 由调用 id 派生
+//! `round.supplemented` 带 `id` / `ids`。结果节点 id 由调用 id 派生
 //! （[`crate::event::result_node_id`]），不作为载荷键。**节点身份因此是
 //! 事实的一部分**，重建不必凭空造号——只有「载荷确实没记的」（旧事件的补充格、
 //! 恢复路的结果节点）才由事件 id 稳定合成（合成必须**稳定**，见
@@ -502,7 +502,7 @@ fn nodes_of(
             e.payload
                 .get("root_id")
                 .and_then(|v| v.as_str())
-                .is_some_and(|turn| denied_speech.contains(turn)),
+                .is_some_and(|round| denied_speech.contains(round)),
         );
     }
     match slot_of(e, c, m) {
@@ -530,7 +530,7 @@ fn nodes_of(
     }
 }
 
-/// 用户发言（`turn × opened`）：载荷 `{ text, tier, id }`。
+/// 用户发言（`round × opened`）：载荷 `{ text, tier, id }`。
 ///
 /// `id` 是**流式期已广播的节点 id**（`user_node_id` 入格）——前端按 id 合并，
 /// 重建必须复用它，否则同一条发言在实时面与重建面是两个身份。
@@ -559,7 +559,7 @@ fn user_node(e: &Event) -> ChatNode {
     }
 }
 
-/// 轮边界汇报（`turn × asserted`）：界面文本。
+/// 轮边界汇报（`round × asserted`）：界面文本。
 ///
 /// 形状**复用写入侧的构造** [`ReportDraft::to_message`]
 /// ——它就是落库镜像上那一格的定义（`dialog_node(text, "progress", true)`）。
@@ -590,7 +590,7 @@ fn reported_node(e: &Event) -> ChatNode {
     m
 }
 
-/// 对话面开场白（`turn × asserted`）：`Escalate` 首响。
+/// 对话面开场白（`round × asserted`）：`Escalate` 首响。
 ///
 /// 形状经 [`crate::round::node_build::dialog_node`] **同一构造器**复刻（与 [`dialog_node`]
 /// 及 `reported_node` 同一条纪律：构造只有一份，漂移才不可能）。理由码与
@@ -1214,7 +1214,7 @@ fn artifact_nodes(
     if !failure_kind.is_empty() {
         // **并入**而非整格替换：构造侧的 `meta.style_tag` / `meta.tool_name` 是
         // 节点身份的一部分（后骨架与工具名只活在 meta 里），
-        // 整格覆盖 = 重建一次丢一次形态词，前端折叠退回 `turn`（e2e t27 抓到）。
+        // 整格覆盖 = 重建一次丢一次形态词，前端折叠退回 `round`（e2e t27 抓到）。
         let mut meta = call.meta.clone().unwrap_or_else(|| serde_json::json!({}));
         if let Some(obj) = meta.as_object_mut() {
             obj.insert("success".into(), serde_json::json!(success));

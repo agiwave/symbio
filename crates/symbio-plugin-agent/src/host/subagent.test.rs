@@ -252,7 +252,7 @@ fn relabel_anchors_top_level_assistant_as_tool_response() {
     assert_eq!(
         node.node_role(),
         Some(NodeRole::Tool),
-        "分型结构 ToolCall(Assistant) → Turn(Tool)，且 flatten 的 find_tool_result 认的是折叠后的族"
+        "分型结构 ToolCall(Assistant) → Round(Tool)，且 flatten 的 find_tool_result 认的是折叠后的族"
     );
     let principal = node.principal.expect("主体就是身份的那一份写");
     assert_eq!(principal.kind, PrincipalKind::Tool);

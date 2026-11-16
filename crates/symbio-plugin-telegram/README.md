@@ -40,7 +40,7 @@ Telegram Bot 集成插件：长轮询收发与"继续会话"交互。
 **不要**按值持有 session 实例——`docs/003-design/006-插件路由与地址.md` 规则五，守卫 E-007 会拦。
 
 调用的**形状**是「地址面入队 + 实时面取答复」，唯一实现在
-`crates/symbio-plugin-telegram/src/turn.rs`：
+`crates/symbio-plugin-telegram/src/round.rs`：
 
 ```text
 vdfs/root → 根地址（唯一的「不给地址」入口）

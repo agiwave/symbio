@@ -141,7 +141,7 @@ fn session_node_publishes_the_context_watermark_reading() {
         id: "turn1".into(),
         msg_type: Some(cm::NodeKind::Skeleton),
         meta: Some(json!({
-            "turn": 1,
+            "round": 1,
             "context": {
                 "content_tokens": 42_000,
                 "request_tokens": 45_000,
@@ -472,7 +472,7 @@ fn msg(id: &str, seq: Option<i64>) -> cm::ChatNode {
     }
 }
 
-/// 带父指针的消息（一个 Turn = 根 + 它的全部后代）
+/// 带父指针的消息（一个 Round = 根 + 它的全部后代）
 fn child(id: &str, seq: Option<i64>, parent: &str) -> cm::ChatNode {
     cm::ChatNode {
         id: id.into(),
@@ -539,7 +539,7 @@ fn transcript_window_pages_before_cursor() {
     assert!(transcript_window(&msgs, Some(2), Some("t1")).is_empty());
 }
 
-/// **Turn 永不被劈开**：`limit` 是名义值，实际条数恒 ≥ limit
+/// **Round 永不被劈开**：`limit` 是名义值，实际条数恒 ≥ limit
 ///
 /// 这是「计量单位是根、不是条」的锁死测试——按条数截断会把一轮 reason /
 /// tool_call 与它的根分开，前端树就拼不起来。
@@ -557,7 +557,7 @@ fn transcript_window_keeps_turns_whole() {
     assert_eq!(
         ids(&transcript_window(&msgs, Some(1), Some("t3"))),
         vec!["t2", "r2", "c2"],
-        "limit=1 却返回 3 条 —— 一个 Turn 不能拆"
+        "limit=1 却返回 3 条 —— 一个 Round 不能拆"
     );
 }
 
@@ -697,7 +697,7 @@ fn vdfs_session_content_is_json() {
 ///
 /// 前端 `loadMessages` 读的是叶子（`fetchTranscript` → `readVdfs(vdfsSessionAddr)`），
 /// 不是专用读协议（`session/get_messages` 已于 2026-09-23 退役）。若叶子只序列化存储，
-/// Turn 运行中切走再切回就会
+/// Round 运行中切走再切回就会
 /// 看不到正在跑的那一轮——它在 `persist_messages` 落库之前只存在于在途缓冲里。
 #[test]
 fn vdfs_session_content_overlays_live_messages() {

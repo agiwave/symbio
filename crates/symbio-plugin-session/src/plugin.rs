@@ -762,7 +762,7 @@ fn unbounded_number(key: &str, label: &str, description: &str, default: Value) -
 // 读写删都转发既有会话能力（SessionStore + 会话 metadata 合并），不新造协议。
 
 mod nodes;
-mod turn;
+mod round;
 mod vdfs_catalog;
 mod vdfs_inbox;
 mod vdfs_messages;
