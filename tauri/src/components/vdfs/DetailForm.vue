@@ -251,6 +251,7 @@
 import { computed, nextTick, onMounted, reactive, ref, watch } from 'vue'
 import DetailShell from './DetailShell.vue'
 import BaseModal from '@/components/common/BaseModal.vue'
+import { useToast } from '@/composables/useToast'
 import { pickNative } from '@/services/nativePick'
 import {
   detailPresetFieldOptions,
@@ -389,9 +390,17 @@ function fieldDisabled(f: DetailField): boolean {
 //
 // 后端唤不起原生对话框，故闭集（DETAIL_PICKS）里这几个取值由前端实现：
 // 先取值、写入本字段，再由调用方按自己的绑定提交。
+const { showToast } = useToast()
+
 async function onPick(f: DetailField) {
-  const picked = await pickNative(f.pick as DetailPick | undefined)
-  if (picked != null) form[f.key] = picked
+  // 原生取值也会失败（权限 / 路径失效 / 系统对话框异常）。失败必须说出来，
+  // 否则用户点完「选择目录」看到的是毫无反应，只能反复点。
+  try {
+    const picked = await pickNative(f.pick as DetailPick | undefined)
+    if (picked != null) form[f.key] = picked
+  } catch (e) {
+    showToast('error', `${f.label}取值失败：${e instanceof Error ? e.message : String(e)}`)
+  }
 }
 
 // ==================== 机制原生取值原语（DetailAction.pack） ====================

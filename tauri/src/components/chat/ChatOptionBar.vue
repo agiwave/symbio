@@ -30,6 +30,7 @@
       class="option-btn"
       :class="{ 'is-disabled': isDisabled(f), open: openKey === f.key }"
       :title="tooltip(f)"
+      :aria-label="fieldAriaLabel(f)"
       :aria-expanded="opensMenu(f) ? openKey === f.key : undefined"
       :aria-haspopup="opensMenu(f) ? 'menu' : undefined"
       @click.stop="onFieldClick(f, $event)"
@@ -229,6 +230,17 @@ function tooltip(f: DetailField): string {
   if (val && val !== f.label) parts.push(`当前：${val}`)
   if (f.description) parts.push(f.description)
   return parts.join('\n')
+}
+
+/**
+ * 可访问名称 = 字段名 + 当前值。
+ *
+ * 按钮的可见文字只有**值**（「GPT-4」），读屏听到的会是一个没有上下文的词；
+ * 选项栏是紧凑控件，值必须可见，但名称不能只剩它。
+ */
+function fieldAriaLabel(f: DetailField): string {
+  const val = compactFieldText(f, rawValue(f)) || '未设置'
+  return `${f.label}：${val}`
 }
 
 function closeMenu(restoreFocus = false) {
