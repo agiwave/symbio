@@ -487,6 +487,24 @@ export function pubItemName(raw) {
 }
 
 /**
+ * 公开项声明的**形状**：抹掉名字、标识符与字符串字面量的内容，只留「是什么声明、
+ * 多少个参数、什么类型骨架」。用来认改名——`turn_root_of` → `scope_root_of` 与
+ * `EVENT_TURN_BRANCH = "turn.branch"` → `EVENT_SCOPE_BRANCH = "scope.branch"` 的
+ * 两个声明形状相同，只是名字与字面量换了词（`D-504`）。
+ *
+ * 抹掉标识符与字面量是为了不依赖「改成什么名字」：改名可以是 turn→scope、也可以是
+ * 任意词根替换。保留骨架（关键字 / 标点 / 参数个数 / 类型层级）是为了不把「新加一个
+ * 方法」误认成改名——那条声明没有对应的同形状删除行。
+ */
+function pubItemShape(raw) {
+  return String(raw)
+    .trim()
+    .replace(/"[^"]*"|'[^']*'/g, '§S')
+    .replace(/\b[A-Za-z_]\w*\b/g, '§I')
+    .replace(/\s+/g, ' ')
+}
+
+/**
  * 补件在**机制面**（`sdk` / `kernel`）新增的公开项（前几项，供报错点名）。
  *
  * `plugin-api` 的改动不算补件：那是插件面的通用契约，不改内核的公开面与语义。
@@ -497,19 +515,34 @@ export function pubItemName(raw) {
  * 按行判会把一次净收窄（−369 行机制源码）读成六个新公开项，于是提交者只能挂一个与
  * 本意无关的 `Core-Change`，而「补件次数是设计缺口的读数」这一格从此虚高。
  * 只拿机制面的删除来抵：真正的补件是「插件里的口子搬进内核」，那确实让内核的面变宽。
+ *
+ * 改名同样不算新增（`D-504`，`D-437` 的实现补齐）：`pubItemName` 的注释早就写着
+ * 「换签名、拆文件、**改名**都是把同一行重写一遍」，但同名抵消只认得出「名字相同」，
+ * 认不出「同形状、换了词」的改名（turn→scope）。于是纯粹的改名被记成补件，机制面
+ * 一寸没宽、欠账却 +1。判据的既有口径是「面有没有变宽」，改名没有变宽——本条让实现
+ * 走到这个口径：同一文件里，一个新增公开项若能与某个删除公开项按形状一一配对，且
+ * 该文件删除的公开项数不少于新增数（公开项总数不增），就判为改名、不计补件。
+ * 只增不减、或新增比删除多出来的那些，仍是真补件。
  */
 export function mechanismAdditions(patch) {
   const retired = new Set()
+  // 每个文件内被删除的公开项形状（改名只在同一文件里发生：实现挪位置是搬迁，不是改名）。
+  const removedShapes = new Map()
   for (const file of patch) {
     if (!inTrees(file.path, ARCH_TREES) || !isCapabilitySource(file.path)) continue
+    const shapes = []
     for (const raw of file.removed) {
       const name = pubItemName(raw)
       if (name) retired.add(name)
+      if (PUB_ITEM_RE.test(raw.trim()) && isMechanismLine(raw)) shapes.push(pubItemShape(raw))
     }
+    removedShapes.set(file.path, shapes)
   }
   const out = []
   for (const file of patch) {
     if (!inTrees(file.path, CORE_TREES) || !isCapabilitySource(file.path)) continue
+    // 用 pool 消费式配对：一条删除只能抵一条新增，避免一次删除替多条新增「洗白」。
+    const pool = [...(removedShapes.get(file.path) ?? [])]
     for (const line of file.added) {
       // `use` / `mod` 是接线不是机制面（同 `isMechanismLine`）：只重写 `pub use` 的名单
       // （删符号时必然发生）不构成「新增公开项」。
@@ -517,6 +550,12 @@ export function mechanismAdditions(patch) {
       if (!PUB_ITEM_RE.test(line)) continue
       const name = pubItemName(line)
       if (name && retired.has(name)) continue
+      const shape = pubItemShape(line)
+      const at = pool.findIndex((s) => s === shape)
+      if (at !== -1) {
+        pool.splice(at, 1)
+        continue
+      }
       out.push({ path: file.path, line: line.trim() })
     }
   }

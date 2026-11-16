@@ -490,6 +490,61 @@ test('mechanismAdditions：真新增的公开项照样点名（抵账只认同�
   assert.equal(mechanismAdditions(p).length, 1)
 })
 
+test('mechanismAdditions：同文件改名（同形状、换词根）不算补件（D-504）', () => {
+  // turn→scope 的两笔欠账：改的是词根，声明形状一字未变，机制面没有变宽。
+  const p = patchOf([
+    {
+      path: 'crates/symbio-sdk/src/round/node_build.rs',
+      removed: ['pub fn turn_root_of(node: &ChatNode) -> Option<&str> {'],
+      added: ['pub fn scope_root_of(node: &ChatNode) -> Option<&str> {'],
+    },
+    {
+      path: 'crates/symbio-sdk/src/test_fixtures.rs',
+      removed: [
+        'pub const EVENT_TURN_BRANCH: &str = "turn.branch";',
+        'pub const EVENT_TURN_BRANCH_SELECTED: &str = "turn.branch_selected";',
+      ],
+      added: [
+        'pub const EVENT_SCOPE_BRANCH: &str = "scope.branch";',
+        'pub const EVENT_SCOPE_BRANCH_SELECTED: &str = "scope.branch_selected";',
+      ],
+    },
+  ])
+  assert.deepEqual(mechanismAdditions(p), [])
+})
+
+test('mechanismAdditions：改名抵掉同形状后，多出来的真新增仍算补件（D-504）', () => {
+  // 删 1 个、加 2 个（其中 1 个是改名、1 个是真新增）⇒ 只点名真新增那条。
+  const p = patchOf([
+    {
+      path: 'crates/symbio-sdk/src/round/node_build.rs',
+      removed: ['pub fn turn_root_of(node: &ChatNode) -> Option<&str> {'],
+      added: [
+        'pub fn scope_root_of(node: &ChatNode) -> Option<&str> {',
+        'pub fn brand_new_entry(id: u64) -> bool {',
+      ],
+    },
+  ])
+  const adds = mechanismAdditions(p)
+  assert.equal(adds.length, 1)
+  assert.match(adds[0].line, /brand_new_entry/)
+})
+
+test('mechanismAdditions：只增不减时，即便形状彼此相同也不互相抵消（D-504）', () => {
+  // 两个新增 const 形状相同但没有任何删除 ⇒ 都是真补件，不能自己抵自己。
+  const p = patchOf([
+    {
+      path: 'crates/symbio-sdk/src/test_fixtures.rs',
+      removed: [],
+      added: [
+        'pub const EVENT_ALPHA: &str = "alpha";',
+        'pub const EVENT_BETA: &str = "beta";',
+      ],
+    },
+  ])
+  assert.equal(mechanismAdditions(p).length, 2)
+})
+
 test('NET_GUARD：口径起点有提交号与理由，且不是判据起点本身', () => {
   assert.deepEqual(validateBeforeGuard(NET_GUARD), [])
   assert.match(NET_GUARD.sha, /^[0-9a-f]{7,40}$/)
