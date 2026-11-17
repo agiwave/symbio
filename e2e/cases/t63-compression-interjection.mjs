@@ -183,10 +183,28 @@ export default defineCase(
         async () => (await llm.requests()).some(mainRequestHasInterject),
         { what: '插话进了某一轮主请求的 messages（被消费，没被压缩吞掉）', timeoutMs: 60_000 },
       );
-      await waitFor(
-        () => sessionWalEvents(hd.homedir, SID).some((e) => e.kind === 'session.consolidated'),
-        { what: 'session.consolidated 落格', timeoutMs: 30_000 },
-      );
+      try {
+        await waitFor(
+          () => sessionWalEvents(hd.homedir, SID).some((e) => e.kind === 'session.consolidated'),
+          { what: 'session.consolidated 落格', timeoutMs: 30_000 },
+        );
+      } catch (err) {
+        // 超时不能只说「没等到」：要能分清是摘要请求根本没发、发了没回，
+        // 还是回了但 compact-write 没落格（RE-014 §5：失败要留足以定归属的片段）。
+        const reqs = await llm.requests();
+        const summaryReqs = reqs.filter((q) => systemTextOf(q).includes('你是上下文压缩器'));
+        const kinds = new Set(['session.consolidated', 'chat.assistant.final', 'session.state']);
+        const timeline = sessionWalEvents(hd.homedir, SID)
+          .filter((e) => kinds.has(e.kind))
+          .sort((a, b) => (a.seq ?? 0) - (b.seq ?? 0))
+          .map((e) => `${e.kind}@${e.seq ?? '?'}`)
+          .join(' → ');
+        throw new Error(
+          `${err.message}；压缩诊断: 请求 ${reqs.length} 条（摘要 ${summaryReqs.length} 条，` +
+            `摘要下标 ${summaryReqs.map((q) => reqs.indexOf(q)).join(',') || '—'}）；` +
+            `WAL: ${timeline || '(空)'}`,
+        );
+      }
       await waitTurns(turnsBeforeInterject + 1, '插话轮收束');
 
       // ── ④ 判据：压缩真的完成，且载荷是压缩 Notice ───────────────────────
