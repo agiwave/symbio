@@ -216,6 +216,13 @@ async function copy() {
 .copy-btn:hover {
   color: var(--text-primary);
 }
+
+/* 无悬停设备：复制键常显（理由同 NodeShell 的操作区——hover 在触屏上不存在） */
+@media (hover: none) {
+  .copy-btn {
+    opacity: 1;
+  }
+}
 .user-bubble {
   position: relative;
 }

@@ -905,3 +905,81 @@ describe('MessageNode：工具确认的四档', () => {
     expect(resumed.map((p) => p.action)).toEqual(['approve'])
   })
 })
+
+/**
+ * 审批卡的「管多久」与提问的「选没选」——两张卡此前都缺一句必要的话。
+ */
+describe('MessageNode：交互卡的后果说明与作答校验', () => {
+  it('确认卡写明三档放行各自的作用域（永久放行跨会话）', () => {
+    const w = mountNode(
+      msg({
+        id: 'up1',
+        type: 'interaction',
+        status: 'waiting_user_action',
+        parent_id: 'tc1',
+        meta: {
+          prompt: {
+            kind: 'confirm',
+            tool_name: 'shell',
+            risk_level: 'high',
+            description: '删除文件',
+          },
+        },
+      }),
+    )
+    const hint = w.find('.up-scope-hint')
+    expect(hint.exists()).toBe(true)
+    expect(hint.text()).toContain('本会话')
+    expect(hint.text()).toContain('跨会话')
+  })
+
+  it('没有风险档时仍说明「只对这一次生效」，但不提两档放行', () => {
+    const w = mountNode(
+      msg({
+        id: 'up1',
+        type: 'interaction',
+        status: 'waiting_user_action',
+        parent_id: 'tc1',
+        meta: { prompt: { kind: 'confirm', tool_name: 'shell' } },
+      }),
+    )
+    const hint = w.find('.up-scope-hint')
+    expect(hint.text()).toContain('这一次')
+    expect(hint.text()).not.toContain('永久放行')
+  })
+
+  it('提问未作答时提交键禁用并给出还剩几个问题', async () => {
+    const resume = vi.fn()
+    const w = mount(MessageNode, {
+      props: {
+        node: msg({
+          id: 'up2',
+          type: 'interaction',
+          status: 'waiting_user_action',
+          parent_id: 'tc1',
+          meta: {
+            prompt: {
+              kind: 'question',
+              questions: [
+                { id: 'q1', question: '选一个', options: [{ label: 'A' }, { label: 'B' }] },
+              ],
+            },
+          },
+        }),
+      },
+      global: { provide: { [RESUME_KEY]: resume } },
+    })
+
+    expect(w.find('.up-submit').attributes('disabled')).toBeDefined()
+    expect(w.find('.up-hint').text()).toContain('1 个问题未作答')
+    await w.find('.up-submit').trigger('click')
+    expect(resume).not.toHaveBeenCalled()
+
+    await w.find('input[type="radio"]').setValue(true)
+    expect(w.find('.up-submit').attributes('disabled')).toBeUndefined()
+
+    await w.find('.up-submit').trigger('click')
+    expect(resume).toHaveBeenCalledTimes(1)
+    expect(resume.mock.calls[0][0].answer.answers[0].selected).toEqual(['A'])
+  })
+})

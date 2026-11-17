@@ -106,44 +106,58 @@ defineExpose({
 </script>
 
 <style scoped>
+/*
+ * 配色 / 字号全部走令牌（此前硬编码 `#1e1e1e` / `#2d2d2d` / `#858585`）：
+ *
+ * - 切浅色主题后，硬编码的深色块会与整页冲突；
+ * - `--font-scale`（外观里的字体档位）对它无效，大字号用户在这里看到的仍是小字。
+ *
+ * 编辑器是**编辑区**而非代码展示块，底与正文跟随主题；行号列用下沉底区分。
+ * 字号用 calc 叠上 `--font-scale`，行高与行号列高度共用同一个变量——三处各写
+ * 一份数值就会在改字号时错位。
+ */
 .code-editor {
+  --editor-font-size: calc(0.875rem * var(--font-scale, 1));
+  --editor-line-height: 1.6;
   width: 100%;
   height: 100%;
   display: flex;
   flex-direction: row;
   overflow: hidden;
+  background: var(--surface-sunken);
 }
 
 .line-numbers {
   width: 3rem;
   min-width: 3rem;
-  background: #2d2d2d;
-  color: #858585;
-  font-family: 'Fira Code', 'Consolas', 'Monaco', monospace;
-  font-size: 0.875rem;
-  line-height: 1.6;
+  background: var(--surface-page);
+  color: var(--text-muted);
+  font-family: var(--font-mono);
+  font-size: var(--editor-font-size);
+  line-height: var(--editor-line-height);
   padding: 1rem 0.5rem;
   text-align: right;
   overflow: hidden;
   user-select: none;
-  border-right: 1px solid #3c3c3c;
+  border-right: 1px solid var(--border-default);
 }
 
 .line-number {
-  height: calc(0.875rem * 1.6);
+  height: calc(var(--editor-font-size) * var(--editor-line-height));
 }
 
 .code-textarea {
   flex: 1;
   width: 100%;
   padding: 1rem;
-  background: #1e1e1e;
-  color: #d4d4d4;
+  background: var(--surface-sunken);
+  color: var(--text-primary);
+  caret-color: var(--accent);
   border: none;
   outline: none;
-  font-family: 'Fira Code', 'Consolas', 'Monaco', monospace;
-  font-size: 0.875rem;
-  line-height: 1.6;
+  font-family: var(--font-mono);
+  font-size: var(--editor-font-size);
+  line-height: var(--editor-line-height);
   resize: none;
   tab-size: 2;
   white-space: pre;
@@ -151,10 +165,10 @@ defineExpose({
 }
 
 .code-textarea::placeholder {
-  color: #666;
+  color: var(--text-muted);
 }
 
 .code-textarea:focus {
-  background: #1a1a1a;
+  background: var(--surface-overlay);
 }
 </style>

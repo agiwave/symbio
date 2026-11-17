@@ -25,6 +25,7 @@ import { defineComponent, h, nextTick } from 'vue'
 import MessageNode from '../MessageNode.vue'
 import { useSessionsStore } from '@/stores/sessions'
 import { useChatConnection } from '@/composables/useChatConnection'
+import { MESSAGE_PREVIEW_MAX } from '@/registry/messageTypes'
 import type { ChatNode } from '@/schemas/chat_node'
 
 vi.mock('@/services/plugin', () => ({
@@ -515,7 +516,8 @@ describe('渲染层回归：收起态摘要在流式中显示最新内容', () =
   it('思考折叠叶（始终单行）流式中跟着末端走，定稿后回到开头', async () => {
     const w = mount(Panel, { props: { sessionId: SID } })
     feed(rootSkeleton('T1'))
-    feed(noticeLeaf('R1', 'T1', OPEN + '甲'.repeat(80)))
+    // 填到**超过**摘要上限（按常量取，不写死 80——改上限不该让用例失去意义）
+    feed(noticeLeaf('R1', 'T1', OPEN + '甲'.repeat(MESSAGE_PREVIEW_MAX)))
     await nextTick()
     // 容器默认折叠：展开根级骨架才能看到子流里的思考行
     await w.find('.msg.type-skeleton > .node-head-row > .node-head').trigger('click')
@@ -549,7 +551,7 @@ describe('渲染层回归：收起态摘要在流式中显示最新内容', () =
     await w.find('.msg.type-skeleton > .node-head-row > .node-head').trigger('click')
     await nextTick()
 
-    feed({ id: 'TC1', delta: '甲'.repeat(80) + '"}' })
+    feed({ id: 'TC1', delta: '甲'.repeat(MESSAGE_PREVIEW_MAX) + '"}' })
     await nextTick()
 
     // 工具骨架默认已收起（单行）：此刻唯一的 `.node-preview` 就是它

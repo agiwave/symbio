@@ -89,7 +89,10 @@ defineProps<{
   flex: 1;
   min-width: 0;
 }
-.form-body :deep(.setting-info label) {
+/* 行标题：有对应控件的用 `<label for>`，没有的用 `.setting-label`——
+   没有可关联控件的 `<label>` 是悬空语义，读屏与点击行为都不对。 */
+.form-body :deep(.setting-info label),
+.form-body :deep(.setting-info .setting-label) {
   display: block;
   font-weight: var(--font-weight-medium);
   font-size: var(--font-size-base);

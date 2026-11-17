@@ -452,6 +452,15 @@ const headAriaLabel = computed(() => {
 .node-head-row:focus-within .node-actions {
   display: inline-flex;
 }
+
+/* 触屏 / 无悬停设备：没有 hover 这回事，操作按钮只能常显。
+   否则「编辑 / 重试 / 删除」在这些设备上等于不存在（键盘用户靠 focus-within
+   仍可达，但触屏用户既无 hover 也无 Tab）。 */
+@media (hover: none) {
+  .msg > .node-head-row .node-actions {
+    display: inline-flex;
+  }
+}
 /* ── 分支切换器（常驻，非悬停）──
    读数 `i/n` 夹在两个箭头中间：用户先看见「这是一组里的第几支」，再决定点不点。
    箭头按钮共用全局微操作类 `.node-act.neutral`（见 `styles/controls.css`）。 */
@@ -534,8 +543,9 @@ const headAriaLabel = computed(() => {
   align-items: center;
   font-size: 0.7rem;
   font-weight: 500;
-  color: #ef4444;
-  background: rgba(239, 68, 68, 0.12);
+  /* 语义令牌：与危险/错误色同源，深色主题下自动换成对比度达标的亮红 */
+  color: var(--danger-fg);
+  background: var(--danger-subtle-bg);
   border-radius: 0.25rem;
   padding: 0 0.35rem;
   margin-left: 0.25rem;

@@ -43,7 +43,20 @@
 
     <p v-if="node.error" class="msg-error">{{ node.error }}</p>
 
-    <pre v-if="body" class="msg-body">{{ body }}</pre>
+    <template v-if="body">
+      <!-- 超长正文默认只到前一段：工具输出 / 长文可能几万字，整段平铺会把
+           后面的结构信息（meta / 动作）推到屏外。展开是用户的一次明确选择。 -->
+      <pre class="msg-body">{{ shownBody }}</pre>
+      <button
+        v-if="bodyTooLong"
+        class="msg-expand"
+        type="button"
+        :aria-expanded="expanded"
+        @click="expanded = !expanded"
+      >
+        {{ expanded ? '收起' : `展开全部（共 ${body.length} 字）` }}
+      </button>
+    </template>
     <p v-else class="msg-empty">（无正文：组合节点本身不承载内容）</p>
 
     <dl v-if="meta.length" class="msg-meta">
@@ -56,7 +69,7 @@
 </template>
 
 <script setup lang="ts">
-import { computed } from 'vue'
+import { computed, ref } from 'vue'
 import DetailShell from './DetailShell.vue'
 import type { VdfsRendererProps } from './rendererContract'
 import { nodeKindOf, roleOfPrincipal } from '@/schemas/chat_node'
@@ -77,6 +90,14 @@ defineEmits<{
 
 /** 正文（由 `useVdfs` 的一次 `vdfs/read` 填充；本视图不做增量拼接） */
 const body = computed(() => (typeof props.data === 'string' ? props.data : ''))
+
+/** 超过这个字数就折叠正文（只折叠呈现，不丢内容） */
+const BODY_COLLAPSE_LIMIT = 2000
+const expanded = ref(false)
+const bodyTooLong = computed(() => body.value.length > BODY_COLLAPSE_LIMIT)
+const shownBody = computed(() =>
+  bodyTooLong.value && !expanded.value ? body.value.slice(0, BODY_COLLAPSE_LIMIT) + '…' : body.value,
+)
 
 /**
  * 身份：`attributes.principal` 是唯一的 wire 来源；存量节点还带旧的
@@ -180,6 +201,20 @@ const meta = computed(() => {
   margin: 0;
   font-size: 0.78rem;
   color: var(--text-muted);
+}
+
+.msg-expand {
+  align-self: flex-start;
+  padding: 0.2rem 0.6rem;
+  border: 1px solid var(--border-default);
+  border-radius: var(--radius-md);
+  background: transparent;
+  color: var(--accent);
+  font-size: 0.76rem;
+  cursor: pointer;
+}
+.msg-expand:hover {
+  background: var(--surface-hover);
 }
 
 .msg-meta {

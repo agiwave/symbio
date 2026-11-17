@@ -81,6 +81,15 @@
             </svg>
           </span>
           <span class="toast__text">{{ t.text }}</span>
+          <!-- 内联动作（如「重试」）：提示说得出下一步，就要给得出那个按钮 -->
+          <button
+            v-if="t.action"
+            type="button"
+            class="toast__action"
+            @click.stop="runAction(t)"
+          >
+            {{ t.action.label }}
+          </button>
           <!-- 关闭必须有可聚焦的语义控件：整块 @click 对键盘用户不存在 -->
           <button
             type="button"
@@ -95,9 +104,16 @@
 </template>
 
 <script setup lang="ts">
-import { useToast } from '@/composables/useToast'
+import { useToast, type ToastItem } from '@/composables/useToast'
 
 const { toasts, dismiss, pause, resume } = useToast()
+
+/** 先移除本条再执行：动作往往改变页面状态，留着一条已失效的提示只会误导 */
+function runAction(t: ToastItem) {
+  const action = t.action
+  dismiss(t.id)
+  action?.run()
+}
 </script>
 
 <style scoped>
@@ -184,6 +200,24 @@ const { toasts, dismiss, pause, resume } = useToast()
   flex: 1;
   min-width: 0;
   word-break: break-word;
+}
+
+.toast__action {
+  flex-shrink: 0;
+  padding: 0.1rem 0.5rem;
+  border: 1px solid var(--border-default);
+  border-radius: var(--radius-sm);
+  background: var(--surface-panel);
+  color: var(--accent);
+  font-size: var(--font-size-xs);
+  cursor: pointer;
+}
+.toast__action:hover {
+  border-color: var(--accent);
+}
+.toast__action:focus-visible {
+  outline: 2px solid var(--accent);
+  outline-offset: 1px;
 }
 
 .toast__close {

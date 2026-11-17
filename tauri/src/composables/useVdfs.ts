@@ -166,6 +166,15 @@ export function useVdfs(opts: UseVdfsOptions) {
   /** 待选中的末段名；应用一次即清（后续刷新不得把用户的选择抢回去） */
   const pendingSelect = ref<string | null>(null)
 
+  /**
+   * 深链定位失败的**可见理由**。
+   *
+   * `?select=` 指向的条目不存在（已删 / 不属于当前目录 / 形状非法）时，此前一律
+   * 静默忽略：右栏只留着「← 选择一个资源」，用户不知道地址里的那一项去了哪儿。
+   * 空串 = 没有待解释的失败。
+   */
+  const focusNotice = ref('')
+
   /** 当前目录全路径 = 绑定地址 + 选中的子目录（深链时 = 绑定地址本身） */
   const cwd = computed(() =>
     pinnedAtAddr.value
@@ -348,6 +357,7 @@ export function useVdfs(opts: UseVdfsOptions) {
 
   /** 把当前路由的选中项落到内存态（定住当前目录 + 记下待选项）；未变化则不动。 */
   function applyFocusIfChanged() {
+    const raw = (selectName.value ?? '').trim()
     const name = focusNameOf(selectName.value)
     const key = `${addr.value}\u0000${name ?? ''}`
     if (key === appliedFocusKey) return
@@ -355,6 +365,8 @@ export function useVdfs(opts: UseVdfsOptions) {
     pinnedAtAddr.value = Boolean(name)
     pendingSelect.value = name
     if (name) selectedName.value = null
+    // 形状非法的选中项（带分隔符 / `..`）在归一化时就被丢弃了，这里如实说一句。
+    focusNotice.value = raw && !name ? `地址中的选中项「${raw}」无法定位：它不是本目录的直接子项` : ''
   }
 
   /**
@@ -376,7 +388,11 @@ export function useVdfs(opts: UseVdfsOptions) {
       return
     }
     const node = await statVdfs(READBACK_REASON.VDFS_BROWSER, target)
-    if (!node || vdfsParent(target) !== cwd.value) return
+    if (vdfsParent(target) !== cwd.value) return
+    if (!node) {
+      focusNotice.value = `地址中的选中项「${name}」不在当前目录中（可能已被删除）`
+      return
+    }
     void select({ ...node, path: target })
   }
 
@@ -618,6 +634,8 @@ export function useVdfs(opts: UseVdfsOptions) {
       clearSelection()
       return
     }
+    // 选中成功 ⇒ 上一条「找不到选中项」的说明已不再成立
+    focusNotice.value = ''
     // 同一个节点的**重读**（刷新收敛）不清空正文缓冲：清空会让详情区先白一下
     // 再填回来，而这次重读拿到的往往就是同一份内容。换到别的节点才清。
     const sameNode = selectedNode.value?.path === node.path
@@ -1101,6 +1119,7 @@ export function useVdfs(opts: UseVdfsOptions) {
     // 选中 / 详情
     selectedNode,
     selectedId,
+    focusNotice,
     renderer,
     nodeText,
     formData,

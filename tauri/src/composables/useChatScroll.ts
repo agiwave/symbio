@@ -28,12 +28,23 @@ export function useChatScroll(containerRef: Ref<HTMLElement | null>) {
   const SCROLL_THRESHOLD = 50
 
   /**
-   * 滚动到底部
+   * 滚动到底部。
+   *
+   * `smooth` 只给**用户主动的**「回到最新」用：流式追加时的自动跟随必须瞬时，
+   * 否则每帧一个动画会在长会话里变成持续的滑动。同时尊重系统的减少动效偏好。
    */
-  function scrollToBottom() {
-    if (containerRef.value) {
-      containerRef.value.scrollTop = containerRef.value.scrollHeight
+  function scrollToBottom(smooth = false) {
+    const el = containerRef.value
+    if (!el) return
+    const reduceMotion =
+      typeof window !== 'undefined' &&
+      typeof window.matchMedia === 'function' &&
+      window.matchMedia('(prefers-reduced-motion: reduce)').matches
+    if (smooth && !reduceMotion) {
+      el.scrollTo({ top: el.scrollHeight, behavior: 'smooth' })
+      return
     }
+    el.scrollTop = el.scrollHeight
   }
 
   /**

@@ -266,7 +266,7 @@ function handleSubmit() {
   }
 
   confirmMessage.value =
-    '即将切换系统目录，所有活跃 chat 会话将被关闭，UI 数据将重新加载。是否继续？'
+    '即将切换系统目录：所有活跃 chat 会话将被关闭，界面数据将重新加载，并回到资源根目录（当前浏览位置会重置）。是否继续？'
   confirmOpen.value = true
 }
 

@@ -387,3 +387,51 @@ describe('ChatOptionBar：空候选的去向', () => {
     expect(router.currentRoute.value.path).toBe('/vdfs')
   })
 })
+
+describe('ChatOptionBar：保存进行中的忙态', () => {
+  it('写入在途时该字段显示转圈且按钮不可再点', async () => {
+    let resolve!: () => void
+    hoisted.updateSession.mockImplementationOnce(
+      () => new Promise<void>((r) => { resolve = () => r() }),
+    )
+    const w = mountBar({ sessionId: 's1' })
+    await btn(w, 1).trigger('click')
+    await w.findAll('.menu-item')[0].trigger('click')
+    await flushPromises()
+
+    expect(btn(w, 1).classes()).toContain('is-busy')
+    expect(btn(w, 1).attributes('aria-busy')).toBe('true')
+    expect(btn(w, 1).find('.opt-spinner').exists()).toBe(true)
+
+    // 忙态里再点不会发出第二次写
+    await btn(w, 1).trigger('click')
+    expect(hoisted.updateSession).toHaveBeenCalledTimes(1)
+
+    resolve()
+    await flushPromises()
+    expect(btn(w, 1).classes()).not.toContain('is-busy')
+  })
+})
+
+describe('ChatOptionBar：候选菜单的键盘导航', () => {
+  it('展开即把焦点送到候选项，方向键在候选项间移动', async () => {
+    // 焦点只对**已挂载到文档**的元素生效（VTU 默认挂到游离节点上，focus() 无效）
+    const w = mount(ChatOptionBar, { props: { definition: definition() }, attachTo: document.body })
+    await btn(w, 1).trigger('click')
+    await flushPromises()
+
+    const items = w.findAll('.menu-item')
+    expect(document.activeElement).toBe(items[1].element) // 当前值 b 对应的候选
+
+    await w.find('.opt-menu').trigger('keydown', { key: 'ArrowDown' })
+    expect(document.activeElement).toBe(items[2].element)
+
+    await w.find('.opt-menu').trigger('keydown', { key: 'ArrowDown' })
+    expect(document.activeElement).toBe(items[0].element) // 循环
+
+    await w.find('.opt-menu').trigger('keydown', { key: 'ArrowUp' })
+    expect(document.activeElement).toBe(items[2].element)
+
+    w.unmount()
+  })
+})

@@ -391,8 +391,14 @@ export function messageShowsLiveBadge(f: MessageFacets): boolean {
 /** 深层级（depth ≥ 此值）一律收起为单行摘要 */
 export const DEEP_COLLAPSE_LEVEL = 3
 
-/** 收起态单行摘要的最大字符数（超出截断并加省略号） */
-export const MESSAGE_PREVIEW_MAX = 80
+/**
+ * 收起态单行摘要的最大字符数（超出截断并加省略号）。
+ *
+ * 80 字在窄栏里常常只剩半句，读不出「这条工具调用到底在干什么」。160 字给到
+ * 一句完整的话（中文一句常见 40–80 字，加上参数前缀），仍由 CSS 单行省略号
+ * 负责最后的排版裁切——这个常量决定**内容**取多少，不决定宽度。
+ */
+export const MESSAGE_PREVIEW_MAX = 160
 
 /**
  * 收起态单行摘要取内容的**哪一端**：流式中取末端（最新），定稿后取开头（摘要）。

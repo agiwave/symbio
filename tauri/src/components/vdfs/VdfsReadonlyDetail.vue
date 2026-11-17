@@ -36,7 +36,15 @@
       <dl class="meta">
         <div v-for="a in attributes" :key="a.key" class="meta-row">
           <dt>{{ a.key }}</dt>
-          <dd>{{ a.value }}</dd>
+          <dd>
+            <!-- 对象 / 数组值此前被一行 JSON.stringify 平铺：大对象会把后面所有
+                 字段推到很远。默认只显摘要，展开才看完整 JSON。 -->
+            <details v-if="a.objectKind" class="attr-object">
+              <summary>{{ a.objectKind }}</summary>
+              <pre class="attr-json">{{ a.value }}</pre>
+            </details>
+            <template v-else>{{ a.value }}</template>
+          </dd>
         </div>
       </dl>
     </div>
@@ -84,10 +92,19 @@ const RESERVED = new Set([
 const attributes = computed(() =>
   Object.entries(props.node)
     .filter(([k]) => !RESERVED.has(k))
-    .map(([k, v]) => ({
-      key: k,
-      value: v == null ? '—' : typeof v === 'object' ? JSON.stringify(v) : String(v),
-    }))
+    .map(([k, v]) => {
+      const isObject = v !== null && typeof v === 'object'
+      return {
+        key: k,
+        value: v == null ? '—' : isObject ? JSON.stringify(v, null, 2) : String(v),
+        /** 对象值的摘要（展开前的可读规模）；非对象为空串 */
+        objectKind: !isObject
+          ? ''
+          : Array.isArray(v)
+            ? `数组（${v.length} 项）`
+            : `对象（${Object.keys(v as Record<string, unknown>).length} 个字段）`,
+      }
+    })
 )
 </script>
 
@@ -140,5 +157,25 @@ const attributes = computed(() =>
   margin: 0 0 0.25rem;
   font-size: 0.75rem;
   color: var(--text-muted);
+}
+
+.attr-object summary {
+  cursor: pointer;
+  color: var(--accent);
+  font-size: 0.78rem;
+}
+.attr-json {
+  margin: 0.35rem 0 0;
+  padding: 0.5rem 0.6rem;
+  max-height: 18rem;
+  overflow: auto;
+  background: var(--color-code-bg);
+  color: var(--color-code-fg);
+  border-radius: var(--radius-md);
+  font-family: var(--font-mono);
+  font-size: 0.74rem;
+  line-height: 1.5;
+  white-space: pre-wrap;
+  word-break: break-word;
 }
 </style>

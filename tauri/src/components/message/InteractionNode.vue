@@ -81,7 +81,16 @@
             </label>
           </div>
         </div>
-        <button class="up-submit" :disabled="isAnswered" @click="submitQuestions">
+        <!-- 每个问题都必须有选择：此前空 answers 也能提交，后端收到的是一次"什么也没答"
+             的恢复，用户看到的却是「已提交」——回答被吞了却不报错。 -->
+        <p v-if="!isAnswered && unansweredCount > 0" class="up-hint">
+          还有 {{ unansweredCount }} 个问题未作答（选了「其他」的还需填写内容）
+        </p>
+        <button
+          class="up-submit"
+          :disabled="isAnswered || !canSubmitQuestions"
+          @click="submitQuestions"
+        >
           {{ isAnswered ? '已提交' : '提交' }}
         </button>
       </template>
@@ -132,6 +141,11 @@
             {{ isAnswered ? '已处理' : '拒绝' }}
           </button>
         </div>
+        <!-- 四档的**后果**写在同一处：三个按钮的文字都只说了做什么，没说「管多久」。
+             永久放行改的是跨会话的授权清单，误点的代价最大，必须在这里说清楚。 -->
+        <p class="up-scope-hint">
+          批准只对这一次调用生效<template v-if="confirmRisk">；本会话放行让同档工具在本会话内不再询问；永久放行对该工具跨会话生效</template>。
+        </p>
       </template>
     </div>
 
@@ -211,6 +225,23 @@ const isAnswered = computed(() => !isWaitingStatus(props.facets.status))
 /** 表单本地状态：questionId → 选中的 label 列表；`Other` 勾选时的自由文本 */
 const selected = ref<Record<string, string[]>>({})
 const customInput = ref<Record<string, string>>({})
+
+/**
+ * 尚未作答的问题数。
+ *
+ * 已回答态（控件禁用）不计；未回答时每个问题要至少选中一项，且勾了 `Other`
+ * 必须填上内容——只勾不填等于交给后端一个空字符串，与「没答」同义。
+ */
+const unansweredCount = computed(() => {
+  if (isAnswered.value) return 0
+  return (questionPrompt.value?.questions ?? []).filter((q) => {
+    const sel = selected.value[q.id] || []
+    if (sel.length === 0) return true
+    if (sel.includes(MESSAGE_PROMPT_OTHER) && !(customInput.value[q.id] || '').trim()) return true
+    return false
+  }).length
+})
+const canSubmitQuestions = computed(() => unansweredCount.value === 0)
 
 function isChosen(questionId: string, label: string): boolean {
   return (selected.value[questionId] || []).includes(label)
@@ -305,6 +336,8 @@ async function submitAllowForever() {
 function submitQuestions() {
   const anchorId = parentSkeletonId()
   if (!anchorId || !resume) return
+  // 兜底：按钮已经禁用，但 Enter 提交等路径不能绕过同一条判据
+  if (!canSubmitQuestions.value) return
   const answers: MessagePromptAnswer[] = (questionPrompt.value?.questions || []).map((q) => ({
     question_id: q.id,
     selected: selected.value[q.id] || [],
@@ -396,8 +429,20 @@ function submitQuestions() {
   cursor: pointer;
 }
 .up-submit:disabled {
-  background: #94a3b8;
+  background: var(--surface-selected);
+  color: var(--text-muted);
   cursor: default;
+}
+.up-hint {
+  margin: 0;
+  font-size: 0.76rem;
+  color: var(--color-tag-warn-fg);
+}
+.up-scope-hint {
+  margin: 0;
+  font-size: 0.72rem;
+  line-height: 1.5;
+  color: var(--text-muted);
 }
 .up-confirm {
   display: flex;

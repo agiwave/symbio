@@ -551,15 +551,20 @@ async function handleSend() {
   const restoredToInput = !inputText.value
   if (restoredToInput) inputText.value = text
   if (images.length) attachedImages.value = [...attachedImages.value, ...images]
+  // 提示必须自带重试入口：此前只说「可重试」，按钮却在别处（错误条 / 流末尾），
+  // 用户此刻的注意力在 toast 上，找不到就以为只能重新打一遍。
   showToast(
     'error',
-    restoredToInput ? '消息未发出，内容已保留，可重试' : '消息未发出，可在错误提示里重试',
+    restoredToInput ? '消息未发出，内容已保留' : '消息未发出',
+    undefined,
+    { label: '重试', run: () => void handleSessionRetry() },
   )
 }
 
 /** 回到最新：上翻阅读时流还在长，没有这个入口用户只能自己一路滚回底部 */
 function jumpToBottom() {
-  scrollToBottom()
+  // 用户主动跳转 → 平滑滚动；自动跟随仍走瞬时（见 useChatScroll）。
+  scrollToBottom(true)
   handleScroll()
 }
 

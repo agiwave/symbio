@@ -112,6 +112,9 @@
       <template v-else-if="!messagesReady || currentLoadedId !== store.activeId">
         <div class="chat-loading">
           <p>正在加载会话历史…</p>
+          <!-- 只有一句「正在加载」时，超过十几秒用户无法区分「慢」与「卡死」。
+               这里不给百分比（后端没有进度通道），但把「大会话会慢」这个事实说出来。 -->
+          <p class="chat-loading-hint">会话较长时可能需要十几秒</p>
         </div>
       </template>
 
@@ -781,6 +784,12 @@ function openChange(row: ChangeRow) {
 .no-session-desc {
   font-size: 0.85rem;
   opacity: 0.7;
+}
+
+.chat-loading-hint {
+  margin-top: 0.35rem;
+  font-size: var(--font-size-xs);
+  color: var(--text-muted);
 }
 
 .chat-loading {

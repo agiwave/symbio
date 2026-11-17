@@ -148,6 +148,12 @@
   --color-inline-code-bg: #eef2f7;
   --color-code-bg: #0f172a;
   --color-code-fg: #e2e8f0;
+  /* 代码块描边（复制按钮等贴边控件用；深底上的分隔线不宜直接拿正文边框色） */
+  --color-code-border: #1e293b;
+  /* 降级提示条（会话历史加载失败后的常驻条）：警示语气，但不至于像错误那样截断操作 */
+  --color-warn-bg: #fffbeb;
+  --color-warn-border: rgba(245, 158, 11, 0.35);
+  --color-warn-fg: #b45309;
   --color-prompt-bg: #eef2ff;
   --color-prompt-border: #c7d2fe;
   --color-error-bg: #fef2f2;
@@ -250,6 +256,10 @@
   --color-inline-code-bg: rgba(148, 163, 184, 0.12);
   --color-code-bg: #101012;
   --color-code-fg: #e2e8f0;
+  --color-code-border: #2a2a30;
+  --color-warn-bg: #2a2109;
+  --color-warn-border: rgba(245, 158, 11, 0.40);
+  --color-warn-fg: #fcd34d;
   --color-prompt-bg: #20202b;
   --color-prompt-border: #4f46e5;
   --color-error-bg: #2a1f24;

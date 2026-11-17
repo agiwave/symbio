@@ -14,11 +14,24 @@ import { ref } from 'vue'
 
 export type ToastType = 'success' | 'error' | 'info'
 
+/**
+ * 提示里的一个可执行动作（如发送失败时的「重试」）。
+ *
+ * 只在提示文字本身不足以让用户完成下一步时使用：一句「可重试」而没有可点的重试，
+ * 用户还得自己去找入口。动作是**可选的**——绝大多数提示只陈述事实。
+ */
+export interface ToastAction {
+  label: string
+  run: () => void
+}
+
 export interface ToastItem {
   /** 唯一 id，用于单独移除 */
   id: number
   type: ToastType
   text: string
+  /** 可选的内联动作（按钮文案 + 回调） */
+  action?: ToastAction
 }
 
 // ── 模块级单例状态（所有调用方共享同一份）─────────────────────────
@@ -88,10 +101,11 @@ function resume(id: number): void {
  * @param type  语义类型（success / error / info）
  * @param text  消息文本
  * @param duration 自动消失时长（ms）；缺省按类型取默认值
+ * @param action 可选内联动作（按钮），点击后先移除本条再执行
  */
-function showToast(type: ToastType, text: string, duration?: number): void {
+function showToast(type: ToastType, text: string, duration?: number, action?: ToastAction): void {
   const id = ++seq
-  toasts.value.push({ id, type, text })
+  toasts.value.push({ id, type, text, action })
   schedule(id, duration ?? DEFAULT_DURATION[type])
 }
 

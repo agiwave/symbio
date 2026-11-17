@@ -59,8 +59,8 @@ const router = createRouter({
       path: '/',
       component: MainLayout,
       children: [
-        // 首页 = 上次浏览的地址；无记忆时 = 会话目录。两者都由 `beforeEach`
-        // 解析（见下）——此处留空路径，由守卫决定去哪。
+        // 首页的**落点**（会话目录，解析失败退资源根）由 `beforeEach` 决定
+        // （见 `coldStartPath`）——此处留空路径，由守卫 replace 过去。
         { path: '', component: VdfsView, name: 'home' },
         // 首页 = `<根>` 目录本身；`/vdfs/<dir…>` = `<根>/<dir…>` 地址页
         // （push 出来的，如会话内部）。两者都是同一个 VdfsView：它把浏览器地址

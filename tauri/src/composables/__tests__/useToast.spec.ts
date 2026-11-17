@@ -102,3 +102,20 @@ describe('useToast — 入队与移除', () => {
     vi.useRealTimers()
   })
 })
+
+describe('useToast — 内联动作', () => {
+  it('动作随提示一起入队（提示说得出下一步，就要给得出按钮）', () => {
+    const { toasts, showToast } = useToast()
+    const run = vi.fn()
+    showToast('error', '消息未发出', undefined, { label: '重试', run })
+    expect(toasts.value[0].action).toMatchObject({ label: '重试' })
+    toasts.value[0].action?.run()
+    expect(run).toHaveBeenCalledTimes(1)
+  })
+
+  it('不传动作时 action 为空（绝大多数提示只陈述事实）', () => {
+    const { toasts, showToast } = useToast()
+    showToast('info', '普通提示')
+    expect(toasts.value[0].action).toBeUndefined()
+  })
+})

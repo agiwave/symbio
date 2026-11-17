@@ -46,6 +46,7 @@
         ref="textareaRef"
         v-model="modelValue"
         aria-label="消息输入"
+        aria-describedby="INPUT_HINT_ID"
         placeholder="输入消息... (可粘贴图片)"
         @keydown.enter.exact="handleKeydown"
         @paste="handlePaste"
@@ -73,11 +74,28 @@
         </svg>
       </button>
     </div>
+
+    <!-- 输入提示行：回车 / 字数反馈。
+         运行中回车**不发送**（见 handleKeydown 的注释），但此前界面对此一字不说，
+         用户按了回车只看到换行，会以为发送失灵——这条提示就是那句说明。
+         字数不做硬上限（后端没有声明上限，前端编一个只会提前拦住合法输入），
+         只在有内容时如实给出计数，让长文作者自己看得见规模。 -->
+    <div :id="INPUT_HINT_ID" class="input-meta">
+      <span v-if="isLoading" class="input-note">生成中：Enter 换行，停止请点右侧方块</span>
+      <span v-else class="input-note">Enter 发送，Shift+Enter 换行</span>
+      <span
+        v-if="charCount > 0"
+        class="input-count"
+        :class="{ long: charCount >= LONG_INPUT_HINT }"
+      >
+        {{ charCount }} 字<template v-if="charCount >= LONG_INPUT_HINT"> · 消息较长</template>
+      </span>
+    </div>
   </div>
 </template>
 
 <script setup lang="ts">
-import { ref, watch, nextTick, onMounted, onUnmounted } from 'vue'
+import { computed, ref, watch, nextTick, onMounted, onUnmounted } from 'vue'
 import type { ImageAttachment } from '@/types'
 import { logger } from '@/utils/logger'
 import { isImeComposing } from '@/utils/keyboard'
@@ -85,6 +103,12 @@ import { useToast } from '@/composables/useToast'
 
 /** 附件上限：前端先拦，避免大图 / 连贴把内存吃满后才由后端拒绝 */
 const MAX_IMAGES = 10
+
+/** 输入提示行的 id（textarea 的 aria-describedby 指向它） */
+const INPUT_HINT_ID = 'chat-input-hint'
+
+/** 超过这个字数就提示「消息较长」——不是上限，只是让长文有可见的规模反馈 */
+const LONG_INPUT_HINT = 2000
 const MAX_IMAGE_BYTES = 10 * 1024 * 1024
 
 const { showToast } = useToast()
@@ -104,6 +128,9 @@ const emit = defineEmits<{
 
 const textareaRef = ref<HTMLTextAreaElement | null>(null)
 const imageInputRef = ref<HTMLInputElement | null>(null)
+
+/** 按用户可见字符计数（`[...str]`），不是 UTF-16 码元——emoji 不该算两个字 */
+const charCount = computed(() => (modelValue.value ? [...modelValue.value].length : 0))
 
 // 暴露给父组件，用于重置高度
 function resetHeight() {
@@ -301,6 +328,36 @@ watch(modelValue, () => {
 .input-wrapper:focus-within {
   border-color: var(--accent);
   background: var(--surface-overlay);
+}
+
+/* 提示行：左边是键盘说明（静态），右边是字数（随输入变）。
+   两个字号的对比刻意压低——它是辅助信息，不该和正文抢注意力。 */
+.input-meta {
+  display: flex;
+  align-items: center;
+  justify-content: space-between;
+  gap: var(--space-2);
+  padding: 0.25rem 0.35rem 0;
+  font-size: var(--font-size-xs);
+  color: var(--text-muted);
+  line-height: 1.4;
+}
+
+.input-note,
+.input-count {
+  white-space: nowrap;
+  overflow: hidden;
+  text-overflow: ellipsis;
+}
+
+.input-count {
+  flex-shrink: 0;
+  font-variant-numeric: tabular-nums;
+}
+
+/* 「消息较长」用警示色而非危险色：它只是规模提示，并没有失败 */
+.input-count.long {
+  color: var(--color-tag-warn-fg);
 }
 
 textarea {

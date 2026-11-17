@@ -34,7 +34,9 @@
       :disabled="isDisabled(i)"
       @click="$emit('run', a)"
     >
-      <!-- 图标按钮：tooltip = 动作名（进行中显示 busy_label） -->
+      <!-- 图标按钮：tooltip = 动作名（进行中显示 busy_label）。
+           主要 / 危险动作再补一个文字标签（见 showLabel）——图标猜不出「保存」
+           还是「还原」，而这两个是全页最常用、误点代价最大的两个。 -->
       <svg
         v-if="iconOf(a)"
         viewBox="0 0 24 24"
@@ -47,7 +49,8 @@
         stroke-linejoin="round"
         v-html="iconOf(a)"
       />
-      <template v-else>{{ label(a, i) }}</template>
+      <span v-if="showLabel(a)" class="ea-label">{{ label(a, i) }}</span>
+      <template v-if="!iconOf(a)">{{ label(a, i) }}</template>
     </button>
   </template>
 </template>
@@ -80,6 +83,17 @@ function isNextLevel(a: DetailAction): boolean {
 
 function iconOf(a: DetailAction): string | undefined {
   return getActionIcon(a)
+}
+
+/**
+ * 是否在图标之外再显示文字。
+ *
+ * 只给**主要**与**危险**两种语义：动作区的原则仍是图标优先（一长排文字按钮
+ * 会把详情头部撑满），但「保存 / 删除」这类高频且不可猜测的动作，图标不足以
+ * 让人在点之前确认。其余动作保持纯图标 + tooltip。
+ */
+function showLabel(a: DetailAction): boolean {
+  return Boolean(iconOf(a)) && (a.style === 'primary' || a.style === 'danger')
 }
 
 function isBusy(i: number): boolean {
@@ -134,6 +148,9 @@ function isDisabled(i: number): boolean {
 .ea-btn.danger:hover:not(:disabled) { background: var(--danger-bg); color: var(--danger-solid); }
 /* 文字回落按钮（无图标映射） */
 .ea-btn.is-text { padding: 0 0.55rem; }
+
+/* 图标 + 文字（主要 / 危险动作） */
+.ea-label { font-size: 0.75rem; line-height: 1; }
 
 /*
  * 「进入下一级」：位置已恒在行尾（机制重排），这里只把它从操作按钮里摘出来。

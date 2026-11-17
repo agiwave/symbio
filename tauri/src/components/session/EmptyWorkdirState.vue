@@ -154,7 +154,8 @@ async function onUseLast() {
 
 .error-text {
   margin-top: 1rem;
-  color: #ef4444;
+  /* 错误色走语义令牌：硬编码的 #ef4444 在深色主题下对比度偏低 */
+  color: var(--danger-fg);
   font-size: 0.8rem;
 }
 </style>

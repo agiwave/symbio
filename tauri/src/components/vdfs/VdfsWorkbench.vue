@@ -198,7 +198,10 @@
         <SkeletonBlock v-for="i in DETAIL_SKELETON_ROWS" :key="i" :lines="1" :height="0.85" />
       </div>
       <div v-else class="vdfs-placeholder">
-        <p>← 选择一个资源查看/编辑</p>
+        <!-- 深链指向的条目没找到时，占位符必须给出理由：否则「← 选择一个资源」
+             读起来像是用户自己没选，而不是地址里的那一项失效了。 -->
+        <p v-if="focusNotice" class="placeholder-notice">{{ focusNotice }}</p>
+        <p v-else>← 选择一个资源查看/编辑</p>
       </div>
     </template>
   </Workbench>
@@ -310,6 +313,7 @@ const {
   atMountLevel,
   selectedNode,
   selectedId,
+  focusNotice,
   renderer,
   nodeText,
   formData,
@@ -848,6 +852,13 @@ async function onCreated(id: string) {
 }
 
 /* ============== 占位 ============== */
+.placeholder-notice {
+  max-width: 22rem;
+  text-align: center;
+  color: var(--color-tag-warn-fg);
+  line-height: 1.5;
+}
+
 .vdfs-placeholder {
   flex: 1;
   display: flex;

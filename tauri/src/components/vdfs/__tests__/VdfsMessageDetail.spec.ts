@@ -89,3 +89,26 @@ describe('VdfsMessageDetail（转写列表项的只读视图）', () => {
     expect(w.findAll('button')).toHaveLength(0)
   })
 })
+
+describe('VdfsMessageDetail：超长正文折叠', () => {
+  it('超过阈值只铺前面一段，展开后才给全文', async () => {
+    const long = '甲'.repeat(2100)
+    const w = mount(VdfsMessageDetail, { props: { node: messageNode(), data: long } })
+
+    expect(w.find('.msg-body').text().length).toBeLessThan(long.length)
+    expect(w.find('.msg-body').text().endsWith('…')).toBe(true)
+
+    const toggle = w.find('.msg-expand')
+    expect(toggle.exists()).toBe(true)
+    expect(toggle.text()).toContain('2100')
+
+    await toggle.trigger('click')
+    expect(w.find('.msg-body').text()).toBe(long)
+    expect(toggle.attributes('aria-expanded')).toBe('true')
+  })
+
+  it('短正文不出现展开入口', () => {
+    const w = mount(VdfsMessageDetail, { props: { node: messageNode(), data: '短' } })
+    expect(w.find('.msg-expand').exists()).toBe(false)
+  })
+})

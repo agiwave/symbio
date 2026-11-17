@@ -28,14 +28,24 @@
       :key="f.key"
       type="button"
       class="option-btn"
-      :class="{ 'is-disabled': isDisabled(f), open: openKey === f.key }"
-      :title="tooltip(f)"
+      :class="{
+        'is-disabled': isDisabled(f) || busy,
+        open: openKey === f.key,
+        'is-busy': busy && busyKey === f.key,
+      }"
+      :title="busy && busyKey === f.key ? `保存中…` : tooltip(f)"
       :aria-label="fieldAriaLabel(f)"
+      :aria-busy="busy && busyKey === f.key ? 'true' : undefined"
       :aria-expanded="opensMenu(f) ? openKey === f.key : undefined"
       :aria-haspopup="opensMenu(f) ? 'menu' : undefined"
       @click.stop="onFieldClick(f, $event)"
     >
-      <span class="opt-icon">{{ fieldIcon(f.icon) }}</span>
+      <!-- 保存进行中：当前字段原地转圈。
+           此前只在逻辑里 `if (busy) return`：按钮看着完全正常却点不动，用户以为
+           「点了没反应」。忙态必须看得见，且只标在那一格上——全部一起转圈就看不出
+           是哪次写入在途。 -->
+      <span v-if="busy && busyKey === f.key" class="opt-spinner" aria-hidden="true" />
+      <span v-else class="opt-icon">{{ fieldIcon(f.icon) }}</span>
       <span class="opt-text">{{ compactFieldText(f, rawValue(f)) }}</span>
       <span v-if="opensMenu(f)" class="opt-arrow" :class="{ open: openKey === f.key }">▾</span>
     </button>
@@ -44,11 +54,13 @@
     <Transition name="dropdown">
       <div
         v-if="openField"
+        ref="menuRef"
         class="opt-menu"
         role="menu"
         :aria-label="openField.label"
         :style="{ left: `${menuLeft}px` }"
         @click.stop
+        @keydown="onMenuKeydown"
       >
         <!-- 候选为空是**可达状态**（还没配模型 / 还没建技能），不是异常。
              只说「暂无可选项」用户会困惑于"那我该做什么"，故补一句去向。
@@ -107,7 +119,7 @@
  * 出站只在 `useSessionOptionBar.save`（写会话 metadata）与 `services/nativePick`
  * （原生取值原语）两处。
  */
-import { computed, inject, onBeforeUnmount, onMounted, ref, type Ref } from 'vue'
+import { computed, inject, nextTick, onBeforeUnmount, onMounted, ref, type Ref } from 'vue'
 import { routerKey } from 'vue-router'
 import OptionFormDialog from './OptionFormDialog.vue'
 import { useSessionOptionBar } from '@/composables/useSessionOptionBar'
@@ -201,6 +213,10 @@ const menuLeft = ref(0)
 const formField = ref<DetailField | null>(null)
 /** 打开菜单的触发按钮：关闭时焦点要回到它，而不是丢到 body 上 */
 const menuTrigger: Ref<HTMLElement | null> = ref(null)
+/** 候选菜单容器（键盘导航在它内部移动焦点） */
+const menuRef: Ref<HTMLElement | null> = ref(null)
+/** 正在保存的字段 key：忙态只标这一格（见模板注释） */
+const busyKey = ref<string | null>(null)
 
 const visibleFields = computed(() => fields.value.filter((f) => isVisible(f)))
 const openField = computed(() => fields.value.find((f) => f.key === openKey.value) ?? null)
@@ -256,12 +272,15 @@ function subValuesOf(f: DetailField): Record<string, unknown> {
 
 /** 统一的提交出口：落库失败必须说出来，否则「点了没反应」 */
 async function commit(f: DetailField, value: unknown) {
+  busyKey.value = f.key
   try {
     await save(f.key, value)
     closeMenu()
   } catch (e) {
     // 诊断日志在写入口（`useSessionOptionBar`）已经记过，这里只负责让用户看见
     showToast('error', `${f.label}保存失败：${e instanceof Error ? e.message : String(e)}`)
+  } finally {
+    busyKey.value = null
   }
 }
 
@@ -290,6 +309,13 @@ async function onFieldClick(f: DetailField, ev: MouseEvent) {
     openKey.value = f.key
     menuTrigger.value = (ev.currentTarget as HTMLElement | null) ?? null
     menuLeft.value = menuTrigger.value?.offsetLeft ?? 0
+    // 展开即把焦点送到候选上：`role=menu` 承诺的就是「用方向键选」。
+    // 焦点留在触发按钮上时，方向键没有任何接收者——菜单看着能用，键盘用不了。
+    void nextTick(() => {
+      const items = menuItemsOf()
+      const active = items.find((el) => el.classList.contains('active')) ?? items[0]
+      active?.focus()
+    })
     return
   }
 
@@ -320,6 +346,33 @@ async function onFormSave(values: Record<string, unknown>) {
 
 function onDocClick() {
   closeMenu()
+}
+
+/** 菜单里可聚焦的候选项（按 DOM 顺序） */
+function menuItemsOf(): HTMLElement[] {
+  const root = menuRef.value
+  if (!root) return []
+  return Array.from(root.querySelectorAll<HTMLElement>('[role="menuitem"]'))
+}
+
+/**
+ * 候选菜单的方向键导航（↑/↓/Home/End）。
+ *
+ * 只移动焦点，不代按回车：候选是原生 `<button>`，Enter / Space 的激活行为
+ * 由浏览器给出，自己再处理一遍会双击。
+ */
+function onMenuKeydown(e: KeyboardEvent) {
+  const items = menuItemsOf()
+  if (!items.length) return
+  const idx = items.indexOf(document.activeElement as HTMLElement)
+  let next: number | null = null
+  if (e.key === 'ArrowDown') next = idx < 0 ? 0 : (idx + 1) % items.length
+  else if (e.key === 'ArrowUp') next = idx < 0 ? items.length - 1 : (idx - 1 + items.length) % items.length
+  else if (e.key === 'Home') next = 0
+  else if (e.key === 'End') next = items.length - 1
+  if (next === null) return
+  e.preventDefault()
+  items[next].focus()
 }
 
 /** ESC 关闭候选菜单（页面交互规范承诺的关闭键）；只处理自己开着的那一层 */
@@ -385,6 +438,27 @@ onBeforeUnmount(() => {
   font-size: 0.875rem;
   line-height: 1;
   flex-shrink: 0;
+}
+
+/* 保存中：一个小转圈占住图标的位置（宽度不变，按钮不抽动） */
+.opt-spinner {
+  width: 0.75rem;
+  height: 0.75rem;
+  flex-shrink: 0;
+  border: 2px solid var(--border-default);
+  border-top-color: var(--accent);
+  border-radius: 50%;
+  animation: opt-spin 0.7s linear infinite;
+}
+
+@keyframes opt-spin {
+  to {
+    transform: rotate(360deg);
+  }
+}
+
+.option-btn.is-busy {
+  cursor: progress;
 }
 
 /* 紧凑形态的主文本（「图标 + 当前值」） */
@@ -474,6 +548,12 @@ onBeforeUnmount(() => {
 
 .menu-item:hover {
   background: var(--surface-hover);
+}
+
+/* 键盘导航时焦点必须看得见（展开即聚焦第一项，用户要知道当前在哪） */
+.menu-item:focus-visible {
+  outline: 2px solid var(--accent);
+  outline-offset: -2px;
 }
 
 .menu-item.active {
