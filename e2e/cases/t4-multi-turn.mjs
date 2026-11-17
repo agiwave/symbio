@@ -9,6 +9,7 @@ import {
   nextPort,
   startReadbackCli,
   readSessionMessages,
+  sessionWalEvents,
   waitFor,
   assert,
   assertEq,
@@ -19,6 +20,28 @@ import {
   assertTranscriptInvariants,
   msgRoleOf,
 } from '../helpers.mjs';
+
+/** 一轮请求里最后一条 user 消息（诊断用）：mock 按它选场景，选错就说明这一轮
+ * 请求带的不是刚写进去的那条。 */
+const lastUserText = (req) => {
+  const msgs = req.body?.messages ?? [];
+  const last = [...msgs].reverse().find((m) => m.role === 'user');
+  return last ? textOf(last) : '(无)';
+};
+
+/** 会话事实里与轮次身份相关的落格顺序（诊断用）：两条 user.message 是否都落了、
+ * config 与终答各几次。没有这三个数，「两轮并成一次请求」只能靠重跑来猜。 */
+const walTurnTimeline = (homedir, sid) => {
+  const KINDS = new Set(['user.message', 'session.config', 'chat.assistant.final']);
+  return sessionWalEvents(homedir, sid)
+    .filter((e) => KINDS.has(e.kind))
+    .sort((a, b) => (a.seq ?? 0) - (b.seq ?? 0))
+    .map((e) => {
+      const text = e.payload?.text ?? e.payload?.content ?? '';
+      return `${e.kind}@${e.seq ?? '?'}${text ? ` ${JSON.stringify(String(text).slice(0, 40))}` : ''}`;
+    })
+    .join(' → ');
+};
 
 export default defineCase('T4 多轮会话：第二轮请求携带第一轮历史', async () => {
   const llm = await new MockLlm([
@@ -53,14 +76,18 @@ export default defineCase('T4 多轮会话：第二轮请求携带第一轮历�
       stdinText: '第一轮问题\n第二轮问题\n',
     });
     assertEq(r.code, 0, `CLI 退出码（stderr: ${r.stderr.slice(0, 400)}）`);
-    // 失败时把两侧输出都带出来：只有一句「应含两轮回复」的话，看不出是少了一轮、
-    // 还是答复走了 stderr（`✖ …`），排查得重跑一遍。
+    const reqs = await llm.requests();
+    // 失败时把两侧输出、两轮请求的最后一条 user 消息、事实面落格顺序都带出来：
+    // 只有一句「应含两轮回复」的话，看不出是少了一轮、答复走了 stderr，还是
+    // 第二轮请求仍带着第一轮的消息（RE-014 §5 的「两轮并成一次请求」）。
     assert(
       r.stdout.includes('第一轮回复') && r.stdout.includes('第二轮回复'),
-      `stdout 应含两轮回复（stdout 末 400 字: ${JSON.stringify(r.stdout.slice(-400))}；stderr 末 400 字: ${JSON.stringify(r.stderr.slice(-400))}）`,
+      `stdout 应含两轮回复（stdout 末 400 字: ${JSON.stringify(r.stdout.slice(-400))}；` +
+        `stderr 末 400 字: ${JSON.stringify(r.stderr.slice(-400))}；` +
+        `请求: ${reqs.map((q) => JSON.stringify(lastUserText(q).slice(0, 60))).join(' , ')}；` +
+        `WAL: ${walTurnTimeline(hd.homedir, 'e2e-t4')}）`,
     );
 
-    const reqs = await llm.requests();
     assertEq(reqs.length, 2, 'mock-llm 应收到两次请求');
     assert(
       reqs[1].body.messages.some((m) => m.role === 'user' && textOf(m).includes('第一轮问题')),
