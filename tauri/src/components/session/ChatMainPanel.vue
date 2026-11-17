@@ -112,8 +112,9 @@
       <template v-else-if="!messagesReady || currentLoadedId !== store.activeId">
         <div class="chat-loading">
           <p>正在加载会话历史…</p>
-          <!-- 只有一句「正在加载」时，超过十几秒用户无法区分「慢」与「卡死」。
-               这里不给百分比（后端没有进度通道），但把「大会话会慢」这个事实说出来。 -->
+          <!-- 没有进度通道（一次往返就是全部），只如实给「已等待 N 秒」；
+               时间在动就说明没死，前 3 秒不报时（见 LoadingElapsed）。 -->
+          <LoadingElapsed />
           <p class="chat-loading-hint">会话较长时可能需要十几秒</p>
         </div>
       </template>
@@ -203,6 +204,7 @@ import ModelChatPanel from '../ModelChatPanel.vue'
 import VdfsActions from '@/components/vdfs/VdfsActions.vue'
 import ReadingPanel from '@/components/common/ReadingPanel.vue'
 import ReadingMeter from '@/components/common/ReadingMeter.vue'
+import LoadingElapsed from '@/components/common/LoadingElapsed.vue'
 import SessionChangesList from './SessionChangesList.vue'
 import { useGenerationGuard } from '@/composables/useGenerationGuard'
 import { mergeDetailActions, vdfsJoin, type DetailAction } from '@/schemas/vdfs'
