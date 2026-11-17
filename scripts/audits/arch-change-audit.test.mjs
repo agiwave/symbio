@@ -13,7 +13,14 @@
 
 import { test } from 'node:test'
 import assert from 'node:assert/strict'
-import { judge, parseCommitRecords, patchVerdict, requiresRange, validateBaseline } from './arch-change-audit.mjs'
+import {
+  coreVerdictFiles,
+  judge,
+  parseCommitRecords,
+  patchVerdict,
+  requiresRange,
+  validateBaseline,
+} from './arch-change-audit.mjs'
 
 const SHA = 'deadbeefdeadbeefdeadbeefdeadbeefdeadbeef'
 const CORE = 'crates/symbio-sdk/src/lib.rs'
@@ -161,6 +168,20 @@ test('改动性质：改一行（删一行 + 加一行代码）不是收窄', ()
 
 test('改动性质：读不到 diff 一律当 semantic（错的绿比红的代价大）', () => {
   assert.equal(patchVerdict(null), 'semantic')
+})
+
+test('判定面与豁免面同源：core 里的测试文件不参与 diff 性质判定', () => {
+  assert.deepEqual(
+    coreVerdictFiles([
+      CORE,
+      'crates/symbio-sdk/src/authz/mod.test.rs',
+      'crates/symbio-sdk/tests/integration.rs',
+      PLUGIN,
+    ]),
+    [CORE],
+  )
+  // core 下只有测试文件 ⇒ 没有需要在 diff 上判性质的输入，提交整体照常不看 `Core-Change:`。
+  assert.deepEqual(coreVerdictFiles(['crates/symbio-sdk/src/authz/mod.test.rs']), [])
 })
 
 // ---------------------------------------------------------------- 解析层（喂料）

@@ -302,6 +302,19 @@ export function isProductionSource(f) {
 }
 
 /**
+ * 需要按真实 diff 判性质的 core 文件：**与 CC-001 的判定面保持一致**，只取生产源码。
+ *
+ * 只用「路径在 ARCH_DIRS 下」当输入会让测试文件混进来：改一句断言里的说明文字
+ * （`assert_eq!(…, "…（旧任务号）")`）也是一删一加，`patchVerdict` 只能读成
+ * `semantic`，于是纯测试维护被要求补 `Core-Change:`——正是 `isProductionSource`
+ * 的注释说「不该算」的那一类。判据面与豁免面必须同源，否则理由要求会随
+ * 「这次有没有顺手动测试」漂移。
+ */
+export function coreVerdictFiles(files) {
+  return files.filter((f) => ARCH_DIRS.some((d) => f.startsWith(d)) && isProductionSource(f))
+}
+
+/**
  * 判一条提交。
  *
  * 返回 `{ sha, subject, errors: string[] }`；`errors` 空即通过。
@@ -419,12 +432,14 @@ function main() {
     // （`arch-shape-allow` 登记）、只删代码（零消费方常量退场）都不改变内核语义，
     // 两者都不该要求架构理由。判法见 `patchVerdict`。
     if (inDirs(files, ARCH_DIRS)) {
-      const core = files.filter((f) => ARCH_DIRS.some((d) => f.startsWith(d)))
-      const patch = git(['show', '--format=', '--unified=0', sha, '--', ...core])
-      const verdict = patchVerdict(patch)
-      if (verdict !== 'semantic') {
-        files = files.filter((f) => !core.includes(f))
-        if (verdict === 'narrowing') narrowed += 1
+      const core = coreVerdictFiles(files)
+      if (core.length > 0) {
+        const patch = git(['show', '--format=', '--unified=0', sha, '--', ...core])
+        const verdict = patchVerdict(patch)
+        if (verdict !== 'semantic') {
+          files = files.filter((f) => !core.includes(f))
+          if (verdict === 'narrowing') narrowed += 1
+        }
       }
     }
     if (inDirs(files.filter(isProductionSource), ARCH_DIRS)) coreTouching += 1
