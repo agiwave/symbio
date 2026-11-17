@@ -283,9 +283,12 @@ const CALLS_WRITER_REL = path.join('crates', 'symbio-plugin-model', 'src', 'port
  * ③ `read_requested`——工具执行体，五格全读（含条件格 `node_id` /
  *   `overflow_notice`）；`KEY_REQUEST_ID` 等常量键与 `KEY_REPLY_KEY` 不在字面量
  *   形状里，且那些是 `tool.dispatch` 载荷层的键，不在元素账上。
- * ④ `observe`——工具轮收束，只按 `id` 配对计数。
- * ⑤ `execute`——模型逐笔标记的派生体；体内的 `payload.get("answer")` 是载荷层，
+ * ④ `execute`——模型逐笔标记的派生体；体内的 `payload.get("answer")` 是载荷层，
  *   元素取键只有 `id`。
+ *
+ * 轮收束的读点**不登记**：它已改成债行（D-508），只等工具端口的债全部收束
+ * （`after_port`），不读 `calls[]` 的元素键；旧 `observe` 的逐 attempt 配对
+ * 由端口状态承担。
  *
  * 取键形状是**元素键**（`call.get("…")`），不是产物格那三种 payload 层形状：
  * `root_id` / `calls` 是 `tool.requested` 载荷层的键，写方不是 `dispatch_calls`
@@ -297,7 +300,6 @@ const CALLS_READ_SITES = [
   { rel: path.join('crates', 'symbio-plugin-session', 'src', 'transcript', 'live.rs'), fn: 'partners' },
   { rel: path.join('crates', 'symbio-plugin-session', 'src', 'transcript', 'live.rs'), fn: 'remember_request' },
   { rel: path.join('crates', 'symbio-plugin-tool', 'src', 'port.rs'), fn: 'read_requested' },
-  { rel: path.join('crates', 'symbio-plugin-tool', 'src', 'round_done.rs'), fn: 'observe' },
   { rel: path.join('crates', 'symbio-plugin-model', 'src', 'port.rs'), fn: 'execute' },
 ]
 

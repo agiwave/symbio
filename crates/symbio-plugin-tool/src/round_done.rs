@@ -1,110 +1,136 @@
-//! `tool.calls.done` 的簿记写方（D-378）：收尾是**投影**，不是执行体的最后一步。
+//! `tool.calls.done` 的簿记行（D-378 / D-508）：收尾是**投影**，不是执行体的最后一步。
 //!
-//! 执行体只负责一笔调用；「这批调用齐了」不写在任何进程的收尾语句里——宿主每次驱动
-//! 前后都把全量投影交给这里，本写方按 `tool.requested.calls[]` 与各笔债的终局事实
-//! 重算：**每一笔的最大 attempt 都有收束** ⇒ 这一请求完成，补写
-//! `tool.calls.done:{request_id}`。
+//! 执行体只负责一笔调用；「这批调用齐了」不写在任何进程的收尾语句里——本行按
+//! `tool.requested.calls[]` 与工具端口的债状态重算：**这一请求的工具债全部收束**
+//! ⇒ 补写 `tool.calls.done:{request_id}`。
 //!
-//! 于是执行体中途死掉也不会有「永久未完成」：那一笔由租约收束（重试或判死），收束
-//! 落进同一投影后，本写方下一圈就把它算进去。幂等由事实键承担：同一 `request_id`
-//! 只长出一条完成事实，事实源按 `event_id` 吸收重复。
-
-use std::sync::Arc;
+//! ## 为什么是债行，不是终止写方（D-508）
+//!
+//! 终止写方只在宿主驱动**前后**观察（D-367），而一次驱动可以跨过多个模型往返：
+//! 工具轮一结束，下一轮请求可能在同一驱动里已经跑完并写下终答。那时边界事实落到
+//! 终答之后，会话的进度面按 `tool.calls.done` 判定「本轮已经答完」⇒ 该边界的一句
+//! 汇报被静默吞掉（t23 的并发红灯）。债行在**工具端口当圈没人认领**时就还
+//! （`after_port`），比终止写方早一整拍：边界事实因此总在下一轮模型往返的计划之前
+//! 落库，汇报不再与终答抢时序。
+//!
+//! ## 幂等
+//!
+//! 同一 `request_id` 只长出一条完成事实：债行声明 `unless_id(TOOL_CALLS_DONE, …)`，
+//! 事实源按 `event_id` 吸收重复。
 
 use serde_json::{json, Value};
-use symbio_plugin_api::drive::DriveFact;
+
+use symbio_plugin_api::debt::{debt_row, DebtFacts, DebtSource, DebtSpec, DriveRequest};
 use symbio_plugin_api::events::EVENT_TOOL_REQUESTED;
-use symbio_plugin_api::termination::{termination_row, TerminationView, TerminationWriter};
-use symbio_plugin_api::{CapabilityRow, Entity, FactDraft, Verb};
+use symbio_plugin_api::rows::{RowHandler, RowRequest, RowStep, PLUGIN_ROW};
+use symbio_plugin_api::{CapabilityRow, Entity, FactDraft, Verb, PLUGIN_ID_TOOL};
 
 use super::port::TOOL;
 
 /// 单消费方事实：这次往返的工具清单已还完（会话推进行按它开账）。
 pub(crate) const TOOL_CALLS_DONE: &str = "tool.calls.done";
 
-/// 工具轮的完成写方。
-pub(crate) struct ToolCallsDone;
+/// 债行名（也是 `RowHandler::row` 的键）。
+const TOOL_CALLS_DONE_ROW: &str = "tool-calls-done";
 
-impl TerminationWriter for ToolCallsDone {
-    fn observe(&self, view: &TerminationView<'_>) -> Vec<FactDraft> {
+/// 完成事实的幂等键。
+fn done_key(request_id: &str) -> String {
+    format!("{TOOL_CALLS_DONE}:{request_id}")
+}
+
+/// 完成行的债表：一个 `tool.requested` 欠一条「把边界事实落下来」。
+///
+/// `after_port(TOOL)` 是**唯一**的完成判据：工具端口当圈没人认领 ⇒ 这一请求的
+/// 每一笔调用都已有收束（应答 / 判死）。逐 attempt 的终局判定由端口状态承担，
+/// 本行不复制那份算术。
+pub(crate) struct ToolCallsDoneDebts;
+
+impl DebtSource for ToolCallsDoneDebts {
+    fn rows(&self, _request: &DriveRequest, facts: &DebtFacts) -> Vec<DebtSpec> {
         let mut out = Vec::new();
-        for request in view
-            .facts
-            .iter()
-            .filter(|fact| fact.kind == EVENT_TOOL_REQUESTED)
-        {
-            let request_id = request.key.id.as_str();
-            if done_written(view.facts, request_id) {
-                continue;
-            }
-            let Some(calls) = request.payload.get("calls").and_then(Value::as_array) else {
+        for (request_id, payload) in facts.facts_of(EVENT_TOOL_REQUESTED) {
+            let Some(calls) = payload.get("calls").and_then(Value::as_array) else {
                 continue;
             };
             if calls.is_empty() {
                 continue;
             }
-            let mut count = 0usize;
-            let mut complete = true;
-            for call in calls {
-                let Some(call_id) = call.get("id").and_then(Value::as_str) else {
-                    complete = false;
-                    break;
-                };
-                count += 1;
-                if !terminal(view.facts, request_id, call_id) {
-                    complete = false;
-                    break;
-                }
-            }
-            if !complete {
+            let done_id = done_key(request_id);
+            if facts.fact_payload(TOOL_CALLS_DONE, &done_id).is_some() {
                 continue;
             }
-            out.push(FactDraft {
-                key: format!("{TOOL_CALLS_DONE}:{request_id}"),
-                kind: TOOL_CALLS_DONE.to_string(),
-                entity: Entity::Scope,
-                verb: Verb::Asserted,
-                payload: json!({ "requested": request_id, "calls": count }),
-                produced_by: None,
-            });
+            out.push(
+                DebtSpec::new(
+                    TOOL_CALLS_DONE_ROW,
+                    PLUGIN_ROW,
+                    done_id.clone(),
+                    json!({
+                        "row": TOOL_CALLS_DONE_ROW,
+                        "key": [
+                            ["request", request_id],
+                            ["calls", calls.len().to_string()],
+                        ],
+                    }),
+                )
+                .when_id(EVENT_TOOL_REQUESTED, request_id)
+                .unless_id(TOOL_CALLS_DONE, done_id)
+                .after_port(TOOL)
+                .lease(60_000, 2),
+            );
         }
         out
     }
 }
 
-/// 这一请求的完成事实是否已经落过（键即幂等）。
-fn done_written(facts: &[DriveFact], request_id: &str) -> bool {
-    let key = format!("{TOOL_CALLS_DONE}:{request_id}");
-    facts
-        .iter()
-        .any(|fact| fact.kind == TOOL_CALLS_DONE && fact.key.id == key)
-}
+/// 完成行：把「这一请求已齐」落成事实。跑到本行时端口已干净（见 [`ToolCallsDoneDebts`]），
+/// 因此不需要再读一遍各笔调用的终局。
+pub(crate) struct ToolCallsDoneRow;
 
-/// 这笔调用的**当前** attempt 是否已有收束。
-///
-/// 只看最大 attempt：重试后旧 attempt 的迟归即便落在投影里，也不能冒充这一笔完成。
-fn terminal(facts: &[DriveFact], request_id: &str, call_id: &str) -> bool {
-    let debt_id = format!("tool:{request_id}:{call_id}");
-    let mut current = 0u32;
-    for fact in facts
-        .iter()
-        .filter(|fact| fact.key.port == TOOL && fact.key.id == debt_id)
-    {
-        current = current.max(fact.key.attempt);
+impl RowHandler for ToolCallsDoneRow {
+    fn owner(&self) -> &'static str {
+        PLUGIN_ID_TOOL
     }
-    current > 0
-        && facts.iter().any(|fact| {
-            fact.key.port == TOOL
-                && fact.key.id == debt_id
-                && fact.key.attempt == current
-                && fact.closing().is_some()
-        })
+
+    fn row(&self) -> &'static str {
+        TOOL_CALLS_DONE_ROW
+    }
+
+    fn writes(&self) -> &'static [&'static str] {
+        &[TOOL_CALLS_DONE]
+    }
+
+    fn run(&self, req: &RowRequest<'_>) -> RowStep {
+        let Some(request_id) = req.key_of("request") else {
+            return RowStep::Facts(Vec::new());
+        };
+        let count = req
+            .key_of("calls")
+            .and_then(|v| v.parse::<usize>().ok())
+            .unwrap_or(0);
+        if count == 0 {
+            return RowStep::Facts(Vec::new());
+        }
+        RowStep::Facts(vec![FactDraft {
+            key: done_key(request_id),
+            kind: TOOL_CALLS_DONE.to_string(),
+            entity: Entity::Scope,
+            verb: Verb::Asserted,
+            payload: json!({ "requested": request_id, "calls": count }),
+            produced_by: Some(req.user_seq),
+        }])
+    }
 }
 
-/// 本插件申报的簿记写方行。
-pub(crate) fn rows() -> Vec<CapabilityRow> {
-    vec![termination_row("tool-calls-done", Arc::new(ToolCallsDone))]
+/// 本插件申报的完成行债表。
+pub(crate) fn debt_rows() -> Vec<CapabilityRow> {
+    vec![debt_row(
+        TOOL_CALLS_DONE_ROW,
+        std::sync::Arc::new(ToolCallsDoneDebts),
+    )]
 }
+
+// 链接期提交：本实现随本 crate 进入二进制，宿主按行名选它。
+symbio_plugin_api::submit_row!(ToolCallsDoneRow);
 
 #[cfg(test)]
 #[path = "round_done.test.rs"]

@@ -561,7 +561,7 @@ const PARAPHRASES_TSV: &str = include_str!("fixtures/paraphrases.tsv");
 /// **为什么是这个算法**：本程序是裸 `rustc` 编译的单文件，没有 Cargo 依赖可用；
 /// 这条锁只需要「改一个字节就变」，密码学强度不是目的。目的是让「把换述改得
 /// 更容易命中」在门禁里变成一道**显式的红**，而不是几行措辞 diff。
-const PARAPHRASES_FINGERPRINT: u64 = 0x5fe9_a03f_3f96_1ae5;
+const PARAPHRASES_FINGERPRINT: u64 = 0x9cb4_b919_8c28_b4f0;
 
 /// FNV-1a 64：常量乘积、逐字节异或，八行就够，不引依赖。
 fn fnv1a64(s: &str) -> u64 {

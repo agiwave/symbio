@@ -446,7 +446,7 @@ describe('facetsOf：props → facets 的唯一实现', () => {
     expect(facetsOf(root).responseText).toBe(false)
   })
 
-  it('工具名取自 meta.tool_name（[T-147d-ii]：顶层 name 已退役）', () => {
+  it('工具名取自 meta.tool_name（顶层 name 已退役）', () => {
     const f = facetsOf({
       id: 'tc',
       type: NODE_KIND_SKELETON,
@@ -456,7 +456,7 @@ describe('facetsOf：props → facets 的唯一实现', () => {
     expect(facetsOf({ id: 'tc', type: NODE_KIND_SKELETON }).name).toBeUndefined()
   })
 
-  it('呈现数据 title / icon / actions 从节点顶层直读（[T-155]）', () => {
+  it('呈现数据 title / icon / actions 从节点顶层直读', () => {
     const f = facetsOf({
       id: 'x',
       type: NODE_KIND_NOTICE,
@@ -503,7 +503,7 @@ describe('messageStartedAt：锚点只取后端值', () => {
   })
 })
 
-describe('消息级业务规则（纯函数，[T-155 B2a] 只读后端下发的 actions）', () => {
+describe('消息级业务规则（纯函数，只读后端下发的 actions）', () => {
   const tool = (p: Partial<MessageFacets>) =>
     facets({ type: NODE_KIND_SKELETON, status: NODE_STATUS_FAILED, ...p })
 
@@ -555,7 +555,7 @@ describe('messageShowsLiveBadge：「回复中…」只在正文流式时显示'
   })
 })
 
-describe('messageRetryTargetOf：重试分派（[T-155 B2a] 动作由后端 actions 决定，无 actions 走状态兜底）', () => {
+describe('messageRetryTargetOf：重试分派（动作由后端 actions 决定，无 actions 走状态兜底）', () => {
   it('后端下发 retry → 单工具重试，锚点是它自己', () => {
     expect(
       messageRetryTargetOf({ id: 'tc1', status: NODE_STATUS_FAILED, actions: ['retry'] as ChatNode['actions'] }),
@@ -659,7 +659,7 @@ describe('messageRendererKey：渲染形态分派', () => {
     expect(key({ type: NODE_KIND_INTERACTION })).toBe('interaction')
   })
 
-  it('typing 占位走 fallback（[T-151]：占位形态无专属组件，是有意的兜底）', () => {
+  it('typing 占位走 fallback（占位形态无专属组件，是有意的兜底）', () => {
     expect(key({ type: NODE_KIND_TYPING })).toBe('fallback')
   })
 
@@ -692,7 +692,7 @@ describe('messageRendererKey：渲染形态分派', () => {
   })
 })
 
-describe('synthesizeTypingChildren：Typing 占位合成（[T-151] 三态）', () => {
+describe('synthesizeTypingChildren：Typing 占位合成（三态）', () => {
   // 一个根级骨架（skeleton + 无父），是 typing 的宿主
   const runHost = (status: ChatNode['status'], id = 'run1'): ChatNode => ({
     id,
@@ -891,7 +891,7 @@ describe('messageTypeOf：wire 五值归一（读边界唯一折叠点）', () =
  * 命名空间精确命中、未登记命名空间退回 kind、缺主体返回 undefined（不替它编徽标）、
  * 历史裸字符串 principal 一并归一后进表。
  */
-describe('principal 前缀 → 身份呈现（[T-148] 独立表）', () => {
+describe('principal 前缀 → 身份呈现（独立表）', () => {
   it('各命名空间有自己的图标 / 色调 / 标签', () => {
     expect(principalPresentationOf('person/local')).toEqual({ icon: '👤', tone: 'person', label: '用户' })
     expect(principalPresentationOf('session/main')?.tone).toBe('agent')

@@ -620,21 +620,23 @@ test('★ 并发度随机器能力单调：核多不降、内存少要降、机�
     at(8, { busy: 0.9 }).io < at(8, { busy: 0.1 }).io,
     '启动时负载 90% 必须降并发——「同一台机器不同时段」也是「不同性能的电脑」',
   )
+  // D-509：e2e 按时序判据的竞争窗口定，8 核给 4 路（不是核数−1）。
+  assert.equal(at(8).e2e, 4, '8 核 e2e 应按每两核一路给 4 路')
 })
 
 test('★ 32 核机器上不许仍然只开 8 路', () => {
   const big = derive({ logicalCores: 32, memGB: 64, freeMemGB: 50, cpuMs: 20, busy: 0.1 })
   assert.ok(big.cpu > 8, `32 核机器 cpu 并发只有 ${big.cpu}——上限 8 是旧机器的核数，不是性质`)
   assert.ok(big.io > 8, `32 核机器 io 并发只有 ${big.io}`)
-  // 但 e2e 的上限是**用例结构**决定的（要真等生产定时器的那几条，见
-  // `e2e-order.mjs::CONCURRENCY_CEILING`），**不随核数涨**：32 核与 20 核拿到同一个数。
-  // 判据钉的是「结构常量」这件事本身，不是某个具体值——那个值随用例耗时变，写在
-  // 一处（`CONCURRENCY_CEILING`），改的时候不必再来这里。
-  assert.equal(big.e2e, CONCURRENCY_CEILING, 'e2e 上限必须是结构常量，不是核数')
+  // e2e 的上限取两者较小：**用例结构**上限（要真等生产定时器的那几条，见
+  // `e2e-order.mjs::CONCURRENCY_CEILING`）与**每两核一路**（D-509：时序判据的
+  // 竞争窗口，8 核 7 路的实测见 DE-016）。核数涨到结构上限后不再涨；
+  // 核数低的机器按每两核一路收。
+  assert.equal(big.e2e, CONCURRENCY_CEILING, '核数足够多时 e2e 上限回到结构常量')
   assert.equal(
     derive({ logicalCores: 20, memGB: 32, freeMemGB: 24, cpuMs: 40, busy: 0.1 }).e2e,
-    big.e2e,
-    '核数从 20 涨到 32 不该改变这个上限',
+    10,
+    '20 核按每两核一路给 10 路（低于结构上限）',
   )
   assert.ok(
     derive({ logicalCores: 4, memGB: 8, freeMemGB: 6, cpuMs: 60, busy: 0.1 }).e2e < big.e2e,

@@ -35,8 +35,9 @@ pub(crate) const EVENTS: &[EventDecl] = &[
     EventDecl::new("authz.granted", (Entity::Scope, Verb::Asserted)),
     EventDecl::new(EVENT_AUTHZ_DENIED, (Entity::Scope, Verb::Asserted)),
     EventDecl::new(EVENT_TASK_CONTROLLED, (Entity::Control, Verb::Opened)),
-    EventDecl::host("tool.calls.done", (Entity::Scope, Verb::Asserted)),
-    // 产物格：载荷来自执行体交出的草稿，落行仍走宿主写口 ⇒ 与 `tool.calls.done` 同一口径。
+    // 完成行自己写（D-508）：边界事实的落点必须早于下一轮模型往返的计划。
+    EventDecl::new("tool.calls.done", (Entity::Scope, Verb::Asserted)),
+    // 产物格：载荷来自执行体交出的草稿，落行仍走宿主写口。
     EventDecl::host("artifact.added", (Entity::Artifact, Verb::Asserted)),
 ];
 

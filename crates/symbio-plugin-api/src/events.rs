@@ -174,7 +174,7 @@ pub const SHARED_EVENTS: &[EventDecl] = &[
     EventDecl::new(EVENT_TASK_HELD, (Entity::Task, Verb::Held)), // task.held ← task
     EventDecl::new(EVENT_TASK_OPENED, (Entity::Task, Verb::Opened)), // task.opened ← task
     EventDecl::host(EVENT_TOOL_CALL_REQUESTED, (Entity::Scope, Verb::Asserted)), // tool.call.requested ← model
-    EventDecl::host(EVENT_TOOL_CALLS_DONE, (Entity::Scope, Verb::Asserted)), // tool.calls.done ← tool
+    EventDecl::new(EVENT_TOOL_CALLS_DONE, (Entity::Scope, Verb::Asserted)), // tool.calls.done ← tool
     EventDecl::host(EVENT_TOOL_REQUESTED, (Entity::Scope, Verb::Asserted)), // tool.requested ← model
     EventDecl::new(EVENT_USER_ANSWER, (Entity::Scope, Verb::Asserted)), // user.answer ← session
     EventDecl::host_with_roles(EVENT_USER_MESSAGE, (Entity::Scope, Verb::Opened), &[FactRole::DeclaresBudget]), // user.message ← session

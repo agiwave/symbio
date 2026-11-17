@@ -244,7 +244,7 @@ fn the_three_role_rows_are_narrower_than_main() {
     assert!(matrix.can_write(PRINCIPAL_WORKER, Capability::ProduceArtifact));
     assert!(
         !matrix.can_reply(PRINCIPAL_WORKER) && !matrix.can_reply(PRINCIPAL_WORKER),
-        "工人以产物收束（收束闸的产物臂，ADR-067），不以主控身份发言"
+        "工人以产物收束（收束闸的产物臂），不以主控身份发言"
     );
     assert!(
         !matrix.can_write(PRINCIPAL_WORKER, Capability::DefineWork)
@@ -325,7 +325,7 @@ fn the_closure_gate_is_dispatched_by_kind() {
     // 对等主体：产物收束放行、发言收束仍拒（「没有发言权」≠「留不下任何事实」）。
     assert!(
         matrix.can_produce_artifact(PRINCIPAL_PEER),
-        "对等体以产物收束一轮（ADR-065 裁决的落地前提）"
+        "对等体以产物收束一轮"
     );
     assert!(
         !matrix.can_reply(PRINCIPAL_PEER),
@@ -366,7 +366,7 @@ fn an_unregistered_subject_gets_no_row_at_all() {
     let sub = "session/sub";
     assert!(
         production_matrix().grants_of(sub).is_empty(),
-        "未登记主体在表里没有行（ADR-099：未登记 = 拒）"
+        "未登记主体在表里没有行（未登记 = 拒）"
     );
     assert!(!production_matrix().can_reply(sub), "写不了收束格");
     assert!(
@@ -550,7 +550,7 @@ fn tool_principals_have_declared_rows() {
         PRINCIPAL_TOOL_CONTENT_SEARCH,
     ] {
         let grants = matrix.grants_of(tool);
-        assert!(!grants.is_empty(), "`{tool}` 应在授权表里有一行（ADR-069）");
+        assert!(!grants.is_empty(), "`{tool}` 应在授权表里有一行");
         assert!(
             grants.contains(&Capability::ProduceArtifact),
             "`{tool}` 的权威动作是产生产物（produce.artifact）"
@@ -559,7 +559,7 @@ fn tool_principals_have_declared_rows() {
         assert_ne!(
             principal_namespace(tool),
             Some("session"),
-            "`{tool}` 的归属段是工具自己的 namespace（[ADR-069 §决策 3]）"
+            "`{tool}` 的归属段是工具自己的 namespace"
         );
     }
 }

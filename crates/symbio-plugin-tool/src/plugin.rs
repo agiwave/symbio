@@ -1,7 +1,7 @@
-//! 工具世界插件的门面：为 `port.tool` 注册提供者行，并申报工具债行与完成写方。
+//! 工具世界插件的门面：为 `port.tool` 注册提供者行，并申报工具债行与完成行。
 //!
 //! 本插件没有自己的路由命令（工具执行不经 `route`，只经端口提供者），所以 `route`
-//! 诚实回落 NotFound；`traverse` 是唯一的装配点——把提供者行、债行与簿记写方交给
+//! 诚实回落 NotFound；`traverse` 是唯一的装配点——把提供者行、债行与簿记行交给
 //! 收集宿主。
 
 use std::sync::Arc;
@@ -57,7 +57,7 @@ impl Plugin for ToolPlugin {
             for row in super::debt::debt_rows() {
                 visitor.put(row).await;
             }
-            for row in super::round_done::rows() {
+            for row in super::round_done::debt_rows() {
                 visitor.put(row).await;
             }
         }

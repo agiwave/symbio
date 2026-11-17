@@ -323,7 +323,7 @@ fn main() {
     assert!(
         !store_forms.forms.contains(&"distributed"),
         "`store` 的值域里出现 `distributed`——它在多副本下与 I1（seq 单调）冲突，\
-         已由 ADR-061 退役；要加回来先取代那条 ADR 并答全四问"
+         已退役；要加回来先取代那条裁决并答全四问"
     );
     assert!(
         !facts::in_domain("store", "distributed"),

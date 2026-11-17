@@ -324,7 +324,7 @@ const ENUM_SETS = [
     ts: { file: FORM_TS, array: 'DETAIL_PICKS' },
   },
   {
-    what: '读数面板语气（[T-202]）',
+    what: '读数面板语气',
     // 前端原先写成裸联合 `'normal' | 'warn'`：后端加一档时前端不会红。先有
     // `READING_TONES` 数组再派生类型，本组才能逐词对上账。
     rust: { file: READING_RS, enum: 'ReadingTone' },
@@ -467,12 +467,12 @@ const STRUCT_SETS = [
     ts: { file: FORM_TS, interface: 'DetailDefinition' },
   },
   {
-    what: '读数行（[T-202]：读数面板的跨栈契约）',
+    what: '读数行（读数面板的跨栈契约）',
     rust: { file: READING_RS, struct: 'ReadingRow' },
     ts: { file: READING_TS, interface: 'ReadingRow' },
   },
   {
-    what: '读数分区（[T-202]）',
+    what: '读数分区',
     rust: { file: READING_RS, struct: 'ReadingSection' },
     ts: { file: READING_TS, interface: 'ReadingSection' },
   },
@@ -482,7 +482,7 @@ const STRUCT_SETS = [
     ts: { file: READING_TS, interface: 'ReadingBar' },
   },
   {
-    what: '读数面板（[T-202]）',
+    what: '读数面板',
     rust: { file: READING_RS, struct: 'ReadingPanel' },
     ts: { file: READING_TS, interface: 'ReadingPanel' },
   },

@@ -1040,7 +1040,7 @@ fn aborted_status_lands_on_the_turn_and_its_text() {
     let got = shapes(&rebuild(&events, &CHAT, &MESSAGE));
     assert_eq!(got[1].status, Some(NodeStatus::Aborted));
     assert_eq!(got[2].status, Some(NodeStatus::Aborted));
-    assert_eq!(got[2].text, "说到一半", "半截正文照入格（ADR-052）");
+    assert_eq!(got[2].text, "说到一半", "半截正文照入格");
 }
 
 // ── ④′ 一次模型往返的产出（`response` / `failed`）──────────────────────

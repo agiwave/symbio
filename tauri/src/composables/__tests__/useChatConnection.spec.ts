@@ -220,7 +220,7 @@ describe('messageTree — 从 store 派生', () => {
   })
 })
 
-describe('typing 占位合成（[T-151] 端到端：合成挂进 messageTree）', () => {
+describe('typing 占位合成（端到端：合成挂进 messageTree）', () => {
   // 根级、正在 streaming 的骨架就是 typing 的宿主（形状判据：无父 + skeleton）
   const runHost = (status: ChatNode['status']): ChatNode => ({
     id: 'run1',
@@ -499,7 +499,7 @@ describe('resume — 会话恢复', () => {
   })
 })
 
-describe('expandSkeleton — 折叠骨架按需重取（[T-150] 只读）', () => {
+describe('expandSkeleton — 折叠骨架按需重取（只读）', () => {
   it('动作落在 `<A>/message/<mid>`，payload 带 depth，拿回的子树走唯一落地口装回转写', async () => {
     hoisted.runVdfsAction.mockResolvedValueOnce({
       action: 'expand_skeleton',

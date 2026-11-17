@@ -82,8 +82,8 @@ fn tool_result_adds_a_second_row_with_its_own_identity() {
     );
     assert_eq!(
         after_tools.after_port.as_deref(),
-        Some(TOOL_PORT),
-        "逐笔债串链后，同圈首派的链上后一笔还没有账上痕迹，只有 after_port 挡得住"
+        Some(PLUGIN_ROW),
+        "完成行与进度行都是 plugin_row 债：等这个端口这一圈跑完，汇报才早于下一轮模型往返（D-510）"
     );
 }
 

@@ -269,18 +269,29 @@ export function derive({ logicalCores, memGB, freeMemGB, cpuMs, busy }) {
   const ioByMem = availableMemGB / GB_PER_IO_SLOT
   const io = clamp(Math.min(ioByCores, ioByMem) * loadFactor, 1, MAX_IO_SLOTS)
 
-  // e2e：**不能沿用 `cpu`**。e2e 用例是「一个 node 进程 + 一个小服务 + 一个端口」，
-  // 单个占用远小于一次 cargo 编译，原实现 `min(6, 核数)` 在本机实测 6 路稳定。
-  // 若跟着 `cpu`（按 rustc 的胃口算）走，本机会被压到 3 路，e2e 阶段直接慢一倍
-  // ——那是把「按最重的任务定并发」这个错误又犯一遍。
-  // 所以它有自己的内存口径（每路 ~0.8GB），且上限是**用例结构**决定的
-  // （`CONCURRENCY_CEILING`，理由在 `e2e-order.mjs`），不是机器决定的：
-  // 机器再强也不该超过它，只做「低配往下收」。
+  // e2e：**不能沿用 `cpu`**（按 rustc 的胃口算会把本机压到 3 路，阶段慢一倍），
+  // 但它也不是「一个 node 进程 + 一个小服务」那么轻：一个用例至少起
+  // release CLI + mock LLM + mock MCP，部分还有读回 CLI，且断言里有大量
+  // 「等实时面收敛」的时序判据（58-e2e 头注释）。
+  //
+  // 8 核实测：7 路连续两轮各随机红一例（t4 的第二个提示符先于正文、
+  // t36 的心跳轮晚于等待线），4 路连续 95/95；差别是**时序判据的竞争窗口**，
+  // 不是 CPU 打满。因此这里按「每两核一路」定上界（8→4、16→8、4→2），
+  // 内存口径（每路 ~0.8GB）与 `CONCURRENCY_CEILING` 照旧取小。
+  // 反悔条件写在 DE-016 的 D-509：等读面的实时帧水位判据落地，可把这一项抬回核数−1。
   //
   // ⚠️ 这里只回答「这台机器开得动几路」。**这一批用例需要几路**是另一个问题
   // （`总工作量/最慢单例`），由 `58-e2e.mjs` 用 `suggestConcurrency` 从实测耗时算，
   // 两者取小。别把这个常量当成并发度的最终答案。
-  const e2e = clamp(Math.min(MAX_E2E_SLOTS, logicalCores - 1, availableMemGB / 0.8) * loadFactor, 1, MAX_E2E_SLOTS)
+  const e2e = clamp(
+    Math.min(
+      MAX_E2E_SLOTS,
+      Math.max(1, Math.floor(logicalCores / 2)),
+      availableMemGB / 0.8,
+    ) * loadFactor,
+    1,
+    MAX_E2E_SLOTS,
+  )
 
   // process：进程创建拐点。强机（探针快 + 核多）能到 3，中档 2，弱机 1。
   // 阈值 30ms / 8 核取自本机对照：本机 43ms / 8 核 → 2，与实测拐点一致。

@@ -1438,7 +1438,7 @@ export function auditEntries(entries, root, projections = [], kinds = {}) {
   }
 
   // ---- RG-018：序号字段与 id 两面对账 ----
-  // kind README meta 声明 `serial: <字段名>`（如 adr 的 `serial: adr`）：`id` 是登记身份
+  // kind README meta 声明 `serial: <字段名>` 时生效：`id` 是登记身份
   // （`D-048a`），序号字段是序号本身（`048a`）——两者必须只差一个 `<前缀>-`
   // （存在的理由：文件名可改名 / 可手抄错，序号字段会与取代链、渲染列一起被机器读，
   // 它是序号的**数据面**，必须与身份严格对账）。

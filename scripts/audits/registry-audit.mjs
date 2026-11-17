@@ -35,11 +35,11 @@
  *     不成环，且 `active` 的规范不得取代另一条仍 `active` 的规范——矛盾必须显式消解。
  *   - **RG-016** spec 的 `clears`（豁免的清除任务指认）：目标存在且为 task；
  *     **不要求闭环**——豁免挂在开放的清除任务上是合法语义（`clears` 是指认，`deps` 是前置）。
- *   - **RG-017** adr 的 `impl`（落地进展，与 `status` 正交）：词表封闭
- *     （`planned` / `partial` / `done` / `none`）——把「算不算数」与「做到哪一步」
- *     拆成两个字段，是 `adr` kind 存在的核心理由。
- *   - **RG-018** adr 的 `adr` 序号与 id 两面对账（只差 `ADR-` 前缀）；
- *   - **RG-019** adr 的 `domain` 域闭集；
+ *   - **RG-017** `impl`（落地进展，与 `status` 正交）：词表由 kind README meta 自描述
+ *     （今天 design 声明 `impl.<词>`）——把「算不算数」与「做到哪一步」拆成两个字段。
+ *   - **RG-018** 序号字段与 `id` 两面对账（kind meta 声明 `serial: <字段>` 时生效：
+ *     两者只许差一个 `<前缀>-`）；
+ *   - **RG-019** `domain` 域闭集（kind meta 声明 `domain.<域>` 时生效）；
  *   - **RG-020** **未登记文档**：扫描范围内活跃 `.md` 必须自带 front-matter 且声明 `kind`
  *     ——「全仓文档都在登记机制内」这句话的唯一执行方，豁免住 `registry-lib` 的 `SCAN_SKIP_*`；
  *   - **RG-021** 文档类（在位文档）的 `title` 必须逐字等于正文首个 H1——title 的唯一来源
@@ -74,8 +74,9 @@
  *   node scripts/audits/registry-audit.mjs --root=<仓库根>   （回归测试夹具用）
  *
  * **扫描范围**：整个仓（`SCAN_SKIP_*` 豁免外的每个活跃 `.md` 都必须登记）——
- * 条目类（task / spec / adr）编号 = 文件名，文档类（goal / stage / plan / arch / ref / guide）
- * **文档即条目、在位存放**，编号 = 仓根相对路径；kind 只来自 front-matter，目录不参与判定。
+ * 编号条目（`GO` / `SC` / `DE` / `RE` / `SP` / `GU` / `T` / `RV`）的 `id` 去前缀后
+ * 等于文件名主干；导航文档（`README.md`）的 `id` 等于仓根相对路径。kind 只来自
+ * front-matter，目录不参与判定。
  *
  * 退出码：0 = 通过；1 = 有违规 / 解析失败；2 = 范围读不出（扫不到任何条目、
  * 参数不识别）。汇总页的「忘更新」**不判红**：那是确定性投影，由门禁

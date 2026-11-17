@@ -1,146 +1,124 @@
-//! 完成投影的判据：全部终局才落一条完成事实；重试看最大 attempt；已落不重落。
+//! 完成行的判据：一个未落边界的请求欠一条完成事实；`after_port(TOOL)` 决定它还的时机；
+//! 同一请求已落 ⇒ 不再欠。
 
 use super::*;
-use symbio_plugin_api::drive::DriveKey;
+use symbio_plugin_api::debt::DriveRequest;
 
-fn world(kind: &str, id: &str, payload: Value) -> DriveFact {
-    DriveFact {
-        kind: kind.to_string(),
-        key: DriveKey {
-            port: String::new(),
-            id: id.to_string(),
-            attempt: 0,
-        },
-        payload,
-        at_ms: 0,
-        reply: None,
+fn request() -> DriveRequest {
+    DriveRequest {
+        session_id: "s-1".to_string(),
+        provider: None,
+        principal: "session/main".to_string(),
     }
 }
 
-fn ring(id: &str, attempt: u32, kind: &str) -> DriveFact {
-    DriveFact {
-        kind: kind.to_string(),
-        key: DriveKey {
-            port: TOOL.to_string(),
-            id: id.to_string(),
-            attempt,
-        },
-        payload: serde_json::json!({}),
-        at_ms: 0,
-        reply: None,
-    }
-}
-
-fn requested(request_id: &str, calls: &[&str]) -> DriveFact {
-    world(
+fn note_requested(facts: &mut DebtFacts, request_id: &str, calls: &[&str]) {
+    facts.note_fact_payload(
         EVENT_TOOL_REQUESTED,
         request_id,
-        serde_json::json!({
+        json!({
             "root_id": "u-1",
             "calls": calls
                 .iter()
-                .map(|id| serde_json::json!({ "id": id, "name": "echo", "arguments": {} }))
+                .map(|id| json!({ "id": id, "name": "echo", "arguments": {} }))
                 .collect::<Vec<_>>(),
         }),
-    )
+    );
 }
 
-fn observe(facts: Vec<DriveFact>) -> Vec<FactDraft> {
-    ToolCallsDone.observe(&TerminationView {
-        facts: &facts,
-        exhausted: true,
-    })
-}
-
-fn debt_id(request_id: &str, call_id: &str) -> String {
-    format!("tool:{request_id}:{call_id}")
+fn row_request<'a>(key: &'a [(String, String)]) -> RowRequest<'a> {
+    RowRequest {
+        row: TOOL_CALLS_DONE_ROW,
+        key,
+        anchor: "anchor",
+        now_ms: 0,
+        principal: "session/main",
+        user_seq: 7,
+        facts: &[],
+        history: &[],
+        after_port: Some(TOOL),
+    }
 }
 
 #[test]
-fn a_closed_batch_emits_one_done_fact() {
+fn an_undeclared_boundary_owes_one_done_row() {
     let request_id = "tool.requested:model-1";
-    let drafts = observe(vec![
-        requested(request_id, &["c1", "c2"]),
-        ring(&debt_id(request_id, "c1"), 1, "sent"),
-        ring(&debt_id(request_id, "c1"), 1, "response"),
-        ring(&debt_id(request_id, "c2"), 1, "sent"),
-        ring(&debt_id(request_id, "c2"), 1, "response"),
-    ]);
+    let mut facts = DebtFacts::default();
+    note_requested(&mut facts, request_id, &["c1", "c2"]);
+
+    let rows = ToolCallsDoneDebts.rows(&request(), &facts);
+
+    assert_eq!(rows.len(), 1);
+    assert_eq!(rows[0].name, TOOL_CALLS_DONE_ROW);
+    assert_eq!(rows[0].port, PLUGIN_ROW);
+    assert_eq!(
+        rows[0].after_port.as_deref(),
+        Some(TOOL),
+        "完成事实只在工具端口当圈没人认领时才落"
+    );
+    assert!(rows[0].unless.is_some(), "已落边界的请求不再欠");
+}
+
+#[test]
+fn a_written_boundary_removes_the_row() {
+    let request_id = "tool.requested:model-1";
+    let mut facts = DebtFacts::default();
+    note_requested(&mut facts, request_id, &["c1"]);
+    facts.note_fact_payload(TOOL_CALLS_DONE, &done_key(request_id), json!({}));
+
+    assert!(
+        ToolCallsDoneDebts.rows(&request(), &facts).is_empty(),
+        "完成事实按 request_id 幂等"
+    );
+}
+
+#[test]
+fn a_request_without_calls_owes_nothing() {
+    let mut facts = DebtFacts::default();
+    note_requested(&mut facts, "tool.requested:model-1", &[]);
+
+    assert!(
+        ToolCallsDoneDebts.rows(&request(), &facts).is_empty(),
+        "没有工具调用就没有轮边界"
+    );
+}
+
+#[test]
+fn the_row_writes_one_done_fact() {
+    let request_id = "tool.requested:model-1";
+    let key = vec![
+        ("request".to_string(), request_id.to_string()),
+        ("calls".to_string(), "2".to_string()),
+    ];
+
+    let RowStep::Facts(drafts) = ToolCallsDoneRow.run(&row_request(&key)) else {
+        panic!("完成行必须落事实");
+    };
 
     assert_eq!(drafts.len(), 1);
     assert_eq!(drafts[0].kind, TOOL_CALLS_DONE);
     assert_eq!(drafts[0].key, format!("tool.calls.done:{request_id}"));
     assert_eq!(drafts[0].payload["requested"], request_id);
     assert_eq!(drafts[0].payload["calls"], 2);
+    assert_eq!(drafts[0].produced_by, Some(7), "完成事实的溯源锚是行调用者");
 }
 
-/// 部分失败：判死也是终局；完成事实不因其中一笔失败而缺席。
 #[test]
-fn a_failed_call_still_counts_as_terminal() {
-    let request_id = "tool.requested:model-1";
-    let drafts = observe(vec![
-        requested(request_id, &["c1", "c2"]),
-        ring(&debt_id(request_id, "c1"), 1, "response"),
-        ring(&debt_id(request_id, "c2"), 2, "failed"),
-    ]);
-
-    assert_eq!(drafts.len(), 1, "一笔应答 + 一笔判死 ⇒ 这批齐了");
-    assert_eq!(drafts[0].payload["calls"], 2);
-}
-
-/// 一笔待批：挂起的债没有收束（`sent{deadline_ms: null}`），完成事实必须继续缺席。
-#[test]
-fn a_pending_call_holds_the_done_fact() {
-    let request_id = "tool.requested:model-1";
-    let drafts = observe(vec![
-        requested(request_id, &["c1", "c2"]),
-        ring(&debt_id(request_id, "c1"), 1, "response"),
-        ring(&debt_id(request_id, "c2"), 1, "sent"),
-    ]);
-
-    assert!(
-        drafts.is_empty(),
-        "停在「等用户」的一笔未收束，这批不算完成"
-    );
-}
-
-/// 一笔迟归：旧 attempt 的 response 落在投影里，也不能冒充当前 attempt 完成。
-#[test]
-fn a_late_return_on_a_superseded_attempt_is_not_complete() {
-    let request_id = "tool.requested:model-1";
-    let drafts = observe(vec![
-        requested(request_id, &["c1"]),
-        ring(&debt_id(request_id, "c1"), 1, "sent"),
-        ring(&debt_id(request_id, "c1"), 1, "response"),
-        ring(&debt_id(request_id, "c1"), 2, "sent"),
-    ]);
-
-    assert!(
-        drafts.is_empty(),
-        "当前 attempt 还在飞，迟归的旧 attempt 不算完成"
-    );
-}
-
-/// 一笔重试：只有当前 attempt 收束才算；完成后再次观察不重复落。
-#[test]
-fn a_retried_call_completes_once_and_only_once() {
-    let request_id = "tool.requested:model-1";
-    let mut facts = vec![
-        requested(request_id, &["c1"]),
-        ring(&debt_id(request_id, "c1"), 1, "sent"),
-        ring(&debt_id(request_id, "c1"), 2, "sent"),
-        ring(&debt_id(request_id, "c1"), 2, "response"),
+fn the_row_ignores_an_empty_call_list() {
+    let key = vec![
+        ("request".to_string(), "tool.requested:model-1".to_string()),
+        ("calls".to_string(), "0".to_string()),
     ];
 
-    let drafts = observe(facts.clone());
-    assert_eq!(drafts.len(), 1);
-    facts.push(world(
-        TOOL_CALLS_DONE,
-        &format!("tool.calls.done:{request_id}"),
-        drafts[0].payload.clone(),
-    ));
-    assert!(
-        observe(facts).is_empty(),
-        "完成事实按 request_id 幂等，不重复落"
-    );
+    let RowStep::Facts(drafts) = ToolCallsDoneRow.run(&row_request(&key)) else {
+        panic!("完成行必须返回事实步");
+    };
+    assert!(drafts.is_empty());
+}
+
+#[test]
+fn the_row_declares_the_done_fact_as_its_write() {
+    assert_eq!(ToolCallsDoneRow.writes(), &[TOOL_CALLS_DONE]);
+    assert_eq!(ToolCallsDoneRow.row(), TOOL_CALLS_DONE_ROW);
+    assert_eq!(ToolCallsDoneRow.owner(), PLUGIN_ID_TOOL);
 }

@@ -70,7 +70,7 @@ export const BASELINE = {
 
   // baseline-allow ciRustTestsTotal: CI 侧同一口径（同一条 `cargo test --workspace`、同一批
   //   目标），当前 2242。逐次折算的归属同样归 `git log`——理由同上一条，不在这里记变更史。
-  ciRustTestsTotal: 2258,
+  ciRustTestsTotal: 2259,
   cliRustTests: 21,
   tauriRustTests: 4,
   // doc-link-allow D-010: 下一行是退役文件的历史叙述（已把这两个文件删掉），不是入链

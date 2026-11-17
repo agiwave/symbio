@@ -79,6 +79,24 @@ const walKindCounts = (homedir, sid) => {
   return `tool.calls.done=${count('tool.calls.done')} chat.assistant.reported=${count('chat.assistant.reported')}`;
 };
 
+/** 决策相关事实的落格顺序（诊断用）：同一条红灯要能一眼看出「第二个边界是
+ * 没落、还是落在终答之后」。 */
+const walDecisionTimeline = (homedir, sid) => {
+  const KINDS = new Set([
+    'user.message',
+    'tool.requested',
+    'tool.calls.done',
+    'classify.answered',
+    'chat.assistant.reported',
+    'chat.assistant.final',
+  ]);
+  return sessionWalEvents(homedir, sid)
+    .filter((e) => KINDS.has(e.kind))
+    .sort((a, b) => (a.seq ?? 0) - (b.seq ?? 0))
+    .map((e) => `${e.kind}@${e.seq ?? '?'}`)
+    .join(' → ');
+};
+
 /** 三条线各自的会话 id（各自从零开始，断言互不污染） */
 const SIDS = {
   report: 'e2e-t23-report',
@@ -248,7 +266,10 @@ export default defineCase(
       assertEq(
         aReports.length,
         2,
-        `A 线两个轮边界应各汇报一次（实得 ${aReports.length} 条；事实面 ${walKindCounts(a.hd.homedir, SIDS.report)}）`,
+        `A 线两个轮边界应各汇报一次（实得 ${aReports.length} 条；` +
+          `正文 ${JSON.stringify(aReports.map((r) => r.content))}；` +
+          `事实面 ${walKindCounts(a.hd.homedir, SIDS.report)}；` +
+          `落格顺序 ${walDecisionTimeline(a.hd.homedir, SIDS.report)}）`,
       );
       for (const r of aReports) {
         assertEq(msgRoleOf(r), 'assistant', '汇报是助手说的话');

@@ -34,7 +34,7 @@ mod spec;
 pub use self::commitment::{commitment_events, commitment_records};
 pub use self::control::EliminationDecider;
 pub use self::spec::{actor_can_assign_work, pattern_for_principal};
-// `trivial_actor_spec` 是**测试面**的平凡值构造（ADR-067：生产构造点按真实授权行立规格）。
+// `trivial_actor_spec` 是**测试面**的平凡值构造（生产构造点按真实授权行立规格）。
 #[cfg(test)]
 pub(crate) use self::spec::trivial_actor_spec;
 
