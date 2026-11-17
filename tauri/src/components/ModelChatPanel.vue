@@ -144,6 +144,7 @@ import {
   PRINCIPAL_KIND_PERSON,
   PRINCIPAL_USER,
   messageTextOf,
+  replaceMessageText,
 } from '@/schemas/chat_node'
 import type { ImageAttachment } from '@/types'
 import type { DetailDefinition } from '@/schemas/vdfs'
@@ -209,7 +210,7 @@ const inputText = ref(uiState.draftOf(props.sessionId))
 watch(inputText, (text) => uiState.setDraft(props.sessionId, text))
 const attachedImages = ref<ImageAttachment[]>([])
 // 编辑单条消息的浮层状态
-const editing = ref<{ id: string; content: string; isJson: boolean } | null>(null)
+const editing = ref<{ id: string; content: string; isJson: boolean; original: MessageContent | undefined } | null>(null)
 
 // --- Composables ---
 const { isUserAtBottom, scrollToBottom, scrollToGap, gapFromBottom, smartScroll, handleScroll } = useChatScroll(messagesRef)
@@ -639,7 +640,8 @@ function handleEdit(messageId: string) {
   const c = msg.content
   const isJson = typeof c === 'string' && /^[\\[{]/.test(c.trim())
   const text = messageTextOf(c)
-  editing.value = { id: messageId, content: text, isJson }
+  // 保留原始内容：多模态消息的截图分片在编辑时不可见，保存时必须原样带回
+  editing.value = { id: messageId, content: text, isJson, original: c }
 }
 
 /**
@@ -652,13 +654,14 @@ function handleEdit(messageId: string) {
  */
 async function saveEdit() {
   if (!editing.value) return
-  const { id, content } = editing.value
+  const { id, content, original } = editing.value
   const msg = sessionsStore.getSessionMessages(props.sessionId).find(m => m.id === id)
   if (!msg) {
     editing.value = null
     return
   }
-  const newContent: MessageContent = content
+  // 只替换文本分片，截图等非文本分片原样保留（见 replaceMessageText）
+  const newContent: MessageContent = replaceMessageText(original, content)
   try {
     await sessionsStore.updateMessage(props.sessionId, {
       ...msg,

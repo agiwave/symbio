@@ -652,6 +652,10 @@ export function useChatConnection(options: UseChatConnectionOptions): UseChatCon
       store.setSessionStatus(sid, VDFS_STATUS_WORKING)
     }
 
+    // 恢复失败时的统一文案前缀：动作词随载荷带出，让用户知道是哪个操作没成功
+    // （授权 / 批准 / 重试等），而不是只看到一句笼统的「操作失败」。
+    const failPrefix = `操作「${payload.action}」未生效`
+
     // 运行模式 / 风险等级：与从前同级别的回退链——会话记忆值 > 默认值。
     // 后端把 MODE / RISK_LEVEL 写入 chat ctx，continuation chat_loop 通过
     // ctx.fork() 继承。
@@ -664,6 +668,7 @@ export function useChatConnection(options: UseChatConnectionOptions): UseChatCon
         store.putStatus(sid, { status: VDFS_STATUS_FAILED, activity: '错误', outcome: 'failed' })
         store.setSessionStatus(sid, VDFS_STATUS_FAILED)
       }
+      showToast('error', `${failPrefix}：会话地址未就绪，请稍后重试`)
       return
     }
 
@@ -698,6 +703,7 @@ export function useChatConnection(options: UseChatConnectionOptions): UseChatCon
       } else if (!resp.ok) {
         // 其它「没做」的如实报告（如目标消息已不在）：不静默，也不冒充失败终态
         logger.warn('useChatConnection', `[${sid}] resume 未生效：${resp.message}`)
+        showToast('error', `${failPrefix}：${resp.message || '目标消息已不存在，请重试'}`)
       }
     } catch (err: any) {
       logger.error('useChatConnection', 'Failed to resume:', err)
@@ -705,6 +711,7 @@ export function useChatConnection(options: UseChatConnectionOptions): UseChatCon
         store.putStatus(sid, { status: VDFS_STATUS_FAILED, activity: '错误', outcome: 'failed' })
         store.setSessionStatus(sid, VDFS_STATUS_FAILED)
       }
+      showToast('error', `${failPrefix}：${err?.message || '未知错误'}`)
     }
   }
 

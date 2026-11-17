@@ -76,10 +76,15 @@
           <textarea
             v-model="supplyArgsText"
             class="supply-textarea"
+            :class="{ invalid: !!supplyError }"
             aria-label="补充工具参数（JSON）"
+            :aria-invalid="!!supplyError"
+            aria-describedby="supply-error"
             placeholder='{"key":"value"}  (与原参数浅合并)'
             rows="4"
+            @input="supplyError = ''"
           />
+          <p v-if="supplyError" id="supply-error" class="supply-error" role="alert">{{ supplyError }}</p>
           <button class="supply-submit" @click="submitSupply">提交补充</button>
         </div>
       </div>
@@ -195,14 +200,18 @@ const missingResultNote = computed<string | null>(() =>
 const canSupply = computed(() => canSupplyToolArgs(props.facets))
 const showSupplyForm = ref(false)
 const supplyArgsText = ref('')
+/** 补参 JSON 解析失败：就地显示原因，别让「提交补充」变成点了没反应的死按钮 */
+const supplyError = ref('')
 
 function submitSupply() {
   let parsed: unknown
   try {
     parsed = JSON.parse(supplyArgsText.value || '{}')
-  } catch {
-    return // JSON 解析失败：静默忽略
+  } catch (e) {
+    supplyError.value = `参数不是合法 JSON：${e instanceof Error ? e.message : String(e)}`
+    return
   }
+  supplyError.value = ''
   if (!resume) return
   resume({
     targetId: props.node.id,
@@ -293,6 +302,16 @@ function submitSupply() {
 }
 .supply-textarea:focus {
   border-color: var(--accent);
+}
+.supply-textarea.invalid {
+  border-color: var(--color-error-border);
+}
+.supply-error {
+  margin: 0;
+  color: var(--color-error-fg);
+  font-size: 0.76rem;
+  line-height: 1.4;
+  word-break: break-word;
 }
 .supply-submit {
   align-self: flex-start;

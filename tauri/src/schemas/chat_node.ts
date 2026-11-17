@@ -401,6 +401,32 @@ export function messageTextOf(content: MessageContent | undefined | null): strin
 }
 
 /**
+ * 用新文本替换消息里的**文本分片**，同时原样保留非文本分片（图片等）。
+ *
+ * 编辑用户消息时只改文字，但内容可能是多模态 `ContentPart[]`（文字 + 截图）。
+ * 若直接把 `content` 写成编辑后的纯字符串，图片分片会被静默丢失且不可恢复。
+ * 此函数是 `messageTextOf` 的写侧对称：读侧取纯文本，写侧只换文本、其余分片不动。
+ *
+ * 形状处理与 `messageTextOf` 对齐：
+ * - 字符串 / `{ text }` / `{ parts }`：替换为字符串（无结构化非文本分片可保）
+ * - `ContentPart[]`：第一个文本分片换成新文本，其后文本分片丢弃，图片分片按原序保留；
+ *   原本没有文本分片时把新文本插在最前。
+ */
+export function replaceMessageText(
+  content: MessageContent | undefined | null,
+  nextText: string,
+): MessageContent {
+  if (!content || typeof content === 'string') return nextText
+  if (Array.isArray(content)) {
+    const images = content.filter((p) => (p as { type?: string } | undefined)?.type === 'image_url')
+    if (!images.length) return nextText
+    return [{ type: 'text', text: nextText }, ...images]
+  }
+  // `{ text }` / `{ parts }` 变体：无结构化的图片分片，回落为纯文本
+  return nextText
+}
+
+/**
  * 会话消息（后端 `symbio_kernel::chat::chat_node::ChatNode` 的镜像）。
  *
  * **本接口没有 `agent_id` / `prompt` 两个顶层字段**——它们曾在此声明，但后端

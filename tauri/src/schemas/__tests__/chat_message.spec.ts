@@ -10,7 +10,7 @@
  */
 
 import { describe, expect, it } from 'vitest'
-import { NODE_STATUSES, isNodeStatus, messageTextOf } from '../chat_node'
+import { NODE_STATUSES, isNodeStatus, messageTextOf, replaceMessageText } from '../chat_node'
 import type { MessageContent } from '../chat_node'
 
 /**
@@ -64,6 +64,46 @@ describe('messageTextOf：内容形状', () => {
     expect(messageTextOf('')).toBe('')
     expect(messageTextOf(asContent({ text: 123 }))).toBe('')
     expect(messageTextOf(asContent({ other: 1 }))).toBe('')
+  })
+})
+
+/**
+ * `replaceMessageText`：`messageTextOf` 的写侧对称——编辑消息只换文字，
+ * 多模态里的图片分片必须原样保留，否则编辑一次截图就永久丢了。
+ */
+describe('replaceMessageText：编辑保留非文本分片', () => {
+  it('纯字符串 / 缺省换成新文本', () => {
+    expect(replaceMessageText('old', 'new')).toBe('new')
+    expect(replaceMessageText(undefined, 'new')).toBe('new')
+    expect(replaceMessageText(null, 'new')).toBe('new')
+  })
+
+  it('多模态消息：换文字但保留全部图片分片', () => {
+    const img1 = { type: 'image_url' as const, image_url: { url: 'a' } }
+    const img2 = { type: 'image_url' as const, image_url: { url: 'b' } }
+    const out = replaceMessageText(
+      [{ type: 'text', text: '看这两张' }, img1, { type: 'text', text: '第二张' }, img2],
+      '改过了',
+    )
+    expect(out).toEqual([{ type: 'text', text: '改过了' }, img1, img2])
+  })
+
+  it('纯图片消息：补一个文本分片在前，图片不丢', () => {
+    const img = { type: 'image_url' as const, image_url: { url: 'x' } }
+    expect(replaceMessageText([img], '说明')).toEqual([
+      { type: 'text', text: '说明' },
+      img,
+    ])
+  })
+
+  it('无图片的数组回落为纯文本（不留空图片列表）', () => {
+    expect(replaceMessageText([{ type: 'text', text: 'a' }], 'b')).toBe('b')
+  })
+
+  it('写后读回：正文恰为新文本', () => {
+    const img = { type: 'image_url' as const, image_url: { url: 'x' } }
+    const out = replaceMessageText([{ type: 'text', text: 'old' }, img], 'fresh')
+    expect(messageTextOf(out)).toBe('fresh')
   })
 })
 

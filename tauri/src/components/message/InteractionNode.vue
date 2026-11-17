@@ -156,6 +156,7 @@ import {
   type MessagePromptQuestion,
 } from '@/schemas/message_prompt'
 import { RESUME_KEY, ALLOW_FOR_SESSION_KEY, ALLOW_FOREVER_KEY } from '@/composables/useChatConnection'
+import { useToast } from '@/composables/useToast'
 import { isSessionRiskLevel, type SessionRiskLevel } from '@/schemas/session_meta'
 import {
   isWaitingStatus,
@@ -178,6 +179,7 @@ const emit = defineEmits<{
 }>()
 
 const resume = inject(RESUME_KEY)
+const { showToast } = useToast()
 /** 「本会话放行」（审批卡第二档）；无人提供时按「没有这一档」处理 */
 const allowForSession = inject(ALLOW_FOR_SESSION_KEY, null)
 /** 「永久放行」（审批卡第三档）；同样可缺席（嵌入式只读视图） */
@@ -265,8 +267,10 @@ async function submitAllowForSession() {
   if (allowForSession) {
     try {
       await allowForSession(risk)
-    } catch {
-      // 抬阈值失败不拦本次批准（理由见函数文档）
+    } catch (e) {
+      // 抬阈值失败不拦本次批准（理由见函数文档），但必须让用户知道
+      // 「本会话放行」没写进去——否则界面照常推进，用户误以为以后都不问了。
+      showToast('error', `本次已批准，但「本会话放行」未生效：${e instanceof Error ? e.message : String(e)}`)
     }
   }
   submitConfirm(true)
@@ -289,8 +293,10 @@ async function submitAllowForever() {
   if (allowForever) {
     try {
       await allowForever(tool, risk)
-    } catch {
-      // 抬上限失败不拦本次批准（理由见函数文档）
+    } catch (e) {
+      // 抬上限失败不拦本次批准（理由见函数文档），但这是安全敏感的
+      // 跨会话授权：必须如实告知没写进去，用户不能以为「永久放行」已生效。
+      showToast('error', `本次已批准，但「永久放行」未生效：${e instanceof Error ? e.message : String(e)}`)
     }
   }
   submitConfirm(true)

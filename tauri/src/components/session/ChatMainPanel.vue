@@ -122,11 +122,23 @@
       </template>
 
       <template v-else>
-        <ModelChatPanel
-          :key="store.activeAddr || 'none'"
-          :sessionId="store.activeId ?? ''"
-          :sessionAddr="store.activeAddr"
-        />
+        <div class="chat-with-banner">
+          <!-- 历史加载失败后点「忽略」：不再假装消息全没了，常驻一条可重试的
+               降级条，明确告诉用户「仅显示新消息」，并能一键重新加载。 -->
+          <div v-if="historyDegraded" class="history-degraded" role="status">
+            <span class="history-degraded-icon">⚠</span>
+            <span class="history-degraded-text">会话历史未能加载，当前仅显示新消息</span>
+            <button class="history-degraded-btn" :disabled="historyReloading" @click="reloadCurrent">
+              {{ historyReloading ? '重试中…' : '重新加载' }}
+            </button>
+            <button class="history-degraded-close" title="关闭提示" @click="historyDegraded = false">✕</button>
+          </div>
+          <ModelChatPanel
+            :key="store.activeAddr || 'none'"
+            :sessionId="store.activeId ?? ''"
+            :sessionAddr="store.activeAddr"
+          />
+        </div>
       </template>
     </main>
 
@@ -241,6 +253,9 @@ const hasActive = computed(() => !!store.activeId)
 const messagesReady = ref(false)
 const currentLoadedId = ref<string | null>(null)
 const loadError = ref<string | null>(null)
+/** 历史加载失败后点「忽略」仍常驻的降级提示（不是「消息全丢了」的空白页） */
+const historyDegraded = ref(false)
+const historyReloading = ref(false)
 
 /**
  * 会话切换的**代次守卫**（机制唯一实现，见 `useGenerationGuard`）。
@@ -257,6 +272,8 @@ watch(
     messagesReady.value = false
     currentLoadedId.value = null
     loadError.value = null
+    historyDegraded.value = false
+    historyReloading.value = false
     if (id) {
       // 打开会话 ⇒ 补列一次收件箱（排队中的消息）。补的是**冷启动窗口**：应用起来
       // 之前就排在队里的消息没有入队帧可收（见 `stores/sessionInboxSync` 模块头的
@@ -272,14 +289,16 @@ watch(
         }
         currentLoadedId.value = id
         messagesReady.value = true
+        historyDegraded.value = false
       } catch (e) {
         if (loadGuard.revision() !== rev) return
         const msg = e instanceof Error ? e.message : String(e || '未知错误')
         loadError.value = msg
         // 仍然把 currentLoadedId 设为 id，避免 messagesReady 永久 false
-        // 让用户可以"忽略"继续发送消息
+        // 让用户可以"忽略"继续发送消息；但降级标志常驻，避免被误读成"消息全丢了"。
         currentLoadedId.value = id
         messagesReady.value = true
+        historyDegraded.value = true
         logger.error('ChatMainPanel', `loadMessages(${id}) failed`, e)
       }
     }
@@ -299,16 +318,21 @@ async function reloadCurrent() {
   const rev = loadGuard.advance()
   loadError.value = null
   messagesReady.value = false
+  historyReloading.value = true
   try {
     await store.loadMessages(id)
     if (loadGuard.revision() !== rev) return
     currentLoadedId.value = id
     messagesReady.value = true
+    historyDegraded.value = false
   } catch (e) {
     if (loadGuard.revision() !== rev) return
     const msg = e instanceof Error ? e.message : String(e || '未知错误')
     loadError.value = msg
     messagesReady.value = true
+    historyDegraded.value = true
+  } finally {
+    if (loadGuard.revision() === rev) historyReloading.value = false
   }
 }
 
@@ -838,5 +862,49 @@ function openChange(row: ChangeRow) {
 
 .load-error-btn.primary:hover {
   opacity: 0.9;
+}
+
+/* 历史加载失败后的常驻降级条：不占满屏，明确「仅新消息」并可重试 */
+.chat-with-banner {
+  flex: 1;
+  min-height: 0;
+  display: flex;
+  flex-direction: column;
+}
+.history-degraded {
+  flex: 0 0 auto;
+  display: flex;
+  align-items: center;
+  gap: 0.5rem;
+  padding: 0.35rem 0.75rem;
+  background: var(--color-warn-bg, var(--surface-sunken));
+  border-bottom: 1px solid var(--color-warn-border, var(--border-default));
+  color: var(--text-primary);
+  font-size: 0.8rem;
+}
+.history-degraded-icon {
+  color: var(--color-warn-fg, var(--text-muted));
+}
+.history-degraded-text {
+  flex: 1;
+}
+.history-degraded-btn,
+.history-degraded-close {
+  border: 1px solid var(--border-default);
+  background: var(--surface-panel);
+  color: var(--text-primary);
+  border-radius: 0.375rem;
+  padding: 0.15rem 0.5rem;
+  font-size: 0.76rem;
+  cursor: pointer;
+}
+.history-degraded-btn:disabled {
+  cursor: default;
+  opacity: 0.6;
+}
+.history-degraded-close {
+  border: none;
+  background: transparent;
+  padding: 0.15rem 0.35rem;
 }
 </style>
