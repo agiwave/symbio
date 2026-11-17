@@ -46,7 +46,13 @@
     />
 
     <div id="palette-results" ref="listRef" class="pa-list" role="listbox" aria-label="结果">
-      <p v-if="loading" class="pa-note">正在取资源清单…</p>
+      <div v-if="loading" class="pa-loading" aria-busy="true">
+        <span class="pa-skel" v-for="i in 5" :key="i" />
+      </div>
+      <div v-else-if="loadError" class="pa-load-error" role="alert">
+        <p>{{ loadError }}</p>
+        <button type="button" class="pa-retry" @click="load">重试</button>
+      </div>
       <template v-else>
         <section v-for="g in groups" :key="g.name" class="pa-group" role="group" :aria-label="g.name">
           <p class="pa-group-name" aria-hidden="true">{{ g.name }}</p>
@@ -100,6 +106,8 @@ const query = ref('')
 const nodes = ref<VdfsItem[]>([])
 const truncated = ref(false)
 const loading = ref(false)
+/** 清单读取失败（区别于「真的没有类别」）——失败时给重试，不误报空 */
+const loadError = ref('')
 const activeKey = ref('')
 const listRef = ref<HTMLElement | null>(null)
 
@@ -117,11 +125,21 @@ const activeOptionId = computed(() => optionIdOf(activeKey.value))
 
 async function load() {
   loading.value = true
-  // 不写 try/catch：`treeVdfs` 与其余三个回读动词同一条降级口径（失败即空清单 +
-  // 服务层留痕），拿不到东西时面板照常可关，这里再造一层只会掩盖那条留痕。
-  const resp = await treeVdfs(READBACK_REASON.PALETTE_SEARCH, vdfsRoot(), { depth: DEPTH })
+  loadError.value = ''
+  // treeVdfs 吞错返空清单（服务层口径不变），借观测器把「读不到」与「真没有」
+  // 分开——否则后端挂了会被显示成「没有可新建的类别」，用户无从分辨。
+  let err: unknown
+  const resp = await treeVdfs(
+    READBACK_REASON.PALETTE_SEARCH,
+    vdfsRoot(),
+    { depth: DEPTH },
+    (e) => {
+      err = e
+    }
+  )
   nodes.value = resp.nodes ?? []
   truncated.value = Boolean(resp.truncated)
+  if (err) loadError.value = `资源清单读取失败：${err instanceof Error ? err.message : String(err)}`
   loading.value = false
 }
 
@@ -290,6 +308,39 @@ function activate(key?: string) {
   margin: var(--space-3) 0;
   font-size: var(--font-size-sm);
   color: var(--text-muted);
+}
+
+.pa-loading {
+  display: flex;
+  flex-direction: column;
+  gap: var(--space-2);
+  padding: var(--space-2) 0;
+}
+.pa-skel {
+  height: 1.1rem;
+  border-radius: var(--radius-sm);
+  background: var(--surface-sunken);
+  animation: pa-pulse 1.2s ease-in-out infinite;
+}
+.pa-skel:nth-child(even) { width: 78%; }
+@keyframes pa-pulse {
+  0%, 100% { opacity: 0.5; }
+  50% { opacity: 1; }
+}
+.pa-load-error {
+  margin: var(--space-3) 0;
+  font-size: var(--font-size-sm);
+  color: var(--danger-fg);
+}
+.pa-retry {
+  margin-top: var(--space-2);
+  padding: 0.25rem 0.7rem;
+  border: 1px solid var(--border-default);
+  border-radius: var(--radius-md);
+  background: var(--surface-panel);
+  color: var(--text-primary);
+  font-size: var(--font-size-sm);
+  cursor: pointer;
 }
 
 .pa-foot {

@@ -64,8 +64,7 @@ const sheetOpen = ref(false)
  * 会话类别目录（**认出来的**，不是写死的 `/vdfs/session`）。
  *
  * 段名由后端 provider 决定；`ensureSessionMountDir` 是「某个类别挂在哪」的唯一实现。
- * 认不出时 `sessionDir` 留空 ⇒ Cmd+N 的 `when` 不成立 ⇒ 那个组合键原样还给浏览器，
- * 而不是变成一条什么都不做的死键。
+ * 冷启动早期留空；Cmd+N 此时在 run 里现解析并吞键，不会把组合键还给浏览器。
  */
 const sessionDir = ref('')
 
@@ -102,8 +101,22 @@ useHotkeys('main-layout', [
     keys: 'mod+n',
     group: '会话',
     label: '新建会话',
-    when: () => Boolean(sessionDir.value),
-    run: () => void router.push(vdfsBrowserPathOf(sessionDir.value)),
+    // 冷启动早期 sessionDir 还没解析出来。若此时 `when` 不成立，按键会被还给
+    // 浏览器（Cmd/Ctrl+N 正好是「新建窗口」）——用户明明按了建会话却弹出新窗口。
+    // 因此这里恒吞键，目的地未就绪时在 run 里现解析（已缓存，不会重复 IPC）。
+    run: () => {
+      const dir = sessionDir.value
+      if (dir) {
+        void router.push(vdfsBrowserPathOf(dir))
+      } else {
+        void ensureSessionMountDir()
+          .then((d) => {
+            sessionDir.value = d
+            void router.push(vdfsBrowserPathOf(d))
+          })
+          .catch((e) => logger.info('MainLayout', 'Cmd+N 未启用：会话挂载点没认出来', e))
+      }
+    },
   },
 ])
 
@@ -204,7 +217,7 @@ onMounted(async () => {
   // 不阻塞任何启动流程——它只是浮层，数据侧照旧自己拉。
   void useOnboardingStore().maybeOpen()
 
-  // Cmd+N 的前提（会话类别在哪）在这里认一次；认不出就留空，那条键让给浏览器。
+  // Cmd+N 的目的地（会话类别在哪）在这里预先解析一次；冷启动早期按键也会在 run 里兜底解析。
   ensureSessionMountDir()
     .then((dir) => {
       sessionDir.value = dir

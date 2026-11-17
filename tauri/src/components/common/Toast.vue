@@ -8,11 +8,19 @@
   - 浮层底色：--surface-overlay
   - 描边：--border-default，左侧语义强调条按 type 取 solid 色
   - 阴影：--shadow-2（深色下自动转为深底描边感）
-  点击浮层可提前关闭；aria-live 便于读屏播报。
+  点 × 按钮关闭（整块不再可点，错误信息因此能选中复制）；aria-live 便于读屏播报，
+  错误另走 assertive 通道以便立刻告知。
 -->
 <template>
   <Teleport to="body">
     <div class="toast-layer" role="region" aria-label="通知" aria-live="polite">
+      <!-- 错误用 assertive 通道：读屏用户必须被立刻告知失败（切换失败等），
+           polite 会排到当前朗读之后，常被错过。 -->
+      <div class="toast-assertive" aria-live="assertive" aria-atomic="true">
+        <template v-for="t in toasts" :key="'a-' + t.id">
+          <span v-if="t.type === 'error'" class="sr-only">{{ t.text }}</span>
+        </template>
+      </div>
       <TransitionGroup name="toast">
         <div
           v-for="t in toasts"
@@ -20,7 +28,6 @@
           class="toast"
           :class="`toast--${t.type}`"
           role="status"
-          @click="dismiss(t.id)"
           @mouseenter="pause(t.id)"
           @mouseleave="resume(t.id)"
           @focusin="pause(t.id)"
@@ -120,8 +127,29 @@ const { toasts, dismiss, pause, resume } = useToast()
   color: var(--text-primary);
   font-size: var(--font-size-sm);
   line-height: var(--line-height-normal);
-  cursor: pointer;
-  user-select: none;
+  /* 整块不再 @click 关闭：错误信息（失败原因 / 路径）需要能选中复制排查。
+     关闭交给右上角的 × 按钮。 */
+  cursor: default;
+  user-select: text;
+}
+
+.toast-assertive {
+  position: absolute;
+  width: 1px;
+  height: 1px;
+  overflow: hidden;
+  clip: rect(0 0 0 0);
+  clip-path: inset(50%);
+  white-space: nowrap;
+}
+.sr-only {
+  position: absolute;
+  width: 1px;
+  height: 1px;
+  overflow: hidden;
+  clip: rect(0 0 0 0);
+  clip-path: inset(50%);
+  white-space: nowrap;
 }
 
 .toast--success {

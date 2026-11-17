@@ -39,6 +39,7 @@ const SESSION_DIR = '@vfs/session'
 function arrange(overrides: Record<string, unknown> = {}) {
   const close = vi.fn()
   const dismiss = vi.fn()
+  const beginModelSetup = vi.fn()
   hoisted.store = {
     open: true,
     systemReady: true,
@@ -49,9 +50,10 @@ function arrange(overrides: Record<string, unknown> = {}) {
     sessionDir: SESSION_DIR,
     close,
     dismiss,
+    beginModelSetup,
     ...overrides,
   }
-  return { close, dismiss }
+  return { close, dismiss, beginModelSetup }
 }
 
 function bench() {
@@ -64,7 +66,7 @@ beforeEach(() => {
 
 describe('Onboarding 导航目标', () => {
   it('★ 去配模型 = 推「认出来的模型类别目录」，且**不**记为已读', async () => {
-    const { close, dismiss } = arrange()
+    const { close, dismiss, beginModelSetup } = arrange()
     const w = bench()
 
     await w.find('button.ob-btn:not(.primary):not(.ghost)').trigger('click')
@@ -74,6 +76,7 @@ describe('Onboarding 导航目标', () => {
     )
     expect(close).toHaveBeenCalled()
     expect(dismiss, '还没走到第 3 步，不能算读完').not.toHaveBeenCalled()
+    expect(beginModelSetup, '挂上监听：模型配好后引导要自动回到第 3 步').toHaveBeenCalled()
   })
 
   it('★ 发第一条消息 = 推会话目录 + 记为已读（这一步之后引导结束）', async () => {

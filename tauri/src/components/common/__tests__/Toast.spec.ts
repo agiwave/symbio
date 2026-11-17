@@ -8,8 +8,8 @@
  *    层叠上下文裁掉——这是它挂在应用根之外的原因。
  * 2. 语义落到 class（`toast--success` / `error` / `info`），**颜色不由测试断言**
  *    （值是令牌，归 CSS）。
- * 3. 点击浮层可提前关闭（不必等 3 秒到期）；`aria-live` 与 `role=status`
- *    让读屏能播报。
+ * 3. 关闭走**关闭按钮**（可聚焦的语义控件）；正文可选中复制，点正文不关闭；
+ *    `aria-live` 与 `role=status` 让读屏能播报，错误另有 assertive 通道。
  *
  * ⚠️ 单例状态跨用例共享，每条用例前必须清场。Teleport 的内容不在 wrapper 里，
  *    直接查 `document`。
@@ -68,12 +68,16 @@ describe('Toast — 浮层', () => {
     expect(document.querySelector('.toast__text')?.textContent).toBe('保存失败：IPC 断了')
   })
 
-  it('点击浮层提前关闭（不用等到期）', async () => {
+  it('点关闭按钮提前关闭（不用等到期）；整块文本可选中、点正文不关闭', async () => {
     const { showToast, toasts } = useToast()
     showToast('info', '点我关闭')
     mount(Toast, { attachTo: document.body })
-    const el = layer()[0] as HTMLElement
-    el.click()
+    // 点正文不再关闭（错误信息要能选中复制）。Teleport 的内容不在 wrapper 里，直接查 document。
+    ;(document.querySelector('.toast__text') as HTMLElement).click()
+    await Promise.resolve()
+    expect(toasts.value).toHaveLength(1)
+    // 关闭按钮才关闭
+    ;(document.querySelector('.toast__close') as HTMLElement).click()
     await Promise.resolve()
     expect(toasts.value).toHaveLength(0)
   })

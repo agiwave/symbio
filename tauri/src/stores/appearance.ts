@@ -63,13 +63,19 @@ export const useAppearanceStore = defineStore('appearance', () => {
   function apply() {
     document.documentElement.setAttribute('data-theme', resolveTheme())
     document.documentElement.style.setProperty('--font-scale', String(FONT_SCALE_MAP[fontSize.value]))
-    localStorage.setItem(
-      STORAGE_KEY,
-      JSON.stringify({
-        theme: theme.value,
-        fontSize: fontSize.value,
-      })
-    )
+    // apply() 在 app.mount 之前同步调用（见 main.ts），存储不可用时（隐私模式 /
+    // 配额耗尽）抛错会卡在白屏。持久化失败是非致命的：外观已经生效，仅不跨重启。
+    try {
+      localStorage.setItem(
+        STORAGE_KEY,
+        JSON.stringify({
+          theme: theme.value,
+          fontSize: fontSize.value,
+        })
+      )
+    } catch {
+      /* 非致命：外观已应用，仅不持久化 */
+    }
   }
 
   // 系统深色模式变化时，仅当处于"跟随系统"才需要重新解析

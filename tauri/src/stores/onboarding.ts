@@ -28,6 +28,7 @@
 import { defineStore } from 'pinia'
 import { computed, ref } from 'vue'
 import { listVdfs } from '@/services/vdfs'
+import { subscribeVdfsChanged } from '@/services/eventBus'
 import { READBACK_REASON } from '@/services/readback'
 import { findMountDirByNewTypeExt } from '@/services/vdfsScheme'
 import { locationError } from '@/services/systemLocation'
@@ -66,6 +67,13 @@ export const useOnboardingStore = defineStore('onboarding', () => {
   const modelReady = ref(false)
   const sessionReady = ref(false)
   const checking = ref(false)
+  /**
+   * 用户点了「去配置模型」⇒ 引导关掉但没读完。此时监听资源变更：一旦模型目录里
+   * 出现了条目（用户配好了），自动把引导带回来继续第③步——否则第②步是死胡同，
+   * 用户配完模型后再也看不到「发第一条消息」的引导。
+   */
+  const awaitingModel = ref(false)
+  let stopWatching: (() => void) | null = null
 
   /** 模型类别的挂载目录（认不出 = 该类别没挂上，引导据此降级到资源根） */
   const modelDir = ref<string | null>(null)
@@ -119,6 +127,30 @@ export const useOnboardingStore = defineStore('onboarding', () => {
     if (!modelReady.value) open.value = true
   }
 
+  /**
+   * 用户点「去配置模型」：标记在等模型，挂一次资源变更监听（幂等）。
+   * 模型一旦配好 ⇒ 刷新判据并把引导带回第③步。这样第②步不再是死胡同。
+   */
+  function beginModelSetup(): void {
+    if (dismissed.value) return
+    awaitingModel.value = true
+    if (stopWatching) return
+    // 监听整棵资源树（模型目录的挂载点由数据认出，这里不硬编码），任何变更都
+    // 重新判一次；只在「等待中 + 模型就绪 + 未读」时才重开面板。
+    stopWatching = subscribeVdfsChanged({ prefix: '' }, () => {
+      // 面板正开着就不用重开；已读 / 不在等待中也不打扰
+      if (!awaitingModel.value || dismissed.value || open.value) return
+      void refresh().then(() => {
+        if (awaitingModel.value && modelReady.value && !dismissed.value) {
+          awaitingModel.value = false
+          stopWatching?.()
+          stopWatching = null
+          open.value = true
+        }
+      })
+    })
+  }
+
   /** 从「关于」等入口手动打开（不看 `dismissed`） */
   function openManually(): void {
     open.value = true
@@ -134,6 +166,9 @@ export const useOnboardingStore = defineStore('onboarding', () => {
   function dismiss(): void {
     open.value = false
     dismissed.value = true
+    awaitingModel.value = false
+    stopWatching?.()
+    stopWatching = null
     persistDismissed(true)
   }
 
@@ -149,6 +184,7 @@ export const useOnboardingStore = defineStore('onboarding', () => {
     sessionDir,
     refresh,
     maybeOpen,
+    beginModelSetup,
     openManually,
     close,
     dismiss,

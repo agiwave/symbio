@@ -179,12 +179,12 @@ describe('全局键（外壳这张表）', () => {
     expect(hoisted.push).toHaveBeenCalledWith('/vdfs/session')
   })
 
-  it('★ 会话挂载点认不出 ⇒ Cmd+N 不吞键（那个组合还给浏览器，而不是变成死键）', async () => {
+  it('★ 会话挂载点认不出 ⇒ 键仍归应用（不把 Ctrl+N 还给浏览器弹新窗口），但不导航', async () => {
     hoisted.sessionDir = null
     const w = await bench()
 
     const evt = await press(w, { key: 'n', ctrlKey: true })
-    expect(evt.defaultPrevented).toBe(false)
+    expect(evt.defaultPrevented).toBe(true)
     expect(hoisted.push).not.toHaveBeenCalled()
 
     hoisted.sessionDir = '@vfs/session'

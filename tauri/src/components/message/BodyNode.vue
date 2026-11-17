@@ -28,6 +28,14 @@
     <div v-if="isUser" class="user-row">
       <div class="bubble user-bubble">
         <div class="markdown-body" v-html="rendered" />
+        <button
+          v-if="text"
+          class="copy-btn"
+          type="button"
+          :title="copied ? '已复制' : '复制正文'"
+          :aria-label="copied ? '已复制' : '复制正文'"
+          @click="copy"
+        >{{ copied ? '✓' : '复制' }}</button>
       </div>
     </div>
 
@@ -36,12 +44,28 @@
       <MessageErrorBox v-if="showsOwnError" :text="errorText" />
       <!-- 请求视图（toolRequest）与工具返回同走 JSON 高亮：参数流式未闭合时
            高亮器退化为整段着色（比空白有用），不做 Markdown 渲染。 -->
-      <pre
-        v-else-if="renderAsJson || facets.toolResult || facets.toolRequest"
-        :class="['json', facets.toolRequest ? 'req' : '']"
-        v-html="highlighted"
-      />
-      <div v-else class="markdown-body" v-html="rendered" />
+      <div v-else-if="renderAsJson || facets.toolResult || facets.toolRequest" class="copy-wrap">
+        <pre :class="['json', facets.toolRequest ? 'req' : '']" v-html="highlighted" />
+        <button
+          v-if="text"
+          class="copy-btn"
+          type="button"
+          :title="copied ? '已复制' : '复制内容'"
+          :aria-label="copied ? '已复制' : '复制内容'"
+          @click="copy"
+        >{{ copied ? '✓' : '复制' }}</button>
+      </div>
+      <div v-else class="copy-wrap">
+        <div class="markdown-body" v-html="rendered" />
+        <button
+          v-if="text"
+          class="copy-btn"
+          type="button"
+          :title="copied ? '已复制' : '复制正文'"
+          :aria-label="copied ? '已复制' : '复制正文'"
+          @click="copy"
+        >{{ copied ? '✓' : '复制' }}</button>
+      </div>
     </template>
 
     <!-- 子流：本形态不折叠它（收起用户气泡只收起气泡，回答留在流里）。
@@ -53,9 +77,11 @@
 </template>
 
 <script setup lang="ts">
-import { computed } from 'vue'
+import { computed, ref } from 'vue'
 import { type ChatNode } from '@/schemas/chat_node'
 import { useMessageContent } from '@/composables/useMessageContent'
+import { useToast } from '@/composables/useToast'
+import { copyText } from '@/composables/useClipboard'
 import { isFailedStatus, isUserFacet, type MessageFacets } from '@/registry/messageTypes'
 import NodeShell from './NodeShell.vue'
 import MessageErrorBox from './MessageErrorBox.vue'
@@ -81,10 +107,27 @@ const showsOwnError = computed(
   () => isFailedStatus(props.facets.status) && props.facets.toolResult && !props.parentFailed,
 )
 
-const { highlighted, rendered, renderAsJson, errorText } = useMessageContent(
+const { text, highlighted, rendered, renderAsJson, errorText } = useMessageContent(
   () => props.node,
   () => props.facets,
 )
+
+const { showToast } = useToast()
+const copied = ref(false)
+let copiedTimer: ReturnType<typeof setTimeout> | null = null
+async function copy() {
+  const ok = await copyText(text.value)
+  if (!ok) {
+    showToast('error', '复制失败，请手动选中文本')
+    return
+  }
+  copied.value = true
+  if (copiedTimer) clearTimeout(copiedTimer)
+  copiedTimer = setTimeout(() => {
+    copied.value = false
+    copiedTimer = null
+  }, 1500)
+}
 </script>
 
 <style scoped>
@@ -142,5 +185,43 @@ const { highlighted, rendered, renderAsJson, errorText } = useMessageContent(
 }
 .user-bubble :deep(.markdown-body > *:last-child) {
   margin-bottom: 0;
+}
+
+/* 一键复制：贴着内容块右上角，悬停/聚焦才显形，不占正文空间 */
+.copy-wrap {
+  position: relative;
+}
+.copy-btn {
+  position: absolute;
+  top: 0.3rem;
+  right: 0.3rem;
+  opacity: 0;
+  border: 1px solid var(--color-code-border, var(--border-default));
+  background: var(--surface-panel);
+  color: var(--text-secondary);
+  border-radius: 0.3rem;
+  padding: 0.1rem 0.4rem;
+  font-size: 0.7rem;
+  cursor: pointer;
+  transition: opacity 0.12s ease;
+  z-index: 1;
+}
+.copy-wrap:hover > .copy-btn,
+.copy-wrap:focus-within > .copy-btn,
+.user-bubble:hover > .copy-btn,
+.user-bubble:focus-within > .copy-btn,
+.copy-btn:focus-visible {
+  opacity: 1;
+}
+.copy-btn:hover {
+  color: var(--text-primary);
+}
+.user-bubble {
+  position: relative;
+}
+.user-bubble > .copy-btn {
+  color: rgba(255, 255, 255, 0.85);
+  border-color: rgba(255, 255, 255, 0.3);
+  background: rgba(0, 0, 0, 0.15);
 }
 </style>

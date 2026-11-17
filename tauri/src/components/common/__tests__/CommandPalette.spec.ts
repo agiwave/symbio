@@ -63,7 +63,12 @@ describe('取清单的时机', () => {
     arrange()
     await flushPromises()
     expect(hoisted.treeVdfs).toHaveBeenCalledTimes(1)
-    expect(hoisted.treeVdfs).toHaveBeenCalledWith(READBACK_REASON.PALETTE_SEARCH, '@vfs', { depth: 2 })
+    expect(hoisted.treeVdfs).toHaveBeenCalledWith(
+      READBACK_REASON.PALETTE_SEARCH,
+      '@vfs',
+      { depth: 2 },
+      expect.any(Function),
+    )
   })
 
   it('关着的时候一次都不取（面板不替用户做后台轮询）', async () => {

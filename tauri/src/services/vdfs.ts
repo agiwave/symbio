@@ -131,7 +131,9 @@ export async function listVdfs(
 export async function treeVdfs(
   reason: ReadbackReason,
   path = vdfsRoot(),
-  opts?: { depth?: number; limit?: number }
+  opts?: { depth?: number; limit?: number },
+  /** 失败观测器：读失败仍吞成空清单，但可据此把「读不到」上报给 UI（区别于「真没有」）。 */
+  onFallback?: (err: unknown) => void
 ): Promise<VdfsTreeResponse> {
   const payload: Record<string, unknown> = { path }
   if (opts?.depth !== undefined) payload.depth = opts.depth
@@ -140,7 +142,8 @@ export async function treeVdfs(
   return withFallback(
     async () => (await callReadback<VdfsTreeResponse>(reason, VDFS_TREE, payload)) ?? empty(),
     empty,
-    { tag: 'vdfs-service', what: `treeVdfs(${path}) failed` }
+    { tag: 'vdfs-service', what: `treeVdfs(${path}) failed` },
+    onFallback
   )
 }
 

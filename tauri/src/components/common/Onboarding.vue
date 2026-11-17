@@ -24,7 +24,7 @@
   >
     <h2 id="onboarding-title" class="ob-title">三步开始</h2>
     <p class="ob-sub">
-      别处找不到「设置」：这个应用里的一切都是资源树上的一个节点。把下面三件做完，就能开始对话。
+      设置是资源树上的一个节点（左侧齿轮图标），随时可从「关于」重新打开本引导。把下面三件做完，就能开始对话。
     </p>
 
     <ol class="ob-steps">
@@ -100,8 +100,9 @@ function openDir(dir: string | null) {
   void router.push(dir ? vdfsBrowserPathOf(dir) : VDFS_HOME_PATH)
 }
 
-/** 去配模型：关掉面板但**不记为已读**——用户还没走到第 3 步 */
+/** 去配模型：关掉面板但**不记为已读**——挂上监听，配好模型后自动带回第③步 */
 function goModel() {
+  store.beginModelSetup()
   openDir(store.modelDir)
   store.close()
 }
