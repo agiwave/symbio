@@ -647,13 +647,19 @@ export async function callPlugin<TOutput = unknown, TInput = unknown>(
 
   if (timeoutMs <= 0) return resultPromise;
 
-  return Promise.race([
-    resultPromise,
-    new Promise<TOutput>((_, reject) => setTimeout(() => {
+  // 超时定时器必须在请求 settle 后清掉：否则每次调用都挂一个 30s 定时器，
+  // 即使早已 resolve，到点仍会 connection?.close() 把一条活跃连接静默关掉。
+  let timer: ReturnType<typeof setTimeout> | undefined;
+  const timeoutPromise = new Promise<TOutput>((_, reject) => {
+    timer = setTimeout(() => {
       connection?.close();
       reject(new Error(`[Timeout] ${path} call timed out after ${timeoutMs}ms`));
-    }, timeoutMs))
-  ]);
+    }, timeoutMs);
+  });
+
+  return Promise.race([resultPromise, timeoutPromise]).finally(() => {
+    if (timer !== undefined) clearTimeout(timer);
+  });
 }
 
 /**

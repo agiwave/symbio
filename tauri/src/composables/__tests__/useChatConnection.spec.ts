@@ -27,8 +27,8 @@
  * 5. **session_busy 是现状不是失败**：回落 `active`，绝不置 `failed`
  *    ——否则会显示一个并不存在的失败终态，且重试按钮不消失。
  *
- * ⚠️ 只记录未改：`send` 的 `onSendComplete` 只在**失败**分支调用，成功时不调用
- * （成功由后端节点状态收敛）。这是否为原意未确认，故此处按现状断言并注明。
+ * 6. `send` 的 `onSendComplete` 在**成功与失败**两条路径都触发（名字是 complete），
+ *    上层可据此复位发送态，不会在成功时卡住。
  */
 
 import { beforeEach, describe, expect, it, vi } from 'vitest'
@@ -361,11 +361,11 @@ describe('send — 写收件箱条目 + 乐观置位', () => {
     expect(errorCalls.every((args) => args[1] === null)).toBe(true)
   })
 
-  it('⚠️ 现状：onSendComplete 只在失败时调用（成功不调用）', async () => {
+  it('onSendComplete 在成功路径也触发（名字是 complete，不是 failed）', async () => {
     const onSendComplete = vi.fn()
     const c = conn({ onSendComplete })
-    await c.send(msg({ id: 'u1' }))
-    expect(onSendComplete).not.toHaveBeenCalled()
+    await expect(c.send(msg({ id: 'u1' }))).resolves.toBe(true)
+    expect(onSendComplete).toHaveBeenCalledTimes(1)
   })
 })
 

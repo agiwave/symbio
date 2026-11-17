@@ -156,6 +156,8 @@ onMounted(async () => {
     reload: async (sid) => {
       await sessions.loadMessages(sid)
     },
+    // resync 覆盖全部已知会话，而非只覆盖收到过帧的（断线期间静默的会话也要补）
+    allSessionIds: () => sessions.list.map((s) => s.id),
   })
 
   // 会话清单的 VDFS 订阅同样由外壳接线（store 自己不挂监听器），
@@ -179,6 +181,7 @@ onMounted(async () => {
     reloadInbox: async (sid) => {
       await sessions.refreshInbox(sid)
     },
+    allSessionIds: () => sessions.list.map((s) => s.id),
   })
 
   // 提示音的设置来源同样由外壳注入（service 不认识 store）：

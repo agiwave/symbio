@@ -70,7 +70,7 @@ function inboxNode(over: Partial<VdfsNode> & Record<string, unknown>): VdfsNode 
 }
 
 /** 记录落地动作的假 sink */
-function spySink() {
+function spySink(knownIds?: string[]) {
   const applied: Array<{ sid: string; id: string; label: string }> = []
   const removed: Array<{ sid: string; id: string }> = []
   const reloaded: string[] = []
@@ -80,6 +80,7 @@ function spySink() {
     reloadInbox: (sid) => {
       reloaded.push(sid)
     },
+    allSessionIds: knownIds ? () => knownIds : undefined,
   }
   return { sink, applied, removed, reloaded }
 }
@@ -238,6 +239,18 @@ describe('作用域与 resync', () => {
     fireResync!()
     await settle()
     expect(spy.reloaded).toEqual([])
+  })
+
+  it('resync 覆盖断线期间从未收到帧的会话（allSessionIds 与 seenSessions 取并集）', async () => {
+    const spy = spySink(['b', 'c'])
+    await startSessionInboxSync(spy.sink)
+
+    dispatch!(itemFrame('a', 'i1', { name: 'i1', description: '待消费 · x' }))
+    await settle()
+
+    fireResync!()
+    await settle()
+    expect([...spy.reloaded].sort()).toEqual(['a', 'b', 'c'])
   })
 })
 

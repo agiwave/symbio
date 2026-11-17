@@ -80,6 +80,11 @@ export interface SessionInboxSink {
   removeInboxItem(sessionId: string, itemId: string): void
   /** 重同步 / 打开会话时整份重列（权威清单替换本地） */
   reloadInbox(sessionId: string): void | Promise<void>
+  /**
+   * 本端已知的全部会话 id（可选）。resync 时与 `seenSessions` 取并集：断线期间
+   * 从未收到入队帧的会话不在 seenSessions 里，仅按后者重列会永久漏掉它的气泡。
+   */
+  allSessionIds?(): string[]
 }
 
 interface InboxSyncState {
@@ -193,9 +198,11 @@ function subscribeMount(mountDir: string, sink: SessionInboxSink): () => void {
     { prefix: mountDir },
     handleVdfsChange,
     () => {
-      // 重同步：漏帧会让本地多一个幽灵气泡或少一个气泡——按见过的会话整份重列，
-      // 权威清单直接替换本地（与转写消费端的 resync 同构）。
-      for (const sid of [...S.seenSessions]) {
+      // 重同步：漏帧会让本地多一个幽灵气泡或少一个气泡——与本端已知全部会话
+      // 取并集整份重列，权威清单直接替换本地（与转写消费端的 resync 同构）。
+      // 断线期间完全没有帧的会话不在 seenSessions 里，不能漏。
+      const targets = new Set([...S.seenSessions, ...(sink.allSessionIds?.() ?? [])])
+      for (const sid of targets) {
         void Promise.resolve(sink.reloadInbox(sid)).catch((err: unknown) =>
           logger.warn('[inbox-sync]', `重列收件箱失败：${sid}`, err),
         )

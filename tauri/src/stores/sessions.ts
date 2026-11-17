@@ -79,6 +79,7 @@ import { ensureSessionMountDir, ensureSessionScheme } from '@/services/vdfsSchem
 import { playCompletionChime } from '@/services/completionChime'
 import { READBACK_REASON } from '@/services/readback'
 import { logger } from '@/utils/logger'
+import { useToast } from '@/composables/useToast'
 import {
   NODE_STATUS_REMOVED,
   type ChatNode,
@@ -909,9 +910,14 @@ export const useSessionsStore = defineStore('sessions', () => {
     // 删除前先 abort 活跃任务（地址动作；回执 `ok:false` = 本来就没在跑，无需处理）
     if (isWorkingStatus(target.status) && addr) {
       try {
-        await runVdfsAction(addr, VDFS_ACTION_ABORT)
+        const resp = await runVdfsAction(addr, VDFS_ACTION_ABORT)
+        if (!resp.ok) {
+          logger.warn('[sessions]', `abort 未生效：${resp.message}`)
+          useToast().showToast('error', `中止运行中任务失败（${resp.message || '未知原因'}），任务可能仍在后台运行`)
+        }
       } catch (e) {
         logger.warn('[sessions]', 'abort 失败', e)
+        useToast().showToast('error', '中止运行中任务失败，任务可能仍在后台运行')
       }
     }
 

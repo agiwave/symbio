@@ -92,6 +92,12 @@ export interface TranscriptSyncSink {
   applyTranscriptMessages(sessionId: string, messages: ChatNode[]): void
   /** resync：按会话整份重读（权威快照替换本地转写） */
   reload(sessionId: string): void | Promise<void>
+  /**
+   * 本端已知的全部会话 id（可选）。resync 时与 `seenSessions` 取并集：
+   * 断线期间从未收到过帧的会话不在 seenSessions 里，仅按后者重读会永久漏掉
+   * 那段正文。生产由外壳传 sessions store 的清单；缺省时退化为仅 seenSessions。
+   */
+  allSessionIds?(): string[]
 }
 
 /** 增量合帧窗口（毫秒）= 60Hz 显示刷新的 3 帧——攒批的收益在 2 帧后已基本到手，
@@ -484,7 +490,10 @@ function subscribeMount(mountDir: string, sink: TranscriptSyncSink): () => void 
       logger.warn('[transcript-sync]', '收到重同步信号，整份重读在途会话')
       // 先丢弃待落地增量再重读：权威快照会覆盖它们，不丢就会把同一段正文追加两次。
       dropPending()
-      for (const sid of [...S.seenSessions]) {
+      // 与「本端已知全部会话」取并集：seenSessions 只含收到过帧的会话，断线期间
+      // 完全静默的会话不在其中，仅按它重读会永久漏掉那段正文。
+      const targets = new Set([...S.seenSessions, ...(sink.allSessionIds?.() ?? [])])
+      for (const sid of targets) {
         void Promise.resolve(sink.reload(sid)).catch((err: unknown) =>
           logger.warn('[transcript-sync]', `重读转写失败：${sid}`, err),
         )

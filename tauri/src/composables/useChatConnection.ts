@@ -568,6 +568,9 @@ export function useChatConnection(options: UseChatConnectionOptions): UseChatCon
       onSendComplete?.()
       return false
     }
+    // 入队成功同样是一次「发送完成」——回调按名字应对两条路径都触发，
+    // 否则上层若用它复位发送态，成功路径会永远卡住。
+    onSendComplete?.()
     return true
   }
 

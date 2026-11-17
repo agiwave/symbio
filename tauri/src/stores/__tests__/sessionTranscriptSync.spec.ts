@@ -76,7 +76,7 @@ function messageNode(over: Partial<VdfsNode> & Record<string, unknown>): VdfsNod
 }
 
 /** 记录落地动作的假 sink */
-function spySink() {
+function spySink(knownIds?: string[]) {
   const calls: string[] = []
   const reloaded: string[] = []
   const has: Record<string, boolean> = {}
@@ -88,6 +88,7 @@ function spySink() {
     reload: (sid) => {
       reloaded.push(sid)
     },
+    allSessionIds: knownIds ? () => knownIds : undefined,
   }
   return { sink, calls, reloaded, has }
 }
@@ -363,5 +364,20 @@ describe('作用域与 resync', () => {
     fireResync!()
     await vi.advanceTimersByTimeAsync(0)
     expect([...spy.reloaded].sort()).toEqual(['a', 'b'])
+  })
+
+  it('resync 覆盖断线期间从未收到帧的会话（allSessionIds 与 seenSessions 取并集）', async () => {
+    vi.useFakeTimers()
+    const spy = spySink(['b', 'c']) // c 从没发过帧，不在 seenSessions 里
+    await startSessionTranscriptSync(spy.sink)
+
+    dispatch!(frame('a', 'm1', { id: 'm1' }))
+    mocks.statVdfs.mockResolvedValue(messageNode({}))
+    mocks.readVdfs.mockResolvedValue({ path: '', text: '', binary: false, size: 0 })
+    await vi.advanceTimersByTimeAsync(0)
+
+    fireResync!()
+    await vi.advanceTimersByTimeAsync(0)
+    expect([...spy.reloaded].sort()).toEqual(['a', 'b', 'c'])
   })
 })
