@@ -336,9 +336,26 @@ describe('useVdfs 有界列表（中栏只取最新一页 + 加载更早）', ()
     expect(api.items.value).toHaveLength(100)
     expect(api.hasMore.value, '满页 ⇒ 可能还有更早的').toBe(true)
     // 目录刷新那一次带窗口参数；左栏导航那次不带（导航项本来就少）
-    expect(mocks.listVdfs).toHaveBeenLastCalledWith(READBACK_REASON.VDFS_BROWSER, MSG_DIR, {
-      limit: 100,
+    expect(mocks.listVdfs).toHaveBeenLastCalledWith(
+      READBACK_REASON.VDFS_BROWSER,
+      MSG_DIR,
+      { limit: 100 },
+      expect.any(Function) // 失败观测器：把「读不到」与「真没有」分开上报
+    )
+
+    wrapper.unmount()
+  })
+
+  it('服务层吞错返空表时借观测器把「读不到」显示为 loadError（不是假空目录）', async () => {
+    mocks.listVdfs.mockImplementation(async (_reason, _path, _opts, onFallback) => {
+      onFallback?.(new Error('后端不可达'))
+      return { path: MSG_DIR, node: { ...msgNode('__dir'), access: 'l', ext: undefined }, items: [] }
     })
+    const { api, wrapper } = mountHost(MSG_DIR)
+    await settle()
+
+    expect(api.loadError.value).toContain('后端不可达')
+    expect(api.items.value).toHaveLength(0)
 
     wrapper.unmount()
   })

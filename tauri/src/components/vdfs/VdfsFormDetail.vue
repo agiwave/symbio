@@ -32,7 +32,7 @@
       <p v-if="error" class="banner-msg">{{ error }}</p>
       <ul v-if="fieldErrors.length" class="banner-fields">
         <li v-for="f in fieldErrors" :key="f.field">
-          <code>{{ f.field }}</code>
+          <code>{{ fieldLabelOf(f.field) }}</code>
           <span>{{ f.message }}</span>
         </li>
       </ul>
@@ -41,6 +41,7 @@
       :definition="definition"
       :node="node"
       :values="values"
+      :field-errors="fieldErrors"
       :capabilities="capabilities"
       :mechanism-actions="mechanismActions"
       :mechanism-busy="mechanismBusy"
@@ -51,6 +52,7 @@
       @open-container="$emit('browse')"
       @test="$emit('action', 'test')"
       @action="(id, file) => $emit('action', id, file)"
+      @dirty-change="(dirty) => $emit('dirty-change', dirty)"
     />
   </div>
 </template>
@@ -97,9 +99,19 @@ defineEmits<{
    * 前端只负责把动作转发给页面层 `browseInto`。
    */
   (e: 'browse'): void
+  (e: 'dirty-change', dirty: boolean): void
 }>()
 
 const access = computed(() => vdfsAccessOf(props.node))
+
+/** 后端字段级错误的机器 key → 表单里的中文 label（认不出就原样显示 key） */
+function fieldLabelOf(key: string): string {
+  for (const sec of (props.node.schema as DetailDefinition | undefined)?.sections ?? []) {
+    const f = sec.fields.find((x) => x.key === key)
+    if (f) return f.label || key
+  }
+  return key
+}
 
 /**
  * 草稿节点（机制「新建」态）——判据与页面同源（`schemas/vdfs.isVdfsDraft`）。

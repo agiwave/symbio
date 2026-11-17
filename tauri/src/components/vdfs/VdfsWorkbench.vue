@@ -44,7 +44,7 @@
         :title="`新建 ${creatableType?.title ?? ''}`"
         :aria-label="`新建 ${creatableType?.title ?? ''}`"
         :disabled="loading || saving"
-        @click="startNew()"
+        @click="startNewFromButton()"
       >
         <svg viewBox="0 0 24 24" width="15" height="15" fill="none" stroke="currentColor" stroke-width="2.25" stroke-linecap="round">
           <line x1="12" y1="5" x2="12" y2="19" />
@@ -132,7 +132,10 @@
 
     <template #empty>
       <!-- 列表加载失败与「目录为空」是两件事：前者必须说出来，否则会被读成「没有数据」 -->
-      <p v-if="loadError" class="prompt-error">{{ loadError }}</p>
+      <template v-if="loadError">
+        <p class="prompt-error">{{ loadError }}</p>
+        <button class="empty-action" type="button" :disabled="loading" @click="refresh">重试</button>
+      </template>
       <!-- 「筛掉了」与「本来就没有」也是两件事：前者要告诉用户还有更早的页可捞 -->
       <template v-else-if="filterEmpty">
         <p>没有匹配「{{ activeFilter }}」的条目</p>
@@ -150,7 +153,7 @@
           class="empty-action primary"
           type="button"
           :disabled="loading || saving"
-          @click="startNew()"
+          @click="startNewFromButton()"
         >
           新建第一个{{ creatableType?.title ?? '条目' }}
         </button>
@@ -169,6 +172,7 @@
       <component
         :is="rendererComp"
         v-if="selectedNode && rendererComp"
+        ref="rendererRef"
         :key="selectedNode.path || `draft-${draftSeq}`"
         :node="selectedNode"
         :data="rendererData"
@@ -184,6 +188,7 @@
         @created="onCreated"
         @browse="browseInto"
         @open-node="onOpenNode"
+        @dirty-change="onDetailDirty"
       />
 
       <!-- 详情加载中：骨架按"标题 + 若干字段行"的形状占位，与表单详情同构，
@@ -209,6 +214,21 @@
     icon-kind="danger"
     @confirm="confirmDelete"
     @cancel="pendingDelete = false"
+  />
+
+  <!-- 未保存离开确认：详情表单/文本改到一半就切走会静默丢内容，这里兜住。
+       confirm 时执行被拦下的导航，cancel 时留在当前详情。 -->
+  <ConfirmDialog
+    :visible="pendingLeave"
+    title="放弃未保存的修改？"
+    message="当前资源有尚未保存的修改，离开后这些修改将丢失。"
+    confirm-text="放弃并离开"
+    cancel-text="继续编辑"
+    danger
+    icon="⚠"
+    icon-kind="danger"
+    @confirm="confirmLeave"
+    @cancel="cancelLeave"
   />
 </template>
 
@@ -373,6 +393,56 @@ watch(
   },
 )
 
+// ==================== 未保存离开拦截 ====================
+// 详情渲染器（表单 / 文本）在编辑时上抛 dirty。切换节点/目录、钻入、新建这些
+// 「离开当前详情」的动作先过一道闸：有改动就弹确认，避免静默丢弃编辑现场。
+const detailDirty = ref(false)
+const pendingLeave = ref(false)
+let queuedLeave: (() => void) | null = null
+
+function onDetailDirty(dirty: boolean) {
+  detailDirty.value = dirty
+}
+
+// 兜底：任何路径导致的详情节点切换（含保存后 select、自动草稿、后端收敛）都清掉
+// 上一节点的 dirty，避免把旧编辑态带进新详情、在下次离开时误弹确认。
+watch(
+  () => selectedNode.value?.path ?? selectedNode.value?.id,
+  () => {
+    detailDirty.value = false
+    queuedLeave = null
+    pendingLeave.value = false
+  },
+)
+
+/** 离开当前详情前先过闸；无改动直接执行，有改动则暂存动作并弹确认 */
+function guardLeave(action: () => void) {
+  if (!detailDirty.value) {
+    action()
+    return
+  }
+  queuedLeave = action
+  pendingLeave.value = true
+}
+
+function confirmLeave() {
+  pendingLeave.value = false
+  const action = queuedLeave
+  queuedLeave = null
+  detailDirty.value = false
+  action?.()
+}
+
+function cancelLeave() {
+  pendingLeave.value = false
+  queuedLeave = null
+}
+
+/** 用户点「新建」：也是离开当前详情，过闸；自动备草稿不经过这里 */
+function startNewFromButton() {
+  guardLeave(() => startNew())
+}
+
 // ==================== 钻入（emit，宿主决定呈现） ====================
 
 /**
@@ -388,8 +458,8 @@ watch(
  * 子目录，没有可重置的选中态），而子目录切换是同一个地址内的浏览。
  */
 function onRailSelect(key: string) {
-  if (atMountLevel.value) return void emit('open', vdfsJoin(vdfsRoot(), key))
-  return void selectDir(key)
+  if (atMountLevel.value) return guardLeave(() => emit('open', vdfsJoin(vdfsRoot(), key)))
+  return guardLeave(() => void selectDir(key))
 }
 
 /**
@@ -397,8 +467,12 @@ function onRailSelect(key: string) {
  * （emit `open`，宿主通常 push 一个新地址页，同一控件承接）。
  */
 function onItemClick(n: VdfsItem) {
-  if (!isVdfsDir(n)) return void select(n)
-  emit('open', n.path)
+  // 点当前已选项不算离开（只是重读同一详情），无需确认
+  if (!isVdfsDir(n)) {
+    if (selectedId.value === n.id) return void select(n)
+    return guardLeave(() => void select(n))
+  }
+  guardLeave(() => emit('open', n.path))
 }
 
 /**
@@ -485,7 +559,7 @@ useHotkeys('vdfs-workbench', [
 function browseInto() {
   const n = selectedNode.value
   if (!n) return
-  emit('open', n.path)
+  guardLeave(() => emit('open', n.path))
 }
 
 /**
@@ -497,7 +571,7 @@ function browseInto() {
  */
 function onOpenNode(addr: string) {
   if (!addr) return
-  emit('open', vdfsParent(addr), vdfsBase(addr))
+  guardLeave(() => emit('open', vdfsParent(addr), vdfsBase(addr)))
 }
 
 // ==================== 详情装配 ====================
@@ -538,9 +612,20 @@ const rendererData = computed<unknown>(() => {
   return null
 })
 
+const rendererRef = ref<{ markSaved?: () => void } | null>(null)
+
 function onSave(payload: unknown) {
-  if (isFormRenderer(renderer.value)) void saveFields((payload ?? {}) as Record<string, unknown>)
-  else void saveText()
+  const done = isFormRenderer(renderer.value)
+    ? saveFields((payload ?? {}) as Record<string, unknown>)
+    : saveText()
+  // 保存成功后 renderer 重新读入同一节点，身份门闩不会重跑预填 ⇒ 表单基线仍停在旧值，
+  // dirty 会误留。显式把新值树立为基线，dirty 归零，避免保存后又弹「放弃修改」。
+  void done.then((ok) => {
+    if (ok) {
+      rendererRef.value?.markSaved?.()
+      detailDirty.value = false
+    }
+  })
 }
 
 /** 删除确认：确认前不动数据（目录是递归删除，节点内容不可撤销） */

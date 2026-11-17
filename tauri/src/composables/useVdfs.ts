@@ -231,9 +231,16 @@ export function useVdfs(opts: UseVdfsOptions) {
     loadError.value = ''
     loadMoreError.value = ''
     try {
-      const resp = await listVdfs(READBACK_REASON.VDFS_BROWSER, cwd.value, {
-        limit: VDFS_PAGE_SIZE,
-      })
+      const resp = await listVdfs(
+        READBACK_REASON.VDFS_BROWSER,
+        cwd.value,
+        { limit: VDFS_PAGE_SIZE },
+        (err) => {
+          // listVdfs 吞错返空列表（服务层口径不变），这里借观测器把「读不到」
+          // 与「真的空」分开——否则后端故障会被显示成「此目录为空/可新建」。
+          loadError.value = `加载失败：${err instanceof Error ? err.message : String(err)}`
+        }
+      )
       items.value = resp.items
       cwdNode.value = resp.node
       hasMore.value = resp.items.length >= VDFS_PAGE_SIZE
@@ -641,11 +648,14 @@ export function useVdfs(opts: UseVdfsOptions) {
     const gen = appendGuard.revision(node.path)
     loadingDetail.value = true
     try {
-      const content = await readVdfs(READBACK_REASON.VDFS_BROWSER, node.path)
+      let readErr: unknown
+      const content = await readVdfs(READBACK_REASON.VDFS_BROWSER, node.path, (e) => {
+        readErr = e
+      })
       if (detailGuard.revision() !== token) return
       if (appendGuard.revision(node.path) !== gen) return
       if (!content) {
-        detailError.value = '读取失败'
+        detailError.value = `读取失败：${readErr instanceof Error ? readErr.message : '后端未返回内容'}`
         return
       }
       const text = content.text ?? ''

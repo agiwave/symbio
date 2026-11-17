@@ -74,10 +74,11 @@
         </button>
         <div v-show="!collapsed[si]" class="setting-group" :class="{ 'advanced-group': sec.title }">
           <template v-for="f in sec.fields" :key="f.key">
-            <div v-if="fieldVisible(f)" class="setting-item" :class="{ column: widgetIsFullWidth(f) }">
+            <div v-if="fieldVisible(f)" class="setting-item" :class="{ column: widgetIsFullWidth(f), 'field-invalid': fieldHasError(f) }">
             <div class="setting-info">
               <label :for="isLabelable(f) ? fieldControlId(f) : undefined">{{ f.label }}<span v-if="f.required" class="required">*</span></label>
               <p v-if="f.description" class="setting-desc">{{ f.description }}</p>
+              <p v-if="fieldErrorText(f)" class="field-error" role="alert">{{ fieldErrorText(f) }}</p>
             </div>
 
             <!-- static（只读展示：info 绑定概览 / 只读字段；options 作值→标签映射） -->
@@ -278,6 +279,7 @@ import type {
   DetailCondition,
   DetailDefinition,
   DetailField,
+  VdfsFieldError,
   VdfsNode,
 } from '@/schemas/vdfs'
 
@@ -291,8 +293,10 @@ const props = withDefaults(
      * 表单模型对象（字段名 → 当前值）：来自 `vdfs/read` 内容的 JSON parse，
      * 或级联选项节点的 `data`。异步到位（挂载后才返回）时会触发一次预填。
      */
-    values?: Record<string, unknown> | null
-    capabilities: Record<string, boolean>
+  values?: Record<string, unknown> | null
+  /** 后端字段级校验错误（供逐字段就地高亮；机器 key → 文案） */
+  fieldErrors?: VdfsFieldError[]
+  capabilities: Record<string, boolean>
     /** 机制动作注入（页面单一定义点计算：重命名 / 删除），与定义动作同排渲染于动作区。
      *  同 id 时**定义声明的那一份胜出**（去重规则见 schemas/vdfs-form.mergeDetailActions）。 */
     mechanismActions?: DetailAction[]
@@ -306,6 +310,7 @@ const props = withDefaults(
   }>(),
   {
     values: null,
+    fieldErrors: () => [],
     mechanismActions: () => [],
     saving: false,
     testing: false,
@@ -336,6 +341,11 @@ const emit = defineEmits<{
    */
   action: [id: string, file?: File]
   cancel: []
+  /**
+   * 表单是否有未保存改动。页面据此在切换节点 / 目录离开前弹确认，避免静默丢弃。
+   * 只在值真的偏离预填基线时翻转（刷新同一节点不会误报）。
+   */
+  'dirty-change': [dirty: boolean]
 }>()
 
 const uid = Math.random().toString(36).slice(2, 8)
@@ -518,6 +528,22 @@ function isLabelable(f: DetailField): boolean {
 
 /** 必填预检的错误信息（空 = 没有未填的必填项） */
 const requiredError = ref('')
+/** 就地高亮的字段 key：本地必填预检 + 后端字段级校验的并集 */
+const requiredFieldKeys = ref(new Set<string>())
+/** 后端字段级错误：key → 文案（把机器 key 映射回字段 label 展示） */
+const backendFieldError = computed<Record<string, string>>(() => {
+  const map: Record<string, string> = {}
+  for (const e of props.fieldErrors ?? []) if (e.field) map[e.field] = e.message
+  return map
+})
+/** 字段是否处于错误态（本地缺填 / 后端校验失败） */
+function fieldHasError(f: DetailField): boolean {
+  return requiredFieldKeys.value.has(f.key) || Boolean(backendFieldError.value[f.key])
+}
+/** 字段就地错误文案：优先后端，其次本地「必填」 */
+function fieldErrorText(f: DetailField): string {
+  return backendFieldError.value[f.key] || (requiredFieldKeys.value.has(f.key) ? '此项为必填' : '')
+}
 
 /**
  * 保存前的必填预检：只查**当前可见且可编辑**的必填字段。
@@ -525,16 +551,17 @@ const requiredError = ref('')
  * 后端 `validate_manifest` 仍是最终权威（格式、跨字段约束等都在那里）；
  * 这里只把「空着没填」这一种最常见的错误提前一步，并聚焦到第一个出错控件。
  */
-function firstMissingRequired(): DetailField | null {
+function missingRequiredFields(): DetailField[] {
+  const missing: DetailField[] = []
   for (const sec of props.definition.sections) {
     for (const f of sec.fields) {
       if (!f.required || !fieldVisible(f) || fieldDisabled(f)) continue
       if (specOf(f).tag === 'static') continue
       const v = form[f.key]
-      if (v == null || v === '' || (Array.isArray(v) && v.length === 0)) return f
+      if (v == null || v === '' || (Array.isArray(v) && v.length === 0)) missing.push(f)
     }
   }
-  return null
+  return missing
 }
 
 /** static 只读展示：options 值→标签映射，数组/对象友好展开 */
@@ -637,16 +664,19 @@ function runAction(a: DetailAction) {
     case 'save': {
       // info 只读：没有 save 语义
       if (isInfo.value) return
-      const missing = firstMissingRequired()
-      if (missing) {
-        requiredError.value = `请填写「${missing.label}」`
+      const missing = missingRequiredFields()
+      if (missing.length) {
+        // 一次列全所有缺失项，别让用户逐个点保存才发现下一个
+        requiredError.value = `请填写必填项：${missing.map((f) => f.label).join('、')}`
+        missing.forEach((f) => requiredFieldKeys.value.add(f.key))
         void nextTick(() => {
-          const el = document.getElementById(fieldControlId(missing))
+          const el = document.getElementById(fieldControlId(missing[0]))
           el?.scrollIntoView({ block: 'center' })
           el?.focus()
         })
         return
       }
+      requiredFieldKeys.value.clear()
       requiredError.value = ''
       const values = buildSave(saveCtx())
       if (!isUpload.value) {
@@ -740,6 +770,35 @@ function onPresetFieldChange(f: DetailField) {
   }
 }
 
+// ==================== 未保存改动追踪 ====================
+// 编辑现场是 form，基线是上次预填（或保存成功）时的快照。切换节点前页面据此拦截。
+let baseline = ''
+let lastDirty = false
+function snapshotBaseline() {
+  baseline = JSON.stringify(form)
+  if (lastDirty) {
+    lastDirty = false
+    emit('dirty-change', false)
+  }
+}
+watch(
+  form,
+  () => {
+    const dirty = JSON.stringify(form) !== baseline
+    if (dirty !== lastDirty) {
+      lastDirty = dirty
+      emit('dirty-change', dirty)
+    }
+  },
+  { deep: true }
+)
+
+/** 由页面在保存成功后调用：把当前值树立为新基线，dirty 归零 */
+function markSaved() {
+  snapshotBaseline()
+}
+defineExpose({ markSaved })
+
 // ==================== 预填（watch values：编辑态 / 新建态重置） ====================
 function initForm() {
   for (const sec of props.definition.sections) {
@@ -781,6 +840,8 @@ watch(
     // 编辑态：仅刷新动态候选（不覆盖已填值）；新建态：按 fill 策略填充
     applyPreset(!isExisting.value)
     for (const k of Object.keys(reveal)) reveal[k] = false
+    // 预填完成后拍一份基线：dirty 只认「偏离这次预填」，同一节点后台刷新不误报
+    snapshotBaseline()
   },
   { immediate: true }
 )
@@ -898,6 +959,16 @@ watch(
   background: var(--danger-bg);
   color: var(--danger-fg);
   font-size: var(--font-size-sm);
+}
+.field-error {
+  margin: 0.15rem 0 0;
+  font-size: 0.72rem;
+  color: var(--danger-fg);
+}
+.setting-item.field-invalid input,
+.setting-item.field-invalid select,
+.setting-item.field-invalid textarea {
+  border-color: var(--danger-fg);
 }
 
 /* static 只读展示（info 绑定概览字段） */

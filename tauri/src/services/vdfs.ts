@@ -99,7 +99,9 @@ export async function ensureVdfsRoot(): Promise<void> {
 export async function listVdfs(
   reason: ReadbackReason,
   path = vdfsRoot(),
-  opts?: VdfsListOptions
+  opts?: VdfsListOptions,
+  /** 失败观测器：读失败仍吞成空列表，但可据此把「读不到」上报给 UI（区别于「真没有」）。 */
+  onFallback?: (err: unknown) => void
 ): Promise<VdfsListResponse> {
   const payload: Record<string, unknown> = { path }
   if (opts?.limit !== undefined) payload.limit = opts.limit
@@ -109,7 +111,8 @@ export async function listVdfs(
   return withFallback(
     async () => (await callReadback<VdfsListResponse>(reason, VDFS_LIST, payload)) ?? empty(),
     empty,
-    { tag: 'vdfs-service', what: `listVdfs(${path}) failed` }
+    { tag: 'vdfs-service', what: `listVdfs(${path}) failed` },
+    onFallback
   )
 }
 
@@ -152,11 +155,17 @@ export function statVdfs(reason: ReadbackReason, path: string): Promise<VdfsNode
 }
 
 /** 读内容；失败返回 null。`reason` 见 [`READBACK_REASON`]（必填，进路由留痕）。 */
-export function readVdfs(reason: ReadbackReason, path: string): Promise<VdfsContent | null> {
-  return withFallback(() => callReadback<VdfsContent>(reason, VDFS_READ, { path }), () => null, {
-    tag: 'vdfs-service',
-    what: `readVdfs(${path}) failed`,
-  })
+export function readVdfs(
+  reason: ReadbackReason,
+  path: string,
+  onFallback?: (err: unknown) => void
+): Promise<VdfsContent | null> {
+  return withFallback(
+    () => callReadback<VdfsContent>(reason, VDFS_READ, { path }),
+    () => null,
+    { tag: 'vdfs-service', what: `readVdfs(${path}) failed` },
+    onFallback
+  )
 }
 
 /**

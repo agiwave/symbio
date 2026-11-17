@@ -47,6 +47,7 @@ const props = defineProps<VdfsRendererProps>()
 const emit = defineEmits<{
   (e: 'save', text: string): void
   (e: 'delete'): void
+  (e: 'dirty-change', dirty: boolean): void
 }>()
 
 const readonly = computed(() => !vdfsAccessOf(props.node).write)
@@ -63,9 +64,11 @@ const actions = computed<DetailAction[]>(() => [
 /** 自有动作的进行中标记（按索引对齐；写操作在途时两者都锁） */
 const busy = computed(() => actions.value.map(() => Boolean(props.saving)))
 
-/** 自有动作的禁用条件（保存键在无改动或只读时不可用） */
+/** 自有动作的禁用条件（保存键在无改动或只读时不可用；还原键在只读时也无文本可还） */
 const disabledFlags = computed(() =>
-  actions.value.map((a) => (a.id === 'save' ? !dirty.value || readonly.value : false))
+  actions.value.map((a) =>
+    a.id === 'save' ? !dirty.value || readonly.value : a.id === 'reset' ? readonly.value : false
+  )
 )
 
 /** 自有动作就地处理；机制动作（delete）原样上抛给页面 */
@@ -75,13 +78,22 @@ function onAction(a: DetailAction): void {
   else if (a.id === 'delete') emit('delete')
 }
 
-// 节点身份或后端内容变化时重置草稿（编辑中不覆盖：仅当节点切换/保存回调后同步）
+// 节点切换 ⇒ 一定重置草稿；同一节点的后端内容帧 ⇒ 仅在未编辑时同步。
+// 编辑到一半时外部 content 帧到达不该冲掉用户正在写的内容（多端/多进程写入下
+// 尤其常见）——那是静默丢数据，保存后由 markSaved/select 收敛即可。
+const draftDirtyForSync = computed(() => draft.value !== base.value)
 watch(
-  () => [props.node.path, base.value] as const,
+  () => props.node.path,
   () => {
     draft.value = base.value
   }
 )
+watch(base, (next) => {
+  if (!draftDirtyForSync.value) draft.value = next
+})
+
+// 未保存改动上抛：页面据此在切换节点/目录离开前拦截。dirty 翻转才发，避免刷屏。
+watch(dirty, (d) => emit('dirty-change', d), { immediate: true })
 
 function save() {
   if (readonly.value) return

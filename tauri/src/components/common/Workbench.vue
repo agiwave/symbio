@@ -76,13 +76,14 @@
 
       <slot name="list" />
 
-      <div v-if="!hasListContent && $slots.empty" class="empty-state">
-        <slot name="empty" />
-      </div>
-      <!-- 加载态用骨架卡而非纯文字：形状与列表内容一致，数据到达是"填充"
-           而不是"重排"（纯文字态与内容态高度不等，一到就跳） -->
-      <div v-else-if="!hasListContent && loading" class="list-skeleton" aria-busy="true">
+      <!-- 加载态优先于空态：换目录时列表还没回来，若先渲染 #empty 会闪现
+           「暂无子目录 / 新建第一个 X」的假空态，用户以为资源没了。骨架必须
+           抢在空态前面（此前 v-if 判空在前，#empty 恒存在 ⇒ 骨架分支不可达）。 -->
+      <div v-if="!hasListContent && loading" class="list-skeleton" aria-busy="true">
         <VdfsCardSkeleton v-for="i in SKELETON_COUNT" :key="i" :title-width="skeletonTitleWidth(i)" />
+      </div>
+      <div v-else-if="!hasListContent && $slots.empty" class="empty-state">
+        <slot name="empty" />
       </div>
     </aside>
 

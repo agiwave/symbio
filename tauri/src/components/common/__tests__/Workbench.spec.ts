@@ -12,8 +12,8 @@
  *    挡住它被改回文件图标。
  * 2. **图标不写死尺寸**：兜底 svg 不带 `width` / `height`，尺寸交给容器 CSS
  *    （`.nav-btn svg` 20px / `.card-icon` 16px）。写死任何一边，另一边就是错的。
- * 3. **空态与加载态互斥且空态优先**：两者都以「列表无内容」为前提，
- *    `empty` 插槽在场时显示空态，否则才轮到「加载中…」。
+ * 3. **空态与加载态互斥且加载态优先**：两者都以「列表无内容」为前提，
+ *    loading 时先显示骨架（换目录不会闪现假空态），加载结束才轮到 `empty` 插槽。
  *
  * 另：不传 `railItems` = 两栏形态（无侧边栏），是本容器的一等形态，不是边界。
  */
@@ -142,13 +142,13 @@ describe('Workbench — 中栏', () => {
     expect(w.find('.workbench-list').attributes('style')).toContain('width: 320px')
   })
 
-  it('列表无内容 + 有 empty 插槽 → 空态', () => {
+  it('列表无内容 + loading + 有 empty 插槽 → 骨架优先（不闪现假空态）', () => {
     const w = mount(Workbench, {
       props: { hasListContent: false, loading: true },
       slots: { empty: '<span class="e">没有内容</span>' },
     })
-    expect(w.find('.empty-state .e').exists()).toBe(true)
-    expect(w.find('.list-skeleton').exists()).toBe(false)
+    expect(w.find('.list-skeleton').exists()).toBe(true)
+    expect(w.find('.empty-state .e').exists()).toBe(false)
   })
 
   it('列表无内容 + 无 empty 插槽 + loading → 骨架卡加载态', () => {

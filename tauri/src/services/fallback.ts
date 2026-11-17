@@ -69,12 +69,22 @@ export interface FallbackLog {
 export async function withFallback<T>(
   op: () => Promise<T>,
   fallback: () => T,
-  log: FallbackLog
+  log: FallbackLog,
+  /** 可选的失败观测器：吞错口径不变，但调用方可据此把「读不到」与「真没有」区分上报。
+   *  观察者抛错不影响兜底返回。 */
+  onFallback?: (err: unknown) => void
 ): Promise<T> {
   try {
     return await op()
   } catch (err) {
     logger[log.level ?? 'error'](log.tag, `${log.what}:`, err)
+    if (onFallback) {
+      try {
+        onFallback(err)
+      } catch (observerErr) {
+        logger.warn(log.tag, `${log.what}: 失败观测器抛错`, observerErr)
+      }
+    }
     return fallback()
   }
 }
