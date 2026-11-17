@@ -592,6 +592,16 @@ impl SymbioClient {
                         // 离开 `working` = 本轮结束（中止 / 失败 / 正常收尾三种结局之一，
                         // 由 `outcome` 区分）。此刻本轮全部消息帧**已在它之前落地**——
                         // 单一订阅 FIFO 给出的保证，不是调度巧合。
+                        //
+                        // 但**先得见过本轮的 `working`**：状态视图会因收尾 / 告警重复
+                        // 下发同一份（584 行的幂等假设只对 working 做了）。下一轮 `ask`
+                        // 的 `last_status` 还是 `None`，若把上一轮遗留的终态帧当成这轮的
+                        // 结束，就会在正文帧之前返回——t4 的 WAL 已有第二轮终答，stdout
+                        // 却只有第一轮。Resync 分支不设此限：它靠 `stat` 回读当前状态，
+                        // 本来就是漏帧的兜底。
+                        if last_status.as_deref() != Some(VDFS_STATUS_WORKING) {
+                            continue;
+                        }
                         if node.attributes.get("outcome").and_then(Value::as_str)
                             == Some(OUTCOME_ABORTED)
                         {
