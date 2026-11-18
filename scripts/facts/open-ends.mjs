@@ -10,9 +10,9 @@
  *
  * ## 为什么必须是生成物
  *
- * 手抄的「当前 14 篇」必然与 front-matter 漂移，而漂移没人看得见：复盘时在
- * D-480 撞到手抄的累计欠账读数，实跑 `capability-migration-audit` 已是 0；
- * `docs/README.md` 的 guide 总账也落后于 `registry-board` 的实时读数。本表每格
+ * 手抄的「当前 14 篇」必然与 front-matter 漂移，而漂移没人看得见：手抄的累计欠账读数
+ * 与 `capability-migration-audit` 的实跑值早已分叉；`docs/README.md` 的 guide 总账也
+ * 落后于 `registry-board` 的实时读数。本表每格
  * 从 owner 实时取值，`gen-facts --check` 让「读数说谎」变成一次判红。
  *
  * ## 判据不在这里
@@ -48,7 +48,7 @@ created: 2026-11-13
  * 一行读数 = 一个 owner 的条数 + 去哪查。
  *
  * `key` 指向 [`collect`] 的返回；新增一类欠账只加一行，并让 `collect` 从它的
- * owner 把数读出来。任何一格都不许写死数字——写死就是下一处 D-480。
+ * owner 把数读出来。任何一格都不许写死数字——写死就制造了第二份会漂移的手抄读数。
  */
 export const ROWS = [
   {
