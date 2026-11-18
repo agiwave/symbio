@@ -1,4 +1,4 @@
-//! Agent 包的**权限声明**与它的执行方（`DE-011` §5.3 / D-102 / D-140 / D-153）。
+//! Agent 包的**权限声明**与它的执行方（`DE-011` §5.3 / D-140 / D-153）。
 //!
 //! ## 这个模块为什么在 core
 //!
@@ -13,7 +13,7 @@
 //! 四个字段（`network` / `fs.read` / `fs.write` / `limits`）是**授权清单**：
 //! 列了才能用，没列就是没有。空清单 = 一律拒（fail-closed），与授权表
 //! （`authz` 域的授权表）同一条纪律——「不声明就有」的边界不是边界，
-//! 那正是 D-102 判过的坏形状。完整裁决（含被否候选）见
+//! 那正是「不声明就有」这种坏形状。完整裁决（含被否候选）见
 //! [D-153](../../../../docs/003-design/011-Agent目录规范.md#d-153-权限四字段的执行面同批落地空清单即拒glob-只管自己的包 "DE-011-Agent目录规范")。
 //!
 //! ## 执行面与边界（哪些地方真的在守）
@@ -49,7 +49,7 @@ use symbio_kernel::plugin::{PluginInvokeRequest, PluginInvokeRequestExt};
 
 /// Agent 包的权限声明（manifest `permissions` 四字段）。
 ///
-/// 线格式由规范 §5.3 定；Rust 侧曾叫 `declared_permissions`（D-102：当时没有
+/// 线格式由规范 §5.3 定；Rust 侧曾叫 `declared_permissions`（当时的中间态没有
 /// 执行方），四字段同批落地后改回 [`Self`] 本名（D-140 的两态之名）。
 #[derive(Debug, Clone, Default, Serialize, Deserialize)]
 #[serde(default)]

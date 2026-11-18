@@ -62,7 +62,7 @@ pub struct AgentManifest {
     /// [D-153](../../../../docs/003-design/011-Agent目录规范.md#d-153-权限四字段的执行面同批落地空清单即拒glob-只管自己的包 "DE-011-Agent目录规范")。
     ///
     /// **线格式不变**（`permissions`）：它一直是 Agent 包的公开键；Rust 侧曾按
-    /// 「没有执行方」改名 `declared_permissions`（D-102），执行面落地后改回本名
+    /// 「没有执行方」改名 `declared_permissions`（早期中间态），执行面落地后改回本名
     /// （D-140 的两态之名）。
     #[serde(
         rename = "permissions",
