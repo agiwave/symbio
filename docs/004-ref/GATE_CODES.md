@@ -56,7 +56,7 @@ lists: [gate-codes=owner]
 | **R** | 死代码 | `scripts/audits/dead-code-audit.mjs` | R-001–003 | `R-004` |
 | **RF** | 文档引用（编号 → 地址由机制生成） | `scripts/gens/gen-doc-refs.mjs` | RF-001–004 | `RF-005` |
 | **RG** | 登记条目校验（registry 单文档的字段 / 状态 / 依赖 / 判据指认 / 分解） | `scripts/registry-lib.mjs` | RG-001–027、RG-029–033 | `RG-034` |
-| **S** | 源码 grep 形态 | `scripts/audits/grep-audit.mjs` | S-001–003、S-006–010、S-012–017 | `S-018` |
+| **S** | 源码 grep 形态 | `scripts/audits/grep-audit.mjs` | S-002、S-008–010、S-012–017 | `S-018` |
 | **SC** | 插件层特判（工具名 / 供应商差异） | `scripts/audits/plugin-special-case-audit.mjs` | SC-001–006 | `SC-007` |
 | **SD** | 会话死码台账（B 类能力待接入） | `scripts/audits/session-dead-code-audit.mjs` | SD-001–002 | `SD-003` |
 | **SPC** | 规范执行方覆盖 | `scripts/audits/spec-coverage-audit.mjs` | SPC-001–003 | `SPC-004` |
@@ -283,11 +283,7 @@ lists: [gate-codes=owner]
 | **RG-031** | `scripts/registry-lib.mjs` |
 | **RG-032** | `scripts/registry-lib.mjs` |
 | **RG-033** | `scripts/registry-lib.mjs` |
-| **S-001** | `scripts/audits/grep-audit.mjs` |
 | **S-002** | `scripts/audits/grep-audit.mjs` |
-| **S-003** | `scripts/audits/grep-audit.mjs` |
-| **S-006** | `scripts/audits/grep-audit.mjs` |
-| **S-007** | `scripts/audits/grep-audit.mjs` |
 | **S-008** | `scripts/audits/grep-audit.mjs` |
 | **S-009** | `scripts/audits/grep-audit.mjs` |
 | **S-010** | `scripts/audits/grep-audit.mjs` |
