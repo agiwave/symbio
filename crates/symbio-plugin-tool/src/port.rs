@@ -355,7 +355,7 @@ fn approval_denied_draft(
 /// 批准是**一次用户动作**，但此前的授权结论只在内存里（`resume` 动作串）：
 /// `authz.denied{needs_approval}` 之后没有对应的放行结论。这里在批准执行前补上
 /// `authz.granted`，风险档**原样取闸门已交回的产物载荷**（`prompt.risk_level`，
-/// 唯一解析点在 `ApprovalGate`）——消费端不许再算一遍（D-350）。
+/// 唯一解析点在 `ApprovalGate`）——消费端不许再算一遍。
 ///
 /// 幂等键与首派的 `authz` 分开：同一笔债的第二次结论，不是重复；重放会被事实源
 /// 按同键吸收。

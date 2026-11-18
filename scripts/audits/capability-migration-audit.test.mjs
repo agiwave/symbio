@@ -490,7 +490,7 @@ test('mechanismAdditions：真新增的公开项照样点名（抵账只认同�
   assert.equal(mechanismAdditions(p).length, 1)
 })
 
-test('mechanismAdditions：同文件改名（同形状、换词根）不算补件（D-504）', () => {
+test('mechanismAdditions：同文件改名（同形状、换词根）不算补件', () => {
   // turn→scope 的两笔欠账：改的是词根，声明形状一字未变，机制面没有变宽。
   const p = patchOf([
     {
@@ -513,7 +513,7 @@ test('mechanismAdditions：同文件改名（同形状、换词根）不算补�
   assert.deepEqual(mechanismAdditions(p), [])
 })
 
-test('mechanismAdditions：改名抵掉同形状后，多出来的真新增仍算补件（D-504）', () => {
+test('mechanismAdditions：改名抵掉同形状后，多出来的真新增仍算补件', () => {
   // 删 1 个、加 2 个（其中 1 个是改名、1 个是真新增）⇒ 只点名真新增那条。
   const p = patchOf([
     {
@@ -530,7 +530,7 @@ test('mechanismAdditions：改名抵掉同形状后，多出来的真新增仍�
   assert.match(adds[0].line, /brand_new_entry/)
 })
 
-test('mechanismAdditions：只增不减时，即便形状彼此相同也不互相抵消（D-504）', () => {
+test('mechanismAdditions：只增不减时，即便形状彼此相同也不互相抵消', () => {
   // 两个新增 const 形状相同但没有任何删除 ⇒ 都是真补件，不能自己抵自己。
   const p = patchOf([
     {

@@ -858,12 +858,12 @@ fn answered_turn_folds_into_the_same_tree_as_a_work_turn() {
     assert_eq!(meta["reason"], "from_context");
 }
 
-/// 两个产出点交的两份载荷，折出的是**同一棵树**（`D-345` 的出口判据，`D-482`）。
+/// 两个产出点交的两份载荷，折出的是**同一棵树**（`D-482` 的出口判据）。
 ///
 /// 左栏是模型端口的形状（`port.rs::outcome_payload`：带 `text_id` / `truncated` /
 /// `calls[]`），右栏是答话行的形状（`answer.rs::answer_step`：没有 `text_id`，
 /// 对话面标记走 `meta`）。两份载荷的键不能全等——它们掌握的信息不同——但**挂在
-/// 哪、是什么节点、正文是什么、状态是什么**必须逐字段相等。`D-345` 的病正是这一层
+/// 哪、是什么节点、正文是什么、状态是什么**必须逐字段相等。终答的病正是这一层
 /// 不相等（一条根级、一条轮下），而字段差异只是它的投影。
 #[test]
 fn the_two_final_writers_fold_into_one_tree() {
