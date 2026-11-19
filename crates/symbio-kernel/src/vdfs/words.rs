@@ -242,3 +242,13 @@ pub const VDFS_PARAM_LIMIT: &str = "limit";
 /// 游标是**地址**而不是页码：清单在两次请求之间会变（新增 / 删除 / 被顶到前面），
 /// 偏移量会重复或漏项，地址不会。
 pub const VDFS_PARAM_BEFORE: &str = "before";
+
+/// 参数键：`list` 时**连 `hidden` 的子节点一起列出**（缺省不列）。
+///
+/// `hidden` 的语义是「清单里不出现」，不是「不存在」（见 `VdfsNode::hidden`）。
+/// 而**按 `kind` 发现一段叫什么名字**只能看清单——段名不进消费方的地址模板，
+/// 正是为了让 provider 能改文案。于是清单有两种读法：**导航**问「这里有什么可
+/// 浏览的」（缺省，隐藏节点不出现），**发现**问「这一段叫什么」（带本参数）。
+///
+/// 与 [`VDFS_PARAM_LIMIT`] 同一条约定：可选、不认就当没传，provider 无需改动。
+pub const VDFS_PARAM_WITH_HIDDEN: &str = "with_hidden";

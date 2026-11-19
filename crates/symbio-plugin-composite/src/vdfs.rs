@@ -85,7 +85,7 @@ use symbio_plugin_api::{
     VdfsAccess, VdfsActionResult, VdfsChange, VdfsChangeSink, VdfsContent, VdfsContext, VdfsError,
     VdfsNewType, VdfsNode, VdfsProvider, VdfsRequest, VdfsResponse, VdfsResult, VdfsWriteResponse,
     VDFS_ACTION_DISABLE, VDFS_ACTION_ENABLE, VDFS_ACTION_PLUGINS, VDFS_EXT_FORM,
-    VDFS_PLUGINS_FIELD, VDFS_PLUGIN_NAME_FIELD, VDFS_PLUGIN_PROVIDER_FIELD,
+    VDFS_PARAM_WITH_HIDDEN, VDFS_PLUGINS_FIELD, VDFS_PLUGIN_NAME_FIELD, VDFS_PLUGIN_PROVIDER_FIELD,
 };
 
 use symbio_providers::new_registry;
@@ -95,6 +95,17 @@ pub struct CompositeVdfs {
     /// 插件集合：目录清单（资源树与注册表）与实例表都在它那里，
     /// 运行期启停/安装/卸载也经它执行——本视图因此没有自己的状态。
     registry: Arc<PluginRegistry>,
+}
+
+/// `list` 的调用级开关：连 `hidden` 的子节点一起列出（缺省只列可见的）。
+///
+/// `hidden` 的语义是「清单里不出现」，不是「不存在」——而**按 `kind` 认段**只能看
+/// 清单（段名不进消费方的地址模板）。于是清单有两种读法：导航（缺省）看不见隐藏
+/// 节点，发现（带 `VDFS_PARAM_WITH_HIDDEN`）看得见它。开关只作用于这一次调用，
+/// 缺省行为与从前逐字节一致。
+fn include_hidden(ctx: &VdfsContext) -> bool {
+    ctx.param_as::<bool>(VDFS_PARAM_WITH_HIDDEN)
+        .unwrap_or(false)
 }
 
 /// 拆分树内路径：`(首段, 其余)`；根（空路径）返回 `None`
@@ -513,7 +524,10 @@ impl VdfsProvider for CompositeVdfs {
                             .await,
                         );
                     }
-                    Ok(VdfsResponse::list(out.into_iter().filter(|n| !n.hidden)))
+                    let all = include_hidden(ctx);
+                    Ok(VdfsResponse::list(
+                        out.into_iter().filter(|n| all || !n.hidden),
+                    ))
                 }
                 VdfsRequest::Stat => Ok(VdfsResponse::Stat(self.self_node(&dirs))),
                 // 注册表动词（见上文「插件注册表（运行期）」）：列 / 启停 / 安装。
@@ -554,8 +568,10 @@ impl VdfsProvider for CompositeVdfs {
                 // 地址与 `ext` / `title` 不在这里补——访问层按**请求地址**统一回填
                 // （见模块文档「本层不填条目地址」）。
                 // 隐藏属性是**机制级**的：任何子树里被标为 hidden 的子节点都不出现，
-                // 不因它来自哪个插件而异。
-                items.retain(|it| !it.node.hidden);
+                // 不因它来自哪个插件而异（`with_hidden` 那次调用除外，见 `include_hidden`）。
+                if !include_hidden(ctx) {
+                    items.retain(|it| !it.node.hidden);
+                }
                 Ok(VdfsResponse::List(items))
             }
             VdfsRequest::Stat => {

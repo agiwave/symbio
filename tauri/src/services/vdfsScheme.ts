@@ -241,7 +241,11 @@ async function resolveSegs(mountDir: string): Promise<{ messagesSeg: string; inb
     throw new Error(`集合段未解析：${mountDir} 下没有任何会话可供推导`)
   }
   const sessionPath = fullAddr(mountDir, first)
-  const children = (await listVdfs(READBACK_REASON.BOOTSTRAP, sessionPath)).items ?? []
+  // 段目录在导航里是隐藏的（转写已在会话正文显示，收件箱是内部机制），因此这一次
+  // list 要带 `withHidden`：导航问「有什么可浏览」，发现问「这一段叫什么」——
+  // 后者只能看清单，隐藏只挡前者。
+  const children =
+    (await listVdfs(READBACK_REASON.BOOTSTRAP, sessionPath, { withHidden: true })).items ?? []
   const messages = children.find(isMessagesSeg)
   const inbox = children.find(isInboxSeg)
   if (!messages) {

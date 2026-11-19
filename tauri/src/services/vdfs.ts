@@ -41,6 +41,13 @@ import type { ReadbackReason } from './readback'
 export interface VdfsListOptions {
   limit?: number
   before?: string
+  /**
+   * 连 `hidden` 的子节点一起列出（缺省只列可见的）。
+   *
+   * 清单有两种读法：**导航**问「这里有什么可浏览的」，**发现**问「这一段叫什么
+   * 名字」（段名不进地址模板，只能从清单里认）。隐藏的子节点只从后者的清单里消失。
+   */
+  withHidden?: boolean
 }
 
 /**
@@ -137,6 +144,7 @@ export async function listVdfs(
   const payload: Record<string, unknown> = { path: addr }
   if (opts?.limit !== undefined) payload.limit = opts.limit
   if (opts?.before) payload.before = opts.before
+  if (opts?.withHidden) payload.with_hidden = true
   // 空目录要带上 `path`，故兜底是 thunk（惰性）而非常量
   const empty = (): VdfsListResponse => ({ path: addr, node: emptyNode(addr), items: [] })
   return withFallback(

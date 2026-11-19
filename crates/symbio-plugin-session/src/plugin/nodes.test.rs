@@ -362,6 +362,16 @@ fn vdfs_internal_dirs_conditional() {
         without[1].kind, KIND_INBOX,
         "收件箱的 kind 是稳定协议词（与会话转写消息区分开）"
     );
+    // 左栏只列**用户要浏览的资源**：转写已在会话正文显示，收件箱是内部机制，
+    // 两者都不该在导航里再出现一次。`hidden` 只挡清单，寻址与 kind 发现照常。
+    assert!(
+        without[0].hidden && without[1].hidden,
+        "转写 / 收件箱不进导航（hidden 只影响清单）"
+    );
+    assert!(
+        !without[2].hidden && !without[3].hidden,
+        "子会话 / 记忆仍是导航里的资源，不得跟着隐藏"
+    );
     assert_eq!(without[2].name, workdir::SEG_SUB_SESSIONS);
     // 侧栏与卡片按 kind 取图标（前端 `registry/vdfsIcons` 按它查表）。
     // 没有 kind 的两个区段此前只能退成文件夹兜底——四个一样的图标，
@@ -395,6 +405,7 @@ fn vdfs_internal_dirs_conditional() {
         with[4].is_dir() && !with[4].access.write,
         "工作目录是只读目录（不提供新建）"
     );
+    assert!(!with[4].hidden, "工作目录要出现在导航里");
 }
 
 /// 转写列表项：`ext = message`、只读、正文进内容、结构进 `attributes`

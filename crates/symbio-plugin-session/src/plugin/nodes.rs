@@ -352,6 +352,10 @@ pub(crate) const TITLE_MESSAGES: &str = "消息";
 pub(crate) fn messages_dir_node() -> VdfsNode {
     let mut node = VdfsNode::dir(SEG_MESSAGES, TITLE_MESSAGES, VdfsAccess::LIST);
     node.kind = KIND_MESSAGES.to_string();
+    // **不进导航**：转写已经在会话正文里显示，左栏再列一段「消息」是同一份数据的
+    // 第二个入口。`hidden` 只影响清单（导航），按 `<sid>/message` 的寻址照常，
+    // 按 `kind` 发现段名的消费方带 `VDFS_PARAM_WITH_HIDDEN` 那次 list 也照常看得见。
+    node.hidden = true;
     node
 }
 
@@ -383,6 +387,10 @@ pub(crate) const TITLE_INBOX: &str = "收件箱";
 pub(crate) fn inbox_dir_node() -> VdfsNode {
     let mut node = VdfsNode::dir(SEG_INBOX, TITLE_INBOX, VdfsAccess::LIST);
     node.kind = KIND_INBOX.to_string();
+    // **不进导航**：收件箱是**内部机制**（待消费的用户消息队列，被消费才落库），
+    // 不是用户要浏览的一份资源。隐藏只影响清单：写入 `<sid>/inbox/<iid>` 照常可入队，
+    // 按 `kind` 发现段名的消费方带 `VDFS_PARAM_WITH_HIDDEN` 那次 list 仍看得见。
+    node.hidden = true;
     node
 }
 

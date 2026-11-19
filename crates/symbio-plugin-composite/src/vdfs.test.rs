@@ -266,6 +266,25 @@ async fn hidden_dirs_are_filtered_from_listing_but_still_reachable() {
         vec!["shown"]
     );
 
+    // 发现用（按 kind 认段名）带开关：隐藏节点回到清单里——导航看不见的，发现看得见
+    let discovering = ctx
+        .clone()
+        .with_param(symbio_plugin_api::VDFS_PARAM_WITH_HIDDEN, true);
+    let VdfsResponse::List(named) = vdfs
+        .dispatch(&discovering, "", VdfsRequest::List {})
+        .await
+        .unwrap()
+    else {
+        panic!("应为 List 响应");
+    };
+    assert_eq!(
+        named
+            .iter()
+            .map(|it| it.node.name.as_str())
+            .collect::<Vec<_>>(),
+        vec!["shown", "masked"]
+    );
+
     // 但按路径 stat 照常命中，且**如实报告**隐藏属性
     let VdfsResponse::Stat(n) = vdfs
         .dispatch(&ctx, "masked", VdfsRequest::Stat)

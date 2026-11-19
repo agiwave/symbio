@@ -139,6 +139,10 @@ describe('ensureSessionScheme：按 kind 认两个集合段', () => {
     })
     // 两个段**一次列目录同时取**：它们住在同一个父下，分两次解析就是两次 IPC
     expect(vdfs.listVdfs).toHaveBeenCalledTimes(3)
+    // 段目录在导航里是隐藏的 ⇒ 发现那一次调用必须带开关，否则认不出段名
+    expect(vdfs.listVdfs).toHaveBeenLastCalledWith(READBACK_REASON.BOOTSTRAP, '@vfs/session/s1', {
+      withHidden: true,
+    })
   })
 
   it('展示名变了也认得出（这正是 kind 存在的理由）', async () => {
