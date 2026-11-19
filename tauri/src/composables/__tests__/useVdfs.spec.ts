@@ -155,6 +155,45 @@ beforeEach(() => {
   mocks.subscribeVdfsChanged.mockReturnValue(() => {})
 })
 
+describe('useVdfs 地址代数（挂载层 / 选中项 / 深链）', () => {
+  /** 一个子目录项（左栏导航用的形状：含 `l`） */
+  function dirItem(base: string, name: string): VdfsNode {
+    return {
+      path: `${base}/${name}`,
+      name,
+      title: name,
+      kind: 'subsession',
+      status: 'active',
+      access: 'l',
+    }
+  }
+
+  it('挂载层不拼上一页残留的选中名（回退到挂载页时 cwd = 挂载目录本身）', async () => {
+    const addrRef = ref('@vfs/session/abc')
+    // 会话页：左栏有 `subsession`，刷新时被自动选中 ⇒ 当前目录是 `<会话>/subsession`
+    mocks.listVdfs.mockResolvedValue({
+      path: '@vfs/session/abc',
+      node: { ...msgNode('__dir'), access: 'l', ext: undefined },
+      items: [dirItem('@vfs/session/abc', 'subsession')],
+    })
+    const { api, wrapper } = mountHost(addrRef)
+    await settle()
+    expect(api.cwd.value).toBe('@vfs/session/abc/subsession')
+
+    // 回退到挂载页：同一控件实例只换绑定地址，`selectedName` 会留着上一页的值。
+    // 挂载层的左栏是**类别清单**，那个名字不是本目录的子项——拼上就是
+    // `@vfs/session/subsession` 这个不存在的地址（后端只能回「会话不存在」）。
+    addrRef.value = '@vfs/session'
+    await settle()
+    expect(api.cwd.value).toBe('@vfs/session')
+    expect(
+      mocks.listVdfs.mock.calls.some((c) => c[1] === '@vfs/session/subsession'),
+      '悬空的选中名不得被拼成本目录的子地址',
+    ).toBe(false)
+    wrapper.unmount()
+  })
+})
+
 describe('useVdfs 消费 VDFS 变更（信封没有操作枚举、非 delta 载荷 ⇒ 一律重拉收敛）', () => {
   it('影响当前目录的变更触发重拉（无载荷 = 「这个节点变了，请重读」）', async () => {
     vi.useFakeTimers()

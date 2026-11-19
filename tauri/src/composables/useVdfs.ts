@@ -192,9 +192,17 @@ export function useVdfs(opts: UseVdfsOptions) {
    */
   const focusNotice = ref('')
 
-  /** 当前目录全路径 = 绑定地址 + 选中的子目录（深链时 = 绑定地址本身） */
+  /**
+   * 当前目录全路径 = 绑定地址 + 选中的子目录（深链 / 挂载层 = 绑定地址本身）。
+   *
+   * **挂载层不取选中项**：那一层的左栏是**类别清单**（`navDir` = 根），`selectedName`
+   * 是「本目录的子目录」而不是类别。工作台在地址页之间复用同一个控件实例，`selectedName`
+   * 会留着上一页的值（如从会话页回退到挂载页时留着 `subsession`）——拼上去就是
+   * `<挂载目录>/<上一页的选中名>` 这种不存在的地址，后端只能回「会话不存在」，而
+   * 当前目录本是那个挂载目录。
+   */
   const cwd = computed(() =>
-    pinnedAtAddr.value
+    pinnedAtAddr.value || atMountLevel.value
       ? addr.value
       : selectedName.value
         ? vdfsJoin(addr.value, selectedName.value)

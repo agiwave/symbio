@@ -614,6 +614,28 @@ async fn facts_hands_out_one_shared_instance_per_session() {
     );
 }
 
+/// 只读面**不要求会话主体**：载体（`session.json`）读不到的会话照常开事实源。
+///
+/// D-339 的「拒绝回落主体」是**落账**的纪律（`@principal` 解析），不是打开处的闸：
+/// 在那里拒绝会把 `session/stats` / `session/changes` 一起判死——而它们根本不落账。
+/// 用户看到的后果是「每打开一个旧会话就报一次内部错误」，读数是永远出不来。
+#[tokio::test]
+async fn a_session_without_metadata_still_opens_its_fact_source() {
+    let tmp = TempDir::new().unwrap();
+    let store = SessionStore::new(tmp.path().to_path_buf());
+    save(&store, &session_with("sess_legacy", None)).await;
+    std::fs::remove_file(dir_for(tmp.path(), "sess_legacy").join("session.json"))
+        .expect("删掉元数据载体，模拟旧 / 损坏会话");
+
+    assert!(
+        store
+            .fact_source("sess_legacy")
+            .expect("载体读不到不是打开失败")
+            .is_some(),
+        "目录在 ⇒ 事实源照常打开（读面不需要主体）"
+    );
+}
+
 /// **开轮写口的补落**：另一个进程寄存的消息变更，在令牌回到本进程后的第一个
 /// 写窗口落进事实源（`SessionStore::drain_parked` 的生产调用点是会话开面的
 /// `plugin.rs::fact_source`）。

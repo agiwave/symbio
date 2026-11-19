@@ -234,16 +234,19 @@ impl SessionStore {
         let workdir = super::layout::read_workdir(&dir);
         // 运行参数与 workdir 同一读法：地址写入面不承载运行选项，metadata 是来源。
         let params = super::layout::read_session_params(&dir);
-        // 会话主体的唯一来源；目录在却取不到就显式失败，不回落 `session/main`。
-        let agent_id = super::layout::read_agent_id(&dir).ok_or_else(|| {
-            format!("会话 {session_id} 的 metadata 取不到 agent_id（拒绝回落主体）")
-        })?;
+        // 会话主体的唯一来源；取不到时**原样传 `None`，不回落 `session/main`**。
+        //
+        // 拒绝点不在「打开」而在「落账」：`SessionFactSource::append` 碰到 `@principal`
+        // 而主体为 `None` 时显式失败（D-339）。打开就要求主体会把**只读面**一起判死——
+        // 旧会话 / 载体读不到的会话连读数（`session/stats`、`session/changes`）都打不开，
+        // 而那两条路径根本不落账。
+        let agent_id = super::layout::read_agent_id(&dir);
         Ok(self.facts(session_id)?.map(|wal| {
             super::fact_source::SessionFactSource::open(
                 wal,
                 session_id.to_string(),
                 workdir,
-                Some(agent_id),
+                agent_id,
                 params,
                 self.agent_scope_cell(session_id),
                 self.source_principal_cell(session_id),
