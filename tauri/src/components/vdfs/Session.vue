@@ -58,12 +58,19 @@
     </div>
   </div>
 </template>
-
 <script setup lang="ts">
 import { computed, ref, watch } from 'vue'
-import { isVdfsDraft, type DetailAction, type DetailDefinition, type VdfsItem } from '@/schemas/vdfs'
+import {
+  isVdfsDraft,
+  vdfsBase,
+  vdfsJoin,
+  type DetailAction,
+  type DetailDefinition,
+  type VdfsItem,
+} from '@/schemas/vdfs'
 import type { ImageAttachment } from '@/types'
 import { useSessionsStore } from '@/stores/sessions'
+import { sessionSpaceOf } from '@/services/vdfsScheme'
 import { useToast } from '@/composables/useToast'
 import { logger } from '@/utils/logger'
 import ChatMainPanel from '@/components/session/ChatMainPanel.vue'
@@ -144,10 +151,37 @@ function onAction(a: DetailAction) {
 // 身份是「空间 + id」，只传 id 会把「住在哪个空间」在这一跳丢掉——子智能体空间
 // 里选中的会话于是被当成根空间的会话，消息发到了父智能体。地址解析见
 // `schemas/vdfs.parseVdfsSessionAddr`。
+//
+// ⚠️ 地址**不一定是** `<挂载目录>/<id>`：子会话（`<父会话>/subsession/<子>`）的
+// `ext` 也是 `session`，可它多嵌了两段。若原样交给 store，`parseVdfsSessionAddr`
+// 会把 `<父会话>/subsession` 当成「空间」，接着清单、转写、收件箱、工作目录全部
+// 按这个假空间拼地址——得到一串「会话内部不存在该路径」「没有 kind=messages 的
+// 子节点」「该路径不可写入」。
+//
+// 但子会话**不是**不能看：它在后端是**独立会话**（凭自己的 id 直取，见
+// `store::load_session_checked` 的「嵌套子会话也凭自身 id 命中」），与父会话住在
+// 同一个空间里。于是这里只做一件事——把它**重新落到所属空间的门口**：
+// `<挂载目录>/<子>`。空间由节点自述向上认（`sessionSpaceOf`），前端不认识
+// `subsession` 这个段名。
+//
+// 顺带还要把节点自述一起交给 store：子会话不在挂载目录的 `list` 里，而
+// `activeWorkdir` / 标题 / 运行态都从清单项取，缺了它面板会退化成「请先选工作目录」。
+/** 选中代次：连点几项时，先发起的 stat 回执不得覆盖后选中的那一项 */
+let selectSeq = 0
+
 watch(
   () => props.node?.path,
-  (addr) => {
-    if (addr) void store.selectSession(addr)
+  async (addr) => {
+    if (!addr) return
+    const seq = ++selectSeq
+    const node = props.node
+    const space = await sessionSpaceOf(addr)
+    if (seq !== selectSeq) return
+    // 正常会话：`space` 就是父目录，`vdfsJoin` 拼回来的地址与 `addr` 逐字节相同；
+    // 子会话：被重新落到 `<挂载目录>/<子>`。解析不出空间（自述读不到）时**不否决**，
+    // 原样交给 store——一次 IPC 抖动不该让会话变成打不开。
+    const target = space ? vdfsJoin(space, vdfsBase(addr)) : addr
+    void store.selectSession(target, node)
   },
   { immediate: true }
 )

@@ -44,7 +44,7 @@
  * 再补一次，新建会话后也补一次；而引导窗口内没有任何会话被展示。
  */
 
-import { listVdfs } from './vdfs'
+import { listVdfs, statVdfs } from './vdfs'
 import { READBACK_REASON } from './readback'
 import {
   VDFS_EXT_SESSION,
@@ -52,9 +52,10 @@ import {
   VDFS_KIND_MESSAGES,
   isVdfsSystemAddr,
   vdfsJoin,
+  vdfsParent,
   type VdfsSessionScheme,
 } from '@/schemas/vdfs'
-import { isInboxSeg, isMessagesSeg, isSessionNode } from '@/registry/vdfsTypes'
+import { isInboxSeg, isMessagesSeg, isSessionExt, isSessionNode } from '@/registry/vdfsTypes'
 import { vdfsRoot } from '@/schemas/vdfsRoot'
 import { logger } from '@/utils/logger'
 
@@ -115,6 +116,72 @@ export async function findMountDirByNewTypeExt(ext: string): Promise<string | nu
   const resp = await listVdfs(READBACK_REASON.BOOTSTRAP)
   const hit = (resp.items ?? []).find((n) => n.new_type?.ext === ext)
   return hit ? fullAddr(vdfsRoot(), hit) : null
+}
+
+/**
+ * 某个地址是不是**会话挂载目录**。
+ *
+ * 判据与 [`ensureSessionMountDir`] 认出根挂载用的是同一个契约词——节点自述里的
+ * `new_type.ext`。这里做的是「按地址复核一次」，因为调用方常常只拿到一个**地址**
+ * （例如详情页选中的节点路径的父目录），而「它是不是空间」必须由后端自述回答。
+ *
+ * 为什么需要它：会话节点的 `ext` 也是 `session`，但它是**叶子**。若把
+ * `<挂载目录>/<id>` 当成"空间"，后续每一次寻址（清单 / 转写 / 收件箱 / 工作目录）
+ * 都会按 `<挂载目录>/<id>/…` 拼，得到的是一串
+ * 「会话内部不存在该路径」「没有 kind=messages 的子节点」。
+ * 目录节点的 `new_type` 只有挂载目录才有，因此 stat 一次即可分辨。
+ *
+ * @returns `true` / `false` = 后端明确回答；`null` = 读不到自述（IPC 抖动 / 节点刚
+ *   被删）。调用方**不得**把 `null` 当成 `false`——「读不到」不等于「不是」，
+ *   据此否决会让一次抖动就把正常会话显示成不可用。
+ */
+export async function isSessionMountDir(addr: string): Promise<boolean | null> {
+  if (!addr) return false
+  // 已解析过的挂载（根空间那份 + 子智能体空间各自那份）不必再 stat
+  if (cachedMountDir === addr || cachedSegs.has(addr)) return true
+  const node = await statVdfs(READBACK_REASON.BOOTSTRAP, addr)
+  if (!node) return null
+  return isSessionExt(node.new_type?.ext)
+}
+
+/**
+ * 向上找空间的最大层数。
+ *
+ * 真实形状只有 `subsession` 那一层需要多走两步；给 8 层是余量——同时它是**上界**
+ * 而不是「必须走满」：地址再怪也不会在这里绕圈（每轮 `vdfsParent` 都严格变短，
+ * 但把上界写明，将来若地址方案允许环状引用也不会变成死循环）。
+ */
+const SESSION_SPACE_MAX_DEPTH = 8
+
+/**
+ * 某个**会话条目**属于哪个会话挂载目录（会话空间）。
+ *
+ * 为什么地址里的一段前缀不够：会话可以嵌在**另一个会话内部**——子会话的地址是
+ * `<挂载目录>/<父会话>/subsession/<子>`，它和父会话住在**同一个空间**里，只是
+ * 寻址路径长了两段。若把「父目录」当成空间（`parseVdfsSessionAddr` 的机械切分
+ * 就是这样），后续每一次寻址（清单 / 转写 / 收件箱 / 工作目录 / 发消息）都会
+ * 按一个**不存在的空间**拼，得到一串「会话内部不存在该路径」「没有 kind=messages
+ * 的子节点」「该路径不可写入」。
+ *
+ * 判据因此是**节点自述**：从条目所在目录开始逐级向上，第一个自述为
+ * 「可新建 session」的目录就是空间（`new_type` 只有挂载目录才有，见
+ * [`isSessionMountDir`]）。这是机制层唯一认识的形状——前端不认识 `subsession`
+ * 这个段名，也不该认识。
+ *
+ * @returns 空间地址；向上找不到、或自述读不到时 `null`（调用方不得据此否决，
+ *   见 [`isSessionMountDir`] 关于 `null` 的约定）
+ */
+export async function sessionSpaceOf(addr: string): Promise<string | null> {
+  let cur = addr ? vdfsParent(addr) : ''
+  for (let depth = 0; depth < SESSION_SPACE_MAX_DEPTH && cur; depth += 1) {
+    const hit = await isSessionMountDir(cur)
+    if (hit === true) return cur
+    if (hit === null) return null
+    const up = vdfsParent(cur)
+    if (!up || up === cur) return null
+    cur = up
+  }
+  return null
 }
 
 export async function ensureSessionMountDir(): Promise<string> {

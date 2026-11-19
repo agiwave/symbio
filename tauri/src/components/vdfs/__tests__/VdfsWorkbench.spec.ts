@@ -84,8 +84,8 @@ function makeNode(name: string): VdfsNode {
   }
 }
 
-/** `installStub` 装上的两个可写 ref（换目录的用例要在挂载后改它们） */
-let stubRefs: { cwd: Ref<string>; cwdNode: Ref<VdfsNode | null> } | null = null
+/** `installStub` 装上的可写 ref（换目录的用例要在挂载后改它们） */
+let stubRefs: { cwd: Ref<string>; cwdNode: Ref<VdfsNode | null>; cwdAddr: Ref<string> } | null = null
 
 /** 可控的 `useVdfs` 桩：只填本文件关心的那几个键，其余给空值 */
 function installStub(
@@ -107,7 +107,10 @@ function installStub(
   // `cwdNode` 要等 `refresh()` 回来，两者的时间差正是那条滞后 bug 的来源）
   const cwd = ref(opts.cwd ?? '@vfs')
   const cwdNode = shallowRef<VdfsNode | null>(opts.cwdNode ?? null)
-  stubRefs = { cwd, cwdNode }
+  // `cwdNode` 是**哪个地址**的自述（真实现里由 list 回执同源登记）。缺省与 `cwd`
+  // 一致 = 「自述已经跟上当前目录」；换目录的用例可以把两者拆开，复刻那一步滞后。
+  const cwdAddr = ref(opts.cwd ?? '@vfs')
+  stubRefs = { cwd, cwdNode, cwdAddr }
   /** 筛选词：真实现是 ref + computed 投影；桩里复刻成同一个形状，
    *  好让「筛选框输入 → 列表收窄」这条链路在本文件也能被断言 */
   const filter = ref('')
@@ -130,6 +133,8 @@ function installStub(
     // （会话挂载目录）并自动开一份新会话草稿（见控件内的 autoDraft）。
     // 默认给 null（不可新建的目录），本文件多数用例测的是新建入口与动作转发。
     cwdNode: computed<VdfsNode | null>(() => cwdNode.value),
+    // 自述对应的地址（真实现里 `cwdAddr === cwd` 才说明自述已经跟上当前目录）
+    cwdAddr: computed(() => cwdAddr.value),
     title: computed(() => '资源'),
     items,
     filteredItems,
@@ -200,6 +205,7 @@ async function emitAction(w: VueWrapper, id: string, file?: File) {
 
 beforeEach(() => {
   Object.values(hoisted.fns).forEach((f) => f.mockClear())
+  hoisted.sessions.setSessionSpace.mockClear()
   hoisted.newTypes.length = 0
   stubRefs = null
 })
@@ -386,7 +392,9 @@ describe('VdfsWorkbench 进入可新建目录时自动备好草稿', () => {
     title: '会话',
     kind: 'dir',
     status: 'active',
-    access: 'rw',
+    // 挂载根的访问位是 `l`（后端 `VdfsNode::dir("", "会话", VdfsAccess::LIST)`），
+    // 新建走「写目录自身」，不靠 `w` 位。
+    access: 'l',
     ext: 'dir',
     new_type: SESSION_TYPE,
   }
@@ -645,5 +653,82 @@ describe('VdfsWorkbench 键盘', () => {
     expect(pressKey({ key: 'ArrowDown' })).toEqual({ consumed: false, prevented: false })
     expect(document.activeElement).toBe(outside)
     expect(mounted.exists()).toBe(true)
+  })
+})
+
+/**
+ * 「当前空间」声明 —— 只有**会话挂载目录**才能被声明成会话空间。
+ *
+ * 这条判据错了不会报错，只会把清单 / 新建 / 转写订阅 / 收件箱全部导到一个不是
+ * 挂载目录的地址上，然后控制台刷出一串
+ * 「会话内部不存在该路径」「没有 kind=messages 的子节点」「该路径不可写入」。
+ * 三个条件缺一不可，每条都对应一次真实事故：
+ *
+ * 1. `new_type.ext = session` —— 判据与 `services/vdfsScheme` 认出根挂载同源；
+ * 2. 必须是**目录**（访问位含 `l`）—— 会话节点自己的 ext 也是 `session`，
+ *    但它是叶子（`rw`），选中一个会话就把 `<挂载目录>/<id>` 当成了空间；
+ * 3. 自述与当前目录**同源**（`cwdAddr === cwd`）—— 换目录时 `cwdNode` 一步滞后，
+ *    进入会话后点开 `message` / `subsession`，它们的地址就被上一栏的自述
+ *    （`ext = session`）认成了空间。
+ */
+describe('VdfsWorkbench 当前空间声明（会话挂载目录）', () => {
+  const SESSION_TYPE: VdfsNewType = { ext: 'session', title: '会话' }
+  const mountNode: VdfsNode = {
+    path: '@vfs/session',
+    name: 'session',
+    title: '会话',
+    kind: 'dir',
+    status: 'active',
+    access: 'l',
+    ext: 'dir',
+    new_type: SESSION_TYPE,
+  }
+
+  it('会话挂载目录（可下钻 + 声明可新建 session）⇒ 声明为当前空间', () => {
+    installStub({ cwd: '@vfs/session', cwdNode: mountNode })
+
+    bench()
+
+    expect(hoisted.sessions.setSessionSpace).toHaveBeenCalledWith('@vfs/session')
+  })
+
+  it('★ 会话节点自身（ext 也是 session，但它是叶子）不声明空间', () => {
+    // 会话叶子：`rw`（不可下钻），ext 与会话挂载目录撞名
+    const sessionLeaf: VdfsNode = {
+      path: '@vfs/session/s1',
+      name: 's1',
+      title: 's1',
+      kind: 'session',
+      status: 'active',
+      access: 'rw',
+      ext: 'session',
+      new_type: SESSION_TYPE,
+    }
+    installStub({ cwd: '@vfs/session/s1', cwdNode: sessionLeaf })
+
+    bench()
+
+    expect(hoisted.sessions.setSessionSpace).not.toHaveBeenCalled()
+  })
+
+  it('★ 换目录后自述还没回来（cwd 变了、cwdAddr 没变）⇒ 不拿上一栏的自述声明空间', () => {
+    installStub({ cwd: '@vfs/session', cwdNode: mountNode })
+    bench()
+    hoisted.sessions.setSessionSpace.mockClear()
+
+    // 用户点开会话内部的 `message` 目录：地址立刻变了，而 `cwdNode` 还是上一栏的
+    stubRefs!.cwd.value = '@vfs/session/s1/message'
+    // `cwdAddr` 仍停在 '@vfs/session'，正是那一拍的状态
+    return nextTick().then(() => {
+      expect(hoisted.sessions.setSessionSpace).not.toHaveBeenCalled()
+    })
+  })
+
+  it('★ 只有目录声明 session 但不可下钻 ⇒ 不声明（目录性优先于类型自述）', () => {
+    installStub({ cwd: '@vfs/x', cwdNode: { ...mountNode, path: '@vfs/x', name: 'x', access: 'rw' } })
+
+    bench()
+
+    expect(hoisted.sessions.setSessionSpace).not.toHaveBeenCalled()
   })
 })

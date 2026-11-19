@@ -36,6 +36,9 @@ import { startSessionInboxSync, registerInboxMount } from '@/stores/sessionInbox
 import { setChimeSettingsSource } from '@/services/completionChime'
 import { getWorkspacePath } from '@/services/home'
 import { ensureSessionMountDir } from '@/services/vdfsScheme'
+import { statVdfs } from '@/services/vdfs'
+import { READBACK_REASON } from '@/services/readback'
+import { isSessionExt } from '@/registry/vdfsTypes'
 import { dispatchHotkeys, useHotkeys } from '@/composables/useHotkeys'
 import { vdfsBrowserPathOf } from '@/schemas/vdfsAddress'
 import { useSessionsStore } from '@/stores/sessions'
@@ -133,8 +136,16 @@ useHotkeys('main-layout', [
  */
 watch(
   () => sessions.sessionSpace,
-  (dir) => {
+  async (dir) => {
     if (!dir) return
+    // 只有**会话挂载点**才能推导 `<sid>/<集合段>`。会话内部路径（`<sid>/session`
+    // / `<sid>/workdir` 等）也曾从这里流进来，结果三个消费端各自去 list 它、各自
+    // 报「下没有任何会话可供推导」。登记前按节点自述核一次，错的地址就地挡住。
+    const node = await statVdfs(READBACK_REASON.BOOTSTRAP, dir)
+    if (!isSessionExt(node?.new_type?.ext)) {
+      logger.warn('MainLayout', `会话空间 ${dir} 不是会话挂载点，跳过实时订阅登记`)
+      return
+    }
     void registerSessionMount(dir)
     void registerTranscriptMount(dir)
     void registerInboxMount(dir)

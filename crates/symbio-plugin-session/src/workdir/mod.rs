@@ -68,11 +68,16 @@ pub fn sub_sessions_dir_node() -> symbio_kernel::vdfs::VdfsNode {
 }
 
 /// 工作目录树根节点（`list` 与 `stat` 共用同一份形状）。理由同上。
+///
+/// 访问位用 `lwt`（list + write + traverse）里的 **`lt`**：工作目录是会话的工作区，
+/// 中栏以**目录树**呈现（而非扁平列表），树形递归走机制级 `vdfs/tree`——它只下钻
+/// 声明了 `t` 位的目录（见 `docs/003-design/009-VDFS规范.md`）。缺 `t` 时 `vdfs/tree`
+/// 只返回第一层，子目录永远打不开。`w` 不给：目录的写由具体文件节点承载。
 pub fn workdir_dir_node() -> symbio_kernel::vdfs::VdfsNode {
     let mut n = symbio_kernel::vdfs::VdfsNode::dir(
         SEG_WORKDIR,
         TITLE_WORKDIR,
-        symbio_kernel::vdfs::VdfsAccess::LIST,
+        symbio_kernel::vdfs::VdfsAccess::LIST_TRAVERSE,
     );
     n.kind = KIND_WORKDIR.to_string();
     n
@@ -180,14 +185,24 @@ pub async fn list_children(
     Ok(nodes)
 }
 
-/// 文件 / 目录元数据 → 节点（列与 stat 共用同一份形状，两条链路不会分叉）
+/// 文件 / 目录元数据 → 节点（列与 stat 共用同一份形状，两条链路不会分叉）。
+///
+/// 目录带 `lt`：中栏目录树经机制级 `vdfs/tree` 递归，它只下钻声明 `t` 位的目录，
+/// 缺 `t` 则子目录永远打不开（工作目录与物理盘目录在这点必须对齐，见
+/// `crates/symbio-plugin-vdfs/src/physical.rs` 的 `VdfsAccess::dir`）。
+///
+/// 文件显式声明 `ext = "text"`：前端按 `ext` 选详情渲染器（显式 ext 优先于文件名
+/// 后缀推导），工作目录里的文件是 UTF-8 文本（`read_content` 用 `read_to_string`），
+/// 声明为 text 才会让前端发 `vdfs/read` 取正文——否则落到 fallback 渲染器，正文
+/// 不读，用户看到的就是空文件。纯文本编辑器对各语言一视同仁，不按后缀分支。
 fn tree_node(name: &str, meta: &std::fs::Metadata) -> VdfsNode {
     let is_dir = meta.is_dir();
     let mut n = if is_dir {
-        VdfsNode::dir(name, name, VdfsAccess::LIST)
+        VdfsNode::dir(name, name, VdfsAccess::LIST_TRAVERSE)
     } else {
         let mut f = VdfsNode::file(name, name, VdfsAccess::READ_WRITE);
         f.size = Some(meta.len());
+        f.ext = Some("text".to_string());
         f
     };
     n.kind = TREE_KIND.to_string();

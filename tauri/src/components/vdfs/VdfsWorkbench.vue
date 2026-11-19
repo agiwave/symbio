@@ -65,7 +65,7 @@
            目录条目少（服务端认定不值得检索）、或空目录时都不给：一个筛不出东西的
            搜索框只会让用户以为"可以搜库"。
            筛选本身是纯客户端投影（见 useVdfs 的说明），不发请求、不动分页游标。 -->
-      <div v-if="searchable" class="vdfs-filter">
+      <div v-if="searchable && !treeMode" class="vdfs-filter">
         <input
           v-model="filter"
           class="vdfs-filter-input"
@@ -94,27 +94,46 @@
         aria-label="资源列表"
         @scroll.passive="onListScroll"
       >
-        <!-- 徽标只给目录（子项数）。⚠️ 文件不给徽标：`ext` 是**渲染器键**
+        <!-- 目录树形态：当前目录声明 `t` 位时，中栏改渲染可展开的树。
+             点目录就地展开 / 折叠，点文件走与列表项相同的 onItemClick（右栏出详情）。 -->
+        <template v-if="treeMode">
+          <VdfsTreeNode
+            v-for="n in treeNodes"
+            :key="n.item.path"
+            :node="n"
+            :selected-id="selectedId"
+            @activate="onItemClick"
+          />
+          <!-- 树被深度 / 数量上限截断时如实告知：别把「还没展开完」读成「就这些」。 -->
+          <p v-if="treeTruncated" class="tree-truncated" role="status">
+            {{ treeMessage || '目录过大，仅显示部分层级' }}
+          </p>
+        </template>
+
+        <!-- 扁平列表形态（未声明 `t` 位的目录）。
+             徽标只给目录（子项数）。⚠️ 文件不给徽标：`ext` 是**渲染器键**
              （`form` / `session` 之类），属机制细节，不该出现在给用户看的列表里。 -->
-        <VdfsCard
-          v-for="n in filteredItems"
-          :key="n.path"
-          :title="n.title || n.name"
-          :subtitle="n.description"
-          :status="cardStatusOf(n)"
-          :status-title="cardStatusTextOf(n)"
-          :show-status="Boolean(n.status)"
-          :badge="cardBadgeOf(n)"
-          badge-kind="primary"
-          :tags="cardTagsOf(n)"
-          :icon="cardIconOf(n)"
-          :is-active="selectedId === n.path"
-          @click="onItemClick(n)"
-        />
+        <template v-else>
+          <VdfsCard
+            v-for="n in filteredItems"
+            :key="n.path"
+            :title="n.title || n.name"
+            :subtitle="n.description"
+            :status="cardStatusOf(n)"
+            :status-title="cardStatusTextOf(n)"
+            :show-status="Boolean(n.status)"
+            :badge="cardBadgeOf(n)"
+            badge-kind="primary"
+            :tags="cardTagsOf(n)"
+            :icon="cardIconOf(n)"
+            :is-active="selectedId === n.path"
+            @click="onItemClick(n)"
+          />
+        </template>
         <!-- 有界列表的收尾：滚到底自动续页，也留一个显式入口。
              ⚠️ 筛选态下**必须保留**：命中可能落在更早的页里，去掉这个入口
              就会把「还没找到」误报成「不存在」。 -->
-        <div v-if="hasMore && filteredItems.length > 0" class="list-more">
+        <div v-if="!treeMode && hasMore && filteredItems.length > 0" class="list-more">
           <!-- 续页失败不能把入口藏起来：保留按钮就是保留重试，错误行说明为什么没动。 -->
           <p v-if="loadMoreError" class="list-more-error" role="alert">{{ loadMoreError }}</p>
           <button
@@ -239,6 +258,7 @@
 import { computed, ref, watch } from 'vue'
 import Workbench from '@/components/common/Workbench.vue'
 import VdfsCard from '@/components/common/VdfsCard.vue'
+import VdfsTreeNode from './VdfsTreeNode.vue'
 import ConfirmDialog from '@/components/common/ConfirmDialog.vue'
 import SkeletonBlock from '@/components/common/SkeletonBlock.vue'
 import { useHotkeys } from '@/composables/useHotkeys'
@@ -294,8 +314,13 @@ const {
   selectedName,
   cwd,
   cwdNode,
+  cwdAddr,
   title,
   items,
+  treeMode,
+  treeNodes,
+  treeTruncated,
+  treeMessage,
   filteredItems,
   searchable,
   filter,
@@ -352,9 +377,23 @@ const {
 //
 // 选中一个**已存在**的会话时不必依赖它：那条路径的地址里本来就带着挂载目录
 // （`Session.vue` 传 `node.path` → `store.selectSession` 解析）。
+//
+// ⚠️ 判据必须三条同时成立，缺一条都会把**不是挂载目录**的地址声明成会话空间：
+// 1. 自述声明 `new_type.ext === 'session'`（判据与 `services/vdfsScheme` 同源）；
+// 2. 它是**目录**（访问位含 `l`）——会话节点自己的 ext 也是 `session`，但它是叶子
+//    （`rw`）。少了这条，选中一个会话就会把 `<挂载目录>/<id>` 当成"空间"，
+//    清单、新建、转写订阅全部按一个不是挂载目录的地址寻址；
+// 3. 自述与当前目录**同源**（`cwdAddr === cwd`）——换目录时 `cwdNode` 一步滞后，
+//    少了这条会把上一栏的类型套到这一栏（进入会话后切到 `message` / `subsession`
+//    就把它们声明成了会话空间）。
 const sessionsStore = useSessionsStore()
 watch(
-  () => (isSessionExt(cwdNode.value?.new_type?.ext) ? cwd.value : ''),
+  () => {
+    const node = cwdNode.value
+    if (!node || !isSessionExt(node.new_type?.ext)) return ''
+    if (cwdAddr.value !== cwd.value) return ''
+    return isVdfsDir(node) ? cwd.value : ''
+  },
   (dir) => {
     if (dir) sessionsStore.setSessionSpace(dir)
   },
@@ -841,6 +880,14 @@ async function onCreated(id: string) {
 
 .more-hint {
   font-size: 0.8125rem;
+  color: var(--text-muted);
+}
+
+/* 目录树被截断的如实说明（不是错误，故用 muted 色） */
+.tree-truncated {
+  margin: 0.5rem 0.4rem;
+  font-size: 0.74rem;
+  line-height: 1.5;
   color: var(--text-muted);
 }
 

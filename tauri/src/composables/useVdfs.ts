@@ -54,6 +54,7 @@ import {
   readVdfs,
   runVdfsAction,
   statVdfs,
+  treeVdfs,
   writeVdfs,
 } from '@/services/vdfs'
 import { READBACK_REASON } from '@/services/readback'
@@ -61,6 +62,7 @@ import { subscribeVdfsChanged } from '@/services/eventBus'
 import {
   VDFS_STATUS_ACTIVE,
   actionFileOf,
+  assembleVdfsTree,
   isVdfsDir,
   isVdfsDraft,
   isVdfsUnder,
@@ -75,6 +77,7 @@ import {
   type VdfsItem,
   type VdfsNewType,
   type VdfsNode,
+  type VdfsTreeNode,
 } from '@/schemas/vdfs'
 import { vdfsRoot } from '@/schemas/vdfsRoot'
 import {
@@ -92,6 +95,20 @@ import type { WorkbenchRailItem } from '@/components/common/Workbench.vue'
 
 /** 各数据地址的左栏选中记忆（模块级：往返 push / 返回后恢复原选中） */
 const selectedMemo = new Map<string, string>()
+
+/**
+ * 各**当前目录**的右栏选中记忆（模块级：往返 push / 返回后恢复原会话）。
+ *
+ * 为什么不用 URL `?select=`：那是「打开父目录下的一个文件」的深链语义，它只接受
+ * 一个直接子项名。会话列表页并没有自己的 URL 概念可挂——把选中项写进 query 会
+ * 改变当前历史条目，返回键的来源、焦点落位与左栏高亮会一起漂移（实测返回后落到
+ * 资源根、左栏没有选中类别）。选中态是工作台内部状态，就该由工作台自己记住。
+ *
+ * 键是 `cwd` 而不是 `addr`：同一地址页里切过子目录后，返回时要恢复的是**那一层**
+ * 当时看的那一项，而不是别的目录里的旧详情。值在使用前一定回读校验，删掉的东西
+ * 不会从记忆里复活。
+ */
+const selectedNodeMemo = new Map<string, VdfsItem>()
 
 /**
  * 中栏一页的**名义**条数。
@@ -214,8 +231,49 @@ export function useVdfs(opts: UseVdfsOptions) {
   /** 中栏条目 = 地址 + 节点；`cwdNode` 是**目录自身的自述**（纯节点，不带地址） */
   const items = ref<VdfsItem[]>([])
   const cwdNode = shallowRef<VdfsNode | null>(null)
+  /**
+   * `cwdNode` 是**哪个地址**的自述（= 读回它时请求的 `cwd`）。
+   *
+   * 换目录时 `cwd` 立刻变、`cwdNode` 要等 `refresh()` 回来才换，中间那一拍两者
+   * 是错位的。任何「按目录自述决定行为」的消费方都必须拿这一对**同源**判断，
+   * 否则会把这一个目录的自述（如「这里能新建会话」）套到**另一个**目录上
+   * （真实事故：进入会话后左栏切到 `message`，工作台仍拿着会话节点的
+   * `new_type.ext = session`，把 `<sid>/message` 声明成了「当前会话空间」，
+   * 于是清单、转写、收件箱全都按一个不是挂载目录的地址去寻址）。
+   */
+  const cwdAddr = ref('')
   const loading = ref(false)
   const loadError = ref('')
+
+  // ── 目录树（中栏的第二种形态）────────────────────────────────────
+  // 判据只有一条：**当前目录声明了 `t`（traverse）位**。这是后端对「这棵目录
+  // 值得递归呈现」的声明（工作目录的目录节点带 `lt`，见 workdir/mod.rs），前端
+  // 不认识任何类型 / 段名——加一个新树目录只要后端声明 `t`，这里零改动。
+  // 扁平 items 仍是列表形态的数据源（筛选 / 徽标 / 选中记忆都用它），树是**另存**
+  // 的一份投影：一次目录加载里，先拿 list 更新 cwdNode，再按它的访问位决定是否
+  // 额外取一次 vdfs/tree。
+  const treeMode = computed(() => vdfsAccessOf(cwdNode.value).traverse)
+  const treeNodes = shallowRef<VdfsTreeNode[]>([])
+  const treeTruncated = ref(false)
+  const treeMessage = ref('')
+
+  /** 在树里按完整地址找一项（树回执是扁平的，层级只体现在 `path`） */
+  function findTreeNode(nodes: VdfsTreeNode[], path: string): VdfsTreeNode | null {
+    for (const node of nodes) {
+      if (node.item.path === path) return node
+      const hit = findTreeNode(node.children, path)
+      if (hit) return hit
+    }
+    return null
+  }
+
+  /** 当前视图里是否看得到这条路径（列表只看本页；树看整棵已取回的树） */
+  function isVisibleInCwd(path: string): boolean {
+    if (!treeMode.value) return items.value.some((n) => n.path === path)
+    // 树没取回 / 被截断时不能据此判「项已删除」——那只说明本页没看全。
+    if (treeNodes.value.length === 0 || treeTruncated.value) return true
+    return findTreeNode(treeNodes.value, path) !== null
+  }
 
   /**
    * 是否还有更早的条目。
@@ -252,19 +310,38 @@ export function useVdfs(opts: UseVdfsOptions) {
       )
       items.value = resp.items
       cwdNode.value = resp.node
+      // 自述与请求地址同源登记（见 `cwdAddr` 的说明）
+      cwdAddr.value = resp.path
       hasMore.value = resp.items.length >= VDFS_PAGE_SIZE
+
+      // 目录声明了 `t` ⇒ 额外取一次机制级 vdfs/tree，把扁平回执组装成树供中栏
+      // 渲染。树失败只清空树、退回列表形态，不牵连已经拿到的 list（树是增强）。
+      if (treeMode.value) {
+        try {
+          const tree = await treeVdfs(READBACK_REASON.VDFS_BROWSER, cwd.value)
+          treeNodes.value = assembleVdfsTree(tree.nodes, cwd.value)
+          treeTruncated.value = tree.truncated
+          treeMessage.value = tree.message ?? ''
+        } catch (err) {
+          treeNodes.value = []
+          treeTruncated.value = false
+          treeMessage.value = ''
+          logger.error('useVdfs', `加载目录树失败 ${cwd.value}:`, err)
+        }
+      } else {
+        treeNodes.value = []
+        treeTruncated.value = false
+        treeMessage.value = ''
+      }
+
       // 选中项若已不在当前目录（被删/被移走），清理选中态。
       // ⚠️ 有界列表下**不能**仅凭「不在这页里」就判它没了——它可能只是落在更早的
       // 一页（深链直开旧会话就是这种情形）。只有确信已拿全时才清理。
       // ⚠️ **草稿不受此判**：它本来就不在清单里（还没落盘），路径为空。
       const sel = selectedNode.value
-      if (
-        sel &&
-        !isVdfsDraft(sel) &&
-        !hasMore.value &&
-        !items.value.some((n) => n.path === sel.path)
-      ) {
-        clearSelection()
+      if (sel && !isVdfsDraft(sel) && !hasMore.value && !isVisibleInCwd(sel.path)) {
+        // 确实不在当前视图里 = 被删 / 被移走，连同记忆一起忘掉，别在下次返回时复活。
+        clearSelection(true)
       }
     } catch (err) {
       loadError.value = String(err)
@@ -397,14 +474,39 @@ export function useVdfs(opts: UseVdfsOptions) {
   }
 
   /**
+   * 返回原地址页（或刷新后）恢复这一层上次选中的项。
+   *
+   * 只在没有路由深链、且右栏当前为空时才动手：用户还没选 / 已经选了别的 / 正被
+   * `?select=` 定位，都不该被记忆抢回去。目标必须仍存在于当前视图，否则忘掉它。
+   */
+  async function restoreMemoSelection() {
+    if (selectName.value || selectedNode.value) return
+    const key = cwd.value
+    const memo = selectedNodeMemo.get(key)
+    if (!memo) return
+    const found = treeMode.value
+      ? findTreeNode(treeNodes.value, memo.path)?.item
+      : items.value.find((n) => n.path === memo.path)
+    if (!found) {
+      selectedNodeMemo.delete(key)
+      return
+    }
+    await select(found)
+  }
+
+  /**
    * 整体重载（绑定地址 / 路由选中项变化 / 宿主要求）：落位左栏选中 + 刷新当前目录。
    * 选中落位变化时 refreshNav 已就地刷新，无需重复。
    */
   async function reload() {
     applyFocusIfChanged()
-    if (await refreshNav()) return
+    if (await refreshNav()) {
+      await restoreMemoSelection()
+      return
+    }
     await refresh()
     await settleSelect()
+    await restoreMemoSelection()
   }
 
   /**
@@ -619,13 +721,20 @@ export function useVdfs(opts: UseVdfsOptions) {
     return true
   }
 
-  function clearSelection() {
+  /**
+   * 清空详情。`forget = true` 才删掉该目录的返回记忆：
+   * - 换目录 / 离开地址页时的清空只是暂时收起，返回还要恢复；
+   * - 删除条目 / 回读确认它已不在当前视图时则必须忘掉，否则旧项会复活。
+   */
+  function clearSelection(forget = false) {
+    const memoKey = cwd.value
     detailGuard.advance()
     selectedNode.value = null
     nodeText.value = ''
     formData.value = null
     detailError.value = ''
     fieldErrors.value = []
+    if (forget) selectedNodeMemo.delete(memoKey)
   }
 
   /** 选中节点并按其渲染器加载数据 */
@@ -646,6 +755,8 @@ export function useVdfs(opts: UseVdfsOptions) {
     }
     detailError.value = ''
     fieldErrors.value = []
+    // 记住这一层当时在看什么；换目录 / 进下一级只是暂时收起，返回时按此恢复。
+    if (!isVdfsDraft(node)) selectedNodeMemo.set(cwd.value, node)
 
     // 草稿（新建态）**没有内容可读**：它还没落盘，路径是空的——去读它只会落到
     // 目录地址上。详情渲染器自己知道怎么呈现「还没有的东西」（表单给默认值、
@@ -855,7 +966,7 @@ export function useVdfs(opts: UseVdfsOptions) {
     try {
       await deleteVdfs(node.path, isVdfsDir(node))
       showToast('success', `已删除「${node.title || node.name}」`)
-      clearSelection()
+      clearSelection(true)
       await refresh()
       return true
     } catch (err) {
@@ -1099,7 +1210,14 @@ export function useVdfs(opts: UseVdfsOptions) {
     cwd,
     title,
     cwdNode,
+    /** `cwdNode` 对应的地址（换目录后到新自述回来之前会与 `cwd` 不一致） */
+    cwdAddr,
     items,
+    // 目录树模式（当前目录声明 `t` 位时，中栏改渲染树）
+    treeMode,
+    treeNodes,
+    treeTruncated,
+    treeMessage,
     loading,
     loadError,
     hasMore,

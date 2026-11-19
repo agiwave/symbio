@@ -7,6 +7,19 @@ use super::*;
 use serde_json::json;
 use tempfile::TempDir;
 
+/// 工作目录树根节点声明 `t`：中栏目录树经 `vdfs/tree` 递归，它只下钻含 `t` 的目录。
+/// 缺这一位的表现是——左栏能看到「工作目录」，但子目录一层也打不开。
+#[test]
+fn workdir_root_declares_traverse_for_tree_walk() {
+    let node = workdir_dir_node();
+    assert_eq!(node.kind, KIND_WORKDIR);
+    assert_eq!(node.access.flags(), "lt");
+    assert!(
+        node.access.traverse,
+        "根也必须可递归，vdfs/tree 才下钻第一层"
+    );
+}
+
 /// 世代守卫延迟释放：卸载的 unwatch 迟到时不得误杀重新建立的订阅；
 /// 宽限期内无重新订阅才真正释放（tokio paused time 驱动）。
 #[tokio::test(start_paused = true)]
@@ -96,10 +109,20 @@ async fn root_children_skip_hidden_and_sort_dirs_first() {
         .unwrap();
     let names: Vec<&str> = nodes.iter().map(|n| n.name.as_str()).collect();
     assert_eq!(names, vec!["src", "README.md"]);
-    // 是否可展开只看访问位，不看 kind
+    // 是否可展开 / 可递归只看访问位，不看 kind
     assert!(nodes[0].is_dir(), "目录 → `l`");
+    assert_eq!(
+        nodes[0].access.flags(),
+        "lt",
+        "目录带 `t`，vdfs/tree 才能递归下钻"
+    );
     assert!(!nodes[1].is_dir(), "文件 → 不可列");
     assert_eq!(nodes[1].access.flags(), "rw");
+    assert_eq!(
+        nodes[1].ext.as_deref(),
+        Some("text"),
+        "文件显式声明 text ⇒ 前端选文本渲染器 ⇒ 发 vdfs/read 取正文，不再显示空文件"
+    );
 }
 
 #[tokio::test]

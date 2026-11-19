@@ -78,14 +78,18 @@
              **排在最后**：写在本区末位，机制再把「进入下一级」归到行尾
              （`mergeDetailActions`），于是它落在整个头部的最右端——
              它是本页唯一的**导航**出口，与前面「作用于本页」的动作（重命名 /
-             删除）语义不同，用左边框分隔开。 -->
-        <VdfsActions
-          v-if="merged.actions.length"
-          class="header-actions"
-          :actions="merged.actions"
-          :busy="merged.busy"
-          @run="(a) => emit('action', a)"
-        />
+             删除）语义不同，用左边框分隔开。
+
+             ⚠️ 分隔线挂在这一层 `<div>` 上，不能把 class 传给 `VdfsActions`：
+             它是多根片段，外部 class 无处合并（Vue 会报 `Extraneous non-props
+             attributes` 并把它丢掉，分隔线与左内边距就都没了）。 -->
+        <div v-if="merged.actions.length" class="header-actions">
+          <VdfsActions
+            :actions="merged.actions"
+            :busy="merged.busy"
+            @run="(a) => emit('action', a)"
+          />
+        </div>
       </div>
     </header>
 
@@ -120,8 +124,12 @@
       </template>
 
       <!-- 工作目录判断：放在"会话详情已加载"之后（编辑器获得当前会话详情后再判定）。
-           会话自身是否有 workdir 以详情/metadata 为准，不再仅凭列表卡片即时弹引导。 -->
-      <template v-else-if="!store.activeWorkdir">
+           会话自身是否有 workdir 以详情/metadata 为准，不再仅凭列表卡片即时弹引导。
+           ⚠️ 但**不在本空间清单里的会话**（子会话）不走这道门：它住在父会话内部的
+           清单目录下，后端清单永远不会列它，而它是一段**已经跑完的转写**——没有
+           工作区可挑。拿「请先选工作目录」挡住它，转写就永远看不到（用户报的
+           「点开子会话只有一个没有工作目录的界面」）。 -->
+      <template v-else-if="!store.activeWorkdir && store.activeSessionListed">
         <EmptyWorkdirState />
       </template>
 
@@ -648,8 +656,13 @@ function openChange(row: ChangeRow) {
 
 /* 动作区（进入下一级 / 删除）与前面「作用于本页」的小图标按钮之间画一道分隔：
    它们是本页唯一的**导航**出口，语义与重命名不同，不该读成同一排工具。
-   `align-self: stretch` 让分隔线跟着头部高度走，而不是跟着按钮走。 */
+
+   这一层是**盒子**（`VdfsActions` 是多根片段，按钮直接排在里面），因此要自带
+   flex 行布局——否则按钮会按 inline 排，间距与前面那排对不齐。 */
 .header-actions {
+  display: flex;
+  align-items: center;
+  gap: 0.25rem;
   margin-left: 0.5rem;
   padding-left: 0.5rem;
   border-left: 1px solid var(--border-default);

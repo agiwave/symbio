@@ -17,6 +17,7 @@ import {
   VDFS_STATUS_WAITING_USER_ACTION,
   VDFS_STATUS_WORKING,
   actionFileOf,
+  assembleVdfsTree,
   isVdfsDir,
   isVdfsDraft,
   isVdfsSystemAddr,
@@ -28,6 +29,7 @@ import {
   vdfsExtOf,
   vdfsJoin,
   vdfsParent,
+  type VdfsItem,
   type VdfsNode,
 } from '../vdfs'
 // 命名空间导入：用于「导出的常量集合恰好是这些」这类**闭集**断言
@@ -304,6 +306,53 @@ describe('sessionRuntimeOf：两个场景属性都必须落地', () => {
   it('空串视为缺省（不得让一个空错误占住"有待处理状态"的判定）', () => {
     const rt = sessionRuntimeOf({ ...node({ name: 's' }), error: '' })
     expect(rt.error).toBeUndefined()
+  })
+})
+
+describe('assembleVdfsTree：扁平 path → 目录树', () => {
+  const wd = `${ROOT}/wd`
+  const item = (path: string): VdfsItem => ({
+    ...node({ name: path.slice(wd.length + 1) }),
+    path,
+  })
+
+  it('按 path 的父子关系连边，层级由父节点带出', () => {
+    const tree = assembleVdfsTree(
+      [
+        item(`${wd}/src`),
+        item(`${wd}/README.md`),
+        item(`${wd}/src/lib.rs`),
+        item(`${wd}/src/deep`),
+        item(`${wd}/src/deep/a.txt`),
+      ],
+      wd,
+    )
+    expect(tree.map((t) => t.item.path)).toEqual([`${wd}/src`, `${wd}/README.md`])
+    const src = tree[0]
+    expect(src.children.map((c) => c.item.path)).toEqual([
+      `${wd}/src/lib.rs`,
+      `${wd}/src/deep`,
+    ])
+    expect(src.children[1].children.map((c) => c.item.path)).toEqual([`${wd}/src/deep/a.txt`])
+  })
+
+  it('孤儿（父不在清单）落顶层而不是被丢弃——截断页也能显示已拿到的项', () => {
+    const tree = assembleVdfsTree([item(`${wd}/orphan/child`)], wd)
+    expect(tree).toHaveLength(1)
+    expect(tree[0].item.path).toBe(`${wd}/orphan/child`)
+  })
+
+  it('重复 path 只保留一条；空清单返回空树', () => {
+    const p = `${wd}/dup`
+    expect(assembleVdfsTree([item(p), item(p)], wd)).toHaveLength(1)
+    expect(assembleVdfsTree([], wd)).toEqual([])
+  })
+
+  it('不认识任何类型 / 段名：只按 path 组装', () => {
+    // 即便路径段是随机的、access 各异，也照连边——判据里没有类型名
+    const a = `${wd}/x-y_z`
+    const tree = assembleVdfsTree([item(a), item(`${a}/q.zzz`)], wd)
+    expect(tree[0].children[0].item.path).toBe(`${a}/q.zzz`)
   })
 })
 

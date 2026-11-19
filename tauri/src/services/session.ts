@@ -42,6 +42,7 @@ import {
   VDFS_ACTION_TRUNCATE,
   vdfsMessageAddr,
   vdfsSessionAddr,
+  type VdfsItem,
 } from '@/schemas/vdfs'
 import { isSessionNode } from '@/registry/vdfsTypes'
 import { ChatNode as SessionMessage } from '../schemas/chat_node'
@@ -89,24 +90,38 @@ export async function listSessions(
       ? await listVdfs(READBACK_REASON.LIST_REFRESH, path)
       : await listVdfs(READBACK_REASON.LIST_REFRESH, path, { limit })
   return (resp.items || [])
-    .filter(isSessionNode)
-    .map((n) => {
-      const v = n as Record<string, any>
-      return {
-        id: n.name,
-        // 后端 display_title：metadata.title 优先，否则从会话内容自动生成
-        name: n.title ?? '',
-        message_count: Number(v.message_count ?? 0),
-        updated_at: n.updated_at ?? 0,
-        // 直接透传节点状态，不在边界上压缩成布尔（否则 error / disabled 会丢）
-        status: n.status,
-        metadata: v.metadata ?? {},
-        // 选项定义随节点下发（`node.schema`）；清单一次取全，面板零回读
-        schema: v.schema,
-        // 上下文水位同样是节点属性：收成方言的一格读数（结构判据见 `readingSectionOf`）
-        context_watermark: readingSectionOf(v.context_watermark),
-      }
-    })
+    .map((n) => sessionListItemOf(n))
+    .filter((it): it is SessionList.SessionListItem => it !== null)
+}
+
+/**
+ * 单个 VDFS 节点 → 清单项（**唯一的映射**，`listSessions` 与「选中一个不在清单里的
+ * 会话」共用）。
+ *
+ * 为什么需要后者：子会话（`<挂载目录>/<父会话>/subsession/<子>`）**不会**出现在
+ * 挂载目录的 `list` 里（后端 `read_all_summaries` 只扫挂载目录的直接子目录），
+ * 可详情页选中它时，面板仍要拿它的 `metadata`（workdir / title）与运行态——
+ * 那些字段全在会话节点自述上，所以映射按**节点**做，而不是按「清单里的第几项」。
+ *
+ * @returns 不是会话节点（`ext` 不命中）时 `null`
+ */
+export function sessionListItemOf(n: VdfsItem): SessionList.SessionListItem | null {
+  if (!isSessionNode(n)) return null
+  const v = n as Record<string, any>
+  return {
+    id: n.name,
+    // 后端 display_title：metadata.title 优先，否则从会话内容自动生成
+    name: n.title ?? '',
+    message_count: Number(v.message_count ?? 0),
+    updated_at: n.updated_at ?? 0,
+    // 直接透传节点状态，不在边界上压缩成布尔（否则 error / disabled 会丢）
+    status: n.status,
+    metadata: v.metadata ?? {},
+    // 选项定义随节点下发（`node.schema`）；清单一次取全，面板零回读
+    schema: v.schema,
+    // 上下文水位同样是节点属性：收成方言的一格读数（结构判据见 `readingSectionOf`）
+    context_watermark: readingSectionOf(v.context_watermark),
+  }
 }
 
 /**

@@ -81,15 +81,21 @@ function onAction(a: DetailAction): void {
 // 节点切换 ⇒ 一定重置草稿；同一节点的后端内容帧 ⇒ 仅在未编辑时同步。
 // 编辑到一半时外部 content 帧到达不该冲掉用户正在写的内容（多端/多进程写入下
 // 尤其常见）——那是静默丢数据，保存后由 markSaved/select 收敛即可。
-const draftDirtyForSync = computed(() => draft.value !== base.value)
+//
+// ⚠️ 判据必须是**「草稿仍等于上一份基线」（`draft === prev`），不能是
+// 「草稿和这一份新基线不等」**。选中节点的那一刻正文还没读回来（`data` 是空串），
+// 组件先以空串挂载；读数到达时 `base` 由 `''` 变成正文——若拿**新**基线比，
+// 空草稿当然「不等于」新正文，于是被判定成「用户正在编辑」，同步被跳过，
+// 编辑器就永远停在占位符上（用户报的「文件内容始终为空」）。拿**旧**基线比才对：
+// 那一刻草稿仍是上一份基线，说明它没被编辑过，理应跟随。
 watch(
   () => props.node.path,
   () => {
     draft.value = base.value
   }
 )
-watch(base, (next) => {
-  if (!draftDirtyForSync.value) draft.value = next
+watch(base, (next, prev) => {
+  if (draft.value === prev) draft.value = next
 })
 
 // 未保存改动上抛：页面据此在切换节点/目录离开前拦截。dirty 翻转才发，避免刷屏。

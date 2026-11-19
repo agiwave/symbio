@@ -63,14 +63,20 @@ const sessionApi = vi.hoisted(() => ({
     return Array.isArray(doc.messages) ? doc.messages : []
   }),
 }))
-vi.mock('@/services/session', () => ({
-  listSessions: sessionApi.listSessions,
-  deleteSession: vi.fn(),
-  updateSession: sessionApi.updateSession,
-  readSessionTranscript: sessionApi.readSessionTranscript,
-  deleteMessage: sessionApi.deleteMessage,
-  updateMessage: vi.fn(),
-}))
+// 只替换有 I/O 的几项，其余（如 `sessionListItemOf` 这类纯映射）取真实实现：
+// 替身若把纯映射也写一份，测的就不是生产的那份映射了。
+vi.mock('@/services/session', async (importOriginal) => {
+  const actual = await importOriginal<typeof import('@/services/session')>()
+  return {
+    ...actual,
+    listSessions: sessionApi.listSessions,
+    deleteSession: vi.fn(),
+    updateSession: sessionApi.updateSession,
+    readSessionTranscript: sessionApi.readSessionTranscript,
+    deleteMessage: sessionApi.deleteMessage,
+    updateMessage: vi.fn(),
+  }
+})
 vi.mock('@/services/vdfs', () => ({
   readVdfs: vdfsApi.readVdfs,
   statVdfs: vdfsApi.statVdfs,
@@ -80,7 +86,8 @@ vi.mock('@/services/vdfs', () => ({
 }))
 vi.mock('@/services/plugin', () => ({
   setLastWorkdir: vi.fn(),
-  getLastWorkdir: () => '',
+  // 默认「没有最近使用目录」；个别用例要触发兜底补绑时再改返回值
+  getLastWorkdir: vi.fn(() => ''),
   callPlugin: vi.fn(),
 }))
 
@@ -102,6 +109,7 @@ vi.mock('@/services/vdfsScheme', () => ({
   vdfsSessionScheme: vi.fn(() => SCHEME),
 }))
 
+import { getLastWorkdir } from '@/services/plugin'
 import { useSessionsStore } from '../sessions'
 import { startSessionNodeSync, stopSessionNodeSync } from '../sessionNodeSync'
 import { VDFS_STATUS_WORKING } from '@/schemas/vdfs'
@@ -949,5 +957,108 @@ describe('sessions store —「本会话放行」只抬阈值', () => {
     await expect(store.raiseSessionRiskLevel(SID, 'high')).rejects.toThrow('boom')
     expect(store.getSessionRiskLevel(SID)).toBe('medium')
     expect(store.list[0].metadata?.risk_level).toBe('medium')
+  })
+})
+
+/**
+ * 选中**不在本空间清单里**的会话（子会话）——面板要的自述从哪来。
+ *
+ * 子会话住在父会话内部的清单目录下（`<挂载目录>/<父会话>/subsession/<子>`），
+ * 后端清单只扫挂载目录的直接子目录，因此它**不会**出现在 `list` 里。可详情页
+ * 选中它时，面板的 `activeWorkdir` / 标题 / 运行态全从「清单项」取：不登记那一份，
+ * 面板就退化成「请先选工作目录」，转写明明读到了也不显示（用户报的「子会话窗口
+ * 打不开、没有内容」）。
+ */
+describe('sessions store — 选中不在清单里的会话（子会话）', () => {
+  let store: ReturnType<typeof useSessionsStore>
+
+  /** 子会话节点：`ext = session`，但住在父会话的 `subsession` 目录下 */
+  function subSessionNode(over: Record<string, unknown> = {}) {
+    return {
+      path: `${SCHEME.mountDir}/p1/subsession/s2`,
+      name: 's2',
+      title: '子智能体 · 检索资料',
+      kind: 'session',
+      ext: 'session',
+      status: 'active',
+      access: 'rw',
+      metadata: { workdir: 'D:/work/a' },
+      ...over,
+    } as never
+  }
+
+  beforeEach(() => {
+    setActivePinia(createPinia())
+    captured.scopes.length = 0
+    captured.handlers.length = 0
+    stopSessionNodeSync()
+    store = useSessionsStore()
+    startSessionNodeSync(store)
+    sessionApi.listSessions.mockResolvedValue([])
+  })
+
+  it('按节点自述补上 activeWorkdir / 标题，且**不往清单里塞**一条外来会话', async () => {
+    // 地址已由渲染器重落成 `<挂载目录>/<子>`（见 Session.vue 与 sessionSpaceOf）
+    await store.selectSession(`${SCHEME.mountDir}/s2`, subSessionNode())
+    await flushPromises()
+
+    expect(store.activeId).toBe('s2')
+    expect(store.activeWorkdir, '没有它，面板只显示「请先选工作目录」').toBe('D:/work/a')
+    expect(store.activeTitle).toBe('子智能体 · 检索资料')
+    expect(store.list, '清单仍是后端清单，不被外来会话污染').toHaveLength(0)
+    // 空间仍落在挂载目录上：后续读转写 / 发消息都按 `<挂载目录>/<子>` 寻址
+    expect(store.sessionSpace).toBe(SCHEME.mountDir)
+  })
+
+  it('清单里没有它 ⇒ activeSessionListed 为 false（面板据此跳过「请先选工作目录」）', async () => {
+    await store.selectSession(`${SCHEME.mountDir}/s2`, subSessionNode())
+    await flushPromises()
+
+    expect(store.activeSessionListed, '不在清单里').toBe(false)
+    expect(store.activeWorkdir, '但 workdir 仍取自节点自述').toBe('D:/work/a')
+  })
+
+  it('不给不在清单里的会话兜底补绑 workdir（不偷偷改写它的 metadata）', async () => {
+    // 「最近使用目录」有值 ⇒ 兜底补绑那条路本来是会被触发的
+    vi.mocked(getLastWorkdir).mockReturnValue('D:/last-used')
+    vdfsApi.writeVdfs.mockClear()
+    vdfsApi.writeVdfs.mockResolvedValue({ created: false })
+
+    // 节点自述里没有 workdir：这正是会掉进兜底分支的形状
+    await store.selectSession(`${SCHEME.mountDir}/s2`, subSessionNode({ metadata: {} }))
+    await flushPromises()
+
+    expect(store.activeWorkdir).toBeUndefined()
+    expect(
+      vdfsApi.writeVdfs,
+      '子会话是父会话派出去的一段执行记录，不该被补绑一个「最近使用目录」',
+    ).not.toHaveBeenCalled()
+    vi.mocked(getLastWorkdir).mockReturnValue('')
+  })
+
+  it('清单里查得到时以清单为准（登记过的那份不会盖住后端数据）', async () => {
+    // 先登记一份过期的自述（workdir = a）
+    await store.selectSession(`${SCHEME.mountDir}/s2`, subSessionNode())
+    expect(store.activeWorkdir).toBe('D:/work/a')
+
+    // 同一个 id 出现在清单里，且后端给的是新值（b）
+    // ⚠️ 清单项的形状是 `SessionListItem`（`id` 是身份）——映射由
+    // `services/session.listSessions` 做，这里直接给映射后的结果。
+    sessionApi.listSessions.mockResolvedValue([
+      {
+        id: 's2',
+        name: '子智能体 · 检索资料',
+        message_count: 0,
+        updated_at: 0,
+        status: 'active',
+        metadata: { workdir: 'D:/work/b' },
+      },
+    ] as never)
+    await store.refreshList()
+    await store.selectSession(`${SCHEME.mountDir}/s2`, subSessionNode())
+    await flushPromises()
+
+    expect(store.list).toHaveLength(1)
+    expect(store.activeWorkdir, '清单优先').toBe('D:/work/b')
   })
 })

@@ -20,14 +20,16 @@ import { beforeEach, describe, expect, it, vi } from 'vitest'
 vi.mock('@/utils/logger', () => ({
   logger: { error: vi.fn(), warn: vi.fn(), debug: vi.fn(), info: vi.fn() },
 }))
-const vdfs = vi.hoisted(() => ({ listVdfs: vi.fn() }))
-vi.mock('@/services/vdfs', () => ({ listVdfs: vdfs.listVdfs }))
+const vdfs = vi.hoisted(() => ({ listVdfs: vi.fn(), statVdfs: vi.fn() }))
+vi.mock('@/services/vdfs', () => ({ listVdfs: vdfs.listVdfs, statVdfs: vdfs.statVdfs }))
 
 import {
   ensureSessionMountDir,
   ensureSessionScheme,
   ensureVdfsSessionScheme,
+  isSessionMountDir,
   resetVdfsSessionScheme,
+  sessionSpaceOf,
   vdfsSessionScheme,
 } from '../vdfsScheme'
 import {
@@ -81,6 +83,7 @@ describe('ensureSessionMountDir：按 new_type 认挂载点', () => {
   beforeEach(() => {
     resetVdfsSessionScheme()
     vdfs.listVdfs.mockReset()
+    vdfs.statVdfs.mockReset()
   })
 
   it('取「声明可新建 ext=session」的那个子节点，而不是按名字', async () => {
@@ -118,6 +121,7 @@ describe('ensureSessionScheme：按 kind 认两个集合段', () => {
   beforeEach(() => {
     resetVdfsSessionScheme()
     vdfs.listVdfs.mockReset()
+    vdfs.statVdfs.mockReset()
   })
 
   it('取会话内部 kind = messages / inbox 的两个子目录（与子会话 / 工作目录区分开）', async () => {
@@ -198,6 +202,7 @@ describe('按挂载目录缓存：子智能体空间是另一份方案', () => {
   beforeEach(() => {
     resetVdfsSessionScheme()
     vdfs.listVdfs.mockReset()
+    vdfs.statVdfs.mockReset()
   })
 
   it('传挂载目录 = 解析那个空间那份；与默认那份互不覆盖', async () => {
@@ -234,6 +239,7 @@ describe('地址拼接：后端两种口径都不能拼重', () => {
   beforeEach(() => {
     resetVdfsSessionScheme()
     vdfs.listVdfs.mockReset()
+    vdfs.statVdfs.mockReset()
   })
 
   it('path 已是全路径时直接用（曾拼成 <根>/<根>/session ⇒ 读取转写 404）', async () => {
@@ -285,6 +291,7 @@ describe('vdfsSessionScheme：同步读（事件回调用）', () => {
   beforeEach(() => {
     resetVdfsSessionScheme()
     vdfs.listVdfs.mockReset()
+    vdfs.statVdfs.mockReset()
   })
 
   it('未解析时返回 null —— 引导窗口内事件不路由，而不是拿错的段名去拼', () => {
@@ -307,5 +314,108 @@ describe('vdfsSessionScheme：同步读（事件回调用）', () => {
       messagesSeg: 'message',
       inboxSeg: 'inbox',
     })
+  })
+})
+
+/**
+ * `isSessionMountDir` —— 判断「这个地址是不是会话挂载目录」。
+ *
+ * 它存在的理由是一类**地址形态混淆**：会话节点自己的 `ext` 也是 `session`
+ * （所以都归会话渲染器），但只有挂载目录的 `new_type.ext` 是 `session`。
+ * 把这个判据写错，前端就会拿 `<挂载目录>/<id>`（甚至 `<id>/subsession`）当空间，
+ * 后续每次寻址都按 `<那个地址>/<id>/…` 拼，得到一串
+ * 「会话内部不存在该路径」「没有 kind=messages 的子节点」。
+ */
+describe('isSessionMountDir：按父目录自述分辨挂载目录与会话叶子', () => {
+  beforeEach(() => {
+    resetVdfsSessionScheme()
+    vdfs.listVdfs.mockReset()
+    vdfs.statVdfs.mockReset()
+  })
+
+  it('声明 new_type.ext = session 的目录 = 挂载目录', async () => {
+    vdfs.statVdfs.mockResolvedValue(
+      node({ name: 'session', new_type: { ext: VDFS_EXT_SESSION, title: '会话' } }),
+    )
+
+    await expect(isSessionMountDir('@vfs/session')).resolves.toBe(true)
+    expect(vdfs.statVdfs).toHaveBeenCalledWith(READBACK_REASON.BOOTSTRAP, '@vfs/session')
+  })
+
+  it('会话节点（ext = session 但不是目录）与子会话清单都不是挂载目录', async () => {
+    // 会话叶子：ext 撞了，但没有 new_type（new_type 是「这里能新建什么」的声明）
+    vdfs.statVdfs.mockResolvedValueOnce(node({ name: 's1', kind: 'session', ext: VDFS_EXT_SESSION }))
+    await expect(isSessionMountDir('@vfs/session')).resolves.toBe(false)
+
+    // 子会话清单：kind 自成一类，同样没有 new_type
+    vdfs.statVdfs.mockResolvedValueOnce(node({ name: 'subsession', kind: 'subsession' }))
+    await expect(isSessionMountDir('@vfs/session/s1/subsession')).resolves.toBe(false)
+  })
+
+  it('自述读不到时返回 null（不否决）—— 一次 IPC 抖动不该把正常会话判成不可用', async () => {
+    vdfs.statVdfs.mockResolvedValueOnce(null)
+    await expect(isSessionMountDir('@vfs/session')).resolves.toBeNull()
+  })
+
+  it('已解析过的挂载不必再 stat（根空间那份 / 各子空间那份都在缓存里）', async () => {
+    vdfs.listVdfs.mockResolvedValueOnce({ path: '@vfs', node: node({ name: '' }), items: rootListing() })
+    await ensureSessionMountDir()
+
+    await expect(isSessionMountDir('@vfs/session')).resolves.toBe(true)
+    expect(vdfs.statVdfs).not.toHaveBeenCalled()
+  })
+})
+
+/**
+ * `sessionSpaceOf` —— 一个会话条目**属于哪个空间**。
+ *
+ * 这是「子会话打不开」的修复点：子会话的地址是
+ * `<挂载目录>/<父会话>/subsession/<子>`，比普通会话多嵌两段。若拿父目录当空间
+ * （`parseVdfsSessionAddr` 的机械切分就是这样），后续每一次寻址都按一个不存在的
+ * 空间拼，得到「会话内部不存在该路径」「没有 kind=messages 的子节点」。
+ *
+ * 判据必须只靠**节点自述**（`new_type` 只有挂载目录才有）——前端不认识
+ * `subsession` 这个段名，也不该认识。
+ */
+describe('sessionSpaceOf：从条目向上认它所属的会话空间', () => {
+  beforeEach(() => {
+    resetVdfsSessionScheme()
+    vdfs.listVdfs.mockReset()
+    vdfs.statVdfs.mockReset()
+  })
+
+  it('普通会话：父目录就是挂载目录（一次 stat 即可）', async () => {
+    vdfs.statVdfs.mockResolvedValueOnce(
+      node({ name: 'session', new_type: { ext: VDFS_EXT_SESSION, title: '会话' } }),
+    )
+
+    await expect(sessionSpaceOf('@vfs/session/s1')).resolves.toBe('@vfs/session')
+    expect(vdfs.statVdfs).toHaveBeenCalledTimes(1)
+    expect(vdfs.statVdfs).toHaveBeenCalledWith(READBACK_REASON.BOOTSTRAP, '@vfs/session')
+  })
+
+  it('子会话：越过 `subsession` 与父会话两层，落到挂载目录', async () => {
+    // 第一跳：子会话清单目录（没有 new_type ⇒ 不是空间）
+    vdfs.statVdfs.mockResolvedValueOnce(node({ name: 'subsession', kind: 'subsession' }))
+    // 第二跳：父会话（ext = session 但**没有** new_type，仍不是空间）
+    vdfs.statVdfs.mockResolvedValueOnce(
+      node({ name: 'p1', kind: 'session', ext: VDFS_EXT_SESSION }),
+    )
+    // 第三跳：挂载目录
+    vdfs.statVdfs.mockResolvedValueOnce(
+      node({ name: 'session', new_type: { ext: VDFS_EXT_SESSION, title: '会话' } }),
+    )
+
+    await expect(sessionSpaceOf('@vfs/session/p1/subsession/s2')).resolves.toBe('@vfs/session')
+  })
+
+  it('自述读不到 ⇒ null（调用方不得据此否决，见 isSessionMountDir 的约定）', async () => {
+    vdfs.statVdfs.mockResolvedValueOnce(null)
+    await expect(sessionSpaceOf('@vfs/session/s1')).resolves.toBeNull()
+  })
+
+  it('一路到根都不是空间 ⇒ null（不无限向上）', async () => {
+    vdfs.statVdfs.mockResolvedValue(node({ name: 'x' }))
+    await expect(sessionSpaceOf('@vfs/a/b/c')).resolves.toBeNull()
   })
 })

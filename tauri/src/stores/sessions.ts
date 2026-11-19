@@ -54,6 +54,7 @@ import {
   readSessionTranscript,
   deleteMessage as apiDeleteMessage,
   updateMessage as apiUpdateMessage,
+  sessionListItemOf,
   type SessionListItem,
   type SessionMetadata
 } from '@/services/session'
@@ -70,6 +71,7 @@ import {
   sessionRuntimeOf,
   vdfsInboxAddr,
   vdfsSessionAddr,
+  type VdfsItem,
   type VdfsNode,
 } from '@/schemas/vdfs'
 import { setLastWorkdir, getLastWorkdir } from '@/services/plugin'
@@ -149,6 +151,21 @@ export const useSessionsStore = defineStore('sessions', () => {
    * 一个「现在正好在哪个空间」的猜测。
    */
   const sessionMounts = ref<Record<string, string>>({})
+
+  /**
+   * **不在本空间清单里**的会话的节点自述（id → 清单项）。
+   *
+   * 目前唯一的来源是子会话：它住在父会话内部的清单目录下
+   * （`<挂载目录>/<父会话>/subsession/<子>`），后端的清单只扫挂载目录的直接子目录，
+   * 因此它**永远不会**出现在 `list` 里。可详情页选中它时，面板要的 `workdir` /
+   * 标题 / 运行态全在清单项上（`activeWorkdir` 等一律从 `activeListItem` 取）——
+   * 不登记这一份，面板就会退化成「请先选工作目录」，转写明明读到了也不显示。
+   *
+   * 与 `list` 分开存是**故意的**：往 `list` 里塞一条不属于本空间的会话，会让
+   * 「清单」这一事实变成两种来源的拼合（而后端清单仍是唯一真相）。这里只是
+   * 「选中项的详情自述」，用完即弃，随下一次选中被覆盖。
+   */
+  const offListSessions = ref<Record<string, SessionListItem>>({})
 
   /**
    * 某会话的挂载目录（叶子操作的寻址依据）。
@@ -668,7 +685,16 @@ export const useSessionsStore = defineStore('sessions', () => {
   }
 
   // ---- 计算属性 ----
-  const activeListItem = computed(() => list.value.find(s => s.id === activeId.value) || null)  /**
+  const activeListItem = computed(
+    () =>
+      list.value.find((s) => s.id === activeId.value) ||
+      // 不在本空间清单里的会话（子会话）：用选中时登记的节点自述顶上，
+      // 否则 `activeWorkdir` / 标题 / 运行态全部退化成「未知」。
+      offListSessions.value[activeId.value ?? ''] ||
+      null
+  )
+
+  /**
    * 当前会话的**完整地址**（`<挂载目录>/<id>`）——输入与读取的唯一落点。
    *
    * 会话在前端的身份是地址而不是裸 id（两个空间里可以有同名 id）。`activeId`
@@ -684,11 +710,27 @@ export const useSessionsStore = defineStore('sessions', () => {
   })
   const activeTitle = computed(() => {
     if (!activeId.value) return '会话'
-    return titles.value[activeId.value] || activeListItem.value?.metadata?.title || '新对话'
+    // 标题按**同一判别顺序**取：缓存（新建 / 重命名时就地写过）→ 清单项的标题，
+    // 清单项的标题由 `titleOf` 给（`metadata.title` 优先，回退节点名）。
+    // 回退节点名这一条是子会话要的：它不在清单里，节点自述的 `title` 就是它的名字。
+    const fromItem = activeListItem.value ? titleOf(activeListItem.value) : ''
+    return titles.value[activeId.value] || fromItem || '新对话'
   })
   const activeWorkdir = computed(() => {
     const m = activeListItem.value?.metadata
     return (m?.workdir as string | undefined) || undefined
+  })
+  /**
+   * 当前会话是否**在本空间清单里**。
+   *
+   * 面板据此区分两种「没有工作目录」：清单里的会话没有工作目录 ⇒ 该让它先挑一个
+   * 工作区（那是「在这里干活」的前提）；**不在清单里**的会话（子会话，它住在父
+   * 会话内部的清单目录下，后端清单永远不会列它）⇒ 它是一段**已经跑完的转写**，
+   * 没有工作区可挑——拿「请先选工作目录」挡住它，这段转写就永远看不到了。
+   */
+  const activeSessionListed = computed(() => {
+    const id = activeId.value
+    return Boolean(id && list.value.some((s) => s.id === id))
   })
   const isActiveWorking = computed(() => isWorkingStatus(activeListItem.value?.status))
   const runningCount = computed(() => list.value.filter(s => isWorkingStatus(s.status)).length)
@@ -857,8 +899,12 @@ export const useSessionsStore = defineStore('sessions', () => {
    * 从地址里解析出的挂载目录会被记进 `sessionMounts`，于是后续的读取 / 发送 /
    * 删除都落回**同一个空间**——这正是「子空间里选中的会话，消息却发到父智能体」
    * 那条链路的断点所在（地址在组件间传递时被丢成裸名字）。
+   *
+   * `node` = 那一项的节点自述（详情页手上就有）。**子会话必须传**：它不在挂载目录的
+   * `list` 里（住在父会话内部的清单目录下），而 `activeWorkdir` / 标题 / 运行态都从
+   * 清单项取——不登记这一份，面板会以为它没有工作目录，转写读到了也不显示。
    */
-  async function selectSession(addr: string) {
+  async function selectSession(addr: string, node?: VdfsItem | null) {
     const parsed = parseVdfsSessionAddr(addr)
     const id = parsed?.id ?? addr
     if (!id) return
@@ -867,6 +913,17 @@ export const useSessionsStore = defineStore('sessions', () => {
       // 顺序反了会把刚设好的 activeId 抹掉。
       setSessionSpace(parsed.mountDir)
       rememberMounts([id], parsed.mountDir)
+    }
+    // 清单里查不到 ⇒ 按节点自述登记一份（见 `offListSessions`）；查得到就以清单为准，
+    // 顺手把旧登记清掉，避免一条过期自述盖住后来的清单。
+    // 登记键用**选中的 id**（而不是里的 `item.id`）：本次选中的是谁由地址末段决定，
+    // 两者不一致时以地址为准——否则一条不匹配的登记会静默失效，面板又退回「新对话」。
+    if (node) {
+      const item = sessionListItemOf(node)
+      if (item) {
+        if (list.value.some((s) => s.id === id)) delete offListSessions.value[id]
+        else offListSessions.value[id] = { ...item, id }
+      }
     }
     activeId.value = id
     // 同步最近使用目录（仅作新建默认）。
@@ -877,6 +934,11 @@ export const useSessionsStore = defineStore('sessions', () => {
     }
     // 兜底：该会话从未绑定 workdir（早期会话）时，若存在可用上下文（最近使用目录）
     // 则自动补绑定并持久化，避免"选择已有会话卡在引导选择工作区"。
+    //
+    // ⚠️ 只对**清单里的会话**做：子会话（不在清单里）是父会话派出去的一段执行记录，
+    // 给它补绑一个「最近使用目录」既没有语义，也等于在用户没要求时改写它的 metadata
+    // （真事故：点开子会话却把它的 workdir 改成了上一次用过的工作区）。
+    if (!activeSessionListed.value) return
     const fallback = lastUsedWorkdir.value ?? getLastWorkdir()
     if (fallback) {
       try {
@@ -1334,6 +1396,7 @@ export const useSessionsStore = defineStore('sessions', () => {
     activeAddr,
     activeTitle,
     activeWorkdir,
+    activeSessionListed,
     isActiveWorking,
     runningCount,
     // methods

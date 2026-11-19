@@ -430,6 +430,41 @@ export interface VdfsTreeResponse {
   message?: string
 }
 
+/** 树视图的一个节点：原始条目 + 已组装的子节点。 */
+export interface VdfsTreeNode {
+  item: VdfsItem
+  children: VdfsTreeNode[]
+}
+
+/**
+ * 把 `vdfs/tree` 的**扁平**条目组装成树（层级由 `path` 表达，不是嵌套载荷）。
+ *
+ * `root` 是树的绑定地址（如工作目录根），回执里的条目路径都在它之下。判据只有
+ * 一个：`vdfsParent(node.path)` 指向谁——落在另一个条目上就挂成它的子节点，
+ * 不在清单里（等于 `root` 或中途缺失）就作为顶层。于是**不知道任何类型 / 段名**，
+ * 任意 provider 的树都能组装。
+ *
+ * - 只按 path 的父子关系连边；孤儿（父不在清单）落顶层而不是丢弃，避免一棵被
+ *   截断 / 只取了部分页的树把子项整支藏掉。
+ * - 同名路径去重（后端正常不会给重复 path，但变更收敛可能重复投递）。
+ * - 兄弟顺序保持入参顺序（后端 BFS 已按目录优先 + 名称排序）。
+ */
+export function assembleVdfsTree(nodes: VdfsItem[], root: string): VdfsTreeNode[] {
+  const byPath = new Map<string, VdfsTreeNode>()
+  for (const item of nodes ?? []) {
+    if (!item.path || byPath.has(item.path)) continue
+    byPath.set(item.path, { item, children: [] })
+  }
+  const tops: VdfsTreeNode[] = []
+  for (const node of byPath.values()) {
+    const parentPath = vdfsParent(node.item.path)
+    const parent = parentPath !== root ? byPath.get(parentPath) : undefined
+    if (parent) parent.children.push(node)
+    else tops.push(node)
+  }
+  return tops
+}
+
 /**
  * 写入回执。
  *

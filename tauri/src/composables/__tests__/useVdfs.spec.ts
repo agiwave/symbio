@@ -32,6 +32,7 @@ const mocks = vi.hoisted(() => ({
   readVdfs: vi.fn(),
   writeVdfs: vi.fn(),
   statVdfs: vi.fn(),
+  treeVdfs: vi.fn(),
   subscribeVdfsChanged: vi.fn(),
   // 动作通道：草稿上的「导入整包」要走它（载荷编码 + 目标地址在下面两条用例里钉住）
   runVdfsAction: vi.fn(),
@@ -43,6 +44,7 @@ vi.mock('@/services/vdfs', () => ({
   readVdfs: mocks.readVdfs,
   writeVdfs: mocks.writeVdfs,
   statVdfs: mocks.statVdfs,
+  treeVdfs: mocks.treeVdfs,
   runVdfsAction: mocks.runVdfsAction,
   arrayBufferToBase64: mocks.arrayBufferToBase64,
   // 以下未被本用例触达，仅为满足模块导入
@@ -149,6 +151,7 @@ beforeEach(() => {
     items: [],
   })
   mocks.readVdfs.mockResolvedValue({ path: '', text: '', binary: false, size: 0 })
+  mocks.treeVdfs.mockResolvedValue({ nodes: [], truncated: false })
   mocks.subscribeVdfsChanged.mockReturnValue(() => {})
 })
 
@@ -1061,6 +1064,197 @@ describe('useVdfs 深链选中（`?select=`：父目录 + 选中项）', () => {
     expect(api.selectedNode.value?.path).toBe(`${WORKDIR}/CHANGELOG.md`)
     expect(mocks.subscribeVdfsChanged, '地址没变 ⇒ 订阅范围没变').toHaveBeenCalledTimes(1)
 
+    wrapper.unmount()
+  })
+})
+
+/**
+ * 进入下一级再返回的选中恢复：选中态属于工作台，不属于 URL。
+ *
+ * 之前把会话名写进 `?select=` 看似能恢复，实际改写了当前历史条目，返回键的来源
+ * 与焦点落位一起漂移（左栏类别高亮丢失、中栏落到资源根）。这里用工作台自己的
+ * 记忆恢复，URL 保持不动。
+ */
+describe('useVdfs 返回选中记忆（进入下一级 → 返回）', () => {
+  const SESSION_DIR = '@vfs/session/memo-return'
+  const INNER = `${SESSION_DIR}/workdir`
+  const sessionItem: VdfsItem = {
+    path: `${SESSION_DIR}/s1`,
+    name: 's1',
+    title: 's1',
+    kind: 'file',
+    status: 'active',
+    access: 'r',
+    ext: 'session',
+  }
+
+  function serves(map: Record<string, VdfsItem[]>) {
+    mocks.listVdfs.mockImplementation(async (reasonOrPath: string, maybePath?: string) => {
+      const path = maybePath ?? reasonOrPath
+      return {
+        path,
+        node: { path, name: path.split('/').pop() ?? '', kind: 'dir', status: '', access: 'l' },
+        items: map[path] ?? [],
+      }
+    })
+  }
+
+  it('离开地址页再回来 ⇒ 恢复原会话，不靠 URL 的 ?select=', async () => {
+    serves({ [SESSION_DIR]: [sessionItem], [INNER]: [] })
+    const { api, wrapper, addrRef } = mountHost(ref(SESSION_DIR))
+    await settle()
+    await api.select(sessionItem)
+    expect(api.selectedNode.value?.path).toBe(sessionItem.path)
+
+    addrRef.value = INNER
+    await settle()
+    expect(api.selectedNode.value, '进入下一级 ⇒ 右栏暂时收起').toBeNull()
+
+    addrRef.value = SESSION_DIR
+    await settle()
+    await settle()
+    expect(api.selectedNode.value?.path, '返回 ⇒ 原会话必须重新选中').toBe(sessionItem.path)
+    expect(mocks.statVdfs, '记忆里的项在当前列表里 ⇒ 不必再 stat').not.toHaveBeenCalled()
+
+    wrapper.unmount()
+  })
+})
+
+/**
+ * 目录树里的文件是**孙辈**：中栏列表只拿到第一层，右栏详情却可以是整棵树里的
+ * 任意一层。刷新时若只拿「直接子项在不在 items 里」判失效，会把正在看的文件清空，
+ * 连带作废在途 read——表现就是点开任何文件都只显示空的编辑器。
+ */
+describe('useVdfs 目录树详情（树里的文件不能被列表口径误清空）', () => {
+  const TREE_ROOT = '@vfs/session/tree-abc/workdir'
+  const dirItem: VdfsItem = {
+    path: `${TREE_ROOT}/docs`,
+    name: 'docs',
+    title: 'docs',
+    kind: 'dir',
+    status: '',
+    access: 'lt',
+    ext: 'dir',
+  }
+  const fileItem: VdfsItem = {
+    path: `${TREE_ROOT}/docs/product/a.md`,
+    name: 'a.md',
+    title: 'a.md',
+    kind: 'file',
+    status: '',
+    access: 'rw',
+    ext: 'text',
+  }
+
+  it('★ 树里的文件选中后，后台刷新不得清空正文', async () => {
+    vi.useFakeTimers()
+    try {
+      mocks.listVdfs.mockImplementation(async (reasonOrPath: string, maybePath?: string) => {
+        const path = maybePath ?? reasonOrPath
+        return {
+          path,
+          node: {
+            path,
+            name: path.split('/').pop() ?? '',
+            kind: 'dir',
+            status: '',
+            access: path === TREE_ROOT ? 'lt' : 'l',
+          },
+          // 左栏无子目录 ⇒ cwd 定在树根；树的内容由 treeVdfs 单独给（含孙辈）。
+          items: [],
+        }
+      })
+      mocks.treeVdfs.mockResolvedValue({ nodes: [dirItem, fileItem], truncated: false })
+      mocks.readVdfs.mockResolvedValue({ path: '', text: '# 正文', binary: false, size: 8 })
+
+      const { api, wrapper } = mountHost(TREE_ROOT)
+      await settle()
+      expect(api.treeMode.value).toBe(true)
+
+      await api.select(fileItem)
+      expect(api.selectedNode.value?.path).toBe(fileItem.path)
+      expect(api.nodeText.value).toBe('# 正文')
+
+      // 工作目录 watcher 的一次普通信号 ⇒ scheduleRefresh；树里的孙辈不能被当掉。
+      emitChange({ path: TREE_ROOT })
+      await vi.advanceTimersByTimeAsync(500)
+      await settle()
+
+      expect(api.selectedNode.value?.path, '刷新后仍停在刚打开的文件').toBe(fileItem.path)
+      expect(api.nodeText.value, '在途 read 也不得被误作废').toBe('# 正文')
+      expect(mocks.readVdfs).toHaveBeenCalledWith(
+        READBACK_REASON.VDFS_BROWSER,
+        fileItem.path,
+        expect.any(Function),
+      )
+
+      wrapper.unmount()
+    } finally {
+      vi.useRealTimers()
+    }
+  })
+})
+
+/**
+ * `cwdAddr` —— 当前目录自述**对应哪个地址**。
+ *
+ * 「能不能新建 / 是不是会话空间 / 树形态」全都按目录自述判，而换目录时 `cwd`
+ * 立刻变、自述要等 `refresh()` 回来。两者错位的那一拍若无人记录，消费方就会把
+ * 上一栏的自述套到这一栏（真实事故：进入会话后点开 `message`，工作台拿会话节点的
+ * `new_type.ext = session` 把 `<sid>/message` 声明成了「当前会话空间」）。
+ *
+ * 这里只钉住**登记**这一半：`cwdAddr` 必须等于本次 list 回执的 `path`，而不是
+ * 请求发起时的 `cwd`（回执才是自述的来源）。「拿它拒绝套用」那一半在
+ * `VdfsWorkbench.spec.ts` 的「当前空间声明」里。
+ */
+describe('cwdAddr：目录自述的来源地址', () => {
+  it('等于 list 回执的 path（自述与请求同源登记）', async () => {
+    mocks.listVdfs.mockImplementation(async (_reason: unknown, path: string) => ({
+      path,
+      node: { ...msgNode('__dir'), access: 'l', ext: undefined },
+      items: [],
+    }))
+
+    const { api, wrapper } = mountHost(MSG_DIR)
+    await settle()
+
+    expect(api.cwdAddr.value).toBe(MSG_DIR)
+    wrapper.unmount()
+  })
+
+  it('换地址时落后一拍（cwd 已变、自述还是上一份），回执到了才对齐', async () => {
+    // 到达 `sub` 的那次 list 先扣住不回，好把「错位的那一拍」固定住看。
+    const gates: Array<() => void> = []
+    let gated = true
+    mocks.listVdfs.mockImplementation(async (_reason: unknown, path: string) => {
+      if (gated && path !== MSG_DIR) await new Promise<void>((resolve) => gates.push(resolve))
+      return {
+        path,
+        node: { ...msgNode('__dir'), access: 'l', ext: undefined },
+        // 不给子目录 ⇒ 三栏不自动落位（`refreshNav` 缺省会选第一个子目录），
+        // `cwd` 就恒等于绑定地址，错位才看得见。
+        items: [],
+      }
+    })
+
+    const addrRef = ref(MSG_DIR)
+    const { api, wrapper } = mountHost(addrRef)
+    await settle()
+    expect(api.cwdAddr.value).toBe(MSG_DIR)
+
+    addrRef.value = `${MSG_DIR}/sub`
+    await nextTick()
+    expect(api.cwd.value).toBe(`${MSG_DIR}/sub`)
+    // 这一拍正是 `cwdAddr` 存在的理由：消费方靠「两者不等」拒绝把上一份自述
+    // （如 `new_type.ext = session`）套到这个新目录上。
+    expect(api.cwdAddr.value, '自述还是上一份').toBe(MSG_DIR)
+
+    // 放行：此后（含被扣住的那几条）一律直接回执
+    gated = false
+    for (const open of gates) open()
+    await settle()
+    await settle()
+    expect(api.cwdAddr.value, '回执到了就对齐').toBe(`${MSG_DIR}/sub`)
     wrapper.unmount()
   })
 })

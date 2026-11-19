@@ -48,6 +48,8 @@ vi.mock('@/services/completionChime', () => ({ setChimeSettingsSource: vi.fn() }
 vi.mock('@/services/vdfs', () => ({
   treeVdfs: vi.fn(async () => ({ nodes: [], truncated: false })),
   listVdfs: vi.fn(async () => ({ items: [] })),
+  // 会话空间登记前会 stat 一次节点自述，确认它真是会话挂载点。
+  statVdfs: vi.fn(async () => ({ new_type: { ext: 'session' } })),
 }))
 // 会话挂载点：Cmd+N 的前提。让它由用例决定认不认得出来。
 vi.mock('@/services/vdfsScheme', () => ({

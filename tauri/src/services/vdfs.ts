@@ -70,10 +70,19 @@ function callReadback<TOutput>(
  * `main.ts` 在挂载前 `await` 本函数：路由换算（`vdfsAddress`）读锚点，
  * 必须先于首次导航就绪。失败（无 vdfs 插件 / IPC 断开）不抛错——锚点留空，
  * 地址代数退化为「无虚拟半」，页面仍可渲染物理半；错误已记日志可诊断。
+ *
+ * **并发去重**：冷启动路径（`cold-start: session mount unresolved`）与挂载前
+ * 引导会同时打进来。两次请求除了多一次 IPC 没有别的后果，但真正的坑在
+ * `listVdfs()` 默认地址 = 锚点：锚点还没就绪时它会拿**空地址**发请求，后端按
+ * 「裸地址属于物理层」去解析，报出与本次调用毫无关系的
+ * `缺少 workdir 参数（访问层未透传工作目录）`。让所有入口共用一个在途
+ * Promise，锚点就绪之前不再有人拿空地址出站。
  */
+let rootBootstrap: Promise<void> | null = null
+
 export async function ensureVdfsRoot(): Promise<void> {
   if (vdfsRootResolved()) return
-  await withFallback(
+  rootBootstrap ??= withFallback(
     async () => {
       // `vdfs/root` 的定义就是「不给地址」：给了也不看，免得出现两套入参
       const resp = await callPlugin<VdfsListResponse>(VDFS_ROOT_OP, {})
@@ -86,7 +95,23 @@ export async function ensureVdfsRoot(): Promise<void> {
     },
     () => {},
     { tag: 'vdfs-service', what: 'vdfs/root failed，虚拟半不可用' }
-  )
+  ).finally(() => {
+    rootBootstrap = null
+  })
+  await rootBootstrap
+}
+
+/**
+ * 列表地址的**兜底解析**：没给地址 = 虚拟根，但根锚点必须先就绪。
+ *
+ * 直接拿 `vdfsRoot()` 当缺省值会在冷启动窗口里发出空地址请求（空地址按协议
+ * 归物理层，只会得到一条与调用方无关的 `缺少 workdir 参数`）。锚点仍解析不出来
+ * 时返回空串，由调用方按「无虚拟半」处理——不发那条注定无意义的请求。
+ */
+async function listAddrOf(path: string | undefined): Promise<string> {
+  if (path) return path
+  await ensureVdfsRoot()
+  return vdfsRoot()
 }
 
 /**
@@ -98,20 +123,26 @@ export async function ensureVdfsRoot(): Promise<void> {
  */
 export async function listVdfs(
   reason: ReadbackReason,
-  path = vdfsRoot(),
+  path?: string,
   opts?: VdfsListOptions,
   /** 失败观测器：读失败仍吞成空列表，但可据此把「读不到」上报给 UI（区别于「真没有」）。 */
   onFallback?: (err: unknown) => void
 ): Promise<VdfsListResponse> {
-  const payload: Record<string, unknown> = { path }
+  const addr = await listAddrOf(path)
+  if (!addr) {
+    // 根锚点都没解析出来：不发请求（见 `listAddrOf`），但必须留下可诊断的一行
+    logger.warn('vdfs-service', `listVdfs 缺地址且根锚点未就绪，返回空列表（${reason}）`)
+    return { path: '', node: emptyNode(''), items: [] }
+  }
+  const payload: Record<string, unknown> = { path: addr }
   if (opts?.limit !== undefined) payload.limit = opts.limit
   if (opts?.before) payload.before = opts.before
   // 空目录要带上 `path`，故兜底是 thunk（惰性）而非常量
-  const empty = (): VdfsListResponse => ({ path, node: emptyNode(path), items: [] })
+  const empty = (): VdfsListResponse => ({ path: addr, node: emptyNode(addr), items: [] })
   return withFallback(
     async () => (await callReadback<VdfsListResponse>(reason, VDFS_LIST, payload)) ?? empty(),
     empty,
-    { tag: 'vdfs-service', what: `listVdfs(${path}) failed` },
+    { tag: 'vdfs-service', what: `listVdfs(${addr}) failed` },
     onFallback
   )
 }
@@ -130,19 +161,24 @@ export async function listVdfs(
  */
 export async function treeVdfs(
   reason: ReadbackReason,
-  path = vdfsRoot(),
+  path?: string,
   opts?: { depth?: number; limit?: number },
   /** 失败观测器：读失败仍吞成空清单，但可据此把「读不到」上报给 UI（区别于「真没有」）。 */
   onFallback?: (err: unknown) => void
 ): Promise<VdfsTreeResponse> {
-  const payload: Record<string, unknown> = { path }
+  const addr = await listAddrOf(path)
+  if (!addr) {
+    logger.warn('vdfs-service', `treeVdfs 缺地址且根锚点未就绪，返回空树（${reason}）`)
+    return { nodes: [], truncated: false }
+  }
+  const payload: Record<string, unknown> = { path: addr }
   if (opts?.depth !== undefined) payload.depth = opts.depth
   if (opts?.limit !== undefined) payload.limit = opts.limit
   const empty = (): VdfsTreeResponse => ({ nodes: [], truncated: false })
   return withFallback(
     async () => (await callReadback<VdfsTreeResponse>(reason, VDFS_TREE, payload)) ?? empty(),
     empty,
-    { tag: 'vdfs-service', what: `treeVdfs(${path}) failed` },
+    { tag: 'vdfs-service', what: `treeVdfs(${addr}) failed` },
     onFallback
   )
 }

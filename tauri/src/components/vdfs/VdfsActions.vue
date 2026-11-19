@@ -72,6 +72,15 @@ const props = defineProps<{
 defineEmits<{ (e: 'run', action: DetailAction): void }>()
 
 /**
+ * 本组件根节点是**多根片段**（每个动作一个按钮，另有分隔符），因此 Vue 无法把
+ * 外部传入的 `class` / 属性自动合并到某个根元素上——它会报一条
+ * `Extraneous non-props attributes (class) were passed to component ...` 的警告，
+ * 并把那个 class 丢掉。消费方若需要在外层留一个盒子（如 `ChatMainPanel` 的
+ * `.header-actions` 分隔线），请自己套一层 `<div>`，不要把 class 传进来。
+ */
+defineOptions({ inheritAttrs: false })
+
+/**
  * 「进入下一级」类动作：与「对资源做点什么」的按钮之间隔开一段距离。
  *
  * 位置由 `mergeDetailActions` 保证（恒在最右），这里只负责视觉上把它摘出来——
