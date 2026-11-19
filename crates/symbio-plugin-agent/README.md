@@ -24,12 +24,15 @@ impl: done
 
 ## 职责
 
-| 交出什么 | 机制 |
+| 职责 | 机制 |
 |---|---|
 | agent 目录管理 | `impl VdfsProvider`（`<根>/agent`：浏览 / 整包导入 / 导出 / 删除），目录自管（`AgentDirStore`：唯一来源是本插件自己的目录 `{homedir}/agent`，与 `WORKDIR` 无关；zip-slip 防护、导入即校验） |
 | 子树装配 | 会话选定智能体（`ctx[AGENT_ID]`）时构造该目录的插件树并转发能力收集；注册经 `SubAgentVisitor` 加来源前缀（`agent/<id>/…`），与系统树**并集**且不撞名 |
-| 工具贡献 | `traverse(agent/available_tools)` 把 `agent_run`（子智能体委托）加入会话工具集 |
 | 选项贡献 | `traverse(agent/available_options)` 提供会话页的「智能体」选择项 |
+
+委托工具（`agent_run`）不住在这里：它是**会话级原语**，由 [session](../symbio-plugin-session/README.md "crates/symbio-plugin-session/README")
+注册（D-500）。本插件与委托的关系只剩地址面——session 经容器 VDFS 视图列 `agent` 挂载点
+得到 `agent_id` 候选、执行期 `Stat agent/<id>` 校验存在性，不再有代码级接触。
 
 ### 为什么托管与门槛必须在同一个插件里
 

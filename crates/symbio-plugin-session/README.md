@@ -290,6 +290,21 @@ session:
 
 ---
 
+## 五a、 委托工具（`agent_run`）：会话级原语
+
+LLM 可见工具只有一条：`agent_run`（子智能体委托，D-500）——新建 / 续会话 / 恢复
+委托会话。归属裁决与「为什么它从 agent 插件迁来」见
+[DE-011 D-500](../../docs/003-design/011-Agent目录规范.md "DE-011-Agent目录规范")；
+这里只记模块形状：
+
+| 交出什么 | 机制 |
+|---|---|
+| 工具本体 | `src/tools/subagent.rs`（`PortExecutor`，普通工具零特殊化）；`traverse(session/available_tools)` **无条件注册**——agent 插件缺席时 `agent_id` enum 为空，省略即纯对话子会话 |
+| `agent_id` 取值域 | 经**本作用域容器**的 VDFS 视图列 `agent` 挂载点（`agent_id_candidates`）；执行期 `Stat agent/<id>` 校验——agent 目录的枚举与存在性由它的 owner（agent 插件）经地址面回答，E-009 边不新增 |
+| 承诺面 | `src/tools/behavior.rs`：立约效果（`delegation_promise`）+ 淘汰闸（`assign_work`），经 `ToolBehavior` 交给写口；承诺事件 owner 随写方迁入本插件（D-389 同一条纪律） |
+
+---
+
 ## 六、 工具结果字段约定（跨插件契约）
 
 > **目标**：让「工具返回任意 JSON → 压成一段给模型看的文本」这一**必要适配**不再隐式——加一个工具不必读 `extract_result` 源码才知道自己该返回哪个字段。
