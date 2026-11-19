@@ -1,9 +1,17 @@
 //! agent_run —— 委托型工具：把任务交给另一个已安装的 agent 目录（子智能体）执行。
 //!
+//! ## 归属：会话级原语，住 session 插件
+//!
+//! 新建会话与新建会话的子会话是同一件事的两层（子会话的存储归档、收件箱输入面、
+//! `parent_session_id` 语义全在本插件），委托因此是**会话域**的能力；`agent_id` 只是
+//! 一个可选参数，核心机制（子会话的发起 / 转播 / 恢复）与子 agent 的目录、装配无关
+//! ——agent 插件只管「有哪些智能体、怎么把它们连进来」，不承担会话。工具由本插件
+//! 在 `traverse(available_tools)` 里无条件注册（见 `super::super::plugin`），裁决与
+//! 迁移记录见 `docs/003-design/011-Agent目录规范.md` 的关键决策。
+//!
 //! ## 架构定位：普通工具，零特殊化
 //!
 //! agent_run 与 file_read / shell 等工具完全同构：
-//! - 经 `traverse(available_tools)` 注册（工具即端口，`register_tool` 收口，见 `super::plugin`）；
 //! - 子会话过程经**执行期出口** `ExecEventSink`（由 ctx 注入，见 `symbio_plugin_api::exec`）
 //!   转播到父视图，前端按普通流式工具渲染——工具**不返回通道**；
 //! - 子会话内工具需要用户审批时，产出 `user_prompt(WaitingUserAction)`——与
@@ -42,7 +50,6 @@
 //! 而是对当时那条消息的操作。父子关系始终由子会话存储元数据承载，无进程内状态。
 
 use super::behavior::{ASSIGN_WORK, DELEGATION_PROMISE};
-use super::store::AgentDirStore;
 use serde_json::{json, Value};
 use std::collections::{HashMap, HashSet};
 use std::sync::Arc;
@@ -52,7 +59,6 @@ use symbio_plugin_api::chat_node::{
 use symbio_plugin_api::routes::{
     ROUTE_EVENT_BUS_SUBSCRIBE, ROUTE_VDFS_ROOT, ROUTE_VDFS_UNWATCH, ROUTE_VDFS_WATCH,
 };
-use symbio_plugin_api::PLUGIN_ID_SESSION;
 use symbio_plugin_api::{
     event_bus_resync_of, event_bus_vdfs_change_of, missing_caller, EVENT_BUS_KIND_VDFS,
 };
@@ -66,6 +72,7 @@ use symbio_plugin_api::{vdfs_context, VdfsError};
 use symbio_plugin_api::{
     VdfsContent, VdfsListResponse, VdfsNode, VdfsProvider, VdfsRequest, VDFS_STATUS_WORKING,
 };
+use symbio_plugin_api::{PLUGIN_ID_AGENT, PLUGIN_ID_SESSION};
 
 // ── 本工具的身份约定（续跑参数经**载荷**回传，由 tool_executor 落到 meta.prompt）──
 /// 工具名。**两处必须同源**：`CapabilityMeta.name`（LLM 看到的短名）与待审批载荷
@@ -84,11 +91,8 @@ use symbio_plugin_api::vocab::SEG_INBOX;
 pub struct AgentRunCapability {
     /// 子会话默认 workdir（构造时解析：父 ctx > 无）
     workdir: Option<String>,
-    /// agent 目录存储根 = **本插件自己的目录**（构造时由插件实例传入）
-    ///
-    /// 能力侧同样不认识全局布局：目录由插件给，这里只透传给 [`AgentDirStore`]。
-    agent_dir_root: std::path::PathBuf,
-    /// `agent_id` 的 enum 候选（可用智能体目录 id）
+    /// `agent_id` 的 enum 候选（可用智能体目录 id；构造时由插件实例经容器 VDFS
+    /// 视图列 agent 挂载点得到——本能力不认识 agent 目录的存储）
     agent_ids: Vec<String>,
     /// 插件间路由入口（composite 容器弱引用，构造时由插件实例捕获）
     router: Option<std::sync::Weak<dyn Plugin>>,
@@ -97,13 +101,11 @@ pub struct AgentRunCapability {
 impl AgentRunCapability {
     pub fn new(
         workdir: Option<String>,
-        agent_dir_root: std::path::PathBuf,
         agent_ids: Vec<String>,
         router: Option<std::sync::Weak<dyn Plugin>>,
     ) -> Arc<Self> {
         Arc::new(Self {
             workdir,
-            agent_dir_root,
             agent_ids,
             router,
         })
@@ -236,20 +238,22 @@ impl AgentRunCapability {
 
         // ── 解析目标智能体：显式参数 > 当前会话绑定的智能体 > None（纯对话子会话）──
         //
-        // ⚠️ **默认值必须在本作用域的 store 里可解释**（与 `forward_to_sub_agent`
+        // ⚠️ **默认值必须在本作用域可解释**（与 `forward_to_sub_agent`
         // 清空 `AGENT_ID` 是同一条规则：跨作用域不继承「选中」）。
-        // 本能力的 store 是 `<本插件目录>/agent`：
-        //  - 系统实例的 store = `{homedir}/agent`，与会话选中的 agent **同域** ⇒ 默认照常生效；
-        //  - 子树实例（分形）的 store = `<agentdir>/agent`，而 `ctx[AGENT_ID]` 是**外层**
+        // 本能力读的 agent 挂载点经**本作用域容器**的 VDFS 视图：
+        //  - 系统树的挂载点 = `{homedir}/agent`，与会话选中的 agent **同域** ⇒ 默认照常生效；
+        //  - 子树实例（分形）的挂载点 = `<agentdir>/agent`，而 `ctx[AGENT_ID]` 是**外层**
         //    作用域的选中 ⇒ 拿它当默认必然查不到，令 LLM 收到一条它从未传过的 id 的报错。
-        // 故默认值先过一遍**本作用域**的 store：不在我的目录里 ⇒ 我这一层没有默认。
-        // **显式** `agent_id` 不受此限 —— 那是调用方的指令，仍在下面照旧对照 store 校验。
-        let store = AgentDirStore::new(&self.agent_dir_root);
-        let current_agent = ctx
+        // 故默认值先过一遍**本作用域**的挂载点：不在我的清单里 ⇒ 我这一层没有默认。
+        // **显式** `agent_id` 不受此限 —— 那是调用方的指令，仍在下面照旧校验。
+        let current_agent = match ctx
             .get(symbio_plugin_api::AGENT_ID)
             .map(|s| s.trim().to_string())
             .filter(|s| !s.is_empty())
-            .filter(|id| store.get(id).is_some());
+        {
+            Some(id) if agent_exists(&parent, &ctx, &id).await => Some(id),
+            _ => None,
+        };
         let agent_id: Option<String> = req
             .agent_id
             .clone()
@@ -264,7 +268,7 @@ impl AgentRunCapability {
             None => self.workdir.clone(),
         };
         if let Some(aid) = &agent_id {
-            if store.get(aid).is_none() {
+            if !agent_exists(&parent, &ctx, aid).await {
                 return Err(PluginError::NotFound(format!(
                     "目标智能体 '{aid}' 不存在，无法委托任务。请检查 agent_id 是否正确。"
                 )));
@@ -338,7 +342,7 @@ impl AgentRunCapability {
                 .await
                 {
                     symbio_plugin_api::plugin_warn!(
-                        "agent",
+                        "session",
                         "登记子会话元数据失败（不影响委托执行）: {}",
                         e
                     );
@@ -522,6 +526,28 @@ enum RelayOutcome {
     },
     /// 子会话以错误结束（会话节点 `attributes.error`）。
     Failed(String),
+}
+
+/// 目标 agent 目录是否存在（**本作用域**的 agent 挂载点）。
+///
+/// 判据走地址面（`Stat agent/<id>`），不走 agent 插件的存储——E-009 禁兄弟插件依赖，
+/// agent 目录的存在性由它的 owner（agent 插件）经 VDFS 回答。作用域语义随分形天然
+/// 正确：本能力的路由入口是**本作用域容器**（子树里的 parent 是子容器），其 `agent`
+/// 挂载点在子树里就是 `<agentdir>/agent`。任何错误（挂载点缺席 / 存储故障）一律按
+/// 「不存在」处理——委托目标缺失是参数问题，不值得把存储抖动上抛成另一条报错。
+async fn agent_exists(
+    parent: &Arc<dyn Plugin>,
+    ctx: &Arc<dyn PluginInvokeRequest>,
+    agent_id: &str,
+) -> bool {
+    let Some(provider) = parent.clone().get_vfs_provider() else {
+        return false;
+    };
+    let addr = format!("{PLUGIN_ID_AGENT}/{agent_id}");
+    provider
+        .dispatch(&vdfs_context(ctx), &addr, VdfsRequest::Stat)
+        .await
+        .is_ok()
 }
 
 /// 校验 working_dir：绝对路径、拒绝 `..` 段、支持 `~` 展开。
@@ -1144,7 +1170,7 @@ async fn vdfs_watch(
     let _ = c.set_payload(json!({ "path": addr }));
     if let Err(e) = parent.clone().route(c).await {
         symbio_plugin_api::plugin_warn!(
-            "agent",
+            "session",
             "agent_run: vdfs/{} 登记失败（{}）: {}",
             if subscribe { "watch" } else { "unwatch" },
             addr,

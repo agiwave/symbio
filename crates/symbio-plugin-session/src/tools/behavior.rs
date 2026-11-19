@@ -46,8 +46,9 @@ pub struct DelegationPromise;
 
 impl ToolBehavior for DelegationPromise {
     fn owner(&self) -> &'static str {
-        // 与 `PLUGIN.yml` 的 `plugin_id` 同一串：owner 序即装配序。
-        "agent"
+        // 与本插件的 `plugin_id` 同一串：owner 序即装配序。工具随 `agent_run`
+        // 迁入 session（承诺事件的 owner 也跟着写方走，D-389 同一条纪律）。
+        "session"
     }
 
     fn behavior(&self) -> &'static str {
@@ -91,7 +92,8 @@ const COMMITMENT_VOCAB: symbio_plugin_api::CommitmentVocab = symbio_plugin_api::
     opened: symbio_plugin_api::events::EVENT_COMMITMENT_OPENED,
     released: symbio_plugin_api::events::EVENT_COMMITMENT_RELEASED,
     broken: symbio_plugin_api::events::EVENT_COMMITMENT_BROKEN,
-    asserted: symbio_plugin_api::events::EVENT_COMMITMENT_ASSERTED,
+    // `asserted` 无跨插件读方，不进共享表（CS-007）——owner 的字面量住 declarations。
+    asserted: crate::declarations::EVENT_COMMITMENT_ASSERTED,
 };
 
 symbio_plugin_api::submit_behavior!(DelegationPromise);
@@ -113,7 +115,7 @@ pub struct DelegationGate;
 
 impl ToolBehavior for DelegationGate {
     fn owner(&self) -> &'static str {
-        "agent"
+        "session"
     }
 
     fn behavior(&self) -> &'static str {

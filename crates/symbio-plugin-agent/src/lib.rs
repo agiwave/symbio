@@ -13,6 +13,9 @@
 //!
 //! - [`host`]：symbio 适配层——manifest 读取与门槛校验、Agent 目录的存储与整包
 //!   分发、子 Agent 插件树的托管与注册代理、VDFS 挂载点
+//!
+//! 委托工具（`agent_run`）不住在这里：它是**会话级原语**，由 `symbio-plugin-session`
+//! 提供（`agent_id` 只是可选参数，子会话的存储归档 / 收件箱输入面全在 session 域）；
+//! 承诺面事件（`commitment.*`）的 owner 也跟着写方迁到了 session。
 
-mod declarations;
 mod host;

@@ -93,6 +93,16 @@ pub(crate) const EVENTS: &[EventDecl] = &[
     EventDecl::new("message.edited", (Entity::Message, Verb::Asserted)),
     EventDecl::new("message.removed", (Entity::Message, Verb::Closed)),
     EventDecl::new("session.consolidated", (Entity::Message, Verb::Progressed)),
+    // ── 承诺面四格（owner 跟着写方走，D-389 同一条纪律）──
+    //
+    // 写方在本插件的 `tools::behavior`（`agent_run` 的委派以 `commitment_events`
+    // 成格）。所有者原先是环（`crates/symbio-plugin-loop`），随工具迁入 agent 插件
+    // （D-389 批二），再随委托工具迁回本插件——委托是会话级原语，写方在这里。
+    // `asserted` 不在共享表（单消费方，见上方 `EVENT_COMMITMENT_ASSERTED`）。
+    EventDecl::new("commitment.asserted", (Entity::Commitment, Verb::Asserted)),
+    EventDecl::new("commitment.broken", (Entity::Commitment, Verb::Closed)),
+    EventDecl::new("commitment.opened", (Entity::Commitment, Verb::Opened)),
+    EventDecl::new("commitment.released", (Entity::Commitment, Verb::Closed)),
     // 用户点了切换器：一次「关于这一轮的断言」，不是收束也不是开轮。
     EventDecl::new(EVENT_SCOPE_BRANCH_SELECTED, (Entity::Scope, Verb::Asserted)),
     // 用户答复（`kind ∈ answer|approve|deny`）：外部动作落事实，宿主再驱动一环
@@ -240,8 +250,8 @@ pub(crate) const FACTS: &[FactDecl] = &[
 /// `slo` / `commitment_records` …）住在 core，两个插件都调它，所以拼写只能来自
 /// **清单生成物**——本插件是 `message.*`、`session.consolidated` / `scope.branch_selected`
 /// 与 `chat.*` / `user.message` 的 owner；`authz.granted` 的 owner 是
-/// `crates/symbio-plugin-tool`、`commitment.*` 的 owner 是 `crates/symbio-plugin-agent`
-/// （E-009 禁兄弟插件依赖，故只引用清单生成物）；任务族
+/// `crates/symbio-plugin-tool`、`commitment.*` 的 owner 是本插件
+/// （写方 `tools::behavior` 随委托工具迁入）；任务族
 /// 五条已随能力迁到 `crates/symbio-plugin-task`——拼写同样只从清单生成物取。
 ///
 /// 发言拒因**不占字段**：那两条事实已按写方拆成各 owner 的私有名（D-390），
@@ -282,12 +292,19 @@ pub(crate) const MESSAGE_VOCAB: symbio_sdk::projection::vocab::MessageVocab =
 
 /// 承诺面（4 条）：本插件只剩 `commitment_records`（承诺列）一个消费方——声誉列改按
 /// 名字读台账后，那条折叠搬进了声誉能力包，它的词汇面也跟着走（`D-288`）。
+///
+/// 四格里三条走共享表（声誉读 `opened` / `released` / `broken`）；`commitment.asserted`
+/// 的读方目前只有本插件与 sdk 机制层（声誉明确「自报不进账」）——单消费方的名字随
+/// owner 走、不进共享表（CS-007），名字以字面量住在本文件，格位仍在下方 `EVENTS`
+/// 里声明。DE-038 对等协作落地、出现跨插件读方时再回共享表。
+pub(crate) const EVENT_COMMITMENT_ASSERTED: &str = "commitment.asserted";
+
 pub(crate) const COMMITMENT_VOCAB: symbio_plugin_api::CommitmentVocab =
     symbio_plugin_api::CommitmentVocab {
         opened: symbio_plugin_api::events::EVENT_COMMITMENT_OPENED,
         released: symbio_plugin_api::events::EVENT_COMMITMENT_RELEASED,
         broken: symbio_plugin_api::events::EVENT_COMMITMENT_BROKEN,
-        asserted: symbio_plugin_api::events::EVENT_COMMITMENT_ASSERTED,
+        asserted: EVENT_COMMITMENT_ASSERTED,
     };
 
 // 装配口的提交：宿主链接本 crate 即生效。装配方按 owner 排序后逐个 `declare`，

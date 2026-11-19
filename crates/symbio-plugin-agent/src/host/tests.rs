@@ -148,11 +148,11 @@ async fn agent_import_traverse_and_export() {
     let errors = symbio_plugin_api::capability_take_errors(&ctx).await;
     assert!(errors.is_empty(), "不应有收集期错误: {errors:?}");
 
-    // agent_run 无条件注册；子 Agent 的技能工具带来源前缀进来
+    // agent_run 已迁 session（会话级原语，本插件不再注册）；子 Agent 的技能工具带来源前缀进来
     let caps = tool_metas_of(&manager).await;
     assert!(
-        caps.iter().any(|c| c.name == "agent_run"),
-        "agent_run 应始终注册: {caps:?}"
+        !caps.iter().any(|c| c.name == "agent_run"),
+        "agent_run 由 session 插件注册，agent 不再贡献它: {caps:?}"
     );
     assert!(
         caps.iter()
@@ -213,16 +213,18 @@ async fn version_mismatch_agent_is_rejected_and_unbound_session_is_silent() {
     let err = store.import(&zip_bytes, false).unwrap_err();
     assert!(err.contains("拒绝导入"), "错误应含版本拒绝语义: {err}");
 
-    // 未选择智能体的会话：不装配任何 Agent，错误桶为空；
-    // agent_run 作为会话基础能力仍然注册。
+    // 未选择智能体的会话：不装配任何 Agent，错误桶为空。
+    // agent_run 已迁 session（会话级原语）——本插件不再贡献任何 LLM 可见工具。
     let plugin = Arc::new(AgentPlugin::new());
     let (ctx, manager) = ctx_with(None, None);
     plugin.traverse(String::new(), ctx.clone()).await.unwrap();
     let errors = symbio_plugin_api::capability_take_errors(&ctx).await;
     assert!(errors.is_empty(), "未绑定会话不应有收集期错误: {errors:?}");
     let caps = tool_metas_of(&manager).await;
-    assert_eq!(caps.len(), 1, "仅注册 agent_run: {caps:?}");
-    assert_eq!(caps[0].name, "agent_run");
+    assert!(
+        caps.is_empty(),
+        "agent 插件不再贡献任何工具（agent_run 归 session）: {caps:?}"
+    );
     // 没选智能体 → 不注入任何人格 / 记忆片段（这是作用域闸门，不是优化）
     assert!(
         capability_prompts(&*manager).await.is_empty(),

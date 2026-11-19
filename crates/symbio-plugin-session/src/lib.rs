@@ -25,6 +25,7 @@ pub(crate) mod runtime;
 mod stats;
 mod stats_reading;
 mod termination;
+mod tools;
 mod transcript;
 pub(crate) mod wording;
 mod working;

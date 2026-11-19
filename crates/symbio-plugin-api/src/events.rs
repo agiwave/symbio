@@ -54,16 +54,13 @@ pub const EVENT_CLASSIFY_ESCALATE: &str = "classify.escalate";
 
 // ============ commitment ============
 
-/// commitment.asserted — owner `symbio-plugin-agent`，格位 `(Commitment, Asserted)`
-pub const EVENT_COMMITMENT_ASSERTED: &str = "commitment.asserted";
-
-/// commitment.broken — owner `symbio-plugin-agent`，格位 `(Commitment, Closed)`
+/// commitment.broken — owner `symbio-plugin-session`，格位 `(Commitment, Closed)`
 pub const EVENT_COMMITMENT_BROKEN: &str = "commitment.broken";
 
-/// commitment.opened — owner `symbio-plugin-agent`，格位 `(Commitment, Opened)`
+/// commitment.opened — owner `symbio-plugin-session`，格位 `(Commitment, Opened)`
 pub const EVENT_COMMITMENT_OPENED: &str = "commitment.opened";
 
-/// commitment.released — owner `symbio-plugin-agent`，格位 `(Commitment, Closed)`
+/// commitment.released — owner `symbio-plugin-session`，格位 `(Commitment, Closed)`
 pub const EVENT_COMMITMENT_RELEASED: &str = "commitment.released";
 
 // ============ conation ============
@@ -155,10 +152,9 @@ pub const SHARED_EVENTS: &[EventDecl] = &[
     EventDecl::host_with_roles(EVENT_CHAT_ASSISTANT_FINAL, (Entity::Scope, Verb::Closed), &[FactRole::FinalizesScope]), // chat.assistant.final ← session
     EventDecl::new(EVENT_CLASSIFY_ANSWERED, (Entity::Verdict, Verb::Asserted)), // classify.answered ← classify
     EventDecl::new(EVENT_CLASSIFY_ESCALATE, (Entity::Verdict, Verb::Asserted)), // classify.escalate ← classify
-    EventDecl::new(EVENT_COMMITMENT_ASSERTED, (Entity::Commitment, Verb::Asserted)), // commitment.asserted ← agent
-    EventDecl::new(EVENT_COMMITMENT_BROKEN, (Entity::Commitment, Verb::Closed)), // commitment.broken ← agent
-    EventDecl::new(EVENT_COMMITMENT_OPENED, (Entity::Commitment, Verb::Opened)), // commitment.opened ← agent
-    EventDecl::new(EVENT_COMMITMENT_RELEASED, (Entity::Commitment, Verb::Closed)), // commitment.released ← agent
+    EventDecl::new(EVENT_COMMITMENT_BROKEN, (Entity::Commitment, Verb::Closed)), // commitment.broken ← session
+    EventDecl::new(EVENT_COMMITMENT_OPENED, (Entity::Commitment, Verb::Opened)), // commitment.opened ← session
+    EventDecl::new(EVENT_COMMITMENT_RELEASED, (Entity::Commitment, Verb::Closed)), // commitment.released ← session
     EventDecl::new(EVENT_CONATION_EXPRESSED, (Entity::Conation, Verb::Opened)), // conation.expressed ← conation
     EventDecl::new(EVENT_MEMORY_CONSOLIDATED, (Entity::Memory, Verb::Progressed)), // memory.consolidated ← memory
     EventDecl::new(EVENT_MEMORY_ENCODED, (Entity::Memory, Verb::Opened)), // memory.encoded ← memory

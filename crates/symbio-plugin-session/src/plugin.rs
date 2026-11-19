@@ -44,6 +44,7 @@ use symbio_kernel::vdfs::{VDFS_PARAM_BEFORE, VDFS_PARAM_LIMIT};
 use symbio_plugin_api::PLUGIN_ID_SESSION;
 use symbio_plugin_api::SESSION_ID;
 use symbio_plugin_api::{plugin_dir_from_ctx, PluginConfigFile, PluginDir, PLUGIN_FILE};
+use symbio_plugin_api::{vdfs_context, VdfsItem, VdfsRequest, PLUGIN_ID_AGENT};
 use symbio_providers::MemoryFile;
 use symbio_sdk::chat::session_chat;
 use symbio_sdk::plugin::fact_source::{FactSource, FACT_SOURCE};
@@ -212,6 +213,31 @@ impl SessionPlugin {
     /// 获取父插件引用
     pub(crate) fn get_parent(&self) -> Option<Arc<dyn Plugin>> {
         self.parent.as_ref().and_then(|w| w.upgrade())
+    }
+
+    /// `agent_run` 的 `agent_id` enum 候选：本作用域 agent 挂载点的清单。
+    ///
+    /// 经**本作用域容器**的 VDFS 视图列 `agent` 挂载点——agent 目录的枚举由它的
+    /// owner（agent 插件）经 VDFS 回答（E-009 禁兄弟插件依赖，session 不认识
+    /// `AgentDirStore`）。分形天然正确：子树里本插件的 parent 是子容器，
+    /// 挂载点即 `<agentdir>/agent`。容器缺席 / agent 插件缺席 / 列表失败一律返回空
+    /// ——委托仍可用（省略 `agent_id` 即纯对话子会话），只是没有显式候选。
+    async fn agent_id_candidates(&self, ctx: &Arc<dyn PluginInvokeRequest>) -> Vec<String> {
+        let Some(provider) = self.get_parent().and_then(|p| p.get_vfs_provider()) else {
+            return Vec::new();
+        };
+        match provider
+            .dispatch(&vdfs_context(ctx), PLUGIN_ID_AGENT, VdfsRequest::List {})
+            .await
+        {
+            Ok(resp) => resp
+                .into_list()
+                .unwrap_or_default()
+                .into_iter()
+                .map(|item: VdfsItem| item.node.name)
+                .collect(),
+            Err(_) => Vec::new(),
+        }
     }
 
     /// Session 存储目录：**本插件自己的目录**
@@ -497,11 +523,31 @@ impl Plugin for SessionPlugin {
                 }
             }
         }
-        // 能力收集（available_tools）：本插件**不再贡献工具**——`heartbeat` 那条随调度
-        // 搬进 `crates/symbio-plugin-heartbeat`（[D-077](../../symbio-plugin-heartbeat/README.md#d-077-心跳片的落点定为一层的插件目录卸载单位与第二个消费单位都由它给出 "crates/symbio-plugin-heartbeat/src/README")），
-        // 而它曾是 session 在 LLM 可见工具清单里唯一的一条。
+        // 能力收集（available_tools）：`heartbeat` 那条随调度搬进了
+        // `crates/symbio-plugin-heartbeat`（[D-077](../../symbio-plugin-heartbeat/README.md#d-077-心跳片的落点定为一层的插件目录卸载单位与第二个消费单位都由它给出 "crates/symbio-plugin-heartbeat/src/README")）；
+        // 现在贡献的 LLM 可见工具是 `agent_run`（子智能体委托）。
         // VDFS 挂载点由容器从 `get_vfs_provider` 派生（目录名 = 实例名）。
         if let Some(visitor) = ctx.get(symbio_plugin_api::CAPABILITY_VISITOR) {
+            // ── agent_run（子智能体委托）：会话级原语，**无条件注册** ──
+            //
+            // 新建会话与新建会话的子会话都是本插件域的事（子会话按
+            // `metadata.parent_session_id` 归档、经收件箱地址面发起）；`agent_id`
+            // 只是可选参数，子 agent 的目录与装配归 agent 插件——委托工具因此从
+            // agent 迁到本插件（裁决见 `docs/003-design/011-Agent目录规范.md`
+            // 的关键决策）。未指定 `agent_id` 时默认沿用当前会话的智能体，两者
+            // 皆空则子会话以无智能体的纯对话模式运行。
+            // enum 候选经**本作用域容器**的 VDFS 视图列 agent 挂载点
+            // （[`Self::agent_id_candidates`]）；agent 插件缺席（最小装配 / 测试）
+            // 时清单为空，工具照常注册。
+            // 注册走 `register_tool` 唯一收口（D-440 ③）。`risk` 传 `None`——本工具
+            // 没有参数级风险覆写，静态缺省档（`meta.effective_risk()`）就是它的风险回答。
+            let agent_run = crate::tools::subagent::AgentRunCapability::new(
+                ctx.get(symbio_plugin_api::WORKDIR),
+                self.agent_id_candidates(&ctx).await,
+                self.parent.clone(),
+            );
+            symbio_providers::register_tool(&ctx, agent_run.meta(), None, agent_run).await;
+
             // 智能体自身的 `AGENTS.md`（`{homedir}` / `<agentdir>`）与本会话无关：
             // 那是「智能体自身」与「工作区」两个作用域，归 memory 插件（谁能读写它，谁负责
             // 注入它）。本会话的 `MEMORY.md` 归本插件——各作用域各有一个所有者，

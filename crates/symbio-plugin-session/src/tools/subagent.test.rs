@@ -1,4 +1,4 @@
-//! `crates/symbio-plugin-agent/src/host/subagent.rs` 的单元测试。
+//! `crates/symbio-plugin-session/src/tools/subagent.rs` 的单元测试。
 //!
 //! 与实现**同级**分文件（约定：`X.rs` + `X.test.rs`）。
 //!

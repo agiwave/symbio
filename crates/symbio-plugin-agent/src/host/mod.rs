@@ -4,12 +4,10 @@
 //!
 //! | 模块 | 职责 |
 //! |---|---|
-//! | [`plugin`] | 插件主体：装配子 Agent 插件树（托管）+ manifest 门槛 + 选项与委托能力 |
+//! | [`plugin`] | 插件主体：装配子 Agent 插件树（托管）+ manifest 门槛 + 选项行 |
 //! | [`store`] | agent 目录存储：**本插件自己的目录**、zip 导入（zip-slip 防护）、导出、条目枚举 |
 //! | [`manifest`] | `manifest.yaml` 的读取与接入校验（§5 / §10） |
 //! | [`scope`] | `SubAgentVisitor` 代理层：把子树的注册加 `agent/<id>/` 前缀并进系统树（§8.2） |
-//! | [`subagent`] | `agent_run`（子智能体委托）能力 |
-//! | [`behavior`] | `agent_run` 的效果（委托 = 跨主体立约），经 `ToolBehavior` 交给写口 |
 //! | [`detail`] | agent 概览 / 详情表单的呈现定义 |
 //! | [`vdfs`] | VDFS 挂载点（`<根>/agent/…`，本插件直接 `impl VdfsProvider`） |
 //!
@@ -43,13 +41,11 @@
 //! `<根>/memory/PLUGIN.yml`）。它们的**执行**在共享实现（`providers/memory`），与
 //! work / session 几层同源——本插件不持有任何容量闸门。
 
-mod behavior;
 mod detail;
 pub mod manifest;
 pub mod plugin;
 pub mod scope;
 pub mod store;
-pub mod subagent;
 pub mod vdfs;
 
 #[cfg(test)]

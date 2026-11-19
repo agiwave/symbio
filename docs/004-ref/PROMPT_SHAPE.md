@@ -5,7 +5,7 @@
 > 口径与「什么进基线、什么只作观测」见 [D-057](../../crates/symbio-plugin-session/README.md#d-057-prompt-形状基线钉装配决定的结构规模只作观测)，
 > 提取实现在 `scripts/audits/prompt-shape-audit.mjs`。
 
-场景 `full-主线装配-工具轮-对话面关闭` · 重生成于 2026-11-08 · 请求数 3
+场景 `full-主线装配-工具轮-对话面关闭` · 重生成于 2026-11-19 · 请求数 3
 
 ## 判据列（逐字段比，PS-001）
 
@@ -22,9 +22,9 @@
 
 | 请求 | 消息数 | 消息序列 | system 小节标签 | 工具数 | 正文字节 | 工具 schema 字节 | 请求体总字节 |
 |---|---|---|---|---|---|---|---|
-| req0 | 2 | system → user | 【工作区记忆】【会话记忆】  | 22 | 1522 | 16211 | 17939 |
-| req1 | 4 | system → user → assistant[calls=1] → tool[id] | 【工作区记忆】【会话记忆】    | 22 | 1578 | 16211 | 18231 |
-| req2 | 6 | system → user → assistant[calls=1] → tool[id] → assistant → user | 【工作区记忆】【会话记忆】【长期记忆】      | 22 | 2012 | 16211 | 18732 |
+| req0 | 2 | system → user | 【工作区记忆】【会话记忆】  | 22 | 1522 | 16211 | 17979 |
+| req1 | 4 | system → user → assistant[calls=1] → tool[id] | 【工作区记忆】【会话记忆】    | 22 | 1578 | 16211 | 18271 |
+| req2 | 6 | system → user → assistant[calls=1] → tool[id] → assistant → user | 【工作区记忆】【会话记忆】【长期记忆】      | 22 | 2012 | 16211 | 18772 |
 
 ## 基线（判据本体）
 
@@ -72,7 +72,6 @@
       "tools": {
         "count": 22,
         "names": [
-          "agent_run",
           "glossary_define",
           "heartbeat",
           "<shell>",
@@ -82,6 +81,7 @@
           "ask_user",
           "mcp__mockserv__echo",
           "mcp__mockserv__add",
+          "agent_run",
           "vdfs_list",
           "vdfs_tree",
           "vdfs_stat",
@@ -151,7 +151,6 @@
       "tools": {
         "count": 22,
         "names": [
-          "agent_run",
           "glossary_define",
           "heartbeat",
           "<shell>",
@@ -161,6 +160,7 @@
           "ask_user",
           "mcp__mockserv__echo",
           "mcp__mockserv__add",
+          "agent_run",
           "vdfs_list",
           "vdfs_tree",
           "vdfs_stat",
@@ -248,7 +248,6 @@
       "tools": {
         "count": 22,
         "names": [
-          "agent_run",
           "glossary_define",
           "heartbeat",
           "<shell>",
@@ -258,6 +257,7 @@
           "ask_user",
           "mcp__mockserv__echo",
           "mcp__mockserv__add",
+          "agent_run",
           "vdfs_list",
           "vdfs_tree",
           "vdfs_stat",

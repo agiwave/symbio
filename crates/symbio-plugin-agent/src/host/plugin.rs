@@ -41,8 +41,8 @@
 //! 实例：子智能体有自己的模型服务（子树会话以子容器为 parent 收集，自行解析）；
 //! 父会话收集期该注册才被 `SubAgentVisitor` 丢弃（单槽防劫持）。
 //!
-//! 会话未选择智能体（`ctx[AGENT_ID]` 为空）时不装配任何 Agent，但 **agent_run
-//! （子智能体委托）始终注册**。
+//! 会话未选择智能体（`ctx[AGENT_ID]` 为空）时不装配任何 Agent。委托工具
+//! （`agent_run`）由 session 插件注册——它是会话级原语，与本插件无关。
 
 use crate::host::manifest;
 use crate::host::store::AgentDirStore;
@@ -56,7 +56,7 @@ use symbio_plugin_api::{
     CapabilityRow, Plugin, PluginDir, PluginError, PluginInvokeRequest, PluginInvokeRequestExt,
     PluginInvokeResponse, PluginMeta, PluginPayload, PluginSimpleRequest, Registry, AGENT_ID,
     CAPABILITY_VISITOR, PATH, PLUGIN_DIR, REQUIRED_PLUGINS, TRAVERSE_AVAILABLE_OPTIONS,
-    TRAVERSE_AVAILABLE_TOOLS, VDFS_PARENT_ADDR, WORKDIR,
+    TRAVERSE_AVAILABLE_TOOLS, VDFS_PARENT_ADDR,
 };
 use symbio_plugin_api::{DetailField, DetailOption};
 use symbio_plugin_api::{PLUGIN_ID_AGENT, PLUGIN_ID_COMPOSITE};
@@ -405,15 +405,12 @@ impl Plugin for AgentPlugin {
 
         // ── 会话级「智能体选择」复用既有通用机制 ctx[AGENT_ID]（orchestrator
         // 统一解析：请求显式 > metadata.agent_id）；本插件把它解析为 agent 目录实例 id。
-        // 注意：agent_run（子智能体委托）**始终注册**，不受"是否选择智能体"影响——
-        // 它是会话基础能力：未指定 agent_id 时默认沿用当前会话的智能体，
-        // 两者皆空则子会话以无智能体的纯对话模式运行。
+        // 委托工具（`agent_run`）已迁 session（会话级原语：子会话的存储归档 / 收件箱
+        // 输入面在会话域，`agent_id` 只是可选参数）；本插件只负责按选中装配子树。
         let agent_id = ctx
             .get(AGENT_ID)
             .map(|s| s.trim().to_string())
             .filter(|s| !s.is_empty());
-
-        let workdir = ctx.get(WORKDIR);
 
         let Some(tool_visitor) = ctx.get(symbio_plugin_api::CAPABILITY_VISITOR) else {
             return Ok(PluginPayload::new(&Vec::<serde_json::Value>::new()));
@@ -424,24 +421,6 @@ impl Plugin for AgentPlugin {
         // 本插件的 VDFS 视图 = agent 目录（`impl VdfsProvider for AgentPlugin`，
         // 见 `super::vdfs`），与 workdir 无关。智能体自身的记忆 / 设置不在这里——
         // 它们各有自己的插件与挂载点。
-
-        // ── agent_run：无条件注册 ──
-        let store = AgentDirStore::new(self.dir().dir());
-        let agent_ids: Vec<String> = store
-            .list()
-            .iter()
-            .map(|record| record.manifest.id.clone())
-            .collect();
-        // 注册走 `register_tool` 唯一收口（D-440 ③）：一次写入前缀端口绑定 + 工具行，
-        // 派发侧按名查执行体才有着落。`risk` 传 `None`——本工具没有参数级风险覆写，
-        // 静态缺省档（`meta.effective_risk()`）就是它的风险回答。
-        let agent_run = super::subagent::AgentRunCapability::new(
-            workdir.clone(),
-            self.dir().dir().to_path_buf(),
-            agent_ids,
-            self.router.clone(),
-        );
-        symbio_providers::register_tool(&ctx, agent_run.meta(), None, agent_run).await;
 
         // ── 已选择智能体 → 装配它的能力 ──
         if let Some(agent_id) = agent_id {
