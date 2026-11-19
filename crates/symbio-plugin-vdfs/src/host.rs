@@ -47,7 +47,7 @@ use symbio_plugin_api::{
     vdfs_derive_ext, vdfs_has_parent_segment, DynVdfsProvider, VdfsAccess, VdfsChange,
     VdfsChangeSink, VdfsContent, VdfsContext, VdfsError, VdfsItem, VdfsNode, VdfsParams,
     VdfsProvider, VdfsResult, VdfsWriteResponse, VDFS_PARAM_BEFORE, VDFS_PARAM_LIMIT,
-    VDFS_PARAM_WORKDIR,
+    VDFS_PARAM_WITH_HIDDEN, VDFS_PARAM_WORKDIR,
 };
 use symbio_plugin_api::{
     Plugin, PluginInvokeRequest, PluginInvokeRequestExt, PluginInvokeResponse, PluginPayload,
@@ -303,7 +303,7 @@ async fn root(
 ) -> PluginInvokeResponse<PluginPayload> {
     // 请求载荷忽略：本操作的定义就是「不给地址」（给了也不看，免得出现两套入参）
     let _ = payload_or_default::<VdfsPathRequest>(ctx);
-    list_at(fs, vctx, VDFS_ADDR_ROOT.to_string(), None, None).await
+    list_at(fs, vctx, VDFS_ADDR_ROOT.to_string(), None, None, false).await
 }
 
 /// 列表检索入口的**机制阀值**：条目数达到它才认为「这份清单值得检索」。
@@ -325,7 +325,7 @@ async fn list(
     let req: VdfsPathRequest = payload_or_default(ctx);
     let addr = normalize_addr(&req.path)?;
     let before = req.before.filter(|b| !b.is_empty());
-    list_at(root, vctx, addr, req.limit, before).await
+    list_at(root, vctx, addr, req.limit, before, req.with_hidden).await
 }
 
 /// 列表的公共体 —— `list` 与 `root` 只差「地址从哪来」。
@@ -335,6 +335,7 @@ async fn list_at(
     addr: String,
     limit: Option<u32>,
     before: Option<String>,
+    with_hidden: bool,
 ) -> PluginInvokeResponse<PluginPayload> {
     // 有界列表：把窗口参数放进**调用级参数袋**再分发。
     // 之所以用参数袋、而不是给 `VdfsProvider::list` 加参数，是为了让「不认识窗口」
@@ -346,6 +347,11 @@ async fn list_at(
         }
         if let Some(before) = before.as_deref() {
             c = c.with_param(VDFS_PARAM_BEFORE, before);
+        }
+        // 导航与发现的分野（见 `VDFS_PARAM_WITH_HIDDEN`）：载荷显式要了才透传，
+        // 缺省这次调用与从前逐字节一致。
+        if with_hidden {
+            c = c.with_param(VDFS_PARAM_WITH_HIDDEN, true);
         }
         c
     };

@@ -330,6 +330,55 @@ async fn list_category_root_fills_paths_and_ext() {
     assert!(data.items[1].node.ext.is_none());
 }
 
+/// `with_hidden` 从**请求载荷**进调用级参数袋：清单的「发现」读法靠它。
+///
+/// 只在中继层丢失它就等于开关没接上：容器照旧把隐藏节点滤掉，而按 `kind` 认段名的
+/// 消费方拿到的是「不存在这一段」——这里判的就是那条转发（导航那次不带、发现那次带）。
+#[tokio::test]
+async fn list_payload_with_hidden_reaches_provider_params() {
+    struct Probe(Arc<Mutex<Vec<Option<bool>>>>);
+
+    #[async_trait]
+    impl VdfsProvider for Probe {
+        async fn dispatch(
+            &self,
+            ctx: &VdfsContext,
+            _path: &str,
+            req: VdfsRequest,
+        ) -> VdfsResult<VdfsResponse> {
+            if matches!(req, VdfsRequest::List { .. }) {
+                self.0
+                    .lock()
+                    .unwrap()
+                    .push(ctx.param_as::<bool>(VDFS_PARAM_WITH_HIDDEN));
+            }
+            match req {
+                VdfsRequest::List { .. } => Ok(VdfsResponse::list(Vec::<VdfsNode>::new())),
+                _ => Ok(VdfsResponse::Stat(VdfsNode::dir(
+                    "mem",
+                    "mem",
+                    VdfsAccess::LIST,
+                ))),
+            }
+        }
+    }
+
+    let seen = Arc::new(Mutex::new(Vec::new()));
+    let fs: DynVdfsProvider = Arc::new(Probe(seen.clone()));
+
+    // 导航：缺省不带开关
+    let nav = ctx_with(json!({ "path": ".vdfsv2/mem" }));
+    dispatch(&fs, VDFS_LIST, &nav).await.unwrap().unwrap();
+    // 发现：显式要隐藏节点
+    let discovering = ctx_with(json!({ "path": ".vdfsv2/mem", "with_hidden": true }));
+    dispatch(&fs, VDFS_LIST, &discovering)
+        .await
+        .unwrap()
+        .unwrap();
+
+    assert_eq!(seen.lock().unwrap().clone(), vec![None, Some(true)]);
+}
+
 /// 深层地址：门面在进出两处各做一次口径映射，provider 始终只见相对路径
 #[tokio::test]
 async fn deep_virtual_paths_pass_through_relative() {

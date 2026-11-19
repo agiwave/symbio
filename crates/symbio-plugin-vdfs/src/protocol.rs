@@ -93,6 +93,12 @@ pub struct VdfsPathRequest {
     /// 有界列表：游标（**地址**），返回它之前的一页（`None` = 最新的一页）。
     #[serde(default)]
     pub before: Option<String>,
+    /// 连 `hidden` 的子节点一起列出（缺省只列可见的，见 `VDFS_PARAM_WITH_HIDDEN`）。
+    ///
+    /// 清单有两种读法：**导航**问「这里有什么可浏览的」（缺省，隐藏节点不出现），
+    /// **发现**问「这一段叫什么名字」（按 `kind` 认段，只能从清单里认）。
+    #[serde(default)]
+    pub with_hidden: bool,
 }
 
 /// 树状遍历请求
