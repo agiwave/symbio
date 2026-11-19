@@ -1,4 +1,8 @@
 {
+  "note": "baseline-allow 是在途变更的署名（BS-006）：账本格相对合并基的新增必须署名带决策号；该格落地后由下一批删除。",
+  "baseline-allow": [
+    "(none)→crates/symbio-plugin-session/src/tools/subagent.rs.agent_run.count 工具名常量随 D-500 委托工具归会话迁入 session 插件，新格登记迁移后的债址 D-500"
+  ],
   "crates/symbio-plugin-session/src/transcript/autonomous.rs": {
     "heartbeat": {
       "count": 1,

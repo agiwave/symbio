@@ -47,6 +47,7 @@ import {
   PROVIDER_ID,
   assertTranscriptInvariants,
   msgRoleOf,
+  textOf,
 } from '../helpers.mjs';
 
 /** 本用例的会话 id */
@@ -183,6 +184,36 @@ export default defineCase(
         assertEq(own.kept, 1, '委托成功 ⇒ 了结为守约 kept 1');
         assertEq(own.broken, 0, '没有违约 ⇒ broken 0');
         assertEq(own.score, 1, '平凡打分 = 守约 − 违约');
+
+        // ── ⑤ 委托落卡：结果节点锚到 agent_run 工具卡的**节点 id** ────────────
+        //
+        // 工具卡在转写里的地址 = 流式累积器分配的节点 id（会话内唯一）；provider
+        // 的 wire id（`call_2`）只存在结果节点的 id 后缀与卡的过程记录里，**不是**
+        // 节点的地址。锚错一格的表现：前端按 `parent_id` 建树找不到父节点 ⇒ 孤儿
+        // 升根，子会话内容全体跑到会话根上（用户看到的就是「不在工具卡下面」）。
+        // 转播桥的**实时帧**锚同源（`relay_anchor_of`，Rust 单测钉住选值优先级）。
+        const card = msgs.find(
+          (m) =>
+            (m.type ?? m.msg_type) === 'skeleton' &&
+            m.meta?.style_tag === 'tool' &&
+            m.meta?.tool_name === 'agent_run',
+        );
+        assert(card, 'agent_run 工具卡应出现在父会话转写里');
+        const result = msgs.find((m) => m.id === 'call_2-result');
+        assert(result, 'agent_run 结果节点应存在（id = wire id 后缀 -result）');
+        assertEq(
+          result.parent_id,
+          card.id,
+          `结果节点必须锚到工具卡的节点 id（实际 pid=${result.parent_id}，卡 id=${card.id}）——锚到 wire id 即前端孤儿升根`,
+        );
+        assert(
+          textOf(result).includes('评审：通过'),
+          '子会话产出应折进结果内容（读侧投影）',
+        );
+        assert(
+          !msgs.some((m) => m.parent_id === 'call_2'),
+          'wire id 不是节点的地址——任何落盘节点都不得锚到它上面',
+        );
       } finally {
         api.stop();
       }

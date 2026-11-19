@@ -103,6 +103,11 @@ define_string_key!(TraceIdKey, TRACE_ID, "trace_id");
 // 缺省（顶层请求 / 无 vdfs 装配）为空。
 define_string_key!(VdfsParentAddrKey, VDFS_PARENT_ADDR, "vdfs_parent_addr");
 define_string_key!(ToolCallIdKey, TOOL_CALL_ID, "tool_call_id");
+// 工具卡在转写里的**节点地址**：流式累积器在首个增量分配、会话内唯一
+// （`symbio-plugin-model/src/tool_accumulator.rs`——provider 的 wire id
+// `TOOL_CALL_ID` 跨轮可被网关复用，不是节点的地址；卡的 id 格与 `meta.tool_call_id`
+// 是两个值）。转写树的挂靠锚（子会话转播、工具卡子节点）一律用本键。
+define_string_key!(ToolNodeIdKey, TOOL_NODE_ID, "tool_node_id");
 // 会话运行模式：auto（无人值守，失败不弹交互）| interactive（人在环，失败可交互，但 confirm/ask_user 仍不弹框）
 define_string_key!(ModeKey, MODE, "mode");
 // 会话选定的 Model Provider ID（与 agent_id 同级别：随 chat_send 传输 + session.metadata 持久化）

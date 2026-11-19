@@ -879,6 +879,10 @@ function openChange(row: ChangeRow) {
 .chat-with-banner {
   flex: 1;
   min-height: 0;
+  /* row flex（.chat-body）里的唯一大块 item：min-width:auto 会顶住后代 nowrap
+     文本的 min-content 宽度，把整列推出右缘（收起态摘要在窗口边被截断）。
+     显式 0 让它按容器宽收缩，长文本再由下游 .node-preview 的 overflow 裁切。 */
+  min-width: 0;
   display: flex;
   flex-direction: column;
 }

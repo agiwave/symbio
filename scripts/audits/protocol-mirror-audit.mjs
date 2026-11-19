@@ -604,7 +604,7 @@ const META_KEYS = [
   },
   {
     key: 'agent_id',
-    owner: 'crates/symbio-plugin-agent/src/host/subagent.rs',
+    owner: 'crates/symbio-plugin-session/src/tools/subagent.rs',
     what: '子会话所属智能体',
   },
   {
@@ -614,7 +614,7 @@ const META_KEYS = [
   },
   {
     key: 'parent_session_id',
-    owner: 'crates/symbio-plugin-agent/src/host/subagent.rs',
+    owner: 'crates/symbio-plugin-session/src/tools/subagent.rs',
     what: '子会话锚点（恢复需路由回子会话）',
   },
   {

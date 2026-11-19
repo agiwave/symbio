@@ -16,7 +16,7 @@ use symbio_plugin_api::{
     ExecAbortSignal, ExecEnv, ExecEventSink, Plugin, PluginError, PluginInvokeRequest,
     PluginInvokeResponse, PluginMeta, PluginPayload, PluginSimpleRequest, PortBindings,
     PortErrorClass, PortExecContext, PortExecutor, PortInput, PortOutcome, Registry,
-    CAPABILITY_VISITOR, PORT_BINDINGS,
+    CAPABILITY_VISITOR, PORT_BINDINGS, TOOL_CALL_ID, TOOL_NODE_ID,
 };
 
 // ==================== 记账 fail-closed：造格型的账没落就不许报成功 ====================
@@ -406,6 +406,35 @@ impl EchoTool {
     }
 }
 
+/// 把执行体 ctx 里的两个工具调用身份原样带回来的探针：钉住「工具插件派发时把
+/// 工具卡的节点地址放进 ctx」这条注入契约。
+struct CtxProbeTool {
+    meta: CapabilityMeta,
+}
+
+impl CtxProbeTool {
+    fn meta(&self) -> CapabilityMeta {
+        self.meta.clone()
+    }
+}
+
+#[async_trait]
+impl PortExecutor for CtxProbeTool {
+    async fn execute(&self, exec: PortExecContext, _input: PortInput) -> PortOutcome {
+        let Some(ctx) = exec.ctx else {
+            return PortOutcome::failed(
+                PortErrorClass::NonRetryable,
+                "工具端口没有调用方上下文，无法拆信封".to_string(),
+            );
+        };
+        let node_id = ctx.get(TOOL_NODE_ID).unwrap_or_default();
+        let wire_id = ctx.get(TOOL_CALL_ID).unwrap_or_default();
+        port_result(Ok(
+            serde_json::json!({ "node_id": node_id, "wire_id": wire_id }),
+        ))
+    }
+}
+
 /// 无路由的宿主插件：命中的调用不需要 route；未名回落由它给出诚实 NotFound。
 struct NopPlugin;
 
@@ -526,6 +555,60 @@ async fn executes_through_the_capability_table() {
     assert_eq!(text, "done");
     assert!(success);
     assert!(pending.is_none());
+}
+
+/// 派发注入契约：执行体 ctx 里**两个身份都要有**——wire id（`call_id`，跨轮可复用）
+/// 与工具卡的转写节点地址（`node_id`）。锚少一格的表现：子会话转播挂不到工具卡
+/// 之下（孤儿升根）。
+#[tokio::test]
+async fn dispatch_puts_the_tool_card_node_id_into_the_executor_ctx() {
+    let parent: Arc<dyn Plugin> = Arc::new(NopPlugin);
+    let req = PluginSimpleRequest::new(Some(Weak::clone(&Arc::downgrade(&parent))), None);
+    let registry: Arc<dyn Registry> = Arc::new(FakeRegistry::new());
+    req.set(CAPABILITY_VISITOR, registry);
+    req.set(PORT_BINDINGS, Arc::new(PortBindings::default()));
+    let ctx: Arc<dyn PluginInvokeRequest> = Arc::new(req);
+    let tool = CtxProbeTool {
+        meta: CapabilityMeta {
+            name: "probe".to_string(),
+            ..Default::default()
+        },
+    };
+    symbio_providers::register_tool(&ctx, tool.meta(), None, Arc::new(tool)).await;
+
+    let exec = PortExecContext {
+        abort: ExecAbortSignal::new(),
+        idempotency_key: "tc-1".to_string(),
+        sink: ExecEventSink::silent(),
+        emit: symbio_plugin_api::port::PortFactEmit::silent(),
+        ctx: Some(Arc::clone(&ctx)),
+        subject: String::new(),
+        session_id: String::new(),
+        origin: None,
+        scratch_dir: None,
+        source: String::new(),
+        reader: Some(Arc::new(StaticReader(vec![aliases_fact(&[(
+            "probe", "probe",
+        )])]))),
+    };
+    let input = PortInput {
+        port: TOOL.to_string(),
+        payload: serde_json::json!({
+            "name": "probe",
+            "args": {},
+            "call_id": "call_0",
+            "node_id": "card-1",
+        }),
+    };
+    let out = ToolPort.execute(exec, input).await;
+    let (text, success, _) = decode(&out);
+    assert!(success);
+    let probe: serde_json::Value = serde_json::from_str(&text).expect("探针回的是 JSON 身份对");
+    assert_eq!(
+        probe["node_id"], "card-1",
+        "工具卡的转写节点地址必须进执行体 ctx（挂靠锚的来源）"
+    );
+    assert_eq!(probe["wire_id"], "call_0", "wire id 照旧（协议配对用）");
 }
 
 #[tokio::test]

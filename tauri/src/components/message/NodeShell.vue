@@ -275,8 +275,14 @@ const headAriaLabel = computed(() => {
 </script>
 
 <style scoped>
+/* 不写 width:100%——嵌套层（.msg.nested）有 margin-left，写死 100% 会让
+   盒子按「父级内容盒宽」取宽再整体右移一个外边距，右缘超出父级；每嵌套一层
+   累积一次，深层级（子智能体 / 团队会话转播挂在工具节点下）整段内容被推出
+   窗口右缘。本节点的父容器全部是纵向 flex（.column-body / .node-body /
+   .node-subtree / .skeleton-body），默认 stretch 已把宽度算成
+   「容器宽 − 外边距」：margin-left 吃进宽度而不是叠加溢出。 */
 .msg {
-  width: 100%;
+  min-width: 0;
 }
 /* 分形层级：仅用「缩进 + 左侧引导竖线」表达嵌套深度（类邮件/论坛主题串），
    不再叠加任何外框，彻底避免「竖线 + 外框」的视觉冲突。

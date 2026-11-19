@@ -56,7 +56,7 @@ use symbio_plugin_api::{
     ExecAbortSignal, FactDraft, LatencyTier, Plugin, PluginError, PluginInvokeRequest,
     PluginInvokeRequestExt, PluginPayload, PortErrorClass, PortExecContext, PortExecutor,
     PortInput, PortOutcome, PortProvider, Verb, ABORT_SIGNAL, AGENT_ID, CAPABILITY_VISITOR,
-    EVENT_REQUEST, EVENT_SINK, PLUGIN_ID_TOOL, SESSION_ID, TOOL_CALL_ID, WORKDIR,
+    EVENT_REQUEST, EVENT_SINK, PLUGIN_ID_TOOL, SESSION_ID, TOOL_CALL_ID, TOOL_NODE_ID, WORKDIR,
 };
 
 /// 端口名：名字住 `plugin-api` 的词汇面（D-364），提供者与消费方 import 同一常量。
@@ -1740,6 +1740,14 @@ impl ToolPort {
             .and_then(|v| v.as_str())
             .unwrap_or_default()
             .to_string();
+        // 工具卡的转写节点地址（挂靠锚，`KEY_NODE_ID`）：请求债里带的这一格来自
+        // 流式累积器（`tool_accumulator.rs`）。审批续跑载荷没有它 ⇒ 空，ctx 里
+        // 缺省，执行体自行退回 wire id。
+        let tool_node_id = payload
+            .get(KEY_NODE_ID)
+            .and_then(|v| v.as_str())
+            .unwrap_or_default()
+            .to_string();
         let args = payload
             .get(KEY_ARGS)
             .cloned()
@@ -2029,6 +2037,11 @@ impl ToolPort {
         tool_ctx.set(AGENT_ID, agent_id);
         tool_ctx.set(SESSION_ID, session_id);
         tool_ctx.set(TOOL_CALL_ID, tool_call_id.clone());
+        // 工具卡在转写里的节点地址（挂靠锚）。与 wire id 分键：许多 OpenAI 兼容
+        // 网关跨轮复用 `call_0` 这类短 wire id，转写树的挂靠必须指向卡的真实
+        // 节点 id（`KEY_NODE_ID`，流式累积器分配）；审批续跑载荷没有这一格，
+        // 缺省为空 ⇒ 执行体退回 wire id（旧路径行为不变）。
+        tool_ctx.set(TOOL_NODE_ID, tool_node_id.clone());
         // 执行期双原语注入：工具「把事件写到哪」与「如何感知中止」的唯一来源。
         tool_ctx.set(EVENT_SINK, exec.sink.clone());
         tool_ctx.set(ABORT_SIGNAL, exec.abort.clone());

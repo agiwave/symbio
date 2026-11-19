@@ -67,6 +67,7 @@ use symbio_plugin_api::{
     port_result, ExecAbortSignal, ExecEnv, ExecEventSink, Plugin, PluginError, PluginFrame,
     PluginInvokeRequest, PluginInvokeRequestExt, PluginPayload, PortExecContext, PortExecutor,
     PortInput, PortOutcome, MODE, PATH, PROVIDER_ID, RISK_LEVEL, SESSION_ID, TOOL_CALL_ID,
+    TOOL_NODE_ID,
 };
 use symbio_plugin_api::{vdfs_context, VdfsError};
 use symbio_plugin_api::{
@@ -479,7 +480,12 @@ impl AgentRunCapability {
                 rel_base: format!("{PLUGIN_ID_SESSION}/{child_session_id}"),
                 child_session_id,
                 agent_id,
-                tool_call_id: ctx.get(TOOL_CALL_ID).unwrap_or_default(),
+                // 转播锚 = 本工具调用**在转写里的节点地址**：优先 `TOOL_NODE_ID`
+                // （流式累积器分配的工具卡 id，卡的真实地址）；审批续跑等路径
+                // 没有这一格时退回 wire id `TOOL_CALL_ID`（旧形状，见
+                // `relay_anchor_of` 的单测）。锚错一格的表现：前端按 `parent_id`
+                // 建树时找不到父节点，子会话内容全体升到会话根。
+                tool_call_id: relay_anchor_of(ctx.as_ref()),
             },
             sink,
             abort,
@@ -779,6 +785,10 @@ async fn relay_bridge(b: RelayBridge, sink: ExecEventSink, abort: ExecAbortSigna
     let mut known: HashSet<String> = HashSet::new();
     // 最近一次回读到的完整记录（锚定判定要用它的 `parent_id`）
     let mut records: HashMap<String, ChatNode> = HashMap::new();
+    // 被 Withheld 的节点 id（子会话每轮的 user 委托 prompt）。全量帧的 parent_id
+    // 指向这些轮根，而它们不进父视图——父 id 在父会话里不存在，前端建树时判为
+    // 孤儿、全体升根。记住它们，节点改写才知道哪些 parent_id 必须改锚。
+    let mut withheld_ids: HashSet<String> = HashSet::new();
     let mut relay_error: Option<String> = None;
     // 子会话内的待用户动作：只**捕获载荷**，不落出口——节点由 `tool_executor`
     // 以派生 id（调用 id → 结果节点 id）构造。若此处也落一个（子会话自己的 id），前端
@@ -851,6 +861,7 @@ async fn relay_bridge(b: RelayBridge, sink: ExecEventSink, abort: ExecAbortSigna
                     completed_ids.remove(&mid);
                     known.remove(&mid);
                     records.remove(&mid);
+                    withheld_ids.remove(&mid);
                     // 删除按 id 生效（不依赖父子锚点），原样转发。
                     sink.emit(symbio_plugin_api::llm_removed_frame(&mid)).await;
                     continue;
@@ -864,6 +875,7 @@ async fn relay_bridge(b: RelayBridge, sink: ExecEventSink, abort: ExecAbortSigna
                         // 流式面漏回父视图（那条 id 不在父会话存储里，前端只能编辑失败）。
                         let Some(record) = records.get(&mid) else { continue };
                         if matches!(message_fate(record), MessageFate::Withheld) {
+                            withheld_ids.insert(mid.clone());
                             continue;
                         }
                         if let Some(buf) = text_by_id.get_mut(&mid) {
@@ -877,7 +889,7 @@ async fn relay_bridge(b: RelayBridge, sink: ExecEventSink, abort: ExecAbortSigna
                         // 改写走同一条判据（[`relabel_for_parent`]）。这一帧只有 id 与
                         // 增量，折不出 `Assistant`，因此它得到的只有锚定——角色与主体
                         // **不**在这里改写，父会话早已按首次回读的完整帧记下了改写后的角色。
-                        relabel_for_parent(&mut out, &tool_call_id);
+                        relabel_for_parent(&mut out, &tool_call_id, &withheld_ids);
                         sink.emit(out).await;
                         continue;
                     }
@@ -936,11 +948,12 @@ async fn relay_bridge(b: RelayBridge, sink: ExecEventSink, abort: ExecAbortSigna
 
                 // ── 消息过滤：这一帧不落父视图 ──
                 if matches!(message_fate(&message), MessageFate::Withheld) {
+                    withheld_ids.insert(mid.clone());
                     continue;
                 }
 
                 // ── 节点改写 → 落出口 ──
-                relabel_for_parent(&mut message, &tool_call_id);
+                relabel_for_parent(&mut message, &tool_call_id, &withheld_ids);
                 sink.emit(message).await;
             }
         }
@@ -1039,9 +1052,35 @@ fn message_fate(message: &ChatNode) -> MessageFate {
     MessageFate::Relay
 }
 
+/// 转播锚的选值：**优先工具卡的真实节点地址**（`TOOL_NODE_ID`，流式累积器在首个
+/// 增量分配、会话内唯一），缺它（审批续跑、单测直呼等旧路径）退回 wire id
+/// `TOOL_CALL_ID`。
+///
+/// 为什么两个键不能混用：wire id（provider 交回的 `call.id`，如 `call_0`）跨轮可被
+/// OpenAI 兼容网关复用，**不是**节点的地址——工具卡在转写里的 id 格是 `node_id`，
+/// wire id 只存在卡的 `meta.tool_call_id`。锚指到 wire id 上，前端按 `parent_id`
+/// 建树时找不到父节点，子会话内容全体升根（孤儿升根，`useChatConnection.ts` 的
+/// rootMessages 判据）。判据独立成函数才有单测可言。
+fn relay_anchor_of(ctx: &dyn PluginInvokeRequest) -> String {
+    let node_id = ctx.get(TOOL_NODE_ID).unwrap_or_default();
+    if node_id.is_empty() {
+        ctx.get(TOOL_CALL_ID).unwrap_or_default()
+    } else {
+        node_id
+    }
+}
+
 /// 转播桥语义之三：**节点改写**——把子会话的节点改成父视图的形状。
 ///
-/// 只做顶层节点（`parent_id = None`）：子会话内部已有的父子结构原样带过来。
+/// 改锚的判据不是「`parent_id` 是否为空」，而是「`parent_id` 在父视图里是否
+/// 指向一个存在的节点」：
+/// - `parent_id = None`（顶层节点，窄增量帧也是这一形状）→ 挂到本工具调用之下；
+/// - `parent_id` 指向**被 Withheld 的轮根**（子会话的 user 委托 prompt）——
+///   `stream.rs` 给正文 / 思考 / 工具卡都盖了 `parent_id = 轮根 id`，而轮根 user
+///   被 `message_fate` 过滤、不进父视图。父 id 在父会话里不存在，前端按 `parent_id`
+///   建树时判为孤儿、全体升根。这类也改锚到工具卡；
+/// - `parent_id` 指向别的节点（子会话内部真实父子结构）→ 原样带过来。
+///
 /// 顶层助手正文挂到本工具调用之下，族改成 `Tool`（工具响应）而非 `Assistant`，
 /// 以符合分型结构 `ToolCall(Assistant) → Turn(Tool)`，并能被 flatten 的
 /// `find_tool_result` 正确识别。
@@ -1051,8 +1090,14 @@ fn message_fate(message: &ChatNode) -> MessageFate {
 /// 不需要再往 `role` 格补一份，也就不存在「主体改写必须排在角色改写之后」这种
 /// 顺序纪律。两格都写时，顺序写反就会让 `role` 格永远补不上
 /// （表现是前端与 flatten 都认不出这张卡的类型），那段纪律随第二份写一起消失。
-fn relabel_for_parent(message: &mut ChatNode, tool_call_id: &str) {
-    if message.parent_id.is_some() {
+fn relabel_for_parent(message: &mut ChatNode, tool_call_id: &str, withheld_ids: &HashSet<String>) {
+    // 只有「父 id 在父视图里不存在」的两种形状才改锚：无父，或父被 Withheld。
+    // 子会话内部真实嵌套（父会被一并转播）原样保留，避免把内部层级拍平。
+    let orphan = match message.parent_id.as_deref() {
+        None => true,
+        Some(parent) => withheld_ids.contains(parent),
+    };
+    if !orphan {
         return;
     }
     message.parent_id = Some(tool_call_id.to_string());

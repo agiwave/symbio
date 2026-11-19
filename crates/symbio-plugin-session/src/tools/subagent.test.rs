@@ -12,7 +12,9 @@
 use super::*;
 
 use symbio_plugin_api::principal::{Principal, PrincipalKind};
-use symbio_plugin_api::{VdfsAccess, VDFS_STATUS_ACTIVE, VDFS_STATUS_FAILED};
+use symbio_plugin_api::{
+    PluginSimpleRequest, SymbioKey, VdfsAccess, VDFS_STATUS_ACTIVE, VDFS_STATUS_FAILED,
+};
 
 fn session_node(status: &str, error: Option<&str>) -> VdfsNode {
     let mut n = VdfsNode::dir("sid", "子会话", VdfsAccess::READ);
@@ -235,6 +237,33 @@ fn removal_and_user_frames_take_their_own_paths() {
     );
 }
 
+// ── 转播锚的选值：优先工具卡的节点地址 ──────────────────────────────
+
+/// 有 `TOOL_NODE_ID` ⇒ 锚到工具卡的**真实节点 id**。锚错一格（锚到 wire id）的
+/// 表现：卡的 id 格是节点 id、wire id 只存在 `meta.tool_call_id`，前端按
+/// `parent_id` 建树时找不到父节点，子会话内容全体升根（孤儿升根）。
+#[test]
+fn relay_anchor_prefers_tool_node_id() {
+    let mut meta = serde_json::Map::new();
+    meta.insert(TOOL_NODE_ID.name().to_string(), json!("card-1"));
+    meta.insert(TOOL_CALL_ID.name().to_string(), json!("call_0"));
+    let ctx = PluginSimpleRequest::from_parts(json!({}), Some(&meta));
+    assert_eq!(
+        relay_anchor_of(&ctx),
+        "card-1",
+        "转播锚 = 工具卡在转写里的节点地址（节点 id），不是 provider 的 wire id"
+    );
+}
+
+/// 审批续跑等旧路径没有 `TOOL_NODE_ID` ⇒ 退回 wire id（旧形状行为不变）。
+#[test]
+fn relay_anchor_falls_back_to_wire_id() {
+    let mut meta = serde_json::Map::new();
+    meta.insert(TOOL_CALL_ID.name().to_string(), json!("call_0"));
+    let ctx = PluginSimpleRequest::from_parts(json!({}), Some(&meta));
+    assert_eq!(relay_anchor_of(&ctx), "call_0");
+}
+
 // ── 节点改写：锚定 / 角色 / 主体，以及它们之间的顺序 ──────────────────
 
 /// 顶层助手正文 = 本工具的响应：锚到 ToolCall 之下、族改成 `Tool`、主体跟着改。
@@ -243,7 +272,7 @@ fn relabel_anchors_top_level_assistant_as_tool_response() {
     let mut node = legacy_frame("m-1", NodeRole::Assistant);
     node.principal = Some(Principal::new(PrincipalKind::Agent, "sub-agent"));
     node.content = Some(MessageContent::Text("跑完了".into()));
-    relabel_for_parent(&mut node, "call-9");
+    relabel_for_parent(&mut node, "call-9", &HashSet::new());
     assert_eq!(
         node.parent_id.as_deref(),
         Some("call-9"),
@@ -281,7 +310,7 @@ fn relabel_writes_only_the_principal_and_folds_to_tool() {
         Some(NodeRole::Assistant),
         "前置条件：这一格的 Assistant 是折出来的（role 为空、族靠主体）"
     );
-    relabel_for_parent(&mut folded, "call-9");
+    relabel_for_parent(&mut folded, "call-9", &HashSet::new());
     assert_eq!(
         folded.legacy_role(),
         None,
@@ -298,7 +327,7 @@ fn relabel_writes_only_the_principal_and_folds_to_tool() {
     );
 }
 
-/// 已带父锚点的节点（子会话内部的父子结构）**整格不动**；非助手节点只补锚点。
+/// 已带**有效**父锚点的节点（子会话内部真实父子结构）**整格不动**；非助手节点只补锚点。
 ///
 /// 反例代价：改写子会话内部的层级会把子会话自己的结构拍平到工具调用之下；
 /// 而给 `Tool` / `System` 节点盖 `agent_run` 主体等于伪造来源。
@@ -306,7 +335,8 @@ fn relabel_writes_only_the_principal_and_folds_to_tool() {
 fn relabel_leaves_nested_and_non_assistant_nodes_alone() {
     let mut nested = legacy_frame("m-3", NodeRole::Assistant);
     nested.parent_id = Some("m-2".into());
-    relabel_for_parent(&mut nested, "call-9");
+    // m-2 会被一并转播（不在 withheld 集合）⇒ 内部层级原样保留。
+    relabel_for_parent(&mut nested, "call-9", &HashSet::new());
     assert_eq!(
         nested.parent_id.as_deref(),
         Some("m-2"),
@@ -319,7 +349,7 @@ fn relabel_leaves_nested_and_non_assistant_nodes_alone() {
     );
 
     let mut tool = legacy_frame("m-4", NodeRole::Tool);
-    relabel_for_parent(&mut tool, "call-9");
+    relabel_for_parent(&mut tool, "call-9", &HashSet::new());
     assert_eq!(
         tool.parent_id.as_deref(),
         Some("call-9"),
@@ -327,4 +357,27 @@ fn relabel_leaves_nested_and_non_assistant_nodes_alone() {
     );
     assert_eq!(tool.legacy_role(), Some(NodeRole::Tool));
     assert!(tool.principal.is_none(), "不是助手正文就不伪造主体");
+}
+
+/// 全量帧的真实形状：`stream.rs` 给正文 / 思考 / 工具卡盖的 `parent_id` 不是空，
+/// 而是指向子会话轮根（user 委托 prompt）。轮根被 `message_fate` 判 Withheld、
+/// 不进父视图 —— 若因「已有 parent_id」早退，父 id 在父会话里不存在，前端建树
+/// 判为孤儿、全部升到会话根（本轮修复的核心场景）。这类必须改锚到工具卡。
+#[test]
+fn relabel_reanchors_children_of_withheld_turn_root() {
+    let mut child = legacy_frame("m-5", NodeRole::Assistant);
+    child.parent_id = Some("turn-root-user".into());
+    child.content = Some(MessageContent::Text("看完了项目架构".into()));
+    let withheld = HashSet::from(["turn-root-user".to_string()]);
+    relabel_for_parent(&mut child, "card-9", &withheld);
+    assert_eq!(
+        child.parent_id.as_deref(),
+        Some("card-9"),
+        "父是被 Withheld 的轮根 ⇒ 改锚到工具卡，不升根"
+    );
+    assert_eq!(
+        child.node_role(),
+        Some(NodeRole::Tool),
+        "助手正文仍是本工具的响应，族归 Tool"
+    );
 }

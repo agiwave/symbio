@@ -764,6 +764,9 @@ watch(sessionError, (now) => {
 .column-body {
   flex: 1;
   min-height: 0;
+  /* 滚动容器本身是 flex item：关掉 min-content 下限，长 nowrap 文本沿 flex 链
+     顶宽时，这里能跟着列容器收缩而不是把 .msg 一起撑出右缘。 */
+  min-width: 0;
   overflow-y: auto;
   /* 关掉浏览器的滚动锚定：它会在上方内容插入时自己挪 `scrollTop`，而展开更早的轮次
      时面板**已经**按高度差补过一次（`handleShowEarlier`）。两层各补一次就是补两倍，
