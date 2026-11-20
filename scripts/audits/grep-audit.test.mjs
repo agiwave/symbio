@@ -404,14 +404,21 @@ test('S-013 is silent when the scope has no WalkBuilder at all', () => {
   assert.match(r.stdout, /S-013 通过：scope 内没有 WalkBuilder 构造点/)
 })
 
-test('S-013 finds every WalkBuilder construction pinned in this repository', () => {
+test('S-013 accepts zero WalkBuilder constructions or every construction pinned', () => {
   const r = spawnSync(process.execPath, [script], {
     cwd: path.resolve(path.dirname(script), '..', '..'),
     env: { ...process.env, NO_COLOR: '1' },
     encoding: 'utf8',
     timeout: 30000,
   })
-  assert.match(r.stdout, /S-013 通过：3 处 WalkBuilder 构造点都钉了遍历序/)
+  // D-515 后 content_search / codebase_search 都改走 VDFS 递归遍历，真实仓库
+  // 里 WalkBuilder 构造点已归零——两种通过消息都接受：零处（现状）或「有构造
+  // 点且都钉了遍历序」（若将来有合理引入）。只要有一处没钉，S-013 会报 ERROR，
+  // 这里自然跟着红。
+  assert.match(
+    r.stdout,
+    /S-013 通过：(?:scope 内没有 WalkBuilder 构造点|\d+ 处 WalkBuilder 构造点都钉了遍历序)/,
+  )
 })
 
 // ── S-014: ChatNode 存量 `role` 格直写棘轮 ─────────────────────────────

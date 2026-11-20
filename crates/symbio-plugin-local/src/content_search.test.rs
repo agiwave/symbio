@@ -14,9 +14,11 @@
 //! 三种 `output_mode` 各一条形状判据（对齐 e2e `t67` 的①②③，但这里直接
 //! 打 `search`，不经 LLM/CLI——单测拦形状、e2e 拦出口，两层各管各的）。
 
+use super::SecurityPolicy;
 use super::*;
 use std::path::Path;
 use std::sync::Arc;
+use symbio_providers::ScopeDirVdfs;
 
 fn tool() -> ContentSearchTool {
     ContentSearchTool::new(Arc::new(SecurityPolicy::default()))
@@ -43,11 +45,19 @@ async fn fixture() -> tempfile::TempDir {
     dir
 }
 
+/// 用作用域 provider 包住临时目录，模拟宿主注入 `WORKSPACE_VDFS`。
+fn provider_in(dir: &Path) -> DynVdfsProvider {
+    Arc::new(ScopeDirVdfs::at(dir.to_path_buf())) as DynVdfsProvider
+}
+
 async fn search_all(dir: &Path, output_mode: &str) -> String {
+    let provider = provider_in(dir);
     tool()
         .search(
             "MARK",
-            dir,
+            &provider,
+            &VdfsContext::empty(),
+            "",
             output_mode,
             None,
             None,
@@ -64,9 +74,22 @@ async fn search_all(dir: &Path, output_mode: &str) -> String {
 
 /// 带分页窗口的搜索：`offset` / `head_limit` 现在切在收集阶段
 async fn search_window(dir: &Path, offset: usize, head_limit: usize) -> String {
+    let provider = provider_in(dir);
     tool()
         .search(
-            "MARK", dir, "content", None, None, true, 0, 0, false, offset, head_limit,
+            "MARK",
+            &provider,
+            &VdfsContext::empty(),
+            "",
+            "content",
+            None,
+            None,
+            true,
+            0,
+            0,
+            false,
+            offset,
+            head_limit,
         )
         .await
         .expect("分页搜索应成功")
@@ -323,11 +346,13 @@ async fn no_window_returns_everything_without_note() {
 /// 外壳里），钉的是**交付给编排层的信封形状**。
 #[tokio::test]
 async fn result_carries_the_llm_visible_text_in_output() {
-    use symbio_plugin_api::{ExecEnv, PluginInvokeRequest, PluginSimpleRequest, WORKDIR};
+    use symbio_plugin_api::{
+        ExecEnv, PluginInvokeRequest, PluginInvokeRequestExt, PluginSimpleRequest, WORKSPACE_VDFS,
+    };
 
     let dir = fixture().await;
     let req = PluginSimpleRequest::new(None, None);
-    req.set(WORKDIR, dir.path().to_string_lossy().to_string());
+    req.set(WORKSPACE_VDFS, Some(provider_in(dir.path())));
     let ctx: Arc<dyn PluginInvokeRequest> = Arc::new(req);
     let env = ExecEnv::from_request(&*ctx);
 
@@ -353,10 +378,13 @@ async fn result_carries_the_llm_visible_text_in_output() {
 #[tokio::test]
 async fn no_match_reports_single_line() {
     let dir = fixture().await;
+    let provider = provider_in(dir.path());
     let out = tool()
         .search(
             "NOMATCHHERE",
-            dir.path(),
+            &provider,
+            &VdfsContext::empty(),
+            "",
             "content",
             None,
             None,

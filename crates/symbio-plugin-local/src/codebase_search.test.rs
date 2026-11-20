@@ -5,13 +5,14 @@
 //! 重点在两件容易"看起来对、实际错"的事：
 //!
 //! 1. **增量判据**——什么情况下复用旧块、什么情况下必须重嵌。这里直接用构造出来的
-//!    [`ScannedFile`]（指纹由测试指定）驱动 [`refresh_index`]，不依赖真实文件系统的
-//!    `mtime` 粒度：在 Windows 上两次写盘可能落在同一个时间戳刻度里，
-//!    用真实 `mtime` 写的测试会**偶尔**通过，那种测试比没有更糟。
+//!    [`ScannedFile`]（指纹由测试指定）驱动 [`refresh_index`]，不依赖真实存储后端的
+//!    `updated_at` 粒度：两次写盘可能落在同一个时间刻度里，用真实时间写的测试会
+//!    **偶尔**通过，那种测试比没有更糟。
 //! 2. **二进制格式的读回**——索引是纯派生数据，读坏了正确的行为是"丢弃重建"，
 //!    而不是 panic 或读出错位的垃圾向量。
 
 use super::*;
+use std::path::PathBuf;
 use std::sync::atomic::{AtomicUsize, Ordering};
 
 /// 把临时目录绑成工作区作用域 provider（D-515：索引缓存只认相对地址）。
@@ -53,12 +54,8 @@ impl EmbeddingService for CountingEmbed {
     }
 }
 
-fn fp(secs: i64, size: u64) -> Fingerprint {
-    Fingerprint {
-        mtime_secs: secs,
-        mtime_nanos: 0,
-        size,
-    }
+fn fp(updated_at: i64, size: u64) -> Fingerprint {
+    Fingerprint { updated_at, size }
 }
 
 /// 在 `dir` 下写一个文件，并返回一个指纹由调用方指定的 [`ScannedFile`]
@@ -67,10 +64,28 @@ async fn scanned(dir: &Path, name: &str, content: &str, fingerprint: Fingerprint
         .await
         .expect("写测试文件");
     ScannedFile {
-        abs: dir.join(name),
         rel: name.to_string(),
         fingerprint,
     }
+}
+
+/// 测试侧包装：把 provider / vctx 的装配收在测试文件里，业务代码不留接缝。
+async fn refresh(
+    scanned: &[ScannedFile],
+    previous: Option<&CodeIndex>,
+    dir: &Path,
+    embed: &Arc<dyn EmbeddingService>,
+) -> Option<(CodeIndex, IndexStats)> {
+    let provider = provider_in(dir);
+    let vctx = VdfsContext::empty();
+    refresh_index(scanned, previous, &provider, &vctx, embed).await
+}
+
+/// 测试侧包装：经 provider 嵌入单个相对地址的文件。
+async fn embed_in(dir: &Path, rel: &str, embed: &Arc<dyn EmbeddingService>) -> Vec<Chunk> {
+    let provider = provider_in(dir);
+    let vctx = VdfsContext::empty();
+    embed_file(&provider, &vctx, rel, embed).await
 }
 
 // ==================== 增量判据 ====================
@@ -85,7 +100,7 @@ async fn unchanged_scan_reuses_every_chunk_and_embeds_nothing() {
         scanned(dir.path(), "a.rs", "fn a() {}\n", fp(100, 10)).await,
         scanned(dir.path(), "b.rs", "fn b() {}\n", fp(100, 10)).await,
     ];
-    let (idx1, s1) = refresh_index(&first, None, &embed.as_service())
+    let (idx1, s1) = refresh(&first, None, dir.path(), &embed.as_service())
         .await
         .unwrap();
     assert_eq!(s1.embedded_files, 2);
@@ -93,7 +108,7 @@ async fn unchanged_scan_reuses_every_chunk_and_embeds_nothing() {
     assert!(idx1.matches_scan(&first), "刚建出来的索引必须与扫描一致");
 
     let before = embed.calls();
-    let (idx2, s2) = refresh_index(&first, Some(&idx1), &embed.as_service())
+    let (idx2, s2) = refresh(&first, Some(&idx1), dir.path(), &embed.as_service())
         .await
         .unwrap();
     assert_eq!(embed.calls() - before, 0, "指纹未变却跑了嵌入");
@@ -114,7 +129,7 @@ async fn only_the_changed_file_is_re_embedded() {
         scanned(dir.path(), "b.rs", "fn b() {}\n", fp(100, 10)).await,
         scanned(dir.path(), "c.rs", "fn c() {}\n", fp(100, 10)).await,
     ];
-    let (idx1, _) = refresh_index(&old, None, &embed.as_service())
+    let (idx1, _) = refresh(&old, None, dir.path(), &embed.as_service())
         .await
         .unwrap();
     let a_chunks_before = idx1.files[0].chunks[0].text.clone();
@@ -126,7 +141,7 @@ async fn only_the_changed_file_is_re_embedded() {
         scanned(dir.path(), "c.rs", "fn c() {}\n", fp(100, 10)).await,
     ];
     let before = embed.calls();
-    let (idx2, s) = refresh_index(&new, Some(&idx1), &embed.as_service())
+    let (idx2, s) = refresh(&new, Some(&idx1), dir.path(), &embed.as_service())
         .await
         .unwrap();
 
@@ -148,7 +163,7 @@ async fn deleted_file_is_dropped_from_the_index() {
         scanned(dir.path(), "a.rs", "fn a() {}\n", fp(100, 10)).await,
         scanned(dir.path(), "gone.rs", "fn gone() {}\n", fp(100, 15)).await,
     ];
-    let (idx1, _) = refresh_index(&old, None, &embed.as_service())
+    let (idx1, _) = refresh(&old, None, dir.path(), &embed.as_service())
         .await
         .unwrap();
     assert_eq!(idx1.files.len(), 2);
@@ -160,7 +175,7 @@ async fn deleted_file_is_dropped_from_the_index() {
     let new = vec![scanned(dir.path(), "a.rs", "fn a() {}\n", fp(100, 10)).await];
 
     let before = embed.calls();
-    let (idx2, s) = refresh_index(&new, Some(&idx1), &embed.as_service())
+    let (idx2, s) = refresh(&new, Some(&idx1), dir.path(), &embed.as_service())
         .await
         .unwrap();
 
@@ -177,7 +192,7 @@ async fn new_file_is_embedded_alone() {
     let embed = CountingEmbed::new();
 
     let old = vec![scanned(dir.path(), "a.rs", "fn a() {}\n", fp(100, 10)).await];
-    let (idx1, _) = refresh_index(&old, None, &embed.as_service())
+    let (idx1, _) = refresh(&old, None, dir.path(), &embed.as_service())
         .await
         .unwrap();
 
@@ -186,7 +201,7 @@ async fn new_file_is_embedded_alone() {
         scanned(dir.path(), "b.rs", "fn b() {}\n", fp(300, 10)).await,
     ];
     let before = embed.calls();
-    let (idx2, s) = refresh_index(&new, Some(&idx1), &embed.as_service())
+    let (idx2, s) = refresh(&new, Some(&idx1), dir.path(), &embed.as_service())
         .await
         .unwrap();
 
@@ -206,12 +221,12 @@ async fn full_rebuild_ignores_previous_entirely() {
         scanned(dir.path(), "a.rs", "fn a() {}\n", fp(100, 10)).await,
         scanned(dir.path(), "b.rs", "fn b() {}\n", fp(100, 10)).await,
     ];
-    let (idx1, _) = refresh_index(&scan, None, &embed.as_service())
+    let (idx1, _) = refresh(&scan, None, dir.path(), &embed.as_service())
         .await
         .unwrap();
 
     let before = embed.calls();
-    let (_, s) = refresh_index(&scan, None, &embed.as_service())
+    let (_, s) = refresh(&scan, None, dir.path(), &embed.as_service())
         .await
         .unwrap();
     assert_eq!(s.embedded_files, 2, "previous=None 必须全量重嵌");
@@ -363,7 +378,7 @@ async fn corrupt_index_file_loads_as_none() {
 }
 
 /// 落盘路径必须是**工作区内**的 `.symbio/cache/`——这是"工作区级数据落在工作区里"
-/// 那条约定，也是"索引不会把自己索引进去"（`.symbio` 是隐藏目录，会被 WalkBuilder 跳过）的前提
+/// 那条约定，也是"索引不会把自己索引进去"（`.symbio` 是隐藏目录，会被 VDFS 遍历跳过）的前提
 #[test]
 fn index_lives_under_the_workspace_dot_symbio() {
     // D-515：落位约定收在常量里——常量既是 provider 的相对地址，也是工作区内的路径。
@@ -396,7 +411,7 @@ async fn disk_loaded_index_is_cached_for_subsequent_calls() {
     .unwrap();
 
     // 建一次（rebuild 绕过任何既有状态），落盘 + 进缓存
-    let (built, s1) = get_index(dir.path(), Some(&provider), true, &embed.as_service())
+    let (built, s1) = get_index(&key, &provider, true, &embed.as_service())
         .await
         .expect("首次构建");
     let chunks = built.chunk_count();
@@ -407,7 +422,7 @@ async fn disk_loaded_index_is_cached_for_subsequent_calls() {
     cache().lock().await.remove(&key);
 
     let before = embed.calls();
-    let (from_disk, s2) = get_index(dir.path(), Some(&provider), false, &embed.as_service())
+    let (from_disk, s2) = get_index(&key, &provider, false, &embed.as_service())
         .await
         .expect("读盘");
     assert_eq!(s2.embedded_files, 0, "指纹未变，不该重嵌");
@@ -421,7 +436,7 @@ async fn disk_loaded_index_is_cached_for_subsequent_calls() {
         .unwrap();
 
     let before = embed.calls();
-    let (again, s3) = get_index(dir.path(), Some(&provider), false, &embed.as_service())
+    let (again, s3) = get_index(&key, &provider, false, &embed.as_service())
         .await
         .expect("第三次");
     assert_eq!(
@@ -468,7 +483,7 @@ async fn overlong_file_produces_no_chunks() {
     tokio::fs::write(dir.path().join("vocab.json"), &over)
         .await
         .unwrap();
-    let chunks = embed_file(&dir.path().join("vocab.json"), &embed.as_service()).await;
+    let chunks = embed_in(dir.path(), "vocab.json", &embed.as_service()).await;
     assert!(chunks.is_empty(), "超长文件不该产出块");
     assert_eq!(embed.calls(), 0, "不该为超长文件跑任何嵌入");
 
@@ -477,7 +492,7 @@ async fn overlong_file_produces_no_chunks() {
     tokio::fs::write(dir.path().join("ok.json"), &ok)
         .await
         .unwrap();
-    let chunks = embed_file(&dir.path().join("ok.json"), &embed.as_service()).await;
+    let chunks = embed_in(dir.path(), "ok.json", &embed.as_service()).await;
     assert!(!chunks.is_empty(), "上限内的文件应照常索引");
 }
 
@@ -506,7 +521,8 @@ fn t199_dir() -> std::path::PathBuf {
 #[tokio::test]
 async fn invalid_regex_falls_back_to_literal_with_a_notice() {
     let dir = t199_dir();
-    let (hits, notice) = keyword_search(&dir, "(", 10).await;
+    let provider = provider_in(&dir);
+    let (hits, notice) = keyword_search(&provider, "(", 10).await;
 
     let notice = notice.expect("查询非法必须带说明（不许与「没搜到」同形）");
     assert!(
@@ -521,11 +537,12 @@ async fn invalid_regex_falls_back_to_literal_with_a_notice() {
 #[tokio::test]
 async fn valid_regex_and_empty_result_carry_no_notice() {
     let dir = t199_dir();
-    let (hits, notice) = keyword_search(&dir, "target", 10).await;
+    let provider = provider_in(&dir);
+    let (hits, notice) = keyword_search(&provider, "target", 10).await;
     assert!(!hits.is_empty());
     assert!(notice.is_none(), "合法查询不得伪造降级说明");
 
-    let (empty, notice) = keyword_search(&dir, "no_such_symbol_anywhere", 10).await;
+    let (empty, notice) = keyword_search(&provider, "no_such_symbol_anywhere", 10).await;
     assert!(empty.is_empty());
     assert!(
         notice.is_none(),

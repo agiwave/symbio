@@ -14,6 +14,13 @@ deps: []
 > 「作用域 VDFS provider」，让所有插件经同一套虚拟文件系统接口读写数据，
 > 不再各自拼接物理路径。
 
+### D-515 作用域 provider 取代 ctx 目录参数
+
+本次决策：上下文新增 `AGENT_VDFS` / `WORKSPACE_VDFS` / `SESSION_VDFS` 三个
+provider 键，插件只经相对地址读写，物理路径只留在 provider 后端；`WORKDIR` /
+`SESSION_DIR` 保留为对外协议键，但插件内部不再拿它们寻址。身份键 `AGENT_ID` /
+`SESSION_ID` 经业务意义分析后保留，但不参与存储寻址（见 §2）。
+
 ---
 
 ## 1. 背景与诉求

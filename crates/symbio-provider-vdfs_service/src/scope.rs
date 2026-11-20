@@ -136,13 +136,18 @@ impl ScopeDirVdfs {
         }
     }
 
-    /// 节点的最后修改时间（Unix 秒）。`VdfsNode` 有这个字段，物理后端就该填——
-    /// 否则消费方（`MemoryFile::updated_at`、按时间淘汰的存档）永远只能拿到 `None`。
+    /// 节点的最后修改时间（Unix **毫秒**）。`VdfsNode` 有这个字段，物理后端就该填——
+    /// 否则消费方（`MemoryFile::updated_at`、按时间淘汰的存档、
+    /// `codebase_search` 的增量索引指纹）永远只能拿到 `None`。
+    ///
+    /// 用毫秒而不是秒：`VdfsNode::updated_at` 的约定是「秒或毫秒都可，按量级判别」
+    /// （`ts < 1e12` 视为秒），毫秒在约定内。 code index 的指纹要能分辨
+    /// 「同一秒内、同样长度的内容改动」，秒级会漏检，毫秒把这条缝收窄 1000 倍。
     fn updated_at_of(meta: &std::fs::Metadata) -> Option<i64> {
         meta.modified()
             .ok()
             .and_then(|t| t.duration_since(std::time::UNIX_EPOCH).ok())
-            .map(|d| d.as_secs() as i64)
+            .map(|d| d.as_millis() as i64)
     }
 
     fn basename(path: &str) -> String {

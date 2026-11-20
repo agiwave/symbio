@@ -8,27 +8,29 @@
 //!
 //! 索引是**派生数据**，必须随时跟得上磁盘。三条机制叠在一起：
 //!
-//! 1. **每次调用都做一次文件集指纹扫描**（`stat` 全部候选文件，几百个文件 ≈ 毫秒级），
-//!    与上次索引比对；文件集（相对路径 + `mtime` + 字节数）完全一致就直接复用，
-//!    一次嵌入都不做。
+//! 1. **每次调用都做一次文件集指纹扫描**（经 `WORKSPACE_VDFS` 递归 `List` 全部候选
+//!    文件，几百个文件 ≈ 毫秒级），与上次索引比对；文件集（相对路径 + `updated_at`
+//!    + 字节数）完全一致就直接复用，一次嵌入都不做。
 //! 2. **有差异时只重嵌改动过的文件**：未变文件的块原样搬过来，新增/改动的文件重新
 //!    分块嵌入，已删除的文件整条丢掉。
-//! 3. **索引落盘**（`{workdir}/.symbio/cache/codebase-index.bin`）：进程重启后先读盘，
-//!    再走上面第 1、2 步，因此冷启动也不必全量重嵌。
+//! 3. **索引落盘**（工作区作用域的 `.symbio/cache/codebase-index.bin`）：进程重启后先
+//!    读盘，再走上面第 1、2 步，因此冷启动也不必全量重嵌。
 //!
 //! 之所以敢把"每次调用都扫描"当默认行为：`ort` 下单块嵌入 ≈ 10 ms（`tract` 时代是
-//! ≈ 10 s），全量重建本仓 ≈ 23 s，而扫描只是几百次 `stat`。反过来，**静默的过期索引**
-//! 比慢更糟——agent 会拿一份不包含自己刚写的代码的索引去搜，且完全无从察觉。
+//! ≈ 10 s），全量重建本仓 ≈ 23 s，而扫描只是几百次 `List` 项的元数据读取。反过来，
+//! **静默的过期索引**比慢更糟——agent 会拿一份不包含自己刚写的代码的索引去搜，且完全
+//! 无从察觉。
 //!
-//! 已知边界：指纹用 `mtime` + 字节数，**刻意保留 `mtime` 的写入（如 `rsync -t`）检测不到**。
-//! 这是 `mtime` 型增量重建的固有取舍；要绝对可靠就让 LLM 传 `rebuild=true`。
+//! 已知边界：指纹用 provider 报告的 `updated_at` + 字节数，**刻意保留 `updated_at`
+//! 的写入（如 `rsync -t`）检测不到**；后端不提供时间时退化为仅按字节数比对。两者都是
+//! 抽象存储上的固有取舍；要绝对可靠就让 LLM 传 `rebuild=true`。
 //!
 //! ## 为什么索引不放进 `homedir`
 //!
 //! 索引是**工作区级**的（一个工作区一份），与 `crates/symbio-plugin-agent/src/host/store.rs` 里
 //! `{workdir}/.symbio/agent/<id>` 同源——工作区级数据就落在工作区里。放进 homedir
 //! 反而要按工作区路径做哈希分片，多一层可能撞键的间接。`.symbio/` 以 `.` 开头，
-//! `WalkBuilder` 的 `standard_filters` 会跳过它，`.bin` 也不在 `SOURCE_EXTS` 里，
+//! D-515 的 VDFS 递归遍历会跳过隐藏目录，`.bin` 也不在 `SOURCE_EXTS` 里，
 //! 因此**索引不会把自己索引进去**（两重保险）。
 
 use async_trait::async_trait;
@@ -36,17 +38,18 @@ use base64::Engine as _;
 use grep::regex::RegexMatcherBuilder;
 use grep::searcher::sinks::UTF8 as UTF8Sink;
 use grep::searcher::SearcherBuilder;
-use ignore::WalkBuilder;
+use ignore::gitignore::{Gitignore, GitignoreBuilder};
 use serde_json::{json, Value};
 use std::collections::HashMap;
-use std::path::{Path, PathBuf};
+use std::path::Path;
 use std::sync::Arc;
 use symbio_plugin_api::EmbeddingService;
 use symbio_plugin_api::{
     creator_create_object, missing_caller, port_result, CapabilityMeta, CapabilityRiskLevel,
     DynVdfsProvider, ExecEnv, PluginError, PluginInvokeRequest, PluginInvokeRequestExt,
     PluginInvokeResponse, PluginSimpleRequest, PortExecContext, PortExecutor, PortInput,
-    PortOutcome, VdfsContent, VdfsContext, VdfsRequest, EMBEDDING_LOCAL, WORKSPACE_VDFS,
+    PortOutcome, VdfsContent, VdfsContext, VdfsNode, VdfsRequest, VdfsResponse, EMBEDDING_LOCAL,
+    WORKSPACE_VDFS,
 };
 
 const CHUNK_LINES: usize = 40;
@@ -66,7 +69,7 @@ const INDEX_MAGIC: &[u8; 8] = b"SYMCIDX\0";
 /// **任何字段增删都必须 +1**。版本不符时直接丢弃、全量重建——索引是纯派生数据，
 /// 重建代价是秒级，不值得为它写迁移代码；而容忍旧版本读出来的**错位数据**
 /// （字段错位不会报错，只会静默读出垃圾向量）是这里唯一不能犯的错。
-const INDEX_FORMAT_VERSION: u32 = 1;
+const INDEX_FORMAT_VERSION: u32 = 2;
 
 /// 纳入索引的源码扩展名
 const SOURCE_EXTS: &[&str] = &[
@@ -115,27 +118,21 @@ struct Chunk {
 
 /// 文件指纹：判断"这个文件自上次索引以来动过没有"的依据
 ///
-/// `mtime` + 字节数。加字节数是为了兜住"同一秒内改了长度"这类 `mtime` 分辨率问题
-/// （Windows NTFS 的 `mtime` 是 100ns 粒度，但很多编辑器/归档工具只写到秒）。
+/// `updated_at` + 字节数，都取自 VDFS 节点的 `List` 结果——插件不读物理盘。
+/// 加字节数是为了兜住"同一时间刻度内改了长度"这类分辨率问题。时间精度由后端
+/// 决定：`ScopeDirVdfs` 给毫秒；后端不提供时间时为 0，退化为仅按字节数比对
+/// （这种后端上要绝对可靠就用 `rebuild=true`）。
 #[derive(Debug, Clone, Copy, PartialEq, Eq)]
 struct Fingerprint {
-    mtime_secs: i64,
-    mtime_nanos: u32,
+    updated_at: i64,
     size: u64,
 }
 
 impl Fingerprint {
-    fn of(meta: &std::fs::Metadata) -> Self {
-        let (mtime_secs, mtime_nanos) = meta
-            .modified()
-            .ok()
-            .and_then(|t| t.duration_since(std::time::UNIX_EPOCH).ok())
-            .map(|d| (d.as_secs() as i64, d.subsec_nanos()))
-            .unwrap_or((0, 0));
+    fn of(node: &VdfsNode) -> Self {
         Self {
-            mtime_secs,
-            mtime_nanos,
-            size: meta.len(),
+            updated_at: node.updated_at.unwrap_or(0),
+            size: node.size.unwrap_or(0),
         }
     }
 }
@@ -172,8 +169,9 @@ impl CodeIndex {
 }
 
 /// 扫描到的一个候选文件（尚未分块/嵌入）
+///
+/// D-515：只带 VDFS 相对地址，不带物理路径——插件既不读盘，也不持有盘上位置。
 struct ScannedFile {
-    abs: PathBuf,
     rel: String,
     fingerprint: Fingerprint,
 }
@@ -203,8 +201,8 @@ fn cache() -> &'static tokio::sync::Mutex<HashMap<String, Arc<CodeIndex>>> {
 
 /// 诊断/检索工具：语义代码检索
 ///
-/// **不持策略**：检索根恒为 `workspace_dir`（索引建在它里面、`keyword_search`
-/// 也从它出发），入参 `path` 只是对**已经落在工作区内的结果**做子串过滤
+/// **不持策略**：检索根恒为 `WORKSPACE_VDFS` 作用域（索引建在它里面、
+/// `keyword_search` 也从它出发），入参 `path` 只是对**已经落在工作区内的结果**做子串过滤
 /// （见 `execute_inner` 尾部的 `retain`），不参与任何一次读 ⇒ 不存在可校验的
 /// 越界读。按 `content_search` 那样补一次 `is_path_allowed_for_read` 会得到一段
 /// **永不触发**的死校验（结果集里根本没有工作区外的路径），比不写更坏：它会让
@@ -217,8 +215,8 @@ impl CodebaseSearchTool {
     async fn execute_inner(
         &self,
         args: &Value,
-        workdir: &str,
-        provider: Option<&DynVdfsProvider>,
+        cache_key: &str,
+        provider: &DynVdfsProvider,
     ) -> PluginInvokeResponse<Value> {
         let query = args
             .get("query")
@@ -240,8 +238,6 @@ impl CodebaseSearchTool {
             .unwrap_or(DEFAULT_LIMIT as u64)
             .clamp(1, MAX_LIMIT as u64) as usize;
 
-        let workspace_dir = PathBuf::from(shellexpand::tilde(workdir).to_string());
-
         let ctx: Arc<dyn PluginInvokeRequest> = Arc::new(PluginSimpleRequest::new(None, None));
         let embed = creator_create_object::<dyn EmbeddingService>(EMBEDDING_LOCAL, ctx);
         // 实例恒能拿到（初始化失败时工厂给的是 Noop），所以「可不可用」必须单独问一次：
@@ -258,8 +254,7 @@ impl CodebaseSearchTool {
         let mut notice: Option<String> = None;
 
         if let Some(embed) = embed.as_ref() {
-            if let Some((index, stats)) = get_index(&workspace_dir, provider, rebuild, embed).await
-            {
+            if let Some((index, stats)) = get_index(cache_key, provider, rebuild, embed).await {
                 // 索引统计放进返回体：让"索引是否已跟上磁盘"可见，而不是靠猜。
                 // `embedded_files == 0` 就意味着本次一次嵌入都没跑（索引已是最新）。
                 index_info = json!({
@@ -277,8 +272,7 @@ impl CodebaseSearchTool {
         }
 
         if results.is_empty() {
-            let (keyword_results, keyword_notice) =
-                keyword_search(&workspace_dir, &query, limit).await;
+            let (keyword_results, keyword_notice) = keyword_search(provider, &query, limit).await;
             results = keyword_results;
             mode = "keyword_fallback";
             // 两条降级原因都要说：查询本身非法（正则编译失败 → 字面量回退）是**本次**
@@ -336,56 +330,127 @@ fn is_source_file(p: &Path) -> bool {
         .unwrap_or(false)
 }
 
-/// 列出工作区内的源码文件：用 `ignore`（尊重 .gitignore）遍历，并按扩展名白名单过滤。
-/// 不依赖 `rg` 等外部可执行文件，跨平台行为一致。
-fn walk_source_files(workdir: &Path) -> Vec<PathBuf> {
-    let mut files = Vec::new();
-    // grep-audit-allow S-013: 遍历序不参与输出——唯一取用方 `scan_files` 末尾 `out.sort_by(rel)` 已钉住
-    let mut builder = WalkBuilder::new(workdir);
-    builder
-        .standard_filters(true) // 尊重 .gitignore / 隐藏文件 / 全局 ignore
-        .parents(true)
-        .require_git(false);
-    // 跳过已知的非源码大目录（target / node_modules / dist / build 等）
-    builder.filter_entry(|e| {
-        if e.path().is_dir() {
-            let name = e.file_name().to_string_lossy();
-            return !matches!(
-                name.as_ref(),
-                "target" | "node_modules" | ".git" | "dist" | "build"
-            );
+/// 递归列举作用域内的源码文件（VDFS 相对地址，名字序，深度优先）。
+///
+/// 替代原来的 `WalkBuilder`：插件不直接读盘，而是经 `WORKSPACE_VDFS` 的 `List`
+/// 逐层展开（逃逸守卫在 provider 的 `resolve` / `guard_read` 里）。复刻了原来
+/// 两处关键语义——`standard_filters(true)` 的隐藏文件 / `.gitignore`（每层可
+/// 叠加，子目录优先）与 `filter_entry` 的非源码大目录跳过。名字序钉死，保证
+/// 截断窗口与索引字节内容跨平台稳定。
+fn collect_source_files<'a>(
+    provider: &'a DynVdfsProvider,
+    vctx: &'a VdfsContext,
+    dir: &'a str,
+    ignores: &'a mut Vec<Gitignore>,
+    out: &'a mut Vec<ScannedFile>,
+) -> std::pin::Pin<Box<dyn std::future::Future<Output = Result<(), String>> + Send + 'a>> {
+    Box::pin(async move {
+        let resp = provider
+            .dispatch(vctx, dir, VdfsRequest::List {})
+            .await
+            .map_err(|e| format!("列举目录失败: {e}"))?;
+        let VdfsResponse::List(nodes) = resp else {
+            return Ok(());
+        };
+        let mut nodes: Vec<_> = nodes.into_iter().collect();
+        nodes.sort_by(|a, b| a.node.name.cmp(&b.node.name));
+        for node in nodes {
+            let is_dir = node.node.is_dir();
+            // 指纹先取——下面会把 `name` 移动出去，之后再借 `node.node` 就不合法了。
+            let fingerprint = Fingerprint::of(&node.node);
+            let name = node.node.name;
+            if name.starts_with('.') {
+                continue;
+            }
+            if is_dir
+                && matches!(
+                    name.as_str(),
+                    "target" | "node_modules" | ".git" | "dist" | "build"
+                )
+            {
+                continue;
+            }
+            let rel = if dir.is_empty() {
+                name.clone()
+            } else {
+                format!("{dir}/{name}")
+            };
+            if ignores
+                .iter()
+                .any(|ig| ig.matched(Path::new(&name), is_dir).is_ignore())
+            {
+                continue;
+            }
+            if is_dir {
+                let pushed = load_ignore(provider, vctx, &rel).await;
+                let has_pushed = pushed.is_some();
+                if let Some(ig) = pushed {
+                    ignores.push(ig);
+                }
+                collect_source_files(provider, vctx, &rel, ignores, out).await?;
+                if has_pushed {
+                    ignores.pop();
+                }
+            } else if is_source_file(Path::new(&name)) {
+                out.push(ScannedFile { rel, fingerprint });
+            }
         }
-        true
-    });
-    for entry in builder.build().flatten() {
-        let p = entry.path();
-        if p.is_file() && is_source_file(p) {
-            files.push(p.to_path_buf());
-        }
-    }
-    files
+        Ok(())
+    })
 }
 
-/// 扫描工作区：拿到候选文件 + 各自的指纹，并按相对路径排序
+/// 读某层的 `.gitignore` 并编译为 matcher；没有文件就是「不忽略」。
+async fn load_ignore(
+    provider: &DynVdfsProvider,
+    vctx: &VdfsContext,
+    dir: &str,
+) -> Option<Gitignore> {
+    let path = if dir.is_empty() {
+        ".gitignore".to_string()
+    } else {
+        format!("{dir}/.gitignore")
+    };
+    let VdfsResponse::Read(content) = provider
+        .dispatch(vctx, &path, VdfsRequest::Read)
+        .await
+        .ok()?
+    else {
+        return None;
+    };
+    let text = content.text?;
+    let mut builder = GitignoreBuilder::new("");
+    for line in text.lines() {
+        builder.add_line(None, line).ok()?;
+    }
+    builder.build().ok()
+}
+
+/// 从 VDFS 读到的正文取出字节：文本直接用，二进制按 base64 解码。
+fn content_bytes(content: VdfsContent) -> Option<Vec<u8>> {
+    if let Some(text) = content.text {
+        return Some(text.into_bytes());
+    }
+    let encoded = content.b64?;
+    base64::engine::general_purpose::STANDARD
+        .decode(encoded)
+        .ok()
+}
+
+/// 扫描工作区：经 provider 递归列举候选文件 + 各自的指纹，并按相对路径排序
 ///
 /// 排序是**必须**的：增量比对的快路径要求两侧顺序一致。顺带让索引文件的字节内容
 /// 只取决于内容（不取决于遍历顺序），同一份代码重复构建得到同一个文件。
-async fn scan_files(workdir: &Path) -> Vec<ScannedFile> {
+async fn scan_files(provider: &DynVdfsProvider) -> Vec<ScannedFile> {
+    let vctx = VdfsContext::empty();
     let mut out: Vec<ScannedFile> = Vec::new();
-    for abs in walk_source_files(workdir) {
-        let Ok(meta) = tokio::fs::metadata(&abs).await else {
-            continue;
-        };
-        let rel = abs
-            .strip_prefix(workdir)
-            .unwrap_or(&abs)
-            .to_string_lossy()
-            .replace('\\', "/");
-        out.push(ScannedFile {
-            abs,
-            rel,
-            fingerprint: Fingerprint::of(&meta),
-        });
+    let mut ignores = Vec::new();
+    if let Some(ig) = load_ignore(provider, &vctx, "").await {
+        ignores.push(ig);
+    }
+    // 列举失败只影响本次扫描（退化成关键词检索），不带崩整个工具——但要说出来，
+    // 静默吞掉会让「作用域压根列不出来」看起来跟「工作区里没有源码」一个样。
+    if let Err(e) = collect_source_files(provider, &vctx, "", &mut ignores, &mut out).await {
+        tracing::warn!("代码索引扫描失败（本次按关键词检索兜底）：{e}");
     }
     out.sort_by(|a, b| a.rel.cmp(&b.rel));
     out
@@ -404,11 +469,27 @@ fn dot(a: &[f32], b: &[f32]) -> f32 {
 }
 
 /// 把一个文件切成块并逐块嵌入。文本读不出来 / 全为空 ⇒ 空 `Vec`（该文件不进索引）
-async fn embed_file(path: &Path, embed: &Arc<dyn EmbeddingService>) -> Vec<Chunk> {
-    let text = match tokio::fs::read_to_string(path).await {
-        Ok(t) if !t.is_empty() => t,
-        _ => return Vec::new(),
+///
+/// D-515：正文经作用域 provider 按相对地址读取，不再 `tokio::fs::read_to_string`。
+async fn embed_file(
+    provider: &DynVdfsProvider,
+    vctx: &VdfsContext,
+    rel: &str,
+    embed: &Arc<dyn EmbeddingService>,
+) -> Vec<Chunk> {
+    let Some(VdfsResponse::Read(read)) = provider.dispatch(vctx, rel, VdfsRequest::Read).await.ok()
+    else {
+        return Vec::new();
     };
+    let Some(bytes) = content_bytes(read) else {
+        return Vec::new();
+    };
+    let Ok(text) = String::from_utf8(bytes) else {
+        return Vec::new();
+    };
+    if text.is_empty() {
+        return Vec::new();
+    }
     let lines: Vec<&str> = text.lines().collect();
     if lines.is_empty() {
         return Vec::new();
@@ -421,7 +502,7 @@ async fn embed_file(path: &Path, embed: &Arc<dyn EmbeddingService>) -> Vec<Chunk
             "跳过过长文件（{} 行 > {} 行上限，按生成物处理）：{}",
             lines.len(),
             MAX_INDEXED_LINES,
-            path.display()
+            rel
         );
         return Vec::new();
     }
@@ -456,6 +537,8 @@ async fn embed_file(path: &Path, embed: &Arc<dyn EmbeddingService>) -> Vec<Chunk
 async fn refresh_index(
     scanned: &[ScannedFile],
     previous: Option<&CodeIndex>,
+    provider: &DynVdfsProvider,
+    vctx: &VdfsContext,
     embed: &Arc<dyn EmbeddingService>,
 ) -> Option<(CodeIndex, IndexStats)> {
     if scanned.is_empty() {
@@ -479,7 +562,7 @@ async fn refresh_index(
             .filter(|f| f.fingerprint == s.fingerprint);
         let (chunks, reused) = match reuse {
             Some(f) => (clone_chunks(&f.chunks), true),
-            None => (embed_file(&s.abs, embed).await, false),
+            None => (embed_file(provider, vctx, &s.rel, embed).await, false),
         };
         if reused {
             stats.reused_files += 1;
@@ -513,15 +596,18 @@ fn clone_chunks(chunks: &[Chunk]) -> Vec<Chunk> {
 /// 取（或刷新）某工作区的代码索引
 ///
 /// 每一次调用都会走一遍「取上次索引 → 扫描指纹 → 有差异才重嵌」，
-/// 因此返回的索引**总是当前磁盘内容的视图**（除非写盘方刻意保留了 `mtime`，
+/// 因此返回的索引**总是当前作用域内容的视图**（除非写盘方刻意保留了时间，
 /// 见模块文档；那种情况用 `rebuild` 兜底）。
+///
+/// `cache_key` 只是进程内缓存的分片键（D-515：它是**身份标识**，不是存储地址）——
+/// 插件不拿它去读盘；所有文件访问都走 `provider` 的相对地址。
 async fn get_index(
-    workdir: &Path,
-    provider: Option<&DynVdfsProvider>,
+    cache_key: &str,
+    provider: &DynVdfsProvider,
     rebuild: bool,
     embed: &Arc<dyn EmbeddingService>,
 ) -> Option<(Arc<CodeIndex>, IndexStats)> {
-    let key = workdir.to_string_lossy().to_string();
+    let key = cache_key.to_string();
 
     // 上次的索引：`rebuild` 时一律当作没有（全量重嵌）。
     // 进程内缓存优先，没有再读盘——读盘是为了跨进程重启也能省掉全量重建。
@@ -531,17 +617,13 @@ async fn get_index(
         let cached = { cache().lock().await.get(&key).cloned() };
         match cached {
             Some(idx) => Some(idx),
-            // 没有工作区作用域 → 不读盘（进程内缓存仍可用）
-            None => match provider {
-                Some(p) => load_from_disk(p).await.map(Arc::new),
-                None => None,
-            },
+            None => load_from_disk(provider).await.map(Arc::new),
         }
     };
 
     // 扫描放在这里（而不是 `refresh_index` 里），是为了让"零嵌入"快路径也能
     // 直接把上一次的 `Arc` 还回去——不必克隆整个索引。
-    let scanned = scan_files(workdir).await;
+    let scanned = scan_files(provider).await;
     if scanned.is_empty() {
         return None;
     }
@@ -565,15 +647,14 @@ async fn get_index(
         }
     }
 
-    let (idx, stats) = refresh_index(&scanned, previous.as_deref(), embed).await?;
+    let vctx = VdfsContext::empty();
+    let (idx, stats) = refresh_index(&scanned, previous.as_deref(), provider, &vctx, embed).await?;
     let arc = Arc::new(idx);
 
     // 落盘与进缓存。落盘失败不影响本次结果（下次照旧走全量），但要说出来——
     // 否则"索引没落盘"会表现为每次冷启动都慢，且没有任何线索。
-    if let Some(p) = provider {
-        if let Err(e) = save_to_disk(p, &arc).await {
-            tracing::warn!("代码索引落盘失败（不影响本次检索）：{e}");
-        }
+    if let Err(e) = save_to_disk(provider, &arc).await {
+        tracing::warn!("代码索引落盘失败（不影响本次检索）：{e}");
     }
     cache().lock().await.insert(key, Arc::clone(&arc));
     Some((arc, stats))
@@ -586,9 +667,9 @@ async fn get_index(
 // - 512 维 f32 用 JSON 存会膨胀数倍（每维 ~12 字节文本 vs 4 字节二进制）；
 // - 本仓对"为一件小事拉一整条依赖链"一贯保守（zip 只开 deflate 是同一个理由）。
 //
-// 布局：
+// 布局（v2：文件指纹从 mtime 二元组改为 provider 报告的 updated_at 单值）：
 //   magic[8] | version:u32 | file_count:u32
-//   每文件： rel:str | mtime_secs:i64 | mtime_nanos:u32 | size:u64 | chunk_count:u32
+//   每文件： rel:str | updated_at:i64 | size:u64 | chunk_count:u32
 //   每块：   start_line:u32 | end_line:u32 | text:str | dim:u32 | f32*dim
 // 其中 str = len:u32 + utf8 字节
 
@@ -673,8 +754,7 @@ fn encode_index(idx: &CodeIndex) -> Vec<u8> {
     put_u32(&mut out, idx.files.len() as u32);
     for f in &idx.files {
         put_str(&mut out, &f.rel);
-        put_i64(&mut out, f.fingerprint.mtime_secs);
-        put_u32(&mut out, f.fingerprint.mtime_nanos);
+        put_i64(&mut out, f.fingerprint.updated_at);
         put_u64(&mut out, f.fingerprint.size);
         put_u32(&mut out, f.chunks.len() as u32);
         for c in &f.chunks {
@@ -700,8 +780,7 @@ fn decode_index(buf: &[u8]) -> Option<CodeIndex> {
     for _ in 0..file_count {
         let rel = r.string()?;
         let fingerprint = Fingerprint {
-            mtime_secs: r.i64()?,
-            mtime_nanos: r.u32()?,
+            updated_at: r.i64()?,
             size: r.u64()?,
         };
         let chunk_count = r.u32()? as usize;
@@ -831,7 +910,11 @@ async fn semantic_search(
 /// 返回 `(片段, 降级说明)`。查询不是合法正则时**不静默返回空**（那与「真的没搜到」
 /// 同形）：先按字面量重试一次（`regex::escape`），并把「按字面量匹配」写进
 /// 说明；字面量也编译不出来时才返回空 + 说明。
-async fn keyword_search(workdir: &Path, query: &str, limit: usize) -> (Vec<Value>, Option<String>) {
+async fn keyword_search(
+    provider: &DynVdfsProvider,
+    query: &str,
+    limit: usize,
+) -> (Vec<Value>, Option<String>) {
     let (matcher, notice) = match RegexMatcherBuilder::new().case_smart(false).build(query) {
         Ok(matcher) => (matcher, None),
         Err(e) => {
@@ -857,51 +940,41 @@ async fn keyword_search(workdir: &Path, query: &str, limit: usize) -> (Vec<Value
     };
     let mut searcher = SearcherBuilder::new().line_number(true).build();
 
-    let mut builder = WalkBuilder::new(workdir);
-    builder
-        .standard_filters(true)
-        .parents(true)
-        .require_git(false);
-    builder.filter_entry(|e| {
-        if e.path().is_dir() {
-            let name = e.file_name().to_string_lossy();
-            return !matches!(
-                name.as_ref(),
-                "target" | "node_modules" | ".git" | "dist" | "build"
-            );
-        }
-        true
-    });
-    // 降级路径按 `limit` 截断，截的是**遍历序的前 N 条**——不钉名字序就等于让「哪些片段
-    // 被返回」随文件系统实现变（索引侧已有 `out.sort_by(rel)`，这里是对称的必需）。
-    builder.sort_by_file_name(|a, b| a.cmp(b));
+    // 经作用域 provider 递归列举（名字序在 collect_source_files 里钉死），逐文件用
+    // `search_slice` 搜内容；不再 WalkBuilder + search_path，插件不碰物理盘。
+    let vctx = VdfsContext::empty();
+    let mut ignores = Vec::new();
+    if let Some(ig) = load_ignore(provider, &vctx, "").await {
+        ignores.push(ig);
+    }
+    let mut files = Vec::new();
+    if let Err(e) = collect_source_files(provider, &vctx, "", &mut ignores, &mut files).await {
+        tracing::warn!("关键词检索列举作用域失败：{e}");
+    }
 
     let mut out: Vec<Value> = Vec::new();
-    'outer: for entry in builder.build() {
-        let entry = match entry {
-            Ok(e) => e,
-            Err(_) => continue,
-        };
-        let fp = entry.path();
-        if !fp.is_file() || !is_source_file(fp) {
+    'outer: for scanned in files {
+        let Some(VdfsResponse::Read(read)) = provider
+            .dispatch(&vctx, &scanned.rel, VdfsRequest::Read)
+            .await
+            .ok()
+        else {
             continue;
-        }
+        };
+        let Some(content) = content_bytes(read) else {
+            continue;
+        };
         let mut matches: Vec<(u64, String)> = Vec::new();
         let sink = UTF8Sink(|ln: u64, text: &str| {
             matches.push((ln, text.to_string()));
             Ok(true)
         });
-        if searcher.search_path(&matcher, fp, sink).is_err() {
+        if searcher.search_slice(&matcher, &content, sink).is_err() {
             continue;
         }
-        let rel = fp
-            .strip_prefix(workdir)
-            .unwrap_or(fp)
-            .to_string_lossy()
-            .to_string();
         for (ln, content) in matches {
             out.push(json!({
-                "file": rel,
+                "file": scanned.rel,
                 "start_line": ln,
                 "end_line": ln,
                 "score": 0.0,
@@ -926,7 +999,7 @@ impl CodebaseSearchTool {
         CapabilityMeta {
             name: "codebase_search".to_string(),
             description:
-                "语义化检索代码库：对查询做向量相似度检索，返回最相关的代码片段（含文件路径与行号）。索引会按文件 mtime 自动增量更新（每次调用都校验，未改动的文件不重嵌），跨进程重启复用磁盘上的索引。嵌入服务不可用时自动降级为正则关键词检索。"
+                "语义检索代码库：向量相似度检索，返回相关代码片段（含路径与行号）。索引按 updated_at 增量更新（每次调用都校验，未改动的文件不重嵌），重启后复用磁盘索引。嵌入服务不可用时自动降级为正则关键词检索。"
                     .to_string(),
             input_schema: json!({
                 "type": "object",
@@ -934,7 +1007,7 @@ impl CodebaseSearchTool {
                     "query": { "type": "string", "description": "自然语言或代码片段查询，如 '解析请求参数的函数'" },
                     "path": { "type": "string", "description": "限定检索范围的子目录或文件名（可选）" },
                     "limit": { "type": "integer", "description": "返回结果条数，默认 8，最大 30" },
-                    "rebuild": { "type": "boolean", "description": "忽略现有索引、全量重建（默认 false）。正常情况不需要——索引每次调用都会按 mtime 增量同步；只在怀疑索引与磁盘不一致时使用" }
+                    "rebuild": { "type": "boolean", "description": "忽略现有索引、全量重建（默认 false）。正常情况不需要——索引每次调用都会按 updated_at 增量同步；只在怀疑索引与内容不一致时使用" }
                 },
                 "required": ["query"]
             }),
@@ -954,18 +1027,19 @@ impl CodebaseSearchTool {
         _env: &ExecEnv,
         ctx: Arc<dyn PluginInvokeRequest>,
     ) -> Result<Value, PluginError> {
-        let workdir_str = ctx.get(symbio_plugin_api::WORKDIR).ok_or_else(|| {
+        // 身份键（进程内缓存分片用），不是存储地址——插件不拿它读盘。
+        let cache_key = ctx.get(symbio_plugin_api::WORKDIR).ok_or_else(|| {
             PluginError::ValidationError("Missing workdir in context".to_string())
         })?;
-        if workdir_str.is_empty() {
+        if cache_key.is_empty() {
             return Err(PluginError::ValidationError(
                 "Empty workdir in context".to_string(),
             ));
         }
-        let provider = ctx.get(WORKSPACE_VDFS).flatten();
-        let data = self
-            .execute_inner(&args, &workdir_str, provider.as_ref())
-            .await?;
+        let provider = ctx.get(WORKSPACE_VDFS).flatten().ok_or_else(|| {
+            PluginError::ValidationError("当前上下文没有工作区作用域，无法检索代码库".into())
+        })?;
+        let data = self.execute_inner(&args, &cache_key, &provider).await?;
         Ok(serde_json::to_value(&data)?)
     }
 }

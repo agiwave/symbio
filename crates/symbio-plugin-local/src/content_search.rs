@@ -11,21 +11,124 @@ use grep::matcher::Matcher;
 use grep::regex::RegexMatcherBuilder;
 use grep::searcher::sinks::UTF8 as UTF8Sink;
 use grep::searcher::SearcherBuilder;
-use ignore::WalkBuilder;
+use ignore::gitignore::{Gitignore, GitignoreBuilder};
 use serde_json::{json, Value};
 use std::collections::BTreeSet;
-use std::path::PathBuf;
+use std::path::Path;
 use std::sync::Arc;
 use symbio_plugin_api::{
-    missing_caller, port_result, CapabilityMeta, CapabilityRiskLevel, ExecEnv, PluginError,
-    PluginInvokeRequest, PluginInvokeRequestExt, PluginInvokeResponse, PortExecContext,
-    PortExecutor, PortInput, PortOutcome,
+    missing_caller, port_result, CapabilityMeta, CapabilityRiskLevel, DynVdfsProvider, ExecEnv,
+    PluginError, PluginInvokeRequest, PluginInvokeRequestExt, PluginInvokeResponse,
+    PortExecContext, PortExecutor, PortInput, PortOutcome, VdfsContent, VdfsContext, VdfsRequest,
+    VdfsResponse,
 };
 
 const MAX_RESULTS: usize = 1000;
 const MAX_OUTPUT_BYTES: usize = 1_048_576;
 
+/// 递归列举作用域内的文件，返回相对地址（名字序、深度优先）。
+///
+/// 替代原来的 `WalkBuilder`：插件不直接读盘，而是经 `WORKSPACE_VDFS` 的
+/// `List` 逐层展开（`ScopeDirVdfs` 只接受相对地址并做逃逸守卫）。复刻了
+/// `standard_filters(true)` 的两个关键语义——隐藏文件（`.` 开头）与
+/// `.gitignore`（每层可叠加，子目录优先）。排序固定为名字序，与原来的
+/// `sort_by_file_name` 一致，保证 `offset` / `head_limit` 窗口跨平台稳定。
+fn collect_files<'a>(
+    provider: &'a DynVdfsProvider,
+    vctx: &'a VdfsContext,
+    dir: &'a str,
+    ignores: &'a mut Vec<Gitignore>,
+    out: &'a mut Vec<String>,
+) -> std::pin::Pin<Box<dyn std::future::Future<Output = Result<(), String>> + Send + 'a>> {
+    Box::pin(async move {
+        let resp = provider
+            .dispatch(vctx, dir, VdfsRequest::List {})
+            .await
+            .map_err(|e| format!("列举目录失败: {e}"))?;
+        let VdfsResponse::List(nodes) = resp else {
+            return Ok(());
+        };
+        let mut nodes: Vec<_> = nodes.into_iter().collect();
+        nodes.sort_by(|a, b| a.node.name.cmp(&b.node.name));
+        for node in nodes {
+            let is_dir = node.node.is_dir();
+            let name = node.node.name;
+            if name.starts_with('.') {
+                continue;
+            }
+            let rel = if dir.is_empty() {
+                name.clone()
+            } else {
+                format!("{dir}/{name}")
+            };
+            if ignores
+                .iter()
+                .any(|ig| ig.matched(Path::new(&name), is_dir).is_ignore())
+            {
+                continue;
+            }
+            if is_dir {
+                let pushed = load_ignore(provider, vctx, &rel).await;
+                let has_pushed = pushed.is_some();
+                if let Some(ig) = pushed {
+                    ignores.push(ig);
+                }
+                collect_files(provider, vctx, &rel, ignores, out).await?;
+                if has_pushed {
+                    ignores.pop();
+                }
+            } else {
+                out.push(rel);
+            }
+        }
+        Ok(())
+    })
+}
+
+/// 读某层的 `.gitignore` 并编译为 matcher；没有文件就是「不忽略」。
+async fn load_ignore(
+    provider: &DynVdfsProvider,
+    vctx: &VdfsContext,
+    dir: &str,
+) -> Option<Gitignore> {
+    let path = if dir.is_empty() {
+        ".gitignore".to_string()
+    } else {
+        format!("{dir}/.gitignore")
+    };
+    let VdfsResponse::Read(content) = provider
+        .dispatch(vctx, &path, VdfsRequest::Read)
+        .await
+        .ok()?
+    else {
+        return None;
+    };
+    let text = content.text?;
+    let mut builder = GitignoreBuilder::new("");
+    for line in text.lines() {
+        builder.add_line(None, line).ok()?;
+    }
+    builder.build().ok()
+}
+
+/// 从 VDFS 读到的正文取出字节：文本直接用，二进制按 base64 解码。
+fn content_bytes(content: VdfsContent) -> Option<Vec<u8>> {
+    if let Some(text) = content.text {
+        return Some(text.into_bytes());
+    }
+    let encoded = content.b64?;
+    use base64::Engine as _;
+    base64::engine::general_purpose::STANDARD
+        .decode(encoded)
+        .ok()
+}
+
 /// 内容搜索工具
+///
+/// 持有 `SecurityPolicy` 做**用户配置的路径策略**判定（禁止路径等）——provider
+/// 只保证「不逃逸作用域」，不实现用户自定义的 `forbidden_paths` 等规则，这一层
+/// 不能少。但路径本身是 VDFS 相对地址（不是物理路径），逃逸守卫在 provider 的
+/// `resolve` / `guard_read` 里做。
 #[derive(Clone)]
 pub struct ContentSearchTool {
     security: Arc<SecurityPolicy>,
@@ -36,7 +139,11 @@ impl ContentSearchTool {
         Self { security }
     }
 
-    async fn execute_inner(&self, args: &Value, workdir: &str) -> PluginInvokeResponse<Value> {
+    async fn execute_inner(
+        &self,
+        args: &Value,
+        provider: Option<&DynVdfsProvider>,
+    ) -> PluginInvokeResponse<Value> {
         validate_params(args, &["pattern"]).map_err(PluginError::ValidationError)?;
 
         let pattern = match args.get("pattern").and_then(|v| v.as_str()) {
@@ -86,32 +193,31 @@ impl ContentSearchTool {
             )));
         }
 
-        let workspace_dir = std::path::PathBuf::from(shellexpand::tilde(workdir).to_string());
-        let full_search_path = if PathBuf::from(search_path).is_absolute() {
-            PathBuf::from(search_path)
-        } else {
-            workspace_dir.join(search_path)
-        };
-
-        let resolved_path = tokio::fs::canonicalize(&full_search_path)
-            .await
-            .map_err(|e| PluginError::InternalError(format!("无法解析搜索路径: {e}")))?;
-
-        // 使用统一的路径验证方法
+        let provider = provider.ok_or_else(|| {
+            PluginError::ValidationError("当前上下文没有工作区作用域，无法搜索文件内容".into())
+        })?;
+        // 作用域只认相对地址（拒绝绝对路径与 `..` 父段，见 ScopeDirVdfs::resolve），
+        // 由 provider 统一做逃逸守卫；插件不再自行 canonicalize / 拼物理路径。
+        let rel_root = search_path.trim_start_matches("./").trim_end_matches('/');
+        // 用户配置的路径策略（forbidden_paths / workspace_only 等）仍需生效：provider
+        // 只管「不逃逸作用域」，不管「用户禁止读哪一段」。这里按相对地址判定。
         if !self
             .security
-            .is_path_allowed_for_read(&resolved_path, &workspace_dir)
+            .is_path_allowed_for_read(rel_root, std::path::Path::new(""))
             .await
         {
             return Err(PluginError::ValidationError(
-                "搜索路径超出工作区范围。".to_string(),
+                "搜索路径被安全策略拒绝。".into(),
             ));
         }
+        let vctx = VdfsContext::empty();
 
         match self
             .search(
                 pattern,
-                &resolved_path,
+                provider,
+                &vctx,
+                rel_root,
                 output_mode,
                 include,
                 type_filter,
@@ -151,7 +257,9 @@ impl ContentSearchTool {
     async fn search(
         &self,
         pattern: &str,
-        path: &std::path::Path,
+        provider: &DynVdfsProvider,
+        vctx: &VdfsContext,
+        rel_root: &str,
         output_mode: &str,
         include: Option<&str>,
         file_type: Option<&str>,
@@ -183,22 +291,11 @@ impl ContentSearchTool {
                 globs.push((*g).to_string());
             }
         }
-        let mut walk_builder = WalkBuilder::new(path);
-        walk_builder
-            .standard_filters(true) // 遵循 .gitignore / 隐藏文件 / 全局 ignore
-            .hidden(true)
-            .require_git(false)
-            .parents(true)
-            .ignore(true)
-            .git_ignore(true)
-            .git_global(true)
-            .git_exclude(true);
-        // 遍历序必须钉成名字序：默认的文件系统返回序在 NTFS 上恰是名字序、在 ext4 上是
-        // 哈希序，于是同一查询在两平台上行序不同——`apply_line_pagination` 的
-        // `offset`/`head_limit` 窗口和 `MAX_RESULTS` 的截断点都跟着变（用户可见的缺陷，
-        // 不只是测试不稳）。
-        walk_builder.sort_by_file_name(|a, b| a.cmp(b));
-        if !globs.is_empty() {
+        // glob 过滤：编译一次，遍历时对 VDFS 相对地址匹配（原来的 filter_entry
+        // 拿的是物理路径，这里换成相对地址——语义等价，且不再泄漏物理路径）。
+        let glob_set = if globs.is_empty() {
+            None
+        } else {
             let mut builder = globset::GlobSetBuilder::new();
             for g in &globs {
                 builder.add(
@@ -208,17 +305,21 @@ impl ContentSearchTool {
                         .map_err(|e| format!("无效的 include/glob '{g}': {e}"))?,
                 );
             }
-            let set = builder
-                .build()
-                .map_err(|e| format!("构建 glob 失败: {e}"))?;
-            walk_builder.filter_entry(move |e| {
-                if e.path().is_dir() {
-                    true
-                } else {
-                    set.is_match(e.path())
-                }
-            });
+            Some(
+                builder
+                    .build()
+                    .map_err(|e| format!("构建 glob 失败: {e}"))?,
+            )
+        };
+
+        // 经作用域 provider 递归列举文件：不读物理盘，逃逸由 provider 守卫。
+        // 名字序在 collect_files 里钉死，保证 offset / head_limit 窗口跨平台稳定。
+        let mut files = Vec::new();
+        let mut ignores = Vec::new();
+        if let Some(ig) = load_ignore(provider, vctx, "").await {
+            ignores.push(ig);
         }
+        collect_files(provider, vctx, rel_root, &mut ignores, &mut files).await?;
 
         let mut searcher = SearcherBuilder::new().line_number(true).build();
 
@@ -245,30 +346,32 @@ impl ContentSearchTool {
             }};
         }
 
-        for entry in walk_builder.build() {
-            let entry = match entry {
-                Ok(e) => e,
-                Err(_) => continue,
-            };
-            let fp = entry.path();
-            if !fp.is_file() {
-                continue;
+        for rel in files {
+            if let Some(set) = &glob_set {
+                if !set.is_match(Path::new(&rel)) {
+                    continue;
+                }
             }
-            // 展示路径：剥掉 Windows `canonicalize` 的 `\\?\` 扩展前缀。搜索根在
-            // 调用方已过 `fs::canonicalize`，walk 出来的每个 `entry.path()` 因此都带
-            // 前缀；逐行原样回显会让每行多占 ~30 字符且模型不可读（真实会话实证）。
-            // ⚠️ 仅用于**输出展示**——所有 IO（read / search_path）仍用原始 `fp`，
-            // 剥前缀后的路径若超长或含尾随空格会破坏 Windows 路径语义。
-            let disp = super::policy::normalize_path_for_comparison(fp);
-            let disp = disp.display();
+            // 展示路径用作用域相对地址（VDFS 视图内唯一），不再有 Windows 扩展前缀。
+            let disp = if rel_root.is_empty() {
+                rel.clone()
+            } else {
+                format!("{rel_root}/{rel}")
+            };
+
+            // 经 provider 读取正文；二进制以 b64 返回，解码后同样可搜。
+            let Some(VdfsResponse::Read(read)) =
+                provider.dispatch(vctx, &rel, VdfsRequest::Read).await.ok()
+            else {
+                continue;
+            };
+            let Some(content) = content_bytes(read) else {
+                continue;
+            };
 
             if multiline {
                 // 跨行：整文件读入后用 Matcher 手动迭代匹配（'.' 已开启匹配换行）
-                let bytes = match std::fs::read(fp) {
-                    Ok(b) => b,
-                    Err(_) => continue,
-                };
-                let haystack = bstr::BString::from(bytes);
+                let haystack = bstr::BString::from(content);
                 let mut at = 0usize;
                 let mut file_matches: Vec<String> = Vec::new();
                 loop {
@@ -312,7 +415,7 @@ impl ContentSearchTool {
                     file_matches.push((ln, text.trim_end_matches(['\n', '\r']).to_string()));
                     Ok(true)
                 });
-                if searcher.search_path(&matcher, fp, sink).is_err() {
+                if searcher.search_slice(&matcher, &content, sink).is_err() {
                     continue;
                 }
                 if file_matches.is_empty() {
@@ -329,11 +432,7 @@ impl ContentSearchTool {
                         emit_line!(format!("{}:{}:{}", disp, ln, text));
                     }
                 } else {
-                    // 手动上下文窗口：读文件行，合并匹配 ± 上下文行号
-                    let content = match std::fs::read(fp) {
-                        Ok(b) => b,
-                        Err(_) => continue,
-                    };
+                    // 手动上下文窗口：用已读入的正文，合并匹配 ± 上下文行号
                     let owned = bstr::BString::from(content);
                     let line_vec: Vec<&[u8]> = owned.lines().collect();
                     let n = line_vec.len();
@@ -490,15 +589,8 @@ impl ContentSearchTool {
         _env: &ExecEnv,
         ctx: Arc<dyn PluginInvokeRequest>,
     ) -> Result<Value, PluginError> {
-        let workdir_str = ctx.get(symbio_plugin_api::WORKDIR).ok_or_else(|| {
-            PluginError::ValidationError("Missing workdir in context".to_string())
-        })?;
-        if workdir_str.is_empty() {
-            return Err(PluginError::ValidationError(
-                "Empty workdir in context".to_string(),
-            ));
-        }
-        let data = self.execute_inner(&args, &workdir_str).await?;
+        let provider = ctx.get(symbio_plugin_api::WORKSPACE_VDFS).flatten();
+        let data = self.execute_inner(&args, provider.as_ref()).await?;
         Ok(serde_json::to_value(&data)?)
     }
 }

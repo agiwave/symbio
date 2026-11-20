@@ -221,9 +221,13 @@ export default defineCase(
         !pagedOut.includes('b.ts'),
         `head_limit 截在 a.ts 内 ⇒ b.ts 不该出现（实际: ${pagedOut.slice(0, 300)}）`,
       );
+      // D-515 后展示路径是 VDFS 相对地址（`a.ts` / `b.ts`），每行只有几十字节；
+      // 分页尾注本身就有约 200 字节，拿「分页总字节 < 默认总字节」当截短判据
+      // 会在相对路径下假红。真正的截短语义是「只给 2 条匹配行 + 带分页尾注」：
+      // 匹配行数上面已钉死，这里再钉住尾注即可。
       assert(
-        pagedOut.length < contentOut.length,
-        `head_limit=2 应截短输出（分页 ${pagedOut.length} 字节 < 默认 ${contentOut.length} 字节）`,
+        pagedOut.includes('结果已分页'),
+        `head_limit 截短后应给出分页尾注（实际: ${pagedOut.slice(0, 300)}）`,
       );
 
       // ── ⑤ 截断：输出超 1 MiB ⇒ 截断正文 + 尾注 ──
