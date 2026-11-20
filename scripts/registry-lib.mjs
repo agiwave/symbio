@@ -454,7 +454,12 @@ export const SCAN_SKIP_DIRS = new Set([
   '.agents',
   'examples',
 ])
-/** 目录前缀豁免（相对仓根，以 `/` 结尾）：归档是历史快照，现行登记不接管。 */
+/**
+ * 目录前缀豁免（相对仓根，以 `/` 结尾）。
+ *
+ * 历史上曾有归档目录；D-494 已裁定不设归档目录、历史只归 `git log`。
+ * 这里保留前缀跳过仅为防止旧快照残留干扰扫描，不是现行归档机制。
+ */
 export const SCAN_SKIP_PREFIXES = ['docs/archive/']
 /** 单文件豁免：路径 → 理由（与职责表同口径）。 */
 export const SCAN_SKIP_FILES = new Map([
@@ -1073,7 +1078,7 @@ export function auditEntries(entries, root, projections = [], kinds = {}) {
           out.push(
             `${e.rel}：RG-033 退场档正文 ${lines} 行，超过 ${RETIRED_MAX_BODY_LINES} 行预算` +
               '——退场文档只留裁决锚点与指向：目标设计段删除、结论已并入谁写进 `reason`；' +
-              '历史归 `git log` 与 `docs/archive/`（D-145）',
+              '历史归 `git log`（D-494）',
           )
         }
       }
