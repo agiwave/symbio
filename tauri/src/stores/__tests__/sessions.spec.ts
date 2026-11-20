@@ -1062,3 +1062,62 @@ describe('sessions store — 选中不在清单里的会话（子会话）', () 
     expect(store.activeWorkdir, '清单优先').toBe('D:/work/b')
   })
 })
+
+/**
+ * 收件箱气泡的收敛动作（排队中的用户消息 → 「待发送」气泡）。
+ *
+ * `sessionInboxSync` 把实时帧翻译成对 store 的四个 sink 调用；这里锁的是 sink 落地后的
+ * 收敛语义。它们与清单 / 运行态互不重叠——不触发任何 vdfs 回读，是纯本地状态变更。
+ * 顺序是核心：队列是 FIFO，气泡上下顺序就是消费顺序，打乱会让「第二条先跑」看着像 bug。
+ */
+describe('sessions store — 收件箱气泡的收敛动作', () => {
+  let store: ReturnType<typeof useSessionsStore>
+
+  beforeEach(() => {
+    setActivePinia(createPinia())
+    store = useSessionsStore()
+  })
+
+  it('applyInboxItem 按到达顺序追加，且空 id / 空 entry 不入账', () => {
+    store.applyInboxItem('s1', { id: 'i1', label: '第一条' })
+    store.applyInboxItem('s1', { id: 'i2', label: '第二条' })
+    store.applyInboxItem('', { id: 'i3', label: '无会话' })
+    store.applyInboxItem('s1', { id: '', label: '无条目' })
+
+    expect(store.getInboxItems('s1').map((e) => e.id)).toEqual(['i1', 'i2'])
+  })
+
+  it('applyInboxItem 对已存在的 id 只更新文案、不挪位置（后端重发帧幂等）', () => {
+    store.applyInboxItem('s1', { id: 'i1', label: '旧' })
+    store.applyInboxItem('s1', { id: 'i2', label: '第二' })
+    store.applyInboxItem('s1', { id: 'i1', label: '新' })
+
+    expect(store.getInboxItems('s1')).toEqual([
+      { id: 'i1', label: '新' },
+      { id: 'i2', label: '第二' },
+    ])
+  })
+
+  it('removeInboxItem 只移除命中项，未命中 / 空队列是无操作', () => {
+    store.applyInboxItem('s1', { id: 'i1', label: '一' })
+    store.applyInboxItem('s1', { id: 'i2', label: '二' })
+
+    store.removeInboxItem('s1', 'i1')
+    expect(store.getInboxItems('s1').map((e) => e.id)).toEqual(['i2'])
+
+    store.removeInboxItem('s1', '不存在')
+    expect(store.getInboxItems('s1').map((e) => e.id)).toEqual(['i2'])
+    store.removeInboxItem('s2', 'i2')
+    expect(store.getInboxItems('s2')).toEqual([])
+  })
+
+  it('setInboxItems 整份替换，且不同会话互不串扰', () => {
+    store.applyInboxItem('s1', { id: 'old', label: '旧' })
+    store.applyInboxItem('s2', { id: 'keep', label: '保留' })
+
+    store.setInboxItems('s1', [{ id: 'new', label: '权威清单' }])
+
+    expect(store.getInboxItems('s1')).toEqual([{ id: 'new', label: '权威清单' }])
+    expect(store.getInboxItems('s2')).toEqual([{ id: 'keep', label: '保留' }])
+  })
+})
