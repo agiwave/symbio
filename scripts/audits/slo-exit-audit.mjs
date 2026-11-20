@@ -23,6 +23,14 @@
  * | SX-001 | 出口表指认了 `session/stats` 里不存在的列 ⇒ 红（指认漂移 / 列被改名） |
  * | SX-002 | 规则源读不出（出口表 / `stats.rs` 的固定字段 / `submit_reports!` 的 `slot` 提取失败）⇒ exit 2 |
  * | SX-003 | 反向自检用：出口表本身形状不对（没有那一列 / 没有 `阶` 头）⇒ exit 2 |
+ * | SX-004 | 无用户可见读数的出口（`—`）行数超过 `MISSING_BASELINE` ⇒ 红；低于时提示同批下调 |
+ *
+ * ## 为什么 `—` 要设棘轮（SX-004）
+ *
+ * `—` 是「待建」，不是「不用有」。此前它只是每周日志里的一个数，债可以无限涨而门禁
+ * 照绿——这正是「全绿由冻结债构成」的一种。SX-004 把它变成只许降的棘轮：新增一行没有
+ * 读数的出口必须红；有人补上读数后，实测低于基线时提示同批把 `MISSING_BASELINE` 钉到
+ * 实测（D-505 先例），余量不会被下一次新增免费占用。
  *
  * ## 为什么 `—` 不是豁免
  *
@@ -35,13 +43,13 @@
  */
 // 判据码命名空间（登记表 docs/004-ref/GATE_CODES.md 由这些行生成，判据见 gate-codes-audit.mjs）
 // @ns SX SLO 出口表 vs session/stats 读数列（用户可见出口）
-// @codes SX-001 SX-002 SX-003
+// @codes SX-001 SX-002 SX-003 SX-004
 // @gate weekly
 
 import fs from 'node:fs'
 import path from 'node:path'
 import { fileURLToPath } from 'node:url'
-import { green, red } from '../color.mjs'
+import { dim, green, red } from '../color.mjs'
 import { plain, tableWithHeader } from '../md-table.mjs'
 import { walkFiles } from '../fs-walk.mjs'
 
@@ -56,6 +64,13 @@ const STATS_REL = path.join('crates', 'symbio-plugin-session', 'src', 'stats.rs'
 const TABLE_ANCHOR = '阶'
 /** 新列的名字。改名要连本脚本一起改，否则 SX-003 会红——那是刻意的。 */
 const EXIT_HEAD = '用户可见出口'
+
+/**
+ * SX-004 棘轮：出口表里没有用户可见读数的行数，只许降。
+ * 当前值 9 = 出口表 15 行中 9 行是 `—`（实测）。新增无读数出口必须红；
+ * 补上读数后同批把这个数钉到新实测（与 `DATA_BASELINE` / `R002_BASELINE` 同一模式）。
+ */
+const MISSING_BASELINE = 9
 
 /**
  * `session/stats` 的读数列集合。
@@ -226,13 +241,34 @@ for (const row of rows) {
   if (columnsOf(row.raw).length === 0) missing++
 }
 
+// SX-004：无读数的出口行数只许降——新增一行 `—` 必须当场红
+if (missing > MISSING_BASELINE) {
+  errors++
+  console.log(
+    red(
+      `[ERROR] SX-004 出口表有 ${missing} 行没有用户可见读数（—），超过基线 ${MISSING_BASELINE}；` +
+        '新增出口必须配读数，或另裁决策下调基线（只许降）',
+    ),
+  )
+}
+
 if (errors) {
-  console.log(`slo-exit-audit 未通过：${errors} 处指认对不上（扫 ${rows.length} 行）`)
+  console.log(`slo-exit-audit 未通过：${errors} 处判据问题（扫 ${rows.length} 行）`)
   process.exit(1)
+}
+
+if (missing < MISSING_BASELINE) {
+  console.log(
+    dim(
+      `· SX-004 余量 ${MISSING_BASELINE - missing}：请同批把 MISSING_BASELINE 钉到 ${missing}` +
+        '（D-505 先例，余量会被下一次新增免费占用）',
+    ),
+  )
 }
 console.log(
   green(
     `slo-exit-audit 通过：出口表 ${rows.length} 行，${declared} 处指认全部指得到列` +
-      `（${declaredColumns.size} 个不同列）；${missing} 行**没有**用户可见读数（—）`,
+      `（${declaredColumns.size} 个不同列）；${missing} 行**没有**用户可见读数（—），` +
+      `棘轮基线 ${MISSING_BASELINE}（只许降）`,
   ),
 )

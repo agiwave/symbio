@@ -63,7 +63,7 @@ lists: [gate-codes=owner]
 | **SR** | 归宿行（开不出账的行）条数棘轮 | `scripts/audits/sink-row-audit.mjs` | SR-001–004 | `SR-005` |
 | **SRA** | 控制面 session 退役线的进度尺（豁免账 / 单槽登记） | `scripts/audits/session-retire-audit.mjs` | SRA-001–005 | `SRA-006` |
 | **SV** | 共享词汇 | `scripts/audits/shared-name-audit.mjs` | SV-001、SV-003–004 | `SV-005` |
-| **SX** | SLO 出口表 vs session/stats 读数列（用户可见出口） | `scripts/audits/slo-exit-audit.mjs` | SX-001–003 | `SX-004` |
+| **SX** | SLO 出口表 vs session/stats 读数列（用户可见出口） | `scripts/audits/slo-exit-audit.mjs` | SX-001–004 | `SX-005` |
 | **TD** | 工具自声明行为位（声明面基线对账） | `scripts/audits/tool-decls-audit.mjs` | TD-001–002 | `TD-003` |
 | **TR** | turn 词根冻结（废弃概念的存量棘轮） | `scripts/audits/turn-root-audit.mjs` | TR-001–004 | `TR-005` |
 | **UX** | 前端可用性（原生弹窗 / 可访问名称 / 图片替代文本） | `scripts/audits/frontend-ux-audit.mjs` | UX-001–004 | `UX-005` |
@@ -319,6 +319,7 @@ lists: [gate-codes=owner]
 | **SX-001** | `scripts/audits/slo-exit-audit.mjs` |
 | **SX-002** | `scripts/audits/slo-exit-audit.mjs` |
 | **SX-003** | `scripts/audits/slo-exit-audit.mjs` |
+| **SX-004** | `scripts/audits/slo-exit-audit.mjs` |
 | **TD-001** | `scripts/audits/tool-decls-audit.mjs` |
 | **TD-002** | `scripts/audits/tool-decls-audit.mjs` |
 | **TR-001** | `scripts/audits/turn-root-audit.mjs` |

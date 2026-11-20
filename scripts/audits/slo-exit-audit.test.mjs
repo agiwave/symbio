@@ -11,7 +11,7 @@
  *
  *   ① **抓得住**：表里指认一个不存在的列 ⇒ 红；
  *   ② **读不出即失败**：出口表没有那一列 / `stats.rs` 提不出字段 ⇒ exit 2；
- *   ③ **`—` 不是违规**：整表都是 `—` 时不得假红（否则守卫会被驯化成「别填了」）；
+ *   ③ **`—` 不是违规，但必须受棘轮约束**：整表都是 `—` 在基线内不得假红，涨过基线则红；
  *   ④ **点号子列**：`tiers.p99` 这类指认可解析，且随 `TierRow` 的字段集合长。
  *
  * 跑法：node --test scripts/audits/slo-exit-audit.test.mjs
@@ -148,6 +148,28 @@ auditCase('整表都是 `—` ⇒ 通过（不得假红，否则没人再填这�
 test('`-` / 全角破折号也算「没有出口」', () => {
   const r = audit({ docBody: table(['-', '－', '']) })
   assert.equal(r.status, 0, r.stdout)
+})
+
+test('无读数出口涨过棘轮基线 ⇒ SX-004 红（新增债不能静默）', () => {
+  // 10 行全 `—` > MISSING_BASELINE(9)：必须红，且名下是 SX-004 而不是指认漂移
+  const rows = Array.from({ length: 10 }, (_, i) => `| S${i} | 某指标 | 达标 | 埋点 | — |`)
+  const docBody = [
+    '## 1.3 逐阶出口 SLO',
+    '',
+    '| 阶 | 出口指标 | 初值目标 | 测量方式 | 用户可见出口 |',
+    '|---|---|---|---|---|',
+    ...rows,
+  ].join('\n')
+  const r = audit({ docBody })
+  assert.equal(r.status, 1, '无读数出口涨过基线必须红：' + r.stdout)
+  assert.match(r.stdout, /SX-004/)
+  assert.match(r.stdout, /10 行没有用户可见读数/)
+})
+
+test('棘轮基线内 ⇒ 通过且提示余量（不得假红）', () => {
+  const r = audit({ docBody: table(['`invariants`', '—', '—']) })
+  assert.equal(r.status, 0, r.stdout)
+  assert.match(r.stdout, /SX-004 余量/)
 })
 
 // ── ④ 点号子列 ────────────────────────────────────────────────────────
