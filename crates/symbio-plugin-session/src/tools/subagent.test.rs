@@ -364,11 +364,11 @@ fn relabel_leaves_nested_and_non_assistant_nodes_alone() {
 /// 不进父视图 —— 若因「已有 parent_id」早退，父 id 在父会话里不存在，前端建树
 /// 判为孤儿、全部升到会话根（本轮修复的核心场景）。这类必须改锚到工具卡。
 #[test]
-fn relabel_reanchors_children_of_withheld_turn_root() {
+fn relabel_reanchors_children_of_withheld_round_root() {
     let mut child = legacy_frame("m-5", NodeRole::Assistant);
-    child.parent_id = Some("turn-root-user".into());
+    child.parent_id = Some("round-root-user".into());
     child.content = Some(MessageContent::Text("看完了项目架构".into()));
-    let withheld = HashSet::from(["turn-root-user".to_string()]);
+    let withheld = HashSet::from(["round-root-user".to_string()]);
     relabel_for_parent(&mut child, "card-9", &withheld);
     assert_eq!(
         child.parent_id.as_deref(),

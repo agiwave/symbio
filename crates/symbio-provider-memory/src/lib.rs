@@ -9,9 +9,9 @@
 //!
 //! | 层 | 读写面（VDFS 地址） | 注入者 | 物理落位 |
 //! |---|---|---|---|
-//! | 工作区 | memory（`<根>/memory/WORKSPACE.md`） | memory | `{workdir}/AGENTS.md` |
-//! | 会话 | session（`<根>/session/<id>/MEMORY.md`） | session | `{会话目录}/MEMORY.md` |
-//! | 系统智能体 | memory（`<根>/memory/AGENTS.md`） | memory | `{homedir}/AGENTS.md` |
+//! | 工作区 | memory（`<根>/memory/WORKSPACE.md`） | memory | `{work_dir}/AGENTS.md` |
+//! | 会话 | memory（`<根>/memory/SESSION.md`） | memory | `{session_dir}/MEMORY.md` |
+//! | 系统智能体 | memory（`<根>/memory/AGENTS.md`） | memory | `{agent_dir}/AGENTS.md` |
 //! | 子智能体 | memory（`<根>/agent/<id>/memory/AGENTS.md`） | memory | `<agentdir>/AGENTS.md` |
 //!
 //! 挂载名与物理名**可以不同**：工作区腿的挂载名是 `WORKSPACE.md` 而物理文件仍是
@@ -27,10 +27,9 @@
 //! 判据是**「谁拥有它」**，不是「它够不够底层」（见
 //! D-023、D-035）：
 //!
-//! - 它**不隶属任何单个插件**：memory / session 两个插件各自构造一个 `MemoryFile`
-//!   指向自己的作用域（memory 插件一个实例就构造两个——智能体与工作区各一）。
-//!   若它住其中任何一个插件（思路 1），另一些就得跨插件引用，违反
-//!   「插件之间不直接相互引用」。⇒ 归 `providers/`（思路 2）。
+//! - 它**不隶属任何单个插件**：三层记忆的 owner 是同一个 `memory` 插件，但它仍有
+//!   三个作用域、三个落位规则（智能体 / 工作区 / 会话）；共享实现若住插件里，
+//!   就要从其它作用域反被引，违背插件墙。⇒ 归 `providers/`（思路 2）。
 //! - 它是**实现**而不是契约：没有任何一处需要 `dyn MemoryProvider`——插件在
 //!   **编译期**就知道自己要用哪种记忆。故走**方式 B**（具体类型直接组合，见
 //!   `crate::providers` 的两种接线方式），**不进** `creator_create_object`。
@@ -39,8 +38,8 @@
 //! **core 里什么都不留**——本模块的**整个**概念面都搬来了 `providers/`：实现、两道闸门、
 //! 片段排版、节点形状，以及**文件名**。文件名尤其不该由 core 统一：各层各写各的文件、
 //! 互不干涉，共享一个字面量只是把「改一层」变成「改几层」。
-//! 各层自己的名字定义在各自插件里（`memory::memory::MEMORY_FILE` /
-//! `memory::workspace::WORK_MEMORY_FILE` / `session::memory::SESSION_MEMORY_FILE`）。
+//! 各层自己的名字定义在 memory 插件里（`memory::memory::MEMORY_FILE` /
+//! `memory::workspace::WORK_MEMORY_FILE` / `memory::session::SESSION_MEMORY_FILE`）。
 //!
 //! ## 边界：本模块收「**有地址、要限容**」的东西
 //!
@@ -62,10 +61,10 @@
 //! - **模糊**：同一个文件被一处叫「指令」（只读）、另一处叫「记忆」（可写），
 //!   用户看不出该往哪写。
 //!
-//! 因此 `{workdir}/AGENTS.md` 与两份智能体 `AGENTS.md`（系统态 / 子智能体态）
-//! **都归 memory**——它同时给出读写面（`<根>/memory/…`）与注入面，工作区与智能体
-//! 两个作用域同属这一个所有者，因此印在片段里的地址与闸门都是**它自己会执行**的；
-//! session 不再读工作区那份，哪怕它叫「指令」。
+//! 因此 `{work_dir}/AGENTS.md`、`{agent_dir}/AGENTS.md` 与 `{session_dir}/MEMORY.md`
+//! **都归 memory**（D-513）——它同时给出读写面（`<根>/memory/…`）与注入面，三个
+//! 作用域同属一个所有者，印在片段里的地址与闸门都是**它自己会执行**的；session
+//! 只递出 `SESSION_DIR` 和事实源，不再读任何记忆文件。
 //!
 //! ## 个性不进来
 //!

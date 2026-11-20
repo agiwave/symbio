@@ -1,11 +1,12 @@
 //! memory 插件的配置（`<本插件目录>/PLUGIN.yml`）。
 //!
-//! 本插件同时管**两个作用域**的记忆，配置也按作用域分组：
+//! 本插件同时管**三个作用域**的记忆，配置也按作用域分组：
 //!
 //! | 作用域 | 字段 | 闸门 | 超限行为 |
 //! |---|---|---|---|
 //! | 智能体自身（分形：随实例走） | `memory_max_bytes` / `memory_inject_max_bytes` | `MemoryFile::write` / `MemoryFile::inject` | **拒绝** / **截断** + 告知地址 |
 //! | 工作区（会话作用域 `ctx[WORKDIR]`） | `workspace_enabled` / `workspace_max_bytes` / `workspace_inject_max_bytes` | 同上（同一份共享实现） | 同上 |
+//! | 会话（`ctx[SESSION_DIR]`） | `session_max_bytes` / `session_inject_max_bytes` | 同上（同一份共享实现） | 同上 |
 //!
 //! 注入为什么比写入小得多：注入的正文**每一轮**都在烧上下文（4 KiB），
 //! 写入是一次性的（16 KiB，超出部分模型按地址 `vdfs_read` 取全文）。
@@ -59,6 +60,15 @@ pub struct MemoryConfig {
     /// 与上一条是两道独立的闸门：记忆文件可以比注入预算大。
     #[serde(default = "default_inject_max_bytes")]
     pub workspace_inject_max_bytes: usize,
+
+    // —— 会话记忆（会话作用域：ctx[SESSION_DIR]，物理文件 `{session_dir}/MEMORY.md`） ——
+    /// 会话记忆文件**单次写入**的字节上限（硬限制，超出拒绝写入）。
+    #[serde(default = "default_max_bytes")]
+    pub session_max_bytes: usize,
+
+    /// 每轮请求**注入**的会话记忆正文字节上限（超出部分截断，靠地址读取全文）。
+    #[serde(default = "default_inject_max_bytes")]
+    pub session_inject_max_bytes: usize,
 }
 
 fn default_true() -> bool {
@@ -84,6 +94,8 @@ impl Default for MemoryConfig {
             workspace_enabled: true,
             workspace_max_bytes: default_max_bytes(),
             workspace_inject_max_bytes: default_inject_max_bytes(),
+            session_max_bytes: default_max_bytes(),
+            session_inject_max_bytes: default_inject_max_bytes(),
         }
     }
 }
@@ -107,6 +119,16 @@ impl MemoryConfig {
     /// 生效的工作区记忆注入上限（下界 1 字节，理由同上）
     pub fn effective_workspace_inject_bytes(&self) -> usize {
         self.workspace_inject_max_bytes.max(1)
+    }
+
+    /// 生效的会话记忆写入上限（下界 1 字节，理由同上）
+    pub fn effective_session_max_bytes(&self) -> usize {
+        self.session_max_bytes.max(1)
+    }
+
+    /// 生效的会话记忆注入上限（下界 1 字节，理由同上）
+    pub fn effective_session_inject_bytes(&self) -> usize {
+        self.session_inject_max_bytes.max(1)
     }
 }
 

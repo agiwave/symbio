@@ -47,8 +47,8 @@ const TURN2 = '第二句：我喜欢什么';
 const AGENT_MEM_ADDR = '.vdfsv2/vdfs/agent/e2e-t57-agent/memory/AGENTS.md';
 /** 根级【工作区记忆】段地址标记 */
 const ROOT_WS_ADDR = '.vdfsv2/vdfs/memory/WORKSPACE.md';
-/** 根级【会话记忆】段地址标记 */
-const ROOT_SESS_ADDR = '.vdfsv2/vdfs/session/e2e-t57/MEMORY.md';
+/** 根级【会话记忆】段地址标记（D-513：会话记忆归 memory 插件） */
+const ROOT_SESS_ADDR = '.vdfsv2/vdfs/memory/SESSION.md';
 
 export default defineCase(
   'T57 system 装配契约：三重注册段全部送达 + 前缀置后 + 合成唯一一条（LC-002）',
@@ -85,10 +85,12 @@ export default defineCase(
       assertEq(reqs.length, 2, '两轮各一次请求（对话面已关）');
 
       // ── ① 注册段全部送达（第一轮：尚无召回 ⇒ 前缀缺席是正确形态）────────
+      // D-513 后会话记忆归 memory 插件：与工作区腿同批注册（memory 的 traverse 位），
+      // 因此排在人格段**之前**（与 T46 的 prompt 形状基线同一口径）。
       assertSystemAssembly(
         reqs[0],
         {
-          segments: [AGENT_MEM_ADDR, AGENTS_BODY, ROOT_WS_ADDR, PERSONA, ROOT_SESS_ADDR],
+          segments: [AGENT_MEM_ADDR, AGENTS_BODY, ROOT_WS_ADDR, ROOT_SESS_ADDR, PERSONA],
         },
         'T57① 注册段',
       );
@@ -102,7 +104,7 @@ export default defineCase(
       assertSystemAssembly(
         reqs[1],
         {
-          segments: [AGENT_MEM_ADDR, AGENTS_BODY, ROOT_WS_ADDR, PERSONA, ROOT_SESS_ADDR],
+          segments: [AGENT_MEM_ADDR, AGENTS_BODY, ROOT_WS_ADDR, ROOT_SESS_ADDR, PERSONA],
           prefixMarkers: ['【长期记忆】'],
         },
         'T57② 前缀置后',

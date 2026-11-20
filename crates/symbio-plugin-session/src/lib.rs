@@ -11,7 +11,6 @@ pub(crate) mod config;
 mod convergence;
 mod declarations;
 mod grants;
-mod memory;
 pub(crate) mod message_events;
 mod opening;
 mod options;

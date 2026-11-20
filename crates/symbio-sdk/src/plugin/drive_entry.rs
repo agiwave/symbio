@@ -44,6 +44,9 @@ pub struct DriveTarget {
     pub session_id: String,
     /// 会话 metadata 的工作目录：`append` 不携带运行选项，由写口在打开时取来。
     pub workdir: Option<String>,
+    /// 会话级插件数据目录（D-513）：由会话插件按自己的唯一布局解析，随驱动目标交回，
+    /// 再由宿主挂进本轮 ctx 的 `SESSION_DIR`。它不是事实源目录，能力面不得据此开档。
+    pub session_dir: Option<String>,
     /// 会话主体来源：metadata 的 `agent_id`（空串 = 无绑定主体 ⇒ `session/main`）。
     ///
     /// 由写口在打开会话事实源时取来，`drive_on_new_fact` 据此设 `AGENT_ID`——

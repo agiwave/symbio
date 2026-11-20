@@ -595,160 +595,16 @@ async fn config_write_validates_before_applying() {
     assert_eq!(p.config.read().await.max_messages, before);
 }
 
-// ==================== 会话记忆（`<根>/session/<id>/MEMORY.md`）====================
+// ==================== 会话记忆地址已迁出 ====================
 
-/// 会话记忆是会话内部的一个**可读写文件**：与三个目录并列、`stat` 与 `list` 同源、
-/// 写后读得回、**不可删除**（与 work / agent 的记忆层同一共享实现约定）。
+/// 旧地址 `<根>/session/<id>/MEMORY.md` 不再由 session 插件服务（D-513）：
+/// 会话记忆归 memory 插件，地址是 `<根>/memory/SESSION.md`。
 #[tokio::test]
-async fn memory_is_a_read_write_file_inside_the_session() {
+async fn legacy_session_memory_address_is_retired() {
     let (_dir, p) = fixture();
-    let id = unique_id("memory");
+    let id = unique_id("memory-retired");
     p.save_session(&Session::new(&id)).await.unwrap();
-    let path = format!("{id}/{}", crate::memory::SESSION_MEMORY_FILE);
-
-    // ① 会话内部并列着记忆（它本来就是会话的一部分，不另开一条寻址）
-    let items = p
-        .dispatch(&vctx(), &id, LIST)
-        .await
-        .unwrap()
-        .into_list()
-        .unwrap();
-    let mem = items
-        .iter()
-        .find(|it| it.node.name == crate::memory::SESSION_MEMORY_FILE)
-        .expect("会话内部应列出记忆文件");
-    assert!(!mem.node.is_dir(), "记忆是文件，不是目录");
-    assert_eq!(
-        mem.node.access.flags(),
-        "rw",
-        "模型与用户共用这一份，可读可写"
-    );
-    assert_eq!(mem.node.kind, PLUGIN_ID_SESSION);
-    assert!(mem.node.description.is_some(), "列表里要能看出它是干什么的");
-
-    // ② `stat` 与 `list` 同源（同一份形状，不是另写一份「详情版」）
-    let stat = p
-        .dispatch(&vctx(), &path, STAT)
-        .await
-        .unwrap()
-        .into_stat()
-        .unwrap();
-    assert_eq!(stat.name, mem.node.name);
-    assert_eq!(stat.access.flags(), mem.node.access.flags());
-    assert_eq!(stat.size, mem.node.size);
-    assert_eq!(stat.description, mem.node.description);
-
-    // ③ 还没写过 → 空串（「还没写过」是记忆的正常状态，不是错误）
-    assert_eq!(
-        p.dispatch(&vctx(), &path, READ)
-            .await
-            .unwrap()
-            .into_read()
-            .unwrap()
-            .text
-            .as_deref(),
-        Some("")
-    );
-
-    // ④ 写入 → 读回（写闸门在共享实现，本层不重复实现）
-    let r = p
-        .dispatch(
-            &vctx(),
-            &path,
-            VdfsRequest::Write {
-                content: VdfsContent::text("本会话约定：所有时间用 UTC。"),
-            },
-        )
-        .await
-        .unwrap()
-        .into_write()
-        .unwrap();
-    assert!(r.created, "首次写入应报 created");
-    assert_eq!(
-        p.dispatch(&vctx(), &path, READ)
-            .await
-            .unwrap()
-            .into_read()
-            .unwrap()
-            .text
-            .as_deref(),
-        Some("本会话约定：所有时间用 UTC。")
-    );
-    let again = p
-        .dispatch(
-            &vctx(),
-            &path,
-            VdfsRequest::Write {
-                content: VdfsContent::text("改主意了"),
-            },
-        )
-        .await
-        .unwrap()
-        .into_write()
-        .unwrap();
-    assert!(!again.created, "覆盖写入不是 created");
-
-    // ⑤ 记忆不可删除：要清空就写空内容（一次可读、可审、可撤销的显式动作）
-    assert!(
-        matches!(
-            p.dispatch(&vctx(), &path, DEL).await,
-            Err(VdfsError::Forbidden(_))
-        ),
-        "删除即丢失本会话的长期约定，必须明确拒绝"
-    );
-    assert!(
-        p.dispatch(&vctx(), &path, READ).await.is_ok(),
-        "拒绝删除后内容仍在"
-    );
-
-    // ⑥ 记忆是文件：没有子项；更深层级也不解析
-    assert!(p.dispatch(&vctx(), &path, LIST).await.is_err());
-}
-
-/// 写入闸门取自 `SessionConfig`：配小 → 同一个写入被**拒绝**（而不是截断），
-/// 且被拒绝的写入不得留下半截内容。
-#[tokio::test]
-async fn memory_write_respects_the_configured_gate() {
-    let (_dir, p) = fixture();
-    *p.config.write().await = SessionConfig {
-        memory_max_bytes: 4,
-        ..SessionConfig::default()
-    };
-    let id = unique_id("memory-gate");
-    p.save_session(&Session::new(&id)).await.unwrap();
-    let path = format!("{id}/{}", crate::memory::SESSION_MEMORY_FILE);
-
-    assert!(
-        p.dispatch(
-            &vctx(),
-            &path,
-            VdfsRequest::Write {
-                content: VdfsContent::text("12345")
-            }
-        )
-        .await
-        .is_err(),
-        "超出写入上限必须被拒绝"
-    );
-    assert_eq!(
-        p.dispatch(&vctx(), &path, READ)
-            .await
-            .unwrap()
-            .into_read()
-            .unwrap()
-            .text
-            .as_deref(),
-        Some(""),
-        "被拒绝的写入不得留下半截内容"
-    );
-}
-
-/// 不存在的会话：记忆路径一律 NotFound（不为幽灵会话造一份记忆）
-#[tokio::test]
-async fn memory_of_unknown_session_is_not_found() {
-    let (_dir, p) = fixture();
-    let id = unique_id("memory-ghost");
-    let path = format!("{id}/{}", crate::memory::SESSION_MEMORY_FILE);
+    let path = format!("{id}/MEMORY.md");
 
     assert!(p.dispatch(&vctx(), &path, STAT).await.is_err());
     assert!(p.dispatch(&vctx(), &path, READ).await.is_err());
@@ -762,43 +618,6 @@ async fn memory_of_unknown_session_is_not_found() {
         )
         .await
         .is_err());
-}
-
-/// 记忆写入经订阅表投递变更（与 `list` 的节点地址同一坐标系：`<id>/MEMORY.md`）
-#[tokio::test]
-async fn memory_write_notifies_subscribers() {
-    let (_dir, p) = fixture();
-    let id = unique_id("memory-notify");
-    p.save_session(&Session::new(&id)).await.unwrap();
-    let path = format!("{id}/{}", crate::memory::SESSION_MEMORY_FILE);
-
-    let (tx, mut rx) = tokio::sync::mpsc::unbounded_channel::<VdfsChange>();
-    let sink: VdfsChangeSink = Arc::new(move |c| {
-        let _ = tx.send(c);
-    });
-    p.dispatch(&vctx(), &id, VdfsRequest::Watch { sink })
-        .await
-        .unwrap();
-
-    p.dispatch(
-        &vctx(),
-        &path,
-        VdfsRequest::Write {
-            content: VdfsContent::text("记一笔"),
-        },
-    )
-    .await
-    .unwrap()
-    .into_write()
-    .unwrap();
-
-    let got = rx.recv().await.expect("写入应投递一条变更");
-    assert_eq!(
-        got.path,
-        format!("{id}/{}", crate::memory::SESSION_MEMORY_FILE),
-        "变更路径与 list 返回的节点地址同源"
-    );
-    assert!(got.data.is_none(), "资源信号无载荷（信封没有操作枚举）");
 }
 
 // ==================== 会话 id 形状 ====================

@@ -73,18 +73,6 @@ pub struct SessionConfig {
     ///   UI 可回看全部历史；此时存储层仅剩 `max_messages` 的 FIFO 轮次淘汰。
     #[serde(default = "default_prune_tool_history")]
     pub prune_tool_history: bool,
-    /// 会话记忆（`<会话目录>/MEMORY.md`）的**写入**字节上限。
-    ///
-    /// 与 `providers/memory` 的两道闸门口径一致：超限**拒绝**（不截断、不部分
-    /// 写入）——静默丢内容是最坏的一类失败，拒绝则把判断权交回模型。
-    #[serde(default = "default_memory_max_bytes")]
-    pub memory_max_bytes: usize,
-    /// 会话记忆每轮**注入**系统提示词的字节上限；超出部分截断并告知地址。
-    ///
-    /// 与写入上限是**两道独立闸门**：记忆文件可以比注入预算大，超出部分靠模型按
-    /// 地址 `vdfs_read` 读取。两者取值不同才有意义。
-    #[serde(default = "default_memory_inject_max_bytes")]
-    pub memory_inject_max_bytes: usize,
     /// 补充整合总开关（J2 平凡值：`false` ⇒ 完全退回"一条消息 = 一轮"）。
     ///
     /// ## 它控制什么
@@ -218,12 +206,6 @@ pub fn default_context_messages() -> usize {
 pub fn default_prune_tool_history() -> bool {
     true
 }
-pub fn default_memory_max_bytes() -> usize {
-    16 * 1024
-}
-pub fn default_memory_inject_max_bytes() -> usize {
-    4 * 1024
-}
 pub fn default_supplements_enabled() -> bool {
     true
 }
@@ -267,16 +249,6 @@ pub fn default_progress_max_attempts() -> u32 {
 }
 
 impl SessionConfig {
-    /// 生效的会话记忆**写入**上限（下界 1 字节，避免配成 0 后一切写入都失败却看不出原因）
-    pub fn effective_memory_max_bytes(&self) -> usize {
-        self.memory_max_bytes.max(1)
-    }
-
-    /// 生效的会话记忆**注入**预算（下界 1 字节，理由同上）
-    pub fn effective_memory_inject_bytes(&self) -> usize {
-        self.memory_inject_max_bytes.max(1)
-    }
-
     /// 生效的建树策略：认不出的写法按出厂默认 [`PresentationTree::Grouped`] 处理。
     ///
     /// 读侧容错与 `verbosity` 同纪律：手写 `PLUGIN.yml` 写错、或写了尚未生效的档，
@@ -296,8 +268,6 @@ impl Default for SessionConfig {
             max_messages: default_max_messages(),
             context_messages: default_context_messages(),
             prune_tool_history: default_prune_tool_history(),
-            memory_max_bytes: default_memory_max_bytes(),
-            memory_inject_max_bytes: default_memory_inject_max_bytes(),
             supplements_enabled: default_supplements_enabled(),
             supplements_max_per_drain: default_supplements_max_per_drain(),
             opening_enabled: default_opening_enabled(),

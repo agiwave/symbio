@@ -245,6 +245,7 @@ impl SessionStore {
             super::fact_source::SessionFactSource::open(
                 wal,
                 session_id.to_string(),
+                Some(dir),
                 workdir,
                 agent_id,
                 params,

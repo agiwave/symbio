@@ -31,7 +31,6 @@ use super::types::{Session, SessionSummary};
 use async_trait::async_trait;
 use serde_json::{json, Value};
 use std::collections::HashMap;
-use std::path::PathBuf;
 use std::sync::{Arc, OnceLock, Weak};
 use symbio_kernel::capability::CapabilityRow;
 use symbio_kernel::plugin::{
@@ -42,10 +41,8 @@ use symbio_kernel::present::{DetailDefinition, DetailField, DetailOption, Detail
 use symbio_kernel::vdfs::{VdfsAccess, VdfsChange};
 use symbio_kernel::vdfs::{VDFS_PARAM_BEFORE, VDFS_PARAM_LIMIT};
 use symbio_plugin_api::PLUGIN_ID_SESSION;
-use symbio_plugin_api::SESSION_ID;
 use symbio_plugin_api::{plugin_dir_from_ctx, PluginConfigFile, PluginDir, PLUGIN_FILE};
 use symbio_plugin_api::{vdfs_context, VdfsItem, VdfsRequest, PLUGIN_ID_AGENT};
-use symbio_providers::MemoryFile;
 use symbio_sdk::chat::session_chat;
 use symbio_sdk::plugin::fact_source::{FactSource, FACT_SOURCE};
 use symbio_sdk::vdfs::host::VdfsChangeSubscriptions;
@@ -240,21 +237,10 @@ impl SessionPlugin {
         }
     }
 
-    /// Session 存储目录：**本插件自己的目录**
-    ///
-    /// 根不在本插件里推导——来自构造时父插件经 `PLUGIN_DIR` 告知的 `PluginDir`。
-    /// 插件不知道、也不该知道自己被放在哪。
-    ///
-    /// 按 id 派生路径的自由函数（`paths::session_dir` / `memory_path` /
-    /// `resolve_archive_dir` / `save_transcript_archive`）一概由**调用方把根传进去**，
-    /// 不在内部反查全局布局。
-    ///
-    /// 这是 session 存储目录的**唯一权威位置**，不依赖任何 config 字段。
-    /// 切换 homedir 后 worker composite 会整体重建（`home/reload`），
-    /// 新插件实例的下一次 `get_store` 因此用新 homedir 下的目录。
-    pub fn storage_dir(&self) -> PathBuf {
-        self.config_file.dir().dir().to_path_buf()
-    }
+    // Session 存储目录是**本插件自己的目录**，在 `new` 里由父插件经 `PLUGIN_DIR`
+    // 告知的 `PluginDir` 一次定下并交给 `Convergence` / `remember_storage_dir`。
+    // 这里不再保留 `storage_dir()` 门面：D-513 后生产侧没有第二个调用点，
+    // 留着只会让人以为可以再从插件上反查一遍全局布局。
 
     /// 获取（或初始化）存储后端。全局单例，首次调用时创建。
     ///
@@ -371,39 +357,6 @@ impl SessionPlugin {
         self.convergence.open_chat_session(session_id).await
     }
 
-    // ==================== 会话记忆（`<根>/session/<id>/MEMORY.md`）====================
-    //
-    // 机制在 `providers/memory`（三层记忆同一份实现），本插件只有「个性」：
-    // 落位在会话目录、地址挂在会话节点下、两道闸门取自 [`SessionConfig`]。
-    // 归属原则是「谁能读写它，谁负责注入它」——工作区记忆归 work，本层只认会话。
-
-    /// 由会话 id + 生效配置构造记忆门面。
-    ///
-    /// **作用域闸门**（id 缺失 / 空 → 无作用域）与**两道容量闸门**都在这一处注入，
-    /// 因此调用点不必各自判断。
-    fn store_with(
-        root: &std::path::Path,
-        session_id: Option<&str>,
-        cfg: &SessionConfig,
-    ) -> MemoryFile {
-        super::memory::store(
-            root,
-            session_id,
-            cfg.effective_memory_max_bytes(),
-            cfg.effective_memory_inject_bytes(),
-        )
-    }
-
-    /// 依会话 id 构造记忆门面。
-    ///
-    /// 会话 id 有两个来源——收集期来自 `ctx[SESSION_ID]`，VDFS 侧来自**路径**——
-    /// 两者都归到这一个构造点，作用域闸门与两道容量闸门因此只写一遍。
-    pub(crate) async fn memory_store(&self, session_id: &str) -> MemoryFile {
-        let cfg = self.config.read().await;
-        let root = self.storage_dir();
-        Self::store_with(&root, Some(session_id), &cfg)
-    }
-
     /// 本插件当前的**建树策略**（`SessionConfig::presentation_tree`）。
     ///
     /// 呈现读侧的投影取值点（`session_content` 的两个 Read 分支经它）。与写侧
@@ -412,35 +365,6 @@ impl SessionPlugin {
     /// 呈现序列化，取一次值即放。
     pub(crate) async fn presentation_mode(&self) -> PresentationTree {
         self.config.read().await.presentation_tree()
-    }
-
-    /// 参与能力收集：交出**会话记忆**（系统提示词片段）。
-    ///
-    /// 无会话 id 时静默跳过——没有会话就没有「本会话的记忆」，这不是故障，
-    /// 不该往收集期错误桶里塞东西。
-    async fn contribute_memory(
-        &self,
-        ctx: &Arc<dyn PluginInvokeRequest>,
-        visitor: &Arc<dyn symbio_kernel::capability::Registry>,
-    ) {
-        let sid = ctx.get(SESSION_ID).unwrap_or_default();
-        let store = self.memory_store(&sid).await;
-        if !store.has_scope() {
-            return;
-        }
-        // 绝对地址 = 上下文父地址 + 相对地址（容器转发时已写入父地址）
-        let address = symbio_plugin_api::absolute_addr(ctx, &super::memory::memory_rel_path(&sid));
-        match store.segment(&super::memory::segment_spec(&address)) {
-            Ok(Some(segment)) => {
-                visitor
-                    .put(CapabilityRow::prompt(super::memory::SEGMENT_NAME, segment))
-                    .await;
-            }
-            Ok(None) => {}
-            Err(e) => {
-                symbio_plugin_api::plugin_warn!("session", "读取会话记忆失败，本轮不注入：{e}")
-            }
-        }
     }
 }
 
@@ -548,15 +472,9 @@ impl Plugin for SessionPlugin {
             );
             symbio_providers::register_tool(&ctx, agent_run.meta(), None, agent_run).await;
 
-            // 智能体自身的 `AGENTS.md`（`{homedir}` / `<agentdir>`）与本会话无关：
-            // 那是「智能体自身」与「工作区」两个作用域，归 memory 插件（谁能读写它，谁负责
-            // 注入它）。本会话的 `MEMORY.md` 归本插件——各作用域各有一个所有者，
-            // 层数与地址见 `providers/memory` 的模块文档。
-
-            // 会话记忆（`<根>/session/<id>/MEMORY.md`）：**本会话私有**，可读写、有地址、
-            // 有两道容量闸门——因此它归共享实现那套机制，本插件只负责「落位 + 标题 + 地址」。
-            // 作用域闸门在 `contribute_memory` 内一处收口（无 `ctx[SESSION_ID]` 即不注入）。
-            self.contribute_memory(&ctx, &visitor).await;
+            // 三层文件记忆（智能体 / 工作区 / 会话）归 memory 插件（D-513）：
+            // 谁能读写它，谁负责注入它。本插件只解析并递出 `SESSION_DIR`，
+            // 不认识记忆文件，也不再注册 `session-memory` 段。
             // 首响的运行时债表（`session.opening`）：装载期只挂「这一族归谁申报」，
             // 每轮 `rows()` 现算是否欠首响（开关读当轮 `session.config`）。
             visitor
@@ -673,24 +591,6 @@ fn config_definition() -> DetailDefinition {
                         "开启时在落库阶段物理删除上下文窗口之外的 Tool / ToolCall / Reasoning 节点\
                          （存储不再保留完整原文）；关闭后存储严格保留全文",
                         d.prune_tool_history,
-                    ),
-                ],
-            },
-            DetailSection {
-                title: Some("记忆".into()),
-                collapsed: true,
-                fields: vec![
-                    unbounded_number(
-                        "memory_max_bytes",
-                        "记忆写入上限（字节）",
-                        "会话记忆文件（每个会话自己的 `MEMORY.md`）单次写入的字节上限，超出会被拒绝",
-                        json!(d.memory_max_bytes),
-                    ),
-                    unbounded_number(
-                        "memory_inject_max_bytes",
-                        "记忆注入上限（字节）",
-                        "每轮注入系统提示词的会话记忆正文字节上限，超出部分截断并告知地址",
-                        json!(d.memory_inject_max_bytes),
                     ),
                 ],
             },

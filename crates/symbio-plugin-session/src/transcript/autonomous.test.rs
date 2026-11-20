@@ -33,7 +33,7 @@ fn autonomy_plugin() -> (tempfile::TempDir, Arc<SessionPlugin>) {
 }
 
 fn wal(p: &SessionPlugin, sid: &str) -> std::path::PathBuf {
-    crate::paths::session_dir(&p.storage_dir(), sid).join(crate::paths::V2_WAL_FILE)
+    crate::paths::session_dir(p.config_file.dir().dir(), sid).join(crate::paths::V2_WAL_FILE)
 }
 
 /// 事实源里先放一格：溯源锚指"上一格"，一格都没有就没有可触发的东西。

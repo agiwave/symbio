@@ -15,10 +15,10 @@
   递归引用自己在渲染函数内（ESM 环在模块求值期不触碰），与 MessageChildren 同手法。
 -->
 <template>
-  <div class="tree-node">
+  <div>
     <div
       class="tree-row"
-      :class="{ active: selectedId === node.item.path, dir: isDir }"
+      :class="{ active: selectedId === node.item.path }"
       role="button"
       tabindex="0"
       :aria-expanded="isDir ? expanded : undefined"

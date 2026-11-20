@@ -39,6 +39,9 @@ pub(crate) struct SessionFactSource {
     wal: Arc<WalStore>,
     /// 会话身份：驱动收口据此踢对应会话（事实源本身就是会话边界）。
     session_id: String,
+    /// 会话级插件数据目录（D-513）：打开时由 `SessionStore` 按唯一布局解析，随驱动目标
+    /// 交给宿主，再由宿主挂进本轮 ctx 的 `SESSION_DIR`。它不是事实源目录。
+    session_dir: Option<PathBuf>,
     /// 会话 metadata 的工作目录：`append` 不携带运行选项，驱动收口把它带进工具上下文。
     workdir: Option<String>,
     /// 会话主体来源（metadata 的 `agent_id`）：随驱动目标交回，`append` 不再反查。
@@ -81,6 +84,7 @@ impl SessionFactSource {
     pub(crate) fn open(
         wal: Arc<WalStore>,
         session_id: String,
+        session_dir: Option<PathBuf>,
         workdir: Option<String>,
         agent_id: Option<String>,
         params: SessionParams,
@@ -95,6 +99,7 @@ impl SessionFactSource {
             me: me.clone(),
             wal,
             session_id,
+            session_dir,
             workdir,
             agent_id,
             params,
@@ -238,6 +243,10 @@ impl FactSource for SessionFactSource {
                 let target = DriveTarget {
                     session_id: self.session_id.clone(),
                     workdir: self.workdir.clone(),
+                    session_dir: self
+                        .session_dir
+                        .as_ref()
+                        .map(|dir| dir.to_string_lossy().into_owned()),
                     // 主体是打开时取的；带驱动的事实源必须有它（打开处已校验）。
                     agent_id: Some(self.agent_id.clone().ok_or_else(|| {
                         "会话主体不可用：带驱动的事实源缺少 agent_id".to_string()
@@ -299,13 +308,13 @@ impl FactSourceOpener for SessionFactOpener {
         let wal = store
             .facts(session_id)?
             .ok_or_else(|| format!("会话 {session_id} 没有事实源"))?;
-        let workdir = store
-            .session_dir(session_id)
-            .and_then(|dir| super::layout::read_workdir(&dir));
+        let session_dir = store.session_dir(session_id);
+        let workdir = session_dir.as_deref().and_then(super::layout::read_workdir);
         // 只读开面不带驱动：运行参数没有消费方，取默认值即可（作用域槽为独立空置）。
         Ok(SessionFactSource::open(
             wal,
             session_id.to_string(),
+            session_dir,
             workdir,
             None,
             SessionParams::default(),

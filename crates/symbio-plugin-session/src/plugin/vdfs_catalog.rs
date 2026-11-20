@@ -10,8 +10,8 @@
 
 use super::*;
 use symbio_kernel::vdfs::{
-    VdfsAccess, VdfsActionResult, VdfsChange, VdfsContent, VdfsContext, VdfsError, VdfsNewType,
-    VdfsNode, VdfsRequest, VdfsResponse, VdfsResult, VdfsWriteResponse, VDFS_ACTION_ABORT,
+    VdfsAccess, VdfsActionResult, VdfsContent, VdfsContext, VdfsError, VdfsNewType, VdfsNode,
+    VdfsRequest, VdfsResponse, VdfsResult, VdfsWriteResponse, VDFS_ACTION_ABORT,
 };
 use symbio_plugin_api::vdfs_from_plugin_error;
 
@@ -92,11 +92,10 @@ impl SessionPlugin {
     ) -> VdfsResult<VdfsResponse> {
         match req {
             VdfsRequest::List { .. } => {
-                // 会话内部：三个虚拟子目录 + 记忆文件（会话存在性校验由 `session_of` 承担）
+                // 会话内部：三个虚拟子目录（会话存在性校验由 `session_of` 承担）
                 let session = self.session_of(id).await?;
                 Ok(VdfsResponse::list(internal_dirs(
                     super::super::workdir::workdir_of(&session).is_some(),
-                    self.memory_node_of(id).await,
                 )))
             }
             VdfsRequest::Stat => {
@@ -162,71 +161,6 @@ impl SessionPlugin {
                     },
                     data: None,
                 }))
-            }
-            _ => Err(VdfsError::NotImplemented),
-        }
-    }
-
-    /// 会话记忆（`<id>/MEMORY.md`）：单个文件，形状由共享实现产出。
-    pub(super) async fn memory_at(
-        &self,
-        path: &str,
-        id: &str,
-        req: VdfsRequest,
-    ) -> VdfsResult<VdfsResponse> {
-        match req {
-            // 记忆是**单个文件**：没有子项
-            VdfsRequest::List { .. } => Err(VdfsError::not_found(format!(
-                "记忆是文件，没有子项：{path}"
-            ))),
-            VdfsRequest::Stat => {
-                // 存在性校验：会话不在，就没有「它的记忆」可谈
-                self.session_of(id).await?;
-                Ok(VdfsResponse::Stat(self.memory_node_of(id).await))
-            }
-            VdfsRequest::Read => {
-                // 会话记忆（`<根>/session/<id>/MEMORY.md`）：正文即文件全文。
-                // 文件不存在 → 空串（不是错误）——「还没写过」是记忆的正常状态。
-                self.session_of(id).await?;
-                let text = self
-                    .memory_store(id)
-                    .await
-                    .read()
-                    .map_err(VdfsError::internal)?;
-                Ok(VdfsResponse::Read(VdfsContent::text(text)))
-            }
-            VdfsRequest::Write { content } => {
-                // 会话记忆：**纯文本**写入（容量闸门在共享实现 `MemoryFile::write`，本插件不重复实现）
-                if content.binary {
-                    return Err(VdfsError::invalid("会话记忆是文本文件，不接受二进制内容"));
-                }
-                // 存在性校验：会话不在，就没有「它的记忆」可写
-                self.session_of(id).await?;
-                let store = self.memory_store(id).await;
-                let existed = store.exists();
-                let text = content.text.as_deref().unwrap_or_default();
-                store.write(text).map_err(VdfsError::invalid)?;
-                // 变更路径与 `list` 返回的节点地址同源（provider 子树口径，
-                // 挂载名由容器的 watch 包装补上——见 `watch_at_path` 的说明）
-                self.change_subs
-                    .notify(&VdfsChange::bare(super::super::memory::memory_rel_path(id)));
-                Ok(VdfsResponse::Write(VdfsWriteResponse {
-                    name: None,
-                    created: !existed,
-                }))
-            }
-            VdfsRequest::Delete { .. } => {
-                // 记忆**不可删除**（与 work / agent 的记忆层同一共享实现约定）：
-                // 删除即丢失本会话的长期约定，且没有东西能把它找回来。要清空就写入空内容
-                // ——那是一次可读、可审、可撤销的显式动作。
-                Err(VdfsError::Forbidden(format!(
-                    "会话记忆不可删除（删除即丢失本会话的长期约定）。\
-                     如需清空，请向 `{}` 写入空内容。",
-                    crate::memory::SESSION_MEMORY_FILE
-                )))
-            }
-            req @ (VdfsRequest::Watch { .. } | VdfsRequest::Unwatch) => {
-                self.dispatch_watch(path, req).await
             }
             _ => Err(VdfsError::NotImplemented),
         }

@@ -190,7 +190,7 @@ fn session_node_publishes_the_context_watermark_reading() {
     assert_eq!(empty.attributes.get("context_watermark"), None);
 }
 
-/// 会话内部寻址：`<id>` / `<id>/MEMORY.md` / `<id>/message[/<mid>]` /
+/// 会话内部寻址：`<id>` / `<id>/message[/<mid>]` /
 /// `<id>/subsession[/<sub>]` / `<id>/workdir[/<rel>]`。
 /// 未知区段与越界层级一律 NotFound——不给半通不通的路径留口子。
 #[test]
@@ -199,15 +199,9 @@ fn vdfs_internal_path_parsing() {
     assert!(matches!(parse_session_path("").unwrap(), Root));
     assert!(matches!(parse_session_path("/").unwrap(), Root));
     assert!(matches!(parse_session_path("abc").unwrap(), Session("abc")));
-    // 会话记忆：单个文件，地址用真实文件名
-    assert!(matches!(
-        parse_session_path("abc/MEMORY.md").unwrap(),
-        Memory("abc")
-    ));
-    assert!(
-        parse_session_path("abc/MEMORY.md/deeper").is_err(),
-        "记忆是文件，没有更深层级"
-    );
+    // 会话记忆已随 D-513 归 memory 插件（<根>/memory/SESSION.md），
+    // session 地址面不再解析这个集合段
+    assert!(parse_session_path("abc/MEMORY.md").is_err());
     // 转写列表：目录本身与列表项两级
     assert!(matches!(
         parse_session_path("abc/message").unwrap(),
@@ -324,34 +318,18 @@ fn inbox_item_node_reuses_message_shape() {
     assert_eq!(n.updated_at, Some(1_700_000_000_000));
 }
 
-/// 会话内部的虚拟子项：转写列表、收件箱与子会话恒在，记忆是**文件**且恒在，
-/// 工作目录按会话是否声明 workdir 出现。
+/// 会话内部的虚拟子目录：转写列表、收件箱与子会话恒在，
+/// 工作目录按会话是否声明 workdir 出现；记忆已迁到 memory 插件。
 #[test]
 fn vdfs_internal_dirs_conditional() {
-    // 有作用域才有节点名（无作用域 = 没有文件 = 没有名字，共享实现如实返回空名）。
-    // 这里按生产路径的形态构造：给一个真实落位，节点名就是它的文件名。
-    let memory = || {
-        let path = std::path::PathBuf::from("abc").join(crate::memory::SESSION_MEMORY_FILE);
-        symbio_providers::MemoryFile::new(Some(path), 1024, 256).node(
-            &symbio_providers::MemoryNodeSpec {
-                title: "会话记忆",
-                name: None,
-                kind: PLUGIN_ID_SESSION,
-                description: "d",
-            },
-        )
-    };
-
-    let without = internal_dirs(false, memory());
-    assert_eq!(without.len(), 4);
+    let without = internal_dirs(false);
+    assert_eq!(without.len(), 3);
     assert_eq!(without[0].name, SEG_MESSAGES, "转写列表恒在（会话的本体）");
     assert_eq!(
         without[0].name, "message",
         "路径段一律 ASCII（地址要能安全地进 URL / 命令行 / 日志）"
     );
     assert_eq!(without[0].title, TITLE_MESSAGES, "展示名才是中文");
-    // 段名与展示名不是一回事，**标识**由 kind 承担：消费者按 kind 发现转写列表，
-    // 不必把段名写进自己的地址模板（前端镜像守卫 X-002 校验的就是这个词）
     assert_eq!(
         without[0].kind, KIND_MESSAGES,
         "转写列表的 kind 是稳定协议词，不随段名 / 展示名变化"
@@ -368,44 +346,31 @@ fn vdfs_internal_dirs_conditional() {
         without[0].hidden && without[1].hidden,
         "转写 / 收件箱不进导航（hidden 只影响清单）"
     );
-    assert!(
-        !without[2].hidden && !without[3].hidden,
-        "子会话 / 记忆仍是导航里的资源，不得跟着隐藏"
-    );
+    assert!(!without[2].hidden, "子会话仍是导航里的资源，不得跟着隐藏");
     assert_eq!(without[2].name, workdir::SEG_SUB_SESSIONS);
-    // 侧栏与卡片按 kind 取图标（前端 `registry/vdfsIcons` 按它查表）。
-    // 没有 kind 的两个区段此前只能退成文件夹兜底——四个一样的图标，
-    // 等于会话内部没有导航。
     assert_eq!(
         without[2].kind,
         workdir::KIND_SUB_SESSIONS,
         "子会话区段的 kind 是稳定协议词，不随段名变化"
     );
-    assert_eq!(
-        without[3].name,
-        crate::memory::SESSION_MEMORY_FILE,
-        "记忆恒在——它本来就是会话的一部分"
-    );
-    assert!(!without[3].is_dir(), "记忆是文件，不是目录");
-    assert!(without[3].access.write, "记忆可写（模型与用户共用这一份）");
     assert!(
-        without[..3].iter().all(|n| n.is_dir() && !n.access.write),
-        "三个目录区段都是只读目录"
+        without.iter().all(|n| n.is_dir() && !n.access.write),
+        "三个区段都是只读目录"
     );
 
-    let with = internal_dirs(true, memory());
-    assert_eq!(with.len(), 5);
-    assert_eq!(with[4].name, workdir::SEG_WORKDIR);
+    let with = internal_dirs(true);
+    assert_eq!(with.len(), 4);
+    assert_eq!(with[3].name, workdir::SEG_WORKDIR);
     assert_eq!(
-        with[4].kind,
+        with[3].kind,
         workdir::KIND_WORKDIR,
         "工作目录区段的 kind 与目录树节点同词（同一类资源的两种位置）"
     );
     assert!(
-        with[4].is_dir() && !with[4].access.write,
+        with[3].is_dir() && !with[3].access.write,
         "工作目录是只读目录（不提供新建）"
     );
-    assert!(!with[4].hidden, "工作目录要出现在导航里");
+    assert!(!with[3].hidden, "工作目录要出现在导航里");
 }
 
 /// 转写列表项：`ext = message`、只读、正文进内容、结构进 `attributes`

@@ -259,6 +259,43 @@ async fn disabled_workspace_skips_injection_but_keeps_the_mount() {
     assert!(p.get_vfs_provider().is_some(), "关掉注入不等于关掉编辑面");
 }
 
+// ==================== 会话腿（会话作用域） ====================
+
+/// 会话记忆的落位来自 `ctx[SESSION_DIR]`，地址落在 memory 挂载点下（D-513）
+#[tokio::test]
+async fn session_leg_injects_from_the_context_directory() {
+    let tmp = TempDir::new().unwrap();
+    let sess = TempDir::new().unwrap();
+    std::fs::write(
+        sess.path().join(session::SESSION_MEMORY_FILE),
+        "本会话用 UTC。",
+    )
+    .unwrap();
+    let p = plugin_in(tmp.path());
+
+    let ctx: Arc<dyn PluginInvokeRequest> =
+        Arc::new(symbio_plugin_api::PluginSimpleRequest::new(None, None));
+    ctx.set(PATH, TRAVERSE_AVAILABLE_TOOLS.to_string());
+    ctx.set(VDFS_PARENT_ADDR, "@vfs/memory".to_string());
+    ctx.set(SESSION_DIR, sess.path().to_string_lossy().into_owned());
+    let visitor = Arc::new(DefaultToolVisitor::new());
+    ctx.set(
+        CAPABILITY_VISITOR,
+        Arc::clone(&visitor) as Arc<dyn Registry>,
+    );
+    p.traverse(String::new(), ctx).await.unwrap();
+
+    let segs = capability_prompts(&*visitor).await;
+    let sess_seg = &segs
+        .iter()
+        .find(|(n, _)| n == session::SEGMENT_NAME)
+        .expect("会话腿应注入")
+        .1;
+    assert!(sess_seg.contains("本会话用 UTC。"));
+    assert!(sess_seg.contains("@vfs/memory/SESSION.md"));
+    assert!(sess_seg.contains("【会话记忆】"));
+}
+
 // ==================== 无自有路由 ====================
 
 #[tokio::test]

@@ -1,18 +1,17 @@
 //! VDFS 挂载点（`<根>/memory`）—— 本插件**直接实现 `VdfsProvider`**。
 //!
-//! ## 挂载根有两份记忆
+//! ## 挂载根有三份记忆
 //!
 //! ```text
-//! <根>/memory/AGENTS.md      智能体自身的记忆（rw；物理文件 = 宿主目录的 AGENTS.md）
-//! <根>/memory/WORKSPACE.md   工作区记忆（rw；物理文件 = {workdir}/AGENTS.md）
+//! <根>/memory/AGENTS.md      智能体自身的记忆（rw；物理文件 = {agent_dir}/AGENTS.md）
+//! <根>/memory/WORKSPACE.md   工作区记忆（rw；物理文件 = {work_dir}/AGENTS.md）
+//! <根>/memory/SESSION.md     会话记忆（rw；物理文件 = {session_dir}/MEMORY.md）
 //! ```
 //!
-//! 智能体记忆的物理落位是**宿主目录的 `AGENTS.md`**（宿主目录 = 本插件目录的父
-//! 目录，见 [`super::memory`]）；工作区记忆的物理落位是**工作区根的 `AGENTS.md`**
-//! （行业通行约定，见 [`super::workspace`]）。两者的**物理文件同名**（同一族行业
-//! 约定），因此挂载里的名字必须能区分归属：工作区那份叫 `WORKSPACE.md`。
-//! 这里的挂载点是它们的**稳定地址**——不随会话变、不随「选了哪个智能体 / 哪个
-//! 工作目录」那个会话级视图变（选中与否决定的是**注不注入**，不是文件在哪）。
+//! 三者的作用域分别来自装配位置、`ctx[WORKDIR]` 与 `ctx[SESSION_DIR]`（D-513）。
+//! 智能体与工作区的物理文件同名（同一族行业约定），会话那份刻意叫 `MEMORY.md`：
+//! 会话目录不是 agent 目录。挂载名则各自点明作用域，列表里不会撞名。
+//! 智能体 / 工作区两份地址不随会话变；会话那份跟着当前会话的作用域走。
 //!
 //! 根下**只列记忆文件**：插件配置文档（`PLUGIN.yml`）不并列——它与其它插件同一
 //! 口径，进设置走 `CONFIGURABLE_VISITOR` 那条通道；但按**真实文件名**仍然可达
@@ -51,6 +50,7 @@
 
 use super::memory::{self, MEMORY_FILE, PLUGIN_TITLE};
 use super::plugin::MemoryPlugin;
+use super::session::{self, MOUNT_FILE as SESSION_FILE, SEGMENT_TITLE as SESSION_LABEL};
 use super::workspace::{self, MOUNT_FILE as WORKSPACE_FILE, SEGMENT_TITLE as WORKSPACE_LABEL};
 use async_trait::async_trait;
 use symbio_plugin_api::PLUGIN_FILE;
@@ -82,6 +82,11 @@ fn workspace_memory_node(store: &MemoryFile) -> VdfsNode {
     store.node(&workspace::node_spec())
 }
 
+/// 会话记忆 → 节点（同上，节点名 = 挂载名 `SESSION.md`）
+fn session_memory_node(store: &MemoryFile) -> VdfsNode {
+    store.node(&session::node_spec())
+}
+
 impl MemoryPlugin {
     /// 智能体记忆门面：作用域来自**装配位置**（本插件目录的父目录），与请求上下文
     /// 无关——插件被构造出来这件事本身就意味着这一层记忆存在。
@@ -97,6 +102,15 @@ impl MemoryPlugin {
         let host = vdfs_host_ctx(ctx)?;
         Ok(self.workspace_store_of(&host).await)
     }
+
+    /// 会话记忆门面：作用域来自**本轮上下文**（`ctx[SESSION_DIR]`）。
+    ///
+    /// 宿主句柄取不到是机制级故障；句柄在但没有会话目录是正常状态（无作用域），
+    /// 由 [`MemoryFile::has_scope`] 表达，不在这里报错。
+    async fn session_store(&self, ctx: &VdfsContext) -> VdfsResult<MemoryFile> {
+        let host = vdfs_host_ctx(ctx)?;
+        Ok(self.session_store_of(&host).await)
+    }
 }
 
 #[async_trait]
@@ -109,6 +123,7 @@ impl VdfsProvider for MemoryPlugin {
     ) -> VdfsResult<VdfsResponse> {
         let agent = self.agent_store().await;
         let ws = self.workspace_store(ctx).await?;
+        let sess = self.session_store(ctx).await?;
         match req {
             VdfsRequest::List { .. } => {
                 if !path.is_empty() {
@@ -116,10 +131,13 @@ impl VdfsProvider for MemoryPlugin {
                         "{LABEL}根下没有子目录：{path}"
                     )));
                 }
-                // 智能体记忆恒在（装配作用域）；工作区记忆有工作区才列
+                // 智能体记忆恒在（装配作用域）；另两腿有作用域才列
                 let mut items = vec![agent_memory_node(&agent)];
                 if ws.has_scope() {
                     items.push(workspace_memory_node(&ws));
+                }
+                if sess.has_scope() {
+                    items.push(session_memory_node(&sess));
                 }
                 Ok(VdfsResponse::list(items))
             }
@@ -139,6 +157,14 @@ impl VdfsProvider for MemoryPlugin {
                     }
                     Ok(VdfsResponse::Stat(workspace_memory_node(&ws)))
                 }
+                SESSION_FILE => {
+                    if !sess.has_scope() {
+                        return Err(VdfsError::not_found(format!(
+                            "{SESSION_LABEL}不可用：当前没有会话作用域"
+                        )));
+                    }
+                    Ok(VdfsResponse::Stat(session_memory_node(&sess)))
+                }
                 // 配置文档按真实文件名可达（列表里不并列，见模块文档）
                 PLUGIN_FILE => Ok(VdfsResponse::Stat(self.config_file().node())),
                 other => Err(VdfsError::not_found(format!("未知路径：{other}"))),
@@ -150,6 +176,10 @@ impl VdfsProvider for MemoryPlugin {
                 }
                 WORKSPACE_FILE => {
                     let text = ws.read().map_err(VdfsError::internal)?;
+                    Ok(VdfsResponse::Read(VdfsContent::text(text)))
+                }
+                SESSION_FILE => {
+                    let text = sess.read().map_err(VdfsError::internal)?;
                     Ok(VdfsResponse::Read(VdfsContent::text(text)))
                 }
                 // 配置文档的**设置页视图** = 配置模型 + 智能体记忆正文。正文从
@@ -203,6 +233,20 @@ impl VdfsProvider for MemoryPlugin {
                         created: !existed,
                     }))
                 }
+                SESSION_FILE => {
+                    if content.binary {
+                        return Err(VdfsError::invalid("会话记忆是文本文件，不接受二进制内容"));
+                    }
+                    let text = content.text.as_deref().unwrap_or_default();
+                    let existed = sess.exists();
+                    // 容量闸门在共享实现里（`MemoryFile::write`）——本插件不重复实现
+                    sess.write(text).map_err(VdfsError::invalid)?;
+                    vdfs_notify_change(PLUGIN_ID_MEMORY, SESSION_FILE);
+                    Ok(VdfsResponse::Write(VdfsWriteResponse {
+                        name: None,
+                        created: !existed,
+                    }))
+                }
                 // 设置页视图的写：正文与闸门**各回各的落盘处**。顺序上先校验配置、
                 // 再写正文（容量闸门在 `MemoryFile::write` 里）、最后才落配置——
                 // 正文超限时这份配置一个字节都不该动。
@@ -249,7 +293,7 @@ impl VdfsProvider for MemoryPlugin {
                 }
                 Err(VdfsError::Forbidden(format!(
                     "{LABEL}不可删除（删除即丢失全部长期记忆）。\
-                     如需清空，请向 `{MEMORY_FILE}` 或 `{WORKSPACE_FILE}` 写入空内容。"
+                     如需清空，请向 `{MEMORY_FILE}` / `{WORKSPACE_FILE}` / `{SESSION_FILE}` 写入空内容。"
                 )))
             }
             VdfsRequest::Watch { sink } => {

@@ -14,6 +14,9 @@ fn defaults_are_the_shipped_behaviour() {
     assert!(c.workspace_enabled);
     assert_eq!(c.workspace_max_bytes, 16 * 1024);
     assert_eq!(c.workspace_inject_max_bytes, 4 * 1024);
+    // 会话作用域（D-513）
+    assert_eq!(c.session_max_bytes, 16 * 1024);
+    assert_eq!(c.session_inject_max_bytes, 4 * 1024);
 }
 
 /// 存量 / 手写的 `PLUGIN.yml` 缺字段时按缺省补齐（`#[serde(default)]` 的意义）。
@@ -56,11 +59,15 @@ fn zero_limits_are_clamped_to_one() {
         workspace_enabled: true,
         workspace_max_bytes: 0,
         workspace_inject_max_bytes: 0,
+        session_max_bytes: 0,
+        session_inject_max_bytes: 0,
     };
     assert_eq!(c.effective_memory_max_bytes(), 1);
     assert_eq!(c.effective_memory_inject_bytes(), 1);
     assert_eq!(c.effective_workspace_max_bytes(), 1);
     assert_eq!(c.effective_workspace_inject_bytes(), 1);
+    assert_eq!(c.effective_session_max_bytes(), 1);
+    assert_eq!(c.effective_session_inject_bytes(), 1);
 }
 
 #[test]
@@ -71,6 +78,8 @@ fn roundtrip_is_lossless() {
         workspace_enabled: false,
         workspace_max_bytes: 11,
         workspace_inject_max_bytes: 5,
+        session_max_bytes: 13,
+        session_inject_max_bytes: 7,
     };
     let json = serde_json::to_string(&c).unwrap();
     let back: MemoryConfig = serde_json::from_str(&json).unwrap();
@@ -79,4 +88,6 @@ fn roundtrip_is_lossless() {
     assert!(!back.workspace_enabled);
     assert_eq!(back.workspace_max_bytes, 11);
     assert_eq!(back.workspace_inject_max_bytes, 5);
+    assert_eq!(back.session_max_bytes, 13);
+    assert_eq!(back.session_inject_max_bytes, 7);
 }

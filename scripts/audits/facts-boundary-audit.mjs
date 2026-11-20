@@ -65,9 +65,13 @@ const ROOT = rootArg
  *    五类记账事实，读侧收放不再由会话插件自取；
  *  - `session/src/worker_progress.rs` 随 `turnstate` 投影退场（轮次状态不再是
  *    可读投影，`chat.assistant.progress` 已无生产写方）；
- *  会话记忆本体（`session/src/memory.rs`）**不进本清单**：它用引擎递来的
- *  `session_dir` 拼地址，路径词在能力面——那是 FB-002 要拦的形状，不是读数。
- *  改这一行清单先要有决策：旧路径是「能力自取磁盘」的实测面，删条目等于关掉读数。 */
+ *  会话记忆本体已随 D-513 从 `session` 迁到 `memory`，地址是 `<根>/memory/SESSION.md`，
+ *  落位用上下文递来的 `session_dir`（`<会话数据目录>/MEMORY.md`）。它不进本清单：
+ *  本清单是 D-084 冻结的既有能力文件集合，不是「所有碰磁盘的插件」名单；D-513 把
+ *  「会话数据目录」与「事实源路径」分开——`session_dir` 本身不是 FB-002 要拦的形状，
+ *  `session_dir + V2_WAL_FILE + open*` 才是。memory 插件里没有 WAL / open 词，
+ *  FB-001 仍扫全仓生产源码守住这条边界。改本清单先要有决策：旧路径是「能力自取磁盘」
+ *  的实测面，删条目等于关掉读数。 */
 const CAPABILITY_FILES = [
   'crates/symbio-plugin-task/src/task.rs',
   'crates/symbio-plugin-tool/src/breaker.rs',

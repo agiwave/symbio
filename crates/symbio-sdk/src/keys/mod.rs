@@ -86,6 +86,10 @@ define_string_key!(PathKey, PATH, "path");
 define_string_key!(WorkdirKey, WORKDIR, "workdir");
 define_string_key!(AgentIdKey, AGENT_ID, "agent_id");
 define_string_key!(SessionIdKey, SESSION_ID, "session_id");
+// 会话级插件数据目录（D-513）：由会话插件按自己的唯一存储布局解析，宿主随本轮基础
+// 上下文统一递给插件。能力插件只读这个目录存取自己的会话数据（记忆文件是首例），
+// **不得**拿它拼事实源路径或重新打开 WAL（D-084 / FB-002）。
+define_string_key!(SessionDirKey, SESSION_DIR, "session_dir");
 // 入站请求的**来源主体**（DE-001 §12.2 跨体承诺的「向谁宣告」）：调用方经请求
 // `metadata.source_principal` 声明「这条消息是谁发的」（完整主体名，如
 // `agent:main`）；网关 `build_ctx` 把 metadata 落进 ctx，会话插件的收件箱入队口

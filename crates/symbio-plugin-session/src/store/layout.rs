@@ -52,7 +52,7 @@ use symbio_sdk::chat::session_chat;
 ///
 /// id→段名的唯一实现在宿主层，经 [`paths::safe_id`] 进入（见模块头）。
 pub(super) fn dir_for(base: &Path, session_id: &str) -> PathBuf {
-    base.join(paths::safe_id(session_id))
+    paths::session_dir(base, session_id)
 }
 
 /// `<base>/<safe_id>/session.json`

@@ -187,7 +187,9 @@ export const WHITELIST_BASELINE = 0
 // 107 → 108（`D-494`）：`TOOL_NODE_ID`（工具卡在转写里的节点地址键）入 SDK 臂——
 // §5.1 两条准入逐条过（不提能力名 ∧ tool 写 / session 读两个插件用），裁决见
 // `003-design/023` 的 D-494。
-export const SDK_BASELINE = 108
+// 108 → 109（`D-513`）：`SESSION_DIR`（会话级插件数据目录键）入 SDK 臂——不提能力名，
+// 会话插件写 / memory 插件读两个消费方，裁决见 `003-design/018` 的 D-513。
+export const SDK_BASELINE = 109
 
 /**
  * 契约臂基线：**只许降**（`D-486`）。`symbio-contract` 是插件 ABI 的纯形状层，
@@ -227,7 +229,9 @@ export const CONTRACT_BASELINE = 25
 // 116 → 108（`D-443`）：`Builder` / `EVENT_RETRY` / `EventStore` / `Store` /
 // `VDFS_KIND_DIR` / `Seq` 六条零生产消费方（全部消费方是插件测试面）——测试通道归
 // `symbio-testkit`，门面不再为测试夹具背书；`EVENT_RETRY` 控制面 loop 改取内核本体。
-export const GRAMMAR_BASELINE = 108
+// 108 → 109（`D-513`）：实测已为 109，基线同批收平；不是放宽，账本只许降，
+// 基线跟着实测走。新增的一条要有决策号，本批记在 D-513。
+export const GRAMMAR_BASELINE = 109
 
 /**
  * 模块级转发的基线：**只许不涨**（D-278）。

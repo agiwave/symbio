@@ -56,7 +56,6 @@ impl VdfsProvider for SessionPlugin {
         match parse_session_path(path)? {
             VdfsSessionPath::Root => self.root_at(ctx, path, req).await,
             VdfsSessionPath::Session(id) => self.session_at(path, id, req).await,
-            VdfsSessionPath::Memory(id) => self.memory_at(path, id, req).await,
             VdfsSessionPath::Messages { id, mid } => {
                 self.messages_at(ctx, path, id, mid, req).await
             }
@@ -239,22 +238,6 @@ impl SessionPlugin {
         let session = self.session_of(id).await?;
         super::super::workdir::workdir_of(&session)
             .ok_or_else(|| VdfsError::not_found(format!("会话 {id} 没有工作目录")))
-    }
-
-    /// 会话记忆 → VDFS 节点。
-    ///
-    /// 形状由共享实现 `MemoryFile::node` 产出，
-    /// `list`（经 `internal_dirs`）与 `stat`
-    /// **共用同一份**——「列表里的和点开的不是同一个东西」这类 bug 因此写不出来。
-    pub(super) async fn memory_node_of(&self, id: &str) -> VdfsNode {
-        self.memory_store(id)
-            .await
-            .node(&symbio_providers::MemoryNodeSpec {
-                title: super::super::memory::SEGMENT_TITLE,
-                name: None,
-                kind: PLUGIN_ID_SESSION,
-                description: super::super::memory::MEMORY_DESCRIPTION,
-            })
     }
 
     /// 取子会话（**归属校验**：必须确实挂在 `id` 之下，避免跨会话越权访问）

@@ -10,15 +10,13 @@
 //! - [`behaviors`]：行为名的收集面（实现住 sdk，本 crate 只转出，D-408）
 //! - [`effects`]：能力效果的实现端口（`ToolBehavior`）与草稿（`FactDraft`）（转出，`D-408`）
 //! - [`rows`]：能力行的执行体端口（`RowHandler`）与债实例（`RowRequest`）（转出，`D-413`）
-//! - [`context`]：能力贡献每轮上下文的端口（`ContextProvider`）与段身份（转出，`D-412`）
+//! - [`rows`]：能力行的执行体端口（`RowHandler`）与债实例（`RowRequest`）（转出，`D-413`）
 //! - [`port`]：世界端口的注册面（`PortProvider` 与 port 族——名字与契约静态，提供者随活插件的能力行动态收集）
-//! - [`text`]：Token 计量与头尾切分的**转发**（实现归 `symbio_sdk::text::tokenizer`，`D-404`）
 //! - [`settle`]：收束之后贡献派生事实的端口（`Contributor`）（转出，`D-413`）
 //! - [`retrieval`]：轮首检索的端口（`Retriever`）——宿主交可见切片与发言，能力交回自有值（D-264）（转出，`D-413`）
 //! - [`hooks`]：`fire_hook` 助手与 hook 事件枚举
 //! - [`declarations`]：声明表的链接期提交口（事件 / 事实 / 视图 / 端口 / 执行体 / 行）
 //!   与词汇读法（冻结机制住 sdk，回落表是 [`events`]，D-415）
-//! - [`reports`]：跨插件报表的登记面与读口（实现住 sdk，本 crate 只转出，D-416）
 //! - [`vocab`]：跨插件共享名的唯一住处（端口 / 行为 / 路径段 / 治理能力，D-364）
 //!
 //! **二、扩展层宿主面白名单**（文件末尾的 `pub use`）——插件要的语法类型、契约形状、机制
@@ -202,7 +200,8 @@ pub use symbio_sdk::event_bus::{
 };
 pub use symbio_sdk::keys::{
     AGENT_ID, MODE, PATH, PRINCIPAL_SCHEDULER, PRINCIPAL_USER, PROVIDER_ID, REQUIRED_PLUGINS,
-    RISK_LEVEL, SESSION_ID, TOOL_CALL_ID, TOOL_NODE_ID, TRACE_ID, VDFS_PARENT_ADDR, WORKDIR,
+    RISK_LEVEL, SESSION_DIR, SESSION_ID, TOOL_CALL_ID, TOOL_NODE_ID, TRACE_ID, VDFS_PARENT_ADDR,
+    WORKDIR,
 };
 pub use symbio_sdk::llm::round::{llm_emit_message, llm_removed_frame, llm_short_id};
 pub use symbio_sdk::plugin::{

@@ -171,6 +171,15 @@ impl SessionPlugin {
         // agent 作用域键递下去，agent 插件自行把子树 prompt rows / 工具加前缀——
         // 「人格 / 记忆」这些段名谁都不需要认识。
         let agent_scope = self.get_store().await?.session_agent_scope(session_id);
+        // 会话级数据目录（D-513）：会话存储布局的唯一 owner 是本插件，收集期把目录
+        // 按**值**递上请求 ctx（memory 的会话记忆据此落位）。能力面只读现成目录，
+        // 不自己拼会话存储路径，也不拿它开事实源。
+        if let Some(dir) = self.get_store().await?.session_dir(session_id) {
+            ctx.set(
+                symbio_plugin_api::SESSION_DIR,
+                dir.to_string_lossy().into_owned(),
+            );
+        }
         let manager = crate::capabilities::collect_capabilities(
             self.get_parent().as_ref(),
             ctx,

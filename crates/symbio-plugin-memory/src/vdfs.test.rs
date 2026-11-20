@@ -1,4 +1,4 @@
-//! `memory/vdfs.rs` 的单元测试 —— 挂载点的寻址、闸门与不可删除（两个作用域）。
+//! `memory/vdfs.rs` 的单元测试 —— 挂载点的寻址、闸门与不可删除（三个作用域）。
 //!
 //! 与实现**同级**分文件（约定：`X.rs` + `X.test.rs`）。
 
@@ -6,7 +6,7 @@ use super::*;
 use std::sync::Arc;
 use symbio_plugin_api::vdfs_context;
 use symbio_plugin_api::{
-    PluginInvokeRequest, PluginInvokeRequestExt, PluginSimpleRequest, WORKDIR,
+    PluginInvokeRequest, PluginInvokeRequestExt, PluginSimpleRequest, SESSION_DIR, WORKDIR,
 };
 use tempfile::TempDir;
 
@@ -24,6 +24,13 @@ fn vctx(workdir: Option<&str>) -> VdfsContext {
     if let Some(w) = workdir {
         ctx.set(WORKDIR, w.to_string());
     }
+    vdfs_context(&ctx)
+}
+
+/// 构造同时带会话目录的 VDFS 调用上下文（D-513）
+fn vctx_with_session(session_dir: &str) -> VdfsContext {
+    let ctx: Arc<dyn PluginInvokeRequest> = Arc::new(PluginSimpleRequest::new(None, None));
+    ctx.set(SESSION_DIR, session_dir.to_string());
     vdfs_context(&ctx)
 }
 
@@ -88,6 +95,64 @@ async fn root_lists_both_memory_files() {
         "挂载名即呈现扩展名"
     );
     assert_eq!(nodes[1].node.kind, "workspace");
+}
+
+/// 有会话目录时列出第三份记忆，挂载名点明作用域（D-513）
+#[tokio::test]
+async fn root_lists_session_memory_when_scope_is_supplied() {
+    let tmp = TempDir::new().unwrap();
+    let sess = TempDir::new().unwrap();
+    let p = plugin_in(tmp.path());
+
+    let nodes = p
+        .dispatch(
+            &vctx_with_session(sess.path().to_string_lossy().as_ref()),
+            "",
+            VdfsRequest::List {},
+        )
+        .await
+        .unwrap()
+        .into_list()
+        .unwrap();
+    assert_eq!(nodes.len(), 2, "智能体 + 会话各一条");
+    assert_eq!(nodes[1].node.name, SESSION_FILE);
+    assert_eq!(nodes[1].node.kind, "session");
+}
+
+/// 会话记忆经挂载名读写，物理落点是 `{session_dir}/MEMORY.md`
+#[tokio::test]
+async fn session_memory_uses_mount_name_and_physical_session_file() {
+    let tmp = TempDir::new().unwrap();
+    let sess = TempDir::new().unwrap();
+    let p = plugin_in(tmp.path());
+
+    p.dispatch(
+        &vctx_with_session(sess.path().to_string_lossy().as_ref()),
+        SESSION_FILE,
+        VdfsRequest::Write {
+            content: VdfsContent::text("本会话私有。"),
+        },
+    )
+    .await
+    .unwrap();
+
+    assert_eq!(
+        std::fs::read_to_string(sess.path().join(session::SESSION_MEMORY_FILE)).unwrap(),
+        "本会话私有。"
+    );
+    let text = p
+        .dispatch(
+            &vctx_with_session(sess.path().to_string_lossy().as_ref()),
+            SESSION_FILE,
+            VdfsRequest::Read,
+        )
+        .await
+        .unwrap()
+        .into_read()
+        .unwrap()
+        .text
+        .unwrap();
+    assert_eq!(text, "本会话私有。");
 }
 
 /// 工作区记忆没有工作区 = 资源不存在（不是「空文件」）

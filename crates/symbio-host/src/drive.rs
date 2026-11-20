@@ -45,7 +45,7 @@ use symbio_kernel::plugin::{
 };
 use symbio_plugin_api::drive::{DriveKey, EVENT_DRIVER_STALLED};
 use symbio_plugin_api::{ExecEventSink, FactDraft};
-use symbio_sdk::keys::{AGENT_ID, MODE, RISK_LEVEL, SOURCE_PRINCIPAL, WORKDIR};
+use symbio_sdk::keys::{AGENT_ID, MODE, RISK_LEVEL, SESSION_DIR, SOURCE_PRINCIPAL, WORKDIR};
 use symbio_sdk::plugin::drive_entry::{
     declared_drive_entry, DriveBinding, DriveBindingDecl, DriveEntry, DriveTarget,
 };
@@ -63,6 +63,8 @@ pub struct FactWorld<'a> {
     /// 选定的 provider（会话 metadata 的 `provider_id`）；`None` = 模型侧默认。
     pub provider: Option<&'a str>,
     pub workdir: &'a str,
+    /// 会话级插件数据目录（D-513）：由会话插件随驱动目标交回，装配在这里挂进 ctx。
+    pub session_dir: Option<&'a str>,
     /// 会话主体来源（metadata 的 `agent_id`，空串 = 无绑定主体）。
     /// 由装配层随事实源带入，`drive_on_new_fact` 只在这里设一次 `AGENT_ID`。
     pub agent_id: &'a str,
@@ -130,6 +132,11 @@ pub async fn drive_on_new_fact(
     // （环不碰这个字段，只原样转交）。
     let ctx = PluginSimpleRequest::new(Some(Arc::downgrade(root)), None);
     ctx.set(WORKDIR, world.workdir.to_string());
+    // 会话级数据目录（D-513）：会话插件按唯一布局解析，宿主只递值；能力插件据此
+    // 存取自己的会话数据，不反向拼会话存储布局，也不拿它开事实源。
+    if let Some(dir) = world.session_dir {
+        ctx.set(SESSION_DIR, dir.to_string());
+    }
     // 会话主体的**唯一**装载点：值来自会话 metadata 的 `agent_id`，
     // 由事实源打开时取来。执行体只读，不再各自派生或回落。
     ctx.set(AGENT_ID, world.agent_id.to_string());
@@ -395,6 +402,7 @@ async fn drain(root: &Arc<dyn Plugin>, target: &DriveTarget, state: &KickState) 
         // 提供方随会话 metadata 一并取来（`req > metadata > 默认` 的元数据档）。
         provider: target.provider_id.as_deref(),
         workdir: &workdir,
+        session_dir: target.session_dir.as_deref(),
         agent_id,
         mode: &target.mode,
         risk_level: &target.risk_level,
