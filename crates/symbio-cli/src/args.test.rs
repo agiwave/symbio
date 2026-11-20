@@ -17,7 +17,9 @@ fn defaults_use_cwd_and_dot_symbio() {
     let cwd = std::env::current_dir().unwrap();
     assert_eq!(a.workdir, cwd);
     assert_eq!(a.homedir, cwd.join(".symbio"));
-    assert_eq!(a.provider.as_deref(), Some(DEFAULT_PROVIDER));
+    // 默认不硬编码任何 provider id —— 交由后端按系统目录配置解析，
+    // 避免指向一个无预设、无密钥来源的"幽灵默认值"，首次运行必然失败。
+    assert!(a.provider.is_none());
     assert_eq!(a.mode, "auto");
     assert!(a.message.is_none());
 }

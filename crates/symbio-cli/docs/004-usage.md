@@ -105,8 +105,9 @@ printf '第一轮\n/provider\n/exit\n' | ../../target/debug/symbio-cli.exe --rep
  **环境变量 > 用户主目录 bootstrap 文件 > 默认 `<当前目录>/.symbio`**。该目录下没有
  任何模型条目（`crates/symbio-plugin-model/src/<id>/provider.json`）时，CLI 提示并退回内置默认配置
  （通常表现为「没有可用 Provider」）。
-- **provider**：CLI 默认 `usrouter-glm5-3-flash`（开箱即连一个可用模型）；`--provider default` 显式
- 保留「回退到系统目录 `crates/symbio-plugin-model/PLUGIN.yml` 的 `default_provider_id`」能力。
+- **provider**：默认 `None`（不硬编码 provider id）—— 交由后端按系统目录配置解析，与桌面端
+ 「左侧模型面板建条目」用的是同一份配置。系统目录无任何模型条目时，CLI 在启动前打印配置提示。
+ `--provider <ID>` 显式覆盖；`--provider default` 是兼容写法，等同不传。
 - **mode**：默认 `auto`（无人值守）—— 遇到需审批的工具，后端返回友好错误后继续，不挂起等待。人在环的
  审批卡片属于 tauri 前端的职责。
 

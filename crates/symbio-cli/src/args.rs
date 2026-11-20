@@ -5,13 +5,6 @@
 
 use std::path::PathBuf;
 
-/// CLI 默认使用的 Model Provider。
-///
-/// 之所以在这里给一个具体默认值（而不是交给后端 model 插件目录下的 `PLUGIN.yml` 的
-/// `default_provider_id`）：CLI 的定位是「开箱即用地连上一个可用模型」，
-/// 而 `--provider default` 显式保留「回退到系统目录配置」的能力。
-pub const DEFAULT_PROVIDER: &str = "usrouter-glm5-3-flash";
-
 /// CLI 默认会话运行模式。
 ///
 /// `auto`（无人值守）：CLI 没有交互卡的应答入口，遇到需审批的工具时
@@ -72,8 +65,8 @@ symbio-cli — Symbio 命令行前端（纯 Rust）
 选项:
   -m, --message <文本>    发送单条消息后退出（等价于位置参数）
   -s, --session <ID>      复用既有会话（默认新建）
-      --provider <ID>     Model Provider（默认 usrouter-glm5-3-flash；
-                          传 default 表示回退到系统目录配置的默认 Provider）
+      --provider <ID>     Model Provider（默认不指定，用系统目录配置的模型；
+                          显式传 ID 才覆盖，default 是回退到系统配置的兼容写法）
       --mode <MODE>       会话运行模式 auto|interactive（默认 auto）
       --workdir <路径>    会话工作目录（默认当前目录）
       --homedir <路径>    系统目录（默认 <当前目录>/.symbio）
@@ -113,7 +106,7 @@ pub fn parse<I: IntoIterator<Item = String>>(argv: I) -> Result<Command, String>
     let mut args = Args {
         message: None,
         session: None,
-        provider: Some(DEFAULT_PROVIDER.to_string()),
+        provider: None,
         mode: DEFAULT_MODE.to_string(),
         workdir: cwd.clone(),
         homedir: cwd.join(".symbio"),
