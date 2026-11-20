@@ -76,7 +76,11 @@ describe('JSON 判定与高亮', () => {
 
   it('工具结果走 JSON 高亮，其余走 Markdown', () => {
     expect(messageRenderedOf('{"a":1}', true)).toContain('json-key')
-    expect(messageRenderedOf('# 标题', false)).toContain('<h1')
+    // node 环境无 DOMParser：Markdown 已渲染（标题文字在），但消毒器按安全策略
+    // 回退为纯文本而非 HTML；DOM 环境的真实 HTML 渲染由 useMarkdown.spec.ts 覆盖。
+    const rendered = messageRenderedOf('# 标题', false)
+    expect(rendered).toContain('标题')
+    expect(rendered).not.toContain('json-key')
   })
 
   it('失败体不再重复渲染成 JSON 代码块', () => {

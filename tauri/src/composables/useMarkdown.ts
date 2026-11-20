@@ -148,10 +148,11 @@ function cleanNode(node: Node): void {
 }
 
 function sanitize(html: string): string {
-  // 无 DOM 的环境（纯 Node 单测）无法建树，也就无法判断；应用运行的环境
-  // （WebView）恒有 DOMParser。这里不进安全分支，否则单测拿到的是一堆转义文本，
-  // 而不是真实渲染形状。
-  if (typeof DOMParser === 'undefined') return html
+  // 无 DOM 的环境无法建树，也就无法判断。正文来自 LLM / 工具输出（不可信），
+  // 没有判断能力时一律不渲染 HTML —— 与下方 catch 分支的安全策略一致。
+  // 消毒主路径由 happy-dom 单测覆盖（useMarkdown.spec.ts 文件头标注），
+  // 这个分支只在真正的非 DOM 宿主里兜底，不再为单测让路。
+  if (typeof DOMParser === 'undefined') return escapeHtml(html)
   try {
     const doc = new DOMParser().parseFromString(html, 'text/html')
     cleanNode(doc.body)
