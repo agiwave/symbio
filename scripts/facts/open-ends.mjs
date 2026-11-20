@@ -110,6 +110,16 @@ export const ROWS = [
     // 的头注释此前正是手抄了 `4/16`）。
     fmt: (v) => `${v.verifyCoupled} / ${v.verifyPrograms}`,
   },
+  {
+    key: "userCriteriaGaps",
+    unit: "条",
+    // 只读「判据现状」列里带缺口标记的条数——状态与理由的 owner 仍是场景总册，
+    // 本表不抄内容。有标记不等于完全无覆盖（可能同一行有部分读数），口径见 SC-001。
+    label: "用户判据含缺口标记（未承诺 / 无判据 / 不成立）",
+    owner: "`docs/002-scene/001-场景总册.md` 的「判据现状」列",
+    how: "读 SC-001 的 13 张「用户判据（诚实账）」表，数判据现状含缺口标记的条数",
+    fmt: (v) => `${v.userCriteriaGaps} / ${v.userCriteriaTotal}`,
+  },
 ];
 
 /** 一份 JSON 账本的 `symbols.length`；读不出 / 形状变了都抛错，不静默报 0。 */
@@ -180,6 +190,46 @@ export function verifyCoupling(root) {
   return { verifyPrograms: programs.length, verifyCoupled: coupled };
 }
 
+/**
+ * 用户判据的缺口读数：SC-001 的 13 张「用户判据（诚实账）」表里，判据现状
+ * 标了未承诺 / 缺口无判据 / 不成立的条数。本表只读 owner 的条数，不抄任何一行内容
+ * ——状态与理由的 owner 仍是场景总册（一个事实一个 owner）。
+ *
+ * 段落数或数据行数不合预期就抛错：静默报 0 会让「判据全绿」与「表被清空」无法区分。
+ */
+export function userCriteriaGaps(root) {
+  const rel = "docs/002-scene/001-场景总册.md";
+  const abs = path.join(root, ...rel.split("/"));
+  if (!fs.existsSync(abs)) {
+    throw new Error(`${OUT_REL}：owner 读不出——${rel} 不存在`);
+  }
+  const text = fs.readFileSync(abs, "utf8");
+  const sections = text.split(/^### 用户判据（诚实账）\s*$/m).slice(1);
+  if (sections.length < 13) {
+    throw new Error(`${OUT_REL}：owner 形状变了——诚实账段落 ${sections.length} < 13`);
+  }
+  let total = 0;
+  let gaps = 0;
+  for (const sec of sections) {
+    const body = sec.split(/^#{2,3} /m)[0];
+    const rows = body.split("\n").filter((l) => /^\|\s*\d+\s*\|/.test(l));
+    if (!rows.length) {
+      throw new Error(`${OUT_REL}：owner 形状变了——某段诚实账无数据行`);
+    }
+    for (const line of rows) {
+      const cells = line
+        .replace(/\\\|/g, "␟")
+        .split("|")
+        .map((s) => s.trim().replace(/␟/g, "|"))
+        .filter(Boolean);
+      const status = cells[2] ?? "";
+      total++;
+      if (/未承诺|缺口：无判据|不成立/.test(status)) gaps++;
+    }
+  }
+  return { userCriteriaTotal: total, userCriteriaGaps: gaps };
+}
+
 /** 一次性从各 owner 取数；任何一格读不出就让整份事实生成失败。 */
 export function collect(root) {
   const registry = loadEntries(root);
@@ -207,6 +257,7 @@ export function collect(root) {
     injectionGaps: CELLS.filter((c) => c?.gap).length,
     ignoredTests: ignoredTests(root),
     ...verifyCoupling(root),
+    ...userCriteriaGaps(root),
   };
 }
 
