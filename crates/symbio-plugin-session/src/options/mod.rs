@@ -234,7 +234,7 @@ fn mode_field() -> DetailField {
         description: Some("工具失败时是否阻塞模型继续".to_string()),
         widget: "select".to_string(),
         icon: Some("run-mode".to_string()),
-        default: Some(json!("interactive")),
+        default: Some(json!("auto")),
         options: vec![
             option(
                 "interactive",
