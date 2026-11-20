@@ -45,8 +45,8 @@ use symbio_plugin_api::PLUGIN_ID_MEMORY;
 use symbio_plugin_api::{
     capability_announce_configurable, plugin_dir_from_ctx, CapabilityRow, Plugin, PluginConfigFile,
     PluginDir, PluginError, PluginInvokeRequest, PluginInvokeRequestExt, PluginInvokeResponse,
-    PluginMeta, PluginPayload, CAPABILITY_VISITOR, PATH, SESSION_DIR, TRAVERSE_AVAILABLE_TOOLS,
-    WORKDIR,
+    PluginMeta, PluginPayload, AGENT_VDFS, CAPABILITY_VISITOR, PATH, SESSION_VDFS,
+    TRAVERSE_AVAILABLE_TOOLS, WORKSPACE_VDFS,
 };
 use symbio_plugin_api::{DetailDefinition, DetailField};
 use symbio_providers::MemoryFile;
@@ -186,17 +186,14 @@ impl MemoryPlugin {
             .with_hidden(true)
     }
 
-    /// 宿主目录 = **本插件目录的父目录**（智能体记忆落位规则的唯一出处，见
-    /// `super::memory`）
-    pub(crate) fn host_dir(&self) -> std::path::PathBuf {
-        memory::host_dir(self.config_file.dir().dir())
-    }
-
-    /// 依生效配置构造**智能体记忆**门面（两道闸门在此注入，调用点不必各自判断）
-    pub(crate) async fn store(&self) -> MemoryFile {
+    /// 依生效配置构造**智能体记忆**门面（两道闸门在此注入，调用点不必各自判断）。
+    ///
+    /// D-515：作用域来自 `ctx[AGENT_VDFS]`（provider 缺失 = 无此层），
+    /// 不再由插件目录反推物理路径。
+    pub(crate) async fn store(&self, ctx: &Arc<dyn PluginInvokeRequest>) -> MemoryFile {
         let cfg = self.config.read().await;
         memory::store(
-            &self.host_dir(),
+            ctx.get(AGENT_VDFS).flatten(),
             cfg.effective_memory_max_bytes(),
             cfg.effective_memory_inject_bytes(),
         )
@@ -204,7 +201,7 @@ impl MemoryPlugin {
 
     /// 由请求上下文 + 生效配置构造**工作区记忆**门面。
     ///
-    /// **作用域闸门**（`ctx[WORKDIR]` 缺失 / 空 → 无作用域）与**两道容量闸门**
+    /// **作用域闸门**（`ctx[WORKSPACE_VDFS]` 缺失 → 无作用域）与**两道容量闸门**
     /// 都在这一处注入，因此调用点不必各自判断。
     pub(crate) async fn workspace_store_of(
         &self,
@@ -212,7 +209,7 @@ impl MemoryPlugin {
     ) -> MemoryFile {
         let cfg = self.config.read().await;
         workspace::store(
-            ctx.get(WORKDIR).as_deref(),
+            ctx.get(WORKSPACE_VDFS).flatten(),
             cfg.effective_workspace_max_bytes(),
             cfg.effective_workspace_inject_bytes(),
         )
@@ -220,14 +217,13 @@ impl MemoryPlugin {
 
     /// 由请求上下文 + 生效配置构造**会话记忆**门面。
     ///
-    /// **作用域闸门**（`ctx[SESSION_DIR]` 缺失 / 空 → 无作用域）与**两道容量闸门**
-    /// 都在这一处注入。目录由会话插件按唯一布局解析、宿主随轮递来；本插件不认识
-    /// `SESSION_ID`，也不从它拼路径（D-513）。
+    /// **作用域闸门**（`ctx[SESSION_VDFS]` 缺失 → 无作用域）与**两道容量闸门**
+    /// 都在这一处注入。provider 由会话插件按唯一布局构造、宿主随轮递来；
+    /// 本插件不认识 `SESSION_ID`，也不从它拼路径（D-513 / D-515）。
     pub(crate) async fn session_store_of(&self, ctx: &Arc<dyn PluginInvokeRequest>) -> MemoryFile {
         let cfg = self.config.read().await;
-        let dir = ctx.get(SESSION_DIR);
         session::store(
-            dir.as_deref(),
+            ctx.get(SESSION_VDFS).flatten(),
             cfg.effective_session_max_bytes(),
             cfg.effective_session_inject_bytes(),
         )
@@ -252,10 +248,10 @@ impl MemoryPlugin {
         ctx: &Arc<dyn PluginInvokeRequest>,
         visitor: &Arc<dyn symbio_plugin_api::Registry>,
     ) {
-        let store = self.store().await;
+        let store = self.store(ctx).await;
         // 绝对地址 = 上下文父地址 + 相对地址（容器转发时已写入父地址）
         let address = symbio_plugin_api::absolute_addr(ctx, memory::rel_path());
-        match memory::segment(&store, &address) {
+        match memory::segment(&store, &address).await {
             Ok(Some(segment)) => {
                 visitor
                     .put(CapabilityRow::prompt(SEGMENT_NAME, segment))
@@ -288,7 +284,7 @@ impl MemoryPlugin {
         let store = self.workspace_store_of(ctx).await;
         // 绝对地址 = 上下文父地址 + 相对地址（容器转发时已写入父地址）
         let address = symbio_plugin_api::absolute_addr(ctx, workspace::rel_path());
-        match store.segment(&workspace::segment_spec(&address)) {
+        match store.segment(&workspace::segment_spec(&address)).await {
             Ok(Some(segment)) => {
                 visitor
                     .put(CapabilityRow::prompt(workspace::SEGMENT_NAME, segment))
@@ -313,7 +309,7 @@ impl MemoryPlugin {
     ) {
         let store = self.session_store_of(ctx).await;
         let address = symbio_plugin_api::absolute_addr(ctx, session::rel_path());
-        match store.segment(&session::segment_spec(&address)) {
+        match store.segment(&session::segment_spec(&address)).await {
             Ok(Some(segment)) => {
                 visitor
                     .put(CapabilityRow::prompt(session::SEGMENT_NAME, segment))

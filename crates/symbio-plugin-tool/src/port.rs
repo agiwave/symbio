@@ -15,7 +15,7 @@
 //! | `args` | 调用参数（模型发的原样 JSON） |
 //! | `call_id` | 本次调用的 id（幂等与节点挂靠；结果节点 id 由它派生） |
 //! | `node_id` | 工具卡在实时面上的节点 id（执行窗口的状态帧写到它上面；可选） |
-//! | `scratch_dir` | 宿主为本轮准备的可写目录（结果超预算时在此写全文；子布局归本插件） |
+//! | `scratch_dir` | 宿主为本轮准备的可写目录（进程执行面保留；结果存档已改走 `ctx[WORKSPACE_VDFS]`，D-515） |
 //! | `artifact` | `{ key, produced_by, allowed, denied_reason }`：落产物格的上下文，`allowed` 是环侧产物闸的结论 |
 //! | `land_only` | `{ text, success, needs_user_action, prompt, failure_kind }`：只落产物格、不再执行（唤醒结果与没跑到的结果走这一形态） |
 //! | `gate` | `{ authorized, spent_ms, requested_ms, budget_ms }`：外部执行闸门的中性输入；快慢与开窗由执行体判 |
@@ -33,7 +33,6 @@
 //! 工具失败**不**映射成 `PortOutcome.error`——失败是信息性事实（模型据此自我纠正），
 //! 与「这一笔协议失败」是两件事。
 
-use std::path::Path;
 use std::sync::Arc;
 
 use serde_json::json;
@@ -52,12 +51,19 @@ use symbio_plugin_api::{
     events::EVENT_ARTIFACT_ADDED,
     events::EVENT_AUTHZ_GRANTED,
     events::EVENT_TOOL_REQUESTED,
-    failure_kind, family, plugin_error, plugin_info, plugin_warn, CapabilityRiskLevel, Entity,
-    ExecAbortSignal, FactDraft, LatencyTier, Plugin, PluginError, PluginInvokeRequest,
-    PluginInvokeRequestExt, PluginPayload, PortErrorClass, PortExecContext, PortExecutor,
-    PortInput, PortOutcome, PortProvider, Verb, ABORT_SIGNAL, AGENT_ID, CAPABILITY_VISITOR,
-    EVENT_REQUEST, EVENT_SINK, PLUGIN_ID_TOOL, SESSION_ID, TOOL_CALL_ID, TOOL_NODE_ID, WORKDIR,
+    failure_kind, family, plugin_error, plugin_info, plugin_warn, CapabilityRiskLevel,
+    DynVdfsProvider, Entity, ExecAbortSignal, FactDraft, LatencyTier, Plugin, PluginError,
+    PluginInvokeRequest, PluginInvokeRequestExt, PluginPayload, PortErrorClass, PortExecContext,
+    PortExecutor, PortInput, PortOutcome, PortProvider, Verb, ABORT_SIGNAL, AGENT_ID,
+    CAPABILITY_VISITOR, EVENT_REQUEST, EVENT_SINK, PLUGIN_ID_TOOL, SESSION_ID, TOOL_CALL_ID,
+    TOOL_NODE_ID, WORKDIR, WORKSPACE_VDFS,
 };
+
+/// 工作区作用域 provider（D-515）：存档走它，不再拿 `scratch_dir` 拼物理路径。
+/// 宿主已在上下文注入三作用域 provider；这里只取本插件需要的那一个。
+fn archive_provider(exec: &PortExecContext) -> Option<DynVdfsProvider> {
+    exec.ctx.as_ref()?.get(WORKSPACE_VDFS).flatten()
+}
 
 /// 端口名：名字住 `plugin-api` 的词汇面（D-364），提供者与消费方 import 同一常量。
 pub(crate) use symbio_plugin_api::vocab::PORT_TOOL as TOOL;
@@ -914,7 +920,7 @@ async fn finish(
     raw: String,
     success: bool,
     pending: Option<serde_json::Value>,
-    archive_dir: &Path,
+    provider: Option<&DynVdfsProvider>,
 ) -> PortOutcome {
     let (text, guard) = match &pending {
         Some(_) => (
@@ -926,7 +932,7 @@ async fn finish(
             }),
         ),
         None => {
-            let guarded = guard_result(&raw, DEFAULT_TOKEN_CAP, archive_dir);
+            let guarded = guard_result(&raw, DEFAULT_TOKEN_CAP, provider).await;
             (
                 guarded.text,
                 serde_json::json!({
@@ -978,11 +984,11 @@ async fn finish_with(
     raw: String,
     success: bool,
     pending: Option<serde_json::Value>,
-    archive_dir: &Path,
+    provider: Option<&DynVdfsProvider>,
     failure_kind: Option<&str>,
     why: &str,
 ) -> PortOutcome {
-    let mut out = finish(raw, success, pending, archive_dir).await;
+    let mut out = finish(raw, success, pending, provider).await;
     if let Some(fact) = out.facts.first_mut().and_then(|f| f.as_object_mut()) {
         if let Some(kind) = failure_kind {
             fact.insert("failure_kind".into(), serde_json::json!(kind));
@@ -1149,7 +1155,10 @@ fn protocol_input(payload: &serde_json::Value) -> Option<ProtocolInput<'_>> {
 ///
 /// 环只把原始协议读数搬进来，并给一个兜底 id 以便结果有落点；它不再判断
 /// 「缺 id / 缺 name / 参数解析失败」。
-async fn refuse_protocol(protocol: ProtocolInput<'_>, archive_dir: &Path) -> Option<PortOutcome> {
+async fn refuse_protocol(
+    protocol: ProtocolInput<'_>,
+    provider: Option<&DynVdfsProvider>,
+) -> Option<PortOutcome> {
     if protocol.id_missing {
         plugin_error!("tool", "[Tool] 协议失败：模型未返回工具调用 id");
         return Some(
@@ -1157,7 +1166,7 @@ async fn refuse_protocol(protocol: ProtocolInput<'_>, archive_dir: &Path) -> Opt
                 "Error: 模型未返回有效的工具调用 ID（协议错误）".to_string(),
                 false,
                 None,
-                archive_dir,
+                provider,
                 Some(failure_kind::ERROR),
                 "",
             )
@@ -1171,7 +1180,7 @@ async fn refuse_protocol(protocol: ProtocolInput<'_>, archive_dir: &Path) -> Opt
                 "Error: 模型未返回有效的工具名称（协议错误）".to_string(),
                 false,
                 None,
-                archive_dir,
+                provider,
                 Some(failure_kind::ERROR),
                 "",
             )
@@ -1194,7 +1203,7 @@ async fn refuse_protocol(protocol: ProtocolInput<'_>, archive_dir: &Path) -> Opt
             text,
             false,
             None,
-            archive_dir,
+            provider,
             Some(failure_kind::ERROR),
             "参数 JSON 解析失败，未执行",
         )
@@ -1473,13 +1482,19 @@ impl ToolPort {
             .unwrap_or_default()
             .to_string();
         let original_args = artifact_args(&artifact.payload);
-        let archive_dir = exec.scratch_dir.clone().unwrap_or_default();
+        let archive_vdfs = archive_provider(&exec);
         // 分岔的判据是事实里的 `kind`（动作闭集 `answer | approve | deny`），不是
         // 债行载荷：债表只问存在性、不读载荷，动作语义由写方落成具体事实。
         let (outcome, run_args) = match kind.as_str() {
             // 答复原文即那次调用的结果：字符串就是原文，不再套一层 JSON 引号。
             "answer" => (
-                finish(answer_text(&answer_value), true, None, &archive_dir).await,
+                finish(
+                    answer_text(&answer_value),
+                    true,
+                    None,
+                    archive_vdfs.as_ref(),
+                )
+                .await,
                 original_args,
             ),
             // 批准：批准位**只进 args**（活闸门读的就是 `args.approved`），不另开
@@ -1532,7 +1547,7 @@ impl ToolPort {
                         text,
                         false,
                         None,
-                        &archive_dir,
+                        archive_vdfs.as_ref(),
                         // 判决词（线上契约，与 `Authz::Denied{detail:"user_rejected"}` 同一词）。
                         Some("user_rejected"),
                         "",
@@ -1634,7 +1649,7 @@ impl ToolPort {
                     failure.text.clone(),
                     false,
                     None,
-                    &exec.scratch_dir.clone().unwrap_or_default(),
+                    archive_provider(&exec).as_ref(),
                     Some(failure.kind),
                     "",
                 )
@@ -1752,7 +1767,7 @@ impl ToolPort {
             .get(KEY_ARGS)
             .cloned()
             .unwrap_or(serde_json::Value::Null);
-        let archive_dir = exec.scratch_dir.clone().unwrap_or_default();
+        let archive_vdfs = archive_provider(&exec);
         // 授权专用入口（环的 gate 调用）：只判一次、只落一条授权事实，**不执行、
         // 不写 `sent`**。这是环上唯一的下判点——拒绝的债因此没有 `sent` 可等，
         // 由 `deny-tools` 直接以 `failed{denied}` 关账。
@@ -1778,7 +1793,7 @@ impl ToolPort {
         }
         // 协议失败：判定与措辞都在执行体（DE-048 D-312）。环只搬原始读数与兜底 id。
         if let Some(protocol) = protocol_input(&payload) {
-            if let Some(out) = refuse_protocol(protocol, &archive_dir).await {
+            if let Some(out) = refuse_protocol(protocol, archive_vdfs.as_ref()).await {
                 return out;
             }
         }
@@ -1814,7 +1829,15 @@ impl ToolPort {
                     .unwrap_or_else(|| "Blocked by pre hook".to_string());
                 let text = format!("Blocked: {reason}");
                 let why = format!("被 PreToolUse 钩子拦下：{reason}");
-                return finish_with(text, false, None, &archive_dir, Some("blocked"), &why).await;
+                return finish_with(
+                    text,
+                    false,
+                    None,
+                    archive_vdfs.as_ref(),
+                    Some("blocked"),
+                    &why,
+                )
+                .await;
             }
         }
 
@@ -1825,7 +1848,7 @@ impl ToolPort {
                 "Error: 模型未返回有效的工具名称（协议错误）".to_string(),
                 false,
                 None,
-                &archive_dir,
+                archive_vdfs.as_ref(),
                 Some(failure_kind::ERROR),
                 "",
             )
@@ -1888,7 +1911,7 @@ impl ToolPort {
                 "Error: No request context".to_string(),
                 false,
                 None,
-                &archive_dir,
+                archive_vdfs.as_ref(),
             )
             .await;
         };
@@ -1899,7 +1922,7 @@ impl ToolPort {
                     "Error: No parent plugin".to_string(),
                     false,
                     None,
-                    &archive_dir,
+                    archive_vdfs.as_ref(),
                 )
                 .await
             }
@@ -2150,7 +2173,7 @@ impl ToolPort {
                         &ctx,
                     )
                     .await;
-                    return finish(text, false, None, &archive_dir).await;
+                    return finish(text, false, None, archive_vdfs.as_ref()).await;
                 }
                 _ = tokio::time::sleep(std::time::Duration::from_secs(TOOL_EXEC_IDLE_TIMEOUT_SECS)) => {
                     let now = progress.emitted();
@@ -2177,7 +2200,7 @@ impl ToolPort {
                         &ctx,
                     )
                     .await;
-                    return finish(text, false, None, &archive_dir).await;
+                    return finish(text, false, None, archive_vdfs.as_ref()).await;
                 }
             }
         };
@@ -2197,7 +2220,7 @@ impl ToolPort {
                                 &ctx,
                             )
                             .await;
-                            return finish(text, false, None, &archive_dir).await;
+                            return finish(text, false, None, archive_vdfs.as_ref()).await;
                         }
                     };
                     let pending = pending_prompt_from(&data);
@@ -2250,7 +2273,7 @@ impl ToolPort {
                         &ctx,
                     )
                     .await;
-                    finish(res, true, pending, &archive_dir).await
+                    finish(res, true, pending, archive_vdfs.as_ref()).await
                 }
                 _ => {
                     let text = "Error: Unexpected payload type".to_string();
@@ -2262,7 +2285,7 @@ impl ToolPort {
                         &ctx,
                     )
                     .await;
-                    finish(text, false, None, &archive_dir).await
+                    finish(text, false, None, archive_vdfs.as_ref()).await
                 }
             },
             Err(e) => {
@@ -2283,7 +2306,7 @@ impl ToolPort {
                     &ctx,
                 )
                 .await;
-                finish(text, false, None, &archive_dir).await
+                finish(text, false, None, archive_vdfs.as_ref()).await
             }
         }
     }

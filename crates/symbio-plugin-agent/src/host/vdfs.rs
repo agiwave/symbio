@@ -34,7 +34,8 @@ use async_trait::async_trait;
 use std::sync::Arc;
 use symbio_plugin_api::PLUGIN_ID_AGENT;
 use symbio_plugin_api::{
-    descend_addr, vdfs_host_ctx, vdfs_notify_change, vdfs_unwatch_changes, vdfs_watch_changes,
+    descend_addr, vdfs_context, vdfs_host_ctx, vdfs_notify_change, vdfs_unwatch_changes,
+    vdfs_watch_changes, PluginInvokeRequestExt, AGENT_VDFS,
 };
 use symbio_plugin_api::{
     VdfsAccess, VdfsActionResult, VdfsChange, VdfsChangeSink, VdfsContent, VdfsContext, VdfsError,
@@ -248,10 +249,19 @@ impl AgentPlugin {
             .get_vfs_provider()
             .ok_or_else(|| VdfsError::internal(format!("子智能体「{id}」未暴露 VDFS 根")))?;
 
+        // D-515：子树的 `memory` 实例经宿主 ctx 的 `AGENT_VDFS` 读写
+        // `<agentdir>/AGENTS.md`（见 `MemoryPlugin::agent_store`）。主 ctx 那份指向
+        // 系统树根（`{homedir}`，T39），执行期经 `agent/<id>/memory` 下钻必须重挂到
+        // 本智能体目录，否则读到的是系统智能体记忆（T84 / T15）。
+        // 与 `forward_to_sub_agent` 的收集期重挂同一口径，两条链路不漂移。
+        let sub_host = host.fork();
+        if let Some(scope) = self.scope_of(id) {
+            let p: symbio_plugin_api::DynVdfsProvider =
+                Arc::new(symbio_providers::ScopeDirVdfs::at(scope.root));
+            sub_host.set(AGENT_VDFS, Some(p));
+        }
         // 地址空间：父地址续接 `<id>`（与 composite 派发的改写规则同一份，含根名）。
-        let sub_ctx = ctx
-            .clone()
-            .with_parent_addr(descend_addr(ctx.parent_addr(), id));
+        let sub_ctx = vdfs_context(&sub_host).with_parent_addr(descend_addr(ctx.parent_addr(), id));
         // 路径回填：树内相对前缀 = 本插件空间里的首段（`<id>`），见上方文档。
         Ok((provider, sub_ctx, id.to_string()))
     }

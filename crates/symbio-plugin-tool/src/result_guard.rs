@@ -4,28 +4,35 @@
 //! 本模块在结果交回环**之前**按 token 预算裁剪：
 //!
 //! 1. 估算 token 数 ≤ 预算 → 原样返回；
-//! 2. 否则：把全文存档到**会话存档目录**（由调用方在载荷里给出的
-//!    `archive_dir`，可经 `local/file_read` 取回），并对正文做
+//! 2. 否则：把全文存档到**工作区作用域**（`WORKSPACE_VDFS` 下的
+//!    [`ARCHIVE_REL_DIR`]，可经 `vdfs_read` 取回），并对正文做
 //!    **head/tail 摘要**（保留前 60% + 后 40% 预算，尾部通常是结论/错误，更关键），
 //!    中间插入占位说明。
 //!
-//! 存档位置跟随会话目录持久化（历史提示不会因临时目录被清理而变成死链）。
+//! D-515：存档不再由插件拿物理路径直写——调用方递来作用域 provider，本模块只
+//! 认相对地址。这样后端换成内存 / 网络存储时插件无感，也避免每个插件各拼一份
+//! 工作区物理路径。provider 缺席（没选工作区）= 不存档，降级为「未存档」提示。
+//!
 //! 文件名 = 毫秒时间戳 + token 数 + 内容 FNV 指纹，杜绝「同秒同 token 数互相覆盖」
 //! 的碰撞；目录按修改时间保留最新 [`ARCHIVE_KEEP`] 个文件，防止无限累积。
 //!
 //! 计量与头尾切分机制住在 `symbio_plugin_api::text`（环与世界共用同一套预算算术）；
 //! 本模块只管**工具结果这一种策略**：触发条件、60/40 配比、占位符文案与存档布局。
 
-use std::path::{Path, PathBuf};
-use std::time::SystemTime;
-use symbio_plugin_api::clock_now_ms;
 use symbio_plugin_api::text::{default_tokenizer, split_head_tail, HeadTailSplit, Tokenizer};
+use symbio_plugin_api::{clock_now_ms, DynVdfsProvider, VdfsContent, VdfsContext, VdfsRequest};
 
 /// 单条工具结果 token 预算（默认 ≈ 32KB 文本），可由调用方按需覆盖。
 pub const DEFAULT_TOKEN_CAP: usize = 8192;
 
-/// 每个会话的 L0 存档目录保留的最新文件数（防无限累积；超出按修改时间淘汰最旧）。
+/// 每个工作区的 L0 存档目录保留的最新文件数（防无限累积；超出按修改时间淘汰）。
 pub const ARCHIVE_KEEP: usize = 20;
+
+/// 存档目录在 `WORKSPACE_VDFS` 下的相对地址。
+///
+/// 相对地址既是 provider 的寻址键，也是印给模型的取回地址——两者同源，
+/// 不会出现「存到 A、提示词指到 B」的漂移。
+pub const ARCHIVE_REL_DIR: &str = "tool_archives";
 
 /// 取回指引文案（三层压缩占位符共用同一格式；随驱动器走，因为写占位符的是这里）。
 ///
@@ -42,19 +49,8 @@ pub struct GuardedResult {
     pub truncated: bool,
     /// 原始 token 估算
     pub original_tokens: usize,
-    /// 存档路径（若写入成功）
+    /// 存档相对地址（若写入成功；`vdfs_read` 可直接取回）
     pub archive_path: Option<String>,
-}
-
-/// L0 存档目录：会话子目录可用时用它（跟随会话生命周期，可被历史取回），
-/// 否则退回系统临时目录兜底（仅作为目录不可写时的降级路径）。
-fn resolve_archive_dir(archive_dir: &Path) -> Option<PathBuf> {
-    if std::fs::create_dir_all(archive_dir).is_ok() {
-        return Some(archive_dir.to_path_buf());
-    }
-    let fallback = std::env::temp_dir().join("symbio_tool_archives");
-    std::fs::create_dir_all(&fallback).ok()?;
-    Some(fallback)
 }
 
 /// 内容 FNV-1a 64 位指纹（取高 32 位十六进制）。
@@ -70,16 +66,15 @@ fn content_fingerprint(text: &str) -> String {
     format!("{:08x}", (h >> 32) as u32)
 }
 
-/// 把全文写入存档目录（best-effort）。失败返回 None，不阻断主流程。
+/// 把全文写入工作区作用域（best-effort）。provider 缺席或写入失败 → None，不阻断主流程。
 ///
 /// 文件名 = `tool_{毫秒ts}_{token数}_{内容指纹}.txt`：毫秒 + 指纹双保险。
-fn archive_full_text(text: &str, token_count: usize, archive_dir: &Path) -> Option<String> {
-    let dir = resolve_archive_dir(archive_dir)?;
-    archive_into_dir(text, token_count, &dir)
-}
-
-/// 写入指定目录并执行清理（目录由调用方解析；拆出便于测试注入目录）。
-fn archive_into_dir(text: &str, token_count: usize, dir: &std::path::Path) -> Option<String> {
+async fn archive_full_text(
+    text: &str,
+    token_count: usize,
+    provider: Option<&DynVdfsProvider>,
+) -> Option<String> {
+    let provider = provider?;
     let now = clock_now_ms();
     let file_name = format!(
         "tool_{}_{}_{}.txt",
@@ -87,35 +82,47 @@ fn archive_into_dir(text: &str, token_count: usize, dir: &std::path::Path) -> Op
         token_count,
         content_fingerprint(text)
     );
-    let path: PathBuf = dir.join(file_name);
-    match std::fs::write(&path, text) {
-        Ok(_) => {
-            prune_archive_dir(dir, ARCHIVE_KEEP);
-            path.to_str().map(|s| s.to_string())
-        }
-        Err(_) => None,
-    }
+    let rel = format!("{ARCHIVE_REL_DIR}/{file_name}");
+    let vctx = VdfsContext::new(());
+    provider
+        .dispatch(
+            &vctx,
+            &rel,
+            VdfsRequest::Write {
+                content: VdfsContent::text(text),
+            },
+        )
+        .await
+        .ok()?;
+    prune_archive_dir(provider, ARCHIVE_KEEP).await;
+    Some(rel)
 }
 
 /// 按修改时间保留最新 `keep` 个存档文件，淘汰更旧的（best-effort，失败静默）。
-fn prune_archive_dir(dir: &std::path::Path, keep: usize) {
-    let Ok(rd) = std::fs::read_dir(dir) else {
+///
+/// `List` 返回的节点带 `updated_at`（ScopeDirVdfs 从 mtime 填），按它排序；同秒
+/// 的并列再按名字排——文件名头是毫秒时间戳，字典序即时间序。
+async fn prune_archive_dir(provider: &DynVdfsProvider, keep: usize) {
+    let vctx = VdfsContext::new(());
+    let Ok(resp) = provider
+        .dispatch(&vctx, ARCHIVE_REL_DIR, VdfsRequest::List {})
+        .await
+    else {
         return;
     };
-    let mut files: Vec<(SystemTime, PathBuf)> = rd
-        .filter_map(|e| e.ok())
-        .filter(|e| e.path().is_file())
-        .filter_map(|e| {
-            let m = e.metadata().ok()?;
-            Some((m.modified().ok()?, e.path()))
-        })
-        .collect();
-    if files.len() <= keep {
+    let Some(items) = resp.into_list() else {
         return;
-    }
-    files.sort_by_key(|(t, _)| std::cmp::Reverse(*t)); // 新 → 旧
-    for (_, path) in files.into_iter().skip(keep) {
-        let _ = std::fs::remove_file(path);
+    };
+    let mut files: Vec<(i64, String)> = items
+        .into_iter()
+        .map(|item| (item.node.updated_at.unwrap_or(0), item.node.name))
+        .collect();
+    files.sort_by(|a, b| b.0.cmp(&a.0).then_with(|| b.1.cmp(&a.1))); // 新 → 旧
+    for (_, name) in files.into_iter().skip(keep) {
+        let rel = format!("{ARCHIVE_REL_DIR}/{name}");
+        let _ = provider
+            .dispatch(&vctx, &rel, VdfsRequest::Delete { recursive: false })
+            .await;
     }
 }
 
@@ -126,9 +133,13 @@ fn omit_placeholder_prefix(omit: usize) -> String {
 
 /// 守卫工具结果：超过预算则存档 + head/tail 摘要，否则原样返回。
 ///
-/// `archive_dir`：会话的 L0 存档目录（环在载荷里给出）。
-/// 目录不可写时退回系统临时目录兜底。
-pub fn guard_result(text: &str, budget_tokens: usize, archive_dir: &Path) -> GuardedResult {
+/// `provider`：工作区作用域 provider（调用方从 `ctx[WORKSPACE_VDFS]` 取）。
+/// 缺席（没选工作区）→ 不存档，占位符如实说明。
+pub async fn guard_result(
+    text: &str,
+    budget_tokens: usize,
+    provider: Option<&DynVdfsProvider>,
+) -> GuardedResult {
     let tok = default_tokenizer();
     let n = tok.count(text);
     if n <= budget_tokens {
@@ -140,13 +151,13 @@ pub fn guard_result(text: &str, budget_tokens: usize, archive_dir: &Path) -> Gua
         };
     }
 
-    let archive_path = archive_full_text(text, n, archive_dir);
+    let archive_path = archive_full_text(text, n, provider).await;
 
     let omit = n.saturating_sub(budget_tokens);
-    // 统一取回协议：占位符含存档路径与 vdfs_read 取回入口。
+    // 统一取回协议：占位符含存档相对地址与 vdfs_read 取回入口。
     let archive_hint = match &archive_path {
         Some(p) => format!("完整输出已存档至: {p}{RETRIEVAL_HINT}"),
-        None => "完整输出未存档（存档目录不可写）".to_string(),
+        None => "完整输出未存档（无工作区作用域）".to_string(),
     };
     let placeholder = format!("{} {archive_hint} ...]", omit_placeholder_prefix(omit));
 

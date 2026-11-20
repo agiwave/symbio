@@ -1,5 +1,7 @@
 use super::skill_response::assemble_response;
-use crate::loader::{load_skills_from_dirs_with_budget, LoadBudget};
+use crate::loader::{
+    cap_skills, load_skills_from_dirs_with_budget, load_skills_from_scope, merge_skills, LoadBudget,
+};
 use crate::skill_tool::SkillExecuteTool;
 use crate::types::{Skill, SkillConfig};
 use async_trait::async_trait;
@@ -9,9 +11,18 @@ use symbio_plugin_api::PLUGIN_ID_SKILL;
 use symbio_plugin_api::{
     plugin_dir_from_ctx, DetailDefinition, DetailField, Plugin, PluginConfigFile, PluginDir,
     PluginError, PluginInvokeRequest, PluginInvokeRequestExt, PluginInvokeResponse, PluginMeta,
-    PluginPayload, TRAVERSE_AVAILABLE_TOOLS,
+    PluginPayload, AGENT_VDFS, TRAVERSE_AVAILABLE_TOOLS, WORKSPACE_VDFS,
 };
 use tokio::sync::RwLock;
+
+/// 把路径表达成 `root` 下的 VDFS 相对地址（统一 `/` 分隔）。
+/// 不在 root 下 → `None`，调用方据此走物理回退（绝对路径配置 / exe 兜底）。
+fn relative_to(root: &Path, path: &Path) -> Option<String> {
+    path.strip_prefix(root)
+        .ok()
+        .map(|p| p.to_string_lossy().replace('\\', "/"))
+        .filter(|s| !s.is_empty())
+}
 
 pub struct SkillPlugin {
     config: Arc<RwLock<SkillConfig>>,
@@ -93,25 +104,62 @@ impl SkillPlugin {
     async fn load_skills_for_tool(
         &self,
         workdir: Option<String>,
+        ctx: &dyn PluginInvokeRequest,
     ) -> Result<Vec<Skill>, PluginError> {
         let config = self.config.read().await;
-        let workdir_path = workdir
-            .as_ref()
-            .map(Path::new)
-            .unwrap_or_else(|| Path::new("."));
         let budget = LoadBudget {
             max_skills: config.max_skills,
             max_body_chars: config.max_body_chars,
         };
+        let work_path = workdir.as_ref().map(Path::new);
+        let scope_root = self.dir.dir().parent().map(Path::to_path_buf);
+        let agent_vdfs = ctx.get(AGENT_VDFS).flatten();
+        let workspace_vdfs = ctx.get(WORKSPACE_VDFS).flatten();
+
         // **本插件自己的目录**是第一来源（其后才是配置里的 `skill_dirs`）。
         // 于是子 Agent 的 skill 实例自包含——技能就放在 `<agent dir>/skill/` 下，
         // 不需要任何全局配置，复制整个目录即复制这个 Agent 的全部技能。
         let mut dirs: Vec<String> = Vec::with_capacity(config.skill_dirs.len() + 1);
         dirs.push(self.dir.dir().to_string_lossy().to_string());
         dirs.extend(config.skill_dirs.iter().cloned());
-        let mut skills = load_skills_from_dirs_with_budget(&dirs, workdir_path, budget).await?;
 
-        // 如果从工作目录没有加载到技能，尝试从项目根目录加载
+        let mut merged: Vec<Skill> = Vec::new();
+        let mut physical_dirs: Vec<String> = Vec::new();
+        for d in dirs {
+            let p = Path::new(&d);
+            // D-515：能表达成作用域相对地址的目录一律走 provider——插件不再直读文件。
+            // 作用域根与本插件目录同源（`<root>/skill` 的上一级），先试 agent 再试 workspace。
+            if let (Some(root), Some(provider)) = (&scope_root, &agent_vdfs) {
+                if let Some(rel) = relative_to(root, p) {
+                    merge_skills(
+                        &mut merged,
+                        load_skills_from_scope(provider, &rel, budget).await?,
+                    );
+                    continue;
+                }
+            }
+            if let (Some(w), Some(provider)) = (work_path, &workspace_vdfs) {
+                if let Some(rel) = relative_to(w, p) {
+                    merge_skills(
+                        &mut merged,
+                        load_skills_from_scope(provider, &rel, budget).await?,
+                    );
+                    continue;
+                }
+            }
+            // 绝对路径配置 / 没有作用域 provider：物理回退（装配与开发期例外）
+            physical_dirs.push(d);
+        }
+        if !physical_dirs.is_empty() {
+            let fallback_root = work_path.unwrap_or_else(|| Path::new("."));
+            merge_skills(
+                &mut merged,
+                load_skills_from_dirs_with_budget(&physical_dirs, fallback_root, budget).await?,
+            );
+        }
+        let mut skills = cap_skills(merged, budget);
+
+        // 如果从工作目录没有加载到技能，尝试从项目根目录加载（开发期例外）
         if skills.is_empty() {
             let project_root = if let Ok(exe_path) = std::env::current_exe() {
                 exe_path
@@ -133,8 +181,12 @@ impl SkillPlugin {
         Ok(skills)
     }
 
-    async fn list_skills(&self, workdir: Option<String>) -> Result<Vec<Skill>, PluginError> {
-        self.load_skills_for_tool(workdir).await
+    async fn list_skills(
+        &self,
+        workdir: Option<String>,
+        ctx: &dyn PluginInvokeRequest,
+    ) -> Result<Vec<Skill>, PluginError> {
+        self.load_skills_for_tool(workdir, ctx).await
     }
 }
 
@@ -455,7 +507,7 @@ impl Plugin for SkillPlugin {
                 let req: ExecuteRequest = ctx.payload()?;
 
                 let skills = self
-                    .list_skills(ctx.get(symbio_plugin_api::WORKDIR))
+                    .list_skills(ctx.get(symbio_plugin_api::WORKDIR), &*ctx)
                     .await?;
                 let skill = skills
                     .into_iter()
@@ -473,7 +525,7 @@ impl Plugin for SkillPlugin {
             }
             _ => {
                 let skills = self
-                    .list_skills(ctx.get(symbio_plugin_api::WORKDIR))
+                    .list_skills(ctx.get(symbio_plugin_api::WORKDIR), &*ctx)
                     .await?;
                 if let Some(skill) = skills.into_iter().find(|s| s.name == path) {
                     // 名称路由没有 args 入口 ⇒ 声明了 `argument_hint` 的技能在这里
@@ -493,7 +545,7 @@ impl Plugin for SkillPlugin {
         let sub_path = ctx.get(symbio_plugin_api::PATH).unwrap_or_default();
         if sub_path == TRAVERSE_AVAILABLE_TOOLS {
             let skills = self
-                .list_skills(ctx.get(symbio_plugin_api::WORKDIR))
+                .list_skills(ctx.get(symbio_plugin_api::WORKDIR), &*ctx)
                 .await?;
 
             if !skills.is_empty() && ctx.get(symbio_plugin_api::CAPABILITY_VISITOR).is_some() {

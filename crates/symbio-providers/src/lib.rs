@@ -116,6 +116,7 @@ pub use symbio_provider_memory::{MemoryFile, MemoryNodeSpec, MemorySegmentSpec};
 #[cfg(feature = "embedding")]
 pub use symbio_provider_embedding::unavailable_reason as embedding_unavailable_reason;
 pub use symbio_provider_vdfs_service::{
-    auto_id as vdfs_auto_id, id_of as vdfs_id_of, safe_segment as vdfs_safe_segment, DirVdfs,
-    MemoryVdfs, SingleFileVdfs, VdfsPack, VdfsUnpack,
+    agent_home_root, attach_round_providers, attach_scope_providers, auto_id as vdfs_auto_id,
+    id_of as vdfs_id_of, safe_segment as vdfs_safe_segment, DirVdfs, MemoryVdfs, ScopeDirVdfs,
+    SingleFileVdfs, VdfsPack, VdfsUnpack,
 };

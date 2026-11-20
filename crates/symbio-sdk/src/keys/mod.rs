@@ -82,6 +82,31 @@ macro_rules! define_string_key {
     };
 }
 
+// 作用域 VDFS provider 键（D-515）：值是进程内 trait object，无字符串 / JSON 形态，
+// 与 `PLUGIN_PARENT` 同一纪律（`WIRE = false`）。三个键把「目录字符串」换成
+// 「绑定作用域根的虚拟文件系统视图」——插件只经 `VdfsProvider::dispatch` 读写，
+// 不再各自 `Path::join` 物理路径；存储后端因此可替换（磁盘 / 内存 / 网络）。
+// `None` = 作用域不存在（没选工作区 / 无会话），是正常降级而非故障。
+macro_rules! define_vdfs_key {
+    ($struct_name:ident, $const_name:ident, $key_name:expr) => {
+        pub struct $struct_name;
+        impl SymbioKey for $struct_name {
+            type Value = Option<symbio_kernel::vdfs::DynVdfsProvider>;
+            const WIRE: bool = false;
+            fn name(&self) -> &'static str {
+                $key_name
+            }
+            fn parse(&self, _s: &str) -> Option<Self::Value> {
+                None
+            }
+            fn format(&self, _v: &Self::Value) -> String {
+                "vdfs_provider".to_string()
+            }
+        }
+        pub const $const_name: $struct_name = $struct_name;
+    };
+}
+
 define_string_key!(PathKey, PATH, "path");
 define_string_key!(WorkdirKey, WORKDIR, "workdir");
 define_string_key!(AgentIdKey, AGENT_ID, "agent_id");
@@ -90,6 +115,12 @@ define_string_key!(SessionIdKey, SESSION_ID, "session_id");
 // 上下文统一递给插件。能力插件只读这个目录存取自己的会话数据（记忆文件是首例），
 // **不得**拿它拼事实源路径或重新打开 WAL（D-084 / FB-002）。
 define_string_key!(SessionDirKey, SESSION_DIR, "session_dir");
+// 三个作用域存储视图（D-515）：分别对应 agent_dir / work_dir / session_dir。
+// 它们取代 WORKDIR / SESSION_DIR 在插件侧的消费面；后两者仍是对外协议键
+// （metadata / CLI / 前端头），只是插件不再拿它们拼物理路径。
+define_vdfs_key!(AgentVdfsKey, AGENT_VDFS, "agent_vdfs_provider");
+define_vdfs_key!(WorkspaceVdfsKey, WORKSPACE_VDFS, "workspace_vdfs_provider");
+define_vdfs_key!(SessionVdfsKey, SESSION_VDFS, "session_vdfs_provider");
 // 入站请求的**来源主体**（DE-001 §12.2 跨体承诺的「向谁宣告」）：调用方经请求
 // `metadata.source_principal` 声明「这条消息是谁发的」（完整主体名，如
 // `agent:main`）；网关 `build_ctx` 把 metadata 落进 ctx，会话插件的收件箱入队口

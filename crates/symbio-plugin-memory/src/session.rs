@@ -25,7 +25,6 @@
 //! `ctx[SESSION_DIR]` 缺失 / 为空 = 当前上下文没有会话作用域 → 什么都不注入、列表
 //! 里也不出现。这与工作区腿同一纪律；收集期读不到就没凭空造一份出来。
 
-use std::path::{Path, PathBuf};
 use symbio_providers::{MemoryFile, MemoryNodeSpec, MemorySegmentSpec};
 
 /// 会话记忆的**物理**文件名 —— `{session_dir}/MEMORY.md`。
@@ -44,23 +43,21 @@ pub const SEGMENT_TITLE: &str = "会话记忆";
 pub const MEMORY_DESCRIPTION: &str =
     "本会话自己的长期约定（跨轮次保留，不被上下文压缩淘汰）：钉住的结论、约束、待办。";
 
-/// 会话记忆文件：`{session_dir}/MEMORY.md`
-pub fn memory_path(session_dir: &str) -> PathBuf {
-    Path::new(session_dir).join(SESSION_MEMORY_FILE)
-}
-
-/// 由会话目录构造记忆门面（`None` / 空串 / 纯空白 = 无会话作用域）。
+/// 由会话作用域 provider 构造记忆门面（`None` = 无会话作用域）。
 ///
-/// 两道闸门在此注入：共享实现只认「上限是多少」，不关心它从哪个配置来。
+/// D-515：作用域闸门从「目录字符串是否为空」改为「provider 是否存在」。
+/// 两道容量闸门在此注入；本插件不认识 `SESSION_ID`，也不从它拼目录。
 pub fn store(
-    session_dir: Option<&str>,
+    provider: Option<symbio_plugin_api::DynVdfsProvider>,
     write_max_bytes: usize,
     inject_max_bytes: usize,
 ) -> MemoryFile {
-    match session_dir.map(str::trim).filter(|dir| !dir.is_empty()) {
-        None => MemoryFile::absent(write_max_bytes, inject_max_bytes),
-        Some(dir) => MemoryFile::new(Some(memory_path(dir)), write_max_bytes, inject_max_bytes),
-    }
+    MemoryFile::via(
+        provider,
+        SESSION_MEMORY_FILE,
+        write_max_bytes,
+        inject_max_bytes,
+    )
 }
 
 /// 会话记忆在**本插件挂载点之下**的相对路径（就是挂载名 [`MOUNT_FILE`]）。

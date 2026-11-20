@@ -35,7 +35,7 @@ use symbio_plugin_api::termination::{
 use symbio_plugin_api::SymbioKey;
 use symbio_plugin_api::{ExecEventSink, FactDraft};
 use symbio_sdk::capability::CAPABILITY_VISITOR;
-use symbio_sdk::keys::{PATH, PROVIDER_ID, SESSION_ID, WORKDIR};
+use symbio_sdk::keys::{PATH, PROVIDER_ID, SESSION_DIR, SESSION_ID, WORKDIR};
 use symbio_sdk::plugin::fact_source::FactSource;
 use symbio_sdk::plugin::TRAVERSE_AVAILABLE_TOOLS;
 
@@ -172,7 +172,19 @@ impl Host {
         let ctx = base.fork();
         ctx.set(PATH, TRAVERSE_AVAILABLE_TOOLS.to_string());
         ctx.set(SESSION_ID, session_id.to_string());
-        ctx.set(WORKDIR, base.get(WORKDIR).unwrap_or_default());
+        let workdir = base.get(WORKDIR).unwrap_or_default();
+        ctx.set(WORKDIR, workdir.clone());
+        // 三个作用域 VDFS provider（D-515）：gather 收集链与 drive 驱动链同址注入，
+        // 插件在 traverse 里读到的存储面与执行期一致。
+        let agent_dir = symbio_providers::agent_home_root();
+        let work_dir = (!workdir.is_empty()).then(|| PathBuf::from(&workdir));
+        let session_dir = base.get(SESSION_DIR).map(PathBuf::from);
+        symbio_providers::attach_scope_providers(
+            ctx.as_ref(),
+            agent_dir.as_deref(),
+            work_dir.as_deref(),
+            session_dir.as_deref(),
+        );
         if let Some(provider) = provider {
             ctx.set(PROVIDER_ID, provider.to_string());
         }

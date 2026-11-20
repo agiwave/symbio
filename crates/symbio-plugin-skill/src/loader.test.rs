@@ -4,7 +4,19 @@
 
 use super::*;
 use std::fs as stdfs;
+use std::sync::Arc;
 use tempfile::TempDir;
+
+/// 测试接缝：按物理路径读取一份 SKILL.md，交给共享解析纯函数。
+///
+/// 生产路径走 `load_skills_from_scope`（provider + 相对地址），物理读取只用于
+/// 钉住 `parse_skill_text` 的解析规则；因此接缝留在测试文件里。
+async fn parse_skill_file(path: &Path, max_body_chars: usize) -> Result<Skill, PluginError> {
+    let raw = tokio::fs::read_to_string(path)
+        .await
+        .map_err(|e| PluginError::InternalError(e.to_string()))?;
+    parse_skill_text(&path.to_string_lossy(), &raw, max_body_chars)
+}
 
 /// 创建一个包含指定 body 长度的 SKILL.md 的目录
 fn make_skill_dir(parent: &Path, name: &str, body_chars: usize) -> PathBuf {
@@ -456,4 +468,53 @@ async fn load_skills_normal_dir_starts_with_dot_is_hidden() {
         .unwrap();
     // .foo 是隐藏目录，应被跳过
     assert!(skills.is_empty(), "整目录名以 . 开头应被跳过");
+}
+
+/// D-515：技能目录可经作用域 provider 加载——插件只认相对地址，不再直读物理路径。
+#[tokio::test]
+async fn load_skills_from_scope_uses_relative_addresses() {
+    let tmp = TempDir::new().unwrap();
+    let root = tmp.path();
+    let skill_dir = root.join("skill").join("reviewer");
+    stdfs::create_dir_all(&skill_dir).unwrap();
+    stdfs::write(
+        skill_dir.join("SKILL.md"),
+        "---\nname: reviewer\ndescription: 评审代码时使用的技能\n---\n\n先读测试。\n",
+    )
+    .unwrap();
+    // 隐藏目录同样跳过
+    let hidden = root.join("skill").join(".git");
+    stdfs::create_dir_all(&hidden).unwrap();
+    stdfs::write(
+        hidden.join("SKILL.md"),
+        "---\nname: git\ndescription: hidden dir skill test\n---\n\nbody\n",
+    )
+    .unwrap();
+
+    let provider: DynVdfsProvider =
+        Arc::new(symbio_providers::ScopeDirVdfs::at(root.to_path_buf()));
+    let skills = load_skills_from_scope(&provider, "skill", LoadBudget::default())
+        .await
+        .unwrap();
+    assert_eq!(skills.len(), 1, "隐藏目录不应被加载");
+    assert_eq!(skills[0].name, "reviewer");
+    assert_eq!(
+        skills[0].file_path, "skill/reviewer/SKILL.md",
+        "地址是 provider 相对地址，不是物理路径"
+    );
+    assert!(skills[0].body.contains("先读测试。"));
+}
+
+/// 作用域里没有技能目录 = 空清单，不是错误（没配技能是正常状态）。
+#[tokio::test]
+async fn scope_without_skills_is_empty_not_an_error() {
+    let tmp = TempDir::new().unwrap();
+    let provider: DynVdfsProvider =
+        Arc::new(symbio_providers::ScopeDirVdfs::at(tmp.path().to_path_buf()));
+    assert!(
+        load_skills_from_scope(&provider, "skill", LoadBudget::default())
+            .await
+            .unwrap()
+            .is_empty()
+    );
 }

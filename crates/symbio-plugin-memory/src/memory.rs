@@ -39,7 +39,6 @@
 //!
 //! 于是本插件不再自己写「超限怎么办」「截断怎么算」——那些口径全项目只有一份。
 
-use std::path::{Path, PathBuf};
 use symbio_plugin_api::PLUGIN_ID_MEMORY;
 use symbio_providers::{MemoryFile, MemoryNodeSpec, MemorySegmentSpec};
 
@@ -75,25 +74,16 @@ pub const SEGMENT_TITLE: &str = "智能体记忆";
 pub const MEMORY_DESCRIPTION: &str =
     "本智能体自身的长期记忆（跨会话保留）：只在选中本智能体时注入系统提示词。";
 
-/// 宿主目录 = **本插件目录的父目录**（容器的既有装配规则）
+/// 记忆门面（共享实现）：两道闸门由 [`super::config::MemoryConfig`] 给出。
 ///
-/// 取不到父目录（理论上不该发生）时退回本插件目录：那样作用域收窄成 `<…>/memory`，
-/// 也不会写到别的地方去。
-pub fn host_dir(plugin_dir: &Path) -> PathBuf {
-    plugin_dir
-        .parent()
-        .map(Path::to_path_buf)
-        .unwrap_or_else(|| plugin_dir.to_path_buf())
-}
-
-/// 记忆文件的落位：`{宿主目录}/AGENTS.md`
-pub fn file_path(host_dir: &Path) -> PathBuf {
-    host_dir.join(MEMORY_FILE)
-}
-
-/// 记忆门面（共享实现）：两道闸门由 [`super::config::MemoryConfig`] 给出
-pub fn store(host_dir: &Path, write_max_bytes: usize, inject_max_bytes: usize) -> MemoryFile {
-    MemoryFile::new(Some(file_path(host_dir)), write_max_bytes, inject_max_bytes)
+/// D-515：生产形态经 `AGENT_VDFS` provider 读写，相对地址就是文件名；
+/// 不再拼物理路径。「落位」用例的 `host_dir` / `file_path` helper 只存在于测试文件。
+pub fn store(
+    provider: Option<symbio_plugin_api::DynVdfsProvider>,
+    write_max_bytes: usize,
+    inject_max_bytes: usize,
+) -> MemoryFile {
+    MemoryFile::via(provider, MEMORY_FILE, write_max_bytes, inject_max_bytes)
 }
 
 /// VDFS 节点规格 —— `list` 与 `stat` 共用，两条链路不会分叉
@@ -139,11 +129,11 @@ pub fn segment_spec(address: &str) -> MemorySegmentSpec<'_> {
 ///
 /// 地址与闸门都印在片段里，而它们**都是本插件自己会执行的**（挂载点下的读写与
 /// 注入闸门都在这里），所以印出来的数字是真的。
-pub fn segment(store: &MemoryFile, address: &str) -> Result<Option<String>, String> {
-    if store.read()?.trim().is_empty() {
+pub async fn segment(store: &MemoryFile, address: &str) -> Result<Option<String>, String> {
+    if store.read().await?.trim().is_empty() {
         return Ok(None);
     }
-    store.segment(&segment_spec(address))
+    store.segment(&segment_spec(address)).await
 }
 
 #[cfg(test)]

@@ -32,6 +32,7 @@
 //! 因此**索引不会把自己索引进去**（两重保险）。
 
 use async_trait::async_trait;
+use base64::Engine as _;
 use grep::regex::RegexMatcherBuilder;
 use grep::searcher::sinks::UTF8 as UTF8Sink;
 use grep::searcher::SearcherBuilder;
@@ -43,8 +44,9 @@ use std::sync::Arc;
 use symbio_plugin_api::EmbeddingService;
 use symbio_plugin_api::{
     creator_create_object, missing_caller, port_result, CapabilityMeta, CapabilityRiskLevel,
-    ExecEnv, PluginError, PluginInvokeRequest, PluginInvokeRequestExt, PluginInvokeResponse,
-    PluginSimpleRequest, PortExecContext, PortExecutor, PortInput, PortOutcome, EMBEDDING_LOCAL,
+    DynVdfsProvider, ExecEnv, PluginError, PluginInvokeRequest, PluginInvokeRequestExt,
+    PluginInvokeResponse, PluginSimpleRequest, PortExecContext, PortExecutor, PortInput,
+    PortOutcome, VdfsContent, VdfsContext, VdfsRequest, EMBEDDING_LOCAL, WORKSPACE_VDFS,
 };
 
 const CHUNK_LINES: usize = 40;
@@ -212,7 +214,12 @@ fn cache() -> &'static tokio::sync::Mutex<HashMap<String, Arc<CodeIndex>>> {
 pub struct CodebaseSearchTool;
 
 impl CodebaseSearchTool {
-    async fn execute_inner(&self, args: &Value, workdir: &str) -> PluginInvokeResponse<Value> {
+    async fn execute_inner(
+        &self,
+        args: &Value,
+        workdir: &str,
+        provider: Option<&DynVdfsProvider>,
+    ) -> PluginInvokeResponse<Value> {
         let query = args
             .get("query")
             .and_then(|v| v.as_str())
@@ -251,7 +258,8 @@ impl CodebaseSearchTool {
         let mut notice: Option<String> = None;
 
         if let Some(embed) = embed.as_ref() {
-            if let Some((index, stats)) = get_index(&workspace_dir, rebuild, embed).await {
+            if let Some((index, stats)) = get_index(&workspace_dir, provider, rebuild, embed).await
+            {
                 // 索引统计放进返回体：让"索引是否已跟上磁盘"可见，而不是靠猜。
                 // `embedded_files == 0` 就意味着本次一次嵌入都没跑（索引已是最新）。
                 index_info = json!({
@@ -509,6 +517,7 @@ fn clone_chunks(chunks: &[Chunk]) -> Vec<Chunk> {
 /// 见模块文档；那种情况用 `rebuild` 兜底）。
 async fn get_index(
     workdir: &Path,
+    provider: Option<&DynVdfsProvider>,
     rebuild: bool,
     embed: &Arc<dyn EmbeddingService>,
 ) -> Option<(Arc<CodeIndex>, IndexStats)> {
@@ -522,7 +531,11 @@ async fn get_index(
         let cached = { cache().lock().await.get(&key).cloned() };
         match cached {
             Some(idx) => Some(idx),
-            None => load_from_disk(workdir).await.map(Arc::new),
+            // 没有工作区作用域 → 不读盘（进程内缓存仍可用）
+            None => match provider {
+                Some(p) => load_from_disk(p).await.map(Arc::new),
+                None => None,
+            },
         }
     };
 
@@ -557,8 +570,10 @@ async fn get_index(
 
     // 落盘与进缓存。落盘失败不影响本次结果（下次照旧走全量），但要说出来——
     // 否则"索引没落盘"会表现为每次冷启动都慢，且没有任何线索。
-    if let Err(e) = save_to_disk(workdir, &arc).await {
-        tracing::warn!("代码索引落盘失败（不影响本次检索）：{e}");
+    if let Some(p) = provider {
+        if let Err(e) = save_to_disk(p, &arc).await {
+            tracing::warn!("代码索引落盘失败（不影响本次检索）：{e}");
+        }
     }
     cache().lock().await.insert(key, Arc::clone(&arc));
     Some((arc, stats))
@@ -712,45 +727,57 @@ fn decode_index(buf: &[u8]) -> Option<CodeIndex> {
     Some(CodeIndex { files })
 }
 
-fn index_path(workdir: &Path) -> PathBuf {
-    workdir.join(INDEX_REL_PATH)
-}
-
-/// 从盘上读索引。任何异常（不存在 / 截断 / 版本不符）都只是"没有旧索引"，返回 `None`。
-async fn load_from_disk(workdir: &Path) -> Option<CodeIndex> {
-    let path = index_path(workdir);
-    let buf = tokio::fs::read(&path).await.ok()?;
+/// 从工作区作用域读索引（D-515）。
+///
+/// 任何异常（不存在 / 截断 / 版本不符）都只是"没有旧索引"，返回 `None`。
+/// 索引用 b64 载荷读写——它是二进制派生数据，不该借 provider 的文本通道。
+async fn load_from_disk(provider: &DynVdfsProvider) -> Option<CodeIndex> {
+    let vctx = VdfsContext::new(());
+    let content = provider
+        .dispatch(&vctx, INDEX_REL_PATH, VdfsRequest::Read)
+        .await
+        .ok()?
+        .into_read()?;
+    let buf = match content.b64 {
+        Some(b64) => base64::engine::general_purpose::STANDARD.decode(b64).ok()?,
+        None => content.text?.into_bytes(),
+    };
     match decode_index(&buf) {
         Some(idx) => {
             tracing::debug!(
-                "代码索引已从磁盘加载：{} 文件 / {} 块（{}）",
+                "代码索引已从工作区作用域加载：{} 文件 / {} 块（{}）",
                 idx.files.len(),
                 idx.chunk_count(),
-                path.display()
+                INDEX_REL_PATH
             );
             Some(idx)
         }
         None => {
-            tracing::info!("磁盘上的代码索引无法解析（版本不符或已损坏），将重建");
+            tracing::info!("工作区作用域里的代码索引无法解析（版本不符或已损坏），将重建");
             None
         }
     }
 }
 
-/// 把索引写到盘上。
+/// 把索引写到工作区作用域（D-515）。
 ///
-/// **先写临时文件再 `rename`**：`rename` 在同一卷上是原子的，因此读方看到的
-/// 要么是完整的新索引、要么是完整的旧索引，不会读到写了一半的文件
-/// （那种文件头是好的、块是缺的，靠魔数/版本根本发现不了）。
-async fn save_to_disk(workdir: &Path, idx: &CodeIndex) -> std::io::Result<()> {
-    let path = index_path(workdir);
-    if let Some(parent) = path.parent() {
-        tokio::fs::create_dir_all(parent).await?;
-    }
+/// 不再自己拼物理路径 + tmp/rename：provider 负责落位；索引是纯派生数据，
+/// 读到半截（魔数/版本不符）就丢弃重建，因此不需要原子 rename 那层保证。
+async fn save_to_disk(provider: &DynVdfsProvider, idx: &CodeIndex) -> Result<(), String> {
     let bytes = encode_index(idx);
-    let tmp = path.with_extension("bin.tmp");
-    tokio::fs::write(&tmp, &bytes).await?;
-    tokio::fs::rename(&tmp, &path).await
+    let b64 = base64::engine::general_purpose::STANDARD.encode(&bytes);
+    let vctx = VdfsContext::new(());
+    provider
+        .dispatch(
+            &vctx,
+            INDEX_REL_PATH,
+            VdfsRequest::Write {
+                content: VdfsContent::binary(b64, bytes.len() as u64),
+            },
+        )
+        .await
+        .map_err(|e| format!("写入代码索引失败：{e}"))?;
+    Ok(())
 }
 
 /// 对查询嵌入并与所有分块做余弦相似度排序，返回 top-k
@@ -935,7 +962,10 @@ impl CodebaseSearchTool {
                 "Empty workdir in context".to_string(),
             ));
         }
-        let data = self.execute_inner(&args, &workdir_str).await?;
+        let provider = ctx.get(WORKSPACE_VDFS).flatten();
+        let data = self
+            .execute_inner(&args, &workdir_str, provider.as_ref())
+            .await?;
         Ok(serde_json::to_value(&data)?)
     }
 }

@@ -4489,6 +4489,7 @@ name = "symbio-plugin-local"
 version = "0.1.14"
 dependencies = [
  "async-trait",
+ "base64 0.22.1",
  "bstr",
  "encoding_rs",
  "glob",
@@ -4832,6 +4833,7 @@ dependencies = [
 name = "symbio-provider-memory"
 version = "0.1.14"
 dependencies = [
+ "async-trait",
  "symbio-contract",
  "symbio-kernel",
  "symbio-sdk",

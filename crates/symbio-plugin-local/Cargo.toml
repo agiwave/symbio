@@ -14,6 +14,7 @@ dead_code = "warn"
 
 [dependencies]
 symbio-plugin-api = { path = "../symbio-plugin-api" }
+base64 = { workspace = true }
 # 本地检索读嵌入的降级原因（`embedding_unavailable_reason`），因此显式开嵌入臂（D-254）。
 symbio-providers = { path = "../symbio-providers", features = ["embedding"] }
 # `rc` feature：`PluginFrame::Data` 的载荷是 `Arc<Value>`（见 transport.rs 的说明），

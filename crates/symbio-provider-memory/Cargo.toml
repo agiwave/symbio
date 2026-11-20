@@ -24,3 +24,5 @@ tempfile = { workspace = true }
 tempfile = { workspace = true }
 # 测试用：tokio 时间控制（start_paused / advance）
 tokio = { workspace = true, features = ["test-util"] }
+# 测试用：实现一个最小 VdfsProvider（钉住 Vdfs 后端 NotFound → 空串的语义）
+async-trait = { workspace = true }

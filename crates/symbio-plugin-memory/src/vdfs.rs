@@ -73,25 +73,25 @@ const LABEL: &str = PLUGIN_TITLE;
 pub(crate) const AGENT_MEMORY_FIELD: &str = "agent_memory";
 
 /// 智能体记忆 → 节点（`list` 与 `stat` 共用同一份形状，两条链路不会分叉）
-fn agent_memory_node(store: &MemoryFile) -> VdfsNode {
-    store.node(&memory::node_spec())
+async fn agent_memory_node(store: &MemoryFile) -> VdfsNode {
+    store.node(&memory::node_spec()).await
 }
 
 /// 工作区记忆 → 节点（同上，节点名 = 挂载名 `WORKSPACE.md`）
-fn workspace_memory_node(store: &MemoryFile) -> VdfsNode {
-    store.node(&workspace::node_spec())
+async fn workspace_memory_node(store: &MemoryFile) -> VdfsNode {
+    store.node(&workspace::node_spec()).await
 }
 
 /// 会话记忆 → 节点（同上，节点名 = 挂载名 `SESSION.md`）
-fn session_memory_node(store: &MemoryFile) -> VdfsNode {
-    store.node(&session::node_spec())
+async fn session_memory_node(store: &MemoryFile) -> VdfsNode {
+    store.node(&session::node_spec()).await
 }
 
 impl MemoryPlugin {
-    /// 智能体记忆门面：作用域来自**装配位置**（本插件目录的父目录），与请求上下文
-    /// 无关——插件被构造出来这件事本身就意味着这一层记忆存在。
-    async fn agent_store(&self) -> MemoryFile {
-        self.store().await
+    /// 智能体记忆门面：作用域来自请求 ctx 的 `AGENT_VDFS` provider（D-515）。
+    async fn agent_store(&self, vctx: &VdfsContext) -> VdfsResult<MemoryFile> {
+        let host = vdfs_host_ctx(vctx)?;
+        Ok(self.store(&host).await)
     }
 
     /// 工作区记忆门面：作用域来自**请求上下文**（`ctx[WORKDIR]`，经宿主请求透传）。
@@ -121,7 +121,7 @@ impl VdfsProvider for MemoryPlugin {
         path: &str,
         req: VdfsRequest,
     ) -> VdfsResult<VdfsResponse> {
-        let agent = self.agent_store().await;
+        let agent = self.agent_store(ctx).await?;
         let ws = self.workspace_store(ctx).await?;
         let sess = self.session_store(ctx).await?;
         match req {
@@ -132,12 +132,12 @@ impl VdfsProvider for MemoryPlugin {
                     )));
                 }
                 // 智能体记忆恒在（装配作用域）；另两腿有作用域才列
-                let mut items = vec![agent_memory_node(&agent)];
+                let mut items = vec![agent_memory_node(&agent).await];
                 if ws.has_scope() {
-                    items.push(workspace_memory_node(&ws));
+                    items.push(workspace_memory_node(&ws).await);
                 }
                 if sess.has_scope() {
-                    items.push(session_memory_node(&sess));
+                    items.push(session_memory_node(&sess).await);
                 }
                 Ok(VdfsResponse::list(items))
             }
@@ -148,14 +148,14 @@ impl VdfsProvider for MemoryPlugin {
                     LABEL,
                     VdfsAccess::LIST_TRAVERSE,
                 ))),
-                MEMORY_FILE => Ok(VdfsResponse::Stat(agent_memory_node(&agent))),
+                MEMORY_FILE => Ok(VdfsResponse::Stat(agent_memory_node(&agent).await)),
                 WORKSPACE_FILE => {
                     if !ws.has_scope() {
                         return Err(VdfsError::not_found(format!(
                             "{WORKSPACE_LABEL}不可用：当前没有工作区"
                         )));
                     }
-                    Ok(VdfsResponse::Stat(workspace_memory_node(&ws)))
+                    Ok(VdfsResponse::Stat(workspace_memory_node(&ws).await))
                 }
                 SESSION_FILE => {
                     if !sess.has_scope() {
@@ -163,7 +163,7 @@ impl VdfsProvider for MemoryPlugin {
                             "{SESSION_LABEL}不可用：当前没有会话作用域"
                         )));
                     }
-                    Ok(VdfsResponse::Stat(session_memory_node(&sess)))
+                    Ok(VdfsResponse::Stat(session_memory_node(&sess).await))
                 }
                 // 配置文档按真实文件名可达（列表里不并列，见模块文档）
                 PLUGIN_FILE => Ok(VdfsResponse::Stat(self.config_file().node())),
@@ -171,15 +171,15 @@ impl VdfsProvider for MemoryPlugin {
             },
             VdfsRequest::Read => match path {
                 MEMORY_FILE => {
-                    let text = agent.read().map_err(VdfsError::internal)?;
+                    let text = agent.read().await.map_err(VdfsError::internal)?;
                     Ok(VdfsResponse::Read(VdfsContent::text(text)))
                 }
                 WORKSPACE_FILE => {
-                    let text = ws.read().map_err(VdfsError::internal)?;
+                    let text = ws.read().await.map_err(VdfsError::internal)?;
                     Ok(VdfsResponse::Read(VdfsContent::text(text)))
                 }
                 SESSION_FILE => {
-                    let text = sess.read().map_err(VdfsError::internal)?;
+                    let text = sess.read().await.map_err(VdfsError::internal)?;
                     Ok(VdfsResponse::Read(VdfsContent::text(text)))
                 }
                 // 配置文档的**设置页视图** = 配置模型 + 智能体记忆正文。正文从
@@ -190,7 +190,7 @@ impl VdfsProvider for MemoryPlugin {
                     let mut model: serde_json::Value = serde_json::from_str(text)
                         .map_err(|e| VdfsError::internal(format!("配置序列化结果不可解析：{e}")))?;
                     if let Some(obj) = model.as_object_mut() {
-                        let memory = agent.read().map_err(VdfsError::internal)?;
+                        let memory = agent.read().await.map_err(VdfsError::internal)?;
                         obj.insert(
                             AGENT_MEMORY_FIELD.to_string(),
                             serde_json::Value::String(memory),
@@ -210,9 +210,9 @@ impl VdfsProvider for MemoryPlugin {
                         return Err(VdfsError::invalid("智能体记忆是文本文件，不接受二进制内容"));
                     }
                     let text = content.text.as_deref().unwrap_or_default();
-                    let existed = agent.exists();
+                    let existed = agent.exists().await;
                     // 容量闸门在共享实现里（`MemoryFile::write`）——本插件不重复实现
-                    agent.write(text).map_err(VdfsError::invalid)?;
+                    agent.write(text).await.map_err(VdfsError::invalid)?;
                     vdfs_notify_change(PLUGIN_ID_MEMORY, MEMORY_FILE);
                     Ok(VdfsResponse::Write(VdfsWriteResponse {
                         name: None,
@@ -224,9 +224,9 @@ impl VdfsProvider for MemoryPlugin {
                         return Err(VdfsError::invalid("工作区记忆是文本文件，不接受二进制内容"));
                     }
                     let text = content.text.as_deref().unwrap_or_default();
-                    let existed = ws.exists();
+                    let existed = ws.exists().await;
                     // 容量闸门在共享实现里（`MemoryFile::write`）——本插件不重复实现
-                    ws.write(text).map_err(VdfsError::invalid)?;
+                    ws.write(text).await.map_err(VdfsError::invalid)?;
                     vdfs_notify_change(PLUGIN_ID_MEMORY, WORKSPACE_FILE);
                     Ok(VdfsResponse::Write(VdfsWriteResponse {
                         name: None,
@@ -238,9 +238,9 @@ impl VdfsProvider for MemoryPlugin {
                         return Err(VdfsError::invalid("会话记忆是文本文件，不接受二进制内容"));
                     }
                     let text = content.text.as_deref().unwrap_or_default();
-                    let existed = sess.exists();
+                    let existed = sess.exists().await;
                     // 容量闸门在共享实现里（`MemoryFile::write`）——本插件不重复实现
-                    sess.write(text).map_err(VdfsError::invalid)?;
+                    sess.write(text).await.map_err(VdfsError::invalid)?;
                     vdfs_notify_change(PLUGIN_ID_MEMORY, SESSION_FILE);
                     Ok(VdfsResponse::Write(VdfsWriteResponse {
                         name: None,
@@ -275,7 +275,7 @@ impl VdfsProvider for MemoryPlugin {
                         let Some(text) = v.as_str() else {
                             return Err(VdfsError::invalid("智能体记忆必须是字符串"));
                         };
-                        agent.write(text).map_err(VdfsError::invalid)?;
+                        agent.write(text).await.map_err(VdfsError::invalid)?;
                         vdfs_notify_change(PLUGIN_ID_MEMORY, MEMORY_FILE);
                     }
                     Ok(VdfsResponse::Write(

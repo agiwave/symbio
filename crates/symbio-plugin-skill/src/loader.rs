@@ -1,7 +1,7 @@
 use crate::types::Skill;
 use regex::Regex;
 use std::path::{Path, PathBuf};
-use symbio_plugin_api::PluginError;
+use symbio_plugin_api::{DynVdfsProvider, PluginError, VdfsContext, VdfsRequest};
 use tokio::fs;
 use tracing::{debug, warn};
 
@@ -76,23 +76,30 @@ pub async fn load_skills_from_dirs_with_budget(
         };
 
         if abs_dir.exists() && abs_dir.is_dir() {
-            // 名称去重 + 冲突检测（后到优先）
-            for skill in load_skills_from_dir(&abs_dir, budget).await? {
-                if merged.iter().any(|s| s.name == skill.name) {
-                    warn!(
-                        skill = %skill.name,
-                        file = %skill.file_path,
-                        "skill 名称重复（后加载的覆盖之前的同名 skill）"
-                    );
-                    // 移除之前的同名 skill
-                    merged.retain(|s| s.name != skill.name);
-                }
-                merged.push(skill);
-            }
+            merge_skills(&mut merged, load_skills_from_dir(&abs_dir, budget).await?);
         }
     }
 
-    // 预算裁剪：作用在合并后的集合上，一次判完
+    Ok(cap_skills(merged, budget))
+}
+
+/// 名称去重 + 冲突检测（后到优先）——物理加载与作用域加载共用同一口径。
+pub fn merge_skills(merged: &mut Vec<Skill>, incoming: Vec<Skill>) {
+    for skill in incoming {
+        if merged.iter().any(|s| s.name == skill.name) {
+            warn!(
+                skill = %skill.name,
+                file = %skill.file_path,
+                "skill 名称重复（后加载的覆盖之前的同名 skill）"
+            );
+            merged.retain(|s| s.name != skill.name);
+        }
+        merged.push(skill);
+    }
+}
+
+/// 预算裁剪：作用在**合并后的集合**上，一次判完（不能逐源扣名额）。
+pub fn cap_skills(mut merged: Vec<Skill>, budget: LoadBudget) -> Vec<Skill> {
     if merged.len() > budget.max_skills {
         warn!(
             merged = merged.len(),
@@ -101,8 +108,46 @@ pub async fn load_skills_from_dirs_with_budget(
         );
         merged.truncate(budget.max_skills);
     }
+    merged
+}
 
-    Ok(merged)
+/// 从作用域 VDFS 加载一个技能目录（D-515）。
+///
+/// `rel_root` 是 provider 根下的相对地址（如 `skill` / `skills` / `.symbio/skills`）。
+/// 目录不存在 = 这里没有技能（正常降级，不是错误）；读取失败的单条 SKILL.md
+/// 记 warn 后跳过，与物理加载同一容错口径。技能地址用相对地址——它既是 provider
+/// 的寻址键，也是印给模型的取回入口，不再暴露物理路径。
+pub async fn load_skills_from_scope(
+    provider: &DynVdfsProvider,
+    rel_root: &str,
+    budget: LoadBudget,
+) -> Result<Vec<Skill>, PluginError> {
+    let vctx = VdfsContext::new(());
+    let root = rel_root.trim_end_matches('/');
+    let Ok(resp) = provider.dispatch(&vctx, root, VdfsRequest::List {}).await else {
+        return Ok(Vec::new());
+    };
+    let Some(items) = resp.into_list() else {
+        return Ok(Vec::new());
+    };
+    let mut skills = Vec::new();
+    for item in items {
+        if !item.node.is_dir() || item.node.name.starts_with('.') {
+            continue; // 隐藏目录（.git / .symbio / .vscode…）不当技能
+        }
+        let rel = format!("{root}/{}/SKILL.md", item.node.name);
+        let Ok(resp) = provider.dispatch(&vctx, &rel, VdfsRequest::Read).await else {
+            continue;
+        };
+        let Some(content) = resp.into_read().and_then(|c| c.text) else {
+            continue;
+        };
+        match parse_skill_text(&rel, &content, budget.max_body_chars) {
+            Ok(skill) => skills.push(skill),
+            Err(e) => warn!(skill = %rel, error = %e, "SKILL.md 解析失败，跳过"),
+        }
+    }
+    Ok(skills)
 }
 
 async fn load_skills_from_dir(dir: &Path, budget: LoadBudget) -> Result<Vec<Skill>, PluginError> {
@@ -129,11 +174,21 @@ async fn load_skills_from_dir(dir: &Path, budget: LoadBudget) -> Result<Vec<Skil
             }
             let manifest_path = path.join("SKILL.md");
             if manifest_path.exists() {
-                match parse_skill_file(&manifest_path, budget.max_body_chars).await {
-                    Ok(skill) => skills.push(skill),
+                match fs::read_to_string(&manifest_path).await {
+                    Ok(raw) => {
+                        match parse_skill_text(
+                            &manifest_path.to_string_lossy(),
+                            &raw,
+                            budget.max_body_chars,
+                        ) {
+                            Ok(skill) => skills.push(skill),
+                            Err(e) => {
+                                warn!(skill = %path.display(), error = %e, "SKILL.md 解析失败，跳过");
+                            }
+                        }
+                    }
                     Err(e) => {
-                        // 单个 SKILL.md 解析失败不阻断整体加载，但记录 warn
-                        warn!(skill = %path.display(), error = %e, "SKILL.md 解析失败，跳过");
+                        warn!(skill = %path.display(), error = %e, "SKILL.md 读取失败，跳过");
                     }
                 }
             }
@@ -142,13 +197,17 @@ async fn load_skills_from_dir(dir: &Path, budget: LoadBudget) -> Result<Vec<Skil
     Ok(skills)
 }
 
-async fn parse_skill_file(path: &Path, max_body_chars: usize) -> Result<Skill, PluginError> {
-    let content = fs::read_to_string(path)
-        .await
-        .map_err(|e| PluginError::InternalError(e.to_string()))?;
-
+/// 解析一份 SKILL.md 正文（物理加载 / 作用域加载共用的纯函数）。
+///
+/// `display_path` 只用于报错与 `Skill.file_path`：物理加载传物理路径，
+/// 作用域加载传相对地址（provider 寻址键 = 模型取回入口）。
+fn parse_skill_text(
+    display_path: &str,
+    raw: &str,
+    max_body_chars: usize,
+) -> Result<Skill, PluginError> {
     // Normalize line endings
-    let content = content.replace("\r\n", "\n");
+    let content = raw.replace("\r\n", "\n");
 
     // Regex to split frontmatter and body
     static RE: std::sync::LazyLock<Regex> =
@@ -173,7 +232,7 @@ async fn parse_skill_file(path: &Path, max_body_chars: usize) -> Result<Skill, P
     let body_char_count = body_raw.chars().count();
     let body = if body_char_count > max_body_chars {
         warn!(
-            skill = %path.display(),
+            skill = %display_path,
             chars = body_char_count,
             max = max_body_chars,
             "SKILL.md body 超出 max_body_chars，已截断"
@@ -227,7 +286,7 @@ async fn parse_skill_file(path: &Path, max_body_chars: usize) -> Result<Skill, P
     // BUG-SR6：行业硬约束——SKILL.md 所在目录名必须 == frontmatter `name`
     // 否则视为配置错误（避免 skill 路由混乱）。
     // 取 path 的 parent dir 名字（basename），与 name 严格比较。
-    if let Some(parent) = path.parent() {
+    if let Some(parent) = Path::new(display_path).parent() {
         if let Some(dir_name_os) = parent.file_name() {
             let dir_name = dir_name_os.to_string_lossy();
             if dir_name != name {
@@ -274,7 +333,7 @@ async fn parse_skill_file(path: &Path, max_body_chars: usize) -> Result<Skill, P
         when_to_use,
         model,
         disable_model_invocation,
-        file_path: path.to_string_lossy().to_string(),
+        file_path: display_path.to_string(),
     })
 }
 
@@ -286,4 +345,4 @@ mod tests;
 // 本文件每一处 `unwrap` / `expect` / `panic!` / `unreachable!` 的理由。登记放在
 // 文件内而不是集中一张表：理由与它解释的那段代码会一起被 review、一起被删。
 // 判据见 `scripts/audits/panic-audit.mjs`。**加一处 panic 必须同时加一行登记，理由非空。**
-// panic-allow crates/symbio-plugin-skill/src/loader.rs::parse_skill_file: 编译期常量正则，模式写错在首次调用即崩——属开发期事故，不是运行期输入。
+// panic-allow crates/symbio-plugin-skill/src/loader.rs::parse_skill_text: 编译期常量正则，模式写错在首次调用即崩——属开发期事故，不是运行期输入。

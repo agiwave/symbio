@@ -97,7 +97,10 @@
 //! 名字也不是「配置」：宿主不解析内容，只做三件事——**注入**、**限容**、**给地址**。
 
 use std::path::{Path, PathBuf};
-use symbio_kernel::vdfs::{VdfsAccess, VdfsNode};
+use symbio_kernel::vdfs::{
+    DynVdfsProvider, VdfsAccess, VdfsContent, VdfsContext, VdfsError, VdfsNode, VdfsRequest,
+    VdfsResponse,
+};
 
 /// 注入用正文的产物 —— 「按预算截断」这一步的全部信息。
 ///
@@ -170,39 +173,79 @@ pub struct MemoryNodeSpec<'a> {
 /// `path = None` 表示**该作用域不存在**（没选工作区 / 没选智能体）——这不是错误，
 /// 是「这层记忆此刻不适用」。所有方法据此降级：读 → 空串，注入 → `None`，
 /// 写 → 明确报错。作用域判断因此不需要在每个调用点重复一遍。
-#[derive(Debug, Clone)]
+/// 记忆文件的存储后端（D-515）：`File` 是兼容形态（测试 / 老调用），
+/// `Vdfs` 是生产形态——经作用域 provider 读写，**插件不再拼物理路径**。
+#[derive(Clone)]
+enum MemoryBackend {
+    File(PathBuf),
+    Vdfs {
+        provider: DynVdfsProvider,
+        /// 相对地址（如 `AGENTS.md` / `MEMORY.md`），不含物理目录。
+        rel: String,
+    },
+}
+
+#[derive(Clone)]
 pub struct MemoryFile {
-    path: Option<PathBuf>,
+    backend: Option<MemoryBackend>,
     write_max_bytes: usize,
     inject_max_bytes: usize,
 }
 
 impl MemoryFile {
-    /// 由落位与两道闸门构造（`path = None` = 作用域不存在）
+    /// 由落位与两道闸门构造（`path = None` = 作用域不存在）。
+    ///
+    /// **兼容形态**：生产路径改用 [`MemoryFile::via`]；本构造仍供测试与
+    /// 「落位规则」用例断言文件落在哪。
     pub fn new(path: Option<PathBuf>, write_max_bytes: usize, inject_max_bytes: usize) -> Self {
         Self {
-            path,
+            backend: path.map(MemoryBackend::File),
             write_max_bytes,
             inject_max_bytes,
         }
     }
 
-    /// 作用域不存在时的构造（无工作区 / 无智能体）
+    /// 由作用域 provider + 相对地址构造（D-515 生产形态）。
+    /// `provider = None` = 作用域不存在（没选工作区 / 无会话）。
+    pub fn via(
+        provider: Option<DynVdfsProvider>,
+        rel: impl Into<String>,
+        write_max_bytes: usize,
+        inject_max_bytes: usize,
+    ) -> Self {
+        Self {
+            backend: provider.map(|provider| MemoryBackend::Vdfs {
+                provider,
+                rel: rel.into(),
+            }),
+            write_max_bytes,
+            inject_max_bytes,
+        }
+    }
+
+    /// 作用域不存在时的构造（无工作区 / 无智能体 / 无会话）
     pub fn absent(write_max_bytes: usize, inject_max_bytes: usize) -> Self {
-        Self::new(None, write_max_bytes, inject_max_bytes)
+        Self {
+            backend: None,
+            write_max_bytes,
+            inject_max_bytes,
+        }
     }
 
     /// 作用域是否存在（无作用域 = 这层记忆的一切读写都无从谈起）
     pub fn has_scope(&self) -> bool {
-        self.path.is_some()
+        self.backend.is_some()
     }
 
     /// 记忆文件路径（无作用域 → `None`）。
     ///
-    /// **仅测试**：生产路径不需要它——落位由构造方决定，读写由本类型自己完成。
-    /// 三个插件的「落位」用例要断言「文件落在哪」，那是**插件个性**的测试接缝。
+    /// **仅测试**：生产路径（Vdfs 后端）没有物理路径，落位由 provider 持有；
+    /// 这里只对 `File` 兼容形态返回，供「落位」用例断言。
     pub fn path(&self) -> Option<&Path> {
-        self.path.as_deref()
+        match self.backend.as_ref() {
+            Some(MemoryBackend::File(p)) => Some(p.as_path()),
+            _ => None,
+        }
     }
 
     /// 文件名 —— 节点名从这里来（**地址用真实文件名**，不另传一份字面量）。
@@ -210,10 +253,13 @@ impl MemoryFile {
     /// 无作用域 → `None`：没有文件，就没有名字。本模块**没有**兜底文件名
     /// （叫什么由各层自己定，见模块文档），所以这里如实返回 `None`。
     pub fn file_name(&self) -> Option<&str> {
-        self.path
-            .as_deref()
-            .and_then(Path::file_name)
-            .and_then(|s| s.to_str())
+        match self.backend.as_ref() {
+            Some(MemoryBackend::File(p)) => p.file_name().and_then(|s| s.to_str()),
+            Some(MemoryBackend::Vdfs { rel, .. }) => {
+                Path::new(rel).file_name().and_then(|s| s.to_str())
+            }
+            None => None,
+        }
     }
 
     /// 写入闸门取值。
@@ -230,66 +276,115 @@ impl MemoryFile {
     }
 
     /// 记忆文件是否已存在
-    pub fn exists(&self) -> bool {
-        self.path.as_ref().is_some_and(|p| p.is_file())
+    pub async fn exists(&self) -> bool {
+        match self.backend.as_ref() {
+            Some(MemoryBackend::File(p)) => p.is_file(),
+            Some(MemoryBackend::Vdfs { provider, rel }) => stat_vdfs(provider, rel).await.is_ok(),
+            None => false,
+        }
     }
 
     /// 记忆文件字节数（不存在 / 无作用域 → 0）
-    pub fn size(&self) -> u64 {
-        self.path
-            .as_ref()
-            .and_then(|p| std::fs::metadata(p).ok())
-            .map(|m| m.len())
-            .unwrap_or(0)
+    pub async fn size(&self) -> u64 {
+        match self.backend.as_ref() {
+            Some(MemoryBackend::File(p)) => std::fs::metadata(p).ok().map(|m| m.len()).unwrap_or(0),
+            Some(MemoryBackend::Vdfs { provider, rel }) => stat_vdfs(provider, rel)
+                .await
+                .ok()
+                .and_then(|n| n.size)
+                .unwrap_or(0),
+            None => 0,
+        }
     }
 
     /// 最后修改时间（Unix 秒；取不到 → `None`）
-    pub fn updated_at(&self) -> Option<i64> {
-        self.path
-            .as_ref()
-            .and_then(|p| std::fs::metadata(p).ok())
-            .and_then(|m| m.modified().ok())
-            .and_then(|t| t.duration_since(std::time::UNIX_EPOCH).ok())
-            .map(|d| d.as_secs() as i64)
+    pub async fn updated_at(&self) -> Option<i64> {
+        match self.backend.as_ref() {
+            Some(MemoryBackend::File(p)) => std::fs::metadata(p)
+                .ok()
+                .and_then(|m| m.modified().ok())
+                .and_then(|t| t.duration_since(std::time::UNIX_EPOCH).ok())
+                .map(|d| d.as_secs() as i64),
+            Some(MemoryBackend::Vdfs { provider, rel }) => stat_vdfs(provider, rel)
+                .await
+                .ok()
+                .and_then(|n| n.updated_at),
+            None => None,
+        }
     }
 
     /// 读记忆全文。
     ///
     /// 文件不存在 → **空串**（不是错误）：记忆是「可以还没有」的东西，把它当错误
     /// 会让每一次「首次读取」都变成异常路径。无作用域 → 明确报错。
-    pub fn read(&self) -> Result<String, String> {
-        let Some(path) = self.path.as_ref() else {
-            return Err("当前作用域没有记忆文件".to_string());
-        };
-        match std::fs::read_to_string(path) {
-            Ok(text) => Ok(text),
-            Err(e) if e.kind() == std::io::ErrorKind::NotFound => Ok(String::new()),
-            Err(e) => Err(format!("读取记忆失败（{}）：{e}", path.display())),
+    pub async fn read(&self) -> Result<String, String> {
+        match self.backend.as_ref() {
+            Some(MemoryBackend::File(p)) => match std::fs::read_to_string(p) {
+                Ok(text) => Ok(text),
+                Err(e) if e.kind() == std::io::ErrorKind::NotFound => Ok(String::new()),
+                Err(e) => Err(format!("读取记忆失败（{}）：{e}", p.display())),
+            },
+            Some(MemoryBackend::Vdfs { provider, rel }) => {
+                let vctx = VdfsContext::new(());
+                match provider.dispatch(&vctx, rel, VdfsRequest::Read).await {
+                    Ok(resp) => Ok(resp.into_read().and_then(|c| c.text).unwrap_or_default()),
+                    // 「还没写过」不是故障：provider 报节点不存在 ⇒ 空串，
+                    // 与 File 后端的 NotFound → Ok("") 完全同一口径。否则每一次
+                    // 首次读取都会进收集期错误桶，工作区腿的空内容提示也永远出不来。
+                    Err(VdfsError::NotFound(_)) => Ok(String::new()),
+                    Err(e) => Err(format!("读取记忆失败：{e}")),
+                }
+            }
+            None => Err("当前作用域没有记忆文件".to_string()),
         }
     }
 
-    /// 写记忆全文（父目录自动创建）。
+    /// 写记忆全文（Vdfs 后端的父目录由 provider 自动创建）。
     ///
     /// **容量闸门**：`write_max_bytes` 是硬限制，超出**直接拒绝**（见模块文档：
     /// 不截断、不部分写入——被拒绝的写入不得留下半截内容）。
-    pub fn write(&self, text: &str) -> Result<(), String> {
-        let Some(path) = self.path.as_ref() else {
+    pub async fn write(&self, text: &str) -> Result<(), String> {
+        // 无作用域直接拒写，与 read/inject 的降级同一口径；用 `let Some` 收口，
+        // 后面的 match 只剩两种真实后端，无需不可达兜底（不引入 panic 面）。
+        let Some(backend) = self.backend.as_ref() else {
             return Err("当前作用域没有记忆文件，不可写".to_string());
+        };
+        let label = match backend {
+            MemoryBackend::File(p) => p.display().to_string(),
+            MemoryBackend::Vdfs { rel, .. } => rel.clone(),
         };
         if text.len() > self.write_max_bytes {
             return Err(format!(
                 "记忆超出容量上限（{}）：当前 {} 字节，上限 {} 字节。\
                  请精简后再写入（可先读取现有内容，合并改写而不是整篇重写）。",
-                path.display(),
+                label,
                 text.len(),
                 self.write_max_bytes
             ));
         }
-        if let Some(parent) = path.parent() {
-            std::fs::create_dir_all(parent)
-                .map_err(|e| format!("创建记忆目录失败（{}）：{e}", parent.display()))?;
+        match backend {
+            MemoryBackend::File(p) => {
+                if let Some(parent) = p.parent() {
+                    std::fs::create_dir_all(parent)
+                        .map_err(|e| format!("创建记忆目录失败（{}）：{e}", parent.display()))?;
+                }
+                std::fs::write(p, text).map_err(|e| format!("写入记忆失败（{}）：{e}", p.display()))
+            }
+            MemoryBackend::Vdfs { provider, rel } => {
+                let vctx = VdfsContext::new(());
+                provider
+                    .dispatch(
+                        &vctx,
+                        rel,
+                        VdfsRequest::Write {
+                            content: VdfsContent::text(text),
+                        },
+                    )
+                    .await
+                    .map_err(|e| format!("写入记忆失败：{e}"))?;
+                Ok(())
+            }
         }
-        std::fs::write(path, text).map_err(|e| format!("写入记忆失败（{}）：{e}", path.display()))
     }
 
     /// 注入产物：按 `inject_max_bytes` 截断。无作用域 → `None`。
@@ -297,17 +392,17 @@ impl MemoryFile {
     /// `total_bytes` 取**读到的全文长度**而不是文件 metadata：与写入闸门同一把尺子
     /// （`write` 也是比 `text.len()`）。头信息里的「当前」因此就是「离被拒还有多远」，
     /// 不会出现「显示 8000 字节、再写一点就被拒」的错位。
-    pub fn inject(&self) -> Result<Option<MemoryInjection>, String> {
+    pub async fn inject(&self) -> Result<Option<MemoryInjection>, String> {
         if !self.has_scope() {
             return Ok(None);
         }
-        let text = self.read()?;
+        let text = self.read().await?;
         Ok(Some(MemoryInjection::cut(&text, self.inject_max_bytes)))
     }
 
     /// 注入产物 → 提示词片段（无作用域 → `None`，即「这层不注入」）
-    pub fn segment(&self, spec: &MemorySegmentSpec) -> Result<Option<String>, String> {
-        let Some(body) = self.inject()? else {
+    pub async fn segment(&self, spec: &MemorySegmentSpec<'_>) -> Result<Option<String>, String> {
+        let Some(body) = self.inject().await? else {
             return Ok(None);
         };
         Ok(Some(memory_render_segment(
@@ -323,10 +418,7 @@ impl MemoryFile {
     /// 无作用域没有文件，也就没有名字。三个插件的调用点都在 `has_scope()` 之后——
     /// 这里对无作用域退回空名，与 `instruction::host_dir` 对「取不到父目录」的处理
     /// 同一口径：理论上不该发生，但降级比 panic 好。
-    ///
-    /// `file_name`
-    pub fn node(&self, spec: &MemoryNodeSpec) -> VdfsNode {
-        // 节点名：规格给了覆盖就用覆盖（挂载名），否则用真实文件名
+    pub async fn node(&self, spec: &MemoryNodeSpec<'_>) -> VdfsNode {
         let name = spec
             .name
             .map(String::from)
@@ -334,10 +426,23 @@ impl MemoryFile {
             .unwrap_or_default();
         let mut n = VdfsNode::file(name, spec.title, VdfsAccess::READ_WRITE);
         n.kind = spec.kind.to_string();
-        n.size = Some(self.size());
-        n.updated_at = self.updated_at();
+        n.size = Some(self.size().await);
+        n.updated_at = self.updated_at().await;
         n.description = Some(spec.description.to_string());
         n
+    }
+}
+
+/// 经 provider 取节点元数据（`exists` / `size` / `updated_at` / `node` 共用）。
+async fn stat_vdfs(provider: &DynVdfsProvider, rel: &str) -> Result<VdfsNode, String> {
+    let vctx = VdfsContext::new(());
+    let resp = provider
+        .dispatch(&vctx, rel, VdfsRequest::Stat)
+        .await
+        .map_err(|e| format!("读取记忆元数据失败：{e}"))?;
+    match resp {
+        VdfsResponse::Stat(node) => Ok(node),
+        _ => Err("provider 未返回 Stat 节点".to_string()),
     }
 }
 

@@ -21,7 +21,7 @@ use symbio_plugin_api::PLUGIN_ID_AGENT;
 use symbio_plugin_api::{
     capability_prompts, family, CapabilityMeta, Plugin, PluginDir, PluginInvokeRequest,
     PluginInvokeRequestExt, PluginSimpleRequest, Registry, AGENT_ID, CAPABILITY_VISITOR, PATH,
-    TRAVERSE_AVAILABLE_TOOLS, VDFS_PARENT_ADDR, WORKDIR,
+    TRAVERSE_AVAILABLE_TOOLS, VDFS_PARENT_ADDR, WORKDIR, WORKSPACE_VDFS,
 };
 use symbio_plugin_api::{vdfs_context, VdfsProvider};
 use symbio_providers::DefaultToolVisitor;
@@ -660,6 +660,11 @@ async fn sub_agent_mount_crossing_is_uniform_across_operations() {
     // 持有的目录决定，不由请求方喂。请求方塞一个进来，测的就不是生产形状了。
     ctx.set(AGENT_ID, "reviewer".to_string());
     ctx.set(WORKDIR, tmp.path().to_string_lossy().to_string());
+    // D-515：模拟宿主在会话 ctx 注入工作区 provider——子树 memory 的工作区腿
+    // 经它读写 `{workdir}/AGENTS.md`（读的是父会话工作区，不落进智能体包）。
+    let ws_provider: symbio_plugin_api::DynVdfsProvider =
+        Arc::new(symbio_providers::ScopeDirVdfs::at(tmp.path().to_path_buf()));
+    ctx.set(WORKSPACE_VDFS, Some(ws_provider));
     let vctx = vdfs_context(&ctx);
 
     // 物理陷阱（= 绕过挂载点时会写进去的那个路径）：子树里**不存在** `memory/`

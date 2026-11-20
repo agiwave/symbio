@@ -3,6 +3,7 @@
 //! 与实现**同级**分文件（约定：`X.rs` + `X.test.rs`）。
 
 use super::*;
+use std::path::Path;
 use std::sync::Arc;
 use symbio_plugin_api::vdfs_context;
 use symbio_plugin_api::{
@@ -19,18 +20,20 @@ fn plugin_in(host: &std::path::Path) -> MemoryPlugin {
 }
 
 /// 构造 VDFS 调用上下文；`workdir` 为 `None` 即「没有工作区」
-fn vctx(workdir: Option<&str>) -> VdfsContext {
+fn vctx(workdir: Option<&str>, agent_dir: Option<&Path>) -> VdfsContext {
     let ctx: Arc<dyn PluginInvokeRequest> = Arc::new(PluginSimpleRequest::new(None, None));
     if let Some(w) = workdir {
         ctx.set(WORKDIR, w.to_string());
     }
+    symbio_providers::attach_scope_providers(&*ctx, agent_dir, workdir.map(Path::new), None);
     vdfs_context(&ctx)
 }
 
 /// 构造同时带会话目录的 VDFS 调用上下文（D-513）
-fn vctx_with_session(session_dir: &str) -> VdfsContext {
+fn vctx_with_session(session_dir: &str, agent_dir: Option<&Path>) -> VdfsContext {
     let ctx: Arc<dyn PluginInvokeRequest> = Arc::new(PluginSimpleRequest::new(None, None));
     ctx.set(SESSION_DIR, session_dir.to_string());
+    symbio_providers::attach_scope_providers(&*ctx, agent_dir, None, Some(Path::new(session_dir)));
     vdfs_context(&ctx)
 }
 
@@ -41,7 +44,7 @@ async fn root_node_leaves_its_name_to_the_caller() {
     let tmp = TempDir::new().unwrap();
     let p = plugin_in(tmp.path());
     let root = p
-        .dispatch(&vctx(None), "", VdfsRequest::Stat)
+        .dispatch(&vctx(None, Some(tmp.path())), "", VdfsRequest::Stat)
         .await
         .unwrap()
         .into_stat()
@@ -61,7 +64,7 @@ async fn root_lists_both_memory_files() {
 
     // 没选工作区：只有智能体记忆
     let nodes = p
-        .dispatch(&vctx(None), "", VdfsRequest::List {})
+        .dispatch(&vctx(None, Some(tmp.path())), "", VdfsRequest::List {})
         .await
         .unwrap()
         .into_list()
@@ -73,7 +76,7 @@ async fn root_lists_both_memory_files() {
     // 选了工作区：两份都在
     let nodes = p
         .dispatch(
-            &vctx(Some(ws.path().to_string_lossy().as_ref())),
+            &vctx(Some(ws.path().to_string_lossy().as_ref()), Some(tmp.path())),
             "",
             VdfsRequest::List {},
         )
@@ -106,7 +109,7 @@ async fn root_lists_session_memory_when_scope_is_supplied() {
 
     let nodes = p
         .dispatch(
-            &vctx_with_session(sess.path().to_string_lossy().as_ref()),
+            &vctx_with_session(sess.path().to_string_lossy().as_ref(), Some(tmp.path())),
             "",
             VdfsRequest::List {},
         )
@@ -127,7 +130,7 @@ async fn session_memory_uses_mount_name_and_physical_session_file() {
     let p = plugin_in(tmp.path());
 
     p.dispatch(
-        &vctx_with_session(sess.path().to_string_lossy().as_ref()),
+        &vctx_with_session(sess.path().to_string_lossy().as_ref(), Some(tmp.path())),
         SESSION_FILE,
         VdfsRequest::Write {
             content: VdfsContent::text("本会话私有。"),
@@ -142,7 +145,7 @@ async fn session_memory_uses_mount_name_and_physical_session_file() {
     );
     let text = p
         .dispatch(
-            &vctx_with_session(sess.path().to_string_lossy().as_ref()),
+            &vctx_with_session(sess.path().to_string_lossy().as_ref(), Some(tmp.path())),
             SESSION_FILE,
             VdfsRequest::Read,
         )
@@ -161,11 +164,19 @@ async fn workspace_without_workdir_is_absent() {
     let tmp = TempDir::new().unwrap();
     let p = plugin_in(tmp.path());
     let stat = p
-        .dispatch(&vctx(None), workspace::MOUNT_FILE, VdfsRequest::Stat)
+        .dispatch(
+            &vctx(None, Some(tmp.path())),
+            workspace::MOUNT_FILE,
+            VdfsRequest::Stat,
+        )
         .await;
     assert!(stat.is_err(), "没有工作区 → stat 如实 NotFound");
     let read = p
-        .dispatch(&vctx(None), workspace::MOUNT_FILE, VdfsRequest::Read)
+        .dispatch(
+            &vctx(None, Some(tmp.path())),
+            workspace::MOUNT_FILE,
+            VdfsRequest::Read,
+        )
         .await;
     assert!(read.is_err(), "没有工作区 → read 无从谈起");
 }
@@ -176,7 +187,7 @@ async fn no_subdirectories_under_the_root() {
     let tmp = TempDir::new().unwrap();
     let p = plugin_in(tmp.path());
     let err = p
-        .dispatch(&vctx(None), "sub", VdfsRequest::List {})
+        .dispatch(&vctx(None, Some(tmp.path())), "sub", VdfsRequest::List {})
         .await
         .unwrap_err();
     assert!(format!("{err:?}").contains("没有子目录"), "{err:?}");
@@ -189,7 +200,11 @@ async fn memory_file_is_readable_and_writable() {
 
     // 还没写过 → 空串（不是错误）
     let text = p
-        .dispatch(&vctx(None), MEMORY_FILE, VdfsRequest::Read)
+        .dispatch(
+            &vctx(None, Some(tmp.path())),
+            MEMORY_FILE,
+            VdfsRequest::Read,
+        )
         .await
         .unwrap()
         .into_read()
@@ -200,7 +215,7 @@ async fn memory_file_is_readable_and_writable() {
 
     let resp = p
         .dispatch(
-            &vctx(None),
+            &vctx(None, Some(tmp.path())),
             MEMORY_FILE,
             VdfsRequest::Write {
                 content: VdfsContent::text("只改必要之处"),
@@ -225,7 +240,7 @@ async fn workspace_file_roundtrips_to_the_physical_agents_file() {
     let tmp = TempDir::new().unwrap();
     let ws = TempDir::new().unwrap();
     let p = plugin_in(tmp.path());
-    let c = vctx(Some(ws.path().to_string_lossy().as_ref()));
+    let c = vctx(Some(ws.path().to_string_lossy().as_ref()), Some(tmp.path()));
 
     let first = p
         .dispatch(
@@ -289,7 +304,7 @@ async fn writes_over_the_limit_are_rejected_for_both_scopes() {
         symbio_plugin_api::PluginDir::at(tmp.path().join(PLUGIN_ID_MEMORY), PLUGIN_ID_MEMORY),
         cfg,
     );
-    let c = vctx(Some(ws.path().to_string_lossy().as_ref()));
+    let c = vctx(Some(ws.path().to_string_lossy().as_ref()), Some(tmp.path()));
 
     for (path, label) in [(MEMORY_FILE, "智能体"), (workspace::MOUNT_FILE, "工作区")] {
         let err = p
@@ -315,7 +330,7 @@ async fn binary_writes_are_rejected_for_both_scopes() {
     let tmp = TempDir::new().unwrap();
     let ws = TempDir::new().unwrap();
     let p = plugin_in(tmp.path());
-    let c = vctx(Some(ws.path().to_string_lossy().as_ref()));
+    let c = vctx(Some(ws.path().to_string_lossy().as_ref()), Some(tmp.path()));
     for path in [MEMORY_FILE, workspace::MOUNT_FILE] {
         let err = p
             .dispatch(
@@ -340,7 +355,7 @@ async fn memory_cannot_be_deleted() {
     let tmp = TempDir::new().unwrap();
     let ws = TempDir::new().unwrap();
     let p = plugin_in(tmp.path());
-    let c = vctx(Some(ws.path().to_string_lossy().as_ref()));
+    let c = vctx(Some(ws.path().to_string_lossy().as_ref()), Some(tmp.path()));
 
     for path in [MEMORY_FILE, workspace::MOUNT_FILE] {
         let err = p
@@ -366,7 +381,11 @@ async fn config_document_is_reachable_by_its_real_name() {
     let tmp = TempDir::new().unwrap();
     let p = plugin_in(tmp.path());
     let node = p
-        .dispatch(&vctx(None), PLUGIN_FILE, VdfsRequest::Stat)
+        .dispatch(
+            &vctx(None, Some(tmp.path())),
+            PLUGIN_FILE,
+            VdfsRequest::Stat,
+        )
         .await
         .unwrap()
         .into_stat()
@@ -388,7 +407,7 @@ async fn config_write_leaves_memory_and_disk_in_agreement() {
     let p = plugin_in(tmp.path());
 
     p.dispatch(
-        &vctx(None),
+        &vctx(None, Some(tmp.path())),
         PLUGIN_FILE,
         VdfsRequest::Write {
             content: VdfsContent::text(r#"{"workspace_enabled": false, "memory_max_bytes": 999}"#),
@@ -439,7 +458,7 @@ async fn settings_view_round_trips_agent_memory_and_gates() {
 
     // 先经记忆文件的写口写一段正文
     p.dispatch(
-        &vctx(None),
+        &vctx(None, Some(tmp.path())),
         MEMORY_FILE,
         VdfsRequest::Write {
             content: VdfsContent::text("记住：部署走蓝绿。"),
@@ -450,7 +469,11 @@ async fn settings_view_round_trips_agent_memory_and_gates() {
 
     // 读设置页视图：正文在，闸门也在
     let content = p
-        .dispatch(&vctx(None), PLUGIN_FILE, VdfsRequest::Read)
+        .dispatch(
+            &vctx(None, Some(tmp.path())),
+            PLUGIN_FILE,
+            VdfsRequest::Read,
+        )
         .await
         .unwrap()
         .into_read()
@@ -462,7 +485,7 @@ async fn settings_view_round_trips_agent_memory_and_gates() {
 
     // 写设置页视图：正文与闸门各回各的落盘处
     p.dispatch(
-        &vctx(None),
+        &vctx(None, Some(tmp.path())),
         PLUGIN_FILE,
         VdfsRequest::Write {
             content: VdfsContent::text(r#"{"agent_memory":"新的一条","memory_max_bytes":777}"#),
@@ -471,7 +494,15 @@ async fn settings_view_round_trips_agent_memory_and_gates() {
     .await
     .unwrap();
 
-    assert_eq!(p.agent_store().await.read().unwrap(), "新的一条");
+    assert_eq!(
+        p.agent_store(&vctx(None, Some(tmp.path())))
+            .await
+            .unwrap()
+            .read()
+            .await
+            .unwrap(),
+        "新的一条"
+    );
     assert_eq!(p.config_slot().read().await.memory_max_bytes, 777);
     // 正文不落进配置文档
     let on_disk = p
@@ -498,7 +529,7 @@ async fn oversized_agent_memory_does_not_change_gates() {
 
     let err = p
         .dispatch(
-            &vctx(None),
+            &vctx(None, Some(tmp.path())),
             PLUGIN_FILE,
             VdfsRequest::Write {
                 content: VdfsContent::text(
@@ -521,7 +552,7 @@ async fn unknown_path_is_not_found() {
     let tmp = TempDir::new().unwrap();
     let p = plugin_in(tmp.path());
     let err = p
-        .dispatch(&vctx(None), "nope.md", VdfsRequest::Read)
+        .dispatch(&vctx(None, Some(tmp.path())), "nope.md", VdfsRequest::Read)
         .await
         .unwrap_err();
     assert!(format!("{err:?}").contains("未知路径"), "{err:?}");

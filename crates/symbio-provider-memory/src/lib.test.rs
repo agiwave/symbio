@@ -18,7 +18,12 @@
 use super::{
     memory_render_segment, MemoryFile, MemoryInjection, MemoryNodeSpec, MemorySegmentSpec,
 };
-use symbio_kernel::vdfs::VdfsAccess;
+use async_trait::async_trait;
+use std::sync::Arc;
+use symbio_kernel::vdfs::{
+    DynVdfsProvider, VdfsAccess, VdfsContext, VdfsError, VdfsProvider, VdfsRequest, VdfsResponse,
+    VdfsResult,
+};
 use tempfile::TempDir;
 
 /// 测试用**合成文件名**：本模块不认识任何真实层的名字，用例自己带一个。
@@ -45,8 +50,8 @@ fn spec() -> MemorySegmentSpec<'static> {
 
 // ==================== 截断 ====================
 
-#[test]
-fn cut_keeps_short_text_intact() {
+#[tokio::test]
+async fn cut_keeps_short_text_intact() {
     let m = MemoryInjection::cut("abc", 3);
     assert_eq!(m.text, "abc");
     assert!(!m.truncated);
@@ -55,8 +60,8 @@ fn cut_keeps_short_text_intact() {
 }
 
 /// 预算落在多字节字符中间 → 回退到字符边界，不产出非法 UTF-8
-#[test]
-fn cut_falls_back_to_a_char_boundary() {
+#[tokio::test]
+async fn cut_falls_back_to_a_char_boundary() {
     // "汉字" = 6 字节；预算 4 落在第一个字符中间 → 回退到 3
     let m = MemoryInjection::cut("汉字", 4);
     assert_eq!(m.text, "汉");
@@ -73,86 +78,125 @@ fn cut_falls_back_to_a_char_boundary() {
 // ==================== 无作用域 ====================
 
 /// 无作用域 = 「这层记忆此刻不适用」，是**正常状态**，不是故障
-#[test]
-fn absent_scope_is_a_normal_state() {
+#[tokio::test]
+async fn absent_scope_is_a_normal_state() {
     let m = MemoryFile::absent(1024, 256);
     assert!(!m.has_scope());
     assert!(m.path().is_none());
-    assert!(!m.exists());
-    assert_eq!(m.size(), 0);
-    assert_eq!(m.updated_at(), None);
+    assert!(!m.exists().await);
+    assert_eq!(m.size().await, 0);
+    assert_eq!(m.updated_at().await, None);
     // 读 / 写是明确报错（调用方本就不该走到这里）
-    assert!(m.read().is_err());
-    assert!(m.write("x").is_err());
+    assert!(m.read().await.is_err());
+    assert!(m.write("x").await.is_err());
     // 注入是 None —— 静默跳过，不往收集期错误桶里塞东西
-    assert_eq!(m.inject().unwrap(), None);
-    assert_eq!(m.segment(&spec()).unwrap(), None);
+    assert_eq!(m.inject().await.unwrap(), None);
+    assert_eq!(m.segment(&spec()).await.unwrap(), None);
     // 无文件 → 无名字（本模块没有兜底文件名）
     assert_eq!(m.file_name(), None);
 }
 
 // ==================== 读写 ====================
 
-#[test]
-fn missing_file_reads_as_empty_not_as_error() {
+#[tokio::test]
+async fn missing_file_reads_as_empty_not_as_error() {
     let tmp = TempDir::new().unwrap();
     let m = file_in(&tmp, 1024, 256);
-    assert!(!m.exists());
-    assert_eq!(m.read().unwrap(), "");
-    assert_eq!(m.size(), 0);
+    assert!(!m.exists().await);
+    assert_eq!(m.read().await.unwrap(), "");
+    assert_eq!(m.size().await, 0);
 }
 
-#[test]
-fn write_creates_dirs_and_roundtrips() {
+/// 最小 provider：任何请求都报「节点不存在」，专门验证 Vdfs **后端**的读语义。
+/// 回归自 D-515：曾把 NotFound 当错误往外抛，导致每次首次读取都进收集期错误桶、
+/// 工作区腿的空内容提示永远出不来——与 File 后端「没写过 = 空串」分叉。
+struct NotFoundProvider;
+
+#[async_trait]
+impl VdfsProvider for NotFoundProvider {
+    async fn dispatch(
+        &self,
+        _ctx: &VdfsContext,
+        _path: &str,
+        _req: VdfsRequest,
+    ) -> VdfsResult<VdfsResponse> {
+        Err(VdfsError::not_found("故意不存在"))
+    }
+}
+
+#[tokio::test]
+async fn vdfs_missing_file_reads_as_empty_not_as_error() {
+    let m = MemoryFile::via(
+        Some(Arc::new(NotFoundProvider) as DynVdfsProvider),
+        FILE_NAME,
+        1024,
+        256,
+    );
+    assert_eq!(
+        m.read().await.unwrap(),
+        "",
+        "provider 报不存在 ⇒ 空串，不是错误"
+    );
+    let injected = m.inject().await.unwrap().unwrap();
+    assert_eq!(injected.text, "");
+    let seg = m.segment(&spec()).await.unwrap().unwrap();
+    assert!(seg.contains("暂无内容"), "空文件也要注入空内容提示：{seg}");
+}
+
+#[tokio::test]
+async fn write_creates_dirs_and_roundtrips() {
     let tmp = TempDir::new().unwrap();
     let m = file_in(&tmp, 1024, 256);
-    m.write("第一条长期事实\n").unwrap();
+    m.write("第一条长期事实\n").await.unwrap();
 
-    assert!(m.exists());
-    assert_eq!(m.read().unwrap(), "第一条长期事实\n");
-    assert_eq!(m.size(), "第一条长期事实\n".len() as u64);
-    assert!(m.updated_at().is_some(), "节点要用它做排序");
+    assert!(m.exists().await);
+    assert_eq!(m.read().await.unwrap(), "第一条长期事实\n");
+    assert_eq!(m.size().await, "第一条长期事实\n".len() as u64);
+    assert!(m.updated_at().await.is_some(), "节点要用它做排序");
 }
 
 // ==================== 写入闸门：拒绝而非截断 ====================
 
-#[test]
-fn oversized_write_is_rejected_and_leaves_the_file_untouched() {
+#[tokio::test]
+async fn oversized_write_is_rejected_and_leaves_the_file_untouched() {
     let tmp = TempDir::new().unwrap();
     let m = file_in(&tmp, 1024, 256);
-    m.write("原有内容").unwrap();
+    m.write("原有内容").await.unwrap();
 
     let narrow = file_in(&tmp, 16, 256);
-    let err = narrow.write(&"x".repeat(64)).unwrap_err();
+    let err = narrow.write(&"x".repeat(64)).await.unwrap_err();
     assert!(err.contains("超出容量上限"), "要点明原因：{err}");
     assert!(err.contains("16"), "要带上限值：{err}");
     assert_eq!(
-        m.read().unwrap(),
+        m.read().await.unwrap(),
         "原有内容",
         "被拒绝的写入不得留下半截内容"
     );
 }
 
 /// 上限按**字节**判定：多字节文本不能因为「字符数少」而蒙混过关
-#[test]
-fn write_limit_counts_bytes_not_chars() {
+#[tokio::test]
+async fn write_limit_counts_bytes_not_chars() {
     let tmp = TempDir::new().unwrap();
     let m = file_in(&tmp, 11, 256);
-    assert!(m.write("四个汉字").is_err(), "4 个汉字 = 12 字节 > 11");
+    assert!(
+        m.write("四个汉字").await.is_err(),
+        "4 个汉字 = 12 字节 > 11"
+    );
     let m = file_in(&tmp, 12, 256);
-    assert!(m.write("四个汉字").is_ok());
+    assert!(m.write("四个汉字").await.is_ok());
 }
 
 // ==================== 注入闸门与写入闸门独立 ====================
 
-#[test]
-fn inject_budget_is_independent_from_the_write_limit() {
+#[tokio::test]
+async fn inject_budget_is_independent_from_the_write_limit() {
     let tmp = TempDir::new().unwrap();
     // 写入上限 1024、注入预算 4 —— 文件可以比注入预算大得多
     let m = file_in(&tmp, 1024, 4);
-    m.write("0123456789").unwrap();
+    m.write("0123456789").await.unwrap();
 
-    let body = m.inject().unwrap().unwrap();
+    let body = m.inject().await.unwrap().unwrap();
     assert_eq!(body.text, "0123");
     assert!(body.truncated, "超出注入预算要明确标记，模型才知道去读全文");
     assert_eq!(
@@ -160,16 +204,20 @@ fn inject_budget_is_independent_from_the_write_limit() {
         "「当前」描述的是文件，不是这一轮给了多少"
     );
     assert_eq!(body.budget_bytes, 4);
-    assert_eq!(m.read().unwrap(), "0123456789", "文件本身不受注入预算影响");
+    assert_eq!(
+        m.read().await.unwrap(),
+        "0123456789",
+        "文件本身不受注入预算影响"
+    );
 }
 
-#[test]
-fn inject_reports_no_truncation_when_budget_is_enough() {
+#[tokio::test]
+async fn inject_reports_no_truncation_when_budget_is_enough() {
     let tmp = TempDir::new().unwrap();
     let m = file_in(&tmp, 1024, 1024);
-    m.write("0123456789").unwrap();
+    m.write("0123456789").await.unwrap();
 
-    let body = m.inject().unwrap().unwrap();
+    let body = m.inject().await.unwrap().unwrap();
     assert_eq!(body.text, "0123456789");
     assert!(!body.truncated);
     assert_eq!(body.total_bytes, 10);
@@ -188,8 +236,8 @@ fn body(text: &str, truncated: bool) -> MemoryInjection {
 
 /// 头信息四要素缺一不可：地址（能改）、上限（写超会被拒）、当前（还剩多少）、
 /// 写法（先读后写）
-#[test]
-fn segment_carries_address_capacity_and_write_discipline() {
+#[tokio::test]
+async fn segment_carries_address_capacity_and_write_discipline() {
     let s = memory_render_segment(&spec(), &body("用户偏好中文回答。", false), 16384);
 
     assert!(s.contains("【工作区记忆】"), "要有一眼认出的标题: {s}");
@@ -201,8 +249,8 @@ fn segment_carries_address_capacity_and_write_discipline() {
 }
 
 /// **简洁是硬指标**：头信息只有一行，整体开销远小于注入预算
-#[test]
-fn head_info_is_one_line_and_overhead_stays_small() {
+#[tokio::test]
+async fn head_info_is_one_line_and_overhead_stays_small() {
     let text = "正文";
     let s = memory_render_segment(&spec(), &body(text, false), 16384);
 
@@ -214,8 +262,8 @@ fn head_info_is_one_line_and_overhead_stays_small() {
     );
 }
 
-#[test]
-fn note_is_optional_and_lands_in_the_head() {
+#[tokio::test]
+async fn note_is_optional_and_lands_in_the_head() {
     let plain = memory_render_segment(&spec(), &body("x", false), 1024);
     assert!(!plain.contains("相互独立"));
 
@@ -232,8 +280,8 @@ fn note_is_optional_and_lands_in_the_head() {
 }
 
 /// 空内容恰恰是最需要「你可以往里写」的时候 —— 但只用一句话
-#[test]
-fn empty_memory_still_teaches_how_to_remember() {
+#[tokio::test]
+async fn empty_memory_still_teaches_how_to_remember() {
     let s = memory_render_segment(&spec(), &body("", false), 1024);
     assert!(s.contains("暂无内容"), "要点明现在还没有内容: {s}");
     assert!(s.contains("vdfs_write"), "要教它怎么写入: {s}");
@@ -242,8 +290,8 @@ fn empty_memory_still_teaches_how_to_remember() {
 }
 
 /// 截断必须**明确告知**：否则模型会以为看到的就是全部
-#[test]
-fn truncated_memory_says_so_and_points_at_the_address() {
+#[tokio::test]
+async fn truncated_memory_says_so_and_points_at_the_address() {
     let s = memory_render_segment(&spec(), &body("前一半", true), 1024);
     assert!(s.contains("已截断"), "要说明只看到了一部分: {s}");
     assert!(s.contains("256"), "要说清截到了多少字节: {s}");
@@ -253,13 +301,13 @@ fn truncated_memory_says_so_and_points_at_the_address() {
 
 // ==================== 组合：inject → segment ====================
 
-#[test]
-fn segment_reads_writes_and_reports_in_one_step() {
+#[tokio::test]
+async fn segment_reads_writes_and_reports_in_one_step() {
     let tmp = TempDir::new().unwrap();
     let m = file_in(&tmp, 1024, 4);
-    m.write("0123456789").unwrap();
+    m.write("0123456789").await.unwrap();
 
-    let s = m.segment(&spec()).unwrap().unwrap();
+    let s = m.segment(&spec()).await.unwrap().unwrap();
     assert!(s.contains("0123"), "只带预算内的前缀: {s}");
     assert!(!s.contains("0123456789"), "超预算的部分不注入: {s}");
     assert!(s.contains("当前：10字节"), "「当前」要是文件总量: {s}");
@@ -268,18 +316,20 @@ fn segment_reads_writes_and_reports_in_one_step() {
 
 // ==================== 节点 ====================
 
-#[test]
-fn node_shape_is_shared_by_list_and_stat() {
+#[tokio::test]
+async fn node_shape_is_shared_by_list_and_stat() {
     let tmp = TempDir::new().unwrap();
     let m = file_in(&tmp, 1024, 256);
-    m.write("内容").unwrap();
+    m.write("内容").await.unwrap();
 
-    let n = m.node(&MemoryNodeSpec {
-        title: "工作区记忆",
-        name: None,
-        kind: "work",
-        description: "本工作区的长期记忆",
-    });
+    let n = m
+        .node(&MemoryNodeSpec {
+            title: "工作区记忆",
+            name: None,
+            kind: "work",
+            description: "本工作区的长期记忆",
+        })
+        .await;
 
     assert_eq!(n.name, FILE_NAME, "节点名 = 真实文件名");
     assert_eq!(n.title, "工作区记忆");

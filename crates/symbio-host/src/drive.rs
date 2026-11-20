@@ -38,6 +38,7 @@ use std::pin::Pin;
 use std::sync::atomic::{AtomicBool, Ordering};
 use std::sync::{Arc, Mutex, OnceLock};
 
+use std::path::Path;
 use symbio_kernel::event::{Entity, Verb};
 use symbio_kernel::exec::{ExecAbortSignal, ABORT_SIGNAL};
 use symbio_kernel::plugin::{
@@ -140,6 +141,16 @@ pub async fn drive_on_new_fact(
     // 会话主体的**唯一**装载点：值来自会话 metadata 的 `agent_id`，
     // 由事实源打开时取来。执行体只读，不再各自派生或回落。
     ctx.set(AGENT_ID, world.agent_id.to_string());
+    // 三个作用域 VDFS provider（D-515）：存储一律经 provider，插件不再各自拼物理路径。
+    // 目录字符串仍是对外协议键（上方 WORKDIR / SESSION_DIR），但插件消费面换成 provider。
+    let agent_dir = symbio_providers::agent_home_root();
+    let work_dir = (!world.workdir.is_empty()).then(|| Path::new(world.workdir));
+    symbio_providers::attach_scope_providers(
+        &ctx,
+        agent_dir.as_deref(),
+        work_dir,
+        world.session_dir.map(Path::new),
+    );
     // 会话运行参数同址装配：审批闸门与模型端口都从这个 ctx 读值，
     // 与 `workdir` / `agent_id` 同一来源（会话 metadata），不在执行体里二次反查。
     ctx.set(MODE, world.mode.to_string());

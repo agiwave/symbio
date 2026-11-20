@@ -55,7 +55,7 @@ use symbio_plugin_api::{
     capability_report_error, creator_create_object, descend_addr, plugin_dir_from_ctx,
     CapabilityRow, Plugin, PluginDir, PluginError, PluginInvokeRequest, PluginInvokeRequestExt,
     PluginInvokeResponse, PluginMeta, PluginPayload, PluginSimpleRequest, Registry, AGENT_ID,
-    CAPABILITY_VISITOR, PATH, PLUGIN_DIR, REQUIRED_PLUGINS, TRAVERSE_AVAILABLE_OPTIONS,
+    AGENT_VDFS, CAPABILITY_VISITOR, PATH, PLUGIN_DIR, REQUIRED_PLUGINS, TRAVERSE_AVAILABLE_OPTIONS,
     TRAVERSE_AVAILABLE_TOOLS, VDFS_PARENT_ADDR,
 };
 use symbio_plugin_api::{DetailField, DetailOption};
@@ -268,6 +268,15 @@ impl AgentPlugin {
     ) -> usize {
         let sub = ctx.fork();
         sub.set(PATH, TRAVERSE_AVAILABLE_TOOLS.to_string());
+        // D-515：子树的 `memory` 实例经 `AGENT_VDFS` 读写 `<子agentdir>/AGENTS.md`。
+        // `fork()` 会继承父 ctx 的 extension——父作用域那份 provider 指向**父** agent
+        // 目录，若直接继承，子树会读错文件（或根本没有 ⇒ 无作用域）。这里按本层
+        // 发现的目录重挂一份，与 `AGENT_ID` 清空 / `VDFS_PARENT_ADDR` 续接同理。
+        if let Some(scope) = self.scope_of(id) {
+            let provider: symbio_plugin_api::DynVdfsProvider =
+                Arc::new(symbio_providers::ScopeDirVdfs::at(scope.root));
+            sub.set(AGENT_VDFS, Some(provider));
+        }
         // 清空而非继承：父作用域的选中 id 由**父**的 store 解析；带进来只会被本层的
         // `agent` 实例当成自己的子目录选择（见上方文档）。
         sub.set(AGENT_ID, String::new());

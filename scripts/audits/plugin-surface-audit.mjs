@@ -189,7 +189,11 @@ export const WHITELIST_BASELINE = 0
 // `003-design/023` 的 D-494。
 // 108 → 109（`D-513`）：`SESSION_DIR`（会话级插件数据目录键）入 SDK 臂——不提能力名，
 // 会话插件写 / memory 插件读两个消费方，裁决见 `003-design/018` 的 D-513。
-export const SDK_BASELINE = 109
+// 109 → 112（`D-515`）：三条作用域存储键 `AGENT_VDFS` / `WORKSPACE_VDFS` /
+// `SESSION_VDFS` 入 SDK 臂——值是进程内 `DynVdfsProvider`，不提能力名；宿主三处
+// 注入写，memory / tool / local / skill 四个插件读（远超两条准入）。裁决见
+// `003-design/057` 的 D-515。
+export const SDK_BASELINE = 112
 
 /**
  * 契约臂基线：**只许降**（`D-486`）。`symbio-contract` 是插件 ABI 的纯形状层，

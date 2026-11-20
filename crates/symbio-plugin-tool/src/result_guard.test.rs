@@ -2,47 +2,74 @@
 //!
 //! 与实现**同级**分文件（约定：`X.rs` + `X.test.rs`，见 `CONTRIBUTING.md`）：
 //! `result_guard.rs` 只保留生产代码，测试全部放本文件。
+//!
+//! D-515 后存档走 `WORKSPACE_VDFS`：这里用 `ScopeDirVdfs` 绑一个临时根，
+//! 既验证虚拟地址（提示词里印的那条），也验证它确实落到 provider 根下。
 
 use super::*;
+use std::path::{Path, PathBuf};
+use symbio_plugin_api::VdfsContext;
+use symbio_providers::ScopeDirVdfs;
 
-/// 测试用会话存储根（只算路径 / 落临时目录，不碰真实 homedir）
-fn root() -> std::path::PathBuf {
-    // 末段保留 `session`：下条用例断言存档路径含 `session/<id>/tool_archives`
-    std::env::temp_dir()
-        .join("symbio-guard-test")
-        .join("session")
+fn temp_dir(tag: &str) -> PathBuf {
+    let dir = std::env::temp_dir().join(format!("symbio_guard_{tag}_{}", std::process::id()));
+    let _ = std::fs::remove_dir_all(&dir);
+    std::fs::create_dir_all(&dir).unwrap();
+    dir
 }
 
-#[test]
-fn short_text_passes_through() {
-    let g = guard_result("hello world", 8192, &root());
+fn provider_in(dir: &Path) -> DynVdfsProvider {
+    std::sync::Arc::new(ScopeDirVdfs::at(dir.to_path_buf()))
+}
+
+async fn list_count(provider: &DynVdfsProvider) -> usize {
+    let vctx = VdfsContext::new(());
+    provider
+        .dispatch(
+            &vctx,
+            ARCHIVE_REL_DIR,
+            symbio_plugin_api::VdfsRequest::List {},
+        )
+        .await
+        .unwrap()
+        .into_list()
+        .unwrap()
+        .len()
+}
+
+#[tokio::test]
+async fn short_text_passes_through() {
+    let g = guard_result("hello world", 8192, None).await;
     assert!(!g.truncated);
     assert_eq!(g.text, "hello world");
 }
 
-#[test]
-fn long_text_is_truncated_and_keeps_head_tail() {
+#[tokio::test]
+async fn long_text_is_truncated_and_keeps_head_tail() {
     // 构造远超预算的多行文本
     let line = "fn main() {\n    println!(\"line\");\n}\n";
     let big = line.repeat(2000);
-    let g = guard_result(&big, 500, &root());
+    let dir = temp_dir("truncate");
+    let provider = provider_in(&dir);
+    let g = guard_result(&big, 500, Some(&provider)).await;
     assert!(g.truncated);
     assert!(g.text.contains("[... 已省略"));
-    // 统一取回协议：占位符含存档路径与 vdfs_read 取回入口
-    assert!(g.text.contains("完整输出已存档至: "));
+    // 统一取回协议：占位符含存档相对地址与 vdfs_read 取回入口
+    assert!(g.text.contains("完整输出已存档至: tool_archives/"));
     assert!(g.text.contains("vdfs_read"));
     // head 与 tail 应分别保留原文片段
     assert!(g.text.contains("fn main()"));
-    // 文本显著缩短（预算 500 token ≈ 文本远小于原文）
     assert!(g.text.len() < big.len() / 2);
+    let _ = std::fs::remove_dir_all(&dir);
 }
 
 /// 单行超长内容：按行截断失效（首行整行放行），应按字符截断行首
-/// （真实会话实证：12k token 单行 glob 结果只省略 1/3，压缩近乎失效）
-#[test]
-fn single_long_line_is_char_truncated() {
+#[tokio::test]
+async fn single_long_line_is_char_truncated() {
     let huge = format!("{{\"entries\":[\"{}\"]}}", "x".repeat(10_000));
-    let g = guard_result(&huge, 300, &root());
+    let dir = temp_dir("singleline");
+    let provider = provider_in(&dir);
+    let g = guard_result(&huge, 300, Some(&provider)).await;
     assert!(g.truncated, "单行超预算应触发存档截断");
     assert!(g.text.contains("vdfs_read"), "占位提示应存在");
     assert!(
@@ -50,85 +77,111 @@ fn single_long_line_is_char_truncated() {
         "行首应保留: {}",
         &g.text[..40.min(g.text.len())]
     );
-}
-
-fn test_archive_dir(tag: &str) -> PathBuf {
-    let dir = std::env::temp_dir()
-        .join("symbio_guard_tests")
-        .join(format!("{}_{}", tag, std::process::id()));
     let _ = std::fs::remove_dir_all(&dir);
-    let _ = std::fs::create_dir_all(&dir);
-    dir
 }
 
-/// 防碰撞：同毫秒同 token 数的不同内容必须落到不同文件
-/// （旧实现文件名 = 秒级时间戳 + token 数，同秒同 token 数互相覆盖）。
-#[test]
-fn same_milli_same_tokens_do_not_collide() {
-    let dir = test_archive_dir("collide");
+/// 防碰撞：同毫秒同 token 数的不同内容必须落到不同相对地址
+#[tokio::test]
+async fn same_milli_same_tokens_do_not_collide() {
+    let dir = temp_dir("collide");
+    let provider = provider_in(&dir);
     // 同长度（≈同 token 数）但内容不同，毫秒内连续写入
     let a = "a".repeat(4096);
     let b = format!("a{}a", "b".repeat(4094));
-    let p1 = archive_into_dir(&a, 1024, &dir).expect("写入 a");
-    let p2 = archive_into_dir(&b, 1024, &dir).expect("写入 b");
+    let p1 = archive_full_text(&a, 1024, Some(&provider))
+        .await
+        .expect("写入 a");
+    let p2 = archive_full_text(&b, 1024, Some(&provider))
+        .await
+        .expect("写入 b");
     assert_ne!(p1, p2, "同毫秒同 token 数的不同内容不得共享同一文件名");
-    assert_eq!(std::fs::read_to_string(&p1).unwrap(), a);
-    assert_eq!(std::fs::read_to_string(&p2).unwrap(), b);
+    let vctx = VdfsContext::new(());
+    for (rel, text) in [(p1, a), (p2, b)] {
+        let got = provider
+            .dispatch(&vctx, &rel, symbio_plugin_api::VdfsRequest::Read)
+            .await
+            .unwrap()
+            .into_read()
+            .unwrap()
+            .text
+            .unwrap();
+        assert_eq!(got, text);
+    }
     let _ = std::fs::remove_dir_all(&dir);
 }
 
-/// 清理策略：目录按修改时间只保留最新 N 个存档。
-#[test]
-fn prune_keeps_only_latest_files() {
-    let dir = test_archive_dir("prune");
+/// 清理策略：按修改时间只保留最新 N 个存档。
+#[tokio::test]
+async fn prune_keeps_only_latest_files() {
+    let dir = temp_dir("prune");
+    let provider = provider_in(&dir);
     for i in 0..6u32 {
         let content = format!("content-{i}-{}", "x".repeat(64));
-        archive_into_dir(&content, 64, &dir).expect("写入");
-        std::thread::sleep(std::time::Duration::from_millis(4));
+        archive_full_text(&content, 64, Some(&provider))
+            .await
+            .expect("写入");
+        tokio::time::sleep(std::time::Duration::from_millis(4)).await;
     }
-    assert_eq!(
-        std::fs::read_dir(&dir).unwrap().count(),
-        6,
-        "6 个 ≤ keep(20) 时不应清理"
-    );
-    prune_archive_dir(&dir, 3);
-    assert_eq!(
-        std::fs::read_dir(&dir).unwrap().count(),
-        3,
-        "应只保留最新 3 个"
-    );
+    let vctx = VdfsContext::new(());
+    assert_eq!(list_count(&provider).await, 6, "6 个 ≤ keep(20) 时不应清理");
+    prune_archive_dir(&provider, 3).await;
+    assert_eq!(list_count(&provider).await, 3, "应只保留最新 3 个");
     // 最新内容（content-5）必须还在
-    let newest = format!("content-5-{}", "x".repeat(64));
-    assert!(
-        std::fs::read_dir(&dir)
+    let items = provider
+        .dispatch(
+            &vctx,
+            ARCHIVE_REL_DIR,
+            symbio_plugin_api::VdfsRequest::List {},
+        )
+        .await
+        .unwrap()
+        .into_list()
+        .unwrap();
+    let mut found = false;
+    for item in items {
+        let rel = format!("{ARCHIVE_REL_DIR}/{}", item.node.name);
+        let got = provider
+            .dispatch(&vctx, &rel, symbio_plugin_api::VdfsRequest::Read)
+            .await
             .unwrap()
-            .filter_map(|e| e.ok())
-            .any(|e| std::fs::read_to_string(e.path()).unwrap() == newest),
-        "保留的应是最新写入的文件"
+            .into_read()
+            .unwrap()
+            .text
+            .unwrap();
+        if got == format!("content-5-{}", "x".repeat(64)) {
+            found = true;
+        }
+    }
+    assert!(found, "保留的应是最新写入的文件");
+    let _ = std::fs::remove_dir_all(&dir);
+}
+
+/// 存档只落在 provider 根下（工作区作用域），地址是相对地址而非物理路径。
+#[tokio::test]
+async fn archive_lives_under_the_workspace_scope() {
+    let dir = temp_dir("scope");
+    let provider = provider_in(&dir);
+    let g = guard_result(&"line\n".repeat(3000), 500, Some(&provider)).await;
+    assert!(g.truncated);
+    let rel = g.archive_path.expect("有 provider 时应产出存档地址");
+    assert!(
+        rel.starts_with(&format!("{ARCHIVE_REL_DIR}/tool_")),
+        "地址应是作用域内的相对地址: {rel}"
+    );
+    assert!(
+        dir.join(&rel).is_file(),
+        "文件应落在 provider 根下: {}",
+        dir.join(&rel).display()
     );
     let _ = std::fs::remove_dir_all(&dir);
 }
 
-/// 存档位置：环在载荷里给出的 `archive_dir` 原样使用
-///（跟随会话生命周期），而非系统临时目录。
-#[test]
-fn archive_prefers_session_dir_when_session_id_given() {
-    let sid = "test_session_guard_01";
-    let archive = root().join(sid).join("tool_archives");
-    let g = guard_result(&"line\n".repeat(3000), 500, &archive);
+/// 没有工作区作用域 → 不存档，占位符如实说明（不再退回物理临时目录）。
+#[tokio::test]
+async fn no_scope_means_no_archive() {
+    let g = guard_result(&"line\n".repeat(3000), 500, None).await;
     assert!(g.truncated);
-    let p = g.archive_path.expect("会话目录可写时应产出存档路径");
-    let expected_frag = format!(
-        "session{}{}{}tool_archives",
-        std::path::MAIN_SEPARATOR,
-        sid,
-        std::path::MAIN_SEPARATOR
-    );
-    assert!(
-        p.contains(&expected_frag),
-        "存档应位于会话 tool_archives/ 目录: {p}"
-    );
-    // 收尾：删除该测试会话的存档目录（不影响其他测试）
-    let dir = root().join(sid).join("tool_archives");
-    let _ = std::fs::remove_dir_all(dir);
+    assert!(g.archive_path.is_none());
+    assert!(g.text.contains("完整输出未存档（无工作区作用域）"));
+    assert!(!g.text.contains("vdfs_read"));
 }

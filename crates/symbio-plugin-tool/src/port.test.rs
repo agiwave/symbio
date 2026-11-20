@@ -1369,15 +1369,13 @@ async fn open_reads_the_grant_ceiling_by_canonical_name() {
 /// 执行体，环不解释）。三者一律**不执行**、落一条失败结果，且成因可指认。
 #[tokio::test]
 async fn protocol_failures_each_name_their_own_cause() {
-    let dir = std::path::Path::new(".");
-
     let missing_id = refuse_protocol(
         ProtocolInput {
             id_missing: true,
             name_missing: false,
             parse_error: None,
         },
-        dir,
+        None,
     )
     .await
     .expect("缺 id 必有结果");
@@ -1396,7 +1394,7 @@ async fn protocol_failures_each_name_their_own_cause() {
             name_missing: true,
             parse_error: None,
         },
-        dir,
+        None,
     )
     .await
     .expect("缺 name 必有结果");
@@ -1410,7 +1408,7 @@ async fn protocol_failures_each_name_their_own_cause() {
             name_missing: false,
             parse_error: Some(r#"{"command": "cargo test"#),
         },
-        dir,
+        None,
     )
     .await
     .expect("参数不可解析必有结果");

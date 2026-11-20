@@ -15,17 +15,17 @@ use symbio_plugin_api::{capability_prompts, PluginInvokeRequestExt, Registry, VD
 use symbio_providers::DefaultToolVisitor;
 use tempfile::TempDir;
 
-/// 构造带能力收集器的上下文；`workdir` 模拟会话选择的工作区（`None` = 没选工作区），
-/// 父地址模拟容器转发时写入的当前父地址
+/// 构造带能力收集器的上下文；三个目录分别注入三个作用域 provider（D-515），
+/// `workdir` 用 `None` 模拟没选工作区，父地址模拟容器转发时写入的当前父地址
 fn ctx(
+    agent_dir: Option<&Path>,
     workdir: Option<&str>,
+    session_dir: Option<&Path>,
     parent_addr: &str,
 ) -> (Arc<dyn PluginInvokeRequest>, Arc<DefaultToolVisitor>) {
     let ctx: Arc<dyn PluginInvokeRequest> =
         Arc::new(symbio_plugin_api::PluginSimpleRequest::new(None, None));
-    if let Some(w) = workdir {
-        ctx.set(WORKDIR, w.to_string());
-    }
+    symbio_providers::attach_scope_providers(&*ctx, agent_dir, workdir.map(Path::new), session_dir);
     ctx.set(PATH, TRAVERSE_AVAILABLE_TOOLS.to_string());
     ctx.set(VDFS_PARENT_ADDR, parent_addr.to_string());
     let visitor = Arc::new(DefaultToolVisitor::new());
@@ -45,8 +45,8 @@ fn plugin_in(host: &Path) -> Arc<MemoryPlugin> {
 }
 
 /// 入口在设置页，不在左侧主导航：记忆没有列表内容，`hidden` 由容器在列表层过滤。
-#[test]
-fn mount_is_hidden_from_sidebar() {
+#[tokio::test]
+async fn mount_is_hidden_from_sidebar() {
     assert!(MemoryPlugin::metadata().hidden, "memory 不应出现在主导航");
 }
 
@@ -59,7 +59,7 @@ async fn system_instance_injects_the_host_memory() {
     let p = plugin_in(tmp.path());
     std::fs::write(tmp.path().join(memory::MEMORY_FILE), "只改必要之处。").unwrap();
 
-    let (ctx, visitor) = ctx(None, "@vfs/memory");
+    let (ctx, visitor) = ctx(Some(tmp.path()), None, None, "@vfs/memory");
     p.clone().traverse(String::new(), ctx).await.unwrap();
 
     let segs = capability_prompts(&*visitor).await;
@@ -88,7 +88,16 @@ async fn sub_agent_instance_injects_its_own_memory() {
     let p = plugin_in(&agent_dir);
     std::fs::write(agent_dir.join(memory::MEMORY_FILE), "评审时先读测试。").unwrap();
 
-    let (ctx, visitor) = ctx(None, "@vfs/agent/reviewer/memory");
+    // 子树实例的 AGENT_VDFS 根 = 该子智能体自己的目录（真实注入链里由 agent
+    // 插件的 `forward_to_sub_agent` 按 `AgentScope.root` 重挂），不是外层系统树
+    // 目录——两者必须对齐，否则
+    // provider 读的是外层 AGENTS.md，读不到刚写下的这份。
+    let (ctx, visitor) = ctx(
+        Some(agent_dir.as_path()),
+        None,
+        None,
+        "@vfs/agent/reviewer/memory",
+    );
     p.traverse(String::new(), ctx).await.unwrap();
 
     let segs = capability_prompts(&*visitor).await;
@@ -109,7 +118,7 @@ async fn empty_memory_injects_nothing_but_keeps_the_mount() {
     let tmp = TempDir::new().unwrap();
     let p = plugin_in(tmp.path());
 
-    let (ctx, visitor) = ctx(None, "@vfs/memory");
+    let (ctx, visitor) = ctx(Some(tmp.path()), None, None, "@vfs/memory");
     p.clone().traverse(String::new(), ctx).await.unwrap();
 
     assert!(capability_prompts(&*visitor).await.is_empty());
@@ -128,7 +137,7 @@ async fn no_workspace_injects_no_workspace_memory() {
     let p = plugin_in(tmp.path());
     std::fs::write(tmp.path().join(memory::MEMORY_FILE), "智能体自己的记忆").unwrap();
 
-    let (ctx, visitor) = ctx(None, "@vfs/memory");
+    let (ctx, visitor) = ctx(Some(tmp.path()), None, None, "@vfs/memory");
     p.traverse(String::new(), ctx).await.unwrap();
 
     let segs = capability_prompts(&*visitor).await;
@@ -148,7 +157,12 @@ async fn empty_workspace_still_injects_the_empty_hint() {
     let ws = TempDir::new().unwrap();
     let p = plugin_in(tmp.path());
 
-    let (ctx, visitor) = ctx(Some(ws.path().to_string_lossy().as_ref()), "@vfs/memory");
+    let (ctx, visitor) = ctx(
+        Some(tmp.path()),
+        Some(ws.path().to_string_lossy().as_ref()),
+        None,
+        "@vfs/memory",
+    );
     p.traverse(String::new(), ctx).await.unwrap();
 
     let segs = capability_prompts(&*visitor).await;
@@ -178,7 +192,12 @@ async fn workspace_memory_is_injected_verbatim() {
     .unwrap();
     let p = plugin_in(tmp.path());
 
-    let (ctx, visitor) = ctx(Some(ws.path().to_string_lossy().as_ref()), "@vfs/memory");
+    let (ctx, visitor) = ctx(
+        Some(tmp.path()),
+        Some(ws.path().to_string_lossy().as_ref()),
+        None,
+        "@vfs/memory",
+    );
     p.traverse(String::new(), ctx).await.unwrap();
 
     let segs = capability_prompts(&*visitor).await;
@@ -207,7 +226,12 @@ async fn both_legs_inject_together() {
     .unwrap();
     let p = plugin_in(tmp.path());
 
-    let (ctx, visitor) = ctx(Some(ws.path().to_string_lossy().as_ref()), "@vfs/memory");
+    let (ctx, visitor) = ctx(
+        Some(tmp.path()),
+        Some(ws.path().to_string_lossy().as_ref()),
+        None,
+        "@vfs/memory",
+    );
     p.traverse(String::new(), ctx).await.unwrap();
 
     let segs = capability_prompts(&*visitor).await;
@@ -252,7 +276,12 @@ async fn disabled_workspace_skips_injection_but_keeps_the_mount() {
         cfg,
     ));
 
-    let (ctx, visitor) = ctx(Some(ws.path().to_string_lossy().as_ref()), "@vfs/memory");
+    let (ctx, visitor) = ctx(
+        Some(tmp.path()),
+        Some(ws.path().to_string_lossy().as_ref()),
+        None,
+        "@vfs/memory",
+    );
     p.clone().traverse(String::new(), ctx).await.unwrap();
 
     assert!(capability_prompts(&*visitor).await.is_empty());
@@ -277,7 +306,7 @@ async fn session_leg_injects_from_the_context_directory() {
         Arc::new(symbio_plugin_api::PluginSimpleRequest::new(None, None));
     ctx.set(PATH, TRAVERSE_AVAILABLE_TOOLS.to_string());
     ctx.set(VDFS_PARENT_ADDR, "@vfs/memory".to_string());
-    ctx.set(SESSION_DIR, sess.path().to_string_lossy().into_owned());
+    symbio_providers::attach_scope_providers(&*ctx, Some(tmp.path()), None, Some(sess.path()));
     let visitor = Arc::new(DefaultToolVisitor::new());
     ctx.set(
         CAPABILITY_VISITOR,

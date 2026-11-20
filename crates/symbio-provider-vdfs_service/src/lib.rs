@@ -38,11 +38,13 @@ mod dir;
 mod entry;
 mod memory;
 mod pack;
+mod scope;
 mod single_file;
 
 /// 三种访问拓扑（一个条目 = 一份主文件 / 一个目录 / 内存一条记录）
 pub use dir::DirVdfs;
 pub use memory::MemoryVdfs;
+pub use scope::{agent_home_root, attach_round_providers, attach_scope_providers, ScopeDirVdfs};
 pub use single_file::SingleFileVdfs;
 
 /// 整包导入导出：zip 落盘 + base64 编解码。插件的节点动作 `import` / `export`

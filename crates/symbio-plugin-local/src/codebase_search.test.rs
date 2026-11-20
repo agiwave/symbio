@@ -14,6 +14,15 @@
 use super::*;
 use std::sync::atomic::{AtomicUsize, Ordering};
 
+/// 把临时目录绑成工作区作用域 provider（D-515：索引缓存只认相对地址）。
+fn provider_in(dir: &std::path::Path) -> DynVdfsProvider {
+    Arc::new(symbio_providers::ScopeDirVdfs::at(dir.to_path_buf()))
+}
+
+fn index_file_in(dir: &std::path::Path) -> PathBuf {
+    dir.join(INDEX_REL_PATH)
+}
+
 /// 计数 + 确定性输出的嵌入桩：不跑真模型，但调用次数可断言
 struct CountingEmbed {
     calls: AtomicUsize,
@@ -309,17 +318,18 @@ fn decode_rejects_absurd_length_prefix() {
 
 // ==================== 落盘与读回 ====================
 
-/// 落盘 → 读回，内容一致；且落盘是"临时文件 + rename"，不留 `.tmp` 残骸
+/// 落盘 → 读回，内容一致；索引是纯派生数据，provider 直写即可，不留 `.tmp` 残骸
 #[tokio::test]
 async fn index_round_trips_through_disk() {
     let dir = tempfile::tempdir().unwrap();
+    let provider = provider_in(dir.path());
     let idx = sample_index();
 
-    save_to_disk(dir.path(), &idx).await.expect("落盘");
-    let path = index_path(dir.path());
+    save_to_disk(&provider, &idx).await.expect("落盘");
+    let path = index_file_in(dir.path());
     assert!(path.exists(), "索引文件应存在于 {}", path.display());
 
-    let back = load_from_disk(dir.path()).await.expect("读回");
+    let back = load_from_disk(&provider).await.expect("读回");
     assert_eq!(back.files.len(), 2);
     assert_eq!(back.files[0].chunks[0].norm, vec![0.5, -0.25, 0.125]);
 
@@ -333,34 +343,32 @@ async fn index_round_trips_through_disk() {
 #[tokio::test]
 async fn missing_index_file_is_not_an_error() {
     let dir = tempfile::tempdir().unwrap();
-    assert!(load_from_disk(dir.path()).await.is_none());
+    let provider = provider_in(dir.path());
+    assert!(load_from_disk(&provider).await.is_none());
 }
 
 /// 磁盘上的索引损坏 ⇒ None，让上层重建
 #[tokio::test]
 async fn corrupt_index_file_loads_as_none() {
     let dir = tempfile::tempdir().unwrap();
-    let path = index_path(dir.path());
+    let provider = provider_in(dir.path());
+    let path = index_file_in(dir.path());
     tokio::fs::create_dir_all(path.parent().unwrap())
         .await
         .unwrap();
     tokio::fs::write(&path, b"not an index at all")
         .await
         .unwrap();
-    assert!(load_from_disk(dir.path()).await.is_none());
+    assert!(load_from_disk(&provider).await.is_none());
 }
 
 /// 落盘路径必须是**工作区内**的 `.symbio/cache/`——这是"工作区级数据落在工作区里"
 /// 那条约定，也是"索引不会把自己索引进去"（`.symbio` 是隐藏目录，会被 WalkBuilder 跳过）的前提
 #[test]
 fn index_lives_under_the_workspace_dot_symbio() {
-    let p = index_path(Path::new("/tmp/some-workspace"));
-    assert!(p.ends_with(
-        INDEX_REL_PATH
-            .replace('/', std::path::MAIN_SEPARATOR_STR)
-            .as_str()
-    ));
-    assert!(p.to_string_lossy().contains(".symbio"));
+    // D-515：落位约定收在常量里——常量既是 provider 的相对地址，也是工作区内的路径。
+    assert!(INDEX_REL_PATH.starts_with(".symbio/cache/"));
+    assert!(INDEX_REL_PATH.ends_with(".bin"));
     // `.bin` 不在 SOURCE_EXTS 里 —— 第二重保险
     assert!(!SOURCE_EXTS.contains(&"bin"));
 }
@@ -375,6 +383,7 @@ fn index_lives_under_the_workspace_dot_symbio() {
 #[tokio::test]
 async fn disk_loaded_index_is_cached_for_subsequent_calls() {
     let dir = tempfile::tempdir().unwrap();
+    let provider = provider_in(dir.path());
     let embed = CountingEmbed::new();
     let key = dir.path().to_string_lossy().to_string();
 
@@ -387,18 +396,18 @@ async fn disk_loaded_index_is_cached_for_subsequent_calls() {
     .unwrap();
 
     // 建一次（rebuild 绕过任何既有状态），落盘 + 进缓存
-    let (built, s1) = get_index(dir.path(), true, &embed.as_service())
+    let (built, s1) = get_index(dir.path(), Some(&provider), true, &embed.as_service())
         .await
         .expect("首次构建");
     let chunks = built.chunk_count();
     assert_eq!(s1.embedded_files, 1);
-    assert!(index_path(dir.path()).exists(), "应已落盘");
+    assert!(index_file_in(dir.path()).exists(), "应已落盘");
 
     // 模拟"进程重启"：清掉进程内缓存，只留盘上的索引
     cache().lock().await.remove(&key);
 
     let before = embed.calls();
-    let (from_disk, s2) = get_index(dir.path(), false, &embed.as_service())
+    let (from_disk, s2) = get_index(dir.path(), Some(&provider), false, &embed.as_service())
         .await
         .expect("读盘");
     assert_eq!(s2.embedded_files, 0, "指纹未变，不该重嵌");
@@ -407,12 +416,12 @@ async fn disk_loaded_index_is_cached_for_subsequent_calls() {
 
     // 关键一步：把盘上的索引删掉。此时若上一次没进缓存，就会 cache-miss + 无盘可读
     // → 全量重建。这正是要防的那条路径。
-    tokio::fs::remove_file(index_path(dir.path()))
+    tokio::fs::remove_file(index_file_in(dir.path()))
         .await
         .unwrap();
 
     let before = embed.calls();
-    let (again, s3) = get_index(dir.path(), false, &embed.as_service())
+    let (again, s3) = get_index(dir.path(), Some(&provider), false, &embed.as_service())
         .await
         .expect("第三次");
     assert_eq!(

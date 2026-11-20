@@ -49,7 +49,6 @@
 //!
 //! 于是这里不再有第二份「超限怎么办」「截断怎么算」——那些口径全项目只有一份。
 
-use std::path::{Path, PathBuf};
 use symbio_providers::{MemoryFile, MemoryNodeSpec, MemorySegmentSpec};
 
 /// 工作区记忆的**物理**文件名 —— `{workdir}/AGENTS.md`（行业通行约定）。
@@ -77,19 +76,21 @@ pub const SEGMENT_TITLE: &str = "工作区记忆";
 pub const MEMORY_DESCRIPTION: &str =
     "本工作区的长期记忆（跨会话保留）：用户偏好、项目约定、已定结论、环境事实。";
 
-/// 工作区记忆文件：`{workdir}/AGENTS.md`
-pub fn memory_path(workdir: &str) -> PathBuf {
-    Path::new(workdir).join(WORK_MEMORY_FILE)
-}
-
-/// 由工作目录构造记忆门面（`None` / 空串 / 纯空白 = 无工作区）。
+/// 由工作区作用域 provider 构造记忆门面（`None` = 没选工作区）。
 ///
-/// 两道闸门在此注入：共享实现只认「上限是多少」，不关心它从哪个配置来。
-pub fn store(workdir: Option<&str>, write_max_bytes: usize, inject_max_bytes: usize) -> MemoryFile {
-    match workdir.map(str::trim).filter(|w| !w.is_empty()) {
-        None => MemoryFile::absent(write_max_bytes, inject_max_bytes),
-        Some(w) => MemoryFile::new(Some(memory_path(w)), write_max_bytes, inject_max_bytes),
-    }
+/// D-515：作用域闸门从「目录字符串是否为空」改为「provider 是否存在」——
+/// 两者等价，但后者不再让插件认识物理目录。两道容量闸门仍在此注入。
+pub fn store(
+    provider: Option<symbio_plugin_api::DynVdfsProvider>,
+    write_max_bytes: usize,
+    inject_max_bytes: usize,
+) -> MemoryFile {
+    MemoryFile::via(
+        provider,
+        WORK_MEMORY_FILE,
+        write_max_bytes,
+        inject_max_bytes,
+    )
 }
 
 /// 工作区记忆在**本插件挂载点之下**的相对路径（就是挂载名 [`MOUNT_FILE`]）。

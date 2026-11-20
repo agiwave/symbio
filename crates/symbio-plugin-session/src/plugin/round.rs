@@ -174,12 +174,29 @@ impl SessionPlugin {
         // 会话级数据目录（D-513）：会话存储布局的唯一 owner 是本插件，收集期把目录
         // 按**值**递上请求 ctx（memory 的会话记忆据此落位）。能力面只读现成目录，
         // 不自己拼会话存储路径，也不拿它开事实源。
-        if let Some(dir) = self.get_store().await?.session_dir(session_id) {
+        let session_dir = self.get_store().await?.session_dir(session_id);
+        if let Some(dir) = &session_dir {
             ctx.set(
                 symbio_plugin_api::SESSION_DIR,
                 dir.to_string_lossy().into_owned(),
             );
         }
+        // 作用域 VDFS provider（D-515）：在真实能力收集前挂上工作区 / 会话两层，
+        // 插件经 provider 读写数据，不再各自拼 workdir / session_dir。
+        // `AGENT_VDFS` 不由本处决定——保留 ctx 的既有绑定，见下。
+        // 目录字符串键只是对外协议面，内部消费面一律换成 provider。
+        let work_dir = ctx
+            .get(symbio_plugin_api::WORKDIR)
+            .map(std::path::PathBuf::from);
+        // 子空间开轮时 ctx 可能已经被 agent 插件重挂 `AGENT_VDFS` 到该子智能体目录
+        // （VDFS 下钻 / 子智能体转发），这里不能拿 `agent_home_root()`（`{homedir}`）
+        // 覆盖，否则子会话会注入顶层人格而不是自己的（T15）。顶层会话的既有绑定
+        // 本来就是 `{homedir}`，保留同样正确。
+        symbio_providers::attach_round_providers(
+            ctx.as_ref(),
+            work_dir.as_deref(),
+            session_dir.as_deref(),
+        );
         let manager = crate::capabilities::collect_capabilities(
             self.get_parent().as_ref(),
             ctx,
