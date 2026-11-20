@@ -19,6 +19,9 @@
  * - 锚点形态：`/^#{2,6}\s+(D-\d{3}a?)/`——`###` 到 `######` 都算，编号带可选字母尾巴。
  * - 返回的 id **去掉 `D-` 前缀**（`'077'` / `'209a'`），与各审计里 `D-(\d{3}a?)` 捕获组
  *   的取值同形；两边形状不一致会让「存在的决策」被判成不存在。
+ * - **唯一性**：同一编号出现两次直接抛错——`D-NNN` 是身份，重复会让豁免引用无法寻址。
+ *   这里此前用 `Set` 静默折叠重复，门禁全绿却有两份正文共用一号；现在所有消费者
+ *   经这一个入口，重复在这里一次性判红。
  *
  * 结果按 `docsRoot` 缓存一次（同一进程里逐条豁免各扫一遍全仓会拖慢门禁）。
  */
@@ -55,9 +58,18 @@ function scan(roots) {
       } catch {
         continue
       }
-      for (const line of text.split('\n')) {
-        const m = ANCHOR_RE.exec(line)
-        if (m) found.add(m[1].slice(2))
+      const lines = text.split('\n')
+      for (let i = 0; i < lines.length; i++) {
+        const m = ANCHOR_RE.exec(lines[i])
+        if (!m) continue
+        const id = m[1].slice(2)
+        if (found.has(id)) {
+          throw new Error(
+            `决策编号 D-${id} 重复定义：${path.relative(roots[0], abs)}:${i + 1}。` +
+              'D-NNN 是身份，必须唯一——请给其中一条裁决重新编号并同步所有引用。'
+          )
+        }
+        found.add(id)
       }
     }
   }

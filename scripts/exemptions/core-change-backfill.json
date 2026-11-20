@@ -219,8 +219,8 @@
       "rules": [
         "CC-001"
       ],
-      "change": "转播锚从 provider wire id 换成工具卡节点地址：`symbio-sdk/src/keys/mod.rs` 新增 `TOOL_NODE_ID` 键（SDK 臂 +1，基线同批 107→108）；已推送，提交信息未写 `Core-Change:` 段；机制授权归 D-494",
-      "decision": "D-494",
+      "change": "转播锚从 provider wire id 换成工具卡节点地址：`symbio-sdk/src/keys/mod.rs` 新增 `TOOL_NODE_ID` 键（SDK 臂 +1，基线同批 107→108）；已推送，提交信息未写 `Core-Change:` 段；机制授权归 D-516",
+      "decision": "D-516",
       "authorized_by": "D-513"
     },
     {

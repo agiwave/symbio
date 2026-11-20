@@ -184,9 +184,9 @@ export const WHITELIST_BASELINE = 0
 // `text_floor_char_boundary`）改从契约层转出——纯 std 算法、memory / skill / local /
 // mcp / web 多 owner 共享，verify 以 `#[path]` standalone 包含同一份源码。
 // `tokenizer` 是有预算语义的宿主机制（`D-404`），按规则 C 留守。
-// 107 → 108（`D-494`）：`TOOL_NODE_ID`（工具卡在转写里的节点地址键）入 SDK 臂——
+// 107 → 108（`D-516`）：`TOOL_NODE_ID`（工具卡在转写里的节点地址键）入 SDK 臂——
 // §5.1 两条准入逐条过（不提能力名 ∧ tool 写 / session 读两个插件用），裁决见
-// `003-design/023` 的 D-494。
+// `003-design/023` 的 D-516。
 // 108 → 109（`D-513`）：`SESSION_DIR`（会话级插件数据目录键）入 SDK 臂——不提能力名，
 // 会话插件写 / memory 插件读两个消费方，裁决见 `003-design/018` 的 D-513。
 // 109 → 112（`D-515`）：三条作用域存储键 `AGENT_VDFS` / `WORKSPACE_VDFS` /
