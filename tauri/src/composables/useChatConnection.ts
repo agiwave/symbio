@@ -549,8 +549,8 @@ export function useChatConnection(options: UseChatConnectionOptions): UseChatCon
           },
         },
       )
-    } catch (err: any) {
-      const errText = `Send failed: ${err.message || String(err)}`
+    } catch (err: unknown) {
+      const errText = `Send failed: ${err instanceof Error ? err.message : String(err)}`
       // 请求本身失败（transport 级）：收敛为「以错误结束」这个状态值。
       // 后端若已开始工作，它的节点视图随后会覆盖这里——权威在服务端。
       store.putStatus(sid, { status: VDFS_STATUS_FAILED, activity: '错误', outcome: 'failed' })
@@ -708,13 +708,13 @@ export function useChatConnection(options: UseChatConnectionOptions): UseChatCon
         logger.warn('useChatConnection', `[${sid}] resume 未生效：${resp.message}`)
         showToast('error', `${failPrefix}：${resp.message || '目标消息已不存在，请重试'}`)
       }
-    } catch (err: any) {
+    } catch (err: unknown) {
       logger.error('useChatConnection', 'Failed to resume:', err)
       if (targetSid === sid) {
         store.putStatus(sid, { status: VDFS_STATUS_FAILED, activity: '错误', outcome: 'failed' })
         store.setSessionStatus(sid, VDFS_STATUS_FAILED)
       }
-      showToast('error', `${failPrefix}：${err?.message || '未知错误'}`)
+      showToast('error', `${failPrefix}：${err instanceof Error ? err.message : '未知错误'}`)
     }
   }
 
@@ -763,7 +763,7 @@ export function useChatConnection(options: UseChatConnectionOptions): UseChatCon
         logger.warn('useChatConnection', `[${sid}] expand_skeleton 未生效：${resp.message}`)
         showToast('error', `展开失败：${resp.message || '未知原因'}`)
       }
-    } catch (err: any) {
+    } catch (err: unknown) {
       logger.error('useChatConnection', 'Failed to expand skeleton:', err)
       showToast('error', `展开失败：${err instanceof Error ? err.message : String(err)}`)
     }
@@ -794,7 +794,7 @@ export function useChatConnection(options: UseChatConnectionOptions): UseChatCon
         logger.warn('useChatConnection', `[${sid}] switch_branch 未生效：${resp.message}`)
         showToast('error', `切换分支失败：${resp.message || '未知原因'}`)
       }
-    } catch (err: any) {
+    } catch (err: unknown) {
       logger.error('useChatConnection', 'Failed to switch branch:', err)
       showToast('error', `切换分支失败：${err instanceof Error ? err.message : String(err)}`)
     }

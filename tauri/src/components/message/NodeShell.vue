@@ -30,8 +30,6 @@
         type="button"
         class="node-head"
         :class="headClass"
-        role="button"
-        tabindex="0"
         :aria-expanded="effectiveOpen"
         :aria-label="headAriaLabel"
         @click="toggle"

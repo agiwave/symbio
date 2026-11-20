@@ -609,18 +609,20 @@ describe('MessageNode：结构轴递归（生产形状 = 用户 body 节点当�
 })
 
 /**
- * 节点头的键盘可达性。此前节点头是裸 `div` + `@click`：Tab 键永远走不到它。
- * 这里锁住三件事：可聚焦（tabindex）、开关语义（role / aria-expanded）、键盘能真的触发折叠。
+ * 节点头的键盘可达性。节点头用原生 `<button>`：可聚焦与按钮语义是元素自带的，
+ * 无需再写 `role="button"` / `tabindex="0"`（那是裸 div 时代的残留）。
+ * 这里锁住三件事：是原生 button、开关语义（aria-expanded）、键盘能真的触发折叠。
  */
 describe('MessageNode：节点头键盘可达性', () => {
   // 折叠叶（notice）默认收起，是验证折叠开关语义最干净的载体
   const foldMsg = () => msg({ id: 'r1', type: 'notice', status: 'completed', content: '一段思考' })
 
-  it('节点头可聚焦且带开关语义（role / tabindex / aria-expanded）', () => {
+  it('节点头是原生 button 且带开关语义（无冗余 role / tabindex）', () => {
     const w = mountNode(foldMsg())
     const head = w.find('.node-head')
-    expect(head.attributes('role')).toBe('button')
-    expect(head.attributes('tabindex')).toBe('0')
+    expect(head.element.tagName).toBe('BUTTON')
+    expect(head.attributes('role')).toBeUndefined()
+    expect(head.attributes('tabindex')).toBeUndefined()
     expect(head.attributes('aria-expanded')).toBe('false')
     expect(head.attributes('aria-label')).toContain('展开')
   })

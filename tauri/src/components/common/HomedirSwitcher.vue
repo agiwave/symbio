@@ -283,9 +283,9 @@ async function handleConfirm() {
     emit('reloaded', null)
     emit('update:open', false)
     resetFields()
-  } catch (err: any) {
+  } catch (err: unknown) {
     logger.error('sysdir-switcher', '切换失败:', err)
-    error.value = `切换失败: ${err?.message ?? String(err)}`
+    error.value = `切换失败: ${err instanceof Error ? err.message : String(err)}`
   } finally {
     busy.value = false
   }
