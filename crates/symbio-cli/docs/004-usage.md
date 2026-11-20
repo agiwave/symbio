@@ -20,6 +20,41 @@ node scripts/build-cli.mjs # 在 crates/symbio-cli/ 下执行
 
 ---
 
+## 0. 配置模型（首次必做）
+
+CLI 不硬编码 provider id：它按系统目录（homedir，默认 `<当前目录>/.symbio`）下的模型条目解析。
+**第一次运行前必须至少有一个模型条目**，否则启动前会打印「没有可用 Provider」的提示。
+
+在系统目录里放一份 `model/<id>/provider.json`（`<id>` 自取，与文件里的 `id` 一致）即可：
+
+```json
+{
+  "id": "my-openai",
+  "name": "My OpenAI",
+  "provider": "openai",
+  "api_base": "https://api.openai.com/v1",
+  "model": "gpt-4o-mini",
+  "api_protocol": "openai_chat",
+  "api_key": "<你的 API Key>",
+  "enabled": true
+}
+```
+
+```bash
+../../target/debug/symbio-cli.exe --homedir ~/.symbio -m "你好"
+```
+
+- `provider` / `model` / `api_protocol` 的合法取值见 model 插件的 PRESETS
+  （`crates/symbio-plugin-model/src/detail.rs`）；配本地 Ollama / LMStudio 时用
+  `provider: "openai_compatible"` 并把 `api_base` 指到本机端点。
+- 上例直接写 `api_key`；完整字段形状（含 `max_tokens` / `timeout_secs` 等可选字段）以
+  真实条目为准——仓库 `.symbio/model/*/provider.json` 就是现成样例。
+- 桌面端在左侧「模型」面板新建条目，与 CLI **共用同一份配置**，配一次两端都能用。
+
+`--provider <ID>` 显式指定某个模型条目；不传即用系统目录配置（`--provider default` 是等价的兼容写法）。
+
+---
+
 ## 三种运行模式
 
 ### ① 非交互：单条消息（`-m` 或位置参数）
