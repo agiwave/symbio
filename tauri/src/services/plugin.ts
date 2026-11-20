@@ -26,11 +26,20 @@ import {
  */
 const GATEWAY_PATH = 'gateway'
 
+/** 未知值是否为可索引的对象——IPC 边界所有结构判定的唯一守卫。 */
+function isRecord(v: unknown): v is Record<string, unknown> {
+  return typeof v === 'object' && v !== null && !Array.isArray(v)
+}
+
 // ==================== 1. 协议定义 (与后端 transport.rs 严格对齐) ====================
 
+/**
+ * 线上的帧载荷是 JSON 反序列化结果，静态类型只能是 `unknown`；
+ * 业务形状由 `ProtocolEnforcer.extract` 在边界处用守卫收窄，不让 `any` 越过 IPC 边界。
+ */
 export type PluginFrame =
-  | { Data: any }
-  | { Error: [string, any] }
+  | { Data: unknown }
+  | { Error: [string, unknown] }
 
 export const HEAD_PATH = "path";
 export const HEAD_WORKDIR = "workdir";
@@ -64,17 +73,17 @@ export const HEAD_ORIGIN = "origin";
  */
 export interface PluginMessage {
   metadata: Record<string, string>;
-  payload?: any;
+  payload?: unknown;
 }
 
 /**
  * 载荷包装结构 (与后端 PluginPayloadWire 对齐)
  */
 export type PluginPayloadWire =
-  | { type: 'Data', data: any }
+  | { type: 'Data', data: unknown }
   | { type: 'Connection', data: string }
 
-export interface ConnectEvent { type: string; data?: any }
+export interface ConnectEvent { type: string; data?: unknown }
 
 // 最近一次使用的工作目录（lastWorkdir）。
 // 仅用于"新建会话"时的默认工作区；不承载"全局当前目录"语义——
@@ -113,7 +122,7 @@ export class Connection {
     this.lastActivity = Date.now();
   }
 
-  async send(data: any): Promise<void> {
+  async send(data: unknown): Promise<void> {
     if (!this.active) {
       throw new Error(`[Protocol Error] Cannot send to a disconnected session: ${this.connectionId} (${this.path})`);
     }
@@ -153,8 +162,8 @@ class ProtocolEnforcer {
   /**
    * 严格验证帧结构
    */
-  static validate(frame: any, path: string): PluginFrame {
-    if (!frame || typeof frame !== 'object') {
+  static validate(frame: unknown, path: string): PluginFrame {
+    if (!isRecord(frame)) {
       const msg = `[Protocol Violation] ${path} sent non-object input: ${JSON.stringify(frame)}`;
       logger.error('Protocol', msg);
       throw new Error(msg);
@@ -171,11 +180,11 @@ class ProtocolEnforcer {
   /**
    * 业务载荷提取
    */
-  static extract(frame: PluginFrame, path: string): { type: string; data: any } {
+  static extract(frame: PluginFrame, path: string): { type: string; data: unknown } {
     if ('Data' in frame) {
       const d = frame.Data;
-      // 场景 1: 标准业务格式 { type: "...", data: ... }
-      if (d && typeof d === 'object' && 'type' in d && 'data' in d) {
+      // 场景 1: 标准业务格式 { type: "...", data: ... } —— 用守卫收窄未知载荷
+      if (isRecord(d) && typeof d.type === 'string' && 'data' in d) {
         return { type: d.type, data: d.data };
       }
       // 场景 2: 裸数据帧 (视作 type=message)
@@ -290,7 +299,7 @@ class WsConnection extends Connection {
   get isConnected(): boolean {
     return this.ws.readyState === WebSocket.OPEN
   }
-  async send(data: any): Promise<void> {
+  async send(data: unknown): Promise<void> {
     if (!this.active) {
       throw new Error(`[Protocol Error] Cannot send to a disconnected session: ws (${this.path})`)
     }
@@ -317,7 +326,7 @@ export interface PluginOptions {
   workdir?: string;
   agent_id?: string;
   session_id?: string;
-  metadata?: any;
+  metadata?: Record<string, unknown>;
   /**
    * 调用来源（诊断键，见 [`HEAD_ORIGIN`]）。进 `metadata.origin`，由
    * `Start routing` 留痕打出。缺省不写这个键——**不给来源时信封形状与从前逐字节一致**。
@@ -333,7 +342,7 @@ export interface PluginOptions {
 
 interface SendRouteOptions extends PluginOptions {
   path: string;
-  payload?: any;
+  payload?: unknown;
 }
 
 /**
@@ -425,7 +434,7 @@ async function nativeTransport(
   let currentEofUnlisten: UnlistenFn | undefined;
 
   // 1. 预监听 (消除竞态)
-  currentUnlisten = await listen<any>(`route/${sessionId}`, (event) => {
+  currentUnlisten = await listen<unknown>(`route/${sessionId}`, (event) => {
     try {
       const frame = ProtocolEnforcer.validate(event.payload, request.path);
       onFrame?.(frame);
@@ -434,7 +443,7 @@ async function nativeTransport(
     }
   });
 
-  currentEofUnlisten = await listen<any>(`route/${sessionId}/eof`, () => {
+  currentEofUnlisten = await listen<unknown>(`route/${sessionId}/eof`, () => {
     onEof?.();
   });
 
@@ -459,8 +468,7 @@ async function nativeTransport(
       // 真改了 id，预注册的监听器会挂在旧事件名上，**切换窗口内的帧静默丢失且不报错**。
       // 故删除该分支，把契约写成断言——破坏契约时当场报错，而不是安静地收空气。
       if (payload.data !== sessionId) {
-        currentUnlisten?.();
-        currentEofUnlisten?.();
+        // 交给下方 catch 统一清理——避免同一对监听器被 unlisten 两次
         throw new Error(
           `[Protocol Error] route_v2 返回的 conn_id (${payload.data}) 与 clientId ` +
             `(${sessionId}) 不一致。前端已在 clientId 上预注册监听器，后端改 id 会导致` +
@@ -520,11 +528,15 @@ async function httpInvokeTransport(
   });
 
   const text = await res.text().catch(() => '');
-  let parsed: any = null;
+  let parsed: unknown = null;
   try { parsed = text ? JSON.parse(text) : null; } catch { /* 非 JSON 忽略 */ }
 
-  if (!res.ok || parsed?.error) {
-    throw new Error(`[Gateway HTTP] ${parsed?.error ?? `invoke 失败 ${res.status}`}`);
+  // JSON 是未知值，用守卫读 error 字段，不让 any 从 fetch 响应渗入
+  const parsedRecord = isRecord(parsed) ? parsed : null;
+  const gatewayError = parsedRecord?.error;
+  if (!res.ok || gatewayError) {
+    const errText = gatewayError != null ? String(gatewayError) : `invoke 失败 ${res.status}`;
+    throw new Error(`[Gateway HTTP] ${errText}`);
   }
 
   // 服务端返回的 PluginPayloadWire（Data / Connection）
@@ -576,7 +588,7 @@ async function httpWsTransport(
 
   // 与 native 对称：返回 Connection 型 payload，connectPlugin 据此拿到连接对象
   return {
-    response: { metadata: {}, payload: { type: 'Connection', data: 'ws' } as any },
+    response: { metadata: {}, payload: { type: 'Connection', data: 'ws' } as PluginPayloadWire },
     connection: conn,
   };
 }
@@ -595,11 +607,11 @@ export async function callPlugin<TOutput = unknown, TInput = unknown>(
   timeoutMs = 30000,
   options?: PluginOptions
 ): Promise<TOutput> {
-  let lastData: any = null;
+  let lastData: unknown = null;
   let hasError = false;
   let connection: Connection | undefined;
   let resolveFn!: (val: TOutput) => void;
-  let rejectFn!: (reason?: any) => void;
+  let rejectFn!: (reason?: unknown) => void;
 
   const resultPromise = new Promise<TOutput>((resolve, reject) => {
     resolveFn = resolve;
