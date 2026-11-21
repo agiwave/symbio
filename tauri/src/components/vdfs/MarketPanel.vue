@@ -1,9 +1,10 @@
 <!--
   MarketPanel — 插件市场（plugin_manager 的 `ext=market` 渲染器）
 
-  节点正文是后端现场算出的候选 JSON（`{ candidates: [...] }`），本组件只负责呈现与
-  发起安装，不持有第二份插件清单。安装写回市场节点：后端校验「可选 ∧ 未安装」后
-  复用容器根的安装动词，成功后广播变更，列表与候选随之收敛。
+  候选由后端随「添加插件」新建类型的 `schema` 下发（`{ candidates: [...] }`），
+  本组件只负责呈现与发起安装，不持有第二份插件清单。它不是 VDFS 清单节点，而是一张
+  草稿页：点击安装向宿主抛 `save`，由通用写入机制落到当前目录（= 容器安装动词），
+  成功后广播变更，列表与候选随之收敛（D-520）。
 
   外部插件的形态仍由 D-407 暂缓；候选里的 `source` 字段是它与内置插件共用的呈现位，
   这里不据此分叉出任何恒空分支（D-520）。
@@ -15,7 +16,7 @@
       <p class="market-desc">添加尚未安装的可选插件。已安装的插件可在列表中卸载。</p>
     </header>
 
-    <p v-if="error" class="market-error" role="alert">{{ error }}</p>
+    <p v-if="props.error" class="market-error" role="alert">{{ props.error }}</p>
 
     <div v-if="visible.length" class="market-grid">
       <article v-for="c in visible" :key="c.name" class="market-card">
@@ -24,14 +25,7 @@
           <span class="card-source">{{ sourceLabel(c.source) }}</span>
         </div>
         <code class="card-id">{{ c.name }}</code>
-        <button
-          type="button"
-          class="install-btn"
-          :disabled="busyId !== null"
-          @click="install(c)"
-        >
-          {{ busyId === c.name ? '安装中…' : '安装' }}
-        </button>
+        <button type="button" class="install-btn" @click="install(c)">安装</button>
       </article>
     </div>
 
@@ -40,11 +34,11 @@
 </template>
 
 <script setup lang="ts">
-import { computed, ref } from 'vue'
-import { writeVdfs } from '@/services/vdfs'
+import { computed } from 'vue'
 import type { VdfsRendererProps } from './rendererContract'
 
 const props = defineProps<VdfsRendererProps>()
+const emit = defineEmits<{ (e: 'save', payload: Record<string, unknown>): void }>()
 
 interface Candidate {
   name: string
@@ -53,38 +47,27 @@ interface Candidate {
   label: string
 }
 
+/** 候选来自 `new_type.schema`（不是正文）：机制把它作为 `data` 原样交给渲染器。 */
 const candidates = computed<Candidate[]>(() => {
-  if (typeof props.data !== 'string') return []
-  try {
-    const model = JSON.parse(props.data) as { candidates?: Candidate[] }
-    return Array.isArray(model.candidates) ? model.candidates : []
-  } catch {
-    return []
-  }
+  const model = props.data as { candidates?: unknown } | undefined
+  const list = model && typeof model === 'object' ? model.candidates : null
+  return Array.isArray(list) ? (list as Candidate[]) : []
 })
 
-/** 乐观收敛：安装成功后先把这张卡移走，广播到达后的重拉会给出同一份读数 */
-const locallyInstalled = ref<Set<string>>(new Set())
-const visible = computed(() => candidates.value.filter((c) => !locallyInstalled.value.has(c.name)))
-const busyId = ref<string | null>(null)
-const error = ref('')
+const visible = candidates
 
 function sourceLabel(source: string): string {
   return source === 'builtin' ? '内置可选' : source || '未知来源'
 }
 
-async function install(c: Candidate): Promise<void> {
-  if (busyId.value !== null) return
-  busyId.value = c.name
-  error.value = ''
-  try {
-    await writeVdfs(props.node.path, JSON.stringify({ plugin_provider: c.provider }))
-    locallyInstalled.value = new Set([...locallyInstalled.value, c.name])
-  } catch (e) {
-    error.value = e instanceof Error ? e.message : String(e)
-  } finally {
-    busyId.value = null
-  }
+/**
+ * 点安装 = 提交一张「新建插件」草稿：只抛载荷，写入由宿主统一处理。
+ *
+ * 成功后的列表刷新 / 关闭草稿都由 `useVdfs.write` 完成；失败原因走 `error` prop
+ * 回到页面上，不在渲染器里再写一份 VDFS（D-520）。
+ */
+function install(c: Candidate): void {
+  emit('save', { plugin_provider: c.provider })
 }
 </script>
 

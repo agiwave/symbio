@@ -64,8 +64,6 @@ const TEXTUAL_RENDERERS: ReadonlySet<VdfsRenderer> = new Set([
   'markdown',
   'json',
   'message',
-  // 市场正文是候选 JSON：机制只负责取回文本，parse 与呈现归渲染器自己（D-520）
-  'market',
 ])
 
 /** 该渲染器把节点正文当**文本缓冲**看待（原样呈现，不 parse） */
@@ -76,6 +74,30 @@ export function isTextualRenderer(r: VdfsRenderer): boolean {
 /** 表单渲染器：字段值从正文 parse，保存走 `saveFields` 而不是整篇 `saveText`。 */
 export function isFormRenderer(r: VdfsRenderer): boolean {
   return r === 'form'
+}
+
+/**
+ * 数据来自**节点自述 `schema`**、而非正文的渲染器（目前只有插件市场）。
+ *
+ * 市场是「添加插件」点开的一张草稿页：草稿没有落盘、没有正文，候选由后端随
+ * `new_type.schema` 下发（D-520）。把它排除在文本类之外，机制就不会去读一个
+ * 不存在的节点正文。
+ */
+export function rendererReadsNodeSchema(r: VdfsRenderer): boolean {
+  return r === 'market'
+}
+
+/**
+ * 某个**落成扩展名**是不是「schema 驱动的选择器页」（目前即市场）。
+ *
+ * 供「进入目录自动开草稿」用：自动开的前提是「空目录唯一能做的就是填这张表单」，
+ * 而选择器页的数据在 `schema` 里，进目录第一眼该是列表（D-520）。判据从注册表导出，
+ * 前端不写资源类型名，也不改内核协议字段。
+ */
+export function isSchemaDrivenExt(ext: string | null | undefined): boolean {
+  if (!ext) return false
+  const r = EXT_RENDERERS[ext.toLowerCase()]
+  return r ? rendererReadsNodeSchema(r) : false
 }
 
 /** 节点的项级类型是不是会话（ext 判据的唯一出处，框架层只问这个谓词）。 */
@@ -103,7 +125,8 @@ export function isInboxSeg(node: { kind?: string }): boolean {
  *
  * = 文本缓冲类 ∪ `form`：表单字段值同样取自正文（`vdfs/read` 的 `text`，
  * 前端 parse 成对象后作为显式入参交给渲染器）。其余（`dir` / `session` /
- * `appearance` / `about` / `fallback`）各有自己的数据来源，替它们读正文是白读。
+ * `appearance` / `about` / `market` / `fallback`）各有自己的数据来源——市场的候选
+ * 随 `new_type.schema` 下发（见 `rendererReadsNodeSchema`），替它们读正文是白读。
  */
 export function rendererReadsNodeText(r: VdfsRenderer): boolean {
   return isFormRenderer(r) || isTextualRenderer(r)

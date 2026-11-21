@@ -2,32 +2,27 @@
 /**
  * MarketPanel — 插件市场的页面层判据
  *
- * 市场没有第二份插件清单：候选来自节点正文，安装写回同一节点。这两条链一断，
- * 「市场」就只剩一个空壳，因此测试直接钉住「正文 → 卡片」与「点击 → 写回」。
+ * 市场没有第二份插件清单：候选随「添加插件」的 `new_type.schema` 作为 `data` 下发，
+ * 安装只抛 `save` 载荷，写入由宿主按草稿规则完成。这两条链一断，市场就只剩空壳，
+ * 因此测试直接钉住「schema → 卡片」与「点击 → save 载荷」。
  */
 
-import { beforeEach, describe, expect, it, vi } from 'vitest'
+import { describe, expect, it } from 'vitest'
 import { mount } from '@vue/test-utils'
 import MarketPanel from '../MarketPanel.vue'
 import type { VdfsItem } from '@/schemas/vdfs'
 
-const mocks = vi.hoisted(() => ({ writeVdfs: vi.fn() }))
-vi.mock('@/services/vdfs', () => ({ writeVdfs: mocks.writeVdfs }))
-
-function marketItem(): VdfsItem {
+/** 草稿节点：没有落盘路径——市场页据此证明自己不直接写 VDFS */
+function marketDraft(): VdfsItem {
   return {
-    path: 'plugin_manager/market',
-    name: 'market',
-    title: '插件市场',
-    kind: 'plugin_manager',
+    path: '',
+    name: '',
+    title: '',
+    kind: 'market',
     status: '',
-    access: 'rw',
+    access: 'w',
     ext: 'market',
   }
-}
-
-function body(candidates: unknown[]): string {
-  return JSON.stringify({ candidates })
 }
 
 const candidate = (name: string) => ({
@@ -37,15 +32,12 @@ const candidate = (name: string) => ({
   label: `${name} 插件`,
 })
 
-describe('MarketPanel', () => {
-  beforeEach(() => {
-    mocks.writeVdfs.mockReset()
-    mocks.writeVdfs.mockResolvedValue({ name: 'slo', created: true })
-  })
+const data = (candidates: unknown[]) => ({ candidates })
 
-  it('把候选正文渲染成卡片：名称、来源与安装按钮', () => {
+describe('MarketPanel', () => {
+  it('把 schema 候选渲染成卡片：名称、来源与安装按钮', () => {
     const w = mount(MarketPanel, {
-      props: { node: marketItem(), data: body([candidate('slo'), candidate('setting')]) },
+      props: { node: marketDraft(), data: data([candidate('slo'), candidate('setting')]) },
     })
     expect(w.findAll('.market-card')).toHaveLength(2)
     expect(w.text()).toContain('slo 插件')
@@ -53,34 +45,30 @@ describe('MarketPanel', () => {
     expect(w.findAll('.install-btn')).toHaveLength(2)
   })
 
-  it('点击安装写回市场节点，载荷只带插件工厂', async () => {
+  it('点击安装只抛 save 载荷，不自己写 VDFS', async () => {
     const w = mount(MarketPanel, {
-      props: { node: marketItem(), data: body([candidate('slo')]) },
+      props: { node: marketDraft(), data: data([candidate('slo')]) },
     })
     await w.find('.install-btn').trigger('click')
 
-    expect(mocks.writeVdfs).toHaveBeenCalledTimes(1)
-    const [path, text] = mocks.writeVdfs.mock.calls[0]
-    expect(path).toBe('plugin_manager/market')
-    expect(JSON.parse(text)).toEqual({ plugin_provider: 'slo' })
-    expect(w.text()).toContain('暂无可安装的可选插件')
+    expect(w.emitted('save')).toEqual([[{ plugin_provider: 'slo' }]])
   })
 
-  it('安装失败时把原因留在页面上，不静默', async () => {
-    mocks.writeVdfs.mockRejectedValueOnce(new Error('本构建未链接该工厂'))
+  it('安装失败时把宿主的 error 留在页面上，不静默', () => {
     const w = mount(MarketPanel, {
-      props: { node: marketItem(), data: body([candidate('slo')]) },
+      props: {
+        node: marketDraft(),
+        data: data([candidate('slo')]),
+        error: '本构建未链接该工厂',
+      },
     })
-    await w.find('.install-btn').trigger('click')
-    await Promise.resolve()
-
     expect(w.find('.market-error').text()).toBe('本构建未链接该工厂')
     expect(w.findAll('.market-card')).toHaveLength(1)
   })
 
   it('空候选给出空态而不是空白页', () => {
     const w = mount(MarketPanel, {
-      props: { node: marketItem(), data: body([]) },
+      props: { node: marketDraft(), data: data([]) },
     })
     expect(w.text()).toContain('暂无可安装的可选插件')
   })

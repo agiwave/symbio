@@ -11,7 +11,7 @@ use super::*;
 use std::collections::HashMap;
 use std::sync::Mutex;
 use symbio_plugin_api::DetailDefinition;
-use symbio_plugin_api::{VdfsActionResult, VdfsNewType, VdfsWriteResponse, VDFS_STATUS_NONE};
+use symbio_plugin_api::{VdfsActionResult, VdfsWriteResponse, VDFS_STATUS_NONE};
 
 // ==================== 容器替身 ====================
 
@@ -103,12 +103,13 @@ impl VdfsProvider for FakeRegistry {
                 Ok(VdfsResponse::Unit)
             }
             VdfsRequest::Stat => {
-                // 容器根的可新建类型：安装表单由**执行安装的那一层**声明，本插件转发它
-                let mut n = VdfsNode::dir("", "系统", VdfsAccess::LIST);
-                let mut t = VdfsNewType::new(PLUGIN_ID_MANAGER, "插件");
-                t.description = Some("从已注册的插件工厂里选一个装进本智能体".to_string());
-                n.new_type = Some(Box::new(t));
-                Ok(VdfsResponse::Stat(n))
+                // 容器根只提供注册表条目与安装动词；「添加插件」的页面（new_type）
+                // 由 plugin_manager 自己声明，不再转发容器的通用安装表单（D-520）
+                Ok(VdfsResponse::Stat(VdfsNode::dir(
+                    "",
+                    "系统",
+                    VdfsAccess::LIST,
+                )))
             }
             _ => Err(VdfsError::NotImplemented),
         }
@@ -212,35 +213,57 @@ async fn metadata_is_the_plugin_manager() {
     assert!(root.is_dir());
 }
 
-/// 根不声明 new_type：即使容器声明了也不转发——市场是唯一添加入口
+/// 根声明「添加插件」新建类型：市场是点开的那张页面，不是清单里的节点。
+///
+/// `ext` / `node_ext` 都是 `market`（草稿据此选渲染器），候选随 `schema` 下发——
+/// 前端不持第二份插件清单。这里不转发容器的通用安装表单（那是空下拉）。
 #[tokio::test]
-async fn root_does_not_declare_new_type_even_if_container_does() {
+async fn root_declares_market_new_type_with_candidates() {
     let fake = Arc::new(FakeRegistry::new(Vec::new()));
-    let p = plugin_with(Arc::clone(&fake));
+    let p = plugin_with(fake);
 
     let root = stat(&p, &vctx(), "").await;
+    let t = root.new_type.as_ref().expect("根要声明添加插件的新建类型");
+    assert_eq!(t.ext, MARKET_EXT);
+    assert_eq!(t.node_ext.as_deref(), Some(MARKET_EXT));
     assert!(
-        root.new_type.is_none(),
-        "前端见 new_type 会自动开草稿并收起列表，通用安装表单会挡住市场入口"
-    );
-    assert!(
-        root.description
+        t.description
             .as_deref()
             .unwrap_or_default()
             .contains("插件市场"),
-        "根的描述应把用户指向市场"
+        "新建类型的说明应把用户指向市场"
+    );
+    let schema = t.schema.as_ref().expect("候选随 schema 下发");
+    assert!(
+        schema["candidates"].is_array(),
+        "候选是数组；草稿据此渲染市场卡片"
     );
 
-    // 容器不可达时同样不声明——这不是「退化」，而是本插件的常态
+    // 容器不可达时仍声明入口，只是候选为空——这是常态，不是「退化」为通用表单
     let orphan = plugin_without_registry();
-    assert!(stat(&orphan, &vctx(), "").await.new_type.is_none());
+    let t = stat(&orphan, &vctx(), "")
+        .await
+        .new_type
+        .expect("仍声明添加插件入口");
+    assert_eq!(t.ext, MARKET_EXT);
+    assert_eq!(
+        t.schema.as_ref().unwrap()["candidates"]
+            .as_array()
+            .unwrap()
+            .len(),
+        0
+    );
 }
 
 // ==================== 清单 ====================
 
-/// 清单 = 插件市场在最前 + 各插件条目 + 自有分区垫后
+/// 清单 = 各插件条目 + 自有分区；**没有市场节点**
+///
+/// 「进管理页先看已装插件」：市场是「添加插件」打开的一张页面（根上的 `new_type`），
+/// 不是清单里的又一项。把市场放回清单会重新引入「市场排在长列表末尾、入口看不见」
+/// 的旧问题（D-520）。
 #[tokio::test]
-async fn list_puts_market_first_then_entries_then_own_sections() {
+async fn list_has_entries_then_own_sections_without_market_node() {
     let fake = Arc::new(FakeRegistry::new(vec![
         entry("alpha", "alpha_factory", false, true),
         entry("beta", "beta_factory", false, false),
@@ -249,22 +272,20 @@ async fn list_puts_market_first_then_entries_then_own_sections() {
 
     let items = list(&p, &vctx()).await;
     let names: Vec<&str> = items.iter().map(|it| it.node.name.as_str()).collect();
-    assert_eq!(
-        names,
-        vec!["market", "alpha", "beta", "appearance", "about"]
+    assert_eq!(names, vec!["alpha", "beta", "appearance", "about"]);
+    assert!(
+        !names.contains(&"market"),
+        "市场不是 VDFS 节点，清单里不得出现"
     );
 
-    // 市场在最前：`ext` 是它自己的渲染器键
-    assert_eq!(items[0].node.ext.as_deref(), Some("market"));
-
     // 条目是定义驱动的表单文档，不是目录
-    assert_eq!(items[1].node.kind, PLUGIN_ID_MANAGER);
-    assert_eq!(items[1].node.ext.as_deref(), Some(VDFS_EXT_FORM));
-    assert!(!items[1].node.is_dir(), "条目是文档，不是目录");
+    assert_eq!(items[0].node.kind, PLUGIN_ID_MANAGER);
+    assert_eq!(items[0].node.ext.as_deref(), Some(VDFS_EXT_FORM));
+    assert!(!items[0].node.is_dir(), "条目是文档，不是目录");
 
     // 自有分区：`ext` 即分区 id（前端按 `ext → 渲染器` 回退到专属面板）
-    assert_eq!(items[3].node.ext.as_deref(), Some("appearance"));
-    assert_eq!(items[4].node.ext.as_deref(), Some("about"));
+    assert_eq!(items[2].node.ext.as_deref(), Some("appearance"));
+    assert_eq!(items[3].node.ext.as_deref(), Some("about"));
 }
 
 /// 装配态即节点状态：启用 / 停用 / 装配失败各画各的
@@ -651,34 +672,16 @@ async fn ctx_with_configs() -> VdfsContext {
 
 // ==================== 插件市场（D-520） ====================
 
-/// 市场节点排在清单首位：它是「去哪加插件」的唯一入口，不是又一个插件
-#[tokio::test]
-async fn market_node_leads_the_list() {
-    let p = plugin_with(Arc::new(FakeRegistry::new(vec![entry(
-        "alpha",
-        "alpha_factory",
-        true,
-        true,
-    )])));
-    let items = list(&p, &vctx()).await;
-    let names: Vec<&str> = items.iter().map(|i| i.node.name.as_str()).collect();
-    assert_eq!(names, vec!["market", "alpha", "appearance", "about"]);
-
-    let market = stat(&p, &vctx(), "market").await;
-    assert_eq!(market.ext.as_deref(), Some("market"));
-    assert_eq!(market.status, VDFS_STATUS_NONE);
-    assert!(market.access.write, "市场要能写（写 = 安装）");
-}
-
-/// 候选判据一、二：声明可选、当前未安装（链接判据单列一测，避免受单 crate 构建影响）
+/// 候选判据一、二：声明可选、当前未装配（按挂载实例，不按目录存在）
 #[test]
-fn market_candidates_are_optional_and_uninstalled() {
-    let installed = vec!["setting".to_string()];
-    let candidates = market_candidates(&installed, |_| true);
+fn market_candidates_are_optional_and_unmounted() {
+    // mounted = true ⇒ 已在装配中（即便目录是旧版残留，也不该重复出现在市场）
+    let entries = vec![entry("setting", "setting", false, true)];
+    let candidates = market_candidates(&entries, |_| true);
 
     assert!(
         !candidates.iter().any(|c| c["name"] == "setting"),
-        "已安装的可选插件不在候选里"
+        "已装配的可选插件不在候选里"
     );
     assert!(
         candidates
@@ -695,56 +698,35 @@ fn market_candidates_are_optional_and_uninstalled() {
 /// 候选判据三：本构建没链接的工厂不渲染（否则是一个点了没反应的按钮）
 #[test]
 fn market_candidates_exclude_unlinked_factories() {
-    let candidates = market_candidates(&[], |id| id != "conation");
+    let entries: Vec<PluginEntry> = Vec::new();
+    let candidates = market_candidates(&entries, |id| id != "conation");
     assert!(!candidates.iter().any(|c| c["name"] == "conation"));
     assert!(candidates.iter().any(|c| c["name"] == "slo"));
 }
 
-/// 市场正文是可被前端直接消费的 JSON
-#[tokio::test]
-async fn market_read_returns_candidates_json() {
-    let p = plugin_with(Arc::new(FakeRegistry::new(vec![])));
-    let resp = p
-        .dispatch(&vctx(), "market", VdfsRequest::Read)
-        .await
-        .unwrap()
-        .into_read()
-        .unwrap();
-    let model: Value = serde_json::from_str(resp.as_text().unwrap_or_default()).unwrap();
-    assert!(model["candidates"].is_array());
+/// 历史 homedir 残留的可选插件目录（没挂上、不在跑）仍要出现在市场：
+/// 从市场安装走的是容器 `install`，它只按实例表判重，会重新启用这份目录。
+#[test]
+fn market_offers_optional_plugin_with_stale_directory() {
+    let entries = vec![entry("slo", "slo", false, false)]; // enabled/mounted = false
+    let candidates = market_candidates(&entries, |_| true);
+    assert!(
+        candidates.iter().any(|c| c["name"] == "slo"),
+        "残留目录不等于已装配，市场必须能把它列出来供重新安装"
+    );
 }
 
-/// 市场只装可选插件：核心插件的名字塞进来要被挡在转发之前
+/// 根写安装：带上 `create` 意图（草稿保存走同一条通道，容器只认带 create 的根写）
 #[tokio::test]
-async fn market_rejects_non_optional_provider() {
-    let p = plugin_with(Arc::new(FakeRegistry::new(vec![])));
-    let content =
-        VdfsContent::text(serde_json::json!({ VDFS_PLUGIN_PROVIDER_FIELD: "session" }).to_string());
-    let err = p
-        .dispatch(&vctx(), "market", VdfsRequest::Write { content })
-        .await
-        .unwrap_err();
-    assert!(err.to_string().contains("不是可选插件"));
-}
-
-/// 市场安装复用容器根上的写动词，并带上 `create` 意图
-#[tokio::test]
-async fn market_install_forwards_create_intent() {
+async fn install_forwards_create_intent() {
     let fake = Arc::new(FakeRegistry::new(vec![]));
     let p = plugin_with(fake.clone());
-    let content =
-        VdfsContent::text(serde_json::json!({ VDFS_PLUGIN_PROVIDER_FIELD: "slo" }).to_string());
+    let content = VdfsContent::text(r#"{"provider": "slo"}"#).with_create();
 
-    p.dispatch(&vctx(), "market", VdfsRequest::Write { content })
+    p.dispatch(&vctx(), "", VdfsRequest::Write { content })
         .await
         .unwrap();
 
-    let writes = fake.writes.lock().unwrap();
-    assert_eq!(writes.len(), 1, "只转发一次安装");
-    let (path, text) = &writes[0];
-    assert_eq!(path, "", "安装写在容器根上");
-    let sent: Value = serde_json::from_str(text).unwrap();
-    assert_eq!(sent[VDFS_PLUGIN_PROVIDER_FIELD], "slo");
     assert_eq!(
         fake.writes_create.lock().unwrap().as_slice(),
         &[true],

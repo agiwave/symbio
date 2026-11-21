@@ -12,8 +12,10 @@ import { describe, expect, it } from 'vitest'
 import { defineComponent } from 'vue'
 import {
   getVdfsRenderer,
+  isSchemaDrivenExt,
   isTextualRenderer,
   registerVdfsRenderer,
+  rendererReadsNodeSchema,
   rendererReadsNodeText,
   resolveVdfsRenderer,
 } from '../vdfsTypes'
@@ -79,27 +81,43 @@ describe('registerVdfsRenderer / getVdfsRenderer', () => {
  * （`rendererReadsNodeText` ⊃ `isTextualRenderer`）。这类"形状相同但不是同一件事"
  * 的错误只有把每个渲染器逐条断言才拦得住——泛泛地测两个 `true` 是测不出来的。
  */
+describe('rendererReadsNodeSchema / isSchemaDrivenExt（草稿页的数据来自节点自述，不是正文）', () => {
+  it('只有 market 从 schema 取候选', () => {
+    expect(rendererReadsNodeSchema('market')).toBe(true)
+    for (const r of ['text', 'markdown', 'json', 'message', 'form', 'dir', 'session', 'fallback'] as const) {
+      expect(rendererReadsNodeSchema(r), r).toBe(false)
+    }
+  })
+
+  it('按落成扩展名判选择器页：market 是、表单类不是', () => {
+    expect(isSchemaDrivenExt('market')).toBe(true)
+    for (const ext of ['form', 'session', 'text', 'json', 'dir', '', undefined, null]) {
+      expect(isSchemaDrivenExt(ext), String(ext)).toBe(false)
+    }
+  })
+})
+
 describe('isTextualRenderer / rendererReadsNodeText', () => {
-  it('isTextualRenderer：正文即文本缓冲（市场正文是 JSON 文本，parse 归渲染器）', () => {
-    for (const r of ['text', 'markdown', 'json', 'message', 'market'] as const) {
+  it('isTextualRenderer：正文即文本缓冲', () => {
+    for (const r of ['text', 'markdown', 'json', 'message'] as const) {
       expect(isTextualRenderer(r), r).toBe(true)
     }
   })
 
-  it('isTextualRenderer：其余一律不是（表单与二进制不可追加）', () => {
-    for (const r of ['dir', 'form', 'session', 'appearance', 'about', 'fallback'] as const) {
+  it('isTextualRenderer：其余一律不是（表单、选择器与二进制不可追加）', () => {
+    for (const r of ['dir', 'form', 'session', 'appearance', 'about', 'market', 'fallback'] as const) {
       expect(isTextualRenderer(r), r).toBe(false)
     }
   })
 
   it('rendererReadsNodeText：文本缓冲 ∪ form（表单字段值也取自正文）', () => {
-    for (const r of ['text', 'markdown', 'json', 'message', 'market', 'form'] as const) {
+    for (const r of ['text', 'markdown', 'json', 'message', 'form'] as const) {
       expect(rendererReadsNodeText(r), r).toBe(true)
     }
   })
 
   it('rendererReadsNodeText：其余各有自己的数据来源，替它们读正文是白读', () => {
-    for (const r of ['dir', 'session', 'appearance', 'about', 'fallback'] as const) {
+    for (const r of ['dir', 'session', 'appearance', 'about', 'market', 'fallback'] as const) {
       expect(rendererReadsNodeText(r), r).toBe(false)
     }
   })

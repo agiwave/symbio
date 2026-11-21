@@ -263,7 +263,15 @@ import ConfirmDialog from '@/components/common/ConfirmDialog.vue'
 import SkeletonBlock from '@/components/common/SkeletonBlock.vue'
 import { useHotkeys } from '@/composables/useHotkeys'
 import { useVdfs } from '@/composables/useVdfs'
-import { getVdfsRenderer, isFormRenderer, isSessionExt, isTextualRenderer, resolveVdfsRenderer } from '@/registry/vdfsTypes'
+import {
+  getVdfsRenderer,
+  isFormRenderer,
+  isSchemaDrivenExt,
+  isSessionExt,
+  isTextualRenderer,
+  rendererReadsNodeSchema,
+  resolveVdfsRenderer,
+} from '@/registry/vdfsTypes'
 // 装配渲染器组件（副作用导入：登记 ext → 组件；本控件是唯一消费方）
 import '@/registry/vdfsRenderers'
 // 列表卡片的呈现映射（状态点 / 文案 / 徽标 / 标签 / 图标）
@@ -351,6 +359,7 @@ const {
   mechanismBusyId,
   saveFields,
   saveText,
+  write,
   runAction,
   runPackAction,
   removeSelected,
@@ -416,11 +425,15 @@ watch(
 //
 // 两条边界：① 用户还没选中任何东西（不抢深链进来的选择）；② 每个目录只开一次
 // （否则清空选中 / 删掉刚选中的项之后草稿会"复活"）。
+// ③ **schema 驱动的选择器页不自动开**（如插件市场）：它的数据在 `schema` 里，
+//    进目录第一眼该是已装列表，草稿只由用户点「新建 / 添加插件」打开（D-520）。
+//    判据来自渲染注册表（落成 ext → 渲染器），不写资源类型名、不改内核协议。
 let autoDraftDone = false
 watch(
   () => cwdNode.value,
   (node) => {
     if (autoDraftDone || !node?.new_type) return
+    if (isSchemaDrivenExt(node.new_type.node_ext ?? node.new_type.ext)) return
     if (selectedNode.value) return
     autoDraftDone = true
     startNew()
@@ -647,10 +660,17 @@ const rendererComp = computed(() => {
   return getVdfsRenderer(resolveVdfsRenderer(selectedNode.value)) ?? null
 })
 
-/** 渲染器数据：form → 字段值对象；文本类（含 message 的正文）→ 文本；其余 → 不传 */
+/**
+ * 渲染器数据：form → 字段值对象；文本类（含 message 的正文）→ 文本；
+ * `schema` 类（插件市场）→ 节点自述里的候选；其余 → 不传。
+ *
+ * 市场是一张草稿页（没有落盘、没有正文），候选由后端随 `new_type.schema` 下发，
+ * 因此取 `selectedNode.schema` 而不是 `nodeText`（D-520）。
+ */
 const rendererData = computed<unknown>(() => {
   const r = renderer.value
   if (isFormRenderer(r)) return formData.value
+  if (r && rendererReadsNodeSchema(r)) return selectedNode.value?.schema
   if (isTextualRenderer(r)) return nodeText.value
   return null
 })
@@ -658,9 +678,14 @@ const rendererData = computed<unknown>(() => {
 const rendererRef = ref<{ markSaved?: () => void } | null>(null)
 
 function onSave(payload: unknown) {
-  const done = isFormRenderer(renderer.value)
+  const r = renderer.value
+  const done = isFormRenderer(r)
     ? saveFields((payload ?? {}) as Record<string, unknown>)
-    : saveText()
+    : r && rendererReadsNodeSchema(r)
+      ? // 市场这类选择器页：候选在 `schema`，保存载荷是用户选中的项；写回当前
+        // 目录由 `write` 按草稿规则完成（无需读正文，见 useVdfs.write）
+      write(payload as Record<string, unknown>)
+      : saveText()
   // 保存成功后 renderer 重新读入同一节点，身份门闩不会重跑预填 ⇒ 表单基线仍停在旧值，
   // dirty 会误留。显式把新值树立为基线，dirty 归零，避免保存后又弹「放弃修改」。
   void done.then((ok) => {

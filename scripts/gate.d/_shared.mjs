@@ -75,7 +75,11 @@ export const BASELINE = {
   //   plugin 收集期 / VDFS / 节点 / 变更投递里钉旧地址与旧闸门的用例）；同一条链路改由
   //   memory 侧 `session.test.rs` / `plugin.test.rs` / `vdfs.test.rs` 按新落位（`SESSION.md`，
   //   `ctx[SESSION_DIR]`）钉住，净 -7。覆盖没有丢，是换了承担者。非侵蚀。
-  ciRustTestsTotal: 2286,
+  // baseline-allow ciRustTestsTotal: 2286 → 2288（+2，D-520 后续修复）——新增两条判据用例：
+  //   composite/vdfs.test.rs 钉「有目录但未挂载的插件也能卸载」（删除按目录存在判，不被已挂载实例表挡成「目录不存在」）；
+  //   plugin_manager/plugin.test.rs 钉「残留目录的可选插件仍进市场」（装配按挂载实例判，不被历史目录占满）。非侵蚀。
+  // baseline-allow ciRustTestsTotal: 2288 → 2285（-3，D-520 交互重构）——删掉 4 条旧「market 是 VDFS 节点」的判据用例（节点置顶 / 读正文 / 非可选校验 / 市场写转发），新增 1 条「根写带 create 意图」用例；候选过滤判据 3 条保留。交互改为「添加插件页面」后旧节点语义退役，覆盖由根目录自述与草稿保存用例承担，非侵蚀。
+  ciRustTestsTotal: 2285,
   cliRustTests: 21,
   tauriRustTests: 4,
   // doc-link-allow D-010: 下一行是退役文件的历史叙述（已把这两个文件删掉），不是入链
@@ -89,7 +93,7 @@ export const BASELINE = {
   // `skeletonLazy.spec.ts` 钉本地释放与按需重取的折叠状态，`MessageNode` / 会话 store 补
   // 重取路径的渲染与竞态断言。不是补回覆盖。
   vitestFiles: 83,
-  vitestTests: 1191,
+  vitestTests: 1194,
   verifyPrograms: 17,
   verifyNegatives: 4,
   // baseline-allow e2eCases: 读通道禁令（e2e 不得读任何内部存储文件——`messages.json` / `v2-events.wal` / `session.json` 一并禁）下删 3 个用例：t33 熔断（存储层判据，已由 `wal.test.rs` / `active.test.rs` 覆盖）、t40（断言全为 WAL 白盒入格，可见效果已由 t29 记忆召回 / t35 技能编译覆盖）、t43（messages-json-is-rebuildable，判据「真源已换、缓存可弃」已下沉 `store/tests.rs`，且 messages.json 已停写）。45 → 42，非侵蚀：三条的判据都下沉到了 Rust 侧，不是丢掉覆盖。

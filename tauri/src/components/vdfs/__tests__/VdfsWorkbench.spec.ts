@@ -381,7 +381,9 @@ describe('VdfsWorkbench 列表筛选', () => {
  *
  * 1. 只在**用户还没选中任何东西**时做——覆盖深链进来的选中项等于抢用户的选择；
  * 2. **每个目录只自动开一次**——否则清空选中 / 删掉刚选中的项之后草稿会复活；
- * 3. **目录没声明 `new_type`** ⇒ 不可新建 ⇒ 不开（由后端声明，不由类型名决定）。
+ * 3. **目录没声明 `new_type`** ⇒ 不可新建 ⇒ 不开（由后端声明，不由类型名决定）；
+ * 4. schema 驱动的选择器页（落成 ext = `market`）⇒ 不开——进目录先看列表，草稿只由
+ *    用户点新建打开（判据来自渲染注册表，不是前端按资源类型名猜，D-520）。
  */
 describe('VdfsWorkbench 进入可新建目录时自动备好草稿', () => {
   const SESSION_TYPE: VdfsNewType = { ext: 'session', title: '会话' }
@@ -473,6 +475,23 @@ describe('VdfsWorkbench 进入可新建目录时自动备好草稿', () => {
 
   it('目录不可新建（没有 new_type）⇒ 不自动开', () => {
     installStub({ cwd: '@vfs/session', cwdNode: { ...mountNode, new_type: undefined } })
+    bench()
+
+    expect(hoisted.fns.startNew).not.toHaveBeenCalled()
+  })
+
+  it('★ 选择器页（market 渲染器）⇒ 进目录不开草稿（先看列表，D-520）', () => {
+    installStub({
+      cwd: '@vfs/plugin_manager',
+      cwdNode: {
+        ...mountNode,
+        path: '@vfs/plugin_manager',
+        name: 'plugin_manager',
+        title: '插件管理',
+        // 市场是「添加插件」页面：可以点新建打开，但进目录不自动开
+        new_type: { ext: 'market', node_ext: 'market', title: '添加插件' },
+      },
+    })
     bench()
 
     expect(hoisted.fns.startNew).not.toHaveBeenCalled()

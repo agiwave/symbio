@@ -61,9 +61,9 @@ use symbio_plugin_api::{
     PLUGIN_KEY_REQUIRED, PLUGIN_KEY_VERSION,
 };
 use symbio_plugin_api::{
-    VdfsAccess, VdfsContent, VdfsContext, VdfsError, VdfsItem, VdfsNode, VdfsProvider, VdfsRequest,
-    VdfsResponse, VdfsResult, VDFS_ACTION_DISABLE, VDFS_ACTION_ENABLE, VDFS_ACTION_PLUGINS,
-    VDFS_EXT_FORM, VDFS_PLUGINS_FIELD, VDFS_PLUGIN_NAME_FIELD, VDFS_PLUGIN_PROVIDER_FIELD,
+    VdfsAccess, VdfsContent, VdfsContext, VdfsError, VdfsItem, VdfsNewType, VdfsNode, VdfsProvider,
+    VdfsRequest, VdfsResponse, VdfsResult, VDFS_ACTION_DISABLE, VDFS_ACTION_ENABLE,
+    VDFS_ACTION_PLUGINS, VDFS_EXT_FORM, VDFS_PLUGINS_FIELD, VDFS_PLUGIN_NAME_FIELD,
     VDFS_STATUS_ACTIVE, VDFS_STATUS_DISABLED, VDFS_STATUS_FAILED,
 };
 
@@ -108,29 +108,24 @@ fn section_node(s: &SectionSpec) -> VdfsNode {
     n
 }
 
-/// 插件市场分区：`ext` 是前端渲染器的选择键（与 `appearance` / `about` 同形）。
+/// 「添加插件」新建类型的渲染器键：草稿据此渲染市场面板。
 ///
-/// 它不是插件条目，而是「尚未安装的插件在哪找」这一件事的入口。候选由 `read` 现场计算，
-/// 安装走同一个 `write` 动词——前端因此不必知道容器根上的安装契约。
-const MARKET_ID: &str = "market";
+/// 市场不是 VDFS 里的一个节点，而是「添加插件」这个入口打开的一张页面：候选随
+/// `new_type.schema` 下发，安装写回当前目录（= 容器根上的安装动词）。
+const MARKET_EXT: &str = "market";
 
-fn market_node() -> VdfsNode {
-    let mut n = VdfsNode::file(MARKET_ID, "插件市场", VdfsAccess::READ_WRITE);
-    n.kind = PLUGIN_ID_MANAGER.to_string();
-    n.ext = Some(MARKET_ID.to_string());
-    n.status = symbio_plugin_api::VDFS_STATUS_NONE.to_string();
-    n.description = Some("添加尚未安装的可选插件；已添加的插件在列表中可卸载".to_string());
-    n
-}
-
-/// 候选 = 声明为可选 ∧ 当前未安装 ∧ 本构建确实链接了该工厂（D-520）。
+/// 候选 = 声明为可选 ∧ 当前未装配（没有挂载实例）∧ 本构建确实链接了该工厂（D-520）。
+///
+/// 「未装配」按**挂载实例**判，不按目录存在判：历史 homedir 会残留旧版默认装配留下的
+/// 可选插件目录，那些目录既没挂上也不在跑，不该把市场占满到「一个都没有」——从市场
+/// 安装它们走的正是容器 `install`（只按实例表判重），会把目录重新启用。
 ///
 /// 第三项不可省：只按 `ASSEMBLY_OPTIONAL_PLUGINS` 渲染会给一个「点了没反应」的按钮——
 /// 那个工厂若没被链接进本二进制，容器没有它的 creator，安装只会得到 NotFound。
-fn market_candidates<F: Fn(&str) -> bool>(installed: &[String], linked: F) -> Vec<Value> {
+fn market_candidates<F: Fn(&str) -> bool>(entries: &[PluginEntry], linked: F) -> Vec<Value> {
     ASSEMBLY_OPTIONAL_PLUGINS
         .iter()
-        .filter(|id| !installed.contains(&id.to_string()))
+        .filter(|id| !entries.iter().any(|e| e.name == **id && e.mounted))
         .filter(|id| linked(id))
         .map(|id| {
             serde_json::json!({
@@ -423,29 +418,39 @@ impl PluginManagerPlugin {
 
     // ==================== 节点合成 ====================
 
-    /// 本插件的根：标题 + 清单入口。
+    /// 本插件的根：标题 + 「添加插件」入口。
     ///
-    /// **不声明 `new_type`**：添加插件走清单里的 `market` 节点（D-520），不再用
-    /// 容器转发的通用安装表单。后者不只是重复入口——前端 `VdfsWorkbench` 见目录
-    /// 声明 `new_type` 就**自动开草稿并收起中栏列表**，于是那张「插件工厂」空表单
-    /// 正好把列表里的市场节点挡住，用户因此找不到入口。少一个入口，换来入口可见。
-    async fn root_node(&self, _ctx: &VdfsContext) -> VdfsNode {
+    /// `new_type` 指向市场页面（`ext` / `node_ext` 均为 `market`），候选随 `schema`
+    /// 下发。草稿据此渲染市场面板；用户选中一个插件后写回本目录，由根上的 `Write`
+    /// 转发到容器安装。不转发容器的通用安装表单——那是「选一个插件工厂」的空下拉，
+    /// 既不是市场，也不会给出候选（D-520）。
+    async fn root_node(&self, ctx: &VdfsContext) -> VdfsNode {
         let mut n = VdfsNode::dir("", "插件管理", VdfsAccess::LIST);
-        n.description =
-            Some("从「插件市场」添加尚未安装的插件；已安装的插件可在此卸载".to_string());
+        n.description = Some("本智能体已安装的插件；点右上角「新建」从插件市场添加".to_string());
+        let candidates = match self.entries(ctx).await {
+            Ok(entries) => market_candidates(&entries, creator_has),
+            Err(_) => Vec::new(),
+        };
+        n.new_type = Some(Box::new(VdfsNewType {
+            ext: MARKET_EXT.to_string(),
+            node_ext: Some(MARKET_EXT.to_string()),
+            title: "添加插件".to_string(),
+            description: Some("从插件市场选择要安装的可选插件".to_string()),
+            schema: Some(serde_json::json!({ "candidates": candidates })),
+            ..Default::default()
+        }));
         n
     }
 
-    /// 清单 = **插件市场** + 各插件的条目 + 自有分区。
+    /// 清单 = 各插件的条目 + 自有分区。
     ///
-    /// 市场排在最前：它是「去哪加插件」的唯一入口，压在几十个插件条目之后等于没有
-    /// （用户根本滚不到）。其后依次是插件条目（按容器给的 `(order, name)`）与自有
-    /// 分区（按 [`OWN_SECTIONS`]），后者是应用自身的展示项，排尾不挡路。
+    /// 市场不作为节点出现在清单里——它是「添加插件」打开的一张页面，不是又一个
+    /// 插件条目（D-520）。条目按容器给的 `(order, name)`，自有分区按 [`OWN_SECTIONS`]
+    /// 排在末尾。
     async fn list_items(&self, ctx: &VdfsContext) -> VdfsResult<Vec<VdfsItem>> {
         let entries = self.entries(ctx).await?;
         let configs = Self::config_entries(ctx).await;
-        let mut out: Vec<VdfsItem> = Vec::with_capacity(entries.len() + OWN_SECTIONS.len() + 1);
-        out.push(VdfsItem::new(market_node()));
+        let mut out: Vec<VdfsItem> = Vec::with_capacity(entries.len() + OWN_SECTIONS.len());
         for entry in &entries {
             let config = configs.iter().find(|c| c.node.name == entry.name).cloned();
             out.push(VdfsItem::new(entry_node(entry, config)));
@@ -587,52 +592,6 @@ impl PluginManagerPlugin {
         Ok(VdfsResponse::Write(w))
     }
 
-    /// 读市场：候选现场计算，不缓存。安装位一变，`announce` 会触发重拉。
-    async fn read_market(&self, ctx: &VdfsContext) -> VdfsResult<VdfsResponse> {
-        let entries = self.entries(ctx).await?;
-        let installed: Vec<String> = entries.iter().map(|e| e.name.clone()).collect();
-        let model = serde_json::json!({ "candidates": market_candidates(&installed, creator_has) });
-        let text = serde_json::to_string_pretty(&model)
-            .map_err(|e| VdfsError::internal(format!("插件市场序列化失败：{e}")))?;
-        Ok(VdfsResponse::Read(
-            VdfsContent::text(text).with_mime("application/json"),
-        ))
-    }
-
-    /// 从市场安装：校验工厂确实是可选插件，再复用根上的安装动词。
-    ///
-    /// 「本构建是否链接了该工厂」不在这里重复判：容器 `install` 内部的 `provider_gap`
-    /// 才是那个判据的 owner，候选列表已用 `creator_has` 把装不了的插件挡在展示之前。
-    /// 这里只补容器不知道的那层部署语义——「可选」，否则核心插件会得到「已在装配中」
-    /// 这种答非所问的提示。
-    async fn install_from_market(
-        &self,
-        ctx: &VdfsContext,
-        content: VdfsContent,
-    ) -> VdfsResult<VdfsResponse> {
-        let text = content
-            .as_text()
-            .ok_or_else(|| VdfsError::invalid("安装需要 JSON 文本内容"))?;
-        let value: Value = serde_json::from_str(text)
-            .map_err(|e| VdfsError::invalid(format!("安装参数不是合法 JSON：{e}")))?;
-        let provider = value
-            .get(VDFS_PLUGIN_PROVIDER_FIELD)
-            .and_then(Value::as_str)
-            .unwrap_or_default()
-            .trim()
-            .to_string();
-        if !ASSEMBLY_OPTIONAL_PLUGINS.contains(&provider.as_str()) {
-            return Err(VdfsError::invalid(format!(
-                "「{provider}」不是可选插件，不能从市场安装"
-            )));
-        }
-        let install_content = VdfsContent::text(
-            serde_json::json!({ VDFS_PLUGIN_PROVIDER_FIELD: provider }).to_string(),
-        )
-        .with_create();
-        self.install(ctx, install_content).await
-    }
-
     /// 广播一次变更：本目录下 `<name>` 这一条（新增 / 移除 / 状态变了）不再是旧样子。
     ///
     /// 这是**既有机制**（`vdfs_notify_change` → 前端 `useVdfs` 的防抖重拉 + 重读当前项），
@@ -712,16 +671,6 @@ impl VdfsProvider for PluginManagerPlugin {
         }
 
         let name = leaf(path)?;
-
-        // 插件市场：不是插件条目，候选现场算、安装复用根上的写动词（D-520）
-        if name == MARKET_ID {
-            return match req {
-                VdfsRequest::Stat => Ok(VdfsResponse::Stat(market_node())),
-                VdfsRequest::Read => self.read_market(ctx).await,
-                VdfsRequest::Write { content } => self.install_from_market(ctx, content).await,
-                _ => Err(VdfsError::not_found(format!("未知路径：{path}"))),
-            };
-        }
 
         // 自有分区：不是插件，数据在前端 store（见 [`OWN_SECTIONS`]）
         if let Some(s) = section_of(name) {

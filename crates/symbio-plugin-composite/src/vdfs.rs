@@ -234,8 +234,9 @@ impl CompositeVdfs {
     ///
     /// 候选 = 已注册但当前未挂载的工厂（见 [`PluginRegistry::installable`]），落成
     /// 动作就是根上的 `Write`（见 [`Self::install_plugin`]）——表单声明与执行者同在
-    /// 一处，因此**只有这一份**安装表单的定义；插件管理插件原样转发它（它的根是
-    /// 插件根在界面上的门面），不另写一张。
+    /// 一处。插件管理插件**不再转发这张通用表单**：它的「添加插件」入口改为插件
+    /// 市场页（候选由管理插件按 D-520 的口径下发），这张声明只服务直接访问容器根的
+    /// 场景（D-520）。
     fn install_new_type(&self) -> VdfsNewType {
         let options: Vec<DetailOption> = self
             .registry
@@ -504,6 +505,23 @@ impl VdfsProvider for CompositeVdfs {
         path: &str,
         req: VdfsRequest,
     ) -> VdfsResult<VdfsResponse> {
+        // 卸载按「插件目录是否存在」判，不按「资源树里有没有它」判（见 `registry::uninstall`）。
+        // 单层路径才是一次卸载；带 `/` 的是插件内部删除，照旧往下走。
+        //
+        // 必须**先于** `children_of` / `resolve`：那两者只看已挂载实例，而「有目录却没挂上」
+        // 的插件（装配失败 / 被停用 / 旧版残留）照样出现在注册表条目里，用户点「卸载」
+        // 会先被解析成「目录不存在」——于是这个半成品永远删不掉。注册表自己既能处理
+        // 未挂载的目录，也能给出「必需插件不可删」的准确理由，直接交给它。
+        let name = path.trim_matches('/');
+        if matches!(req, VdfsRequest::Delete { .. }) && !name.is_empty() && !name.contains('/') {
+            return self
+                .registry
+                .uninstall(name)
+                .await
+                .map(|()| VdfsResponse::Unit)
+                .map_err(VdfsError::invalid);
+        }
+
         let dirs = self.children_of(ctx).await?;
 
         // 自身目录：可列 / 可 stat / 可写（= 安装一个插件）/ 收注册表动词；

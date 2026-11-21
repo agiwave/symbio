@@ -1261,6 +1261,8 @@ export function useVdfs(opts: UseVdfsOptions) {
     // 操作
     saveFields,
     saveText,
+    /** 原样写入（选择器类渲染器用：如插件市场只抛选中项，不经正文缓冲） */
+    write,
     runAction,
     runPackAction,
     removeSelected,

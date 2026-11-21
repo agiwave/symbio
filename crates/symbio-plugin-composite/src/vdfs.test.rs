@@ -611,6 +611,40 @@ async fn deleting_child_dir_root_uninstalls_the_plugin() {
     let _ = std::fs::remove_dir_all(&root);
 }
 
+/// 有插件目录、但实例表里没有它（装配失败 / 停用 / 旧版残留）时照样能卸载。
+/// 卸载按目录存在判，不能先被 `resolve` 的已挂载实例表挡成「目录不存在」。
+#[tokio::test]
+async fn deleting_unmounted_plugin_dir_uninstalls_it() {
+    let root = temp_root("uninstall-unmounted");
+    std::fs::create_dir_all(root.join("alpha")).unwrap();
+    std::fs::write(
+        root.join("alpha").join(symbio_plugin_api::PLUGIN_FILE),
+        r#"{"plugin_provider": "alpha"}"#,
+    )
+    .unwrap();
+
+    // 实例表为空：目录存在但没有挂载实例
+    let vdfs = CompositeVdfs::new(Arc::new(PluginRegistry::with_instances(
+        Arc::new(RwLock::new(IndexMap::new())),
+        root.clone(),
+        Vec::new(),
+    )));
+
+    vdfs.dispatch(
+        &host_ctx(),
+        "alpha",
+        VdfsRequest::Delete { recursive: false },
+    )
+    .await
+    .unwrap();
+    assert!(
+        !root.join("alpha").exists(),
+        "有目录但没挂上，也必须能从管理页卸载"
+    );
+
+    let _ = std::fs::remove_dir_all(&root);
+}
+
 /// 写在挂载点目录自身：`rel` 原样（空串）转发；回执里只有**名字**，没有地址
 ///
 /// 「新建 = 写目录自身」在容器层唯一要做的事就是转发——新条目落在哪，由调用方拿
