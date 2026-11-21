@@ -1,0 +1,6 @@
+# 编译期装配声明（scripts/facts/assembly.mjs 读取；不是运行期 VDFS 配置）
+plugin_id: ui_prefs
+plugin_comment: 界面偏好（外观 / 提示音 / 关于）的后端权威数据
+plugin_assembly: sub_agent
+plugin_order: 215
+plugin_undisablable: true

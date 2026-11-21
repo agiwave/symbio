@@ -31,10 +31,10 @@ impl: done
 **无**（权威登记见 [路由参考](../../docs/004-ref/003-ROUTES.md "RE-003-ROUTES") §Plugin_manager 插件）。
 本插件是无状态 provider，`route` 恒 `NotFound`。
 
-## 清单 = 各插件的条目 + 自有分区
+## 清单 = 各插件的条目 + 界面分区
 
 进入 `<根>/plugin_manager` 第一眼就是**已安装插件列表**（条目按容器给的 `order`），
-自有分区垫后。**清单里没有市场节点**：市场是「添加插件」打开的一张页面，不是又一个
+界面分区垫后。**清单里没有市场节点**：市场是「添加插件」打开的一张页面，不是又一个
 插件条目（D-520）。把市场塞回清单，它就会排在同名的几十项之后，用户根本滚不到：
 
 - 条目来自容器的注册表（`Action(plugins)`，见 `composite/vdfs.rs`），**含没有 VDFS 的
@@ -108,15 +108,20 @@ impl: done
 当前选中项的**动作集**都变了，订阅方据此重拉并重读当前项（前端 `useVdfs` 的既有收敛
 路径），按钮因此不会停在旧状态上。订阅走 `vdfs_watch_changes`（本插件是自管变更源）。
 
-## 自有分区（`appearance` / `about`）
+## 界面分区（`appearance` / `about`，归属 `ui_prefs`）
 
-- 清单在 `OWN_SECTIONS` 中登记（`id` / `label`），由 `impl VdfsProvider` 的 `list` 产出。
-- 它们的数据由**前端 store 自持**（主题、版本信息等不在后端），因此这两个分区在 VDFS
- 上是**只读节点**（`access = r`，`ext` 即分区 id）：`vdfs/read` / `vdfs/write` 对它们
- 恒 `Forbidden`，前端按 `ext` 直接渲染专属面板（`registry/vdfsTypes.ts` 的
- `appearance` / `about` 渲染器）。
+- 清单在 `UI_SECTIONS` 中登记（`id` / `label` / `body`），由 `impl VdfsProvider` 的 `list`
+  产出；节点的 `kind` 是 `ui_prefs`——归属与数据权威都在那个插件（D-521），但入口仍挂在
+  本插件清单里，用户操作路径不变。
+- `appearance` 有正文（`body = ui_prefs/PLUGIN.yml`）：`vdfs/read` / `vdfs/write` 转发到
+  容器根下的这份配置文档，`access = rw`。`about` 没有用户数据，正文恒空（`access = r`），
+  读写仍明确 `Forbidden`。
+- 前端按 `ext` 直接渲染专属面板（`registry/vdfsTypes.ts` 的 `appearance` / `about`
+  渲染器）；外观面板把偏好对象序列化成 JSON 写回，工作台原样落盘。
+- localStorage 只做**首屏快照 + 离线降级**：`main.ts` 在挂载前同步应用主题这条路径不能
+  改成异步 VDFS 读取（D-521）。
 - 分区节点显式声明 `status = none`：静态分区没有「运行中 / 就绪」可言，不清掉节点
- `status` 的缺省就会在列表里画一个绿点——那是个不存在的信息。
+  `status` 的缺省就会在列表里画一个绿点——那是个不存在的信息。
 - 原 `plugin_manager/config/get` / `plugin_manager/config/set`（以及更早的
  `plugin_manager/list` / `plugin_manager/get`）已全部下线：分区取值由 VDFS 承担，
  插件配置由各插件自己的配置文件承担。

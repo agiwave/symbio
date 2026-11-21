@@ -47,6 +47,7 @@ use serde_json::Value;
 use std::sync::Arc;
 use symbio_plugin_api::ASSEMBLY_UNDISABLABLE_PLUGINS;
 use symbio_plugin_api::PLUGIN_ID_MANAGER;
+use symbio_plugin_api::PLUGIN_ID_UI_PREFS;
 use symbio_plugin_api::{creator_has, ASSEMBLY_OPTIONAL_PLUGINS};
 use symbio_plugin_api::{
     vdfs_host_ctx, vdfs_notify_change, vdfs_unwatch_changes, vdfs_watch_changes, DynVdfsProvider,
@@ -67,42 +68,49 @@ use symbio_plugin_api::{
     VDFS_STATUS_ACTIVE, VDFS_STATUS_DISABLED, VDFS_STATUS_FAILED,
 };
 
-/// 自有分区（固定清单）：数据由**前端状态**自持，VDFS 侧无正文。
+/// 界面分区（固定清单）：节点挂在本插件清单里，**归属与数据权威**归 `ui_prefs`（D-521）。
 ///
-/// 这两个分区不与插件配置并列在设置页里；插件配置归拥有者名下之后，它们就是
-/// 本插件剩下的全部自有内容——`id` 同时是前端 editor 的「扩展名」（`ext`），
-/// 前端按 `ext → 渲染器` 的纯 UI 映射回退到专属面板。
+/// `id` 同时是前端 editor 的「扩展名」（`ext`），前端按 `ext → 渲染器` 的纯 UI 映射
+/// 回退到专属面板。`body` 是配置文档在**容器根**下的地址：有它的分区（外观）读写
+/// 转发到 `ui_prefs/PLUGIN.yml`；没有的（关于）正文恒空——那里没有用户数据，
+/// 版本来自编译期、引导状态是纯 UI 流程。
 struct SectionSpec {
     id: &'static str,
     label: &'static str,
+    body: Option<&'static str>,
 }
 
-const OWN_SECTIONS: [SectionSpec; 2] = [
+const UI_SECTIONS: [SectionSpec; 2] = [
     SectionSpec {
         id: "appearance",
         label: "外观",
+        body: Some("ui_prefs/PLUGIN.yml"),
     },
     SectionSpec {
         id: "about",
         label: "关于",
+        body: None,
     },
 ];
 
 /// 按 id 取分区声明
 fn section_of(id: &str) -> Option<&'static SectionSpec> {
-    OWN_SECTIONS.iter().find(|s| s.id == id)
+    UI_SECTIONS.iter().find(|s| s.id == id)
 }
 
-/// 分区节点：静态、无正文、只读（数据在前端 store）。
+/// 分区节点：归属 `ui_prefs`，外观可读写、关于只读。
 ///
 /// ⚠️ **显式声明无状态**（[`VDFS_STATUS_NONE`]）：分区是静态的，没有「运行中 / 就绪」
 /// 可言。节点 `status` 缺省是 `active`，不清掉就会在列表里画一个绿点——那是个不存在
 /// 的信息（见 `docs/003-design/010-VDFS前端页面规范.md` §4.2）。
-///
-/// `VDFS_STATUS_NONE`
 fn section_node(s: &SectionSpec) -> VdfsNode {
-    let mut n = VdfsNode::file(s.id, s.label, VdfsAccess::READ);
-    n.kind = PLUGIN_ID_MANAGER.to_string();
+    let access = if s.body.is_some() {
+        VdfsAccess::READ_WRITE
+    } else {
+        VdfsAccess::READ
+    };
+    let mut n = VdfsNode::file(s.id, s.label, access);
+    n.kind = PLUGIN_ID_UI_PREFS.to_string();
     n.ext = Some(s.id.to_string());
     n.status = symbio_plugin_api::VDFS_STATUS_NONE.to_string();
     n
@@ -442,20 +450,20 @@ impl PluginManagerPlugin {
         n
     }
 
-    /// 清单 = 各插件的条目 + 自有分区。
+    /// 清单 = 各插件的条目 + 界面分区。
     ///
     /// 市场不作为节点出现在清单里——它是「添加插件」打开的一张页面，不是又一个
-    /// 插件条目（D-520）。条目按容器给的 `(order, name)`，自有分区按 [`OWN_SECTIONS`]
-    /// 排在末尾。
+    /// 插件条目（D-520）。条目按容器给的 `(order, name)`，界面分区按 [`UI_SECTIONS`]
+    /// 排在末尾；它们的节点归属 `ui_prefs`，但入口仍挂在本插件清单里（D-521）。
     async fn list_items(&self, ctx: &VdfsContext) -> VdfsResult<Vec<VdfsItem>> {
         let entries = self.entries(ctx).await?;
         let configs = Self::config_entries(ctx).await;
-        let mut out: Vec<VdfsItem> = Vec::with_capacity(entries.len() + OWN_SECTIONS.len());
+        let mut out: Vec<VdfsItem> = Vec::with_capacity(entries.len() + UI_SECTIONS.len());
         for entry in &entries {
             let config = configs.iter().find(|c| c.node.name == entry.name).cloned();
             out.push(VdfsItem::new(entry_node(entry, config)));
         }
-        out.extend(OWN_SECTIONS.iter().map(|s| VdfsItem::new(section_node(s))));
+        out.extend(UI_SECTIONS.iter().map(|s| VdfsItem::new(section_node(s))));
         Ok(out)
     }
 
@@ -672,13 +680,24 @@ impl VdfsProvider for PluginManagerPlugin {
 
         let name = leaf(path)?;
 
-        // 自有分区：不是插件，数据在前端 store（见 [`OWN_SECTIONS`]）
+        // 界面分区：归属 ui_prefs。有正文的（外观）把读写转发到它的配置文档；
+        // 没有的（关于）正文恒空——那里没有用户数据（D-521）。
         if let Some(s) = section_of(name) {
+            let no_body =
+                || VdfsError::Forbidden(format!("分区 {} 没有用户数据，VDFS 侧无正文", s.id));
             return match req {
                 VdfsRequest::Stat => Ok(VdfsResponse::Stat(section_node(s))),
-                VdfsRequest::Read | VdfsRequest::Write { .. } => Err(VdfsError::Forbidden(
-                    format!("分区 {} 的数据由前端状态自持，VDFS 侧无正文", s.id),
-                )),
+                VdfsRequest::Read => match s.body {
+                    Some(body) => self.forward(ctx, body, VdfsRequest::Read).await,
+                    None => Err(no_body()),
+                },
+                VdfsRequest::Write { content } => match s.body {
+                    Some(body) => {
+                        self.forward(ctx, body, VdfsRequest::Write { content })
+                            .await
+                    }
+                    None => Err(no_body()),
+                },
                 _ => Err(VdfsError::not_found(format!("未知路径：{path}"))),
             };
         }

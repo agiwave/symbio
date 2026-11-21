@@ -122,6 +122,10 @@ pub const PLUGIN_ID_TELEGRAM: &str = "telegram";
 // dead-code-allow R-001: 插件 id 是部署身份，未被引用不等于可删（同文件头 R-003）
 pub const PLUGIN_ID_TOOL: &str = "tool";
 
+/// 界面偏好（外观 / 提示音 / 关于）的后端权威数据
+// dead-code-allow R-001: 插件 id 是部署身份，未被引用不等于可删（同文件头 R-003）
+pub const PLUGIN_ID_UI_PREFS: &str = "ui_prefs";
+
 /// VDFS 根（单槽归系统 Agent）
 // dead-code-allow R-001: 插件 id 是部署身份，未被引用不等于可删（同文件头 R-003）
 pub const PLUGIN_ID_VDFS: &str = "vdfs";
@@ -162,6 +166,7 @@ pub const ASSEMBLY_SUB_AGENT_PLUGINS: &[&str] = &[
     "memory", // 记忆：智能体自身（分形）+ 工作区（WORKDIR 继承父会话），两作用域同属一个所有者
     "setting", // 智能体自身的信息设置（分形：系统树与每棵子树各有一份）
     "glossary", // 项目术语表：一个工具、一条领域事实、一条效果行为（含重复定义的前置判断）、一个上下文段
+    "ui_prefs", // 界面偏好（外观 / 提示音 / 关于）的后端权威数据
 ];
 
 /// **核心插件**——默认装配且不可删除。这是注入 `REQUIRED_PLUGINS` 的唯一清单（D-520）。
@@ -193,6 +198,7 @@ pub const ASSEMBLY_CORE_PLUGINS: &[&str] = &[
     "vdfs", // VDFS 根（单槽归系统 Agent）
     "memory", // 记忆：智能体自身（分形）+ 工作区（WORKDIR 继承父会话），两作用域同属一个所有者
     "glossary", // 项目术语表：一个工具、一条领域事实、一条效果行为（含重复定义的前置判断）、一个上下文段
+    "ui_prefs", // 界面偏好（外观 / 提示音 / 关于）的后端权威数据
 ];
 
 /// **可选插件**——不默认装配，出现在插件市场里，安装后与核心插件同权（D-520）。
@@ -208,4 +214,5 @@ pub const ASSEMBLY_OPTIONAL_PLUGINS: &[&str] = &[
 pub const ASSEMBLY_UNDISABLABLE_PLUGINS: &[&str] = &[
     "plugin_manager", // 插件管理与配置入口
     "vdfs", // VDFS 根（单槽归系统 Agent）
+    "ui_prefs", // 界面偏好（外观 / 提示音 / 关于）的后端权威数据
 ];

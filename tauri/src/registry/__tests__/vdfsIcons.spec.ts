@@ -34,6 +34,11 @@ describe('registerVdfsIcon / iconForNode（登记与查找）', () => {
     }
   })
 
+  it('ui_prefs 的 kind 级图标已登记（外观 / 关于两行的真实节点不带 config_type）', () => {
+    expect(iconForNode({ kind: 'ui_prefs', name: 'appearance' })).toBeTruthy()
+    expect(iconForNode({ kind: 'ui_prefs', name: 'about' })).toBeTruthy()
+  })
+
   it('会话内部各区段的 kind 均有独立图标（不然侧栏四个文件夹长得一样）', () => {
     // 后端声明的协议词：messages / inbox 在 `plugin/words.rs`，
     // subsession / dir 在 `workdir/mod.rs`。图标缺失只会退成文件夹兜底，
@@ -54,10 +59,16 @@ describe('registerVdfsIcon / iconForNode（登记与查找）', () => {
 })
 
 describe('iconForNode 的项级分发（kind:config_type）', () => {
-  it('插件管理清单的项级图标齐备（自有分区 + 各插件配置目录）', () => {
-    // 清单 = 自有分区（appearance / about）+ 各插件的条目；
+  it('插件管理清单的项级图标齐备（界面分区 + 各插件配置目录）', () => {
+    // 清单 = 界面分区（appearance / about 归属 ui_prefs）+ 各插件条目（kind = plugin_manager）。
     // 条目的项级标识就是**插件目录名**（config_type 携带）。市场不是清单节点（D-520）。
-    for (const ext of ['appearance', 'about', 'session', 'local', 'web', 'gateway', 'telegram']) {
+    for (const ext of ['appearance', 'about']) {
+      expect(
+        iconForNode({ kind: 'ui_prefs', name: ext, config_type: ext }),
+        `${ext} 项级图标缺失`,
+      ).toBeTruthy()
+    }
+    for (const ext of ['session', 'local', 'web', 'gateway', 'telegram']) {
       expect(
         iconForNode({ kind: 'plugin_manager', name: ext, config_type: ext }),
         `${ext} 项级图标缺失`,

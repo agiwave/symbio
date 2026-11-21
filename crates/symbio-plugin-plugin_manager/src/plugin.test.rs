@@ -283,7 +283,7 @@ async fn list_has_entries_then_own_sections_without_market_node() {
     assert_eq!(items[0].node.ext.as_deref(), Some(VDFS_EXT_FORM));
     assert!(!items[0].node.is_dir(), "条目是文档，不是目录");
 
-    // 自有分区：`ext` 即分区 id（前端按 `ext → 渲染器` 回退到专属面板）
+    // 界面分区：`ext` 即分区 id（前端按 `ext → 渲染器` 回退到专属面板）
     assert_eq!(items[2].node.ext.as_deref(), Some("appearance"));
     assert_eq!(items[3].node.ext.as_deref(), Some("about"));
 }
@@ -568,26 +568,39 @@ async fn install_forwards_write_to_the_container_root() {
     assert!(writes[0].1.contains("telegram"), "表单值原样转过去");
 }
 
-// ==================== 自有分区 ====================
+// ==================== 界面分区（归属 ui_prefs） ====================
 
-/// 分区是叶子：无正文、不参与树遍历，也不接受新建
+/// 分区是叶子：归属 ui_prefs、无状态、不接受新建与列目录
 #[tokio::test]
-async fn sections_are_leaves_without_read_or_write() {
+async fn sections_are_leaves_belonging_to_ui_prefs() {
     let p = plugin_without_registry();
     let s = stat(&p, &vctx(), "appearance").await;
     assert!(!s.is_dir(), "分区是叶子文档");
-    assert_eq!(s.kind, PLUGIN_ID_MANAGER);
+    assert_eq!(s.kind, PLUGIN_ID_UI_PREFS, "节点归属 ui_prefs（D-521）");
     assert_eq!(s.status, VDFS_STATUS_NONE, "静态分区没有「运行中」可言");
+    assert_eq!(s.access, VdfsAccess::READ_WRITE, "外观有后端正文，可读写");
+    assert!(p
+        .dispatch(&vctx(), "appearance", VdfsRequest::List {})
+        .await
+        .is_err());
 
-    // 数据在前端 store：读写都明确拒绝（而非静默返回空）
+    let about = stat(&p, &vctx(), "about").await;
+    assert_eq!(about.kind, PLUGIN_ID_UI_PREFS);
+    assert_eq!(about.access, VdfsAccess::READ, "关于无用户数据，只读");
+}
+
+/// 关于页没有用户数据：读写明确拒绝，不静默返回空
+#[tokio::test]
+async fn about_has_no_body() {
+    let p = plugin_without_registry();
     assert!(matches!(
-        p.dispatch(&vctx(), "appearance", VdfsRequest::Read).await,
+        p.dispatch(&vctx(), "about", VdfsRequest::Read).await,
         Err(VdfsError::Forbidden(_))
     ));
     assert!(matches!(
         p.dispatch(
             &vctx(),
-            "appearance",
+            "about",
             VdfsRequest::Write {
                 content: VdfsContent::text("{}")
             }
@@ -595,11 +608,43 @@ async fn sections_are_leaves_without_read_or_write() {
         .await,
         Err(VdfsError::Forbidden(_))
     ));
-    // 分区不接受新建，也不可列
-    assert!(p
-        .dispatch(&vctx(), "appearance", VdfsRequest::List {})
+}
+
+/// 外观的读写转发到 ui_prefs 的配置文档（D-521）
+#[tokio::test]
+async fn appearance_read_write_forward_to_ui_prefs() {
+    let fake = Arc::new(
+        FakeRegistry::new(vec![]).with_config("ui_prefs/PLUGIN.yml", "{\"theme\":\"dark\"}"),
+    );
+    let p = plugin_with(fake.clone());
+
+    let text = p
+        .dispatch(&vctx(), "appearance", VdfsRequest::Read)
         .await
-        .is_err());
+        .unwrap()
+        .into_read()
+        .unwrap()
+        .as_text()
+        .unwrap_or_default()
+        .to_string();
+    assert!(text.contains("\"dark\""), "读回的是 ui_prefs 的权威配置");
+
+    p.dispatch(
+        &vctx(),
+        "appearance",
+        VdfsRequest::Write {
+            content: VdfsContent::text("{\"theme\":\"light\"}"),
+        },
+    )
+    .await
+    .unwrap();
+    let writes = fake.writes.lock().unwrap();
+    assert_eq!(writes.len(), 1);
+    assert_eq!(
+        writes[0].0, "ui_prefs/PLUGIN.yml",
+        "写落在 ui_prefs 的配置文档"
+    );
+    assert!(!writes[0].1.is_empty());
 }
 
 /// 未知条目：`NotFound`（区分「不存在」与「不可读写」）
@@ -626,7 +671,7 @@ async fn unknown_entry_is_not_found() {
 
 // ==================== 无容器可回 ====================
 
-/// 未装配（取不到容器）时：注册表类操作如实报错，自有分区照常可用
+/// 未装配（取不到容器）时：注册表类操作如实报错，界面分区的静态节点照常可用
 #[tokio::test]
 async fn missing_container_view_reports_internal_but_sections_still_work() {
     let p = plugin_without_registry();
@@ -640,7 +685,7 @@ async fn missing_container_view_reports_internal_but_sections_still_work() {
         "取不到容器视图是内部状态问题，不是「路径不对」：{err:?}"
     );
 
-    assert!(stat(&p, &vctx(), "appearance").await.kind == PLUGIN_ID_MANAGER);
+    assert!(stat(&p, &vctx(), "appearance").await.kind == PLUGIN_ID_UI_PREFS);
 }
 
 // ==================== 配置声明通道 ====================

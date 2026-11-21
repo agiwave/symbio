@@ -15,6 +15,7 @@ import {
   isSchemaDrivenExt,
   isTextualRenderer,
   registerVdfsRenderer,
+  rendererPayloadIsText,
   rendererReadsNodeSchema,
   rendererReadsNodeText,
   resolveVdfsRenderer,
@@ -110,19 +111,19 @@ describe('isTextualRenderer / rendererReadsNodeText', () => {
     }
   })
 
-  it('rendererReadsNodeText：文本缓冲 ∪ form（表单字段值也取自正文）', () => {
-    for (const r of ['text', 'markdown', 'json', 'message', 'form'] as const) {
+  it('rendererReadsNodeText：文本缓冲 ∪ form ∪ appearance（两者都取自正文）', () => {
+    for (const r of ['text', 'markdown', 'json', 'message', 'form', 'appearance'] as const) {
       expect(rendererReadsNodeText(r), r).toBe(true)
     }
   })
 
   it('rendererReadsNodeText：其余各有自己的数据来源，替它们读正文是白读', () => {
-    for (const r of ['dir', 'session', 'appearance', 'about', 'market', 'fallback'] as const) {
+    for (const r of ['dir', 'session', 'about', 'market', 'fallback'] as const) {
       expect(rendererReadsNodeText(r), r).toBe(false)
     }
   })
 
-  it('两者的差集**恰好**是 form —— 这正是它们不能合并的原因', () => {
+  it('两者的差集恰好是 form 与 appearance —— 这正是它们不能合并的原因', () => {
     const all = [
       'dir',
       'form',
@@ -137,6 +138,14 @@ describe('isTextualRenderer / rendererReadsNodeText', () => {
       'fallback',
     ] as const
     const onlyReads = all.filter((r) => rendererReadsNodeText(r) && !isTextualRenderer(r))
-    expect(onlyReads).toEqual(['form'])
+    expect(onlyReads).toEqual(['form', 'appearance'])
+  })
+
+  it('rendererPayloadIsText：只有外观面板的保存载荷是正文 JSON 文本（D-521）', () => {
+    const all = [
+      'dir', 'form', 'session', 'message', 'markdown', 'json', 'text',
+      'appearance', 'about', 'market', 'fallback',
+    ] as const
+    expect(all.filter((r) => rendererPayloadIsText(r))).toEqual(['appearance'])
   })
 })

@@ -268,8 +268,9 @@ import {
   isFormRenderer,
   isSchemaDrivenExt,
   isSessionExt,
-  isTextualRenderer,
+  rendererPayloadIsText,
   rendererReadsNodeSchema,
+  rendererReadsNodeText,
   resolveVdfsRenderer,
 } from '@/registry/vdfsTypes'
 // 装配渲染器组件（副作用导入：登记 ext → 组件；本控件是唯一消费方）
@@ -665,13 +666,14 @@ const rendererComp = computed(() => {
  * `schema` 类（插件市场）→ 节点自述里的候选；其余 → 不传。
  *
  * 市场是一张草稿页（没有落盘、没有正文），候选由后端随 `new_type.schema` 下发，
- * 因此取 `selectedNode.schema` 而不是 `nodeText`（D-520）。
+ * 因此取 `selectedNode.schema` 而不是 `nodeText`（D-520）。外观面板的正文是
+ * `ui_prefs` 下发的 JSON 配置文本，组件自行 parse（D-521）。
  */
 const rendererData = computed<unknown>(() => {
   const r = renderer.value
   if (isFormRenderer(r)) return formData.value
   if (r && rendererReadsNodeSchema(r)) return selectedNode.value?.schema
-  if (isTextualRenderer(r)) return nodeText.value
+  if (r && rendererReadsNodeText(r)) return nodeText.value
   return null
 })
 
@@ -685,7 +687,10 @@ function onSave(payload: unknown) {
       ? // 市场这类选择器页：候选在 `schema`，保存载荷是用户选中的项；写回当前
         // 目录由 `write` 按草稿规则完成（无需读正文，见 useVdfs.write）
       write(payload as Record<string, unknown>)
-      : saveText()
+      : r && rendererPayloadIsText(r)
+        ? // 外观面板：载荷已是偏好配置的 JSON 文本，原样写回（D-521）
+        write(String(payload ?? ''))
+        : saveText()
   // 保存成功后 renderer 重新读入同一节点，身份门闩不会重跑预填 ⇒ 表单基线仍停在旧值，
   // dirty 会误留。显式把新值树立为基线，dirty 归零，避免保存后又弹「放弃修改」。
   void done.then((ok) => {

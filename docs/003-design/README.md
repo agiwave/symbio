@@ -182,7 +182,7 @@ board.columns: [impl]
 > ⚠️ **本区块由 `node scripts/audits/registry-audit.mjs --write` 维护（标记之间），请勿手改标记区内内容。**
 > 状态的唯一登记处是各条目文件本身，本区块是投影。字段规范见 [SP-001](../005-spec/001.md)，机制见 [DE-017 · 登记与汇总机制](017-登记与汇总机制.md "DE-017-登记与汇总机制")。
 
-**计数**：active 96 · draft 0 · retired 1（共 97）
+**计数**：active 97 · draft 0 · retired 1（共 98）
 
 ## 现行设计（active）
 
@@ -279,6 +279,7 @@ board.columns: [impl]
 | [`crates/symbio-plugin-task/README`](../../crates/symbio-plugin-task/README.md) | 任务能力包（task） | 与代码一致 |
 | [`crates/symbio-plugin-telegram/README`](../../crates/symbio-plugin-telegram/README.md) | Telegram 插件 | 与代码一致 |
 | [`crates/symbio-plugin-tool/README`](../../crates/symbio-plugin-tool/README.md) | 工具世界能力包（tool） | 与代码一致 |
+| [`crates/symbio-plugin-ui_prefs/README`](../../crates/symbio-plugin-ui_prefs/README.md) | UI_prefs 插件（界面偏好） | 与代码一致 |
 | [`crates/symbio-plugin-vdfs/README`](../../crates/symbio-plugin-vdfs/README.md) | VDFS 插件 | 与代码一致 |
 | [`crates/symbio-plugin-web/README`](../../crates/symbio-plugin-web/README.md) | Web 插件 | 与代码一致 |
 | [`scripts/README`](../../scripts/README.md) | ''`scripts/` —— 脚本目录的布局与机制'' | 与代码一致 |

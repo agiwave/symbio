@@ -123,13 +123,26 @@ export function isInboxSeg(node: { kind?: string }): boolean {
 /**
  * 该渲染器需要**读一次节点正文**才谈得上呈现。
  *
- * = 文本缓冲类 ∪ `form`：表单字段值同样取自正文（`vdfs/read` 的 `text`，
- * 前端 parse 成对象后作为显式入参交给渲染器）。其余（`dir` / `session` /
- * `appearance` / `about` / `market` / `fallback`）各有自己的数据来源——市场的候选
- * 随 `new_type.schema` 下发（见 `rendererReadsNodeSchema`），替它们读正文是白读。
+ * = 文本缓冲类 ∪ `form` ∪ `appearance`：表单字段值同样取自正文（`vdfs/read` 的
+ * `text`，前端 parse 成对象后作为显式入参交给渲染器）；外观面板的偏好值来自
+ * `ui_prefs` 的配置文档（一份 JSON 正文，D-521），同样必须先读。
+ * 其余（`dir` / `session` / `about` / `market` / `fallback`）各有自己的数据来源——
+ * 市场的候选随 `new_type.schema` 下发（见 `rendererReadsNodeSchema`），替它们读正文
+ * 是白读。
  */
 export function rendererReadsNodeText(r: VdfsRenderer): boolean {
-  return isFormRenderer(r) || isTextualRenderer(r)
+  return isFormRenderer(r) || isTextualRenderer(r) || r === 'appearance'
+}
+
+/**
+ * 保存载荷**本身就是正文文本**的渲染器（目前只有外观面板）。
+ *
+ * 外观面板把 `ui_prefs` 的偏好对象序列化成 JSON 文本后 `emit('save')`，工作台
+ * 应原样写回节点，而不是拿本地 `nodeText` 缓冲——后者是读取时的快照，用户刚改的
+ * 值还没落进它（D-521）。
+ */
+export function rendererPayloadIsText(r: VdfsRenderer): boolean {
+  return r === 'appearance'
 }
 
 /** 扩展名 → 渲染器（**唯一的硬编码表**，纯 UI 约定） */

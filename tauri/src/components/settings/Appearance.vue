@@ -1,7 +1,8 @@
 <!--
   Appearance — 外观设置 editor（setting:appearance）
 
-  主题 / 字体大小经 appearance store 即时生效并自动持久化，无需保存按钮。
+  主题 / 字体大小经 appearance store 即时生效并自动持久化（首屏快照），但权威值
+  来自 ui_prefs 的配置文档：读取时对齐，修改后写回（D-521）。
 
   ## 分区
 
@@ -26,7 +27,7 @@
           class="seg-btn"
           :class="{ active: appearance.theme === opt.value }"
           :aria-pressed="appearance.theme === opt.value"
-          @click="appearance.theme = opt.value"
+          @click="setTheme(opt.value)"
         >
           {{ opt.label }}
         </button>
@@ -46,7 +47,7 @@
           class="seg-btn"
           :class="{ active: appearance.fontSize === opt.value }"
           :aria-pressed="appearance.fontSize === opt.value"
-          @click="appearance.fontSize = opt.value"
+          @click="setFontSize(opt.value)"
         >
           {{ opt.label }}
         </button>
@@ -67,7 +68,7 @@
           class="seg-btn"
           :class="{ active: sound.enabled === opt.value }"
           :aria-pressed="sound.enabled === opt.value"
-          @click="sound.enabled = opt.value"
+          @click="setEnabled(opt.value)"
         >
           {{ opt.label }}
         </button>
@@ -87,7 +88,7 @@
             class="seg-btn"
             :class="{ active: sound.kinds.completed }"
             :aria-pressed="sound.kinds.completed"
-            @click="sound.kinds.completed = !sound.kinds.completed"
+            @click="toggleKind('completed')"
           >
             {{ sound.kinds.completed ? '开' : '关' }}
           </button>
@@ -105,7 +106,7 @@
             class="seg-btn"
             :class="{ active: sound.kinds.aborted }"
             :aria-pressed="sound.kinds.aborted"
-            @click="sound.kinds.aborted = !sound.kinds.aborted"
+            @click="toggleKind('aborted')"
           >
             {{ sound.kinds.aborted ? '开' : '关' }}
           </button>
@@ -123,7 +124,7 @@
             class="seg-btn"
             :class="{ active: sound.kinds.failed }"
             :aria-pressed="sound.kinds.failed"
-            @click="sound.kinds.failed = !sound.kinds.failed"
+            @click="toggleKind('failed')"
           >
             {{ sound.kinds.failed ? '开' : '关' }}
           </button>
@@ -138,7 +139,8 @@
         <div class="volume-control">
           <input
             id="sound-volume"
-            v-model.number="sound.volume"
+            :value="sound.volume"
+            @input="onVolumeInput"
             class="volume-input"
             aria-label="提示音音量"
             :aria-valuetext="`${volumePercent}%`"
@@ -167,22 +169,116 @@
 </template>
 
 <script setup lang="ts">
-import { computed } from 'vue'
+import { computed, watch } from 'vue'
 import { useAppearanceStore, type ThemeMode, type FontSize } from '@/stores/appearance'
 import { useSoundSettingsStore } from '@/stores/soundSettings'
 import { playCompletionChime } from '@/services/completionChime'
 import { useToast } from '@/composables/useToast'
 import SettingsFormShell from './SettingsFormShell.vue'
 import type { VdfsRendererProps } from '@/components/vdfs/rendererContract'
+import type { CompletionKind } from '@/schemas/vdfs'
 
 // 声明渲染器统一契约的**全量** props：页面恒传 node / data / testing /
 // mechanism-actions…，声明了才不会被透传到根 DOM（不需要 inheritAttrs 兜底）。
-// 本表单一律自取 store，不消费其中任何一项。
-defineProps<VdfsRendererProps>()
+// `data` 是 ui_prefs 下发的 JSON 正文（后端权威值，D-521）；store 保留为
+// 首屏同步快照与离线降级——main.ts 在挂载前同步 apply()，这条路径不能改成异步读。
+const props = defineProps<VdfsRendererProps>()
+const emit = defineEmits<{ (e: 'save', payload: string): void }>()
 
 const appearance = useAppearanceStore()
 const sound = useSoundSettingsStore()
 const { showToast } = useToast()
+
+/** 后端配置正文的形状（字段与 ui_prefs 的 UiPrefsConfig 一一对应） */
+interface BackendPrefs {
+  theme?: unknown
+  font_size?: unknown
+  sound_enabled?: unknown
+  sound_completed?: unknown
+  sound_aborted?: unknown
+  sound_failed?: unknown
+  volume?: unknown
+}
+
+/** 正文是 JSON 文本；解析不出来时保持首屏快照（插件未装配 / 后端读取失败的降级） */
+function parseBackend(raw: unknown): BackendPrefs | null {
+  if (typeof raw !== 'string' || !raw.trim()) return null
+  try {
+    const parsed: unknown = JSON.parse(raw)
+    return parsed && typeof parsed === 'object' && !Array.isArray(parsed)
+      ? (parsed as BackendPrefs)
+      : null
+  } catch {
+    return null
+  }
+}
+
+function isTheme(v: unknown): v is ThemeMode {
+  return v === 'light' || v === 'dark' || v === 'auto'
+}
+function isFontSize(v: unknown): v is FontSize {
+  return v === 'small' || v === 'medium' || v === 'large'
+}
+
+// 后端权威值到达时覆盖首屏快照；store 的 watch 会同步持久化并即时应用主题。
+// 这里**不** emit save——否则「读回 → 写回」会形成回环。
+watch(
+  () => props.data,
+  (raw) => {
+    const p = parseBackend(raw)
+    if (!p) return
+    if (isTheme(p.theme)) appearance.theme = p.theme
+    if (isFontSize(p.font_size)) appearance.fontSize = p.font_size
+    if (typeof p.sound_enabled === 'boolean') sound.enabled = p.sound_enabled
+    if (typeof p.sound_completed === 'boolean') sound.kinds.completed = p.sound_completed
+    if (typeof p.sound_aborted === 'boolean') sound.kinds.aborted = p.sound_aborted
+    if (typeof p.sound_failed === 'boolean') sound.kinds.failed = p.sound_failed
+    if (typeof p.volume === 'number' && Number.isFinite(p.volume)) {
+      sound.volume = Math.min(1, Math.max(0, p.volume))
+    }
+  },
+  { immediate: true },
+)
+
+/** 把当前偏好写成完整配置 JSON，交工作台写回 ui_prefs */
+function persist(): void {
+  emit(
+    'save',
+    JSON.stringify({
+      theme: appearance.theme,
+      font_size: appearance.fontSize,
+      sound_enabled: sound.enabled,
+      sound_completed: sound.kinds.completed,
+      sound_aborted: sound.kinds.aborted,
+      sound_failed: sound.kinds.failed,
+      volume: sound.volume,
+    }),
+  )
+}
+
+function setTheme(v: ThemeMode): void {
+  appearance.theme = v
+  persist()
+}
+function setFontSize(v: FontSize): void {
+  appearance.fontSize = v
+  persist()
+}
+function setEnabled(v: boolean): void {
+  sound.enabled = v
+  persist()
+}
+function toggleKind(kind: CompletionKind): void {
+  sound.kinds[kind] = !sound.kinds[kind]
+  persist()
+}
+function onVolumeInput(e: Event): void {
+  const v = Number((e.target as HTMLInputElement).value)
+  if (Number.isFinite(v)) {
+    sound.volume = Math.min(1, Math.max(0, v))
+    persist()
+  }
+}
 
 /** 音量百分比（四舍五入到整数；滑块步长 0.05，显示到整数足够） */
 const volumePercent = computed(() => Math.round(sound.volume * 100))

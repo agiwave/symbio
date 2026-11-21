@@ -70,6 +70,7 @@ use symbio_plugin_slo as _;
 use symbio_plugin_task as _;
 use symbio_plugin_telegram as _;
 use symbio_plugin_tool as _;
+use symbio_plugin_ui_prefs as _;
 use symbio_plugin_vdfs as _;
 use symbio_plugin_web as _;
 // <<< plugin-links:end
