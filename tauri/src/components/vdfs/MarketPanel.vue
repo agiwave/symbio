@@ -12,7 +12,7 @@
   <section class="market">
     <header class="market-head">
       <h2 class="market-title">插件市场</h2>
-      <p class="market-desc">添加尚未安装的可选插件。已添加的插件在左侧列表中可以卸载。</p>
+      <p class="market-desc">添加尚未安装的可选插件。已安装的插件可在列表中卸载。</p>
     </header>
 
     <p v-if="error" class="market-error" role="alert">{{ error }}</p>

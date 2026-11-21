@@ -212,27 +212,35 @@ async fn metadata_is_the_plugin_manager() {
     assert!(root.is_dir());
 }
 
-/// 根可新建 = 添加插件：类型原样转发容器（安装表单只有执行安装的那层说得出来）
+/// 根不声明 new_type：即使容器声明了也不转发——市场是唯一添加入口
 #[tokio::test]
-async fn root_new_type_is_forwarded_from_the_container() {
+async fn root_does_not_declare_new_type_even_if_container_does() {
     let fake = Arc::new(FakeRegistry::new(Vec::new()));
     let p = plugin_with(Arc::clone(&fake));
 
     let root = stat(&p, &vctx(), "").await;
-    let t = root.new_type.expect("容器声明了可新建类型，应转发过来");
-    assert_eq!(t.ext, PLUGIN_ID_MANAGER);
-    assert_eq!(t.title, "插件");
+    assert!(
+        root.new_type.is_none(),
+        "前端见 new_type 会自动开草稿并收起列表，通用安装表单会挡住市场入口"
+    );
+    assert!(
+        root.description
+            .as_deref()
+            .unwrap_or_default()
+            .contains("插件市场"),
+        "根的描述应把用户指向市场"
+    );
 
-    // 容器不可达时按「不可新建」处理：少一个入口，好过给一个必然报错的入口
+    // 容器不可达时同样不声明——这不是「退化」，而是本插件的常态
     let orphan = plugin_without_registry();
     assert!(stat(&orphan, &vctx(), "").await.new_type.is_none());
 }
 
 // ==================== 清单 ====================
 
-/// 清单 = 各插件条目在前 + 插件市场居中 + 自有分区垫后
+/// 清单 = 插件市场在最前 + 各插件条目 + 自有分区垫后
 #[tokio::test]
-async fn list_puts_plugin_entries_before_own_sections() {
+async fn list_puts_market_first_then_entries_then_own_sections() {
     let fake = Arc::new(FakeRegistry::new(vec![
         entry("alpha", "alpha_factory", false, true),
         entry("beta", "beta_factory", false, false),
@@ -243,16 +251,17 @@ async fn list_puts_plugin_entries_before_own_sections() {
     let names: Vec<&str> = items.iter().map(|it| it.node.name.as_str()).collect();
     assert_eq!(
         names,
-        vec!["alpha", "beta", "market", "appearance", "about"]
+        vec!["market", "alpha", "beta", "appearance", "about"]
     );
 
-    // 条目是定义驱动的表单文档，不是目录
-    assert_eq!(items[0].node.kind, PLUGIN_ID_MANAGER);
-    assert_eq!(items[0].node.ext.as_deref(), Some(VDFS_EXT_FORM));
-    assert!(!items[0].node.is_dir(), "条目是文档，不是目录");
+    // 市场在最前：`ext` 是它自己的渲染器键
+    assert_eq!(items[0].node.ext.as_deref(), Some("market"));
 
-    // 市场：`ext` 是它自己的渲染器键
-    assert_eq!(items[2].node.ext.as_deref(), Some("market"));
+    // 条目是定义驱动的表单文档，不是目录
+    assert_eq!(items[1].node.kind, PLUGIN_ID_MANAGER);
+    assert_eq!(items[1].node.ext.as_deref(), Some(VDFS_EXT_FORM));
+    assert!(!items[1].node.is_dir(), "条目是文档，不是目录");
+
     // 自有分区：`ext` 即分区 id（前端按 `ext → 渲染器` 回退到专属面板）
     assert_eq!(items[3].node.ext.as_deref(), Some("appearance"));
     assert_eq!(items[4].node.ext.as_deref(), Some("about"));
@@ -642,9 +651,9 @@ async fn ctx_with_configs() -> VdfsContext {
 
 // ==================== 插件市场（D-520） ====================
 
-/// 市场节点在条目之后、自有分区之前：它是「去哪加插件」的入口，不是又一个插件
+/// 市场节点排在清单首位：它是「去哪加插件」的唯一入口，不是又一个插件
 #[tokio::test]
-async fn market_node_sits_between_entries_and_own_sections() {
+async fn market_node_leads_the_list() {
     let p = plugin_with(Arc::new(FakeRegistry::new(vec![entry(
         "alpha",
         "alpha_factory",
@@ -653,7 +662,7 @@ async fn market_node_sits_between_entries_and_own_sections() {
     )])));
     let items = list(&p, &vctx()).await;
     let names: Vec<&str> = items.iter().map(|i| i.node.name.as_str()).collect();
-    assert_eq!(names, vec!["alpha", "market", "appearance", "about"]);
+    assert_eq!(names, vec!["market", "alpha", "appearance", "about"]);
 
     let market = stat(&p, &vctx(), "market").await;
     assert_eq!(market.ext.as_deref(), Some("market"));

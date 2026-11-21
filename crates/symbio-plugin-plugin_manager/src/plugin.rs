@@ -423,35 +423,33 @@ impl PluginManagerPlugin {
 
     // ==================== 节点合成 ====================
 
-    /// 本插件的根：标题 + **可新建**（= 添加插件）
+    /// 本插件的根：标题 + 清单入口。
     ///
-    /// 可新建类型**原样转发**容器的声明（见 `CompositeVdfs::install_new_type`）：
-    /// 安装表单长什么样、候选有哪些，只有真正执行安装的那一层说得出来。转发失败
-    /// （容器不可达）时按「不可新建」处理——少一个入口，好过给一个必然报错的入口。
-    async fn root_node(&self, ctx: &VdfsContext) -> VdfsNode {
+    /// **不声明 `new_type`**：添加插件走清单里的 `market` 节点（D-520），不再用
+    /// 容器转发的通用安装表单。后者不只是重复入口——前端 `VdfsWorkbench` 见目录
+    /// 声明 `new_type` 就**自动开草稿并收起中栏列表**，于是那张「插件工厂」空表单
+    /// 正好把列表里的市场节点挡住，用户因此找不到入口。少一个入口，换来入口可见。
+    async fn root_node(&self, _ctx: &VdfsContext) -> VdfsNode {
         let mut n = VdfsNode::dir("", "插件管理", VdfsAccess::LIST);
-        n.description = Some("本智能体的插件，以及各插件的配置".to_string());
-        n.new_type = match self.forward(ctx, "", VdfsRequest::Stat).await {
-            Ok(resp) => resp.into_stat().and_then(|root| root.new_type),
-            Err(_) => None,
-        };
+        n.description =
+            Some("从「插件市场」添加尚未安装的插件；已安装的插件可在此卸载".to_string());
         n
     }
 
-    /// 清单 = **各插件的条目** + 插件市场 + 自有分区。
+    /// 清单 = **插件市场** + 各插件的条目 + 自有分区。
     ///
-    /// 顺序上插件在前、市场居中、自有分区在后：前两段是用户在管理页里真正要动手的
-    /// 东西，最后一段是应用自身的展示项，排尾不挡路。各段各自保序（插件段按容器给的
-    /// `(order, name)`，分区段按 [`OWN_SECTIONS`]）。
+    /// 市场排在最前：它是「去哪加插件」的唯一入口，压在几十个插件条目之后等于没有
+    /// （用户根本滚不到）。其后依次是插件条目（按容器给的 `(order, name)`）与自有
+    /// 分区（按 [`OWN_SECTIONS`]），后者是应用自身的展示项，排尾不挡路。
     async fn list_items(&self, ctx: &VdfsContext) -> VdfsResult<Vec<VdfsItem>> {
         let entries = self.entries(ctx).await?;
         let configs = Self::config_entries(ctx).await;
         let mut out: Vec<VdfsItem> = Vec::with_capacity(entries.len() + OWN_SECTIONS.len() + 1);
+        out.push(VdfsItem::new(market_node()));
         for entry in &entries {
             let config = configs.iter().find(|c| c.node.name == entry.name).cloned();
             out.push(VdfsItem::new(entry_node(entry, config)));
         }
-        out.push(VdfsItem::new(market_node()));
         out.extend(OWN_SECTIONS.iter().map(|s| VdfsItem::new(section_node(s))));
         Ok(out)
     }
