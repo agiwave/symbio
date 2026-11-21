@@ -309,15 +309,16 @@ const VOCAB_BASELINE = process.env.VOCAB_BASELINE
 // core-shape-allow structFields: D-440 端口注册面与执行契约整面搬进 sdk——PortCapabilities(3：`streaming` / `cancel` / `idempotent`) / PortInput(2：`port` / `payload`) / PortFact(4：`id` / `port` / `kind` / `payload`) / PortExecContext(11：`abort` / `idempotency_key` / `sink` / `emit` / `ctx` / `subject` / `group` / `session_id` / `origin` / `scratch_dir` / `reader`，`source` 随行) / PortExecHandles(5：`ctx` / `scratch_dir` / `sink` / `session_id` / `source`) / PortFactEmit(1) / PortReply(2：`messages` / `links`) / PortOutcome(4：`authz` / `facts` / `error` / `reply`) / PendingPrompt(3：`text` / `prompt` / `failure_kind`) / PortPayload(1) 共 33 格随门面减负换地址。此前住 plugin-api/port.rs（不在 CS-009 扫描面），FA-001 只许门面自有实现降（D-440 ②：门面 476→34 行）；搬的是同一份端口契约，不是新长出的数据面。基线钉到搬后实测 615，不留余量。
 // core-shape-allow structFields: D-446 `when_no_open` 的谓词要从「整条端口」放宽为「作用域」——`NoOpenScope`(2：`port` / `ids`) 是「端口干净才欠」的**同一件事的两半**，单格 `String` 表达不了「只认这一批债 id」，而那正是 D-446 要求的「本次调用集合收束」（一笔迟归的旧调用债不该把这一轮的续跑一起拖住）。两格折不开：折成元组塞回原字段，调用方各拼一半，`covers()` 这个唯一判据就无处安放；降 `pub(crate)` 不行——读它的两侧是环（`symbio-plugin-loop`）与申报方插件（跨 crate）。它补的是**新判据能力**，不是新长出的业务数据面：没有新增世界域名 / 端口名 / 事实名，也没有改动为某个插件开的口子。基线钉到实测 617，不留余量。
 // core-shape-allow structFields: D-513 会话级插件数据目录随驱动目标交回——`DriveTarget::session_dir`(1) 是「会话插件按唯一布局解析、宿主按值挂进本轮 ctx」的值面出口（memory 的会话记忆据此落位）；能力面不得自己拼会话存储路径，也不得拿它开事实源（D-084），所以它必须住在驱动目标这个装订点而不是让执行体反查。旧 `workdir` 保持不动：scratch_dir 的来源还在它身上。基线钉到实测 609，不留余量。
+// core-shape-allow structFields: D-523 图标内容由插件自给、前端直接渲染——`PluginMeta.icon` 这个字段早已存在却运行期零消费（插件管理列表一律退成齿轮本轮修的正是它），接上消费端要两个投影载体：`PluginIdentity.icon`（manifest `plugin_icon` 的读口，与 title/description/version/author 同构，停用插件也读得到）与 `PluginEntry.icon`（列表 `entry_node` 据此把 SVG 内容写进节点顶层属性）。两格承载的是插件自给的一段 SVG 图元串，不是新业务数据面——没有新增世界域名 / 端口名 / 事实名；图形资产全在每个插件自己的 `with_icon(r#"..."#)` 里，前端零字典直接渲染。被否候选「插件只给名字、前端维护名字→图字典」会让图形资产仍留在前端，违背「内容由插件提供」；「后端托管 SVG 库按名取」同样把内容挪出插件并触碰 plugin-api 转发棘轮。基线钉到实测 611，不留余量。
 // 2026-11-16（D-505）：实测已收到 608（614 是 D-440 / D-446 时点的上限），基线同批
 // 钉到 608——余量不白留给下一次新增。2026-11-20（D-513）：608 → 609，`DriveTarget`
-// 增 `session_dir` 一格（放宽行见上），此后照旧只许降。
+// 增 `session_dir` 一格（放宽行见上）。2026-11-21（D-523）：609 → 611，图标自报的两个投影载体（放宽行见上），此后照旧只许降。
 const DATA_BASELINE = process.env.CORE_DATA_BASELINE
   ? (() => {
       const [structFields, enumVariants] = process.env.CORE_DATA_BASELINE.split(':').map((n) => Number(n))
       return { structFields, enumVariants }
     })()
-  : { structFields: 609, enumVariants: 256 }
+  : { structFields: 611, enumVariants: 256 }
 
 const CELL_LABEL = {
   traits: '`pub trait` 数（接缝数）',

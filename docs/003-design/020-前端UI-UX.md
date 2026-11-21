@@ -298,14 +298,22 @@ Cmd+B 折叠中栏与 P1-3b 按 Turn 虚拟化**不是漏项**，是被裁决不
 `registry/vdfsIcons.ts` 提供**唯一**的节点取图标函数 `iconForNode(node)`，
 `cardIconOf` 与 `useVdfs.navItems` 都调用它；中间层
 `getVdfsIcon` / `getVdfsIconFor` / `dirIconOf` **不存在**（留着就还会有人
-从它们那里另走一条回退）。回退链**具体在前、笼统在后**：
+从它们那里另走一条回退）。回退链**自报在前、具体在前、笼统在后**：
 
 ```
+0. plugin_icon    插件自报（PluginMeta.icon 的 SVG 图元内容 → 节点顶层属性；直接渲染）
 1. kind:config_type 项级（最具体）
 2. config_type 配置键（裸分区名，如 appearance）
 3. name 名单级（<根> 挂载点：session / model / …）
 4. kind 类型级（笼统容器：dir / file，最后兜底）
 ```
+
+**第 0 跳是「每个插件自己决定图标」的落点**：插件在 `PluginMeta.icon` 直接写一段
+SVG 图元串（`with_icon(r#"<path …/>"#)`），图长什么样由插件的这段代码定义；装配期经
+`seed_identity` 原样投影成 manifest 的 `plugin_icon`，插件管理列表（`entry_node`）与
+挂载点（`composite/vdfs.rs::dir_node`）把它放进节点顶层属性。前端 `iconFromSvg` 拿这段
+内容直接包进 `<svg>` 壳渲染——**前端零图形资产、零「名→图」字典**，不为任何插件写死
+图标。SVG 内容非字符串 / 空串则回退到 1–4 步，不留空白图标。
 
 ### 9.2 回退顺序的判据
 

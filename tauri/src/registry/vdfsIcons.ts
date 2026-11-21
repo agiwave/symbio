@@ -4,8 +4,12 @@
  * 分层原则（与 registry/vdfsTypes.ts / vdfsRenderers.ts 同一套）：
  * - 资源的**存在性/能力/寻址/顺序/标签**一律来自 VDFS（`<根>` 挂载点与节点），
  *   前端不硬编码类型清单；
- * - 本模块只维护**前端 UI 专属**的映射：某资源类别的 SVG 图标、动作按钮图标，
- *   以及详情**字段**的 emoji 图标（后端不参与下发 SVG path / emoji）。
+ * - **插件图标由插件自己给**：插件在 `PluginMeta.icon` 里写 SVG 图元内容本身
+ *   （`<path .../>` 串），经 manifest 投影、后端透传到节点 `plugin_icon`；
+ *   前端拿过来直接包进 `<svg>` 壳渲染（[`iconFromSvg`]），**不维护任何名字→图
+ *   字典**——图标长什么样完全由插件决定，前端只提供统一的画布与尺寸。
+ * - 本模块另维护**机制级**的少量映射：动作按钮图标、详情字段的 emoji 图标
+ *   （这两类由后端给语义名，前端映射到视觉，与插件自报图标是两套机制）。
  *
  * 详情渲染器的登记不在这里 —— 那是 `registry/vdfsRenderers.ts`（标识 → 组件）。
  *
@@ -30,6 +34,8 @@ import { defineComponent, h, markRaw, shallowReactive, type Component } from 'vu
 export interface VdfsIconTarget {
   kind: string
   config_type?: unknown
+  /** 插件/后端在节点上自报的图标名（来自 `PluginMeta.icon`，经 manifest 投影） */
+  plugin_icon?: unknown
 }
 
 /** 提取项级扩展名（仅接受 string，其余忽略） */
@@ -49,6 +55,9 @@ export function registerVdfsIcon(kind: string, icon: Component): void {
  *
  * ## 回退链：**具体在前、笼统在后**
  *
+ * 0. `plugin_icon`      —— **自报优先**：插件在 `PluginMeta.icon` 写的 SVG 图元内容
+ *                          （节点顶层属性 `plugin_icon`），前端直接包进 `<svg>` 壳渲染。
+ *                          这是「每个插件自己决定图标」的落点——内容来自插件，前端零字典。
  * 1. `kind:config_type` —— 项级（同一 kind 下按分区/扩展名分图）
  * 2. `config_type`      —— 配置键（部分分区把图标登记在**裸分区名**上：
  *                          `appearance` / `session` / `about` …）
@@ -79,11 +88,17 @@ export function iconForNode(node: {
   kind?: string
   name?: string
   config_type?: unknown
+  plugin_icon?: unknown
 }): Component | undefined {
   const kind = node.kind ?? ''
   const name = node.name ?? ''
   const ext = extOf(node as VdfsIconTarget)
+  // 0. 自报优先：`plugin_icon` 携带的是插件自述里给出的 **SVG 图元内容本身**
+  //    （如 `<path d="..."/>`），不是图标名——前端不维护任何「名→图」字典，
+  //    拿过来直接渲染。非字符串 / 空串按「未自报」处理，退回登记链兜底。
+  const selfDeclared = iconFromSvg((node as VdfsIconTarget).plugin_icon)
   return (
+    selfDeclared ?? //                                0. 插件自报的 SVG 内容
     (ext ? icons[`${kind}:${ext}`] : undefined) ?? // 1. 项级
     (ext ? icons[ext] : undefined) ?? //             2. 配置键（名字空间）
     (name ? icons[name] : undefined) ?? //           3. 名单级（挂载点）
@@ -188,6 +203,26 @@ function svgIcon(inner: string): Component {
       },
     })
   )
+}
+
+/**
+ * 把插件自报的 SVG 图元内容变成图标组件（**内容即图标**，无名字字典）。
+ *
+ * 内容来自 `node.plugin_icon`——插件在 `PluginMeta.icon` 里写的 SVG 图元串
+ * （如 `<path d="..."/><circle .../>`），经 manifest 投影、后端透传至此。
+ * 前端不解释、不查表，只把它包进统一的 `<svg viewBox="0 0 24 24">` 壳里；
+ * 因此图标长什么样完全由插件决定。同串缓存复用，避免同一图标反复建组件。
+ */
+const svgComponentCache = new Map<string, Component>()
+
+export function iconFromSvg(value: unknown): Component | undefined {
+  if (typeof value !== 'string' || !value.trim()) return undefined
+  let comp = svgComponentCache.get(value)
+  if (!comp) {
+    comp = svgIcon(value)
+    svgComponentCache.set(value, comp)
+  }
+  return comp
 }
 
 // 设置分区图标

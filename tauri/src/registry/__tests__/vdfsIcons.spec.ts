@@ -10,7 +10,7 @@
  */
 import { describe, expect, it } from 'vitest'
 import { defineComponent } from 'vue'
-import { getActionIcon, iconForNode, registerVdfsIcon } from '../vdfsIcons'
+import { getActionIcon, iconForNode, iconFromSvg, registerVdfsIcon } from '../vdfsIcons'
 
 const Dummy = defineComponent({ template: '<div />' })
 
@@ -179,6 +179,52 @@ describe('iconForNode（按节点取图标的唯一实现）', () => {
 
   it('空节点不炸（缺 kind / name 时按 undefined 处理）', () => {
     expect(iconForNode({})).toBeUndefined()
+  })
+})
+
+describe('插件自报图标（SVG 内容即图标，前端零字典）', () => {
+  const PATH_A = '<path d="M1 1L9 9"/>'
+  const PATH_B = '<circle cx="12" cy="12" r="10"/>'
+
+  it('iconFromSvg 把插件给的 SVG 内容包成组件，同串缓存复用', () => {
+    const a = iconFromSvg(PATH_A)
+    expect(a).toBeTruthy()
+    expect(iconFromSvg(PATH_A), '同一串 SVG 应复用同一组件实例').toBe(a)
+  })
+
+  it('非字符串 / 空串按未自报处理（返回 undefined）', () => {
+    expect(iconFromSvg(42)).toBeUndefined()
+    expect(iconFromSvg('')).toBeUndefined()
+    expect(iconFromSvg('   ')).toBeUndefined()
+    expect(iconFromSvg(undefined)).toBeUndefined()
+  })
+
+  it('不同 SVG 内容得到不同组件——图标长什么样全由插件决定', () => {
+    expect(iconFromSvg(PATH_A)).not.toBe(iconFromSvg(PATH_B))
+  })
+
+  it('节点自报 plugin_icon 优先于 name/kind 登记（内容即权威）', () => {
+    const gear = iconForNode({ kind: 'plugin_manager', name: 'some-unregistered-plugin' })
+    const declared = iconForNode({
+      kind: 'plugin_manager',
+      name: 'some-unregistered-plugin',
+      plugin_icon: PATH_B,
+    })
+    expect(declared).toBeTruthy()
+    expect(declared, '自报 SVG 不应与齿轮兜底相同').not.toBe(gear)
+    expect(declared, '渲染的就是插件给的那一串 SVG').toBe(iconFromSvg(PATH_B))
+  })
+
+  it('plugin_icon 非字符串时回退到既有登记链，不留空白', () => {
+    const fallback = iconForNode({ kind: 'plugin_manager', name: 'session' })
+    expect(iconForNode({ kind: 'plugin_manager', name: 'session', plugin_icon: 42 })).toBe(fallback)
+  })
+
+  it('多个插件各报不同 SVG ⇒ 各得互不相同的图标（整排齿轮回归）', () => {
+    const svgs = [PATH_A, PATH_B, '<rect x="1" y="1" width="8" height="8"/>']
+    const icons = svgs.map((svg) => iconForNode({ kind: 'plugin_manager', name: 'p', plugin_icon: svg }))
+    expect(icons.every(Boolean)).toBe(true)
+    expect(new Set(icons).size).toBe(svgs.length)
   })
 })
 
