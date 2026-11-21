@@ -257,8 +257,8 @@ impl VdfsResponse {
 ///
 /// ## 为什么住这里，而不是 `vdfs` 插件
 ///
-/// 它有两个 Rust 侧消费方：`vdfs` 插件构造它，`subagent` 插件读它的 `path` 拼子会话地址
-/// （`plugin-agent/src/host/subagent.rs::session_vdfs_addr`）。按 E-009，消费方不得
+/// 它有两个 Rust 侧消费方：构造方插件，以及读它 `path` 拼子会话地址的 owner 插件
+/// （由 owner 插件给出）。按 E-009，消费方不得
 /// `use symbio_plugin_vdfs`；按 D-196，被两个插件共同需要的类型就属于领域，上移到共享
 /// 类型层。留成插件私有型时，`agent` 只能拿 `Value` + 手写 `"path"` —— 字段名漂移不会
 /// 编译失败，只在子会话订阅时静默报错。

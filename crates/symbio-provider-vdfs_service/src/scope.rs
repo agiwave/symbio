@@ -363,7 +363,7 @@ pub fn attach_scope_providers(
 /// `WORKSPACE_VDFS` / `SESSION_VDFS`。
 ///
 /// 为什么不能复用 [`attach_scope_providers`]：开轮 ctx 可能已经是**子树 ctx**——
-/// 子会话的收件箱是经 `subagent/<id>/session/<sid>/inbox` 下钻写入的，子智能体插件在
+/// 子会话的收件箱是经 `subagent/<id>/session/<sid>/inbox` 下钻写入的，owner 插件在
 /// VDFS 下钻 / 子智能体转发时已按 `AgentScope.root` 把该子树的 `AGENT_VDFS` 重挂到
 /// `{homedir}/subagent/<id>`（人格 / 记忆属于那个子智能体）。若再用 `agent_home_root()`
 /// （`{homedir}`）覆盖，系统树人格就会顶掉子智能体人格：T15 现场是子空间开出的轮次
@@ -391,7 +391,7 @@ pub fn attach_round_providers(
 ///
 /// 系统树的 `memory` 实例经 `AGENT_VDFS` 读写 `{homedir}/AGENTS.md`（系统智能体
 /// 自身记忆）。**不是** `{homedir}/subagent/<id>`：那是「选中的子智能体」目录，
-/// 由 `subagent` 插件在 `forward_to_sub_agent` 里按 `AgentScope.root` 重挂到子树 ctx
+/// 由 owner 插件在转发时按 `AgentScope.root` 重挂到子树 ctx
 /// （子树 ctx 的 `AGENT_VDFS` 才指向它）。宿主与会话开轮的注入点与 `agent_id`
 /// 无关——把选中 id 的目录当根会让系统树去读子智能体的记忆（T39 回归）。
 /// `homedir` 取 `SYMBIO_HOMEDIR`，缺省 `~/.symbio`。

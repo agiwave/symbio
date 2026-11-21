@@ -59,7 +59,7 @@ use symbio_sdk::capability::{capability_init_error_bucket, CAPABILITY_ERRORS};
 /// - `SESSION_ID`：会话标识
 ///
 /// `agent_scope`（可选）：会话绑定的智能体作用域。收集器把它设成通用的
-/// `AGENT_ID` 键——由 **sub子智能体插件自己**决定要不要按 `agent/<id>/…` 展开子树；
+/// `AGENT_ID` 键——由 **子智能体插件自己**决定要不要按 `agent/<id>/…` 展开子树；
 /// 收集器不认识任何具体段名。缺省（`None` 或空串）时 子智能体插件不贡献任何工具。
 ///
 /// ## 语义

@@ -14,8 +14,8 @@ import { auditCase, expectAudit } from '../audit-assert.mjs'
 // 仓库根经 `--root=` 注入，故这里在临时目录造一棵最小仓库：
 //   <root>/crates/symbio-plugin-<name>/    插件 crate 目录（AO-001/003/005/006 的目录事实；
 //                                          D-191 后一插件一 crate）
-//   <root>/crates/symbio-plugin-subagent/README.md  成员资格判词 + 兄弟插件指路
-//   <root>/crates/symbio-plugin-subagent/src/host/*.rs  职责表 + 归属表副本 + 真实模块文件
+//   <root>/<owner 插件>/README.md  成员资格判词 + 兄弟插件指路
+//   <root>/<owner 插件>/src/host/*.rs  职责表 + 归属表副本 + 真实模块文件
 //   <root>/crates/symbio-deploy/src/lib.rs     装配清单（生成物，判据读它）
 const script = fileURLToPath(new URL('./agent-ownership-audit.mjs', import.meta.url))
 

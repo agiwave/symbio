@@ -30,7 +30,7 @@ use symbio_sdk::plugin::fact_source::FactSource;
 use symbio_sdk::round::facts::FleetSnapshot;
 
 /// 工具表的**去重**：子 Agent 作用域会把同一能力再注册一遍，而 `PrefixedCapability`
-/// 只改名、执行原样透传（`crates/symbio-plugin-subagent/src/host/scope.rs`），所以对模型
+/// 只改名、执行原样透传（owner 插件的作用域访问器），所以对模型
 /// 而言两份是同一个能力。
 ///
 /// 哪两个名字是同一能力的两份，由**声明面**回答（`SCOPE_TWIN` 的 `(前缀名, 本名)` 对，

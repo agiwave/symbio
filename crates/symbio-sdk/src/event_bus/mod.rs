@@ -205,7 +205,7 @@ pub fn event_bus_vdfs_change_of(frame: &symbio_kernel::plugin::PluginFrame) -> O
 ///
 /// 判别读的是**线上字面量**（信封的 `data.kind` 与 `data.data.type`），两侧分属不同 crate。
 /// 这里曾有两个消费方各写一份（`crates/symbio-plugin-telegram/src/turn.rs::is_resync`、`crates/symbio-cli/src/client.rs`），
-/// 而第三个订阅者（`crates/symbio-plugin-subagent/src/host/subagent.rs` 的转播桥）**一份都没写**：它把解不出
+/// 而第三个订阅者（owner 插件的转播桥）**一份都没写**：它把解不出
 /// 变更的帧一律 `continue`，于是把「你可能漏了帧」这条指令也丢了——而那条指令正是它
 /// 「本轮结束」的唯一兜底（漏掉会话态帧 ⇒ 一直等到父会话中止）。
 /// 产帧方与解帧方各写一份、漏写无人发现，正是 [`event_bus_vdfs_change_of`] 存在的那个理由。

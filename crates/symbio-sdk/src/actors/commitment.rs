@@ -82,7 +82,7 @@ impl CommitmentKeeper {
 /// NDC-001：定义域外不得提及主体类型名——提及即可持有，持有即可绕过事实源直连）。
 ///
 /// 返回**待入格的事件序列**：立约（`opened`）→ 了结（`released` / `broken`）→
-/// 必要时宣告（`asserted`）。写方（`crates/symbio-plugin-subagent` 的委派行为）只管按序
+/// 必要时宣告（`asserted`）。写方（委派行为的 owner 插件）只管按序
 /// append，「什么时候落格」是它的决定，「怎么把一次立约变成格子」是本域的决定——与
 /// `recalled_event` 同一形态。
 ///

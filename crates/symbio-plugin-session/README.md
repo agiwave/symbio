@@ -270,7 +270,7 @@ LLM 可见工具只有一条：`agent_run`（子智能体委托，D-500）——
 | 交出什么 | 机制 |
 |---|---|
 | 工具本体 | `src/tools/subagent.rs`（`PortExecutor`，普通工具零特殊化）；`traverse(session/available_tools)` **无条件注册**——子智能体插件缺席时 `agent_id` enum 为空，省略即纯对话子会话 |
-| `agent_id` 取值域 | 经**本作用域容器**的 VDFS 视图列 `subagent` 挂载点（`agent_id_candidates`）；执行期 `Stat subagent/<id>` 校验——agent 目录的枚举与存在性由它的 owner（sub子智能体插件）经地址面回答，E-009 边不新增 |
+| `agent_id` 取值域 | 经**本作用域容器**的 VDFS 视图列 `subagent` 挂载点（`agent_id_candidates`）；执行期 `Stat subagent/<id>` 校验——agent 目录的枚举与存在性由它的 owner（子智能体插件）经地址面回答，E-009 边不新增 |
 | 承诺面 | `src/tools/behavior.rs`：立约效果（`delegation_promise`）+ 淘汰闸（`assign_work`），经 `ToolBehavior` 交给写口；承诺事件 owner 随写方迁入本插件（D-389 同一条纪律） |
 
 ---
@@ -309,7 +309,7 @@ LLM 可见工具只有一条：`agent_run`（子智能体委托，D-500）——
 
 ### D-003 Session 作为编排入口
 
-早期 `subagent` 插件独占会话编排，耦合严重。 `session` 是唯一编排入口（核心循环 `chat_loop`），`agent` 只负责「人格」。 关注点分离；同一 Session 可绑定不同 Agent；支持无 Agent 的纯工具模式。 Session 需要收集全树工具；子智能体插件适配为被动角色。
+早期由 owner 插件独占会话编排，耦合严重。 `session` 是唯一编排入口（核心循环 `chat_loop`），owner 只负责「人格」。 关注点分离；同一 Session 可绑定不同 Agent；支持无 Agent 的纯工具模式。 Session 需要收集全树工具；子智能体插件适配为被动角色。
 
 ### D-018 压缩失败不得裁剪历史——失败必须是可见、可重试、可持久化的状态
 

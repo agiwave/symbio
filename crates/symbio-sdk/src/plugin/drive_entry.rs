@@ -62,7 +62,7 @@ pub struct DriveTarget {
     pub risk_level: String,
     /// 显式指定的 provider；`None` = 由模型侧选默认（本契约不猜）。
     pub provider_id: Option<String>,
-    /// 本会话的 Agent 权限作用域（D-153）：`agent_id` 经 子智能体插件解析后的运行期
+    /// 本会话的 Agent 权限作用域（D-153）：`agent_id` 经 owner 插件解析后的运行期
     /// 事实（目录根 + 声明），由**收集方**在 `collect_capabilities` 之后发布到事实源；
     /// `None` = 本会话没有选中 Agent（宿主态，工具侧按宿主权限处理）。
     ///

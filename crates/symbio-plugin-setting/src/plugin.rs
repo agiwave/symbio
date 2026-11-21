@@ -13,7 +13,7 @@
 //! ## 本插件不认识「系统」与「子智能体」
 //!
 //! 它被装配在哪个智能体目录下，就描述哪个智能体——两个作用域是**同一个插件的两个
-//! 实例**。子树实例的注册经 `subagent` 插件的 `SubAgentVisitor` 加 `agent/<id>/` 前缀，
+//! 实例**。子树实例的注册经作用域访问器加 `agent/<id>/` 前缀，
 //! 与系统侧并集且不撞名。
 
 use super::config::{config_definition, SettingConfig};

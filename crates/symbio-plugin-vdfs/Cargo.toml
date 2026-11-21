@@ -34,7 +34,7 @@ glob = { workspace = true }
 grep = { workspace = true }
 ignore = { workspace = true }
 inventory = { workspace = true }
-# base64 编码：zip 字节经 JSON payload 传输（子智能体插件）
+# base64 编码：zip 字节经 JSON payload 传输
 base64 = { workspace = true }
 tempfile = { workspace = true }
 

@@ -49,6 +49,7 @@ lists: [gate-codes=owner]
 | **ME** | 机制强制等级清单 | `scripts/audits/mechanism-enforcement-audit.mjs` | ME-001–005 | `ME-006` |
 | **NDC** | 主体直连 | `scripts/audits/no-direct-call-audit.mjs` | NDC-001–002 | `NDC-003` |
 | **OB** | 义务环派发面（调度旁路与幂等点问的两类计数棘轮） | `scripts/audits/obligation-bypass-audit.mjs` | OB-001–004 | `OB-005` |
+| **PI** | 插件身份去耦合（系统层不硬编码具体插件） | `scripts/audits/plugin-identity-audit.mjs` | PI-001–002 | `PI-003` |
 | **PN** | 健壮性登记（每一处 panic 都是显式事实） | `scripts/audits/panic-audit.mjs` | PN-001–003 | `PN-004` |
 | **PP** | 投影纯净性 | `scripts/audits/projection-purity.mjs` | PP-001–005 | `PP-006` |
 | **PS** | prompt 形状基线 | `scripts/audits/prompt-shape-audit.mjs` | PS-001–003 | `PS-004` |
@@ -226,6 +227,8 @@ lists: [gate-codes=owner]
 | **OB-002** | `scripts/audits/obligation-bypass-audit.mjs` |
 | **OB-003** | `scripts/audits/obligation-bypass-audit.mjs` |
 | **OB-004** | `scripts/audits/obligation-bypass-audit.mjs` |
+| **PI-001** | `scripts/audits/plugin-identity-audit.mjs` |
+| **PI-002** | `scripts/audits/plugin-identity-audit.mjs` |
 | **PN-001** | `scripts/audits/panic-audit.mjs` |
 | **PN-002** | `scripts/audits/panic-audit.mjs` |
 | **PN-003** | `scripts/audits/panic-audit.mjs` |

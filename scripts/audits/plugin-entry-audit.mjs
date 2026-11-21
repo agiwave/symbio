@@ -991,7 +991,7 @@ const sdkExemption = loadSdkExemption()
         continue
       }
       // TOML 注释：# 在行首或空白之后。注释里提到兄弟插件名是说明，不是依赖
-      // （composite 的 dev-dependencies 上方就有一句「与 symbio-plugin-subagent 同一处境」）。
+      // （composite 的 dev-dependencies 上方就有一句「与 owner 插件同一处境」）。
       const code = raw[i].replace(/(^|\s)#.*$/, '$1')
       if (!code.trim()) continue
       const dep = depNameOf(code)

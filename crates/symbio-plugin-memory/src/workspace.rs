@@ -65,7 +65,7 @@ pub const MOUNT_FILE: &str = "WORKSPACE.md";
 
 /// 系统提示词条目在收集器里的注册名（同名覆盖的键）。
 ///
-/// 子树里的注册会经 `subagent` 插件的 `SubAgentVisitor` 加上 `agent/<id>/` 前缀，
+/// 子树里的注册会经作用域访问器加上 `agent/<id>/` 前缀，
 /// 因此与系统侧的**同名**条目不冲突（并集）。
 pub const SEGMENT_NAME: &str = "workspace-memory";
 

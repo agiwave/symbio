@@ -52,7 +52,7 @@ impl: partial
 
 两者的**内部结构完全相同**：一层目录 = 一个插件，配置与数据同处。差别只在两处：
 
-1. **谁托管它**：系统 Agent 由宿主直接装配；子 Agent 由 subagent 插件托管（§9）；
+1. **谁托管它**：系统 Agent 由宿主直接装配；子 Agent 由该挂载点的 owner 插件托管（§9）；
 2. **插件清单多少**：系统 Agent 挂宿主的全部插件；子 Agent **应当**只挂 `mcp` / `skill`
  等少数与「认知能力」相关的插件（§7.2）。
 
@@ -85,7 +85,7 @@ impl: partial
 
 - **Agent 目录**：一个 Agent 的完整运行目录，是本规范的基本单元。
 - **系统 Agent**：宿主的根 Agent，其目录即**系统根**。
-- **子 Agent**：由 subagent 插件托管、位于系统根 `subagent/<id>` 下的 Agent。
+- **子 Agent**：由 owner 插件托管、位于系统根 `subagent/<id>` 下的 Agent。
 - **宿主（Host）**：装配 Agent 目录并让其能力对模型生效的一方。
 - **能力插件**：Agent 目录下的一个子目录，承载一类能力（如 `mcp/` `skill/`）。
 - **插件容器**：宿主中负责扫描目录、构造插件的通用机制（symbio 中是 `composite`）。
@@ -345,11 +345,11 @@ Agent，不属于「一个 Agent 会什么」。
 
 ## 9. 托管关系（子 Agent）
 
-子 Agent 位于系统 Agent 的 `subagent/<id>/` 下，由 subagent 插件托管。
+子 Agent 位于系统 Agent 的 `subagent/<id>/` 下，由 owner 插件托管。
 
 宿主**必须**满足：
 
-1. 子智能体插件**必须**能枚举 `subagent/` 下的子 Agent 目录（目录名 = 实例名）；
+1. owner 插件**必须**能枚举 `subagent/` 下的子 Agent 目录（目录名 = 实例名）；
 2. 为每个子 Agent **必须**用插件容器构造一棵独立的插件树（§8.1）；
 3. 构造时**必须**把自己声明的必需插件目录补出来（§7.2 的推荐集合）；
 4. 会话绑定到某个子 Agent 时，**必须**把能力收集与系统提示词收集转发进它的插件树
@@ -398,7 +398,7 @@ Agent，不属于「一个 Agent 会什么」。
 ### A.1 装配
 
 - 插件容器 = `composite` 插件；系统根由 `home` 经 `PLUGIN_DIR` 告知它；
-- 子 Agent 树由 `subagent` 插件构造，做法与 `home` 构造 `worker` 完全同形：
+- 子 Agent 树由 owner 插件构造，做法与 `home` 构造 `worker` 完全同形：
  设 `PLUGIN_DIR = <agent dir>`、设 `REQUIRED_PLUGINS = ASSEMBLY_SUB_AGENT_PLUGINS`
  （与系统树共享同一份清单——`memory` / `setting` 的分形实例由它带进子树），
  再 `creator_create_object("composite", …)`；
@@ -443,7 +443,7 @@ Agent，不属于「一个 Agent 会什么」。
 
 ### D-005 Agent 目录宿主（agent-dir/v2）
 
-`subagent` 插件是子智能体域的托管 agent 目录、经 `<根>/subagent` 的 `zip` 新建类型导入、并装配为子树。目录协议是 `agent-dir/v2`——技能 / MCP 复用宿主既有的 `skill` / `mcp` 插件目录，人格是根 `AGENTS.md`。宿主不解释任何「约定目录」：`manifest.yaml` 的 `spec` 与 `requires.spec` 同时满足 §10 门槛，才是唯一接入判据。
+owner 插件是子智能体域的托管 agent 目录、经 `<根>/subagent` 的 `zip` 新建类型导入、并装配为子树。目录协议是 `agent-dir/v2`——技能 / MCP 复用宿主既有的 `skill` / `mcp` 插件目录，人格是根 `AGENTS.md`。宿主不解释任何「约定目录」：`manifest.yaml` 的 `spec` 与 `requires.spec` 同时满足 §10 门槛，才是唯一接入判据。
 
 ### D-026 子智能体的完整会话在 VDFS 空间内自驱动（inbox）
 
@@ -517,7 +517,7 @@ Agent，不属于「一个 Agent 会什么」。
 
 **三处执行面**：`network.domains` 在出站请求发出前判、`fs` 两个清单在文件路径
 入口判、`limits` 在装载期判（超限即整轮拒载——注册进来的行随轮丢弃，等价于拒载）。
-判据与代码的归属在机制层的 `symbio_sdk::agent`：写侧只有 `subagent` 插件（唯一能把
+判据与代码的归属在机制层的 `symbio_sdk::agent`：写侧只有该挂载点的 owner 插件（唯一能把
 `agent_id` 解析成声明的地方），读侧是 `web` / `vdfs` 两族互不相认的宿主工具——
 按「插件之间互不 import」的架构原则，声明形状与判据必须作为共享设施住 core。
 

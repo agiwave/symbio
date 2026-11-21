@@ -5,7 +5,7 @@ import './_selfrun.mjs';
 //
 // `permissions` 四字段的执行方（`D-153`）在各执行面有单测（`net_guard` / `vdfs`
 // 路径入口 / 装载期）钉了判据，但有一条**只有端到端能证**的链：作用域从收集期
-// 发布（`subagent` 插件）经 `collect_capabilities` 挂回轮 ctx，再一路 fork 进工具
+// 发布（owner 插件）经 `collect_capabilities` 挂回轮 ctx，再一路 fork 进工具
 // 执行期。任一环断了，表现都是「闸门恒过」——单测里手工构造的 ctx 看不出来，
 // 因为它们是直接往 ctx 里塞槽的。本用例让真 CLI 跑真会话：选中智能体 ⇒ 模型
 // 调工具 ⇒ 结果按声明放行 / 拒绝。

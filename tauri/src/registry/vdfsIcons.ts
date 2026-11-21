@@ -144,7 +144,7 @@ export function getActionIcon(action: { icon?: string; id: string }): string | u
 /** 字段图标名 → 视觉（emoji） */
 const FIELD_ICONS: Record<string, string> = {
   folder: '📁',
-  agent: '🎭',
+  subagent: '🎭',
   model: '🧠',
   risk: '🎯',
   'run-mode': '💬',

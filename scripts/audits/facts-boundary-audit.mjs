@@ -57,7 +57,7 @@ const ROOT = rootArg
 
 /** D-084 §4 的能力文件（DE-014 迁移表「能力自取磁盘」一行；
  *  6b 成片搬家后驱动器侧的文件住各能力包，`rebuild` 住 core schema）。
- *  `elimination` 随 D-219 迁入 `symbio-plugin-subagent` 的 `before` 实现：它只读
+ *  `elimination` 随 D-219 迁入 owner 插件的 `before` 实现：它只读
  *  控制面批首算好的读数，连取事实的入口都没有，故退出本清单。
  *
  *  **2026-11 清单更新（D-309 轮次投影退场 / D-317 事实身份键改 `scope`）**：

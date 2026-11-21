@@ -2,7 +2,7 @@
 //!
 //! ## 这个模块为什么在 core
 //!
-//! 写侧只有一个——`crates/symbio-plugin-subagent`（它扫描 Agent 目录、读 manifest，是唯一能把
+//! 写侧只有一个——Agent 目录的 owner 插件（它扫描 Agent 目录、读 manifest，是唯一能把
 //! `agent_id` 解析成一份声明的地方）；读侧是**一堆互不相认的宿主工具**
 //! （`web` 的三个出站工具、`vdfs` 的九个路径工具）。插件之间互相不可见
 //! （判据 `plugin-entry-audit` E-009），所以「声明长什么样、怎么判」必须作为
@@ -406,7 +406,7 @@ fn path_key(p: &Path) -> String {
 ///
 /// ## 为什么值是 `Arc<OnceLock<..>>` 而不是 `AgentScope`
 ///
-/// 解析方（子智能体插件）与消费方（web / vdfs 工具）在**同一次 traverse 里根本
+/// 解析方（owner 插件）与消费方（web / vdfs 工具）在**同一次 traverse 里根本
 /// 见不到彼此的 ctx**：容器对每个子插件各 fork 一份（`Composite::traverse`），
 /// 插件写在自己那份上，兄弟与收集方都看不见。可变的共享槽因此是必需的——
 /// 与能力收集期错误桶（`CAPABILITY_ERRORS`）同一条路，差别只在那边是

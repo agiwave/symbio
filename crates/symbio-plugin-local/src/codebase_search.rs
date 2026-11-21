@@ -27,7 +27,7 @@
 //!
 //! ## 为什么索引不放进 `homedir`
 //!
-//! 索引是**工作区级**的（一个工作区一份），与 `crates/symbio-plugin-subagent/src/host/store.rs` 里
+//! 索引是**工作区级**的（一个工作区一份），与 owner 插件的 store 里
 //! `{workdir}/.symbio/subagent/<id>` 同源——工作区级数据就落在工作区里。放进 homedir
 //! 反而要按工作区路径做哈希分片，多一层可能撞键的间接。`.symbio/` 以 `.` 开头，
 //! D-515 的 VDFS 递归遍历会跳过隐藏目录，`.bin` 也不在 `SOURCE_EXTS` 里，

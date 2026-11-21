@@ -215,9 +215,9 @@ impl SessionPlugin {
     /// `agent_run` 的 `agent_id` enum 候选：本作用域 agent 挂载点的清单。
     ///
     /// 经**本作用域容器**的 VDFS 视图列 `subagent` 挂载点——agent 目录的枚举由它的
-    /// owner（sub子智能体插件）经 VDFS 回答（E-009 禁兄弟插件依赖，session 不认识
+    /// owner（子智能体插件）经 VDFS 回答（E-009 禁兄弟插件依赖，session 不认识
     /// `AgentDirStore`）。分形天然正确：子树里本插件的 parent 是子容器，
-    /// 挂载点即 `<agentdir>/subagent`。容器缺席 / sub子智能体插件缺席 / 列表失败一律返回空
+    /// 挂载点即 `<agentdir>/subagent`。容器缺席 / 子智能体插件缺席 / 列表失败一律返回空
     /// ——委托仍可用（省略 `agent_id` 即纯对话子会话），只是没有显式候选。
     async fn agent_id_candidates(&self, ctx: &Arc<dyn PluginInvokeRequest>) -> Vec<String> {
         let Some(provider) = self.get_parent().and_then(|p| p.get_vfs_provider()) else {

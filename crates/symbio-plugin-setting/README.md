@@ -26,7 +26,7 @@ impl: done
 | 内容 | 自述与偏好（结构化字段） | 长期事实与约定（自由文本） | 出厂身份与兼容门槛 |
 | 形态 | `PLUGIN.yml`（表单编辑） | `AGENTS.md`（正文编辑） | `manifest.yaml`（包内，导入即校验） |
 | 谁写 | 人（填字段） | 人与模型 | 打包的人 |
-| 是否参与接入判定 | 否 | 否 | **是**（`subagent` 插件的 §10 门槛） |
+| 是否参与接入判定 | 否 | 否 | **是**（owner 插件的 §10 门槛） |
 
 子智能体目录里既有 `manifest.yaml` 又有 `setting/`，两者不冲突：前者是**随包分发
 的接入契约**（宿主不改），后者是**本实例运行期可改的自述与偏好**。
@@ -41,7 +41,7 @@ impl: done
 | 系统树 | `<homedir>/setting/PLUGIN.yml` | 所有会话 |
 | 子树 | `<agentdir>/setting/PLUGIN.yml` | 选中该智能体时 |
 
-子树实例的注册经 `subagent` 插件的 `SubAgentVisitor` 加 `agent/<id>/` 前缀，
+子树实例的注册经 owner 插件的作用域访问器加 `agent/<id>/` 前缀，
 与系统侧并集且不撞名。
 
 ## 为什么只收这四个字段

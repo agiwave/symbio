@@ -546,15 +546,15 @@ composite；登记本身不改变 composite 的任何行为与代码（见 §2.5
  → 容器经根行（`mount_root`）登记 `<根>` 服务者 → `tool_ctx` 携带该访问器 → `vdfs_*`
  工具经 `capability_vdfs_root` 取根，交给 `UnifiedFs`。子目录不在这一步登记：
  它们由 `UnifiedFs` 背后的组合视图现场列出。
-- **系统链路（前端 / 子智能体挂载点穿越）**：`vdfs` / `subagent` 插件拿到父插件
+- **系统链路（前端 / 子智能体挂载点穿越）**：`vdfs` / owner 插件拿到父插件
  （`Arc<dyn Plugin>`）后直接调 `parent.get_vfs_provider` 取根，不广播、不依赖
  `CAPABILITY_VISITOR`（`resolve_fs` 在 `ctx` 无能力管理器时即走此通道）。
-- **子智能体挂载点穿越**：`subagent/<id>` 是挂载点，`subagent` 插件对 `RelPath::Agent`
+- **子智能体挂载点穿越**：`subagent/<id>` 是挂载点，owner 插件对 `RelPath::Agent`
  （首层）与 `RelPath::File`（子路径）均经 `sub_agent(id).get_vfs_provider` 委托给
  子 composite 的 `CompositeVfs`；`PluginMeta::hidden` 等可见性过滤由子 composite
  统一执行（分形、与系统根同构）。
  - **变更帧路径**：子 provider 报的是子树相对地址，每层容器继续续接自己的挂载段
- （`subagent` 插件补 `<id>`、父 composite 补 `agent`、`UnifiedFs` 补根名），
+ （owner 插件补 `<id>`、父 composite 补 `agent`、`UnifiedFs` 补根名），
  合起来即 `subagent/<id>/<子目录>/<相对路径>`。
  - **条目地址不由挂载点填**：`subagent/<id>` 是挂载点，它给出的前缀是**本插件空间内**
  的相对段（不含 `agent`），填进条目地址就是一个少了外层挂载段的假地址——而访问层
