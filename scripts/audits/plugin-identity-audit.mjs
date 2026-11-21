@@ -116,7 +116,19 @@ export const FILE_EXEMPTIONS = {
 }
 
 /** 扫描的目录（相对仓根）与文件后缀。 */
-const SCAN_DIRS = ['docs/003-design', 'docs/004-ref', 'crates', 'tauri/src']
+const SCAN_DIRS = [
+  'docs/001-goal',
+  'docs/002-scene',
+  'docs/003-design',
+  'docs/004-ref',
+  'docs/005-spec',
+  'docs/006-guide',
+  'docs/007-task',
+  'docs/008-release',
+  'docs/branding',
+  'crates',
+  'tauri/src',
+]
 const EXTS = new Set(['.md', '.rs', '.ts', '.toml'])
 
 function isOwnCrate(rel) {

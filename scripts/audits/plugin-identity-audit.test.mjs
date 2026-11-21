@@ -20,7 +20,19 @@ import { test } from 'node:test'
 import { audit, IDENTITIES, FILE_EXEMPTIONS } from './plugin-identity-audit.mjs'
 import { withTempTree } from '../fs-walk.mjs'
 
-const DIRS = ['docs/003-design', 'docs/004-ref', 'crates', 'tauri/src']
+const DIRS = [
+  'docs/001-goal',
+  'docs/002-scene',
+  'docs/003-design',
+  'docs/004-ref',
+  'docs/005-spec',
+  'docs/006-guide',
+  'docs/007-task',
+  'docs/008-release',
+  'docs/branding',
+  'crates',
+  'tauri/src',
+]
 const BASE = Object.fromEntries(DIRS.map((d) => [`${d}/.keep`, '']))
 
 test('① 干净夹具 → exit 0', () => {
@@ -40,7 +52,18 @@ test('② 系统文档里出现 crate 名 → exit 1（PI-001）', () => {
   }, { dirs: DIRS })
 })
 
-test('③ 代码注释里出现「subagent 插件」中文点名 → exit 1', () => {
+test('③ 规范文档（005-spec）里出现插件 crate 名 → exit 1（PI-001 覆盖全部 docs 子树）', () => {
+  withTempTree({
+    ...BASE,
+    'docs/005-spec/099-夹具.md': '规范正文：`symbio-plugin-telegram` 是第三端口。\n',
+  }, (root) => {
+    const r = audit({ root })
+    assert.equal(r.status, 1, r.stdout)
+    assert.match(r.stdout, /PI-001 .*005-spec.*099-夹具\.md/)
+  }, { dirs: DIRS })
+})
+
+test('③b 代码注释里出现「subagent 插件」中文点名 → exit 1', () => {
   withTempTree({
     ...BASE,
     'crates/symbio-plugin-memory/src/夹具.rs': '//! 这段由 subagent 插件负责。\n',
