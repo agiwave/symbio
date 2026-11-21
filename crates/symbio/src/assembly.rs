@@ -17,12 +17,14 @@
 //!
 //! | 常量 | 消费方 |
 //! |---|---|
-//! | [`ASSEMBLY_SUB_AGENT_PLUGINS`] | `crates/symbio-plugin-home`（系统树）· `crates/symbio-plugin-agent`（子 Agent 树） |
+//! | [`ASSEMBLY_SUB_AGENT_PLUGINS`] | 文档与审计口径：所有 `sub_agent` 插件（含可选的） |
+//! | [`ASSEMBLY_CORE_PLUGINS`] | `crates/symbio-plugin-home`（系统树）· `crates/symbio-plugin-agent`（子 Agent 树）——默认装配且不可删除 |
+//! | [`ASSEMBLY_OPTIONAL_PLUGINS`] | `crates/symbio-plugin-plugin_manager`（插件市场候选） |
 //! | [`ASSEMBLY_UNDISABLABLE_PLUGINS`] | `crates/symbio-plugin-composite`（执行停用前查）· `crates/symbio-plugin-plugin_manager`（界面置灰） |
 //! | [`PLUGIN_ID_*`](PLUGIN_ID_HOME) | 每个插件自己的工厂注册与 `PluginMeta`；跨插件只经对象注册表按名字查找 |
 //!
-//! 只被**一个**模块依赖的两条已按同判据下沉：系统树的插件清单并入 `crates/symbio-plugin-home` 的
-//! `SYSTEM_PLUGINS`（原本只是本清单的纯别名，无第二份字面量），
+//! 只被**一个**模块依赖的两条已按同判据下沉：系统树的核心清单并入 `crates/symbio-plugin-home` 的
+//! `SYSTEM_PLUGINS`（`ASSEMBLY_CORE_PLUGINS` 的纯别名，无第二份字面量），
 //! `SYSTEM_LEVEL_PROVIDERS` → `crates/symbio-plugin-composite`。
 //!
 //! ## 与 `plugin::ids` 的分工（该域已整体并入本模块）
@@ -34,7 +36,7 @@
 //!
 //! ## 清单是生成的（DE-023 D-181）
 //!
-//! 下面三组常量由 `scripts/facts/assembly.mjs` 从各插件目录的 `PLUGIN.yml` 生成到
+//! 下面五组常量由 `scripts/facts/assembly.mjs` 从各插件目录的 `PLUGIN.yml` 生成到
 //! `crates/symbio-deploy/src/lib.rs`，本模块只是它的门面（`pub use symbio_deploy::*;`）。
 //! 要加一个插件：建 crate、写 `PLUGIN.yml`、加代码——`assembly.rs` 与 `symbio-kernel` / `symbio-sdk` 都
 //! 不需要改；手改生成区会被 `gen-facts --check` 判红。
@@ -43,8 +45,10 @@
 //!
 //! 子 Agent 是一棵 composite 插件树（与系统 Agent 同构，agent-directory-spec §1.1），
 //! 构造时经 ctx 键 [`symbio_sdk::keys::REQUIRED_PLUGINS`] 告知容器「必须挂哪些插件」。
-//! 系统树那份（`crates/symbio-plugin-home` 的 `SYSTEM_PLUGINS`）直接别名到本清单，因此不存在需要
-//! 手工同步的第二份字面量。差异**不在清单里**，而在收集期的**作用域**：
+//! 注入的是**核心集**（[`ASSEMBLY_CORE_PLUGINS`]），系统树那份（`crates/symbio-plugin-home` 的
+//! `SYSTEM_PLUGINS`）直接别名到它，因此不存在需要手工同步的第二份字面量。可选插件
+//! （[`ASSEMBLY_OPTIONAL_PLUGINS`]）不进这张清单——它们不默认补目录，只在插件市场里
+//! 供按需安装（D-520）。差异**不在清单里**，而在收集期的**作用域**：
 //!
 //! - `vdfs`（VDFS 根）是**单槽**注册，归系统 Agent 独占。子树**会构造**自己的
 //!   `vdfs` 实例（故本清单在列），但它的**注册**经

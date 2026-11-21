@@ -45,9 +45,10 @@ use {
 /// **收集期作用域**（`vdfs` 单槽归根、`model` 单槽按收集方）而非清单内容——详见
 /// `ASSEMBLY_SUB_AGENT_PLUGINS` 的文档。
 ///
-/// 若将来两侧确需分叉，**在这里加只属于系统侧的字面量并写清理由**——不要恢复
-/// 「两张各写一遍、靠人同步」的形态（两份各自演化的清单会静默漂移，且没有测试会变红）。
-pub const SYSTEM_PLUGINS: &[&str] = symbio_plugin_api::ASSEMBLY_SUB_AGENT_PLUGINS;
+/// 默认装配取**核心集**（D-520）：可选插件由 `plugin_optional` 声明，不进这张清单，
+/// 因此不会在首次启动时被补出目录，而是出现在插件市场里等用户按需安装。这里仍无
+/// 第二份字面量——`SYSTEM_PLUGINS` 是核心集的纯别名。
+pub const SYSTEM_PLUGINS: &[&str] = symbio_plugin_api::ASSEMBLY_CORE_PLUGINS;
 
 /// Home 自己的插件目录 = **系统根** `<homedir>`
 ///

@@ -10,6 +10,8 @@
  * - `PLUGIN_ID_*` ← `plugin_id`（必须等于目录名，E-001 同判据）
  * - `ASSEMBLY_SUB_AGENT_PLUGINS` ← `plugin_assembly: sub_agent`，按 `plugin_order`
  * - `ASSEMBLY_UNDISABLABLE_PLUGINS` ← `plugin_undisablable: true`
+ * - `ASSEMBLY_CORE_PLUGINS` ← `sub_agent` 且**非** `plugin_optional`（默认装配、不可删除，D-520）
+ * - `ASSEMBLY_OPTIONAL_PLUGINS` ← `sub_agent` 且 `plugin_optional: true`（插件市场候选，D-520）
  *
  * **加插件 = 建目录 + 写 `PLUGIN.yml` + 声明**；`assembly.rs` 与共享层零改动
  * （DE-023 D-181 / C5）。命中手改时，门禁 `gen-facts --check` 判红。
@@ -65,6 +67,16 @@ function readPlugins(root) {
     if (undisablable && assembly !== "sub_agent") {
       throw new Error(`${rel}：不在子树清单里的插件不存在「停用」动作，plugin_undisablable 没有意义`);
     }
+    const optional = m.plugin_optional === "true";
+    if (m.plugin_optional && m.plugin_optional !== "true" && m.plugin_optional !== "false") {
+      throw new Error(`${rel}：plugin_optional 只能是 true / false`);
+    }
+    if (optional && assembly !== "sub_agent") {
+      throw new Error(`${rel}：不在子树清单里的插件不参与默认装配，plugin_optional 没有意义`);
+    }
+    if (optional && undisablable) {
+      throw new Error(`${rel}：可选插件不默认加载，不能同时是界面底座（plugin_undisablable）`);
+    }
     plugins.push({
       id,
       comment: m.plugin_comment ?? "",
@@ -72,6 +84,7 @@ function readPlugins(root) {
       assembly,
       order,
       undisablable,
+      optional,
     });
   }
   return plugins;
@@ -97,6 +110,8 @@ function renderAssembly(root) {
 
   const mounted = plugins.filter((p) => p.assembly === "sub_agent").sort((a, b) => a.order - b.order);
   const undisablable = mounted.filter((p) => p.undisablable);
+  const core = mounted.filter((p) => !p.optional);
+  const optional = mounted.filter((p) => p.optional);
 
   const lines = [];
   lines.push("// 编译期装配清单 —— **由 `scripts/facts/assembly.mjs` 生成，请勿手改**。");
@@ -126,6 +141,22 @@ function renderAssembly(root) {
   }
   lines.push("];");
   lines.push("");
+  lines.push("/// **核心插件**——默认装配且不可删除。这是注入 `REQUIRED_PLUGINS` 的唯一清单（D-520）。");
+  lines.push("#[rustfmt::skip]");
+  lines.push("pub const ASSEMBLY_CORE_PLUGINS: &[&str] = &[");
+  for (const p of core) {
+    lines.push(`    "${p.id}", // ${p.comment}`);
+  }
+  lines.push("];");
+  lines.push("");
+  lines.push("/// **可选插件**——不默认装配，出现在插件市场里，安装后与核心插件同权（D-520）。");
+  lines.push("#[rustfmt::skip]");
+  lines.push("pub const ASSEMBLY_OPTIONAL_PLUGINS: &[&str] = &[");
+  for (const p of optional) {
+    lines.push(`    "${p.id}", // ${p.comment}`);
+  }
+  lines.push("];");
+  lines.push("");
   lines.push("/// **不可停用的插件**——界面自身的底座（停用其中一个，少的是整个界面）。");
   lines.push("#[rustfmt::skip]");
   lines.push("pub const ASSEMBLY_UNDISABLABLE_PLUGINS: &[&str] = &[");
@@ -139,7 +170,7 @@ function renderAssembly(root) {
 
 export default {
   id: "assembly",
-  title: "编译期装配清单（插件 id / 子 Agent 清单 / 不可停用集）",
+  title: "编译期装配清单（插件 id / 子 Agent 清单 / 核心集 / 可选集 / 不可停用集）",
   out: OUT_REL,
   stamp: false,
   render: ({ root }) => renderAssembly(root),

@@ -81,6 +81,40 @@ test('plugin_undisablable: true ⇒ 进不可停用集', () => {
   )
 })
 
+test('plugin_optional: true ⇒ 进可选集、不进核心集（D-520）', () => {
+  withRepo(
+    { beta: 'plugin_id: beta\nplugin_comment: 乙\nplugin_assembly: sub_agent\nplugin_order: 20\nplugin_optional: true\n' },
+    (root) => {
+      const out = render(root)
+      const core = out.slice(out.indexOf('ASSEMBLY_CORE_PLUGINS'), out.indexOf('ASSEMBLY_OPTIONAL_PLUGINS'))
+      const optional = out.slice(out.indexOf('ASSEMBLY_OPTIONAL_PLUGINS'), out.indexOf('ASSEMBLY_UNDISABLABLE_PLUGINS'))
+      assert.doesNotMatch(core, /"beta"/)
+      assert.match(optional, /"beta"/)
+      assert.match(optional.slice(0, optional.indexOf('];')), /"beta"/)
+    },
+  )
+})
+
+test('未声明 plugin_optional ⇒ 进核心集（默认装配且不可删除）', () => {
+  withRepo({}, (root) => {
+    const out = render(root)
+    const core = out.slice(out.indexOf('ASSEMBLY_CORE_PLUGINS'), out.indexOf('ASSEMBLY_OPTIONAL_PLUGINS'))
+    assert.match(core, /"alpha"/)
+    assert.match(core, /"beta"/)
+  })
+})
+
+test('可选插件同时声明不可停用 ⇒ 抛错（恒空槽位无意义）', () => {
+  assert.throws(
+    () =>
+      withRepo(
+        { beta: 'plugin_id: beta\nplugin_assembly: sub_agent\nplugin_order: 20\nplugin_optional: true\nplugin_undisablable: true\n' },
+        (root) => render(root),
+      ),
+    /不能同时是界面底座/,
+  )
+})
+
 test('缺 PLUGIN.yml ⇒ 抛错（新插件必须带声明）', () => {
   assert.throws(
     () => withRepo({ beta: null }, (root) => render(root)),

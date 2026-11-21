@@ -3,3 +3,5 @@ plugin_id: setting
 plugin_comment: 智能体自身的信息设置（分形：系统树与每棵子树各有一份）
 plugin_assembly: sub_agent
 plugin_order: 190
+# 可选插件：默认不装配，由插件市场按需安装（D-520）
+plugin_optional: true

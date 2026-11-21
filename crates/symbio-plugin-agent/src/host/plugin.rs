@@ -50,7 +50,7 @@ use async_trait::async_trait;
 use std::sync::Arc;
 use symbio_plugin_api::AgentScope;
 use symbio_plugin_api::VdfsAccess;
-use symbio_plugin_api::ASSEMBLY_SUB_AGENT_PLUGINS;
+use symbio_plugin_api::ASSEMBLY_CORE_PLUGINS;
 use symbio_plugin_api::{
     capability_report_error, creator_create_object, descend_addr, plugin_dir_from_ctx,
     CapabilityRow, Plugin, PluginDir, PluginError, PluginInvokeRequest, PluginInvokeRequestExt,
@@ -157,13 +157,14 @@ impl AgentPlugin {
         let record = store.get(id)?;
         let dir = record.dir.clone();
 
-        // 与 `home` 造 `worker` 同形：把目录（子 Agent 的根）与必需插件清单告知
+        // 与 `home` 造 `worker` 同形：把目录（子 Agent 的根）与核心插件清单告知
         // 容器，其余交给 composite 扫描装配——子 Agent 与系统 Agent 因此结构相同。
+        // 只注入核心集（D-520）：可选插件不默认补目录，由插件市场按需安装。
         let sub_context = Arc::new(PluginSimpleRequest::child_of(ctx, self.router.clone()));
         sub_context.set(PLUGIN_DIR, PluginDir::at(&dir, PLUGIN_ID_COMPOSITE));
         sub_context.set(
             REQUIRED_PLUGINS,
-            ASSEMBLY_SUB_AGENT_PLUGINS
+            ASSEMBLY_CORE_PLUGINS
                 .iter()
                 .map(|s| (*s).to_string())
                 .collect(),
