@@ -11,6 +11,7 @@ fn default_settings_are_empty() {
     assert!(c.is_empty());
     assert_eq!(c.display_name(), "");
     assert_eq!(c.verbosity(), None);
+    assert_eq!(c.agents_file_name(), "AGENTS.md", "指令文件名有默认值");
 }
 
 /// 空白视同未设置：表单里敲几个空格不该产出「名字是一段空格」的指令
@@ -21,6 +22,7 @@ fn whitespace_counts_as_unset() {
         description: " ".to_string(),
         reply_language: "".to_string(),
         verbosity: "  ".to_string(),
+        agents_file_name: "AGENTS.md".to_string(),
     };
     assert!(c.is_empty(), "全空白仍视同未设置");
 }
@@ -61,9 +63,35 @@ fn missing_fields_fall_back_to_defaults() {
     let c: SettingConfig = serde_json::from_str(r#"{"display_name":"评审官"}"#).unwrap();
     assert_eq!(c.display_name(), "评审官");
     assert_eq!(c.reply_language(), "");
+    assert_eq!(c.agents_file_name(), "AGENTS.md", "缺文件名也回落默认");
 }
 
-/// 表单定义覆盖全部四个字段（加字段忘了进表单 = 用户改不到）
+/// 指令文件名非法（路径分隔符 / 父段 / 空白）→ 回落默认值（防逃逸）
+#[test]
+fn invalid_agents_file_name_falls_back() {
+    for raw in [
+        "",
+        "  ",
+        "../AGENTS.md",
+        "sub/AGENTS.md",
+        "sub\\AGENTS.md",
+        "..",
+        ".",
+    ] {
+        let c = SettingConfig {
+            agents_file_name: raw.to_string(),
+            ..SettingConfig::default()
+        };
+        assert_eq!(c.agents_file_name(), "AGENTS.md", "{raw:?} 应回落默认");
+    }
+    let c = SettingConfig {
+        agents_file_name: " CUSTOM.md ".to_string(),
+        ..SettingConfig::default()
+    };
+    assert_eq!(c.agents_file_name(), "CUSTOM.md", "合法名去空白后保留");
+}
+
+/// 表单定义覆盖全部五个字段（加字段忘了进表单 = 用户改不到）
 #[test]
 fn definition_covers_every_field() {
     let d = config_definition();
@@ -75,7 +103,13 @@ fn definition_covers_every_field() {
         .collect();
     assert_eq!(
         keys,
-        vec!["display_name", "description", "reply_language", "verbosity"],
+        vec![
+            "agents_file_name",
+            "display_name",
+            "description",
+            "reply_language",
+            "verbosity"
+        ],
         "字段与配置结构必须一一对应"
     );
 }

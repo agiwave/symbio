@@ -14,15 +14,15 @@ import './_selfrun.mjs';
 // | 会话的 `<根>` 是**系统树**的 | `vdfs_read` 的工具结果（回灌进第二发请求） |
 // | 它**不是**子智能体自己那棵树的 | 同一份工具结果里没有子智能体目录的正文 |
 //
-// ## 为什么读 `<根>/memory/AGENTS.md` 能分辨两棵树
+// ## 为什么读 `<根>/memory/MEMORY.md` 能分辨两棵树
 //
-// 同一个挂载名在**两棵树里各有一个实例**，而 `AGENTS.md` 是「**本插件目录的父目录**下的
-// 文件」：系统树的 `memory` 读 `{homedir}/AGENTS.md`，子智能体树的 `memory` 读
-// `<agentdir>/AGENTS.md`。于是"哪一棵树的根生效"在这一个地址上**可判**。
+// 同一个挂载名在**两棵树里各有一个实例**，而 `MEMORY.md` 是「**本插件目录的父目录**下的
+// 文件」：系统树的 `memory` 读 `{homedir}/MEMORY.md`，子智能体树的 `memory` 读
+// `<agentdir>/MEMORY.md`。于是"哪一棵树的根生效"在这一个地址上**可判**。
 //
 // ## 为什么不能拿整个请求体当判据（本用例只认工具结果）
 //
-// 两份 `AGENTS.md` **都会**出现在请求里——子树的注册走 `agent/<id>/` 前缀并集
+// 两份 `MEMORY.md` **都会**出现在请求里——子树的注册走 `agent/<id>/` 前缀并集
 // （`SubAgentVisitor` 只丢弃单槽那两项，提示词段是转发的），所以「请求体里出现了
 // 子智能体的正文」是**设计**（`t30` 正是在断言这一点）。能分辨"根被劫持"的只有
 // **那一次 `vdfs_read` 的结果**。
@@ -58,20 +58,20 @@ import {
 const SID = 'e2e-t39';
 const AGENT_ID = 'reviewer';
 
-/** 系统树那份记忆（`{homedir}/AGENTS.md`）——会话的根生效时读到的就是它 */
+/** 系统树那份记忆（`{homedir}/MEMORY.md`）——会话的根生效时读到的就是它 */
 const SYS_MEMORY = '系统侧记忆标记：SYS-ROOT-ONLY。';
-/** 子智能体目录那份记忆（`<agentdir>/AGENTS.md`）——根被劫持时读到的会是它 */
+/** 子智能体目录那份记忆（`<agentdir>/MEMORY.md`）——根被劫持时读到的会是它 */
 const AGENT_MEMORY = '子智能体记忆标记：AGENT-ROOT-ONLY。';
 
 const ASK = '读一下你的记忆文件。';
-/** `<根>/memory/AGENTS.md`（根名 `.vdfsv2` 是 vdfs 插件的运行时数据，此处按协议地址写） */
-const READ_PATH = '.vdfsv2/memory/AGENTS.md';
+/** `<根>/memory/MEMORY.md`（根名 `.vdfsv2` 是 vdfs 插件的运行时数据，此处按协议地址写） */
+const READ_PATH = '.vdfsv2/memory/MEMORY.md';
 const FINAL = '读完了。';
 
 /**
  * 从请求体里取出**工具结果**正文：优先 `role=tool` 消息，退一步扫 `工具结果(…)` 行。
  *
- * 只认这一处内容：两份 `AGENTS.md` 都会以提示词段的形式进请求（设计如此），
+ * 只认这一处内容：两份 `MEMORY.md` 都会以提示词段的形式进请求（设计如此），
  * 能把"根被劫持"分辨出来的只有这一次 `vdfs_read` 的返回。
  */
 function toolResultText(body) {
@@ -110,14 +110,17 @@ export default defineCase(
       providers: [{ id: PROVIDER_ID, config: providerConfig(llm.port) }],
       pluginConfigs: { ...dialogFaceOff() },
     });
-    writeFileSync(join(hd.homedir, 'AGENTS.md'), SYS_MEMORY);
-    // 子智能体目录自己的 `AGENTS.md`：两棵树的同一条路径指向两份不同的正文。
+    // 系统树记忆：{homedir}/MEMORY.md（三层统一物理名，D-527）
+    writeFileSync(join(hd.homedir, 'MEMORY.md'), SYS_MEMORY);
+    // 子智能体目录自己的 MEMORY.md：两棵树的同一条路径指向两份不同的正文。
+    // AGENTS.md 保留为人格指令（归 setting），与记忆物理隔离。
     makeAgentDir(hd.homedir, {
       id: AGENT_ID,
-      persona: AGENT_MEMORY,
+      persona: '你是评审子智能体。',
       providerId: PROVIDER_ID,
       providerPort: llm.port,
     });
+    writeFileSync(join(hd.homedir, 'subagent', AGENT_ID, 'MEMORY.md'), AGENT_MEMORY);
 
     try {
       const r = await runCli({
@@ -145,7 +148,7 @@ export default defineCase(
       );
       assert(
         toolText.includes(SYS_MEMORY),
-        `会话的 <根> 必须是**系统树**的——工具结果应读到 {homedir}/AGENTS.md：` +
+        `会话的 <根> 必须是**系统树**的——工具结果应读到 {homedir}/MEMORY.md：` +
           `${toolText.slice(0, 400)}`,
       );
       assert(

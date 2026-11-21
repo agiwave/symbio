@@ -9,31 +9,35 @@ impl: done
 
 # Memory 插件
 
-**记忆** —— 让模型记得住长期成立的事，也改得动它们。一个插件管**两个作用域**：
+**记忆** —— 让模型记得住长期成立的事，也改得动它们。一个插件管**三层叠加的记忆**，
+三层各有一组闸门与独立注入开关，机制同构：
 
 | 作用域 | 记什么 | 物理落位 | 挂载名 |
 |---|---|---|---|
-| **智能体自身** | 「这个智能体自己」的事：它是谁、必须坚持什么、踩过什么坑 | `{宿主目录}/AGENTS.md`（分形） | `AGENTS.md` |
-| **工作区** | 「这个项目里」的事：用户偏好、项目约定、已定结论、环境事实 | `{workdir}/AGENTS.md`（行业通行约定） | `WORKSPACE.md` |
+| **智能体自身** | 「这个智能体自己」的事：踩过什么坑、下定过什么结论 | `{宿主目录}/MEMORY.md`（分形） | `MEMORY.md` |
+| **工作区** | 「这个项目里」的事：用户偏好、项目约定、已定结论、环境事实 | `{workdir}/MEMORY.md` | `WORKSPACE.md` |
+| **会话** | 「这一轮对话里」的事：本会话编码的事实与召回 | `<session dir>/MEMORY.md` | `SESSION.md` |
 
-两者物理文件同名（`AGENTS.md`，同一族行业约定）但作用域不同——放在哪个目录下就属于
-哪个作用域；挂载里的名字因此不同，名字自带归属。
+三层物理文件**统一叫 `MEMORY.md`**（放在哪个目录下就属于哪一层），但挂载名不同、名字
+自带作用域。⚠️ 稳定指令 / 人格（`AGENTS.md`）**不归本插件**：那是 `setting` 的两级
+只读注入段，语义与物理都与动态记忆隔离（[D-527](../../docs/003-design/011-Agent目录规范.md "DE-011-Agent目录规范")）。
+旧 `AGENTS.md` 里的记忆内容不自动迁移，记忆从空的 `MEMORY.md` 开始。
 
 ## 职责
 
 | 交出什么 | 机制 |
 |---|---|
-| 系统提示词两段（【智能体记忆】+【工作区记忆】） | `put(CapabilityRow::prompt(…))`（地址 + 上限 + 正文 + 截断提示） |
-| VDFS 挂载点 `<根>/memory` | `impl VdfsProvider`（容器按 `get_vfs_provider` 派生挂载行；两份记忆的读写面） |
-| 配置 `<根>/memory/PLUGIN.yml` | `capability_announce_configurable`（三个作用域各一组闸门 + 独立的注入开关） |
+| 系统提示词三段（【智能体记忆】+【工作区记忆】+【会话记忆】） | `put(CapabilityRow::prompt(…))`（地址 + 上限 + 正文 + 截断提示） |
+| VDFS 挂载点 `<根>/memory` | `impl VdfsProvider`（容器按 `get_vfs_provider` 派生挂载行；三层记忆的读写面） |
+| 配置 `<根>/memory/PLUGIN.yml` | `capability_announce_configurable`（三层各一组闸门 + 独立的注入开关） |
 
 注入与挂载缺一不可：只注入不给地址 = 只读记忆，永远长不大；只给地址不注入 =
 模型不知道它存在，等于没有。
 
-挂载点声明 `hidden`：记忆**没有列表内容**，不进左侧主导航。入口在**设置页**
-（`plugin_manager` 的 memory 条目）：那里并出闸门与**智能体记忆正文**
-（`agent_memory` 投影字段，落盘仍是 `AGENTS.md`）。工作区记忆不投影——它随工作区
-路径变，没有「一处设置」可言。
+挂载点声明 `hidden`：记忆**没有列表内容**，不进左侧主导航。配置只存**闸门与开关**，
+**不承载任何记忆正文**——正文是模型可读写的文件，不是表单字段（旧 `agent_memory`
+投影字段已删除）。工作区 / 会话记忆也不投影——它们随工作区 / 会话变，没有「一处
+设置」可言。
 
 ## 智能体腿：一个插件，两个实例（分形）
 
@@ -43,8 +47,8 @@ impl: done
 
 | 实例 | 本插件目录 | 记忆文件 | 生效范围 |
 |---|---|---|---|
-| 系统树 | `<homedir>/memory` | `{homedir}/AGENTS.md` | 所有会话 |
-| 子树 | `<agentdir>/memory` | `<agentdir>/AGENTS.md` | 选中该智能体时 |
+| 系统树 | `<homedir>/memory` | `{homedir}/MEMORY.md` | 所有会话 |
+| 子树 | `<agentdir>/memory` | `<agentdir>/MEMORY.md` | 选中该智能体时 |
 
 子树那份**随 agent 目录整包分发**——它是智能体的资产，不是宿主的私有数据，因此必须
 由**子树里那个实例**读写（只有它的父目录是对的）。子树的注册经 owner 插件的
@@ -55,9 +59,9 @@ impl: done
 
 ## 工作区腿：作用域来自会话
 
-物理文件是 `{workdir}/AGENTS.md`（行业通行约定，与 `CLAUDE.md` / `.cursorrules`
-同一族）——它**不属于 symbio**：换任何支持该约定的工具照样生效，能被 `git` 版本化、
-能被 review、能被协作者读到。
+物理文件是 `{workdir}/MEMORY.md` ——与本插件其它两层同名的动态记忆文件，作用域来自
+会话级选择。它**不属于任何特定工具**：能被 `git` 版本化、被 review、被协作者读到。
+（注意与行业约定的 `AGENTS.md` 区分：那是稳定指令，归 `setting` 只读注入，见 D-527。）
 
 作用域来自**会话级选择**：`ctx[WORKDIR]` 缺失 / 为空 = 没有工作区 → 不注入、挂载列表
 缺席（`WORKSPACE.md` 如实 404）。这与智能体腿不同——智能体腿的作用域来自**装配**，
@@ -74,32 +78,34 @@ impl: done
 
 ## 挂载名 ≠ 物理名
 
-两个作用域的物理文件都叫 `AGENTS.md`，同住 `<根>/memory` 一个挂载点——列表里出现
-两个 `AGENTS.md`，模型和用户都分不清「这份记忆是谁的」。挂载里的名字因此是
-`AGENTS.md`（智能体）与 `WORKSPACE.md`（工作区）：**名字自带作用域**；磁盘上的
-物理文件名不动，行业约定照旧成立。
+三层记忆的物理文件都叫 `MEMORY.md`，若原样挂进同一挂载点，列表里会出现三个
+`MEMORY.md`，模型和用户都分不清「这份记忆是谁的」。挂载里的名字因此是
+`MEMORY.md`（智能体）/ `WORKSPACE.md`（工作区）/ `SESSION.md`（会话）：**名字自带作用域**；
+磁盘上的物理文件名统一为 `MEMORY.md`。
 
-## 两道闸门 × 两个作用域（同一份共享实现）
+## 两道闸门 × 三层作用域（同一份共享实现）
 
-| 闸门 | 字段（智能体 / 工作区） | 行为 |
+| 闸门 | 字段（智能体 / 工作区 / 会话） | 行为 |
 |---|---|---|
-| 写入 | `memory_max_bytes` / `workspace_max_bytes`（默认各 16 KiB） | **拒绝**（不截断、不部分写入） |
-| 注入 | `memory_inject_max_bytes` / `workspace_inject_max_bytes`（默认各 4 KiB） | **截断** + 指路 `vdfs_read` 取全文 |
+| 写入 | `memory_max_bytes` / `workspace_max_bytes` / `session_max_bytes`（默认各 16 KiB） | **拒绝**（不截断、不部分写入） |
+| 注入 | `memory_inject_max_bytes` / `workspace_inject_max_bytes` / `session_inject_max_bytes`（默认各 4 KiB） | **截断** + 指路 `vdfs_read` 取全文 |
 
 读写、两道闸门、片段排版、节点形状全部在共享实现 `providers/memory`——本插件只提供
 **落位、地址、标题、空内容提示、闸门取值**，不再有第二份「超限怎么办」「截断怎么算」。
+每层另有独立注入开关（`agent_enabled` / `workspace_enabled` / `session_enabled`）：关掉只
+影响注入，文件与挂载条目照旧可用。
 
-**不可删除**：要清空就写入空内容（与 session 的记忆层同一约定）。
+**不可删除**：要清空就写入空内容。
 
-## 空文件策略（两腿不同）
+## 空文件策略
 
 - 智能体记忆：没写过 → 整段省略——用户没写过时，不该让每个会话都背一段空头信息；
-- 工作区记忆：没写过 → 照注空头信息——工作区记忆需要主动教模型「这里可以建立记忆」。
+- 工作区记忆：没写过 → 照注空头信息——需要主动教模型「这里可以建立记忆」。
 
 ## 关联
 
-- 本智能体的信息设置（我是谁 / 怎么说话）：`../setting/README.md`
-- 会话级记忆（另一层记忆）：`../session/README.md`
+- 稳定指令 / 人格（`AGENTS.md`，归 setting 只读注入）+ 本智能体信息设置：`../setting/README.md`
+- 会话级记忆的落位目录来源：`../session/README.md`
 - 记忆的共享实现（各层共用）：`../../../providers/` 下的 `providers/memory`
 - 子智能体目录与子树装配：`../agent/README.md`
 - Agent 目录规范 §6：`docs/003-design/011-Agent目录规范.md`

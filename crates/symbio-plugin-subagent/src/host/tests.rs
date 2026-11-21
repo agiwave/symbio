@@ -6,7 +6,7 @@
 //! Agent 采用**目录即配置**布局（约定优于配置）：`manifest.yaml` + `AGENTS.md`
 //! + 能力插件目录（`skill/` `mcp/` `plugin_manager/`），存在即安装，无需在 manifest 里登记。
 //!
-//! 智能体自身的 `AGENTS.md` 不归本插件（归 `memory`，分形）——本层只验证「它的
+//! 智能体自身的 `AGENTS.md`（人格指令）归 `setting`、`MEMORY.md`（记忆）归 `memory`，均分形——本层只验证「它们的
 //! 注入确实发生在本插件撑起的那棵子树上」，落位与闸门的用例在 `crates/symbio-plugin-memory`。
 
 use super::plugin::AgentPlugin;
@@ -40,7 +40,7 @@ async fn tool_metas_of(manager: &DefaultToolVisitor) -> Vec<CapabilityMeta> {
 /// 在内存中生成一个 v2 布局的 Agent zip。
 ///
 /// - `manifest.yaml`：身份 + 兼容门槛（§5 / §10）
-/// - `AGENTS.md`：人格与记忆（§6）
+/// - `AGENTS.md`：人格指令（§6；记忆是另一份 `MEMORY.md`，归 memory）
 /// - `skill/playbook/SKILL.md`：技能插件目录（§7）
 fn build_agent_zip(agent_id: &str, requires_spec: &str) -> Vec<u8> {
     use std::io::Write as _;
@@ -161,15 +161,16 @@ async fn agent_import_traverse_and_export() {
         caps.iter().map(|c| &c.name).collect::<Vec<_>>()
     );
 
-    // ── 3. 系统提示词：子 Agent 自身的 AGENTS.md 由**子树里的 memory 实例**注入 ──
-    // 本插件不再兼管子智能体自身的记忆（那是 `memory` 插件，分形）：段名经作用域
-    // visitor 加 `agent/<id>/` 前缀，与系统侧的 `agent-memory` 条目并集且不撞名。
+    // ── 3. 系统提示词：子 Agent 自身的 AGENTS.md 由**子树里的 setting 实例**注入 ──
+    // AGENTS.md 是稳定指令 / 人格，D-527 后归 setting（只读、两级覆盖）；动态记忆
+    // MEMORY.md 才归 memory。段名经作用域 visitor 加 `agent/<id>/` 前缀，与系统侧
+    // 同名条目并集且不撞名。
     let segments = capability_prompts(&*manager).await;
     let names: Vec<&str> = segments.iter().map(|(n, _)| n.as_str()).collect();
-    const OWN_SEGMENT: &str = "agent/com.symbio.test-fixture/agent-memory";
+    const OWN_SEGMENT: &str = "agent/com.symbio.test-fixture/agent-instructions";
     assert!(
         names.contains(&OWN_SEGMENT),
-        "子智能体自身的 AGENTS.md 应由子树的 memory 实例带前缀注入: {names:?}"
+        "子智能体自身的 AGENTS.md 应由子树的 setting 实例带前缀注入: {names:?}"
     );
     let injected = segments
         .iter()
@@ -180,17 +181,15 @@ async fn agent_import_traverse_and_export() {
         injected.contains("你是全栈开发人格"),
         "注入内容应来自该 agent 目录自己的 AGENTS.md: {injected}"
     );
-    // 地址必须落在**子树的 memory 挂载点**下（父地址续接 `<id>` 的回归钉）：
-    // 少续一段就会拼成 `@vfs/subagent/memory/AGENTS.md`——一个不存在的地址。
     assert!(
-        injected.contains("@vfs/subagent/com.symbio.test-fixture/memory/AGENTS.md"),
-        "片段应指路子树 memory 挂载点下的那个地址: {injected}"
+        injected.contains("【本智能体指令】"),
+        "指令段用【本智能体指令】标题，不再印 memory 地址: {injected}"
     );
     // 本插件不再碰那份文件：它仍躺在 agent 目录里，工作区根不受影响
     assert!(
         Path::new(&result.dir).join("AGENTS.md").exists()
             && !Path::new(workdir).join("AGENTS.md").exists(),
-        "智能体记忆归 `memory`（落在 Agent 目录），不是工作区根（那是 work 的作用域）"
+        "人格指令归 `setting`（落在 Agent 目录），不是工作区根（那是 work 的作用域）"
     );
 
     // ── 4. 导出（打包下载语义）──
@@ -259,7 +258,7 @@ async fn nonconforming_agent_is_rejected_with_both_versions() {
 // `docs/003-design/011-Agent目录规范.md`）
 // ---------------------------------------------------------------------
 // 验证三件事：manifest 声明 `agent-dir/v2` 的目录会被挂成插件树；它的注册经
-// 代理层带上来源前缀（与系统树不冲突）；它自己的 `AGENTS.md` 由子树里的 `memory`
+// 代理层带上来源前缀（与系统树不冲突）；它自己的 `AGENTS.md` 由子树里的 `setting`
 // 实例注入成【智能体记忆】（本插件不再兼管这一层）。
 // ═══════════════════════════════════════════════════════════════════════════
 
@@ -277,7 +276,7 @@ async fn sub_agent_tree_is_assembled_and_prefixed() {
         "spec: \"agent-dir/v2\"\nid: \"reviewer\"\nname: \"评审\"\nversion: \"1.0.0\"\nrequires:\n  spec: \"^2\"\n",
     )
     .unwrap();
-    // 人格 / 记忆：`<agentdir>/AGENTS.md`，由子树里的 `memory` 实例读取并注入
+    // 人格指令：`<agentdir>/AGENTS.md`，由子树里的 `setting` 实例只读注入（记忆是 MEMORY.md）
     // （宿主不再把子树的 WORKDIR 改指本目录——`work` 只认工作区，那个覆写是错的）
     std::fs::write(sub.join("AGENTS.md"), "你是评审专家。").unwrap();
     // 一个技能：落在子 Agent **自己的** skill 插件目录下（有技能它才注册 read_skill）
@@ -308,11 +307,11 @@ async fn sub_agent_tree_is_assembled_and_prefixed() {
 
     plugin.traverse(String::new(), ctx).await.unwrap();
 
-    // 1) 子 Agent 的 AGENTS.md 由子树里的 `memory` 实例注入，段名带来源前缀
-    //    （`agent-memory` 段在系统树里也有一份，前缀正是两者并集且不撞名的原因）
+    // 1) 子 Agent 的 AGENTS.md 由子树里的 `setting` 实例注入，段名带来源前缀
+    //    （`agent-instructions` 段在系统树里也有一份，前缀正是两者并集且不撞名的原因）
     let prompts = capability_prompts(&*manager).await;
     let names: Vec<String> = prompts.iter().map(|(n, _)| n.clone()).collect();
-    const OWN_SEGMENT: &str = "agent/reviewer/agent-memory";
+    const OWN_SEGMENT: &str = "agent/reviewer/agent-instructions";
     assert!(
         names.contains(&OWN_SEGMENT.to_string()),
         "子 Agent 的注册应带来源前缀，实际：{names:?}"
@@ -323,16 +322,10 @@ async fn sub_agent_tree_is_assembled_and_prefixed() {
         .map(|(_, t)| t.as_str())
         .unwrap();
     assert!(injected.contains("你是评审专家"), "{injected}");
-    // 地址落在**子树的 memory 挂载点**下：`<父地址续接 id>/memory/AGENTS.md`。
-    // 少续一段（`@vfs/subagent/memory/AGENTS.md`）就是个不存在的地址——那条回归钉
-    // 正是 `AgentPlugin::forward_to_sub_agent` 续接 `VDFS_PARENT_ADDR` 的理由。
+    // 指令段用【本智能体指令】标题、正文原样，不再印 memory 地址（D-527）
     assert!(
-        injected.contains("@vfs/subagent/reviewer/memory/AGENTS.md"),
-        "片段应指路子树 memory 挂载点下的地址: {injected}"
-    );
-    assert!(
-        injected.contains("本智能体私有，与【工作区记忆】相互独立"),
-        "同名不同作用域必须点明，否则模型会把两件事写混: {injected}"
+        injected.contains("【本智能体指令】"),
+        "指令段应有明确标题: {injected}"
     );
 
     // 2) 子 Agent 的 skill 实例注册的工具被代理层改名，不与系统的 `read_skill` 撞名
@@ -615,11 +608,12 @@ async fn mount_root_lists_only_installed_agents() {
         plugin.dispatch(&ctx, "PLUGIN.yml", STAT).await.is_err(),
         "agent 挂载点不再有配置文档（闸门归 memory）"
     );
-    // 挂载根下**没有保留名**：`AGENTS.md` 不再是「本应用自身的指令」（那份文件归
-    // `memory`），它在这里只是一个不存在的 agent id。
+    // 挂载根下**没有保留名**：`AGENTS.md` 是智能体自身的指令（那份文件归 `setting`
+    // 只读注入）、`MEMORY.md` 归 `memory`——两者都不在 agent 挂载点里，这里只是
+    // 不存在的 agent id。
     assert!(
         plugin.dispatch(&ctx, "AGENTS.md", STAT).await.is_err(),
-        "挂载根下不应有 AGENTS.md 保留名（智能体自身记忆归 memory）"
+        "挂载根下不应有 AGENTS.md 保留名（人格指令归 setting）"
     );
 }
 
@@ -650,8 +644,8 @@ async fn sub_agent_mount_crossing_is_uniform_across_operations() {
     )
     .unwrap();
     std::fs::write(sub.join("AGENTS.md"), "你是评审专家。").unwrap();
-    // 父会话的工作区记忆：子树 `memory` 挂载点的工作区腿读写的就是它
-    std::fs::write(tmp.path().join("AGENTS.md"), "工作区记忆内容").unwrap();
+    // 父会话的工作区记忆：子树 `memory` 挂载点的工作区腿读写 `{workdir}/MEMORY.md`
+    std::fs::write(tmp.path().join("MEMORY.md"), "工作区记忆内容").unwrap();
 
     let plugin = AgentPlugin::new_with_dir(PluginDir::at(&agent_root, PLUGIN_ID_SUBAGENT));
     let ctx: Arc<dyn PluginInvokeRequest> = Arc::new(PluginSimpleRequest::new(None, None));
@@ -662,7 +656,7 @@ async fn sub_agent_mount_crossing_is_uniform_across_operations() {
     ctx.set(AGENT_ID, "reviewer".to_string());
     ctx.set(WORKDIR, tmp.path().to_string_lossy().to_string());
     // D-515：模拟宿主在会话 ctx 注入工作区 provider——子树 memory 的工作区腿
-    // 经它读写 `{workdir}/AGENTS.md`（读的是父会话工作区，不落进智能体包）。
+    // 经它读写 `{workdir}/MEMORY.md`（读的是父会话工作区，不落进智能体包）。
     let ws_provider: symbio_plugin_api::DynVdfsProvider =
         Arc::new(symbio_providers::ScopeDirVdfs::at(tmp.path().to_path_buf()));
     ctx.set(WORKSPACE_VDFS, Some(ws_provider));
@@ -732,9 +726,9 @@ async fn sub_agent_mount_crossing_is_uniform_across_operations() {
         .await
         .unwrap();
     assert_eq!(
-        std::fs::read_to_string(tmp.path().join("AGENTS.md")).unwrap(),
+        std::fs::read_to_string(tmp.path().join("MEMORY.md")).unwrap(),
         "改过的记忆",
-        "写入应交给子树 memory 挂载点的工作区腿（物理落点 = 工作区根）"
+        "写入应交给子树 memory 挂载点的工作区腿（物理落点 = 工作区根 MEMORY.md）"
     );
     assert!(
         !trap.exists(),

@@ -16,7 +16,8 @@
 //!
 //! | 东西 | 归谁 | 地址 |
 //! |---|---|---|
-//! | 子智能体自身的记忆（`AGENTS.md`） | `memory` | `<根>/memory/AGENTS.md` |
+//! | 子智能体自身的记忆（`MEMORY.md`） | `memory` | `<根>/memory/MEMORY.md` |
+//! | 子智能体自身的指令 / 人格（`AGENTS.md`） | `setting` | `<agentdir>/AGENTS.md`（只读注入段） |
 //! | 子智能体自身的信息设置 | `setting` | `<根>/setting/PLUGIN.yml` |
 //!
 //! 它们都是**分形**的：子树里各有自己的实例，落位由「本插件目录的父目录」推出。
@@ -27,7 +28,8 @@
 //!
 //! ⚠️ **指令文件不由子树里的插件实例解释**：子树按 agent 目录扫描，其中 `subagent`
 //! 实例只负责「再下一级子 Agent」（`<id>/subagent/<sub-id>` 递归，即分形），并不解释
-//! 本目录自身的指令——本目录的 `AGENTS.md` 归子树里的 `memory` 实例。而本插件
+//! 本目录自身的指令——本目录的 `AGENTS.md` 归子树里的 `setting` 实例（稳定指令 / 人格，
+//! 只读注入）；`MEMORY.md` 归子树里的 `memory` 实例（动态记忆）。而本插件
 //! 恰恰是「认识 Agent 目录」的那个插件：它扫描目录、装配子树、把整包内容暴露成
 //! VDFS，全在职责内。子树的注册经作用域 visitor 加前缀，故与系统侧不冲突（§8.2）。
 //!
@@ -68,11 +70,13 @@ use symbio_plugin_api::{PLUGIN_ID_COMPOSITE, PLUGIN_ID_SUBAGENT};
 /// 列不出来也挂不上（见 [`super::store::AgentDirStore::load_record`]）。
 pub(crate) const SPEC_V2: &str = "agent-dir/v2";
 
-/// 人格文件名（规范 §6：`AGENTS.md` 承载「它是谁」与「它记得什么」）。
+/// 人格 / 指令文件名（规范 §6：`AGENTS.md` 承载「它是谁」，即稳定指令 / 人格）。
 ///
-/// 子树里的 `memory` 实例按同一个名字读它，但**两边不同源**：这是规范约定的
-/// 文件名（包结构的一部分），不是跨插件契约——插件之间不互相 import
-/// （判据 `plugin-entry-audit` E-009），各持一份字面量正是那条原则的代价，可接受。
+/// 子树里的 `setting` 实例经作用域 provider 读它（只读注入，两级覆盖）；动态记忆
+/// 则是另一份文件 `MEMORY.md`，归 `memory`。这里只用它做**装载期字节校验**
+/// （`check_prompt_limit`）：文件名是规范约定的包结构一部分，不是跨插件契约——
+/// 插件之间不互相 import（判据 `plugin-entry-audit` E-009），各持一份字面量是那条
+/// 原则的代价，可接受。
 const AGENTS_MD: &str = "AGENTS.md";
 
 /// 子智能体插件主结构（宿主接入层）。

@@ -17,10 +17,11 @@ impl: done
 与系统同构的 composite 插件树，注册经代理层并进系统树）、**门槛**（manifest 不合规范时
 拒绝接入，绝不静默降级成「没有人格的通用助手」）。
 
-**当前智能体自身的 `AGENTS.md` 不归本插件**：记忆的唯一所有者是
-[memory](../symbio-plugin-memory/README.md "crates/symbio-plugin-memory/README")（[D-040](../symbio-plugin-memory/README.md "crates/symbio-plugin-memory/README")：智能体腿 +
-工作区腿两个作用域同住 `<根>/memory`）。本插件只负责把子树里那个 `memory` 实例**装进来**
-（分形），为什么这样切见 §记忆不在本插件。
+**当前智能体自身的指令与记忆都不归本插件**：稳定指令 / 人格（`AGENTS.md`）归
+[setting](../symbio-plugin-setting/README.md "crates/symbio-plugin-setting/README") 只读注入；
+动态记忆（`MEMORY.md`）的唯一所有者是
+[memory](../symbio-plugin-memory/README.md "crates/symbio-plugin-memory/README")。本插件只负责
+把子树里那两个实例**装进来**（分形），为什么这样切见 §指令与记忆不在本插件。
 
 ## 职责
 
@@ -48,19 +49,21 @@ MCP 配置按约定文件名探测）等于宿主替技能系统与 MCP 客户�
 长期不同步（规范 §3.2 第 2 条）。Agent 因此是**一棵插件树**：能力由目录里的插件实例
 自己解释，本插件只做枚举 / 建目录 / 导入导出，挂载点内**没有任何保留名**。
 
-### 记忆不在本插件：谁能读写它，谁负责注入它
+### 指令与记忆不在本插件：谁能读写它，谁负责注入它
 
-智能体的指令文件就躺在被扫描、被装配、被整包浏览的那些目录里，「顺手一起管」最省事——
-但那样读写面与注入面就分在两个插件手里：`agent` 持有地址，`memory` 注入正文，
-`谁能读写它，谁负责注入它` 这条原则当场破掉。而智能体腿与工作区腿本是**同一种东西的
-两个作用域**（同样的读写、同样的两道容量闸门、同样的片段排版），跨插件复述就会分叉成
-「超限是拒绝还是截断」随这条记忆属于哪一层而变。
+智能体的指令 / 记忆文件就躺在被扫描、被装配、被整包浏览的那些目录里，「顺手一起管」
+最省事——但那样读写面与注入面就分在两个插件手里：`agent` 持有地址，别的插件注入正文，
+`谁能读写它，谁负责注入它` 这条原则当场破掉。而记忆的智能体腿与工作区腿本是**同一种
+东西的不同作用域**（同样的读写、同样的两道容量闸门、同样的片段排版），跨插件复述就会
+分叉成「超限是拒绝还是截断」随这条记忆属于哪一层而变。
 
-[D-040](../symbio-plugin-memory/README.md "crates/symbio-plugin-memory/README") 的切法因此是按**归属**划：两份 `AGENTS.md`
-的落位、可编辑地址、两道闸门与空文件约定都归 `memory` 自己写
+按 [D-527](../../docs/003-design/011-Agent目录规范.md "DE-011-Agent目录规范") 的切法，
+指令与记忆**语义隔离、各归其主**：稳定指令 / 人格（`AGENTS.md`）的读取与注入归 `setting`
+（两级覆盖，只读）；动态记忆（`MEMORY.md`）的落位、可编辑地址、两道闸门与空文件约定
+归 `memory`（三层叠加，各层可开关）
 （[Memory 插件](../symbio-plugin-memory/README.md "crates/symbio-plugin-memory/README") 与
-[006 规范附录 A.3](../../docs/003-design/011-Agent目录规范.md "DE-011-Agent目录规范")）。
-本插件交出的是**分形**：子树里那个 `memory` 实例的父目录恰好就是 agent 目录，
+[规范附录 A.3](../../docs/003-design/011-Agent目录规范.md "DE-011-Agent目录规范")）。
+本插件交出的是**分形**：子树里 `setting` / `memory` 实例的父目录恰好就是 agent 目录，
 落位因此天然正确，谁也不必认识「系统智能体」与「子智能体」这两个词。
 
 ### 子 Agent 的默认插件清单
@@ -70,9 +73,10 @@ MCP 配置按约定文件名探测）等于宿主替技能系统与 MCP 客户�
 复述（复述即重复，改一次要动两处），要看得去常量定义或 `docs/004-ref/006-当前事实表.md` §1。
 下面只写**为什么在列**——每个名字的作用域从哪儿来：
 
-- `memory` 在其中：子智能体自己的 `AGENTS.md` 就躺在它的目录里，由子树里那个实例读写与注入；
- 系统树那份管 `{homedir}/AGENTS.md`，**同一个插件的两个实例**，不是两份实现。
-- `setting` 在其中：智能体自身的信息设置同样分形，系统树与每棵子树各有一份。
+- `memory` 在其中：子智能体自己的 `MEMORY.md` 就躺在它的目录里，由子树里那个实例读写与
+ 注入；系统树那份管 `{homedir}/MEMORY.md`，**同一个插件的两个实例**，不是两份实现。
+- `setting` 在其中：智能体自身的信息设置与指令 / 人格（`AGENTS.md` 只读注入）同样分形，
+ 系统树与每棵子树各有一份。
 - `plugin_manager` 在其中：`SubAgentVisitor` 把它前缀到 `agent/<id>/plugin_manager`，子 Agent 页因此有了
  设置入口，与父 Agent 对齐。
 - `subagent` 在其中：子 Agent 也能在其目录内再挂子 Agent（`<id>/subagent/<sub-id>` 递归）——分形。
@@ -82,9 +86,10 @@ MCP 配置按约定文件名探测）等于宿主替技能系统与 MCP 客户�
 - `vdfs` 在其中，但它的**注册**经 `SubAgentVisitor` 在每一层丢弃：VDFS 根是系统级单槽，
  归系统 Agent 独占。子树照样**构造**出自己的 `vdfs` 实例（所以在清单里），只是那条注册不生效。
 
-⚠️ 子树的 `WORKDIR` **不得**覆写成 Agent 目录：那会让 `memory` 的工作区腿与智能体腿
-读到同一份文件（双重注入），且「工作」这个名字与它承载的作用域名实不符。
-子树工作区腿继承父会话的 `WORKDIR`（规范附录 A.3 的同一条警告）。
+⚠️ 子树的 `WORKDIR` **不得**覆写成 Agent 目录：那会让 `memory` 的工作区记忆腿与智能体腿
+读到同一份文件（双重注入），且「工作」这个名字与它承载的作用域名实不符。`setting` 的
+工作区指令腿同样认 `{workdir}`，覆写也会双重注入。子树继承父会话的 `WORKDIR`
+（规范附录 A.3 的同一条警告）。
 
 ## 寻址（无自有路由，权威登记见 [路由参考](../../docs/004-ref/003-ROUTES.md "RE-003-ROUTES") §子智能体插件）
 
@@ -105,8 +110,9 @@ agent id 的语法门槛（首字符必须是小写字母或数字）由规范 �
 ## 关联
 
 - 会话编排与系统提示词的拼接 / 消费：`../session/README.md`
-- 记忆的另一个所有者（智能体腿 + 工作区腿，两作用域同住一个挂载点）：`../memory/README.md`
-- 设置入口（**不拥有任何记忆文件**）：`../plugin_manager/README.md`
+- 动态记忆的所有者（会话 / 智能体 / 工作区三层叠加）：`../memory/README.md`
+- 稳定指令 / 人格的所有者（`AGENTS.md` 只读注入）+ 设置入口：`../setting/README.md`
+- 插件管理入口（**不拥有任何指令或记忆文件**）：`../plugin_manager/README.md`
 - 记忆的共享实现（各层共用）：`providers/memory`
 - Agent 目录规范：`docs/003-design/011-Agent目录规范.md`
 - VDFS 机制（`<根>/subagent` 挂载点由本插件自持 `impl VdfsProvider`）：`docs/003-design/009-VDFS规范.md` §13.4

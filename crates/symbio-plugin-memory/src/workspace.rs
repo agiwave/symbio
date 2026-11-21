@@ -3,25 +3,23 @@
 //! 本插件同时管两个作用域的记忆（见 [`super`] 的模块文档），本模块是**工作区**那
 //! 一腿的个性；智能体自身那一腿见 [`super::memory`]。
 //!
-//! ## 落位：工作区根目录的 `AGENTS.md`（物理名不变）
+//! ## 落位：工作区根目录的 `MEMORY.md`
 //!
 //! ```text
-//! {workdir}/AGENTS.md    工作区记忆本体（行业通行约定，随仓库可版本化）
+//! {workdir}/MEMORY.md    工作区记忆本体（三层统一物理名，随仓库可版本化）
 //! ```
 //!
-//! 物理文件名**刻意对齐行业惯例**（`AGENTS.md`：给编码智能体的工作区级指令文件，
-//! 与 `CLAUDE.md` / `.cursorrules` 同一族）。收益是记忆**不属于 symbio**：
-//!
-//! - 换任何支持该约定的工具，这份记忆照样生效——它不是某个宿主的私有数据；
-//! - 它就躺在工作区里，能被 `git` 版本化、能被 review、能被其它协作者读到；
-//! - 用户不需要知道 symbio 的数据目录在哪就能编辑它。
+//! 三层记忆物理名统一 `MEMORY.md`（会话 / 工作区 / 智能体），机制一致、可预测。
+//! 它与工作区的**指令文件 `AGENTS.md` 语义隔离**：后者归 `setting` 插件读取注入
+//! （稳定指令），本文件归 memory（动态记忆）。两者各由不同所有者经作用域 provider
+//! 读写，物理隔离。
 //!
 //! ## 挂载名 ≠ 物理名：`WORKSPACE.md`
 //!
 //! 智能体记忆与工作区记忆**同住 `<根>/memory` 一个挂载点**，而两者的物理文件同名
-//! （都叫 `AGENTS.md`）——同一个列表里出现两个 `AGENTS.md`，模型和用户都分不清
+//! （都叫 `MEMORY.md`）——同一个列表里出现两个 `MEMORY.md`，模型和用户都分不清
 //! 「这份记忆是谁的」。因此挂载里的名字用 [`MOUNT_FILE`]（`WORKSPACE.md`）：
-//! 名字自带作用域。物理文件名不动——磁盘上它仍是行业约定的 `AGENTS.md`。
+//! 名字自带作用域。物理文件名是三层统一的 `MEMORY.md`。
 //!
 //! ## 作用域闸门：**选了工作区才有记忆**
 //!
@@ -34,7 +32,7 @@
 //!
 //! ## 归属：这一层只归本插件
 //!
-//! 同一份 `{workdir}/AGENTS.md` 不由 session 插件再读一遍（当「工作区指令」注
+//! 同一份 `{workdir}/MEMORY.md` 不由 session 插件再读一遍（当「工作区记忆」注
 //! 系统提示词基座），结果是同一份内容进两次上下文、而模型改不动它。约定是
 //! **谁能读写它，谁负责注入它**——session 不碰这个文件；本插件的合并只是把
 //! 「工作区」与「智能体」两个作用域收进**同一个所有者**，这条原则不变。
@@ -51,15 +49,15 @@
 
 use symbio_providers::{MemoryFile, MemoryNodeSpec, MemorySegmentSpec};
 
-/// 工作区记忆的**物理**文件名 —— `{workdir}/AGENTS.md`（行业通行约定）。
+/// 工作区记忆的**物理**文件名 —— `{workdir}/MEMORY.md`（三层统一）。
 ///
-/// 刻意对齐行业惯例：记忆**不属于 symbio**——它躺在工作区根，能被 `git` 版本化、
-/// 能被 review、能被协作者读到。挂载里的名字见 [`MOUNT_FILE`]（两者刻意不同）。
-pub const WORK_MEMORY_FILE: &str = "AGENTS.md";
+/// 与指令文件 `AGENTS.md` 语义隔离：后者归 `setting`（稳定指令，两级覆盖）。
+/// 挂载里的名字见 [`MOUNT_FILE`]（两者刻意不同）。
+pub const WORK_MEMORY_FILE: &str = "MEMORY.md";
 
 /// 工作区记忆在**本插件挂载点**里的名字。
 ///
-/// 与智能体记忆（物理名同为 `AGENTS.md`）同住一个挂载点，挂载名必须能区分
+/// 与智能体记忆（物理名同为 `MEMORY.md`）同住一个挂载点，挂载名必须能区分
 /// 「这份记忆是谁的」——见模块文档「挂载名 ≠ 物理名」。
 pub const MOUNT_FILE: &str = "WORKSPACE.md";
 
@@ -105,7 +103,7 @@ pub fn rel_path() -> &'static str {
 
 /// VDFS 节点规格 —— `list` 与 `stat` 共用，两条链路不会分叉。
 ///
-/// `name` 必须覆盖成 [`MOUNT_FILE`]：节点名若取真实文件名（`AGENTS.md`），
+/// `name` 必须覆盖成 [`MOUNT_FILE`]：节点名若取真实文件名（`MEMORY.md`），
 /// 会与智能体记忆在同一个列表里撞名。
 pub fn node_spec() -> MemoryNodeSpec<'static> {
     MemoryNodeSpec {

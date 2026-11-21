@@ -48,6 +48,7 @@ fn all_fields_are_one_line() {
         description: "只读代码".to_string(),
         reply_language: "中文".to_string(),
         verbosity: "detailed".to_string(),
+        agents_file_name: "AGENTS.md".to_string(),
     };
     let s = segment(&c).unwrap();
     assert_eq!(

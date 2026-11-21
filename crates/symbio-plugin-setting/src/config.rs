@@ -1,21 +1,30 @@
 //! setting 插件的配置与表单定义（`<本插件目录>/PLUGIN.yml`）。
 //!
-//! ## 两组字段，一个判据：**有没有消费者**
+//! ## 三组字段，一个判据：**有没有消费者**
 //!
 //! | 组 | 字段 | 消费者 |
 //! |---|---|---|
 //! | 档案 | `display_name` / `description` | 系统提示词（[`super::segment`]）+ 界面自述 |
 //! | 偏好 | `reply_language` / `verbosity` | 系统提示词（[`super::segment`]） |
+//! | 指令 | `agents_file_name` | 两级 AGENTS.md 的读取（[`super::plugin`] 经作用域 provider） |
 //!
 //! 只收**有消费者**的字段：图标、默认模型、默认工作区这类东西看起来也属于「智能体
 //! 的设置」，但它们的消费者在别的插件（前端图标表 / `model` / `work`）里，本插件
 //! 交出去也没人读——那就是死配置（用户填了、什么都没发生）。等消费方接好了再加，
 //! 不预先发明字段。
 //!
+//! ## 指令文件名可由用户配置，但内容不由本插件设置
+//!
+//! AGENTS.md 是**稳定指令 / 人格**（`{workdir}` 与 `{agentdir}` 各一份，工作区优先
+//! 覆盖智能体级），与 `memory` 的 `MEMORY.md`（动态记忆）语义隔离。本插件只配
+//! **文件名**（默认 `AGENTS.md`）——正文通过作用域 VDFS provider 现读，不在配置里
+//! 存一份（存了就等于「设置记忆内容」，正是要拆开的职责）。
+//!
 //! ## 缺省全空 = 不改变任何一轮的提示词
 //!
-//! 四个字段的缺省值都是「未设置」（空串），因此**刚装配完什么都不会注入**。
-//! 这不是偷懒：本插件描述的是「这个智能体是谁」，宿主不该替用户编一个名字。
+//! 档案 / 偏好四个字段的缺省值都是「未设置」（空串），因此**刚装配完不会注入档案
+//! 段**。这不是偷懒：本插件描述的是「这个智能体是谁」，宿主不该替用户编一个名字。
+//! 指令段则由**文件是否存在**决定，与这四个字段无关。
 
 use symbio_plugin_api::{DetailDefinition, DetailField, DetailOption, DetailSection};
 
@@ -40,6 +49,18 @@ pub struct SettingConfig {
     /// 回答详略（`""` / `concise` / `standard` / `detailed`；空 = 不约束）
     #[serde(default)]
     pub verbosity: String,
+
+    /// 两级指令文件的名字（工作区级 / 智能体级同名；默认 `AGENTS.md`）。
+    ///
+    /// 只配**文件名**，不配内容：正文经作用域 VDFS provider 现读，稳定指令与动态
+    /// 记忆（`memory` 的 `MEMORY.md`）因此物理隔离。留空 / 非法文件名回落到默认值。
+    #[serde(default = "default_agents_file_name")]
+    pub agents_file_name: String,
+}
+
+/// 指令文件名缺省值（`AGENTS.md` —— 行业通行约定）。
+fn default_agents_file_name() -> String {
+    "AGENTS.md".to_string()
 }
 
 impl SettingConfig {
@@ -71,7 +92,27 @@ impl SettingConfig {
         }
     }
 
-    /// 有没有任何一项被设置过（全空 → 不注入片段）
+    /// 指令文件名（去空白；空白 / 含路径分隔符 → 回落到 `AGENTS.md`）。
+    ///
+    /// 只接受**纯文件名**：作用域 provider 的根已是工作区 / 智能体目录，带 `/` 或
+    /// `..` 的名字是想跳出作用域——拒绝并回落默认值，不让它成为逃逸向量。
+    pub fn agents_file_name(&self) -> &str {
+        let name = self.agents_file_name.trim();
+        if name.is_empty()
+            || name.contains('/')
+            || name.contains('\\')
+            || name.contains("..")
+            || name == "."
+        {
+            "AGENTS.md"
+        } else {
+            name
+        }
+    }
+
+    /// 有没有任何一项**档案 / 偏好**被设置过（全空 → 不注入档案段）。
+    ///
+    /// 指令文件名不在此列：它有默认值，且指令段的注入由文件是否存在决定。
     pub fn is_empty(&self) -> bool {
         self.display_name().is_empty()
             && self.description().is_empty()
@@ -97,6 +138,15 @@ pub fn config_definition() -> DetailDefinition {
         binding: "option".to_string(),
         title_fallback: Some("智能体".to_string()),
         sections: vec![
+            DetailSection {
+                title: Some("指令文件".to_string()),
+                collapsed: false,
+                fields: vec![DetailField::text(
+                    "agents_file_name",
+                    "指令文件名",
+                    "两级指令文件的名字（默认 AGENTS.md）；工作区级优先覆盖智能体级，正文由该文件提供",
+                )],
+            },
             DetailSection {
                 title: Some("档案".to_string()),
                 collapsed: false,

@@ -6,8 +6,8 @@
 //!
 //! 1. **系统提示词**（`CapabilityRow::prompt`，三段）：三层记忆的正文 + 文件地址 +
 //!    容量与写法，由会话侧按注册顺序拼接后送达模型；
-//! 2. **VDFS 挂载点**（`<根>/memory`）：三份记忆文件本体（`AGENTS.md` /
-//!    `WORKSPACE.md` / `SESSION.md`），模型用 `vdfs_read` / `vdfs_write` 读写，用户
+//! 2. **VDFS 挂载点**（`<根>/memory`）：三份记忆文件本体（物理均 `MEMORY.md`，
+//!    挂载名 `MEMORY.md` / `WORKSPACE.md` / `SESSION.md`），模型用 `vdfs_read` / `vdfs_write` 读写，用户
 //!    在界面上也能直接编辑。
 //!
 //! 两样必须同时存在：只注入不给地址 = 只读记忆，永远长不大；只给地址不注入 =
@@ -17,8 +17,8 @@
 //!
 //! | 作用域 | 物理落位 | 作用域来源 | 挂载名 |
 //! |---|---|---|---|
-//! | 智能体自身 | `{agent_dir}/AGENTS.md` | **装配**（本插件目录的父目录，分形） | `AGENTS.md` |
-//! | 工作区 | `{work_dir}/AGENTS.md` | **会话**（`ctx[WORKDIR]`，可选） | `WORKSPACE.md` |
+//! | 智能体自身 | `{agent_dir}/MEMORY.md` | **装配**（本插件目录的父目录，分形） | `MEMORY.md` |
+//! | 工作区 | `{work_dir}/MEMORY.md` | **会话**（`ctx[WORKDIR]`，可选） | `WORKSPACE.md` |
 //! | 会话 | `{session_dir}/MEMORY.md` | **会话**（`ctx[SESSION_DIR]`，可选） | `SESSION.md` |
 //!
 //! 工作区腿的闸门（没选工作区 → 无作用域；`workspace_enabled` 关 → 不注入）在
@@ -28,14 +28,13 @@
 //!
 //! ## 本插件不认识「系统」与「子智能体」
 //!
-//! 智能体腿的落位规则只有一条（记忆 = 本插件目录的父目录下的 `AGENTS.md`），两个
+//! 智能体腿的落位规则只有一条（记忆 = 本插件目录的父目录下的 `MEMORY.md`），两个
 //! 装配作用域因此是**同一个插件的两个实例**，不是两段代码。子树实例的注册经
 //! 作用域访问器加 `agent/<id>/` 前缀，与系统侧并集且不撞名。
 
 use super::config::MemoryConfig;
 use super::memory::{self, PLUGIN_TITLE, SEGMENT_NAME};
 use super::session;
-use super::vdfs::AGENT_MEMORY_FIELD;
 use super::workspace;
 use async_trait::async_trait;
 use serde_json::json;
@@ -62,22 +61,9 @@ fn config_definition() -> DetailDefinition {
     DetailDefinition::form(
         PLUGIN_TITLE,
         vec![
-            // 智能体记忆的**正文**不是配置项（配置文档只存闸门），但设置页要能改它：
-            // 表单因此多一个投影字段，读 / 写时由 VDFS 侧并到 / 拆自 `AGENTS.md`
-            // （见 `vdfs.rs` 的同名常量）。工作区记忆**不在此列**——它随工作区路径变，
-            // 没有「一处设置」可言。
-            DetailField {
-                key: AGENT_MEMORY_FIELD.to_string(),
-                label: "智能体记忆（AGENTS.md）".to_string(),
-                description: Some(
-                    "这个智能体跨会话记得的事。工作区记忆随工作区路径不同，不在这里设置。"
-                        .to_string(),
-                ),
-                widget: "textarea".to_string(),
-                rows: Some(12),
-                full_width: true,
-                ..Default::default()
-            },
+            // 三层记忆的**正文**都不是配置项：配置只存开关与闸门，正文一律经各自的
+            // VDFS 地址（`<根>/memory/MEMORY.md` / `WORKSPACE.md` / `SESSION.md`）读写。
+            // 稳定指令 `AGENTS.md` 归 `setting`，更不在这里。
             DetailField::toggle(
                 "agent_enabled",
                 "注入智能体记忆",
@@ -373,7 +359,7 @@ impl Plugin for MemoryPlugin {
 
     /// 路由入口：**无自有协议**。
     ///
-    /// 记忆的读 / 写 / 编辑全部由 VDFS 承接（`<根>/memory/AGENTS.md` /
+    /// 记忆的读 / 写 / 编辑全部由 VDFS 承接（`<根>/memory/MEMORY.md` /
     /// `<根>/memory/WORKSPACE.md` / `<根>/memory/SESSION.md`）——与 work / agent
     /// 插件同一取舍：宿主与模型走同一条链路，不为「记忆」再造一条协议。
     async fn route(

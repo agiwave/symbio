@@ -52,7 +52,7 @@ async fn mount_is_hidden_from_sidebar() {
 
 // ==================== 智能体腿（分形） ====================
 
-/// 系统树实例：`<homedir>/memory` ⇒ 记忆落在 `<homedir>/AGENTS.md`
+/// 系统树实例：`<homedir>/memory` ⇒ 记忆落在 `<homedir>/MEMORY.md`
 #[tokio::test]
 async fn system_instance_injects_the_host_memory() {
     let tmp = TempDir::new().unwrap();
@@ -70,14 +70,14 @@ async fn system_instance_injects_the_host_memory() {
     );
     assert_eq!(segs[0].0, SEGMENT_NAME);
     assert!(segs[0].1.contains("只改必要之处。"));
-    assert!(segs[0].1.contains("@vfs/memory/AGENTS.md"), "{}", segs[0].1);
+    assert!(segs[0].1.contains("@vfs/memory/MEMORY.md"), "{}", segs[0].1);
     assert!(segs[0].1.contains("【智能体记忆】"));
 
     // 视图仍然交出：容器据此派生挂载行（只注入不给地址 = 只读记忆，永远长不大）
     assert!(p.clone().get_vfs_provider().is_some());
 }
 
-/// 子树实例：`<agentdir>/memory` ⇒ 记忆落在 `<agentdir>/AGENTS.md`
+/// 子树实例：`<agentdir>/memory` ⇒ 记忆落在 `<agentdir>/MEMORY.md`
 ///
 /// 这就是「同一个插件的两个实例」：与上面那个用例唯一的差别是**目录**。
 #[tokio::test]
@@ -91,7 +91,7 @@ async fn sub_agent_instance_injects_its_own_memory() {
     // 子树实例的 AGENT_VDFS 根 = 该子智能体自己的目录（真实注入链里由 agent
     // 插件的 `forward_to_sub_agent` 按 `AgentScope.root` 重挂），不是外层系统树
     // 目录——两者必须对齐，否则
-    // provider 读的是外层 AGENTS.md，读不到刚写下的这份。
+    // provider 读的是外层 MEMORY.md，读不到刚写下的这份。
     let (ctx, visitor) = ctx(
         Some(agent_dir.as_path()),
         None,
@@ -106,7 +106,7 @@ async fn sub_agent_instance_injects_its_own_memory() {
     assert!(
         segs[0]
             .1
-            .contains("@vfs/subagent/reviewer/memory/AGENTS.md"),
+            .contains("@vfs/subagent/reviewer/memory/MEMORY.md"),
         "地址必须落在子智能体自己的挂载点下：{}",
         segs[0].1
     );
@@ -177,7 +177,7 @@ async fn empty_workspace_still_injects_the_empty_hint() {
     );
     assert!(
         segs[0].1.contains("@vfs/memory/WORKSPACE.md"),
-        "地址是挂载名（不是物理名 AGENTS.md）：{}",
+        "地址是挂载名（不是物理名 MEMORY.md）：{}",
         segs[0].1
     );
 }
@@ -255,7 +255,7 @@ async fn both_legs_inject_together() {
         .find(|(n, _)| n == workspace::SEGMENT_NAME)
         .unwrap()
         .1;
-    assert!(agent_seg.contains("智能体记忆内容") && agent_seg.contains("@vfs/memory/AGENTS.md"));
+    assert!(agent_seg.contains("智能体记忆内容") && agent_seg.contains("@vfs/memory/MEMORY.md"));
     assert!(ws_seg.contains("工作区记忆内容") && ws_seg.contains("@vfs/memory/WORKSPACE.md"));
 }
 

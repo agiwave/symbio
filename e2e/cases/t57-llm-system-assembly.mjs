@@ -44,16 +44,23 @@ import {
   PROVIDER_ID,
 } from '../helpers.mjs';
 import { assertSystemAssembly, assertLastUserIs } from '../llm-contract.mjs';
+import { writeFileSync } from 'node:fs';
+import { join } from 'node:path';
 
 const PERSONA = '你是测试人格小P，说话简短。';
+/** AGENTS.md（人格指令，归 setting 只读注入【本智能体指令】段） */
 const AGENTS_BODY = '你是智能体小A，必须先复述用户问题再回答。';
 const AGENTS_MD = `# 智能体指令\n${AGENTS_BODY}`;
+/** MEMORY.md（动态记忆，归 memory 的【智能体记忆】段） */
+const AGENT_MEMORY_BODY = '智能体记忆：红茶是用户喜欢的茶。';
 
 const TURN1 = '第一句：记住我喜欢红茶';
 const TURN2 = '第二句：我喜欢什么';
 
-/** agent 级【智能体记忆】段的地址标记（段头自带，段内容 = AGENTS.md 正文） */
-const AGENT_MEM_ADDR = '.vdfsv2/vdfs/subagent/e2e-t57-agent/memory/AGENTS.md';
+/** agent 级【智能体记忆】段的地址标记（段头自带，段内容 = MEMORY.md 正文） */
+const AGENT_MEM_ADDR = '.vdfsv2/vdfs/subagent/e2e-t57-agent/memory/MEMORY.md';
+/** 指令段标记（AGENTS.md 正文由 setting 注入，无 vdfs 地址） */
+const AGENT_INSTRUCTION_MARK = '【本智能体指令】';
 /** 根级【工作区记忆】段地址标记 */
 const ROOT_WS_ADDR = '.vdfsv2/vdfs/memory/WORKSPACE.md';
 /** 根级【会话记忆】段地址标记（D-513：会话记忆归 memory 插件） */
@@ -78,6 +85,11 @@ export default defineCase(
       providerId: PROVIDER_ID,
       providerPort: llm.port,
     });
+    // 动态记忆与人格指令物理隔离：AGENTS.md 归 setting，MEMORY.md 归 memory
+    writeFileSync(
+      join(hd.homedir, 'subagent', 'e2e-t57-agent', 'MEMORY.md'),
+      AGENT_MEMORY_BODY,
+    );
 
     try {
       const r = await runCli({

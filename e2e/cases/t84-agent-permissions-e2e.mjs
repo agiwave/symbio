@@ -51,10 +51,14 @@ const GRANTED_PERMS = `permissions:
     read:
       - "**"`;
 
-// `<根>/subagent/<id>/memory/AGENTS.md`：子树 memory 挂载点的虚拟地址（根名 `.vdfsv2`
-// 按协议地址写字面量，与 T57 同一约定）。
-const OWN_ADDR_ZERO = '.vdfsv2/subagent/t84-zero/memory/AGENTS.md';
-const OWN_ADDR_GRANTED = '.vdfsv2/subagent/t84-granted/memory/AGENTS.md';
+// `<根>/subagent/<id>/memory/MEMORY.md`：子树 memory 挂载点的虚拟地址（根名 `.vdfsv2`
+// 按协议地址写字面量，与 T57 同一约定）。人格 AGENTS.md 归 setting 只读注入，
+// 不经 memory 挂载点暴露；自己的记忆文件才是这里要读的"自己的包内资源"。
+const OWN_ADDR_ZERO = '.vdfsv2/subagent/t84-zero/memory/MEMORY.md';
+const OWN_ADDR_GRANTED = '.vdfsv2/subagent/t84-granted/memory/MEMORY.md';
+/** 两个智能体各自的记忆正文（写在 MEMORY.md，作为"读自己的包"的靶子） */
+const ZERO_MEMORY = '零授权智能体的记忆内容。';
+const GRANTED_MEMORY = '持权智能体的记忆内容。';
 
 const WS_MARKER = 'T84-WORKSPACE-MARKER：这一行在工作区，不归智能体声明管。';
 const T_WEB = '试一下外取那个文档页面';
@@ -125,6 +129,7 @@ export default defineCase(
       providerId: PROVIDER_ID,
       providerPort: llm.port,
     });
+    writeFileSync(join(hd.homedir, 'subagent', ZERO, 'MEMORY.md'), ZERO_MEMORY);
     makeAgentDir(hd.homedir, {
       id: GRANTED,
       name: '持权',
@@ -133,6 +138,7 @@ export default defineCase(
       providerPort: llm.port,
       permissions: GRANTED_PERMS,
     });
+    writeFileSync(join(hd.homedir, 'subagent', GRANTED, 'MEMORY.md'), GRANTED_MEMORY);
 
     try {
       // ── 会话 A：零授权智能体，三轮 ──
@@ -197,8 +203,8 @@ export default defineCase(
       // ── 判据 4：声明了真放行（槽里带的是真声明，不是空权限） ──
       const grantedText = toolResultText(reqs[7]);
       assert(
-        grantedText.includes(GRANTED_PERSONA),
-        `声明了 fs.read 的智能体读自己的包应放行并读到人格正文（实际: ${grantedText.slice(0, 400)}）`,
+        grantedText.includes(GRANTED_MEMORY),
+        `声明了 fs.read 的智能体读自己的包应放行并读到自己的记忆正文（实际: ${grantedText.slice(0, 400)}）`,
       );
     } finally {
       llm.stop();

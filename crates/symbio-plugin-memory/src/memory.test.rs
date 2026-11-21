@@ -1,4 +1,4 @@
-//! `memory/memory.rs` 的单元测试 —— 智能体自身 `AGENTS.md` 的**落位、片段与节点**。
+//! `memory/memory.rs` 的单元测试 —— 智能体自身 `MEMORY.md` 的**落位、片段与节点**。
 //!
 //! 与实现**同级**分文件（约定：`X.rs` + `X.test.rs`）。
 //!
@@ -20,7 +20,7 @@ fn host_dir(plugin_dir: &Path) -> PathBuf {
         .unwrap_or_else(|| plugin_dir.to_path_buf())
 }
 
-/// 记忆文件的落位：`{宿主目录}/AGENTS.md`
+/// 记忆文件的落位：`{宿主目录}/MEMORY.md`
 fn file_path(host_dir: &Path) -> PathBuf {
     host_dir.join(MEMORY_FILE)
 }
@@ -82,14 +82,14 @@ async fn empty_memory_is_not_injected() {
     let m = store_at(tmp.path(), 1024, 128);
 
     assert_eq!(
-        segment(&m, "@vfs/memory/AGENTS.md").await.unwrap(),
+        segment(&m, "@vfs/memory/MEMORY.md").await.unwrap(),
         None,
         "没写过 → 不注入"
     );
 
     std::fs::write(file_path(tmp.path()), "   \n\t ").unwrap();
     assert_eq!(
-        segment(&m, "@vfs/memory/AGENTS.md").await.unwrap(),
+        segment(&m, "@vfs/memory/MEMORY.md").await.unwrap(),
         None,
         "只有空白 → 同样不注入"
     );
@@ -102,13 +102,13 @@ async fn segment_carries_title_address_and_gates() {
     let m = store_at(tmp.path(), 1024, 128);
     m.write("只改必要之处").await.unwrap();
 
-    let seg = segment(&m, "@vfs/memory/AGENTS.md")
+    let seg = segment(&m, "@vfs/memory/MEMORY.md")
         .await
         .unwrap()
         .expect("有内容必注入");
     assert!(seg.contains("【智能体记忆】"), "{seg}");
     assert!(
-        seg.contains("@vfs/memory/AGENTS.md"),
+        seg.contains("@vfs/memory/MEMORY.md"),
         "地址必须真实可达：{seg}"
     );
     assert!(
@@ -126,7 +126,7 @@ async fn segment_truncates_over_the_inject_budget() {
     let m = store_at(tmp.path(), 4096, 4);
     m.write("0123456789").await.unwrap();
 
-    let seg = segment(&m, "@vfs/memory/AGENTS.md").await.unwrap().unwrap();
+    let seg = segment(&m, "@vfs/memory/MEMORY.md").await.unwrap().unwrap();
     assert!(seg.contains("已截断至 4 字节"), "{seg}");
     assert!(seg.contains("vdfs_read"), "截断必须指路取全文：{seg}");
 }

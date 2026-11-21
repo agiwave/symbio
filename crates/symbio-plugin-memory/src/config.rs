@@ -42,15 +42,15 @@ pub struct MemoryConfig {
     #[serde(default = "default_true")]
     pub agent_enabled: bool,
 
-    /// 智能体自身的 `AGENTS.md` 的**写入**字节上限（硬限制，超出拒绝写入）。
+    /// 智能体自身的 `MEMORY.md` 的**写入**字节上限（硬限制，超出拒绝写入）。
     #[serde(default = "default_max_bytes")]
     pub memory_max_bytes: usize,
 
-    /// 智能体自身的 `AGENTS.md` 注入系统提示词的**字节**上限（超出部分截断并指路）。
+    /// 智能体自身的 `MEMORY.md` 注入系统提示词的**字节**上限（超出部分截断并指路）。
     #[serde(default = "default_inject_max_bytes")]
     pub memory_inject_max_bytes: usize,
 
-    // —— 工作区记忆（会话作用域：ctx[WORKDIR]，物理文件 `{workdir}/AGENTS.md`） ——
+    // —— 工作区记忆（会话作用域：ctx[WORKDIR]，物理文件 `{workdir}/MEMORY.md`） ——
     /// 是否向系统提示词注入工作区记忆。
     ///
     /// 关掉只影响**注入**：文件与挂载条目照旧可用（用户仍能在界面上编辑）。

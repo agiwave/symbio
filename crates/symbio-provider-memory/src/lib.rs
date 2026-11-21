@@ -9,13 +9,17 @@
 //!
 //! | 层 | 读写面（VDFS 地址） | 注入者 | 物理落位 |
 //! |---|---|---|---|
-//! | 工作区 | memory（`<根>/memory/WORKSPACE.md`） | memory | `{work_dir}/AGENTS.md` |
+//! | 工作区 | memory（`<根>/memory/WORKSPACE.md`） | memory | `{work_dir}/MEMORY.md` |
 //! | 会话 | memory（`<根>/memory/SESSION.md`） | memory | `{session_dir}/MEMORY.md` |
-//! | 系统智能体 | memory（`<根>/memory/AGENTS.md`） | memory | `{agent_dir}/AGENTS.md` |
-//! | 子智能体 | memory（`<根>/subagent/<id>/memory/AGENTS.md`） | memory | `<agentdir>/AGENTS.md` |
+//! | 系统智能体 | memory（`<根>/memory/MEMORY.md`） | memory | `{agent_dir}/MEMORY.md` |
+//! | 子智能体 | memory（`<根>/subagent/<id>/memory/MEMORY.md`） | memory | `<agentdir>/MEMORY.md` |
 //!
-//! 挂载名与物理名**可以不同**：工作区腿的挂载名是 `WORKSPACE.md` 而物理文件仍是
-//! `AGENTS.md`——地址里已经写了作用域，名字就不必再靠目录区分（见 `crates/symbio-plugin-memory/src/workspace.rs`）。
+//! 三层物理文件名**统一 `MEMORY.md`**（D-527）：机制一致、可预测。挂载名与物理名
+//! **刻意不同**——工作区腿叫 `WORKSPACE.md`、会话腿叫 `SESSION.md`、智能体腿叫
+//! `MEMORY.md`，地址里已写作用域，列表里不会撞名（见 `crates/symbio-plugin-memory/src/workspace.rs`）。
+//!
+//! ⚠️ **指令文件 `AGENTS.md` 不在这里**：那是稳定指令 / 人格，归 `setting` 插件读取
+//! 并注入（工作区级 / 智能体级两级覆盖），与本模块管的动态记忆语义隔离、物理隔离。
 //!
 //! 各层形态完全一样——**一个 UTF-8 文本文件、两道容量闸门、一行头信息的提示词片段、
 //! 一个 VDFS 读写节点**。几份实现就是几份会各自漂移的口径：「写侧是拒绝还是截断」
@@ -48,10 +52,11 @@
 //! > 收「模型能自己改的东西」（要有地址、要限容）；
 //! > 没有地址的只读片段走普通注册即可，硬塞进来只会多出一堆「可选字段」。
 //!
-//! ⚠️ 这条线划的是**形态**，不是「谁的名字听起来像指令」：`{homedir}/AGENTS.md`
-//! 一度以「只读指令」的身份**不在**本模块里（宿主只读它、不给地址、不设容量），
-//! 但它现在有地址（`<根>/memory/AGENTS.md`）与两道闸门、在设置页可编辑，
-//! 于是它**进了本模块**。反过来，模型插件注册的人格片段没有地址，就永远不进来。
+//! ⚠️ 这条线划的是**形态**：`{homedir}/AGENTS.md` 曾以「可读写的智能体记忆」身份
+//! 进过本模块（地址 `<根>/memory/AGENTS.md`、设置页可编辑）。D-527 之后职责归位——
+//! AGENTS.md 是**稳定指令 / 人格**，改归 `setting` 只读注入（两道闸门与地址对它不再
+//! 适用），本模块只管三层的 `MEMORY.md` 动态记忆。反过来，模型插件注册的人格片段
+//! 没有地址，也永远不进来。
 //!
 //! ## 归属：一个作用域只有一个所有者
 //!
@@ -61,10 +66,11 @@
 //! - **模糊**：同一个文件被一处叫「指令」（只读）、另一处叫「记忆」（可写），
 //!   用户看不出该往哪写。
 //!
-//! 因此 `{work_dir}/AGENTS.md`、`{agent_dir}/AGENTS.md` 与 `{session_dir}/MEMORY.md`
-//! **都归 memory**（D-513）——它同时给出读写面（`<根>/memory/…`）与注入面，三个
-//! 作用域同属一个所有者，印在片段里的地址与闸门都是**它自己会执行**的；session
-//! 只递出 `SESSION_DIR` 和事实源，不再读任何记忆文件。
+//! 因此三层的 `{work_dir}/MEMORY.md`、`{agent_dir}/MEMORY.md` 与
+//! `{session_dir}/MEMORY.md` **都归 memory**（D-513 / D-527）——它同时给出读写面
+//! （`<根>/memory/…`）与注入面，三个作用域同属一个所有者，印在片段里的地址与闸门
+//! 都是**它自己会执行**的；`AGENTS.md` 两级指令归 `setting`，session 只递出
+//! `SESSION_DIR` 和事实源，不再读任何记忆文件。指令与记忆物理隔离、所有者不同。
 //!
 //! ## 个性不进来
 //!
@@ -88,13 +94,10 @@
 //! ## 本模块**不认识**文件名
 //!
 //! 名字由**各层自己**给：本模块只拿到一个完整路径（`path`），节点名从路径末段推导
-//! （[`MemoryFile::file_name`]），**没有**任何硬编码的兜底文件名。三层各叫各的——
-//! 工作区与智能体目录沿用行业通行的 `AGENTS.md`，会话用 `MEMORY.md`——正是因为
-//! 「叫什么」是**各层的个性**，不是共享口径：三层各写各的文件、互不干涉，共享一个
-//! 文件名常量只把「改一层」变成「改三层」，换不来任何一致性
-//! （D-023）。
-//!
-//! 名字也不是「配置」：宿主不解析内容，只做三件事——**注入**、**限容**、**给地址**。
+//! （[`MemoryFile::file_name`]），**没有**任何硬编码的兜底文件名。D-527 之后三层
+//! 恰好都选了 `MEMORY.md`（统一是可预测性收益，不是本模块强制的）——但那三个字面量
+//! 仍各定义在 memory 插件的三层模块里，本模块不共享、不假设它们同名。名字也不是
+//! 「配置」：宿主不解析内容，只做三件事——**注入**、**限容**、**给地址**。
 
 use std::path::{Path, PathBuf};
 use symbio_kernel::vdfs::{
@@ -159,8 +162,8 @@ pub struct MemoryNodeSpec<'a> {
     /// 节点名覆盖（`None` = 用真实文件名）。
     ///
     /// **什么时候需要覆盖**：同一挂载点里住两份记忆（智能体 / 工作区）而它们的
-    /// 物理文件同名（都叫 `AGENTS.md`）时，挂载里的名字必须能区分「这份记忆是谁的」
-    /// ——挂载名是模型与界面的寻址面，物理名是磁盘上的行业约定，两者不必相同。
+    /// 物理文件同名（都叫 `MEMORY.md`）时，挂载里的名字必须能区分「这份记忆是谁的」
+    /// ——挂载名是模型与界面的寻址面，物理名是磁盘上的文件名，两者不必相同。
     pub name: Option<&'a str>,
     /// 场景类型（`kind` 只承载场景语义，不参与机制判定）
     pub kind: &'a str,
@@ -180,7 +183,7 @@ enum MemoryBackend {
     File(PathBuf),
     Vdfs {
         provider: DynVdfsProvider,
-        /// 相对地址（如 `AGENTS.md` / `MEMORY.md`），不含物理目录。
+        /// 相对地址（如 `MEMORY.md`），不含物理目录。
         rel: String,
     },
 }

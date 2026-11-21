@@ -234,9 +234,9 @@ async fn memory_file_is_readable_and_writable() {
     );
 }
 
-/// 工作区记忆经挂载名读写，物理落点是 `{workdir}/AGENTS.md`
+/// 工作区记忆经挂载名读写，物理落点是 `{workdir}/MEMORY.md`
 #[tokio::test]
-async fn workspace_file_roundtrips_to_the_physical_agents_file() {
+async fn workspace_file_roundtrips_to_the_physical_memory_file() {
     let tmp = TempDir::new().unwrap();
     let ws = TempDir::new().unwrap();
     let p = plugin_in(tmp.path());
@@ -278,7 +278,7 @@ async fn workspace_file_roundtrips_to_the_physical_agents_file() {
         .unwrap();
     assert_eq!(content.text.as_deref(), Some("偏好中文 + 简洁"));
 
-    // 物理落点：工作区根的 AGENTS.md（行业约定），不是挂载名
+    // 物理落点：工作区根的 MEMORY.md（三层统一，D-527），不是挂载名
     assert_eq!(
         std::fs::read_to_string(ws.path().join(workspace::WORK_MEMORY_FILE)).unwrap(),
         "偏好中文 + 简洁",
@@ -449,14 +449,14 @@ async fn config_write_leaves_memory_and_disk_in_agreement() {
     assert!(!restarted.workspace_enabled);
 }
 
-/// 设置页视图：配置文档的读**并出**智能体记忆正文，写则把正文送回 `AGENTS.md`，
-/// 而配置文档本身只存闸门——正文只有一个落盘处。
+/// 配置文档**只存开关与闸门**，不含记忆正文：正文只在各自的 MEMORY.md 里。
+/// （D-527：稳定指令 AGENTS.md 归 setting，动态记忆与配置彻底分离。）
 #[tokio::test]
-async fn settings_view_round_trips_agent_memory_and_gates() {
+async fn config_document_never_carries_memory_body() {
     let tmp = TempDir::new().unwrap();
     let p = plugin_in(tmp.path());
 
-    // 先经记忆文件的写口写一段正文
+    // 经记忆文件写口写一段正文
     p.dispatch(
         &vctx(None, Some(tmp.path())),
         MEMORY_FILE,
@@ -467,7 +467,7 @@ async fn settings_view_round_trips_agent_memory_and_gates() {
     .await
     .unwrap();
 
-    // 读设置页视图：正文在，闸门也在
+    // 读配置文档：不含任何正文字段，只有闸门
     let content = p
         .dispatch(
             &vctx(None, Some(tmp.path())),
@@ -480,20 +480,10 @@ async fn settings_view_round_trips_agent_memory_and_gates() {
         .unwrap();
     let model: serde_json::Value =
         serde_json::from_str(content.as_text().unwrap_or_default()).unwrap();
-    assert_eq!(model[AGENT_MEMORY_FIELD], "记住：部署走蓝绿。");
+    assert!(model.get("agent_memory").is_none(), "配置不再投影记忆正文");
     assert!(model.get("memory_max_bytes").is_some());
 
-    // 写设置页视图：正文与闸门各回各的落盘处
-    p.dispatch(
-        &vctx(None, Some(tmp.path())),
-        PLUGIN_FILE,
-        VdfsRequest::Write {
-            content: VdfsContent::text(r#"{"agent_memory":"新的一条","memory_max_bytes":777}"#),
-        },
-    )
-    .await
-    .unwrap();
-
+    // 正文只在 MEMORY.md 里
     assert_eq!(
         p.agent_store(&vctx(None, Some(tmp.path())))
             .await
@@ -501,49 +491,49 @@ async fn settings_view_round_trips_agent_memory_and_gates() {
             .read()
             .await
             .unwrap(),
-        "新的一条"
+        "记住：部署走蓝绿。"
     );
-    assert_eq!(p.config_slot().read().await.memory_max_bytes, 777);
-    // 正文不落进配置文档
-    let on_disk = p
-        .config_file()
-        .dir()
-        .load::<super::super::config::MemoryConfig>()
-        .unwrap()
-        .unwrap();
-    assert_eq!(on_disk.memory_max_bytes, 777);
 }
 
-/// 正文超限时配置一个字节都不动：先校验、再写正文、最后落配置
+/// 配置写入只动闸门，不影响记忆正文；非法配置被拒绝
 #[tokio::test]
-async fn oversized_agent_memory_does_not_change_gates() {
+async fn config_write_only_touches_gates() {
     let tmp = TempDir::new().unwrap();
-    let cfg = super::super::config::MemoryConfig {
-        memory_max_bytes: 4,
-        ..Default::default()
-    };
-    let p = MemoryPlugin::new(
-        symbio_plugin_api::PluginDir::at(tmp.path().join(PLUGIN_ID_MEMORY), PLUGIN_ID_MEMORY),
-        cfg,
-    );
+    let p = plugin_in(tmp.path());
 
-    let err = p
-        .dispatch(
-            &vctx(None, Some(tmp.path())),
-            PLUGIN_FILE,
-            VdfsRequest::Write {
-                content: VdfsContent::text(
-                    r#"{"agent_memory":"超过四个字节","memory_max_bytes":999}"#,
-                ),
-            },
-        )
-        .await
-        .unwrap_err();
-    assert!(
-        format!("{err:?}").contains("超过四个字节") || format!("{err:?}").contains("上限"),
-        "{err:?}"
+    // 先写正文
+    p.dispatch(
+        &vctx(None, Some(tmp.path())),
+        MEMORY_FILE,
+        VdfsRequest::Write {
+            content: VdfsContent::text("原记忆正文"),
+        },
+    )
+    .await
+    .unwrap();
+
+    // 写配置：只带闸门
+    p.dispatch(
+        &vctx(None, Some(tmp.path())),
+        PLUGIN_FILE,
+        VdfsRequest::Write {
+            content: VdfsContent::text(r#"{"memory_max_bytes":777}"#),
+        },
+    )
+    .await
+    .unwrap();
+    assert_eq!(p.config_slot().read().await.memory_max_bytes, 777);
+
+    // 正文未被配置写入碰过
+    assert_eq!(
+        p.agent_store(&vctx(None, Some(tmp.path())))
+            .await
+            .unwrap()
+            .read()
+            .await
+            .unwrap(),
+        "原记忆正文"
     );
-    assert_eq!(p.config_slot().read().await.memory_max_bytes, 4);
 }
 
 /// 未知路径如实报未知（不为「看起来像记忆」的路径编造语义）

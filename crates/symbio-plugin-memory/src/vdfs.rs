@@ -3,15 +3,15 @@
 //! ## 挂载根有三份记忆
 //!
 //! ```text
-//! <根>/memory/AGENTS.md      智能体自身的记忆（rw；物理文件 = {agent_dir}/AGENTS.md）
-//! <根>/memory/WORKSPACE.md   工作区记忆（rw；物理文件 = {work_dir}/AGENTS.md）
+//! <根>/memory/MEMORY.md      智能体自身的记忆（rw；物理文件 = {agent_dir}/MEMORY.md）
+//! <根>/memory/WORKSPACE.md   工作区记忆（rw；物理文件 = {work_dir}/MEMORY.md）
 //! <根>/memory/SESSION.md     会话记忆（rw；物理文件 = {session_dir}/MEMORY.md）
 //! ```
 //!
-//! 三者的作用域分别来自装配位置、`ctx[WORKDIR]` 与 `ctx[SESSION_DIR]`（D-513）。
-//! 智能体与工作区的物理文件同名（同一族行业约定），会话那份刻意叫 `MEMORY.md`：
-//! 会话目录不是 agent 目录。挂载名则各自点明作用域，列表里不会撞名。
-//! 智能体 / 工作区两份地址不随会话变；会话那份跟着当前会话的作用域走。
+//! 三者的作用域分别来自装配位置、`ctx[WORKDIR]` 与 `ctx[SESSION_DIR]`（D-513），
+//! 物理文件名统一 `MEMORY.md`（D-527）：机制一致、可预测。挂载名则各自点明作用域，
+//! 列表里不会撞名。三者都归本插件——稳定指令 `AGENTS.md` 归 `setting`，与本挂载点
+//! 无关。智能体 / 工作区两份地址不随会话变；会话那份跟着当前会话的作用域走。
 //!
 //! 根下**只列记忆文件**：插件配置文档（`PLUGIN.yml`）不并列——它与其它插件同一
 //! 口径，进设置走 `CONFIGURABLE_VISITOR` 那条通道；但按**真实文件名**仍然可达
@@ -20,15 +20,14 @@
 //!
 //! ## 挂载点标了 `hidden`：入口在设置页
 //!
-//! 记忆没有「列表内容」：用户要改的是智能体记忆正文与闸门，不是浏览一个资源集合。
+//! 记忆没有「列表内容」：用户要改的是闸门，不是浏览一个资源集合。
 //! 因此本挂载点（[`MemoryPlugin::metadata`]）声明 `hidden`，不进左侧主导航；
 //! 入口是设置页（`plugin_manager` 的 memory 条目）。地址本身照常可用——模型与
-//! 深链仍走 `<根>/memory/AGENTS.md`。
+//! 深链仍走 `<根>/memory/MEMORY.md`。
 //!
-//! 设置页编辑的是 `PLUGIN.yml` 这份配置文档，但**智能体记忆的正文不在配置里**：
-//! `read` / `write` 在配置模型上并入 / 拆出一个投影字段 [`AGENT_MEMORY_FIELD`]，
-//! 正文的唯一落盘处仍是 `AGENTS.md`。工作区记忆不投影——它随工作区路径变，
-//! 没有「一处设置」可言。
+//! 设置页编辑的只是 `PLUGIN.yml` 这份配置文档（三层的开关与闸门）；**记忆正文不在
+//! 配置里**，一律经 `<根>/memory/MEMORY.md` / `WORKSPACE.md` / `SESSION.md` 读写。
+//! 稳定指令 `AGENTS.md` 归 `setting` 插件，与本挂载点无关。
 //!
 //! ## 节点的形状由共享实现产出
 //!
@@ -65,12 +64,6 @@ use symbio_plugin_api::{
 use symbio_providers::MemoryFile;
 
 const LABEL: &str = PLUGIN_TITLE;
-
-/// 设置页表单里承载**智能体记忆正文**的投影字段。
-///
-/// 它不是 `MemoryConfig` 的字段（配置文档只存闸门），读写 `PLUGIN.yml` 时在此
-/// 并入 / 拆出：正文的唯一落盘处是 `AGENTS.md`，这个键只是设置页的视图。
-pub(crate) const AGENT_MEMORY_FIELD: &str = "agent_memory";
 
 /// 智能体记忆 → 节点（`list` 与 `stat` 共用同一份形状，两条链路不会分叉）
 async fn agent_memory_node(store: &MemoryFile) -> VdfsNode {
@@ -182,25 +175,10 @@ impl VdfsProvider for MemoryPlugin {
                     let text = sess.read().await.map_err(VdfsError::internal)?;
                     Ok(VdfsResponse::Read(VdfsContent::text(text)))
                 }
-                // 配置文档的**设置页视图** = 配置模型 + 智能体记忆正文。正文从
-                // `AGENTS.md` 现读，不写进配置（那份文件只存闸门）。
+                // 配置文档（设置页只存三层开关与闸门；记忆正文经各自的 MEMORY.md 读写）
                 PLUGIN_FILE => {
                     let content = self.config_file().read(self.config_slot()).await?;
-                    let text = content.text.as_deref().unwrap_or("{}");
-                    let mut model: serde_json::Value = serde_json::from_str(text)
-                        .map_err(|e| VdfsError::internal(format!("配置序列化结果不可解析：{e}")))?;
-                    if let Some(obj) = model.as_object_mut() {
-                        let memory = agent.read().await.map_err(VdfsError::internal)?;
-                        obj.insert(
-                            AGENT_MEMORY_FIELD.to_string(),
-                            serde_json::Value::String(memory),
-                        );
-                    }
-                    let text = serde_json::to_string_pretty(&model)
-                        .map_err(|e| VdfsError::internal(format!("设置视图序列化失败：{e}")))?;
-                    Ok(VdfsResponse::Read(
-                        VdfsContent::text(text).with_mime("application/json"),
-                    ))
+                    Ok(VdfsResponse::Read(content))
                 }
                 other => Err(VdfsError::not_found(format!("未知路径：{other}"))),
             },
@@ -247,43 +225,12 @@ impl VdfsProvider for MemoryPlugin {
                         created: !existed,
                     }))
                 }
-                // 设置页视图的写：正文与闸门**各回各的落盘处**。顺序上先校验配置、
-                // 再写正文（容量闸门在 `MemoryFile::write` 里）、最后才落配置——
-                // 正文超限时这份配置一个字节都不该动。
-                PLUGIN_FILE => {
-                    if content.binary {
-                        return Err(VdfsError::invalid(
-                            "记忆设置是文本（JSON），不接受二进制内容",
-                        ));
-                    }
-                    let text = content.text.as_deref().unwrap_or_default();
-                    let mut value: serde_json::Value = serde_json::from_str(text)
-                        .map_err(|e| VdfsError::invalid(format!("配置不是合法 JSON：{e}")))?;
-                    let Some(obj) = value.as_object_mut() else {
-                        return Err(VdfsError::invalid("配置必须是 JSON 对象"));
-                    };
-                    // 没带这个键 = 「这次不改正文」（例如只调闸门的旧调用方）
-                    let memory_text = obj.remove(AGENT_MEMORY_FIELD);
-                    let config = VdfsContent::text(
-                        serde_json::to_string_pretty(&value)
-                            .map_err(|e| VdfsError::internal(format!("配置序列化失败：{e}")))?,
-                    )
-                    .with_mime("application/json");
-                    // 先按拥有者的定义校验配置，再动正文
-                    self.config_file().decode(&config)?;
-                    if let Some(v) = memory_text {
-                        let Some(text) = v.as_str() else {
-                            return Err(VdfsError::invalid("智能体记忆必须是字符串"));
-                        };
-                        agent.write(text).await.map_err(VdfsError::invalid)?;
-                        vdfs_notify_change(PLUGIN_ID_MEMORY, MEMORY_FILE);
-                    }
-                    Ok(VdfsResponse::Write(
-                        self.config_file()
-                            .apply(self.config_slot(), &config)
-                            .await?,
-                    ))
-                }
+                // 配置文档（只存三层开关与闸门；记忆正文经各自的 MEMORY.md 读写）
+                PLUGIN_FILE => Ok(VdfsResponse::Write(
+                    self.config_file()
+                        .apply(self.config_slot(), &content)
+                        .await?,
+                )),
                 other => Err(VdfsError::not_found(format!("未知路径：{other}"))),
             },
             // 记忆**不可删除**（见模块文档）：要清空就写入空内容

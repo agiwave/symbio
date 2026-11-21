@@ -17,6 +17,7 @@
 //! 与系统侧并集且不撞名。
 
 use super::config::{config_definition, SettingConfig};
+use super::instructions;
 use super::segment;
 use async_trait::async_trait;
 use std::sync::Arc;
@@ -70,11 +71,25 @@ impl SettingPlugin {
             .with_hidden(true)
     }
 
-    /// 参与能力收集：交出**系统提示词**（本智能体的自述与偏好）。
+    /// 参与能力收集：交出**系统提示词**（档案段 + 两级指令段）。
     ///
-    /// 全空 → 静默跳过：缺省状态不该往提示词里塞一个空标题，也不该进收集期错误桶。
-    async fn contribute_prompt(&self, visitor: &Arc<dyn symbio_plugin_api::Registry>) {
-        let cfg = self.config.read().await;
+    /// 档案全空 → 静默跳过：缺省状态不该往提示词里塞一个空标题。
+    /// 指令段由文件是否存在决定，与档案字段无关（见 [`instructions`]）。
+    async fn contribute_prompt(
+        &self,
+        ctx: &Arc<dyn PluginInvokeRequest>,
+        visitor: &Arc<dyn symbio_plugin_api::Registry>,
+    ) {
+        let cfg = self.config.read().await.clone();
+
+        // ① 两级指令：工作区级覆盖智能体级，至多一条
+        if let Some(seg) = instructions::resolve(&**ctx, cfg.agents_file_name()).await {
+            visitor
+                .put(CapabilityRow::prompt(seg.name, instructions::render(&seg)))
+                .await;
+        }
+
+        // ② 档案 / 偏好（全空 → 不注入）
         if let Some(text) = segment::segment(&cfg) {
             visitor
                 .put(CapabilityRow::prompt(segment::SEGMENT_NAME, text))
@@ -130,8 +145,8 @@ impl Plugin for SettingPlugin {
         }
 
         if let Some(visitor) = ctx.get(CAPABILITY_VISITOR) {
-            // 系统提示词：本智能体的自述与偏好
-            self.contribute_prompt(&visitor).await;
+            // 系统提示词：两级指令 + 本智能体的自述与偏好
+            self.contribute_prompt(&ctx, &visitor).await;
         }
 
         // 顺带声明「本插件有一份配置文档」（设置页据此列出并指路）

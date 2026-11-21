@@ -34,12 +34,12 @@ fn store_at(workdir: Option<&str>, write_max_bytes: usize, inject_max_bytes: usi
     }
 }
 
-/// 落位是**行业约定**：工作区根目录的 `AGENTS.md`（不属于 symbio 私有数据）
+/// 落位：工作区根目录的 `MEMORY.md`（三层统一物理名，D-527）
 #[tokio::test]
-async fn memory_is_the_workspace_root_agents_file() {
+async fn memory_is_the_workspace_root_memory_file() {
     let path = memory_path("/w");
     assert_eq!(path, Path::new("/w").join(WORK_MEMORY_FILE));
-    assert_eq!(path.file_name().unwrap(), "AGENTS.md");
+    assert_eq!(path.file_name().unwrap(), "MEMORY.md");
     // 挂载里的地址是挂载名（WORKSPACE.md），不是物理名
     let ctx: Arc<dyn PluginInvokeRequest> = Arc::new(PluginSimpleRequest::new(None, None));
     ctx.set(VDFS_PARENT_ADDR, PARENT.to_string());
@@ -49,11 +49,11 @@ async fn memory_is_the_workspace_root_agents_file() {
     );
 }
 
-/// 挂载名与物理名**刻意不同**：两个作用域的物理文件同名（都叫 `AGENTS.md`），
+/// 挂载名与物理名**刻意不同**：两个作用域的物理文件同名（都叫 `MEMORY.md`），
 /// 挂载里必须能区分「这份记忆是谁的」
 #[tokio::test]
 async fn mount_name_differs_from_the_physical_name() {
-    assert_eq!(WORK_MEMORY_FILE, "AGENTS.md");
+    assert_eq!(WORK_MEMORY_FILE, "MEMORY.md");
     assert_eq!(MOUNT_FILE, "WORKSPACE.md");
     assert_ne!(
         WORK_MEMORY_FILE, MOUNT_FILE,
@@ -101,7 +101,7 @@ async fn scope_carries_the_two_gates_into_the_shared_impl() {
     assert_eq!(
         m.file_name(),
         Some(WORK_MEMORY_FILE),
-        "物理文件名 = 行业约定的 AGENTS.md"
+        "物理文件名 = 三层统一的 MEMORY.md"
     );
 }
 

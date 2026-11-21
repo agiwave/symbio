@@ -94,7 +94,7 @@ pub const PLUGIN_ID_REPUTATION: &str = "reputation";
 // dead-code-allow R-001: 插件 id 是部署身份，未被引用不等于可删（同文件头 R-003）
 pub const PLUGIN_ID_SESSION: &str = "session";
 
-/// 智能体自身的信息设置（分形：系统树与每棵子树各有一份）
+/// 智能体自身的信息设置与指令（分形：系统树与每棵子树各有一份）
 // dead-code-allow R-001: 插件 id 是部署身份，未被引用不等于可删（同文件头 R-003）
 pub const PLUGIN_ID_SETTING: &str = "setting";
 
@@ -164,7 +164,7 @@ pub const ASSEMBLY_SUB_AGENT_PLUGINS: &[&str] = &[
     "gateway", // 外部 API 网关
     "vdfs", // VDFS 根（单槽归系统 Agent）
     "memory", // 记忆：智能体自身（分形）+ 工作区（WORKDIR 继承父会话），两作用域同属一个所有者
-    "setting", // 智能体自身的信息设置（分形：系统树与每棵子树各有一份）
+    "setting", // 智能体自身的信息设置与指令（分形：系统树与每棵子树各有一份）
     "glossary", // 项目术语表：一个工具、一条领域事实、一条效果行为（含重复定义的前置判断）、一个上下文段
     "ui_prefs", // 界面偏好（外观 / 提示音 / 关于）的后端权威数据
 ];
@@ -190,6 +190,7 @@ pub const ASSEMBLY_CORE_PLUGINS: &[&str] = &[
     "skill", // 技能
     "vdfs", // VDFS 根（单槽归系统 Agent）
     "memory", // 记忆：智能体自身（分形）+ 工作区（WORKDIR 继承父会话），两作用域同属一个所有者
+    "setting", // 智能体自身的信息设置与指令（分形：系统树与每棵子树各有一份）
     "ui_prefs", // 界面偏好（外观 / 提示音 / 关于）的后端权威数据
 ];
 
@@ -205,7 +206,6 @@ pub const ASSEMBLY_OPTIONAL_PLUGINS: &[&str] = &[
     "forecast", // 未来预测：把任务事实折成「还剩多少没完成」的读数视图（名册 #34）
     "telegram", // 消息渠道
     "gateway", // 外部 API 网关
-    "setting", // 智能体自身的信息设置（分形：系统树与每棵子树各有一份）
     "glossary", // 项目术语表：一个工具、一条领域事实、一条效果行为（含重复定义的前置判断）、一个上下文段
 ];
 

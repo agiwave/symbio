@@ -86,7 +86,7 @@ export const BASELINE = {
   // baseline-allow ciRustTestsTotal: 2295 → 2294（-1）——「关于」不是插件，已从插件列表
   //   移除，随之退役 about_has_no_body 一条判据；ui_prefs 的「界面」入口读写与归属判据保留。
   //   非侵蚀：删的是非插件节点，配置型插件的权威数据判据一条没少。
-  ciRustTestsTotal: 2300,
+  ciRustTestsTotal: 2306,
   cliRustTests: 21,
   tauriRustTests: 4,
   // doc-link-allow D-010: 下一行是退役文件的历史叙述（已把这两个文件删掉），不是入链

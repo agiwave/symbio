@@ -46,5 +46,6 @@
 //! - [`plugin`]：插件本体（`PluginConfigMount` 提供挂载点，`traverse` 注入片段）
 
 mod config;
+mod instructions;
 mod plugin;
 mod segment;
