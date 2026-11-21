@@ -79,7 +79,11 @@ export const BASELINE = {
   //   composite/vdfs.test.rs 钉「有目录但未挂载的插件也能卸载」（删除按目录存在判，不被已挂载实例表挡成「目录不存在」）；
   //   plugin_manager/plugin.test.rs 钉「残留目录的可选插件仍进市场」（装配按挂载实例判，不被历史目录占满）。非侵蚀。
   // baseline-allow ciRustTestsTotal: 2288 → 2285（-3，D-520 交互重构）——删掉 4 条旧「market 是 VDFS 节点」的判据用例（节点置顶 / 读正文 / 非可选校验 / 市场写转发），新增 1 条「根写带 create 意图」用例；候选过滤判据 3 条保留。交互改为「添加插件页面」后旧节点语义退役，覆盖由根目录自述与草稿保存用例承担，非侵蚀。
-  ciRustTestsTotal: 2296,
+  // baseline-allow ciRustTestsTotal: 2296 → 2295（-1）——删除与项目无关的验收夹具 crate
+  //   symbio-demo-probe（自述「不是生产插件，不进装配清单」）及其唯一的 demo 端口往返测试；
+  //   同时清掉它在 obligation-ring-accept 里的端口漂移项与 host 侧专属便利构造器 base_context。
+  //   这是对无关 demo 内容的清理，非侵蚀。
+  ciRustTestsTotal: 2295,
   cliRustTests: 21,
   tauriRustTests: 4,
   // doc-link-allow D-010: 下一行是退役文件的历史叙述（已把这两个文件删掉），不是入链

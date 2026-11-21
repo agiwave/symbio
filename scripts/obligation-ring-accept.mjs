@@ -175,8 +175,6 @@ const DECLARED_PORTS = [
   { port: 'conation', source: 'crates/symbio-plugin-conation/src/port.rs:43（PortProvider::ports → PROMOTE_PORT，debt.rs:32）' },
   // 记忆端口
   { port: 'memory', source: 'crates/symbio-plugin-memory/src/port.rs:29（PortProvider::ports → MEMORY_PORT）' },
-  // 演示探针（demo 插件）
-  { port: 'demo', source: 'crates/symbio-demo-probe/src/port.rs:9（PortProvider::ports → DEMO_PORT）' },
   // 电报外发端口
   { port: 'notify', source: 'crates/symbio-plugin-telegram/src/declarations.rs:22（PortDecl{port: NOTIFY}，telegram/src/port.rs:20）' },
   // 网页探活端口

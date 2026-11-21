@@ -15,9 +15,7 @@ use std::sync::{Arc, Mutex};
 
 use symbio_kernel::capability::Registry;
 use symbio_kernel::event::{Entity, Event, Verb};
-use symbio_kernel::plugin::{
-    Plugin, PluginInvokeRequest, PluginInvokeRequestExt, PluginSimpleRequest,
-};
+use symbio_kernel::plugin::{Plugin, PluginInvokeRequest, PluginInvokeRequestExt};
 use symbio_kernel::store::MemoryStore;
 use symbio_plugin_api::debt::{
     Closing, DebtFacts, DebtSource as DeclaredDebtSource, DebtTable, DriveRequest, DEBT_FAMILY,
@@ -32,7 +30,6 @@ use symbio_plugin_api::port::{
 use symbio_plugin_api::termination::{
     TerminationPayload, TerminationView, TerminationWriter, TERMINATION_FAMILY,
 };
-use symbio_plugin_api::SymbioKey;
 use symbio_plugin_api::{ExecEventSink, FactDraft};
 use symbio_sdk::capability::CAPABILITY_VISITOR;
 use symbio_sdk::keys::{PATH, PROVIDER_ID, SESSION_DIR, SESSION_ID, WORKDIR};
@@ -682,21 +679,6 @@ fn ring_port_of(event_id: &str) -> String {
     // `:`，只能从右定界（见 [`ring_key_of`]）。端口名含 `:` 会在注册期被拒绝
     // （`check_port_name` 的注册期校验，D-336），所以这里没有歧义。
     rest.split(':').next().unwrap_or_default().to_string()
-}
-
-/// 便利构造：一次驱动用的基上下文（前端只需补工作目录等）。
-///
-/// 带 `AGENT_ID` 载体（空值 = 未绑定智能体，主体按定义为 `session/main`）；
-/// 驱动侧只认这个载体，不再从缺失值派生主体（D-339）。
-pub fn base_context() -> Arc<dyn PluginInvokeRequest> {
-    let meta = serde_json::Map::from_iter([(
-        symbio_plugin_api::AGENT_ID.name().to_string(),
-        serde_json::json!(""),
-    )]);
-    Arc::new(PluginSimpleRequest::from_parts(
-        serde_json::json!({}),
-        Some(&meta),
-    ))
 }
 
 #[cfg(test)]

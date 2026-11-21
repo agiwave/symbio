@@ -62,7 +62,7 @@ test('找不到宿主文件 → ERROR', () => {
 
 // 文件模块 `foo.rs` 的测试按 Rust 默认解析落在 `foo/tests.rs`——宿主是 `foo.rs`，
 // 不是 `foo/mod.rs`。认不出这种形状会把合法布局判成孤儿（symbio-host 的
-// `src/tests.rs` 与 demo-probe 的 `plugin/tests.rs` 都是这个形状）。
+// `src/tests.rs` 就是这个形状）。
 test('`X.rs` + `X/tests.rs` → 通过（文件模块的默认测试位置）', () => {
   const r = audit({
     'foo.rs': 'pub fn a() {}\n#[cfg(test)]\nmod tests;\n',
