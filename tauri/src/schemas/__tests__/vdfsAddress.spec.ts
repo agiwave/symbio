@@ -11,12 +11,19 @@
  *    「相对路径」，**空段不产生空路径段**（`['session','']` ≠ `<根>/session/`）。
  * 2. 非虚拟地址**一律兜底 `/vdfs`**：拼错的地址会静默打开一个空页面，
  *    宁可回首页也不能拼进 URL。前缀陷阱（`<根>XXX`）与根未引导同样落到兜底。
- * 3. 深页面判定只看 `/vdfs/` 前缀：`/vdfs` 是首页（左上角无按钮），
- *    `/vdfs/<something>` 才是 push 出来的地址页（左上角显示返回键）。
+ * 3. 地址形态判定只看 `/vdfs/` 前缀：`/vdfs` 是首页，`/vdfs/<something>` 是深地址。
+ * 4. 返回键 `shouldShowBack` 在深地址**之外**还要 `hasBackSource`——冷启动 `replace`
+ *    落点（会话目录）地址虽深，却没有来源页可返，不显示（bug 回归）。
  */
 
 import { describe, expect, it } from 'vitest'
-import { isVdfsDeepPage, vdfsAddrOf, vdfsBrowserPathOf, VDFS_HOME_PATH } from '../vdfsAddress'
+import {
+  isVdfsDeepPage,
+  shouldShowBack,
+  vdfsAddrOf,
+  vdfsBrowserPathOf,
+  VDFS_HOME_PATH,
+} from '../vdfsAddress'
 import { setVdfsRoot, resetVdfsRoot } from '../vdfsRoot'
 
 // 合成根：与根名无关（见 schemas/__tests__/vdfs.spec.ts 的说明）
@@ -124,5 +131,29 @@ describe('isVdfsDeepPage — 是否 push 出来的地址页', () => {
     expect(isVdfsDeepPage('/')).toBe(false)
     expect(isVdfsDeepPage('/settings')).toBe(false)
     expect(isVdfsDeepPage('/vdfsx/session')).toBe(false)
+  })
+})
+
+describe('shouldShowBack — 返回键「深地址 + 有来源」两条件', () => {
+  it('冷启动落点：深地址但无 push 来源（replace 进去）⇒ 不显示', () => {
+    // 这正是 bug 现场：冷启动落到会话目录，地址是 /vdfs/session，却没有上一页。
+    expect(shouldShowBack('/vdfs/session', false)).toBe(false)
+  })
+
+  it('用户 push 进子页：深地址且有来源 ⇒ 显示', () => {
+    expect(shouldShowBack('/vdfs/session/abc123', true)).toBe(true)
+  })
+
+  it('首页即便有来源也不显示', () => {
+    expect(shouldShowBack('/vdfs', true)).toBe(false)
+  })
+
+  it('非深地址即便误带来源也不显示', () => {
+    expect(shouldShowBack('/settings', true)).toBe(false)
+  })
+
+  it('带 query 的深地址仍按前缀判定（route.fullPath 可直接传入）', () => {
+    expect(shouldShowBack('/vdfs/session/abc123?select=x', true)).toBe(true)
+    expect(shouldShowBack('/vdfs/session/abc123?select=x', false)).toBe(false)
   })
 })

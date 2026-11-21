@@ -9,8 +9,9 @@
     `<根>/session/<id>`）。两者是不同概念，本页只负责换算，数据加载
     由控件按绑定地址自取；
   - **首页**（绑 `<根>`）：左下角注入系统目录入口；
-  - **非首页**（push 出来的地址页）：左上角注入返回键——**回到 push 来源页**
-    （浏览器历史 back；深链直开无来源时回首页），不是父目录。
+  - **有 push 来源的地址页**（用户点开的子页面）：左上角注入返回键——
+    **回到 push 来源页**（浏览器历史 back），不是父目录。冷启动落点（会话目录，
+    守卫 `replace` 进去、无来源）与深链直开都不显示——那是落点，不是「进入子页」。
 
   控件对绑定的是 `<根>` 还是 `<根>/session/<id>` 毫无感知：左栏 = 绑定地址
   的子目录导航，点左栏项中栏切换内容，点列表项右栏出详情——首页与内部
@@ -63,7 +64,7 @@ import { useRoute, useRouter } from 'vue-router'
 import VdfsWorkbench from '@/components/vdfs/VdfsWorkbench.vue'
 import HomedirEntry from '@/components/common/HomedirEntry.vue'
 import { useSessionsStore } from '@/stores/sessions'
-import { vdfsAddrOf, vdfsBrowserPathOf, isVdfsDeepPage } from '@/schemas/vdfsAddress'
+import { vdfsAddrOf, vdfsBrowserPathOf, shouldShowBack } from '@/schemas/vdfsAddress'
 
 const route = useRoute()
 const router = useRouter()
@@ -101,14 +102,26 @@ function onOpen(target: string, select?: string) {
   void router.push({ path, query: select ? { select } : {} })
 }
 
-// ==================== 返回键（非首页地址页，左上角） ====================
+// ==================== 返回键（有 push 来源的子页，左上角） ====================
 
-/** 首页 = `/vdfs`（数据地址 `<根>`）；更深的地址都是 push 出来的页面 */
-const showBack = computed(() => isVdfsDeepPage(route.path))
+/**
+ * 返回键只在「真的从别处 push 进来」时显示。
+ *
+ * 冷启动落点是会话目录——地址形状上是深页，但那是守卫 `replace` 进去的，
+ * 没有来源页可返，并不是用户「进入子页面」；此时左上角必须空着。
+ * `history.state.back` 非空才是 push 进来的证据，与 `goBack` 同一份判据。
+ *
+ * `history.state` 不是 Vue 响应式源，靠 `route.fullPath` 的变化触发重算：
+ * push / back 改变地址时连带更新它，原地 replace 到同一地址则不变。
+ */
+const showBack = computed(() =>
+  shouldShowBack(route.fullPath, window.history.state?.back != null),
+)
 
 /**
  * 返回 = 回 **push 来源页**（浏览器历史 back），不是父目录——push 之前在哪个
- * 页面就回哪里。深链直开（无 push 来源）时回首页兜底。
+ * 页面就回哪里。`showBack` 已保证「无来源时不显示这枚键」，这里的 `else` 只是
+ * 同一判据的防御性兜底（深链直开万一被外部触发时仍有路回首页）。
  */
 function goBack() {
   if (window.history.state?.back != null) router.back()
@@ -131,7 +144,7 @@ async function onHomedirReloaded() {
 
 <style scoped>
 /*
- * 返回按钮：侧栏顶部**整行**的导航件（页面最左上角，仅深页面存在）。
+ * 返回按钮：侧栏顶部**整行**的导航件（页面最左上角，仅有 push 来源的子页存在）。
  *
  * 首页这一格**整个空出来**——品牌 logo 连同占位一并移除（主窗口菜单栏已有
  * 一枚，侧栏再来一枚是同屏重复），空间归还给类别列表。`.side-nav` 头部没有

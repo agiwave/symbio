@@ -171,6 +171,36 @@ describe('冷启动落点', () => {
   }, ROUTER_RELOAD_TIMEOUT)
 
   /**
+   * 返回键显示的**前提**：冷启动落点是 `replace` 进去的，`history.state.back` 为空
+   * ——没有来源页可返，左上角不该显示返回键（`shouldShowBack` 的第二条件）。
+   *
+   * 上面那条只证明了 `/` 不留在历史里，却没证明 `back` 真的为空：那条先把
+   * `/vdfs/model` 压进历史再 push `/`，`back` 会指向 `/vdfs/model`，测不出
+   * **真正冷启动**（栈里只有初始项）时的值。这里显式清空历史再走落点，钉住现场。
+   */
+  it('真正冷启动：落点用 replace 且无上一页 ⇒ history.state.back 为空', async () => {
+    window.history.replaceState(null, '', '/')
+    const router = await freshRouter()
+    await router.push('/')
+    await router.isReady()
+
+    expect(router.currentRoute.value.path).toBe('/vdfs/session')
+    const state = (router.options.history as unknown as { state?: { back?: string | null } }).state
+    expect(state?.back ?? null).toBeNull()
+  }, ROUTER_RELOAD_TIMEOUT)
+
+  it('用户 push 进子页 ⇒ history.state.back 指向来源页（返回键该显示）', async () => {
+    window.history.replaceState(null, '', '/')
+    const router = await freshRouter()
+    await router.push('/')
+    await router.isReady()
+    await router.push('/vdfs/session/abc123')
+
+    const state = (router.options.history as unknown as { state?: { back?: string | null } }).state
+    expect(state?.back).toBe('/vdfs/session')
+  }, ROUTER_RELOAD_TIMEOUT)
+
+  /**
    * 以下三条是**回归用例**，对应打包后的 Tauri webview 里「落点根本没执行」。
    *
    * 上面那几条**全部**走 `router.push('/')`——那是冷启动守卫唯一"正常"的分支，

@@ -15,8 +15,8 @@
  * 2. **数据地址 → 浏览器地址**：根 → `/vdfs`；根之下 → `/vdfs/<rel>`。
  *    ⚠️ 非虚拟地址（不在根之下）**一律兜底 `/vdfs`**，绝不把外来地址
  *    拼进 URL——拼错的地址会静默打开一个空页面。
- * 3. **深页面判定**：`/vdfs/<something>` 才是 push 出来的地址页（深页面在左上角
- *    显示返回键）。`/vdfs` 本身不是。
+ * 3. **深地址判定**：`/vdfs/<something>` 才是深地址，但深地址 ≠ 该显示返回键——
+ *    冷启动 `replace` 落点也是深地址却没有来源页；返回键判据见 `shouldShowBack`。
  *
  * 根叫什么不归本文件：一律读 [`vdfsRoot`]（启动期经 `vdfs/root` 引导）。
  *
@@ -62,11 +62,31 @@ export function vdfsBrowserPathOf(addr: string): string {
 }
 
 /**
- * 是否**深地址页**（push 出来的页面，而非首页）。
+ * 是否**深地址页**（`/vdfs/<…>` 形态，而非首页 `/vdfs`）。
  *
- * 首页（`/vdfs`）左上角是空位，深页面在左上角显示返回键——两者互斥，
- * 判据只有这一处。
+ * ⚠️ 这只是「地址形状」判定，**不等于**「该显示返回键」——冷启动 `replace` 落点
+ * 也是深地址，却没有来源页可返。要判返回键，用 [`shouldShowBack`]。
  */
 export function isVdfsDeepPage(path: string): boolean {
   return (path ?? '').startsWith(`${VDFS_HOME_PATH}/`)
+}
+
+/**
+ * 左上角返回键该不该出现。
+ *
+ * 两个条件缺一不可：
+ * 1. **深地址**（`isVdfsDeepPage`）——首页恒不显示；
+ * 2. **有 push 来源**——`window.history.state.back` 非空。冷启动落点虽是深地址
+ *    （会话目录），却是 `replace` 进去的、没有上一页，不是「进入子页面」，
+ *    因此不显示；用户点开容器/深链内继续钻入走的是 `push`，才有来源可返。
+ *
+ * `hasBackSource` 由调用方从 `window.history.state?.back != null` 求出并传入：
+ * 判据本体因此不碰 DOM，可在 `vdfsAddress.spec.ts` 里直接测。与 `VdfsView.goBack`
+ * 的兜底判据同源——显示与点击走同一份真相，不会出现「有键却无处可返」。
+ *
+ * @param path 浏览器地址（传 `route.path` 或 `route.fullPath` 均可，query 不影响前缀判定）
+ * @param hasBackSource 是否存在真实的 push 来源页
+ */
+export function shouldShowBack(path: string, hasBackSource: boolean): boolean {
+  return hasBackSource && isVdfsDeepPage(path)
 }
