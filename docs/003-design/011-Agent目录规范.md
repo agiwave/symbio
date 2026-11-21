@@ -399,9 +399,9 @@ Agent，不属于「一个 Agent 会什么」。
 
 - 插件容器 = `composite` 插件；系统根由 `home` 经 `PLUGIN_DIR` 告知它；
 - 子 Agent 树由 owner 插件构造，做法与 `home` 构造 `worker` 完全同形：
- 设 `PLUGIN_DIR = <agent dir>`、设 `REQUIRED_PLUGINS = ASSEMBLY_SUB_AGENT_PLUGINS`
- （与系统树共享同一份清单——`memory` / `setting` 的分形实例由它带进子树），
- 再 `creator_create_object("composite", …)`；
+ 设 `PLUGIN_DIR = <agent dir>`、设 `REQUIRED_PLUGINS = ASSEMBLY_CORE_PLUGINS`
+ （与系统树共享同一份默认装配清单——`memory` 的分形实例由它带进子树；可选插件
+ 不在此列，需按需安装），再 `creator_create_object("composite", …)`；
 - `composite` 只扫一层目录，因此 `subagent/<id>` 不会被系统树误扫（§9 第 5 条）。
 
 ### A.2 能力插件的自证

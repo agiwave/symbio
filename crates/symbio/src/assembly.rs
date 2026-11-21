@@ -18,7 +18,8 @@
 //! | 常量 | 消费方 |
 //! |---|---|
 //! | [`ASSEMBLY_SUB_AGENT_PLUGINS`] | 文档与审计口径：所有 `sub_agent` 插件（含可选的） |
-//! | [`ASSEMBLY_CORE_PLUGINS`] | `crates/symbio-plugin-home`（系统树）· 子 Agent 树的 owner 插件——默认装配且不可删除 |
+//! | [`ASSEMBLY_CORE_PLUGINS`] | `crates/symbio-plugin-home`（系统树）· 子 Agent 树的 owner 插件——**默认装配**清单（开箱补目录），其中可删项由必装集之外的部分构成 |
+//! | [`ASSEMBLY_REQUIRED_PLUGINS`] | `crates/symbio-plugin-composite`（`is_required`：卸载拒绝）——不可删除的最小底座 |
 //! | [`ASSEMBLY_OPTIONAL_PLUGINS`] | `crates/symbio-plugin-plugin_manager`（插件市场候选） |
 //! | [`ASSEMBLY_UNDISABLABLE_PLUGINS`] | `crates/symbio-plugin-composite`（执行停用前查）· `crates/symbio-plugin-plugin_manager`（界面置灰） |
 //! | [`PLUGIN_ID_*`](PLUGIN_ID_HOME) | 每个插件自己的工厂注册与 `PluginMeta`；跨插件只经对象注册表按名字查找 |
@@ -78,7 +79,7 @@
 //!
 //! ## 不可停用的判据
 //!
-//! 停用一个普通插件（如 `telegram`）少的是一个功能；停用 [`ASSEMBLY_UNDISABLABLE_PLUGINS`]
+//! 停用一个普通插件（如 `tool`）少的是一个功能；停用 [`ASSEMBLY_UNDISABLABLE_PLUGINS`]
 //! 里的任何一个，少的是**整个界面**：前端所有资源页都经 `vdfs` 取数，插件清单与启停
 //! 按钮都长在 `plugin_manager` 的页面上。于是用户会看到一个再也点不到「启用」的界面，
 //! 只能去磁盘上改 `PLUGIN.yml`——那不是权限设计，是自断其路。因此它是一条**装配方**的
