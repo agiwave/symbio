@@ -6,6 +6,8 @@ plugin_comment: 声誉台账：把承诺三格折成各主体的守约与违约�
 # 从插件树里消失。
 plugin_assembly: sub_agent
 plugin_order: 61
+# 高阶读数：市场可选、不默认装配（scripts/facts/assembly.mjs → ASSEMBLY_OPTIONAL_PLUGINS）
+plugin_optional: true
 # `commitment.*` 四格的 owner 是 `loop`，写方是效果通路与 `agent` 的立约效果；本包只折别人的
 # 格。本包自己只写淘汰裁决 `verdict.asserted`（声明在本包 `decl.rs`，归属缺省 `@principal`），
 # 单消费方 ⇒ 仍然没有 `shared_events`。

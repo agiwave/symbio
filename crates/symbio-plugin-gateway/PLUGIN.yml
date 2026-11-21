@@ -3,3 +3,5 @@ plugin_id: gateway
 plugin_comment: 外部 API 网关
 plugin_assembly: sub_agent
 plugin_order: 160
+# 行业集成：市场可选、不默认装配（scripts/facts/assembly.mjs → ASSEMBLY_OPTIONAL_PLUGINS）
+plugin_optional: true

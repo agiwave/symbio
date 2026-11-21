@@ -6,3 +6,5 @@ plugin_assembly: sub_agent
 # 人格段必须排在记忆（180）与模型人格（80）之前——它是「我是谁」，
 # 排在后面的段只能是它的补充，不能反过来改口吻。
 plugin_order: 55
+# 高阶能力：市场可选、不默认装配（scripts/facts/assembly.mjs → ASSEMBLY_OPTIONAL_PLUGINS）
+plugin_optional: true

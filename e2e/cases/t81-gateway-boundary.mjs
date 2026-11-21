@@ -68,6 +68,8 @@ export default defineCase(
           inbound_readonly: false,
           inbound_max_connections: 1,
         },
+        // telegram 是可选插件（不再默认装配）；本用例用它的一条路由验入站边界，显式装上。
+        telegram: {},
       },
     });
     const cli = startLongLivedCli({

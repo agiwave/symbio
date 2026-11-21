@@ -124,15 +124,17 @@ export function lastUserOf(req) {
  * ⚠️ 与 CURRENT.md 的同步是**契约的一部分**：加一个出厂工具要同时改三处
  * （Rust 注册点 / CURRENT.md 生成物 / 本常量），漏一处就会在 t60 红——
  * 那正是这道判据存在的意义。
+ *
+ * 「出厂」= 默认装配集：可选插件（如 `glossary` / `heartbeat`）不再默认装配，
+ * 它们的工具是「装了该插件才有」的条件工具，不进本表；用例要验证它们时须在
+ * 夹具里显式安装（见 t13 / t36 / t90 / t96）。
  */
 export const FACTORY_TOOLS = Object.freeze([
   'agent_run',
   'ask_user',
   'codebase_search',
-  'glossary_define',
   'content_search',
   'todo_write',
-  'heartbeat',
   'vdfs_list',
   'vdfs_tree',
   'vdfs_stat',

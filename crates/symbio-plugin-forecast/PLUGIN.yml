@@ -3,3 +3,5 @@ plugin_id: forecast
 plugin_comment: 未来预测：把任务事实折成「还剩多少没完成」的读数视图（名册 #34）
 plugin_assembly: sub_agent
 plugin_order: 63
+# 高阶读数：市场可选、不默认装配（scripts/facts/assembly.mjs → ASSEMBLY_OPTIONAL_PLUGINS）
+plugin_optional: true

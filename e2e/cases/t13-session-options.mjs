@@ -73,7 +73,9 @@ export default defineCase(
     const GATEWAY_PORT = nextPort();
     const hd = makeHomedir({
       providers: [{ id: PROVIDER_ID, config: providerConfig(llm.port) }],
-      pluginConfigs: { gateway: gatewayConfig(GATEWAY_PORT) },
+      // heartbeat 贡献会话选项里的 heartbeat 字段；它是可选插件（不再默认装配），
+      // 本用例要验证那条通路，故显式把它装上。
+      pluginConfigs: { gateway: gatewayConfig(GATEWAY_PORT), heartbeat: {} },
     });
 
     /** 起一个 CLI 并取回它的 gateway 句柄（重启验证要起两次） */

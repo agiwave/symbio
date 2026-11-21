@@ -5,15 +5,15 @@
 > 口径与「什么进基线、什么只作观测」见 [D-057](../../crates/symbio-plugin-session/README.md#d-057-prompt-形状基线钉装配决定的结构规模只作观测)，
 > 提取实现在 `scripts/audits/prompt-shape-audit.mjs`。
 
-场景 `full-主线装配-工具轮-对话面关闭` · 重生成于 2026-11-19 · 请求数 3
+场景 `full-主线装配-工具轮-对话面关闭` · 重生成于 2026-11-21 · 请求数 3
 
 ## 判据列（逐字段比，PS-001）
 
 | 请求 | 消息数 | 消息序列（role + 结构载体） | system 小节标签序列 | 工具数 |
 |---|---|---|---|---|
-| req0 | 2 | system → user | 【工作区记忆】【会话记忆】  | 22 |
-| req1 | 4 | system → user → assistant[calls=1] → tool[id] | 【工作区记忆】【会话记忆】    | 22 |
-| req2 | 6 | system → user → assistant[calls=1] → tool[id] → assistant → user | 【工作区记忆】【会话记忆】【长期记忆】      | 22 |
+| req0 | 2 | system → user | 【工作区记忆】【会话记忆】  | 20 |
+| req1 | 4 | system → user → assistant[calls=1] → tool[id] | 【工作区记忆】【会话记忆】    | 20 |
+| req2 | 6 | system → user → assistant[calls=1] → tool[id] → assistant → user | 【工作区记忆】【会话记忆】【长期记忆】      | 20 |
 
 ## 规模观测（**不进判据**：同一列里既有装配代码的字，也有负载的字）
 
@@ -22,9 +22,9 @@
 
 | 请求 | 消息数 | 消息序列 | system 小节标签 | 工具数 | 正文字节 | 工具 schema 字节 | 请求体总字节 |
 |---|---|---|---|---|---|---|---|
-| req0 | 2 | system → user | 【工作区记忆】【会话记忆】  | 22 | 1522 | 16211 | 17979 |
-| req1 | 4 | system → user → assistant[calls=1] → tool[id] | 【工作区记忆】【会话记忆】    | 22 | 1578 | 16211 | 18271 |
-| req2 | 6 | system → user → assistant[calls=1] → tool[id] → assistant → user | 【工作区记忆】【会话记忆】【长期记忆】      | 22 | 2012 | 16211 | 18772 |
+| req0 | 2 | system → user | 【工作区记忆】【会话记忆】  | 20 | 1514 | 14416 | 16174 |
+| req1 | 4 | system → user → assistant[calls=1] → tool[id] | 【工作区记忆】【会话记忆】    | 20 | 1570 | 14416 | 16466 |
+| req2 | 6 | system → user → assistant[calls=1] → tool[id] → assistant → user | 【工作区记忆】【会话记忆】【长期记忆】      | 20 | 2004 | 14416 | 16967 |
 
 ## 基线（判据本体）
 
@@ -64,16 +64,14 @@
           },
           {
             "tag": "会话记忆",
-            "chars": 575
+            "chars": 567
           }
         ],
         []
       ],
       "tools": {
-        "count": 22,
+        "count": 20,
         "names": [
-          "glossary_define",
-          "heartbeat",
           "<shell>",
           "content_search",
           "todo_write",
@@ -95,7 +93,7 @@
           "web_search",
           "http_request"
         ],
-        "schema_bytes": 16211
+        "schema_bytes": 14416
       }
     },
     {
@@ -141,7 +139,7 @@
           },
           {
             "tag": "会话记忆",
-            "chars": 575
+            "chars": 567
           }
         ],
         [],
@@ -149,10 +147,8 @@
         []
       ],
       "tools": {
-        "count": 22,
+        "count": 20,
         "names": [
-          "glossary_define",
-          "heartbeat",
           "<shell>",
           "content_search",
           "todo_write",
@@ -174,7 +170,7 @@
           "web_search",
           "http_request"
         ],
-        "schema_bytes": 16211
+        "schema_bytes": 14416
       }
     },
     {
@@ -232,7 +228,7 @@
           },
           {
             "tag": "会话记忆",
-            "chars": 154
+            "chars": 146
           },
           {
             "tag": "长期记忆",
@@ -246,10 +242,8 @@
         []
       ],
       "tools": {
-        "count": 22,
+        "count": 20,
         "names": [
-          "glossary_define",
-          "heartbeat",
           "<shell>",
           "content_search",
           "todo_write",
@@ -271,7 +265,7 @@
           "web_search",
           "http_request"
         ],
-        "schema_bytes": 16211
+        "schema_bytes": 14416
       }
     }
   ]

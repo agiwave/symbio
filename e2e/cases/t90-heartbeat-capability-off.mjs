@@ -103,7 +103,9 @@ async function bootSide(label, { heartbeatEnabled }) {
     pluginConfigs: {
       gateway: gatewayConfig(gatewayPort),
       ...dialogFaceOff(),
-      ...(heartbeatEnabled ? {} : { heartbeat: { plugin_enabled: false } }),
+      // heartbeat 是可选插件（不再默认装配）：两侧都要显式建目录，启用侧空配置即
+      // 默认启用，停用侧翻 `plugin_enabled: false`——测的正是这一个键的差别。
+      heartbeat: heartbeatEnabled ? {} : { plugin_enabled: false },
     },
   });
   const cli = startLongLivedCli({

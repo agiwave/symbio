@@ -102,8 +102,9 @@ function homedirFor(port, { glossaryEnabled }) {
     providers: [{ id: PROVIDER_ID, config: providerConfig(port) }],
     pluginConfigs: {
       ...dialogFaceOff(),
-      // 启用侧不写这一项：缺省即启用（`PluginDir::enabled` 的约定）。
-      ...(glossaryEnabled ? {} : { glossary: { plugin_enabled: false } }),
+      // glossary 是可选插件（不再默认装配）：两侧都要显式建目录，启用侧空配置即
+      // 默认启用，停用侧翻 `plugin_enabled: false`——测的正是这一个键的差别。
+      glossary: glossaryEnabled ? {} : { plugin_enabled: false },
     },
   });
 }

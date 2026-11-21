@@ -3,3 +3,5 @@ plugin_id: telegram
 plugin_comment: 消息渠道
 plugin_assembly: sub_agent
 plugin_order: 120
+# 行业渠道：市场可选、不默认装配（scripts/facts/assembly.mjs → ASSEMBLY_OPTIONAL_PLUGINS）
+plugin_optional: true

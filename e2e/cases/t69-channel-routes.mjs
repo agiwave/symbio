@@ -85,6 +85,8 @@ export default defineCase(
           inbound_token: '',
           inbound_readonly: false,
         },
+        // telegram 是可选插件（不再默认装配）；本用例打它的本地三路由，显式装上。
+        telegram: {},
       },
     });
     const cli = startLongLivedCli({
