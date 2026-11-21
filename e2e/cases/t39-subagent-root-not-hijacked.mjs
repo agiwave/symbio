@@ -37,7 +37,7 @@ import './_selfrun.mjs';
 // 模型那一半没有这个性质：系统 `model` 与 `agent` 都是容器的**子插件**，谁后注册谁生效，
 // 而子插件的遍历序来自 `HashMap`（逐进程随机）⇒ 端到端钉不住（实测：把丢弃改成转发后
 // 本用例仍通过，因为系统 `model` 恰好后注册）。模型侧的判据因此落在单测
-// （`crates/symbio-plugin-agent/src/host/scope.test.rs` 的 `sub_agent_model_registration_is_discarded`）。
+// （`crates/symbio-plugin-subagent/src/host/scope.test.rs` 的 `sub_agent_model_registration_is_discarded`）。
 import { writeFileSync } from 'node:fs';
 import { join } from 'node:path';
 import {

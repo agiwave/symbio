@@ -4148,7 +4148,6 @@ dependencies = [
  "symbio-deploy",
  "symbio-host",
  "symbio-kernel",
- "symbio-plugin-agent",
  "symbio-plugin-api",
  "symbio-plugin-classify",
  "symbio-plugin-compact",
@@ -4175,6 +4174,7 @@ dependencies = [
  "symbio-plugin-setting",
  "symbio-plugin-skill",
  "symbio-plugin-slo",
+ "symbio-plugin-subagent",
  "symbio-plugin-task",
  "symbio-plugin-telegram",
  "symbio-plugin-tool",
@@ -4240,28 +4240,6 @@ dependencies = [
  "thiserror 2.0.21",
  "tokio",
  "tokio-util",
-]
-
-[[package]]
-name = "symbio-plugin-agent"
-version = "0.1.14"
-dependencies = [
- "async-trait",
- "glob",
- "grep",
- "inventory",
- "notify",
- "serde",
- "serde_json",
- "serde_yaml_ng",
- "symbio",
- "symbio-plugin-api",
- "symbio-providers",
- "tempfile",
- "tokio",
- "tracing",
- "uuid",
- "zip",
 ]
 
 [[package]]
@@ -4688,6 +4666,28 @@ dependencies = [
  "serde_json",
  "symbio-plugin-api",
  "symbio-testkit",
+]
+
+[[package]]
+name = "symbio-plugin-subagent"
+version = "0.1.14"
+dependencies = [
+ "async-trait",
+ "glob",
+ "grep",
+ "inventory",
+ "notify",
+ "serde",
+ "serde_json",
+ "serde_yaml_ng",
+ "symbio",
+ "symbio-plugin-api",
+ "symbio-providers",
+ "tempfile",
+ "tokio",
+ "tracing",
+ "uuid",
+ "zip",
 ]
 
 [[package]]

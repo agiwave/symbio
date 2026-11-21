@@ -18,7 +18,7 @@
 //! | 常量 | 消费方 |
 //! |---|---|
 //! | [`ASSEMBLY_SUB_AGENT_PLUGINS`] | 文档与审计口径：所有 `sub_agent` 插件（含可选的） |
-//! | [`ASSEMBLY_CORE_PLUGINS`] | `crates/symbio-plugin-home`（系统树）· `crates/symbio-plugin-agent`（子 Agent 树）——默认装配且不可删除 |
+//! | [`ASSEMBLY_CORE_PLUGINS`] | `crates/symbio-plugin-home`（系统树）· `crates/symbio-plugin-subagent`（子 Agent 树）——默认装配且不可删除 |
 //! | [`ASSEMBLY_OPTIONAL_PLUGINS`] | `crates/symbio-plugin-plugin_manager`（插件市场候选） |
 //! | [`ASSEMBLY_UNDISABLABLE_PLUGINS`] | `crates/symbio-plugin-composite`（执行停用前查）· `crates/symbio-plugin-plugin_manager`（界面置灰） |
 //! | [`PLUGIN_ID_*`](PLUGIN_ID_HOME) | 每个插件自己的工厂注册与 `PluginMeta`；跨插件只经对象注册表按名字查找 |
@@ -52,7 +52,7 @@
 //!
 //! - `vdfs`（VDFS 根）是**单槽**注册，归系统 Agent 独占。子树**会构造**自己的
 //!   `vdfs` 实例（故本清单在列），但它的**注册**经
-//!   `crates/symbio-plugin-agent/src/host/scope.rs::SubAgentVisitor` 在每一层丢弃。
+//!   `crates/symbio-plugin-subagent/src/host/scope.rs::SubAgentVisitor` 在每一层丢弃。
 //! - `model` **在列**：子智能体有自己的模型服务——子树会话收集能力时以**子容器**
 //!   为 parent，子树 `model` 注册进该次收集自己的管理器；父会话收集期，子树的
 //!   `model` 注册才经 `SubAgentVisitor` 丢弃（单槽，防子树模型劫持父会话）。
@@ -94,7 +94,7 @@
 //! 三者一致。
 //!
 //! - **LLM 工具名不在这里**：工具名是 `CapabilityMeta.name` 短名，属各插件自己的
-//!   实现细节（`agent_run` 在 `crates/symbio-plugin-agent/src/host/subagent.rs`，`vdfs_*` 由
+//!   实现细节（`agent_run` 在 `crates/symbio-plugin-subagent/src/host/subagent.rs`，`vdfs_*` 由
 //!   `crates/symbio-plugin-vdfs/src/protocol.rs::VDFS_OPS` 派生），不经全局注册表。
 //! - **model 协议 id 不在这里**：协议 id 是插件内部实现细节，定义在
 //!   `crates/symbio-plugin-model/src/protocols/mod.rs`；core 既不暴露 `MODEL_PROTOCOL_*` 常量，

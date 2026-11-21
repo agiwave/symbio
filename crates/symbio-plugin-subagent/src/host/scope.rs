@@ -10,7 +10,7 @@
 //!
 //! - 两份都注册（并集天然成立）；
 //! - 判定与顺序无关，不需要给注册体系引入优先级概念；
-//! - 也不必修改架构 crate 的架构定义——本模块只在 agent 插件内做一层代理。
+//! - 也不必修改架构 crate 的架构定义——本模块只在 子智能体插件内做一层代理。
 //!
 //! **去重判定不在这一层做**：这里只保证「两份都能按各自名字取到」，并顺手把
 //! 「这个前缀名原本叫什么」交给会话装配（`SCOPE_TWIN` 声明行）。两份工具谁进模型的
@@ -42,7 +42,7 @@ use async_trait::async_trait;
 use std::sync::Arc;
 use symbio_plugin_api::{family, CapabilityFamily, CapabilityRow, Registry, SCOPE_TWIN};
 
-/// 子 Agent 插件树的注册代理
+/// 子智能体插件树的注册代理
 pub struct SubAgentVisitor {
     inner: Arc<dyn Registry>,
     /// 智能体 id（目录名）
@@ -105,8 +105,8 @@ impl Registry for SubAgentVisitor {
         // 写入方（model 插件的 traverse）逐行 put，规则只需在这一个入口上挡一次。
         if row.family() == family::MODEL {
             symbio_plugin_api::plugin_debug!(
-                "agent",
-                "丢弃子 Agent `{}` 的模型服务注册（生效者与目录都归系统 Agent）",
+                "subagent",
+                "丢弃子智能体 `{}` 的模型服务注册（生效者与目录都归系统 Agent）",
                 self.agent_id
             );
             return;
@@ -125,8 +125,8 @@ impl Registry for SubAgentVisitor {
         // 所以这里不再有「加目录名前缀」那一支。
         if row.vdfs().is_some() {
             symbio_plugin_api::plugin_debug!(
-                "agent",
-                "丢弃子 Agent `{}` 的 VDFS 根注册（单槽，归系统 Agent）",
+                "subagent",
+                "丢弃子智能体 `{}` 的 VDFS 根注册（单槽，归系统 Agent）",
                 self.agent_id
             );
             return;

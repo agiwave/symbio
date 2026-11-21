@@ -41,7 +41,6 @@ pub use symbio_sdk;
 pub use symbio_plugin_api::{hooks, routes};
 // >>> plugin-links:begin
 // 以下链接行由 `scripts/facts/plugin-links-rs.mjs` 从 `crates/symbio-plugin-<id>/` 目录投影，请勿手改；漏一行的后果是那个插件的 inventory 注册项被链接器丢掉（不报错，只少功能）。链接是私有的（`use … as _`），宿主门面的出口在上半段显式写（D-417）。
-use symbio_plugin_agent as _;
 use symbio_plugin_classify as _;
 use symbio_plugin_compact as _;
 use symbio_plugin_compose as _;
@@ -67,6 +66,7 @@ use symbio_plugin_session as _;
 use symbio_plugin_setting as _;
 use symbio_plugin_skill as _;
 use symbio_plugin_slo as _;
+use symbio_plugin_subagent as _;
 use symbio_plugin_task as _;
 use symbio_plugin_telegram as _;
 use symbio_plugin_tool as _;

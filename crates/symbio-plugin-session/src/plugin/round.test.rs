@@ -1,7 +1,7 @@
 //! `dedup_declared_twins` 的判据：声明的副本去掉、未声明/本名缺席的保留、判定与顺序无关。
 //!
 //! 反向用例的关键在「不许猜」：一个长得像前缀副本的名字，只要没有声明，就必须留下。
-//! 那条用例钉的是 D-428 的形状——前缀规则归子 Agent 插件，控制面只读声明。
+//! 那条用例钉的是 D-428 的形状——前缀规则归子智能体插件，控制面只读声明。
 
 use super::dedup_declared_twins;
 use symbio_kernel::capability::CapabilityMeta;

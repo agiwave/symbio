@@ -210,7 +210,7 @@ describe('按挂载目录缓存：子智能体空间是另一份方案', () => {
   })
 
   it('传挂载目录 = 解析那个空间那份；与默认那份互不覆盖', async () => {
-    const SUB = '@vfs/agent/reviewer/session'
+    const SUB = '@vfs/subagent/reviewer/session'
     // 子空间的会话内部：段名与根空间**可以不同**（都是展示名）
     vdfs.listVdfs
       .mockResolvedValueOnce({

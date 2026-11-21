@@ -37,7 +37,7 @@ pub fn agent_detail_definition() -> DetailDefinition {
     DetailDefinition {
         binding: "info".into(),
         title_from: vec![],
-        title_fallback: Some("Agent".into()),
+        title_fallback: Some("子智能体".into()),
         subtitle_from: vec!["version".into(), "scope".into()],
         name_from: vec![],
         id_from: vec![],
@@ -75,7 +75,7 @@ pub fn agent_detail_definition() -> DetailDefinition {
                     DetailField {
                         options: vec![DetailOption {
                             value: "global".into(),
-                            label: "全局级（`{homedir}/agent`）".into(),
+                            label: "全局级（`{homedir}/subagent`）".into(),
                             description: None,
                         }],
                         ..field("scope", "来源层级", "static")
@@ -115,7 +115,7 @@ pub fn agent_detail_definition() -> DetailDefinition {
                 id: "open-container".into(),
                 label: "浏览内部".into(),
                 style: "primary".into(),
-                payload: Some(serde_json::json!({ "kind": "agent" })),
+                payload: Some(serde_json::json!({ "kind": "subagent" })),
                 ..Default::default()
             },
             // 「导出」：VDFS 节点动作 `export`（vdfs/action）→ provider 的

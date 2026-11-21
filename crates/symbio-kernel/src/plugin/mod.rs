@@ -435,7 +435,7 @@ pub trait Plugin: Send + Sync + 'static {
     ///
     /// 与 `Registry`（LLM 链路的能力收集，含 `capability_vdfs_root`）**无关**：
     /// 这里是「这个插件自己暴露的 VDFS 视图」的直接查询接口——容器经它把子插件的
-    /// provider 聚合进组合视图，子智能体经它穿过 `agent/<id>` 挂载点。两条链路拿到的
+    /// provider 聚合进组合视图，子智能体经它穿过 `subagent/<id>` 挂载点。两条链路拿到的
     /// 是同一个 provider 实例，只是发现通道不同。
     ///
     /// 默认 `None`：大多数插件不暴露 VDFS。容器（`Composite`）返回自己的

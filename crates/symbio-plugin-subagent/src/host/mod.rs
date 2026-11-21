@@ -1,15 +1,15 @@
-//! agent 插件的宿主接入层 —— Agent 目录规范 v2（`agent-dir/v2`）的实现。
+//! subagent 插件的宿主接入层 —— Agent 目录规范 v2（`agent-dir/v2`）的实现。
 //!
-//! ## 职责（规范 §3.2 宿主）：只管**装进来的**智能体
+//! ## 职责（规范 §3.2 宿主）：只管**装进来的**子智能体
 //!
 //! | 模块 | 职责 |
 //! |---|---|
-//! | [`plugin`] | 插件主体：装配子 Agent 插件树（托管）+ manifest 门槛 + 选项行 |
+//! | [`plugin`] | 插件主体：装配子智能体插件树（托管）+ manifest 门槛 + 选项行 |
 //! | [`store`] | agent 目录存储：**本插件自己的目录**、zip 导入（zip-slip 防护）、导出、条目枚举 |
 //! | [`manifest`] | `manifest.yaml` 的读取与接入校验（§5 / §10） |
 //! | [`scope`] | `SubAgentVisitor` 代理层：把子树的注册加 `agent/<id>/` 前缀并进系统树（§8.2） |
 //! | [`detail`] | agent 概览 / 详情表单的呈现定义 |
-//! | [`vdfs`] | VDFS 挂载点（`<根>/agent/…`，本插件直接 `impl VdfsProvider`） |
+//! | [`vdfs`] | VDFS 挂载点（`<根>/subagent/…`，本插件直接 `impl VdfsProvider`） |
 //!
 //! **本层没有任何自有协议路由**：agent 目录的浏览 / 导入 / 删除 / 导出分别由
 //! `vdfs/list`、`vdfs/write`（二进制）、`vdfs/delete`、节点动作 `export` 承担，

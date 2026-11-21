@@ -1,10 +1,10 @@
-//! agent 插件 —— Agent 目录规范 v2 的宿主接入层。
+//! subagent 插件 —— Agent 目录规范 v2 的宿主接入层。
 //!
 //! ## 定位（规范 §3.2 宿主）：**只管子智能体的目录与连接**
 //!
 //! 本插件是「**别处装进来的智能体**」域的唯一所有者，做两件事：
 //!
-//! - **托管**：为 `{homedir}/agent/<id>/` 下每个 Agent 构造一棵 composite 插件树
+//! - **托管**：为 `{homedir}/subagent/<id>/` 下每个 Agent 构造一棵 composite 插件树
 //!   （与系统 Agent 同构，§1.1），收集期把它的注册经 [`super::scope::SubAgentVisitor`]
 //!   代理并进系统树（并集，§8.2）；
 //! - **门槛**：manifest 不合 §5 / §10 时**拒绝接入**并明确报错——绝不静默降级成
@@ -16,17 +16,17 @@
 //!
 //! | 东西 | 归谁 | 地址 |
 //! |---|---|---|
-//! | 智能体自身的记忆（`AGENTS.md`） | `memory` | `<根>/memory/AGENTS.md` |
-//! | 智能体自身的信息设置 | `setting` | `<根>/setting/PLUGIN.yml` |
+//! | 子智能体自身的记忆（`AGENTS.md`） | `memory` | `<根>/memory/AGENTS.md` |
+//! | 子智能体自身的信息设置 | `setting` | `<根>/setting/PLUGIN.yml` |
 //!
 //! 它们都是**分形**的：子树里各有自己的实例，落位由「本插件目录的父目录」推出。
 //! 从前本插件用 `instruction` / `memory` 两个模块兼管这两个作用域（外加一份配置
-//! 承载两道容量闸门），于是 `agent` 一边管「装进来的智能体」、一边管「自己是谁」——
+//! 承载两道容量闸门），于是 `subagent` 一边管「装进来的子智能体」、一边管「自己是谁」——
 //! 两件事各有一套落位与闸门，却挤在同一个插件里。现在这条线按**归属**划开：
-//! 本插件只回答「有哪些智能体、怎么把它们连进来」。
+//! 本插件只回答「有哪些子智能体、怎么把它们连进来」。
 //!
-//! ⚠️ **指令文件不由子树里的插件实例解释**：子树按 agent 目录扫描，其中 `agent`
-//! 实例只负责「再下一级子 Agent」（`<id>/agent/<sub-id>` 递归，即分形），并不解释
+//! ⚠️ **指令文件不由子树里的插件实例解释**：子树按 agent 目录扫描，其中 `subagent`
+//! 实例只负责「再下一级子 Agent」（`<id>/subagent/<sub-id>` 递归，即分形），并不解释
 //! 本目录自身的指令——本目录的 `AGENTS.md` 归子树里的 `memory` 实例。而本插件
 //! 恰恰是「认识 Agent 目录」的那个插件：它扫描目录、装配子树、把整包内容暴露成
 //! VDFS，全在职责内。子树的注册经作用域 visitor 加前缀，故与系统侧不冲突（§8.2）。
@@ -36,7 +36,7 @@
 //! 子树因此挂**与父 Agent 同构的默认插件集**（见
 //! [`symbio_plugin_api::ASSEMBLY_SUB_AGENT_PLUGINS`]，与系统侧是**同一份清单**）：子树会构造
 //! 自己的 `vdfs` 实例，但其注册经 `SubAgentVisitor` 在每一层丢弃（VDFS 根单槽归
-//! 系统 Agent 独占），其余（含 `agent` 自身、`model`、`plugin_manager`、
+//! 系统 Agent 独占），其余（含 `subagent` 自身、`model`、`plugin_manager`、
 //! `memory`、`setting`）全部与父树一致——UI 资源入口因此对齐。`model` 在子树里有
 //! 实例：子智能体有自己的模型服务（子树会话以子容器为 parent 收集，自行解析）；
 //! 父会话收集期该注册才被 `SubAgentVisitor` 丢弃（单槽防劫持）。
@@ -59,7 +59,7 @@ use symbio_plugin_api::{
     TRAVERSE_AVAILABLE_TOOLS, VDFS_PARENT_ADDR,
 };
 use symbio_plugin_api::{DetailField, DetailOption};
-use symbio_plugin_api::{PLUGIN_ID_AGENT, PLUGIN_ID_COMPOSITE};
+use symbio_plugin_api::{PLUGIN_ID_COMPOSITE, PLUGIN_ID_SUBAGENT};
 
 /// 规范标识（见 `docs/003-design/011-Agent目录规范.md`）
 ///
@@ -75,9 +75,9 @@ pub(crate) const SPEC_V2: &str = "agent-dir/v2";
 /// （判据 `plugin-entry-audit` E-009），各持一份字面量正是那条原则的代价，可接受。
 const AGENTS_MD: &str = "AGENTS.md";
 
-/// Agent 插件主结构（宿主接入层）。
+/// 子智能体插件主结构（宿主接入层）。
 pub struct AgentPlugin {
-    /// 已构造的子 Agent 插件树（惰性构造 + 缓存，见 [`Self::sub_agent`]）
+    /// 已构造的子智能体插件树（惰性构造 + 缓存，见 [`Self::sub_agent`]）
     sub_agents: tokio::sync::RwLock<std::collections::HashMap<String, Arc<dyn Plugin>>>,
     /// 插件间路由入口（composite 容器的弱引用）。
     ///
@@ -98,7 +98,7 @@ impl AgentPlugin {
     /// 静态工厂：从 PluginInvokeRequest 构造 Plugin 实例（composite 配置驱动）。
     pub fn build(ctx: Arc<dyn PluginInvokeRequest>) -> Arc<dyn Plugin> {
         let router = ctx.parent();
-        let dir = plugin_dir_from_ctx(&*ctx, PLUGIN_ID_AGENT);
+        let dir = plugin_dir_from_ctx(&*ctx, PLUGIN_ID_SUBAGENT);
         Arc::new(Self::new_with(dir, router)) as Arc<dyn Plugin>
     }
 
@@ -116,7 +116,7 @@ impl AgentPlugin {
         Self::new_with(
             PluginDir::at(
                 std::env::temp_dir().join("symbio-test/agent"),
-                PLUGIN_ID_AGENT,
+                PLUGIN_ID_SUBAGENT,
             ),
             None,
         )
@@ -152,7 +152,7 @@ impl AgentPlugin {
         }
 
         // agent 目录只由本插件自己的目录决定（与 workdir 无关）；嵌套子 Agent 的目录
-        // 由 composite 经 `PLUGIN_DIR` 自动作用域到 `<subtree>/agent`，分形天然正确。
+        // 由 composite 经 `PLUGIN_DIR` 自动作用域到 `<subtree>/subagent`，分形天然正确。
         let store = AgentDirStore::new(self.dir().dir());
         let record = store.get(id)?;
         let dir = record.dir.clone();
@@ -170,7 +170,7 @@ impl AgentPlugin {
                 .collect(),
         );
 
-        symbio_plugin_api::plugin_info!("agent", "装配子 Agent `{}` -> {}", id, dir.display());
+        symbio_plugin_api::plugin_info!("subagent", "装配子智能体 `{}` -> {}", id, dir.display());
         let tree = creator_create_object::<dyn Plugin>(PLUGIN_ID_COMPOSITE, sub_context)?;
         self.sub_agents
             .write()
@@ -246,18 +246,18 @@ impl AgentPlugin {
     /// 子树的 `WORKDIR` 与父会话一致（继承）。
     ///
     /// ⚠️ **`AGENT_ID` 必须清空**：它是**会话级「选中的智能体」**，只由**拥有该 id 的
-    /// 那个 store 的实例**解析（系统根实例的 store = `{homedir}/agent`）。子树里的
-    /// `agent` 实例（分形，见模块文档）用同一个键表达**它自己**那一层的选中
-    /// （`<agentdir>/agent/<sub-id>`）；父 id 落进它的作用域会被当成「我这一层的选中」
-    /// 去查 `<agentdir>/agent/<父id>`——必然查不到，于是按 §10 报「拒绝接入」，把整轮
+    /// 那个 store 的实例**解析（系统根实例的 store = `{homedir}/subagent`）。子树里的
+    /// `subagent` 实例（分形，见模块文档）用同一个键表达**它自己**那一层的选中
+    /// （`<agentdir>/subagent/<sub-id>`）；父 id 落进它的作用域会被当成「我这一层的选中」
+    /// 去查 `<agentdir>/subagent/<父id>`——必然查不到，于是按 §10 报「拒绝接入」，把整轮
     /// 能力收集打断（子树明明装好了，却被一个**本不属于该作用域**的 id 判死）。
     /// 故此处显式清空 = 「本作用域无选中」。委托子智能体不走本键，走 `agent_run`
     /// 的显式 `agent_id` 参数（它按自己的 store 解析）。
     ///
     /// ⚠️ **`VDFS_PARENT_ADDR` 必须续接 `<id>`**：子树里的插件（`memory` / `work` / …）
     /// 在收集期拼「给模型看的可编辑地址」，靠的就是上下文里的当前父地址。子树的挂载
-    /// 点是 `<根>/agent/<id>`，而本插件自己的父地址只到 `<根>/agent`——不续接就会拼出
-    /// `<根>/agent/memory/AGENTS.md`（一个不存在的地址），模型按它 `vdfs_read` 必然
+    /// 点是 `<根>/subagent/<id>`，而本插件自己的父地址只到 `<根>/subagent`——不续接就会拼出
+    /// `<根>/subagent/memory/AGENTS.md`（一个不存在的地址），模型按它 `vdfs_read` 必然
     /// 落空。系统链路（[`super::vdfs`] 的 `sub_vfs`）本来就是这么续的，两条链路因此
     /// 说同一个地址。
     async fn forward_to_sub_agent(
@@ -279,9 +279,9 @@ impl AgentPlugin {
             sub.set(AGENT_VDFS, Some(provider));
         }
         // 清空而非继承：父作用域的选中 id 由**父**的 store 解析；带进来只会被本层的
-        // `agent` 实例当成自己的子目录选择（见上方文档）。
+        // `subagent` 实例当成自己的子目录选择（见上方文档）。
         sub.set(AGENT_ID, String::new());
-        // 续接而非继承：子树挂在 `<根>/agent/<id>` 下（见上方文档）。
+        // 续接而非继承：子树挂在 `<根>/subagent/<id>` 下（见上方文档）。
         sub.set(
             VDFS_PARENT_ADDR,
             descend_addr(&ctx.get(VDFS_PARENT_ADDR).unwrap_or_default(), id),
@@ -301,30 +301,30 @@ impl AgentPlugin {
         );
 
         if let Err(e) = tree.clone().traverse(String::new(), sub).await {
-            symbio_plugin_api::plugin_warn!("agent", "子 Agent `{id}` 能力收集失败：{e:?}");
+            symbio_plugin_api::plugin_warn!("subagent", "子智能体 `{id}` 能力收集失败：{e:?}");
         }
         scoped.tool_count()
     }
 
     pub fn metadata() -> PluginMeta {
-        PluginMeta::new(PLUGIN_ID_AGENT, "智能体")
+        PluginMeta::new(PLUGIN_ID_SUBAGENT, "子智能体")
             .with_description(
-                "智能体域：管理装进来的 Agent 目录（安装/导出/删除）与它们的连接，\
+                "子智能体域：管理装进来的 Agent 目录（安装/导出/删除）与它们的连接，\
                  会话绑定 Agent 时把它整棵插件树的能力并进会话（技能 / MCP 由目录里的\
                  插件实例自己解释）",
             )
             .with_version("0.1.0")
             .with_order(3)
-            .with_icon(PLUGIN_ID_AGENT)
+            .with_icon(PLUGIN_ID_SUBAGENT)
             // 根可列举 + 可递归遍历（agent 目录内部有子条目）。
             // 「根下可新建类型」不在这里——agent 目录只能整包导入（没有「先建空壳
             // 再填字段」的形态），清单由 provider 自持（见 `super::vdfs`）
             .with_root_access(VdfsAccess::LIST_TRAVERSE)
     }
 
-    /// 参与 `available_options` 收集：贡献「智能体」字段。
+    /// 参与 `available_options` 收集：贡献「子智能体」字段。
     ///
-    /// 候选 = 「不使用 Agent」 + 各可用 agent 目录（值 = `agent_id`，空串 = 显式解绑）。
+    /// 候选 = 「不使用子智能体」 + 各可用 agent 目录（值 = `agent_id`，空串 = 显式解绑）。
     ///
     /// **不回填当前值**：「值 → 标签」由 `field.options` 承担，前端查表即得；当前值
     /// 来自会话 `metadata.agent_id`。因此这里既不读 `ctx[AGENT_ID]`，也不算
@@ -334,7 +334,7 @@ impl AgentPlugin {
             return;
         };
 
-        // 展示顺序号段约定：20 = 智能体（见 session::options 模块文档）
+        // 展示顺序号段约定：20 = 子智能体（见 session::options 模块文档）
         const ORDER: i32 = 20;
 
         let store = AgentDirStore::new(self.dir().dir());
@@ -346,15 +346,15 @@ impl AgentPlugin {
     }
 }
 
-/// 「智能体」选项的字段声明（`node.schema` 用）。
+/// 「子智能体」选项的字段声明（`node.schema` 用）。
 ///
-/// 候选 = 「不使用 Agent」（空串 = 显式解绑，后端 orchestrator 对空值按「未选择」
+/// 候选 = 「不使用子智能体」（空串 = 显式解绑，后端 orchestrator 对空值按「未选择」
 /// 处理）+ 各可用 agent 目录。`default` 也取空串：会话 metadata 里没有
-/// `agent_id` 时，前端按 `default` 显示「不使用 Agent」。
+/// `agent_id` 时，前端按 `default` 显示「不使用子智能体」。
 fn agent_field(agent_dirs: &[crate::host::store::AgentDirRecord]) -> DetailField {
     let mut options = vec![DetailOption {
         value: String::new(),
-        label: "不使用 Agent".to_string(),
+        label: "不使用子智能体".to_string(),
         description: Some("纯工具模式：直接与 Model 对话，可用文件/搜索等基础工具".to_string()),
     }];
     options.extend(agent_dirs.iter().map(|record| {
@@ -368,10 +368,10 @@ fn agent_field(agent_dirs: &[crate::host::store::AgentDirRecord]) -> DetailField
 
     DetailField {
         key: "agent_id".to_string(),
-        label: "智能体".to_string(),
+        label: "子智能体".to_string(),
         description: Some("选择认知人格（可不选）".to_string()),
         widget: "select".to_string(),
-        icon: Some("agent".to_string()),
+        icon: Some("subagent".to_string()),
         default: Some(serde_json::json!("")),
         options,
         ..Default::default()
@@ -426,13 +426,13 @@ impl Plugin for AgentPlugin {
             return Ok(PluginPayload::new(&Vec::<serde_json::Value>::new()));
         };
 
-        // ── VDFS 挂载点（`<根>/agent`）──
+        // ── VDFS 挂载点（`<根>/subagent`）──
         // 挂载行由容器从 `get_vfs_provider` 派生（本插件在下方 override 返回自身）；
         // 本插件的 VDFS 视图 = agent 目录（`impl VdfsProvider for AgentPlugin`，
-        // 见 `super::vdfs`），与 workdir 无关。智能体自身的记忆 / 设置不在这里——
+        // 见 `super::vdfs`），与 workdir 无关。子智能体自身的记忆 / 设置不在这里——
         // 它们各有自己的插件与挂载点。
 
-        // ── 已选择智能体 → 装配它的能力 ──
+        // ── 已选择子智能体 → 装配它的能力 ──
         if let Some(agent_id) = agent_id {
             match self.sub_agent(&agent_id, &ctx).await {
                 // 子 Agent 是一棵 composite 插件树，能力经代理层并集进来
@@ -444,8 +444,8 @@ impl Plugin for AgentPlugin {
                     let Some(scope) = self.scope_of(&agent_id) else {
                         capability_report_error(
                             &ctx,
-                            PLUGIN_ID_AGENT,
-                            format!("智能体 `{agent_id}` 拒绝接入：manifest 不可解析"),
+                            PLUGIN_ID_SUBAGENT,
+                            format!("子智能体 `{agent_id}` 拒绝接入：manifest 不可解析"),
                         )
                         .await;
                         return Ok(PluginPayload::new(&Vec::<serde_json::Value>::new()));
@@ -453,8 +453,8 @@ impl Plugin for AgentPlugin {
                     if let Err(reason) = self.check_prompt_limit(&scope) {
                         capability_report_error(
                             &ctx,
-                            PLUGIN_ID_AGENT,
-                            format!("智能体 `{agent_id}` 拒绝接入：{reason}"),
+                            PLUGIN_ID_SUBAGENT,
+                            format!("子智能体 `{agent_id}` 拒绝接入：{reason}"),
                         )
                         .await;
                         return Ok(PluginPayload::new(&Vec::<serde_json::Value>::new()));
@@ -466,8 +466,8 @@ impl Plugin for AgentPlugin {
                     if let Err(reason) = self.check_tool_limit(&scope, contributed) {
                         capability_report_error(
                             &ctx,
-                            PLUGIN_ID_AGENT,
-                            format!("智能体 `{agent_id}` 拒绝接入：{reason}"),
+                            PLUGIN_ID_SUBAGENT,
+                            format!("子智能体 `{agent_id}` 拒绝接入：{reason}"),
                         )
                         .await;
                     }
@@ -497,8 +497,8 @@ impl Plugin for AgentPlugin {
                     };
                     capability_report_error(
                         &ctx,
-                        PLUGIN_ID_AGENT,
-                        format!("智能体 `{agent_id}` 拒绝接入：{reason}"),
+                        PLUGIN_ID_SUBAGENT,
+                        format!("子智能体 `{agent_id}` 拒绝接入：{reason}"),
                     )
                     .await;
                 }
@@ -510,7 +510,7 @@ impl Plugin for AgentPlugin {
 
     /// 路由入口：**无自有协议**。
     ///
-    /// agent 目录的浏览 / 导入 / 删除 / 导出全部由 VDFS 承接（`<根>/agent/…`）：
+    /// agent 目录的浏览 / 导入 / 删除 / 导出全部由 VDFS 承接（`<根>/subagent/…`）：
     /// `vdfs/list` / `vdfs/write`（二进制 = 导入）/ `vdfs/delete` / 节点动作
     /// `export`。因此这里不再有任何路由——插件只对宿主暴露装配能力。
     async fn route(
@@ -520,10 +520,10 @@ impl Plugin for AgentPlugin {
         let path = ctx.get(PATH).unwrap_or_default();
         // 绝对地址 = 上下文父地址 + 相对地址（协议级指路信息，封装入口统一）
         Err(PluginError::NotFound(format!(
-            "agent 无自有协议路由 `{path}`：agent 目录一律经 VDFS 访问（{}）",
-            symbio_plugin_api::absolute_addr(&ctx, &format!("{PLUGIN_ID_AGENT}/…"))
+            "子智能体无自有协议路由 `{path}`：agent 目录一律经 VDFS 访问（{}）",
+            symbio_plugin_api::absolute_addr(&ctx, &format!("{PLUGIN_ID_SUBAGENT}/…"))
         )))
     }
 }
 
-symbio_plugin_api::submit_object_creator!(PLUGIN_ID_AGENT, AgentPlugin::build, dyn Plugin);
+symbio_plugin_api::submit_object_creator!(PLUGIN_ID_SUBAGENT, AgentPlugin::build, dyn Plugin);

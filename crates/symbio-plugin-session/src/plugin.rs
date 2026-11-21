@@ -42,7 +42,7 @@ use symbio_kernel::vdfs::{VdfsAccess, VdfsChange};
 use symbio_kernel::vdfs::{VDFS_PARAM_BEFORE, VDFS_PARAM_LIMIT};
 use symbio_plugin_api::PLUGIN_ID_SESSION;
 use symbio_plugin_api::{plugin_dir_from_ctx, PluginConfigFile, PluginDir, PLUGIN_FILE};
-use symbio_plugin_api::{vdfs_context, VdfsItem, VdfsRequest, PLUGIN_ID_AGENT};
+use symbio_plugin_api::{vdfs_context, VdfsItem, VdfsRequest, PLUGIN_ID_SUBAGENT};
 use symbio_sdk::chat::session_chat;
 use symbio_sdk::plugin::fact_source::{FactSource, FACT_SOURCE};
 use symbio_sdk::vdfs::host::VdfsChangeSubscriptions;
@@ -214,17 +214,17 @@ impl SessionPlugin {
 
     /// `agent_run` 的 `agent_id` enum 候选：本作用域 agent 挂载点的清单。
     ///
-    /// 经**本作用域容器**的 VDFS 视图列 `agent` 挂载点——agent 目录的枚举由它的
-    /// owner（agent 插件）经 VDFS 回答（E-009 禁兄弟插件依赖，session 不认识
+    /// 经**本作用域容器**的 VDFS 视图列 `subagent` 挂载点——agent 目录的枚举由它的
+    /// owner（sub子智能体插件）经 VDFS 回答（E-009 禁兄弟插件依赖，session 不认识
     /// `AgentDirStore`）。分形天然正确：子树里本插件的 parent 是子容器，
-    /// 挂载点即 `<agentdir>/agent`。容器缺席 / agent 插件缺席 / 列表失败一律返回空
+    /// 挂载点即 `<agentdir>/subagent`。容器缺席 / sub子智能体插件缺席 / 列表失败一律返回空
     /// ——委托仍可用（省略 `agent_id` 即纯对话子会话），只是没有显式候选。
     async fn agent_id_candidates(&self, ctx: &Arc<dyn PluginInvokeRequest>) -> Vec<String> {
         let Some(provider) = self.get_parent().and_then(|p| p.get_vfs_provider()) else {
             return Vec::new();
         };
         match provider
-            .dispatch(&vdfs_context(ctx), PLUGIN_ID_AGENT, VdfsRequest::List {})
+            .dispatch(&vdfs_context(ctx), PLUGIN_ID_SUBAGENT, VdfsRequest::List {})
             .await
         {
             Ok(resp) => resp
@@ -456,12 +456,12 @@ impl Plugin for SessionPlugin {
             //
             // 新建会话与新建会话的子会话都是本插件域的事（子会话按
             // `metadata.parent_session_id` 归档、经收件箱地址面发起）；`agent_id`
-            // 只是可选参数，子 agent 的目录与装配归 agent 插件——委托工具因此从
+            // 只是可选参数，子 agent 的目录与装配归 子智能体插件——委托工具因此从
             // agent 迁到本插件（裁决见 `docs/003-design/011-Agent目录规范.md`
             // 的关键决策）。未指定 `agent_id` 时默认沿用当前会话的智能体，两者
             // 皆空则子会话以无智能体的纯对话模式运行。
             // enum 候选经**本作用域容器**的 VDFS 视图列 agent 挂载点
-            // （[`Self::agent_id_candidates`]）；agent 插件缺席（最小装配 / 测试）
+            // （[`Self::agent_id_candidates`]）；子智能体插件缺席（最小装配 / 测试）
             // 时清单为空，工具照常注册。
             // 注册走 `register_tool` 唯一收口（D-440 ③）。`risk` 传 `None`——本工具
             // 没有参数级风险覆写，静态缺省档（`meta.effective_risk()`）就是它的风险回答。

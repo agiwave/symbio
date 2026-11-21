@@ -76,7 +76,7 @@ describe('Session：选中会话时的地址重落', () => {
   })
 
   it('子智能体空间里的子会话：落在那个空间，而不是根空间', async () => {
-    const agentMount = '@vfs/agent/a1/session'
+    const agentMount = '@vfs/subagent/a1/session'
     mocks.sessionSpaceOf.mockResolvedValue(agentMount)
 
     const node = sessionItem(`${agentMount}/p1/subsession/s2`)

@@ -185,7 +185,7 @@ impl CompositeVdfs {
             // 沿用 `host.fork()` 会让子插件把这次「只要配置声明」的广播当成
             // 完整能力收集再跑一遍——一次 VDFS 派发就会重注册工具、重拼提示词。
             // agent 子树尤其致命：它的父地址要靠容器在能力广播里续接，而配置
-            // 通道没有挂载点语义，重跑后拼出的是缺失 `agent/<id>` 的错误地址。
+            // 通道没有挂载点语义，重跑后拼出的是缺失 `subagent/<id>` 的错误地址。
             let sub = Arc::new(PluginSimpleRequest::child_of(&host, None));
             sub.set(PATH, TRAVERSE_AVAILABLE_TOOLS.to_string());
             sub.set(CONFIGURABLE_VISITOR, configs.clone());

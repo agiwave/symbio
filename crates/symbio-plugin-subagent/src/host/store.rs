@@ -3,7 +3,7 @@
 //! ## 目录布局
 //!
 //! ```text
-//! {系统目录}/agent/<id>/                   本插件自己的目录（= 全局唯一来源）
+//! {系统目录}/subagent/<id>/                   本插件自己的目录（= 全局唯一来源）
 //! ```
 //!
 //! Agent 统一存放在**本插件自己的目录**下（装配态即 `<homedir>/agent`）。
@@ -161,7 +161,7 @@ impl AgentDirStore {
     pub fn load_record(dir: &Path) -> Option<AgentDirRecord> {
         let manifest = manifest::load(dir)?;
         if let Err(e) = manifest::validate(&manifest) {
-            symbio_plugin_api::plugin_warn!("agent", "跳过 `{}`：{}", dir.display(), e);
+            symbio_plugin_api::plugin_warn!("subagent", "跳过 `{}`：{}", dir.display(), e);
             return None;
         }
         Some(AgentDirRecord {

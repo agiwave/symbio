@@ -10,7 +10,7 @@ import './_selfrun.mjs';
 // | 格 | 单测钉在哪 | 这里钉什么 |
 // |---|---|---|
 // | 裁决可读 | `derived_facts.test.rs` / `actors/mod.test.rs` | 拒因文案点名 `verdict.asserted` 与被收回的能力 |
-// | 闸拒 `agent_run` | `symbio-plugin-agent` 的 `host/behavior.test.rs`（`DelegationGate`）+ `loop` 的 `dispatch/gates.test.rs`（映射） | 工具结果真的是 `Refused: …` 且回灌进了模型下一发请求 |
+// | 闸拒 `agent_run` | `symbio-plugin-subagent` 的 `host/behavior.test.rs`（`DelegationGate`）+ `loop` 的 `dispatch/gates.test.rs`（映射） | 工具结果真的是 `Refused: …` 且回灌进了模型下一发请求 |
 // | 跨会话生效 | 同上（部署级扫描） | **另一个会话**的同一次 `agent_run` 同样被拒 |
 //
 // ## 场景（三个轮次）

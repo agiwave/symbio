@@ -293,8 +293,9 @@ registerVdfsIcon(
     '<rect x="2" y="2" width="20" height="8" rx="2"/><rect x="2" y="14" width="20" height="8" rx="2"/><line x1="6" y1="6" x2="6.01" y2="6"/><line x1="6" y1="18" x2="6.01" y2="18"/>'
   )
 )
+// 子智能体挂载点（`<根>/subagent`）与选项行的图标键（后端 plugin_id = subagent）。
 registerVdfsIcon(
-  'agent',
+  'subagent',
   svgIcon(
     '<path d="M20 21v-2a4 4 0 0 0-4-4H8a4 4 0 0 0-4 4v2"/><circle cx="12" cy="7" r="4"/>'
   )

@@ -757,7 +757,7 @@ test('E-009 不误报：清单注释里提到兄弟插件名（composite 的真�
   const r = audit({
     ...CLEAN,
     ...mcpManifest(
-      `\n[dev-dependencies]\n# 与 \`symbio-plugin-agent\` 同一处境：这几条用例要一整棵装配树\n` +
+      `\n[dev-dependencies]\n# 与 \`symbio-plugin-subagent\` 同一处境：这几条用例要一整棵装配树\n` +
         `symbio = { path = "../symbio" }\n`,
     ),
   })

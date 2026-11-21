@@ -5,7 +5,7 @@ import './_selfrun.mjs';
 //
 // `permissions` 四字段的执行方（`D-153`）在各执行面有单测（`net_guard` / `vdfs`
 // 路径入口 / 装载期）钉了判据，但有一条**只有端到端能证**的链：作用域从收集期
-// 发布（`agent` 插件）经 `collect_capabilities` 挂回轮 ctx，再一路 fork 进工具
+// 发布（`subagent` 插件）经 `collect_capabilities` 挂回轮 ctx，再一路 fork 进工具
 // 执行期。任一环断了，表现都是「闸门恒过」——单测里手工构造的 ctx 看不出来，
 // 因为它们是直接往 ctx 里塞槽的。本用例让真 CLI 跑真会话：选中智能体 ⇒ 模型
 // 调工具 ⇒ 结果按声明放行 / 拒绝。
@@ -51,10 +51,10 @@ const GRANTED_PERMS = `permissions:
     read:
       - "**"`;
 
-// `<根>/agent/<id>/memory/AGENTS.md`：子树 memory 挂载点的虚拟地址（根名 `.vdfsv2`
+// `<根>/subagent/<id>/memory/AGENTS.md`：子树 memory 挂载点的虚拟地址（根名 `.vdfsv2`
 // 按协议地址写字面量，与 T57 同一约定）。
-const OWN_ADDR_ZERO = '.vdfsv2/agent/t84-zero/memory/AGENTS.md';
-const OWN_ADDR_GRANTED = '.vdfsv2/agent/t84-granted/memory/AGENTS.md';
+const OWN_ADDR_ZERO = '.vdfsv2/subagent/t84-zero/memory/AGENTS.md';
+const OWN_ADDR_GRANTED = '.vdfsv2/subagent/t84-granted/memory/AGENTS.md';
 
 const WS_MARKER = 'T84-WORKSPACE-MARKER：这一行在工作区，不归智能体声明管。';
 const T_WEB = '试一下外取那个文档页面';

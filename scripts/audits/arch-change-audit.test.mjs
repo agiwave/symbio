@@ -78,6 +78,15 @@ test('CC-001 不触发：`tests/` 目录下的用例同样不算内核语义', (
   assert.deepEqual(r.errors, [])
 })
 
+// 项目里测试有两种同级的命名约定：`X.test.rs` 与 `X/tests.rs`（后者由
+// `#[cfg(test)] mod tests;` 声明）。两者都是纯测试，判据面必须同源——漏掉
+// `tests.rs` 会让一次「把测试标题从『会话设置』改成『会话』」的夹具维护
+// 被误判成内核语义改动，逼人给纯测试维护编造 `Core-Change:`。
+test('CC-001 不触发：`src/**/tests.rs` 模块同样是纯测试', () => {
+  const r = judge(SHA, ['crates/symbio-kernel/src/vdfs/tests.rs'], msg())
+  assert.deepEqual(r.errors, [])
+})
+
 test('CC-001 仍触发：同批既改测试又改生产源码（测试不豁免生产面的理由）', () => {
   const r = judge(SHA, ['crates/symbio-sdk/src/vocab.test.rs', CORE], msg())
   assert.equal(r.errors.length, 1)

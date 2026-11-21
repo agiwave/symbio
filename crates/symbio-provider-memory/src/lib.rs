@@ -12,7 +12,7 @@
 //! | 工作区 | memory（`<根>/memory/WORKSPACE.md`） | memory | `{work_dir}/AGENTS.md` |
 //! | 会话 | memory（`<根>/memory/SESSION.md`） | memory | `{session_dir}/MEMORY.md` |
 //! | 系统智能体 | memory（`<根>/memory/AGENTS.md`） | memory | `{agent_dir}/AGENTS.md` |
-//! | 子智能体 | memory（`<根>/agent/<id>/memory/AGENTS.md`） | memory | `<agentdir>/AGENTS.md` |
+//! | 子智能体 | memory（`<根>/subagent/<id>/memory/AGENTS.md`） | memory | `<agentdir>/AGENTS.md` |
 //!
 //! 挂载名与物理名**可以不同**：工作区腿的挂载名是 `WORKSPACE.md` 而物理文件仍是
 //! `AGENTS.md`——地址里已经写了作用域，名字就不必再靠目录区分（见 `crates/symbio-plugin-memory/src/workspace.rs`）。

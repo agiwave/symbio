@@ -778,7 +778,7 @@ async fn missing_host_ctx_is_an_internal_error() {
 
 // ==================== 嵌套装配：多段注册名 ====================
 //
-// 子智能体子树里的 provider 经 agent 插件的作用域代理（SubAgentVisitor）
+// 子智能体子树里的 provider 经 子智能体插件的作用域代理（SubAgentVisitor）
 // 以 **多段名** 注册进系统容器：`agent/<agent_id>/<name>`。这里的测试
 // 用合成多段名模拟该形态，钉住三件事：可寻址（resolve 最长前缀）、
 // 派发期父地址 = 完整挂载点、根清单的呈现形态。

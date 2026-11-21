@@ -145,12 +145,12 @@ fn the_virtual_address_of_ones_own_package_is_judged() {
         "/home/me/.symbio/agent/reviewer",
         serde_json::json!({ "fs": { "read": ["assets/**"] } }),
     );
-    assert!(s.path_allowed_addr("@vfs", "@vfs/agent/reviewer/assets/x.png", false));
+    assert!(s.path_allowed_addr("@vfs", "@vfs/subagent/reviewer/assets/x.png", false));
     // 根本身（条目概览）也要读权限——`. ` 或 `**` 才放行。
-    assert!(!s.path_allowed_addr("@vfs", "@vfs/agent/reviewer", false));
-    assert!(!s.path_allowed_addr("@vfs", "@vfs/agent/reviewer/AGENTS.md", false));
+    assert!(!s.path_allowed_addr("@vfs", "@vfs/subagent/reviewer", false));
+    assert!(!s.path_allowed_addr("@vfs", "@vfs/subagent/reviewer/AGENTS.md", false));
     // 别人的包不归本声明管（没有谁的 manifest 能描述别人的树）。
-    assert!(s.path_allowed_addr("@vfs", "@vfs/agent/other/AGENTS.md", false));
+    assert!(s.path_allowed_addr("@vfs", "@vfs/subagent/other/AGENTS.md", false));
     // 用户的工作目录也不归它管。
     assert!(s.path_allowed_addr("@vfs", "src/main.rs", false));
 }
@@ -214,7 +214,7 @@ fn a_sibling_directory_named_after_the_root_is_not_inside_it() {
     assert!(s.own_rel("@vfs", inside).is_some(), "自己在里面");
     assert!(s.own_rel("@vfs", sibling).is_none(), "兄弟目录不在里面");
     // 虚拟侧同案：前缀带尾部分隔符，`reviewer-evil` 匹不上。
-    assert!(s.own_rel("@vfs", "@vfs/agent/reviewer-evil/x").is_none());
+    assert!(s.own_rel("@vfs", "@vfs/subagent/reviewer-evil/x").is_none());
 }
 
 // ── ctx 通道：建槽 → 发布 → 读 ────────────────────────────────────────────

@@ -69,7 +69,7 @@ export interface SessionNodeSink {
  *
  * **不只一份**：子智能体空间（`agent/<id>/…`）是一棵完整子树，内部有自己的
  * `session` 挂载。只订根那一份会让子空间的会话节点变更**根本收不到**——
- * 它的地址是 `<根>/agent/<id>/session/<sid>`，匹配不上根挂载的前缀。
+ * 它的地址是 `<根>/subagent/<id>/session/<sid>`，匹配不上根挂载的前缀。
  * 「会话住在哪个空间」是地址的一部分，订阅因此按挂载目录逐份登记。
  */
 const _mounts = new Set<string>()

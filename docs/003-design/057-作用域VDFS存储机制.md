@@ -63,7 +63,7 @@ provider 键，插件只经相对地址读写，物理路径只留在 provider �
 | `symbio-plugin-tool/src/port.rs`（立约格 `from`） | 声誉聚合主体（DE-038） | **是**（归属） | 保留 |
 | `symbio-plugin-tool/src/port.rs`（before-hook 闸门） | 判的主体 | **是**（授权） | 保留 |
 | `symbio-plugin-tool/src/port.rs`（fork 子 ctx） | 转发 | 转发（无独立语义） | 随保留 |
-| `symbio-plugin-agent/src/host/plugin.rs`（`forward_to_sub_agent`） | 选中 agent 目录实例 | **是**（选择） | 保留 |
+| `symbio-plugin-subagent/src/host/plugin.rs`（`forward_to_sub_agent`） | 选中 agent 目录实例 | **是**（选择） | 保留 |
 | `symbio-plugin-session/src/tools/subagent.rs`（默认 agent 选择） | 子会话默认 agent | **是**（继承选择） | 保留 |
 | `symbio-plugin-local/src/todo_write.rs`（内存键） | `wd::aid` 内存键 | 否（寻址替代） | 迁 provider |
 
@@ -142,7 +142,7 @@ provider 键名。
 |---|---|---|
 | `WORKSPACE_VDFS` | 宿主 `drive.rs` / `Host::gather` | `DriveTarget.workdir` / metadata |
 | `SESSION_VDFS` | session `plugin/round.rs`（能力收集前） | `SessionStore::session_dir` |
-| `AGENT_VDFS` | 装配层 / 宿主 | `{homedir}/agent/<id>`（`SYMBIO_HOMEDIR`） |
+| `AGENT_VDFS` | 装配层 / 宿主 | `{homedir}/subagent/<id>`（`SYMBIO_HOMEDIR`） |
 
 - 宿主基础 ctx 与驱动 ctx 都要注入，覆盖「gather 收集」与「drive 驱动」两条链；
 - session 编排器在真实能力收集前注入（延续 D-513 的教训：`fork()` 只 clone

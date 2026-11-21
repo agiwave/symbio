@@ -6,9 +6,9 @@
 //!
 //! ## 背景
 //!
-//! 重构前，会话的工具集由 **agent 插件**在 `agent/chat` 路由里独家装配：
+//! 重构前，会话的工具集由 **子智能体插件**在 `agent/chat` 路由里独家装配：
 //! session 把 chat 请求整个转交给 agent，agent 再 `parent.traverse` 收工具、
-//! 装 system prompt、最后转交 model。这让 agent 插件成为会话链路上的**特权节点**——
+//! 装 system prompt、最后转交 model。这让 子智能体插件成为会话链路上的**特权节点**——
 //! 其它插件（local / web / mcp / skill）都只是 `traverse` 的参与者，唯独 agent 既
 //! 参与 `traverse` 又独占 chat 路由，且 session 必须选出一个 agent 才能对话。
 //!
@@ -59,8 +59,8 @@ use symbio_sdk::capability::{capability_init_error_bucket, CAPABILITY_ERRORS};
 /// - `SESSION_ID`：会话标识
 ///
 /// `agent_scope`（可选）：会话绑定的智能体作用域。收集器把它设成通用的
-/// `AGENT_ID` 键——由 **agent 插件自己**决定要不要按 `agent/<id>/…` 展开子树；
-/// 收集器不认识任何具体段名。缺省（`None` 或空串）时 agent 插件不贡献任何工具。
+/// `AGENT_ID` 键——由 **sub子智能体插件自己**决定要不要按 `agent/<id>/…` 展开子树；
+/// 收集器不认识任何具体段名。缺省（`None` 或空串）时 子智能体插件不贡献任何工具。
 ///
 /// ## 语义
 ///
@@ -81,7 +81,7 @@ pub async fn collect_capabilities(
 
     let traverse_ctx = ctx.fork();
     // 作用域展开：会话绑定 `agent`（metadata.agent_id）时，把这一个通用作用域键交给
-    // 各插件自行决定认不认——agent 插件据此把子树的 prompt rows / 工具按
+    // 各插件自行决定认不认——子智能体插件据此把子树的 prompt rows / 工具按
     // `agent/<id>/…` 展开。收集器**只做展开**，不认识「人格」「记忆」这些段名。
     if let Some(scope) = agent_scope.map(str::trim).filter(|s| !s.is_empty()) {
         traverse_ctx.set(AGENT_ID, scope.to_string());
@@ -94,7 +94,7 @@ pub async fn collect_capabilities(
     let bindings = std::sync::Arc::new(symbio_plugin_api::port::PortBindings::default());
     traverse_ctx.set(symbio_plugin_api::port::PORT_BINDINGS, bindings.clone());
     capability_init_error_bucket(&traverse_ctx);
-    // Agent 权限作用域槽（D-153）：agent 插件在 traverse 里发布（它是唯一能把
+    // Agent 权限作用域槽（D-153）：子智能体插件在 traverse 里发布（它是唯一能把
     // `agent_id` 解析成一份声明的地方），收集结束后由本函数把同一个 `Arc` 挂回
     // 调用方 ctx——工具执行期从那里读。与错误桶同一条路：容器对每个子插件各
     // fork 一份，插件写在自己那份上，收集方与兄弟都看不见，只能靠**共享的可变槽**。

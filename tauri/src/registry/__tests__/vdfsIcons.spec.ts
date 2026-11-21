@@ -29,7 +29,7 @@ describe('registerVdfsIcon / iconForNode（登记与查找）', () => {
   })
 
   it('主导航的六类资源均登记了独立图标', () => {
-    for (const kind of ['model', 'mcp', 'agent', 'skill', 'session', 'plugin_manager']) {
+    for (const kind of ['model', 'mcp', 'subagent', 'skill', 'session', 'plugin_manager']) {
       expect(iconForNode({ kind }), `${kind} 缺图标`).toBeTruthy()
     }
   })
@@ -113,11 +113,11 @@ function svgStub() {
  * `<根>` 的挂载点节点由后端 `composite/vdfs.rs::dir_node` 用 `VdfsNode::dir(...)`
  * 产出 —— 它的 `kind` 恒为 **`"dir"`**（`VDFS_KIND_DIR`），且**不带 `config_type`**；
  * 身份只有 name / title / description / access。而挂载点图标是登记在**裸名字**上的
- * （`session` / `model` / `agent` / …）。
+ * （`session` / `model` / `subagent` / …）。
  *
  * 侧栏原先写的是「只按名字查一级」，能命中；卡片写的是「项级 → kind → 名字」三级。
  * 我为了「kind 优先」把侧栏第一跳改成 `kind`，却没保留**名字兜底**——`kind="dir"`
- * 查不到、`config_type` 又没有，于是主界面左栏的「会话 / 模型 / 智能体 / MCP /
+ * 查不到、`config_type` 又没有，于是主界面左栏的「会话 / 模型 / 子智能体 / MCP /
  * 技能 / 插件管理」整排退成了同一个默认图标。
  *
  * ## 这组用例为什么必须存在
@@ -134,7 +134,7 @@ describe('iconForNode（按节点取图标的唯一实现）', () => {
   const ROOT_MOUNTS = [
     { name: 'session', title: '会话' },
     { name: 'model', title: '模型' },
-    { name: 'agent', title: '智能体' },
+    { name: 'subagent', title: '子智能体' },
     { name: 'mcp', title: 'MCP' },
     { name: 'skill', title: '技能' },
     { name: 'plugin_manager', title: '插件管理' },

@@ -14,13 +14,13 @@ import { auditCase, expectAudit } from '../audit-assert.mjs'
 // 仓库根经 `--root=` 注入，故这里在临时目录造一棵最小仓库：
 //   <root>/crates/symbio-plugin-<name>/    插件 crate 目录（AO-001/003/005/006 的目录事实；
 //                                          D-191 后一插件一 crate）
-//   <root>/crates/symbio-plugin-agent/README.md  成员资格判词 + 兄弟插件指路
-//   <root>/crates/symbio-plugin-agent/src/host/*.rs  职责表 + 归属表副本 + 真实模块文件
+//   <root>/crates/symbio-plugin-subagent/README.md  成员资格判词 + 兄弟插件指路
+//   <root>/crates/symbio-plugin-subagent/src/host/*.rs  职责表 + 归属表副本 + 真实模块文件
 //   <root>/crates/symbio-deploy/src/lib.rs     装配清单（生成物，判据读它）
 const script = fileURLToPath(new URL('./agent-ownership-audit.mjs', import.meta.url))
 
 const BASE_README = [
-  '# Agent 插件',
+  '# 子智能体插件',
   '',
   '子树挂与父 Agent 同构的默认插件集：',
   '',
@@ -63,15 +63,15 @@ const BASE_ASSEMBLY = ['pub const ASSEMBLY_SUB_AGENT_PLUGINS: &[&str] = &[', '  
  */
 function audit({ readme, modRs, pluginRs, assembly, extraHost = {}, extraPluginDirs = [] } = {}) {
   return withTempTree({}, (root) => {
-    const agentHost = path.join(root, 'crates/symbio-plugin-agent/src/host')
+    const agentHost = path.join(root, 'crates/symbio-plugin-subagent/src/host')
     fs.mkdirSync(agentHost, { recursive: true })
-    for (const name of ['agent', 'memory', 'setting', ...extraPluginDirs]) {
+    for (const name of ['subagent', 'memory', 'setting', ...extraPluginDirs]) {
       fs.mkdirSync(path.join(root, 'crates', `symbio-plugin-${name}`), { recursive: true })
     }
     fs.writeFileSync(path.join(root, 'crates/symbio-plugin-memory/README.md'), '# 记忆插件\n')
-    fs.writeFileSync(path.join(root, 'crates/symbio-plugin-agent/README.md'), readme ?? BASE_README)
-    fs.writeFileSync(path.join(root, 'crates/symbio-plugin-agent/src/host/mod.rs'), modRs ?? BASE_MOD_RS)
-    fs.writeFileSync(path.join(root, 'crates/symbio-plugin-agent/src/host/plugin.rs'), pluginRs ?? BASE_PLUGIN_RS)
+    fs.writeFileSync(path.join(root, 'crates/symbio-plugin-subagent/README.md'), readme ?? BASE_README)
+    fs.writeFileSync(path.join(root, 'crates/symbio-plugin-subagent/src/host/mod.rs'), modRs ?? BASE_MOD_RS)
+    fs.writeFileSync(path.join(root, 'crates/symbio-plugin-subagent/src/host/plugin.rs'), pluginRs ?? BASE_PLUGIN_RS)
     for (const [name, src] of Object.entries(extraHost)) {
       fs.writeFileSync(path.join(agentHost, name), src)
     }

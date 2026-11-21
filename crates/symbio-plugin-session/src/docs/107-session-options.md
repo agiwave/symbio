@@ -289,7 +289,7 @@ session ──collect_options(parent, ctx)──▶ parent.traverse(available_op
 
 ### 9.3 智能体 / Model（跨插件贡献）
 
-- agent 插件贡献 `select`：候选 = 「不使用 Agent」（`value = ""`）+ 各可用 agent
+- 子智能体插件贡献 `select`：候选 = 「不使用 Agent」（`value = ""`）+ 各可用 agent
  目录；`default = ""`。
 - model 插件贡献 `select`：候选 = 各启用 Provider；**无可用 Provider 时下发单个
  占位候选「未配置」**（说明指向设置页），而不是为它新增「无条件禁用」这种机制。

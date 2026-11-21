@@ -96,7 +96,7 @@ async fn sub_agent_instance_injects_its_own_memory() {
         Some(agent_dir.as_path()),
         None,
         None,
-        "@vfs/agent/reviewer/memory",
+        "@vfs/subagent/reviewer/memory",
     );
     p.traverse(String::new(), ctx).await.unwrap();
 
@@ -104,7 +104,9 @@ async fn sub_agent_instance_injects_its_own_memory() {
     assert_eq!(segs.len(), 1);
     assert!(segs[0].1.contains("评审时先读测试。"));
     assert!(
-        segs[0].1.contains("@vfs/agent/reviewer/memory/AGENTS.md"),
+        segs[0]
+            .1
+            .contains("@vfs/subagent/reviewer/memory/AGENTS.md"),
         "地址必须落在子智能体自己的挂载点下：{}",
         segs[0].1
     );

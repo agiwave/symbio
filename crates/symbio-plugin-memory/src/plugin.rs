@@ -30,7 +30,7 @@
 //!
 //! 智能体腿的落位规则只有一条（记忆 = 本插件目录的父目录下的 `AGENTS.md`），两个
 //! 装配作用域因此是**同一个插件的两个实例**，不是两段代码。子树实例的注册经
-//! `agent` 插件的 `SubAgentVisitor` 加 `agent/<id>/` 前缀，与系统侧并集且不撞名。
+//! `subagent` 插件的 `SubAgentVisitor` 加 `agent/<id>/` 前缀，与系统侧并集且不撞名。
 
 use super::config::MemoryConfig;
 use super::memory::{self, PLUGIN_TITLE, SEGMENT_NAME};

@@ -117,7 +117,7 @@ S.unsubscribes ??= []
  * 变更地址落在哪个已登记的挂载目录下（没有就是不属于本消费端）。
  *
  * 取**最长**匹配：挂载目录互为前缀时（`<根>/session` 与 `<根>/session/…` 不会，
- * 但 `<根>/agent` 之下可能），最长匹配才是「属于谁」的正确答案。
+ * 但 `<根>/subagent` 之下可能），最长匹配才是「属于谁」的正确答案。
  */
 function mountOf(path: string): string | null {
   let best: string | null = null

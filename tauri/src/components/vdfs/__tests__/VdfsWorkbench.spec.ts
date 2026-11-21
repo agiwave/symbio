@@ -440,9 +440,9 @@ describe('VdfsWorkbench 进入可新建目录时自动备好草稿', () => {
     // 中间那一拍 `creatableType` 仍是上一栏的类型。故监听源必须是目录自述。
     const agent: VdfsNode = {
       ...mountNode,
-      path: '@vfs/agent',
-      name: 'agent',
-      new_type: { ext: 'agent', title: '智能体' },
+      path: '@vfs/subagent',
+      name: 'subagent',
+      new_type: { ext: 'subagent', title: '子智能体' },
     }
     const model: VdfsNode = {
       ...mountNode,
@@ -450,9 +450,9 @@ describe('VdfsWorkbench 进入可新建目录时自动备好草稿', () => {
       name: 'model',
       new_type: { ext: 'model', title: '模型' },
     }
-    installStub({ cwd: '@vfs/agent', cwdNode: agent })
+    installStub({ cwd: '@vfs/subagent', cwdNode: agent })
     bench()
-    expect(hoisted.newTypes).toEqual(['agent'])
+    expect(hoisted.newTypes).toEqual(['subagent'])
 
     // 切到模型：地址先变，自述还没回来 —— 这一拍里绝不能开（开了就是 agent 的详情）
     stubRefs!.cwd.value = '@vfs/model'
@@ -463,7 +463,7 @@ describe('VdfsWorkbench 进入可新建目录时自动备好草稿', () => {
     stubRefs!.cwdNode.value = model
     await nextTick()
     expect(hoisted.fns.startNew).toHaveBeenCalledTimes(2)
-    expect(hoisted.newTypes).toEqual(['agent', 'model'])
+    expect(hoisted.newTypes).toEqual(['subagent', 'model'])
   })
 
   it('已有选中项 ⇒ 不覆盖用户的选择', () => {

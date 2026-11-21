@@ -62,7 +62,7 @@ cd tauri && npm install && npm run tauri dev
 
 ### 导入智能体
 
-在 `<根>/agent` 里用**新建类型 `zip`** 导入整包——Agent 没有独立二进制入口。示例目录是
+在 `<根>/subagent` 里用**新建类型 `zip`** 导入整包——Agent 没有独立二进制入口。示例目录是
 [`examples/fullstack-dev/`](examples/fullstack-dev)；先打包再导入：
 
 ```bash

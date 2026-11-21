@@ -59,7 +59,7 @@ const GONE_TOOLS = [
 ];
 
 /** 停用后**应仍在**工具面的会话级原语：agent_run 由 session 注册（D-500），
- *  agent 插件只提供 `agent_id` 的取值域——目录缺席时 enum 为空，工具照常在。 */
+ *  子智能体插件只提供 `agent_id` 的取值域——目录缺席时 enum 为空，工具照常在。 */
 const STAYS_TOOLS = ['agent_run'];
 
 const gatewayConfig = (port) => ({
@@ -169,7 +169,7 @@ export default defineCase(
         assert(!tools.includes(gone), `停用工具插件后 ${gone} 不该在工具面（实际: ${tools.join(',')}）`);
       }
       for (const stays of STAYS_TOOLS) {
-        assert(tools.includes(stays), `会话级原语 ${stays} 不随 agent 插件停用消失（D-500；实际: ${tools.join(',')}）`);
+        assert(tools.includes(stays), `会话级原语 ${stays} 不随 子智能体插件停用消失（D-500；实际: ${tools.join(',')}）`);
       }
       // 下限防白绿：工具面整体变空意味着别的插件也丢了，而不是「停用生效」。
       assert(

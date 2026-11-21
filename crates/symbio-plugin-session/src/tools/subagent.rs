@@ -5,7 +5,7 @@
 //! 新建会话与新建会话的子会话是同一件事的两层（子会话的存储归档、收件箱输入面、
 //! `parent_session_id` 语义全在本插件），委托因此是**会话域**的能力；`agent_id` 只是
 //! 一个可选参数，核心机制（子会话的发起 / 转播 / 恢复）与子 agent 的目录、装配无关
-//! ——agent 插件只管「有哪些智能体、怎么把它们连进来」，不承担会话。工具由本插件
+//! ——子智能体插件只管「有哪些子智能体、怎么把它们连进来」，不承担会话。工具由本插件
 //! 在 `traverse(available_tools)` 里无条件注册（见 `super::super::plugin`），裁决与
 //! 迁移记录见 `docs/003-design/011-Agent目录规范.md` 的关键决策。
 //!
@@ -73,7 +73,7 @@ use symbio_plugin_api::{vdfs_context, VdfsError};
 use symbio_plugin_api::{
     VdfsContent, VdfsListResponse, VdfsNode, VdfsProvider, VdfsRequest, VDFS_STATUS_WORKING,
 };
-use symbio_plugin_api::{PLUGIN_ID_AGENT, PLUGIN_ID_SESSION};
+use symbio_plugin_api::{PLUGIN_ID_SESSION, PLUGIN_ID_SUBAGENT};
 
 // ── 本工具的身份约定（续跑参数经**载荷**回传，由 tool_executor 落到 meta.prompt）──
 /// 工具名。**两处必须同源**：`CapabilityMeta.name`（LLM 看到的短名）与待审批载荷
@@ -241,9 +241,9 @@ impl AgentRunCapability {
         //
         // ⚠️ **默认值必须在本作用域可解释**（与 `forward_to_sub_agent`
         // 清空 `AGENT_ID` 是同一条规则：跨作用域不继承「选中」）。
-        // 本能力读的 agent 挂载点经**本作用域容器**的 VDFS 视图：
-        //  - 系统树的挂载点 = `{homedir}/agent`，与会话选中的 agent **同域** ⇒ 默认照常生效；
-        //  - 子树实例（分形）的挂载点 = `<agentdir>/agent`，而 `ctx[AGENT_ID]` 是**外层**
+        // 本能力读的 subagent 挂载点经**本作用域容器**的 VDFS 视图：
+        //  - 系统树的挂载点 = `{homedir}/subagent`，与会话选中的 agent **同域** ⇒ 默认照常生效；
+        //  - 子树实例（分形）的挂载点 = `<agentdir>/subagent`，而 `ctx[AGENT_ID]` 是**外层**
         //    作用域的选中 ⇒ 拿它当默认必然查不到，令 LLM 收到一条它从未传过的 id 的报错。
         // 故默认值先过一遍**本作用域**的挂载点：不在我的清单里 ⇒ 我这一层没有默认。
         // **显式** `agent_id` 不受此限 —— 那是调用方的指令，仍在下面照旧校验。
@@ -536,10 +536,10 @@ enum RelayOutcome {
 
 /// 目标 agent 目录是否存在（**本作用域**的 agent 挂载点）。
 ///
-/// 判据走地址面（`Stat agent/<id>`），不走 agent 插件的存储——E-009 禁兄弟插件依赖，
-/// agent 目录的存在性由它的 owner（agent 插件）经 VDFS 回答。作用域语义随分形天然
-/// 正确：本能力的路由入口是**本作用域容器**（子树里的 parent 是子容器），其 `agent`
-/// 挂载点在子树里就是 `<agentdir>/agent`。任何错误（挂载点缺席 / 存储故障）一律按
+/// 判据走地址面（`Stat subagent/<id>`），不走 sub子智能体插件的存储——E-009 禁兄弟插件依赖，
+/// agent 目录的存在性由它的 owner（sub子智能体插件）经 VDFS 回答。作用域语义随分形天然
+/// 正确：本能力的路由入口是**本作用域容器**（子树里的 parent 是子容器），其 `subagent`
+/// 挂载点在子树里就是 `<agentdir>/subagent`。任何错误（挂载点缺席 / 存储故障）一律按
 /// 「不存在」处理——委托目标缺失是参数问题，不值得把存储抖动上抛成另一条报错。
 async fn agent_exists(
     parent: &Arc<dyn Plugin>,
@@ -549,7 +549,7 @@ async fn agent_exists(
     let Some(provider) = parent.clone().get_vfs_provider() else {
         return false;
     };
-    let addr = format!("{PLUGIN_ID_AGENT}/{agent_id}");
+    let addr = format!("{PLUGIN_ID_SUBAGENT}/{agent_id}");
     provider
         .dispatch(&vdfs_context(ctx), &addr, VdfsRequest::Stat)
         .await

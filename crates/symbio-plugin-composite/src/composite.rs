@@ -196,7 +196,7 @@ impl Plugin for Composite {
             // 能力收集同样是跨挂载边界的转发：子插件在收集期拼协议级绝对地址
             // （如提示词片段里的可编辑地址），靠的就是这里的当前父地址。
             // 从 **ctx 已携带的父地址续接**而非落回系统根——本容器自身可能是
-            // 嵌套装配（如子智能体子树挂在 `<根>/agent/<id>` 下），落回系统根
+            // 嵌套装配（如子智能体子树挂在 `<根>/subagent/<id>` 下），落回系统根
             // 会让子插件收集期拼出与实际挂载不符的地址。
             req_ctx.set(
                 VDFS_PARENT_ADDR,
@@ -212,9 +212,9 @@ impl Plugin for Composite {
 
     /// 系统链路：`Composite` 直接暴露自己的组合视图（[`CompositeVdfs`]）。
     ///
-    /// 容器把子插件的 vfs provider 聚合进它，子智能体的 `agent/<id>` 挂载点也经它
-    /// 往下钻——`agent` 插件拿到子 composite 的 `Arc<dyn Plugin>` 后调本方法即可取回
-    /// 同一个 provider，无需任何类型耦合（见 `crates/symbio-plugin-agent/src/host/vdfs.rs` 的 `sub_vfs`）。
+    /// 容器把子插件的 vfs provider 聚合进它，子智能体的 `subagent/<id>` 挂载点也经它
+    /// 往下钻——`subagent` 插件拿到子 composite 的 `Arc<dyn Plugin>` 后调本方法即可取回
+    /// 同一个 provider，无需任何类型耦合（见 `crates/symbio-plugin-subagent/src/host/vdfs.rs` 的 `sub_vfs`）。
     ///
     /// 插件管理插件也走这条：它经 `ctx.parent()` 拿到本容器，取回这个 provider，
     /// 再以注册表动词读写插件集合（见 `crates/symbio-plugin-plugin_manager/src/plugin.rs`）。

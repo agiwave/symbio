@@ -8,7 +8,7 @@ import './_selfrun.mjs';
 // 4. FIFO、忙则排队：一轮在跑时新消息只入队，跑完再取；排队中的条目可删除取消。
 //
 // 与 `agent_run` 的区分：这条路径全程没有「派生子会话」——子会话是**那个空间
-// 自己的**（`<homedir>/agent/<id>/session/<sid>`，与父会话不同的 store）。
+// 自己的**（`<homedir>/subagent/<id>/session/<sid>`，与父会话不同的 store）。
 import {
   MockLlm,
   makeHomedir,
@@ -75,8 +75,8 @@ export default defineCase('T15 子智能体空间自驱动：写 inbox → 空�
     gatewayPort: GATEWAY_PORT,
   });
 
-  /** 子空间在 VDFS 里的地址段：`agent/<id>/session/<sid>` */
-  const subSession = `agent/${AGENT_ID}/session/${SUB_SESSION}`;
+  /** 子空间在 VDFS 里的地址段：`subagent/<id>/session/<sid>` */
+  const subSession = `subagent/${AGENT_ID}/session/${SUB_SESSION}`;
 
   try {
     await cli.waitGatewayReady();
@@ -85,12 +85,12 @@ export default defineCase('T15 子智能体空间自驱动：写 inbox → 空�
     const root = rootResp.body?.data?.path;
     assert(typeof root === 'string' && root.length > 0, 'vdfs/root 应返回根地址');
 
-    /** 空间内会话叶子的地址：`<根>/agent/<id>/session/<sid>`（读它 = 前端打开该会话的同一出口） */
+    /** 空间内会话叶子的地址：`<根>/subagent/<id>/session/<sid>`（读它 = 前端打开该会话的同一出口） */
     const subSessionAddr = `${root.replace(/\/+$/, '')}/${subSession}`;
     /** 子空间里的消息集合（生产读出口：`vdfs/read` 会话叶子，与前端加载历史同一出口） */
     const subMessages = async () => (await readTranscriptAt(cli, subSessionAddr)) ?? [];
 
-    /** 空间内地址：`<根>/agent/<id>/session/<sid>/inbox[/<iid>]` */
+    /** 空间内地址：`<根>/subagent/<id>/session/<sid>/inbox[/<iid>]` */
     const inboxAddr = (iid) =>
       `${subSessionAddr}/inbox${iid ? `/${iid}` : ''}`;
 
@@ -106,13 +106,13 @@ export default defineCase('T15 子智能体空间自驱动：写 inbox → 空�
 
     // ── ①b 清单里的地址必须**可用**：会话条目地址 = 完整地址，且按它读得到转写
     //
-    // 挂载点（`agent/<id>`）**不得**替访问层填条目地址——它不知道自己被挂在哪
-    // （`agent/`），填出来的会是一个少了外层挂载段的假地址，而访问层见到非空地址就
+    // 挂载点（`subagent/<id>`）**不得**替访问层填条目地址——它不知道自己被挂在哪
+    // （`subagent/`），填出来的会是一个少了外层挂载段的假地址，而访问层见到非空地址就
     // 「不再回填」。表现：子空间里列出的**每一条**都顶着子空间根地址
     // （`<根>/<agent-id>`，那是个目录），前端点开会话即「读取会话转写失败」。
     //
     // 只手工拼地址（`inboxAddr`）的用例对这条无感：必须**消费清单给的地址**才钉得住。
-    const sessionMount = `${root.replace(/\/+$/, '')}/agent/${AGENT_ID}/session`;
+    const sessionMount = `${root.replace(/\/+$/, '')}/subagent/${AGENT_ID}/session`;
     const mountList = await cli.invoke('vdfs/list', { path: sessionMount });
     const listed = mountList.body?.data?.items ?? [];
     const mine = listed.find((n) => n.name === SUB_SESSION);
@@ -134,12 +134,12 @@ export default defineCase('T15 子智能体空间自驱动：写 inbox → 空�
 
     // ── ①c 子空间里的「智能体」清单必须是**它自己的**（该子智能体没有下级）
     //
-    // agent 插件的作用域 = **它自己持有的目录**（装配期由父插件经 `PLUGIN_DIR`
+    // 子智能体插件的作用域 = **它自己持有的目录**（装配期由父插件经 `PLUGIN_DIR`
     // 告知）。若从**请求上下文**取，那里没有 `PLUGIN_DIR`，就会回退到**全局**
     // agent 根——子空间里列出的「智能体」其实是顶层清单（含它自己），用户看到
     // 的是「下一级智能体居然是自己」。顶层看不出这个错（回退值恰好等于自己的
     // 目录），只有钻进嵌套层才显形。
-    const nestedAgentMount = `${root.replace(/\/+$/, '')}/agent/${AGENT_ID}/agent`;
+    const nestedAgentMount = `${root.replace(/\/+$/, '')}/subagent/${AGENT_ID}/subagent`;
     const nestedList = await cli.invoke('vdfs/list', { path: nestedAgentMount });
     assertEq(
       nestedList.status,

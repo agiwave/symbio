@@ -12,7 +12,7 @@
 //! ## 根为什么是**单槽**，以及谁被挡在外面
 //!
 //! 根归系统 Agent：子智能体子树里也有容器（它会把自己登记成根），其注册经
-//! `crates/symbio-plugin-agent/src/host/scope.rs::SubAgentVisitor` **丢弃**——否则子树会劫持整个 `<根>`，
+//! `crates/symbio-plugin-subagent/src/host/scope.rs::SubAgentVisitor` **丢弃**——否则子树会劫持整个 `<根>`，
 //! 系统侧全部挂载点瞬间消失（判据 = 该文件的单测 + e2e `t39`）。
 //!
 //! ## 挂载清单（非根的挂载行）为什么不存在

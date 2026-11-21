@@ -165,7 +165,7 @@ async fn round_injection_keeps_the_existing_agent_scope() {
 
     let ctx: std::sync::Arc<dyn symbio_sdk::plugin::PluginInvokeRequest> =
         std::sync::Arc::new(PluginSimpleRequest::new(None, None));
-    // 模拟 agent 插件在子树 ctx 上按 AgentScope.root 重挂的那一份
+    // 模拟 子智能体插件在子树 ctx 上按 AgentScope.root 重挂的那一份
     let sub_scoped: symbio_kernel::vdfs::DynVdfsProvider =
         std::sync::Arc::new(ScopeDirVdfs::at(agent_dir.path().to_path_buf()));
     ctx.set(AGENT_VDFS, Some(sub_scoped));

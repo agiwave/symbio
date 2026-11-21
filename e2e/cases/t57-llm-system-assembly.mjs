@@ -21,6 +21,15 @@ import './_selfrun.mjs';
 // 注册段的条数随挂载形态变（绑不绑 agent、挂几个 memory 实例），按下标判
 // 一换形态就红；按**段自己的地址标记**判则与形态无关——段在不在、序对不对，
 // 都是段内容自身的事实。
+//
+// ## 段间相对顺序为何是这一串
+//
+// 注册段的广播序 = 容器子插件的实例表插入序（目录扫描的字母序，见
+// `composite.rs::traverse`），不是什么声明契约：改名前 `agent < memory < model`，
+// 改名后 `memory < model < subagent`，于是人格段从末尾移到两段记忆之间。
+// 本用例钉的**顺序纪律只有一条**——请求级前缀（【长期记忆】）排在全部注册段
+// 之后；段与段之间谁先谁后是实现细节，修改插件名会让它漂移，不作为契约。
+// 下面 `segments` 按当前装配形态的实际顺序给出，只为让「段在场」的判据成立。
 import {
   MockLlm,
   makeHomedir,
@@ -44,7 +53,7 @@ const TURN1 = '第一句：记住我喜欢红茶';
 const TURN2 = '第二句：我喜欢什么';
 
 /** agent 级【智能体记忆】段的地址标记（段头自带，段内容 = AGENTS.md 正文） */
-const AGENT_MEM_ADDR = '.vdfsv2/vdfs/agent/e2e-t57-agent/memory/AGENTS.md';
+const AGENT_MEM_ADDR = '.vdfsv2/vdfs/subagent/e2e-t57-agent/memory/AGENTS.md';
 /** 根级【工作区记忆】段地址标记 */
 const ROOT_WS_ADDR = '.vdfsv2/vdfs/memory/WORKSPACE.md';
 /** 根级【会话记忆】段地址标记（D-513：会话记忆归 memory 插件） */
@@ -90,7 +99,7 @@ export default defineCase(
       assertSystemAssembly(
         reqs[0],
         {
-          segments: [AGENT_MEM_ADDR, AGENTS_BODY, ROOT_WS_ADDR, ROOT_SESS_ADDR, PERSONA],
+          segments: [ROOT_WS_ADDR, ROOT_SESS_ADDR, PERSONA, AGENT_MEM_ADDR, AGENTS_BODY],
         },
         'T57① 注册段',
       );
@@ -104,7 +113,7 @@ export default defineCase(
       assertSystemAssembly(
         reqs[1],
         {
-          segments: [AGENT_MEM_ADDR, AGENTS_BODY, ROOT_WS_ADDR, ROOT_SESS_ADDR, PERSONA],
+          segments: [ROOT_WS_ADDR, ROOT_SESS_ADDR, PERSONA, AGENT_MEM_ADDR, AGENTS_BODY],
           prefixMarkers: ['【长期记忆】'],
         },
         'T57② 前缀置后',

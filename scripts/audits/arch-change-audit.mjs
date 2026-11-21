@@ -308,7 +308,15 @@ const inDirs = (files, dirs) => files.some((f) => dirs.some((d) => f.startsWith(
  * 这条判据随即退化成填表（与 CC-001 只管源码、不管 Cargo.toml 是同一条理由）。
  */
 export function isProductionSource(f) {
-  return f.endsWith('.rs') && !/\.test\.rs$/.test(f) && !/(^|\/)tests\//.test(f)
+  return (
+    f.endsWith('.rs') &&
+    !/\.test\.rs$/.test(f) &&
+    !/(^|\/)tests\//.test(f) &&
+    // 项目里纯测试模块的第二种命名约定：`#[cfg(test)] mod tests;` 对应的
+    // `src/**/tests.rs`。与 `*.test.rs` 同级，都是契约的证词而非契约本身；
+    // 全仓其余审计（dead-code / panic / facade-loc / grep-audit）同此口径。
+    !/(^|\/)tests\.rs$/.test(f)
+  )
 }
 
 /**

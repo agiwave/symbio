@@ -24,7 +24,7 @@
 //!
 //! ## 归属：这一层只归本插件
 //!
-//! 从前这两份文件由 `agent` 插件用两个模块各管一个（`instruction` 管系统态、
+//! 从前这两份文件由 `subagent` 插件用两个模块各管一个（`instruction` 管系统态、
 //! `memory` 管子智能体态），落位规则相同却写成两份。现在它们是**同一个插件的两个
 //! 实例**：读写面（`<根>/memory/…`）与注入面落在同一个所有者上，
 //! 「谁能读写它，谁负责注入它」这条原则重新完整成立。
@@ -57,7 +57,7 @@ pub const MEMORY_FILE: &str = "AGENTS.md";
 /// 空间里（跨族同名 = 后写者胜，落盘表现是挂载点被顶掉），本插件的挂载名是 `memory`，
 /// 段名于是叫 `agent-memory`——与另外两腿（`workspace-memory` / `session-memory`）同构。
 ///
-/// 子树里的注册会经 `agent` 插件的 `SubAgentVisitor` 加上 `agent/<id>/` 前缀，
+/// 子树里的注册会经 `subagent` 插件的 `SubAgentVisitor` 加上 `agent/<id>/` 前缀，
 /// 因此与系统侧的**同名**条目不冲突（并集）。
 pub const SEGMENT_NAME: &str = "agent-memory";
 

@@ -549,7 +549,7 @@ describe('useVdfs 新建 = 选中一张草稿节点（与「选中一项」同�
  * 归属判据（`isVdfsUnder`）在目录变的**那一刻**就能判，不看列表。
  */
 describe('useVdfs 换目录 ⇒ 旧选中项失效', () => {
-  const AGENT_DIR = `@vfs/agent`
+  const AGENT_DIR = `@vfs/subagent`
 
   /** 智能体目录里的一个条目（选中它 ⇒ 右栏是智能体详情） */
   function agentItem(): VdfsItem {
@@ -557,7 +557,7 @@ describe('useVdfs 换目录 ⇒ 旧选中项失效', () => {
       path: `${AGENT_DIR}/a1`,
       name: 'a1',
       title: '智能体一',
-      kind: 'agent',
+      kind: 'subagent',
       status: 'active',
       access: 'rw',
       ext: 'form',
@@ -567,7 +567,7 @@ describe('useVdfs 换目录 ⇒ 旧选中项失效', () => {
   it('★ 换绑定地址 ⇒ 上一个目录的选中项立刻作废（不等列表回来）', async () => {
     mocks.listVdfs.mockResolvedValue({
       path: AGENT_DIR,
-      node: { ...dirNode(), path: AGENT_DIR, name: 'agent', title: '智能体' },
+      node: { ...dirNode(), path: AGENT_DIR, name: 'subagent', title: '子智能体' },
       items: [agentItem()],
     })
     const addrRef = ref<string>(AGENT_DIR)
@@ -712,7 +712,7 @@ describe('useVdfs 左栏导航图标（回归：挂载点 kind 恒为 dir，必�
   const SIX_MOUNTS: Array<[string, string]> = [
     ['session', '会话'],
     ['model', '模型'],
-    ['agent', '智能体'],
+    ['subagent', '子智能体'],
     ['mcp', 'MCP'],
     ['skill', '技能'],
     ['plugin_manager', '插件管理'],

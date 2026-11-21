@@ -16,7 +16,7 @@ use symbio_kernel::chat::principal::Principal;
 // ==================== 转写地址与节点投影 ====================
 //
 // 下面两项从 `crates/symbio-plugin-session` 上移到 core：它们描述的是**跨插件的契约**，
-// 不是会话插件的内部实现。上移之前，`crates/symbio-plugin-agent` 为了构造子会话转播桥，
+// 不是会话插件的内部实现。上移之前，`crates/symbio-plugin-subagent` 为了构造子会话转播桥，
 // 不得不从会话插件的内部模块取类型 —— 那是全仓**唯一**一处
 // 真跨插件引用，违反插件独立原则（判据 `plugin-entry-audit` E-009）。
 //

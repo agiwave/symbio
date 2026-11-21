@@ -6,10 +6,6 @@
 
 // ============ 插件工厂 id（部署身份） ============
 
-/// 智能体（含子 Agent —— 分形）
-// dead-code-allow R-001: 插件 id 是部署身份，未被引用不等于可删（同文件头 R-003）
-pub const PLUGIN_ID_AGENT: &str = "agent";
-
 /// 对话面·判决（无它 ⇒ 全部输入直接进工具循环）
 // dead-code-allow R-001: 插件 id 是部署身份，未被引用不等于可删（同文件头 R-003）
 pub const PLUGIN_ID_CLASSIFY: &str = "classify";
@@ -110,6 +106,10 @@ pub const PLUGIN_ID_SKILL: &str = "skill";
 // dead-code-allow R-001: 插件 id 是部署身份，未被引用不等于可删（同文件头 R-003）
 pub const PLUGIN_ID_SLO: &str = "slo";
 
+/// 子智能体（子 Agent 的管理与连接 —— 分形）
+// dead-code-allow R-001: 插件 id 是部署身份，未被引用不等于可删（同文件头 R-003）
+pub const PLUGIN_ID_SUBAGENT: &str = "subagent";
+
 /// 任务表：清单声明成事实、独立验证与返工、就绪集调度与调度段
 // dead-code-allow R-001: 插件 id 是部署身份，未被引用不等于可删（同文件头 R-003）
 pub const PLUGIN_ID_TASK: &str = "task";
@@ -159,7 +159,7 @@ pub const ASSEMBLY_SUB_AGENT_PLUGINS: &[&str] = &[
     "mcp", // 工具
     "telegram", // 消息渠道
     "hook", // 钩子
-    "agent", // 智能体（含子 Agent —— 分形）
+    "subagent", // 子智能体（子 Agent 的管理与连接 —— 分形）
     "skill", // 技能
     "gateway", // 外部 API 网关
     "vdfs", // VDFS 根（单槽归系统 Agent）
@@ -192,7 +192,7 @@ pub const ASSEMBLY_CORE_PLUGINS: &[&str] = &[
     "mcp", // 工具
     "telegram", // 消息渠道
     "hook", // 钩子
-    "agent", // 智能体（含子 Agent —— 分形）
+    "subagent", // 子智能体（子 Agent 的管理与连接 —— 分形）
     "skill", // 技能
     "gateway", // 外部 API 网关
     "vdfs", // VDFS 根（单槽归系统 Agent）

@@ -363,7 +363,7 @@ const DYNAMIC_ROUTES = {
     vdfsOps(ROOT).length
   } 个操作）`,
   composite: "容器：按配置挂载的子插件名分发，运行期动态",
-  agent: "已无自有路由（一律 `NotFound` 并指引到 `<根>/agent`）",
+  agent: "已无自有路由（一律 `NotFound` 并指引到 `<根>/subagent`）",
   model: "已无自有路由（模型往返由本插件注册的 `port.model` 执行体完成，环按端口名取行）",
 };
 

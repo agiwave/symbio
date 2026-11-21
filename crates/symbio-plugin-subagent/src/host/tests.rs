@@ -17,7 +17,7 @@ use std::sync::Arc;
 // 只为把全部插件的工厂注册（inventory）链进本测试二进制，见 Cargo.toml 的 dev-dependencies 注。
 use symbio as _;
 
-use symbio_plugin_api::PLUGIN_ID_AGENT;
+use symbio_plugin_api::PLUGIN_ID_SUBAGENT;
 use symbio_plugin_api::{
     capability_prompts, family, CapabilityMeta, Plugin, PluginDir, PluginInvokeRequest,
     PluginInvokeRequestExt, PluginSimpleRequest, Registry, AGENT_ID, CAPABILITY_VISITOR, PATH,
@@ -104,7 +104,7 @@ fn ctx_with(
     }
     ctx.set(PATH, TRAVERSE_AVAILABLE_TOOLS.to_string());
     // 合成父地址：模拟容器转发时写入的当前父地址（不依赖真实挂载名）
-    ctx.set(VDFS_PARENT_ADDR, "@vfs/agent".to_string());
+    ctx.set(VDFS_PARENT_ADDR, "@vfs/subagent".to_string());
     let manager: Arc<DefaultToolVisitor> = Arc::new(DefaultToolVisitor::new());
     ctx.set(
         CAPABILITY_VISITOR,
@@ -119,7 +119,7 @@ async fn agent_import_traverse_and_export() {
     let workdir = dir.path().to_str().unwrap();
 
     // ── 1. 导入（zip → Agent 目录）──
-    let store = AgentDirStore::new(dir.path().join("agent"));
+    let store = AgentDirStore::new(dir.path().join("subagent"));
     let zip_bytes = build_agent_zip("com.symbio.test-fixture", "^2");
     let result = store
         .import(&zip_bytes, false)
@@ -134,8 +134,8 @@ async fn agent_import_traverse_and_export() {
     // ── 2. traverse：整棵插件树并进会话（能力带来源前缀，§8.2）──
     // 插件作用域到导入目录，使「发现根 == 导入位置」（与生产态 `PLUGIN_DIR` 语义一致）
     let plugin = Arc::new(AgentPlugin::new_with_dir(PluginDir::at(
-        dir.path().join("agent"),
-        PLUGIN_ID_AGENT,
+        dir.path().join("subagent"),
+        PLUGIN_ID_SUBAGENT,
     )));
     let (ctx, manager) = ctx_with(Some(workdir), Some("com.symbio.test-fixture"));
     plugin
@@ -162,7 +162,7 @@ async fn agent_import_traverse_and_export() {
     );
 
     // ── 3. 系统提示词：子 Agent 自身的 AGENTS.md 由**子树里的 memory 实例**注入 ──
-    // 本插件不再兼管智能体自身的记忆（那是 `memory` 插件，分形）：段名经作用域
+    // 本插件不再兼管子智能体自身的记忆（那是 `memory` 插件，分形）：段名经作用域
     // visitor 加 `agent/<id>/` 前缀，与系统侧的 `agent-memory` 条目并集且不撞名。
     let segments = capability_prompts(&*manager).await;
     let names: Vec<&str> = segments.iter().map(|(n, _)| n.as_str()).collect();
@@ -181,9 +181,9 @@ async fn agent_import_traverse_and_export() {
         "注入内容应来自该 agent 目录自己的 AGENTS.md: {injected}"
     );
     // 地址必须落在**子树的 memory 挂载点**下（父地址续接 `<id>` 的回归钉）：
-    // 少续一段就会拼成 `@vfs/agent/memory/AGENTS.md`——一个不存在的地址。
+    // 少续一段就会拼成 `@vfs/subagent/memory/AGENTS.md`——一个不存在的地址。
     assert!(
-        injected.contains("@vfs/agent/com.symbio.test-fixture/memory/AGENTS.md"),
+        injected.contains("@vfs/subagent/com.symbio.test-fixture/memory/AGENTS.md"),
         "片段应指路子树 memory 挂载点下的那个地址: {injected}"
     );
     // 本插件不再碰那份文件：它仍躺在 agent 目录里，工作区根不受影响
@@ -207,7 +207,7 @@ async fn agent_import_traverse_and_export() {
 async fn version_mismatch_agent_is_rejected_and_unbound_session_is_silent() {
     let dir = tempfile::tempdir().unwrap();
 
-    let store = AgentDirStore::new(dir.path().join("agent"));
+    let store = AgentDirStore::new(dir.path().join("subagent"));
     // requires.spec = ^9 与宿主主版本 2 不匹配 → 导入即拒绝（规范 §10）
     let zip_bytes = build_agent_zip("com.acme.future", "^9");
     let err = store.import(&zip_bytes, false).unwrap_err();
@@ -223,7 +223,7 @@ async fn version_mismatch_agent_is_rejected_and_unbound_session_is_silent() {
     let caps = tool_metas_of(&manager).await;
     assert!(
         caps.is_empty(),
-        "agent 插件不再贡献任何工具（agent_run 归 session）: {caps:?}"
+        "子智能体插件不再贡献任何工具（agent_run 归 session）: {caps:?}"
     );
     // 没选智能体 → 不注入任何人格 / 记忆片段（这是作用域闸门，不是优化）
     assert!(
@@ -237,7 +237,7 @@ async fn version_mismatch_agent_is_rejected_and_unbound_session_is_silent() {
 async fn nonconforming_agent_is_rejected_with_both_versions() {
     let dir = tempfile::tempdir().unwrap();
     let workdir = dir.path().to_str().unwrap();
-    let root = dir.path().join("agent");
+    let root = dir.path().join("subagent");
     // 一个没有 manifest 的目录：store 扫不到 → 绑定它应报拒绝接入
     std::fs::create_dir_all(root.join("ghost")).unwrap();
 
@@ -265,11 +265,11 @@ async fn nonconforming_agent_is_rejected_with_both_versions() {
 
 #[tokio::test]
 async fn sub_agent_tree_is_assembled_and_prefixed() {
-    use symbio_plugin_api::PLUGIN_ID_AGENT;
+    use symbio_plugin_api::PLUGIN_ID_SUBAGENT;
     use symbio_plugin_api::{PluginDir, PLUGIN_DIR};
 
     let tmp = tempfile::tempdir().unwrap();
-    let agent_root = tmp.path().join("agent");
+    let agent_root = tmp.path().join("subagent");
     let sub = agent_root.join("reviewer");
     std::fs::create_dir_all(&sub).unwrap();
     std::fs::write(
@@ -291,13 +291,13 @@ async fn sub_agent_tree_is_assembled_and_prefixed() {
 
     // 构造插件：把 PLUGIN_DIR 指到 <tmp>/agent
     let build_ctx: Arc<dyn PluginInvokeRequest> = Arc::new(PluginSimpleRequest::new(None, None));
-    build_ctx.set(PLUGIN_DIR, PluginDir::at(&agent_root, PLUGIN_ID_AGENT));
+    build_ctx.set(PLUGIN_DIR, PluginDir::at(&agent_root, PLUGIN_ID_SUBAGENT));
     let plugin = AgentPlugin::build(build_ctx);
 
     let ctx: Arc<dyn PluginInvokeRequest> = Arc::new(PluginSimpleRequest::new(None, None));
     ctx.set(PATH, TRAVERSE_AVAILABLE_TOOLS.to_string());
     // 合成父地址：模拟容器转发时写入的当前父地址（不依赖真实挂载名）
-    ctx.set(VDFS_PARENT_ADDR, "@vfs/agent".to_string());
+    ctx.set(VDFS_PARENT_ADDR, "@vfs/subagent".to_string());
     ctx.set(AGENT_ID, "reviewer".to_string());
     ctx.set(WORKDIR, tmp.path().to_string_lossy().to_string());
     let manager: Arc<DefaultToolVisitor> = Arc::new(DefaultToolVisitor::new());
@@ -324,10 +324,10 @@ async fn sub_agent_tree_is_assembled_and_prefixed() {
         .unwrap();
     assert!(injected.contains("你是评审专家"), "{injected}");
     // 地址落在**子树的 memory 挂载点**下：`<父地址续接 id>/memory/AGENTS.md`。
-    // 少续一段（`@vfs/agent/memory/AGENTS.md`）就是个不存在的地址——那条回归钉
+    // 少续一段（`@vfs/subagent/memory/AGENTS.md`）就是个不存在的地址——那条回归钉
     // 正是 `AgentPlugin::forward_to_sub_agent` 续接 `VDFS_PARENT_ADDR` 的理由。
     assert!(
-        injected.contains("@vfs/agent/reviewer/memory/AGENTS.md"),
+        injected.contains("@vfs/subagent/reviewer/memory/AGENTS.md"),
         "片段应指路子树 memory 挂载点下的地址: {injected}"
     );
     assert!(
@@ -358,7 +358,7 @@ async fn sub_agent_tree_is_assembled_and_prefixed() {
 #[tokio::test]
 async fn declared_limits_reject_the_agent_at_load_time() {
     let tmp = tempfile::tempdir().unwrap();
-    let agent_root = tmp.path().join("agent");
+    let agent_root = tmp.path().join("subagent");
     let sub = agent_root.join("heavy");
     std::fs::create_dir_all(&sub).unwrap();
     // 声明一个 AGENTS.md 必然超过的提示词上限（现写 60+ 字节）
@@ -384,7 +384,7 @@ async fn declared_limits_reject_the_agent_at_load_time() {
 
     let plugin = Arc::new(AgentPlugin::new_with_dir(PluginDir::at(
         &agent_root,
-        PLUGIN_ID_AGENT,
+        PLUGIN_ID_SUBAGENT,
     )));
     let (ctx, manager) = ctx_with(Some(&tmp.path().to_string_lossy()), Some("heavy"));
 
@@ -423,7 +423,7 @@ async fn declared_limits_reject_the_agent_at_load_time() {
 #[tokio::test]
 async fn declared_tool_limit_rejects_after_the_subtree_is_counted() {
     let tmp = tempfile::tempdir().unwrap();
-    let agent_root = tmp.path().join("agent");
+    let agent_root = tmp.path().join("subagent");
     let sub = agent_root.join("toolheavy");
     std::fs::create_dir_all(&sub).unwrap();
     // 工具上限 0：只要子树贡献了**任何**工具就越界（默认值是 32，这里显式收紧）
@@ -444,7 +444,7 @@ async fn declared_tool_limit_rejects_after_the_subtree_is_counted() {
 
     let plugin = Arc::new(AgentPlugin::new_with_dir(PluginDir::at(
         &agent_root,
-        PLUGIN_ID_AGENT,
+        PLUGIN_ID_SUBAGENT,
     )));
     let (ctx, manager) = ctx_with(Some(&tmp.path().to_string_lossy()), Some("toolheavy"));
 
@@ -479,7 +479,7 @@ async fn declared_tool_limit_rejects_after_the_subtree_is_counted() {
 #[tokio::test]
 async fn declared_limits_that_are_met_let_the_agent_in() {
     let tmp = tempfile::tempdir().unwrap();
-    let agent_root = tmp.path().join("agent");
+    let agent_root = tmp.path().join("subagent");
     let sub = agent_root.join("light");
     std::fs::create_dir_all(&sub).unwrap();
     std::fs::write(
@@ -492,7 +492,7 @@ async fn declared_limits_that_are_met_let_the_agent_in() {
 
     let plugin = Arc::new(AgentPlugin::new_with_dir(PluginDir::at(
         &agent_root,
-        PLUGIN_ID_AGENT,
+        PLUGIN_ID_SUBAGENT,
     )));
     let (ctx, _manager) = ctx_with(Some(&tmp.path().to_string_lossy()), Some("light"));
 
@@ -506,7 +506,7 @@ async fn declared_limits_that_are_met_let_the_agent_in() {
     assert!(errors.is_empty(), "限额达标不应有收集期错误: {errors:?}");
 }
 
-/// 钻进 v2 子智能体根（`agent/<id>`）应**穿过挂载点**列出子 composite 的根视图，
+/// 钻进 v2 子智能体根（`subagent/<id>`）应**穿过挂载点**列出子 composite 的根视图，
 /// 因此与父（系统）根完全一致——只显示可见插件，`root_hidden` 的配置型挂载点
 /// （gateway/web/telegram/local/work）不出现在侧边栏。这正是「父只显示可见、
 /// 子却显示全部」这一回归的根因修复：之前 `RelPath::Agent` 直接裸列 agent 目录，
@@ -514,10 +514,10 @@ async fn declared_limits_that_are_met_let_the_agent_in() {
 #[tokio::test]
 async fn sub_agent_root_crosses_mount_and_hides_root_hidden() {
     use symbio_plugin_api::PluginDir;
-    use symbio_plugin_api::PLUGIN_ID_AGENT;
+    use symbio_plugin_api::PLUGIN_ID_SUBAGENT;
 
     let tmp = tempfile::tempdir().unwrap();
-    let agent_root = tmp.path().join("agent");
+    let agent_root = tmp.path().join("subagent");
     let sub = agent_root.join("reviewer");
     std::fs::create_dir_all(&sub).unwrap();
     std::fs::write(
@@ -527,11 +527,11 @@ async fn sub_agent_root_crosses_mount_and_hides_root_hidden() {
     .unwrap();
     std::fs::write(sub.join("AGENTS.md"), "你是评审专家。").unwrap();
 
-    let plugin = AgentPlugin::new_with_dir(PluginDir::at(&agent_root, PLUGIN_ID_AGENT));
+    let plugin = AgentPlugin::new_with_dir(PluginDir::at(&agent_root, PLUGIN_ID_SUBAGENT));
 
     let ctx: Arc<dyn PluginInvokeRequest> = Arc::new(PluginSimpleRequest::new(None, None));
     // 合成父地址：模拟容器转发时写入的当前父地址（不依赖真实挂载名）
-    ctx.set(VDFS_PARENT_ADDR, "@vfs/agent".to_string());
+    ctx.set(VDFS_PARENT_ADDR, "@vfs/subagent".to_string());
     // 请求上下文**不带 `PLUGIN_DIR`**——那是**装配期**的键（见
     // `sub_agent_agent_list_is_scoped_to_its_own_space`）：插件的作用域由它**自己**
     // 持有的目录决定，不由请求方喂。请求方塞一个进来，测的就不是生产形状了。
@@ -539,7 +539,7 @@ async fn sub_agent_root_crosses_mount_and_hides_root_hidden() {
     ctx.set(WORKDIR, tmp.path().to_string_lossy().to_string());
     let vctx = vdfs_context(&ctx);
 
-    // 钻进子智能体根：列 `agent/reviewer` 的「下一层」
+    // 钻进子智能体根：列 `subagent/reviewer` 的「下一层」
     let items = plugin
         .dispatch(&vctx, "reviewer", LIST)
         .await
@@ -551,9 +551,10 @@ async fn sub_agent_root_crosses_mount_and_hides_root_hidden() {
     // 1) 穿过挂载点：返回的是子 composite 视图（名字是资源入口），而不是裸目录
     //    （`AGENTS.md` / `manifest.yaml` / `skill` 目录）。
     assert!(
-        names
-            .iter()
-            .any(|n| matches!(*n, "session" | "mcp" | "skill" | "plugin_manager" | "agent")),
+        names.iter().any(|n| matches!(
+            *n,
+            "session" | "mcp" | "skill" | "plugin_manager" | "subagent"
+        )),
         "子根应经子 composite 列出可见资源入口，实际：{names:?}"
     );
     //    ⚠️ 判据**不是**「条目路径带挂载段」：条目地址由访问层按请求地址回填，
@@ -580,7 +581,7 @@ async fn sub_agent_root_crosses_mount_and_hides_root_hidden() {
 async fn mount_root_lists_only_installed_agents() {
     let tmp = tempfile::tempdir().unwrap();
     let workdir = tmp.path().to_string_lossy().to_string();
-    let agent_root = tmp.path().join("agent");
+    let agent_root = tmp.path().join("subagent");
     std::fs::create_dir_all(&agent_root).unwrap();
 
     let store = AgentDirStore::new(agent_root.clone());
@@ -594,7 +595,7 @@ async fn mount_root_lists_only_installed_agents() {
     host.set(WORKDIR, workdir);
     let ctx = vdfs_context(&host);
 
-    let plugin = AgentPlugin::new_with_dir(PluginDir::at(&agent_root, PLUGIN_ID_AGENT));
+    let plugin = AgentPlugin::new_with_dir(PluginDir::at(&agent_root, PLUGIN_ID_SUBAGENT));
     let items = plugin
         .dispatch(&ctx, "", LIST)
         .await
@@ -605,7 +606,7 @@ async fn mount_root_lists_only_installed_agents() {
     assert_eq!(
         names,
         vec!["com.acme.demo"],
-        "挂载根只有装进来的智能体：{names:?}"
+        "挂载根只有装进来的子智能体：{names:?}"
     );
 
     // 本插件**没有配置文档**：智能体自身的记忆闸门随 `memory` 走，装进来的智能体
@@ -622,7 +623,7 @@ async fn mount_root_lists_only_installed_agents() {
     );
 }
 
-/// 子智能体挂载点穿越必须**九操作一致**：`agent/<id>/…` 下的每个操作都交给子
+/// 子智能体挂载点穿越必须**九操作一致**：`subagent/<id>/…` 下的每个操作都交给子
 /// composite，而不是「list / stat / delete 穿了，read / write 没穿」。
 ///
 /// 这是 `read` / `write` 绕过挂载点的回归钉：绕过时 `read` 会去读裸 agent 目录里
@@ -637,10 +638,10 @@ async fn mount_root_lists_only_installed_agents() {
 async fn sub_agent_mount_crossing_is_uniform_across_operations() {
     use symbio_plugin_api::PluginDir;
     use symbio_plugin_api::VdfsError;
-    use symbio_plugin_api::PLUGIN_ID_AGENT;
+    use symbio_plugin_api::PLUGIN_ID_SUBAGENT;
 
     let tmp = tempfile::tempdir().unwrap();
-    let agent_root = tmp.path().join("agent");
+    let agent_root = tmp.path().join("subagent");
     let sub = agent_root.join("reviewer");
     std::fs::create_dir_all(&sub).unwrap();
     std::fs::write(
@@ -652,9 +653,9 @@ async fn sub_agent_mount_crossing_is_uniform_across_operations() {
     // 父会话的工作区记忆：子树 `memory` 挂载点的工作区腿读写的就是它
     std::fs::write(tmp.path().join("AGENTS.md"), "工作区记忆内容").unwrap();
 
-    let plugin = AgentPlugin::new_with_dir(PluginDir::at(&agent_root, PLUGIN_ID_AGENT));
+    let plugin = AgentPlugin::new_with_dir(PluginDir::at(&agent_root, PLUGIN_ID_SUBAGENT));
     let ctx: Arc<dyn PluginInvokeRequest> = Arc::new(PluginSimpleRequest::new(None, None));
-    ctx.set(VDFS_PARENT_ADDR, "@vfs/agent".to_string());
+    ctx.set(VDFS_PARENT_ADDR, "@vfs/subagent".to_string());
     // 请求上下文**不带 `PLUGIN_DIR`**——那是**装配期**的键（见
     // `sub_agent_agent_list_is_scoped_to_its_own_space`）：插件的作用域由它**自己**
     // 持有的目录决定，不由请求方喂。请求方塞一个进来，测的就不是生产形状了。
@@ -675,7 +676,7 @@ async fn sub_agent_mount_crossing_is_uniform_across_operations() {
         .join("WORKSPACE.md");
 
     // ① list：列出的是子 composite 的可见入口，**条目地址由访问层回填**——
-    //    本层是挂载点，**不得**填条目地址：它不知道自己被挂在哪（`agent/`），
+    //    本层是挂载点，**不得**填条目地址：它不知道自己被挂在哪（`subagent/`），
     //    填出来的会是一个少了外层挂载段的假地址，而访问层见到非空地址就
     //    「不再回填」。
     //
@@ -774,12 +775,12 @@ async fn sub_agent_mount_crossing_is_uniform_across_operations() {
     // 移动整条下线后不再有第二个地址可供越界。
 }
 
-/// 子智能体空间里的「智能体」清单必须**只反映那个空间自己**。
+/// 子智能体空间里的「子智能体」清单必须**只反映那个空间自己**。
 ///
 /// 生产态的请求上下文**不带 `PLUGIN_DIR`**——那个键只在**装配期**给出
 /// （`composite::build` 构造子插件时、[`AgentPlugin::sub_agent`] 造子树时）。
 /// 因此目录若从**请求上下文**取（`plugin_dir_from_ctx`），嵌套实例就会回退到
-/// `PluginDir::of(PLUGIN_ID_AGENT)` = **全局 agent 根**：子空间里列出的「智能体」
+/// `PluginDir::of(PLUGIN_ID_SUBAGENT)` = **全局 subagent 根**：子空间里列出的「子智能体」
 /// 其实是**顶层**清单，用户看到的是**它自己**。
 ///
 /// 顶层看不出这个错，是因为回退值与它自己的目录**恰好相同**。这类「只在嵌套层
@@ -787,15 +788,15 @@ async fn sub_agent_mount_crossing_is_uniform_across_operations() {
 /// 上下文里塞 `PLUGIN_DIR`（其余用例塞了，等于绕开了生产态的真实形状）。
 ///
 /// 判据取「清单里必须有子空间**自己**的那个下级智能体」而不是「清单必须为空」：
-/// 后者在全局 agent 根恰好为空时会**放过**这个 bug（错误实现在那里读到的是空清单，
+/// 后者在全局 subagent 根恰好为空时会**放过**这个 bug（错误实现在那里读到的是空清单，
 /// 与正确实现无从区分）。放一个只在子空间里存在的下级智能体，两种实现必然分岔。
 #[tokio::test]
 async fn sub_agent_agent_list_is_scoped_to_its_own_space() {
     use symbio_plugin_api::PluginDir;
-    use symbio_plugin_api::PLUGIN_ID_AGENT;
+    use symbio_plugin_api::PLUGIN_ID_SUBAGENT;
 
     let tmp = tempfile::tempdir().unwrap();
-    let agent_root = tmp.path().join("agent");
+    let agent_root = tmp.path().join("subagent");
     let sub = agent_root.join("reviewer");
     std::fs::create_dir_all(&sub).unwrap();
     std::fs::write(
@@ -804,8 +805,8 @@ async fn sub_agent_agent_list_is_scoped_to_its_own_space() {
     )
     .unwrap();
     std::fs::write(sub.join("AGENTS.md"), "你是评审专家。").unwrap();
-    // 子空间里**真正**的下一级智能体：只存在于 `<sub>/agent/` 下
-    let inner = sub.join("agent").join("inner");
+    // 子空间里**真正**的下一级子智能体：只存在于 `<sub>/subagent/` 下
+    let inner = sub.join("subagent").join("inner");
     std::fs::create_dir_all(&inner).unwrap();
     std::fs::write(
         inner.join("manifest.yaml"),
@@ -813,17 +814,17 @@ async fn sub_agent_agent_list_is_scoped_to_its_own_space() {
     )
     .unwrap();
 
-    let plugin = AgentPlugin::new_with_dir(PluginDir::at(&agent_root, PLUGIN_ID_AGENT));
+    let plugin = AgentPlugin::new_with_dir(PluginDir::at(&agent_root, PLUGIN_ID_SUBAGENT));
 
     // 生产态请求上下文：只有宿主该有的键，**没有 `PLUGIN_DIR`**
     let ctx: Arc<dyn PluginInvokeRequest> = Arc::new(PluginSimpleRequest::new(None, None));
-    ctx.set(VDFS_PARENT_ADDR, "@vfs/agent".to_string());
+    ctx.set(VDFS_PARENT_ADDR, "@vfs/subagent".to_string());
     ctx.set(WORKDIR, tmp.path().to_string_lossy().to_string());
     let vctx = vdfs_context(&ctx);
 
-    // 钻进子智能体，看它自己的「智能体」挂载点
+    // 钻进子智能体，看它自己的「子智能体」挂载点
     let nested = plugin
-        .dispatch(&vctx, "reviewer/agent", LIST)
+        .dispatch(&vctx, "reviewer/subagent", LIST)
         .await
         .unwrap()
         .into_list()
@@ -832,8 +833,8 @@ async fn sub_agent_agent_list_is_scoped_to_its_own_space() {
     assert_eq!(
         ids,
         vec!["inner"],
-        "子空间的智能体清单必须来自**它自己的** agent 目录（实际：{ids:?}）——\
-         出现顶层智能体（尤其它自己）即表示目录回退到了全局 agent 根"
+        "子空间的子智能体清单必须来自**它自己的** subagent 目录（实际：{ids:?}）——\
+         出现顶层子智能体（尤其它自己）即表示目录回退到了全局 subagent 根"
     );
 }
 
@@ -842,7 +843,7 @@ async fn sub_agent_agent_list_is_scoped_to_its_own_space() {
 #[test]
 fn import_rejects_any_manifest_failing_the_access_gate() {
     let dir = tempfile::tempdir().unwrap();
-    let store = AgentDirStore::new(dir.path().join("agent"));
+    let store = AgentDirStore::new(dir.path().join("subagent"));
     let base = "id: \"com.acme.x\"\nversion: \"1.0.0\"\n";
     let old_spec = format!("spec: \"oab/v1\"\n{base}name: \"X\"\nrequires:\n  spec: \"^1\"\n");
 
@@ -891,7 +892,7 @@ async fn non_mountable_agent_dir_is_not_browsable_at_all() {
     use symbio_plugin_api::VdfsError;
 
     let tmp = tempfile::tempdir().unwrap();
-    let agent_root = tmp.path().join("agent");
+    let agent_root = tmp.path().join("subagent");
     let sub = agent_root.join("legacyish");
     std::fs::create_dir_all(&sub).unwrap();
     std::fs::write(
@@ -900,9 +901,9 @@ async fn non_mountable_agent_dir_is_not_browsable_at_all() {
     )
     .unwrap();
 
-    let plugin = AgentPlugin::new_with_dir(PluginDir::at(&agent_root, PLUGIN_ID_AGENT));
+    let plugin = AgentPlugin::new_with_dir(PluginDir::at(&agent_root, PLUGIN_ID_SUBAGENT));
     let ctx: Arc<dyn PluginInvokeRequest> = Arc::new(PluginSimpleRequest::new(None, None));
-    ctx.set(VDFS_PARENT_ADDR, "@vfs/agent".to_string());
+    ctx.set(VDFS_PARENT_ADDR, "@vfs/subagent".to_string());
     let vctx = vdfs_context(&ctx);
 
     // 列不出来：挂载根清单里没有它

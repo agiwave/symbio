@@ -47,12 +47,12 @@ impl: partial
 
 ```text
 系统 Agent = 系统根 ← 由插件容器装配
-子 Agent = 系统根/agent/<id> ← 由同一个插件容器装配
+子 Agent = 系统根/subagent/<id> ← 由同一个插件容器装配
 ```
 
 两者的**内部结构完全相同**：一层目录 = 一个插件，配置与数据同处。差别只在两处：
 
-1. **谁托管它**：系统 Agent 由宿主直接装配；子 Agent 由 Agent 插件托管（§9）；
+1. **谁托管它**：系统 Agent 由宿主直接装配；子 Agent 由 subagent 插件托管（§9）；
 2. **插件清单多少**：系统 Agent 挂宿主的全部插件；子 Agent **应当**只挂 `mcp` / `skill`
  等少数与「认知能力」相关的插件（§7.2）。
 
@@ -85,7 +85,7 @@ impl: partial
 
 - **Agent 目录**：一个 Agent 的完整运行目录，是本规范的基本单元。
 - **系统 Agent**：宿主的根 Agent，其目录即**系统根**。
-- **子 Agent**：由 Agent 插件托管、位于系统根 `agent/<id>` 下的 Agent。
+- **子 Agent**：由 subagent 插件托管、位于系统根 `subagent/<id>` 下的 Agent。
 - **宿主（Host）**：装配 Agent 目录并让其能力对模型生效的一方。
 - **能力插件**：Agent 目录下的一个子目录，承载一类能力（如 `mcp/` `skill/`）。
 - **插件容器**：宿主中负责扫描目录、构造插件的通用机制（symbio 中是 `composite`）。
@@ -218,7 +218,7 @@ permissions:
 只被 `**` 与 `.` 命中。含 `..` 的 glob 在**装载期**即拒（§5.1）——它是执行面的输入，
 一个能逃出包的 glob 会让整份清单失去意义。
 
-**管辖范围**：`fs` 的 glob 只描述 Agent 访问**它自己那个目录**（`<根>/agent/<id>/…`，
+**管辖范围**：`fs` 的 glob 只描述 Agent 访问**它自己那个目录**（`<根>/subagent/<id>/…`，
 含它子树里那份记忆文件）。用户工作目录里的文件不归它管——那是宿主策略
 （工作区闸 + 审批）的地界；**别的** Agent 的包也不归它管（没有谁的 manifest 能
 描述别人的树）。虚拟地址与物理绝对路径落在 Agent 目录内是**同案**。
@@ -345,11 +345,11 @@ Agent，不属于「一个 Agent 会什么」。
 
 ## 9. 托管关系（子 Agent）
 
-子 Agent 位于系统 Agent 的 `agent/<id>/` 下，由 Agent 插件托管。
+子 Agent 位于系统 Agent 的 `subagent/<id>/` 下，由 subagent 插件托管。
 
 宿主**必须**满足：
 
-1. Agent 插件**必须**能枚举 `agent/` 下的子 Agent 目录（目录名 = 实例名）；
+1. 子智能体插件**必须**能枚举 `subagent/` 下的子 Agent 目录（目录名 = 实例名）；
 2. 为每个子 Agent **必须**用插件容器构造一棵独立的插件树（§8.1）；
 3. 构造时**必须**把自己声明的必需插件目录补出来（§7.2 的推荐集合）；
 4. 会话绑定到某个子 Agent 时，**必须**把能力收集与系统提示词收集转发进它的插件树
@@ -398,11 +398,11 @@ Agent，不属于「一个 Agent 会什么」。
 ### A.1 装配
 
 - 插件容器 = `composite` 插件；系统根由 `home` 经 `PLUGIN_DIR` 告知它；
-- 子 Agent 树由 `agent` 插件构造，做法与 `home` 构造 `worker` 完全同形：
+- 子 Agent 树由 `subagent` 插件构造，做法与 `home` 构造 `worker` 完全同形：
  设 `PLUGIN_DIR = <agent dir>`、设 `REQUIRED_PLUGINS = ASSEMBLY_SUB_AGENT_PLUGINS`
  （与系统树共享同一份清单——`memory` / `setting` 的分形实例由它带进子树），
  再 `creator_create_object("composite", …)`；
-- `composite` 只扫一层目录，因此 `agent/<id>` 不会被系统树误扫（§9 第 5 条）。
+- `composite` 只扫一层目录，因此 `subagent/<id>` 不会被系统树误扫（§9 第 5 条）。
 
 ### A.2 能力插件的自证
 
@@ -417,7 +417,7 @@ Agent，不属于「一个 Agent 会什么」。
 | 作用域 | 物理落位 | 可编辑地址 | 片段标题 |
 |---|---|---|---|
 | 系统 Agent（宿主自身） | `{homedir}/AGENTS.md` | `<根>/memory/AGENTS.md` | 【智能体记忆】 |
-| 子 Agent | `<agent dir>/AGENTS.md` | `<根>/agent/<id>/memory/AGENTS.md` | 【智能体记忆】 |
+| 子 Agent | `<agent dir>/AGENTS.md` | `<根>/subagent/<id>/memory/AGENTS.md` | 【智能体记忆】 |
 
 两条落位都不需要新的上下文键：智能体腿的作用域取自**本插件目录的父目录**（容器
 规则是「一层目录 = 一个插件，插件并列在智能体目录下」——系统实例落在
@@ -443,7 +443,7 @@ Agent，不属于「一个 Agent 会什么」。
 
 ### D-005 Agent 目录宿主（agent-dir/v2）
 
-`agent` 插件是智能体域的托管 agent 目录、经 `<根>/agent` 的 `zip` 新建类型导入、并装配为子树。目录协议是 `agent-dir/v2`——技能 / MCP 复用宿主既有的 `skill` / `mcp` 插件目录，人格是根 `AGENTS.md`。宿主不解释任何「约定目录」：`manifest.yaml` 的 `spec` 与 `requires.spec` 同时满足 §10 门槛，才是唯一接入判据。
+`subagent` 插件是子智能体域的托管 agent 目录、经 `<根>/subagent` 的 `zip` 新建类型导入、并装配为子树。目录协议是 `agent-dir/v2`——技能 / MCP 复用宿主既有的 `skill` / `mcp` 插件目录，人格是根 `AGENTS.md`。宿主不解释任何「约定目录」：`manifest.yaml` 的 `spec` 与 `requires.spec` 同时满足 §10 门槛，才是唯一接入判据。
 
 ### D-026 子智能体的完整会话在 VDFS 空间内自驱动（inbox）
 
@@ -512,12 +512,12 @@ Agent，不属于「一个 Agent 会什么」。
 **glob 只管自己的包**：`fs` 的 glob 相对 Agent 目录根判定，管的是 Agent 访问
 **它自己那个目录**。别人的包与用户工作目录都不归它管——没有谁的 manifest 能描述
 别人的树，而工作目录是宿主策略（工作区闸 + 审批）的地界。虚拟地址
-（`<根>/agent/<id>/<rel>`）与物理绝对路径落在 Agent 目录内是**同案**；段边界按
+（`<根>/subagent/<id>/<rel>`）与物理绝对路径落在 Agent 目录内是**同案**；段边界按
 目录比（`<root>-evil/x` 不算 `<root>` 里面）。
 
 **三处执行面**：`network.domains` 在出站请求发出前判、`fs` 两个清单在文件路径
 入口判、`limits` 在装载期判（超限即整轮拒载——注册进来的行随轮丢弃，等价于拒载）。
-判据与代码的归属在机制层的 `symbio_sdk::agent`：写侧只有 `agent` 插件（唯一能把
+判据与代码的归属在机制层的 `symbio_sdk::agent`：写侧只有 `subagent` 插件（唯一能把
 `agent_id` 解析成声明的地方），读侧是 `web` / `vdfs` 两族互不相认的宿主工具——
 按「插件之间互不 import」的架构原则，声明形状与判据必须作为共享设施住 core。
 
@@ -535,19 +535,19 @@ MCP 服务器自己发的请求出不了一层；模型 API 往返不是工具�
 
 ### D-500 委托工具归会话：`agent_run` 从 agent 插件迁 session，agent 只管目录与装配
 
-**为什么现有形状不够**：`agent_run` 一直住在 agent 插件里，但它做的事——新建会话、
+**为什么现有形状不够**：`agent_run` 一直住在子智能体插件里，但它做的事——新建会话、
 新建会话的子会话（按 `parent_session_id` 归档）、经收件箱地址面发起与恢复——每一件
 都是**会话域**的事；会话插件本来就为子会话托管存储、定义收件箱契约、承载审批恢复机制。
-工具却寄住在 agent 插件，造成两处错位：① agent 插件的职责是「有哪些智能体、怎么把它们
+工具却寄住在子智能体插件，造成两处错位：① 子智能体插件的职责是「有哪些智能体、怎么把它们
 连进来」（§3.2 宿主），却额外背了一份会话编排实现；② 消费耦合倒挂——委托工具要认识
 agent 目录的存在（`agent_id` 校验、enum 候选），而 agent 目录本可以只作为**可选参数的
 取值域**出现在工具面前。
 
 **新形状**：委托工具迁 session，成为**会话级原语**——`traverse(available_tools)` 里
-无条件注册（agent 插件缺席时 enum 为空，工具照常注册，`agent_id` 省略即纯对话子会话）。
+无条件注册（子智能体插件缺席时 enum 为空，工具照常注册，`agent_id` 省略即纯对话子会话）。
 agent 目录对工具只剩两个地址面接触点：enum 候选经**本作用域容器**的 VDFS 视图列
-`agent` 挂载点得到（分形天然正确：子树里挂载点即 `<agentdir>/agent`）；执行期存在性
-校验走 `Stat agent/<id>`。agent 插件对委托的残余责任归零；承诺面（立约效果与淘汰闸）
+`subagent` 挂载点得到（分形天然正确：子树里挂载点即 `<agentdir>/subagent`）；执行期存在性
+校验走 `Stat subagent/<id>`。子智能体插件对委托的残余责任归零；承诺面（立约效果与淘汰闸）
 随写方同迁，承诺事件的 owner 也跟着写方走（D-389 同一条纪律）——`commitment.*` 三格
 进 session 的 `shared_events`，`commitment.asserted` 无跨插件读方、按 CS-007 不进共享表。
 
@@ -556,8 +556,8 @@ agent 目录对工具只剩两个地址面接触点：enum 候选经**本作用�
 `commitment_records` 视图。子会话机制不变：发起 / 转播 / 恢复 / 归档全按 D-026 的
 地址面契约，工具名 `agent_run` 与行为名 `assign_work` / `delegation_promise` 都不变。
 
-**代价**：session 多认识一个挂载名（`agent`，经 VDFS 地址面而非依赖——E-009 边不新增）；
-枚举候选从「注册期读目录」改为「注册期列挂载点」，agent 插件缺席的装配里清单为空，
+**代价**：session 多认识一个挂载名（`subagent`，经 VDFS 地址面而非依赖——E-009 边不新增）；
+枚举候选从「注册期读目录」改为「注册期列挂载点」，子智能体插件缺席的装配里清单为空，
 委托目标可见性随装配域走——这是把「agent 目录是委托的可选取值域」如实写成行为，
 不是缺陷。
 

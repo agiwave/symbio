@@ -1174,7 +1174,7 @@ export async function resumeSession(cli, sid, targetId, action, payload = {}, me
 }
 
 /**
- * 造一个 v2 子智能体目录：`<homedir>/agent/<id>/{manifest.yaml,AGENTS.md,model/<provider>/provider.json}`。
+ * 造一个 v2 子智能体目录：`<homedir>/subagent/<id>/{manifest.yaml,AGENTS.md,model/<provider>/provider.json}`。
  *
  * 三件东西各自有主，缺一不可：
  * - `manifest.yaml` 声明 `agent-dir/v2`（不合规即**拒绝接入**，§10）；
@@ -1189,7 +1189,7 @@ export async function resumeSession(cli, sid, targetId, action, payload = {}, me
  * 少数要验「声明了真放行」的用例才显式给块。
  */
 export function makeAgentDir(homedir, { id, name = id, persona = '', providerId, providerPort, permissions = null }) {
-  const dir = join(homedir, 'agent', id);
+  const dir = join(homedir, 'subagent', id);
   mkdirSync(dir, { recursive: true });
   const permBlock = permissions ? `${permissions}\n` : '';
   writeFileSync(

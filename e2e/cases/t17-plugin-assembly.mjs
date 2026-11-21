@@ -29,7 +29,7 @@ import {
 } from '../helpers.mjs';
 
 /** 构造者声明的必需插件（`home::SYSTEM_PLUGINS`）中的一组代表 */
-const REQUIRED_PLUGINS = ['agent', 'local', 'mcp', 'model', 'session', 'skill', 'vdfs', 'memory'];
+const REQUIRED_PLUGINS = ['subagent', 'local', 'mcp', 'model', 'session', 'skill', 'vdfs', 'memory'];
 
 /** 第一轮（装配前）的会话 id；第二轮（停用 local 后）换一个，两轮各自从零开始 */
 const SID_ON = 'e2e-t17';

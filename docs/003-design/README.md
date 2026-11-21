@@ -249,7 +249,6 @@ board.columns: [impl]
 | [`DE-111-INTERACTION`](../../tauri/docs/111-INTERACTION.md) | 前端交互面（用户视角） | 与代码一致 |
 | [`DE-112-architecture`](../../crates/symbio-cli/docs/112-architecture.md) | 架构 | 与代码一致 |
 | [`DE-113-heartbeat-mechanism`](../../crates/symbio-plugin-heartbeat/src/docs/113-heartbeat-mechanism.md) | 会话心跳机制（heartbeat） | 与代码一致 |
-| [`crates/symbio-plugin-agent/README`](../../crates/symbio-plugin-agent/README.md) | Agent 插件 | 与代码一致 |
 | [`crates/symbio-plugin-classify/README`](../../crates/symbio-plugin-classify/README.md) | Classify 插件（对话面：判决） | 与代码一致 |
 | [`crates/symbio-plugin-compact/README`](../../crates/symbio-plugin-compact/README.md) | 上下文压缩能力包（compact） | 与代码一致 |
 | [`crates/symbio-plugin-compose/README`](../../crates/symbio-plugin-compose/README.md) | Compose 插件（对话面：措辞） | 与代码一致 |
@@ -276,6 +275,7 @@ board.columns: [impl]
 | [`crates/symbio-plugin-setting/README`](../../crates/symbio-plugin-setting/README.md) | Setting 插件 | 与代码一致 |
 | [`crates/symbio-plugin-skill/README`](../../crates/symbio-plugin-skill/README.md) | Skill 插件 | 与代码一致 |
 | [`crates/symbio-plugin-slo/README`](../../crates/symbio-plugin-slo/README.md) | 时延分层能力包（slo） | 与代码一致 |
+| [`crates/symbio-plugin-subagent/README`](../../crates/symbio-plugin-subagent/README.md) | 子智能体插件 | 与代码一致 |
 | [`crates/symbio-plugin-task/README`](../../crates/symbio-plugin-task/README.md) | 任务能力包（task） | 与代码一致 |
 | [`crates/symbio-plugin-telegram/README`](../../crates/symbio-plugin-telegram/README.md) | Telegram 插件 | 与代码一致 |
 | [`crates/symbio-plugin-tool/README`](../../crates/symbio-plugin-tool/README.md) | 工具世界能力包（tool） | 与代码一致 |

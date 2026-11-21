@@ -30,7 +30,7 @@ use symbio_sdk::plugin::fact_source::FactSource;
 use symbio_sdk::round::facts::FleetSnapshot;
 
 /// 工具表的**去重**：子 Agent 作用域会把同一能力再注册一遍，而 `PrefixedCapability`
-/// 只改名、执行原样透传（`crates/symbio-plugin-agent/src/host/scope.rs`），所以对模型
+/// 只改名、执行原样透传（`crates/symbio-plugin-subagent/src/host/scope.rs`），所以对模型
 /// 而言两份是同一个能力。
 ///
 /// 哪两个名字是同一能力的两份，由**声明面**回答（`SCOPE_TWIN` 的 `(前缀名, 本名)` 对，
@@ -168,7 +168,7 @@ impl SessionPlugin {
         // 的出站闸门因此读到空 deny 名单，该拒而放行（t84）。
         //
         // 作用域按**会话自己的绑定**展开（metadata.agent_id）：收集器只把它当通用的
-        // agent 作用域键递下去，agent 插件自行把子树 prompt rows / 工具加前缀——
+        // agent 作用域键递下去，子智能体插件自行把子树 prompt rows / 工具加前缀——
         // 「人格 / 记忆」这些段名谁都不需要认识。
         let agent_scope = self.get_store().await?.session_agent_scope(session_id);
         // 会话级数据目录（D-513）：会话存储布局的唯一 owner 是本插件，收集期把目录
@@ -188,7 +188,7 @@ impl SessionPlugin {
         let work_dir = ctx
             .get(symbio_plugin_api::WORKDIR)
             .map(std::path::PathBuf::from);
-        // 子空间开轮时 ctx 可能已经被 agent 插件重挂 `AGENT_VDFS` 到该子智能体目录
+        // 子空间开轮时 ctx 可能已经被 子智能体插件重挂 `AGENT_VDFS` 到该子智能体目录
         // （VDFS 下钻 / 子智能体转发），这里不能拿 `agent_home_root()`（`{homedir}`）
         // 覆盖，否则子会话会注入顶层人格而不是自己的（T15）。顶层会话的既有绑定
         // 本来就是 `{homedir}`，保留同样正确。

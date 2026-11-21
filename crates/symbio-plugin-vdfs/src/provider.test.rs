@@ -243,7 +243,7 @@ async fn missing_root_degrades_to_empty_virtual_layer() {
 // **越界必拒，且请求根本没有到 provider**（`seen` 空）——后者是「零副作用」的
 // 可观测形状：闸门在派发之前，不是拦在落盘那一刻。
 
-/// 带权限作用域的请求上下文（agent 插件发布的那一份的直接等价物）。
+/// 带权限作用域的请求上下文（子智能体插件发布的那一份的直接等价物）。
 fn agent_ctx(
     id: &str,
     root: &std::path::Path,
@@ -274,13 +274,13 @@ async fn a_path_outside_the_declared_globs_never_reaches_the_provider() {
     );
 
     // 清单内：放行
-    vdfs.read(&ctx, ".vdfsv2/agent/reviewer/assets/icon.svg")
+    vdfs.read(&ctx, ".vdfsv2/subagent/reviewer/assets/icon.svg")
         .await
         .unwrap();
     // 清单外：拒。人格文件与根本身（条目概览）都不在 `assets/**` 里。
     for bad in [
-        ".vdfsv2/agent/reviewer/AGENTS.md",
-        ".vdfsv2/agent/reviewer", // 根本身（条目概览）也要读权限
+        ".vdfsv2/subagent/reviewer/AGENTS.md",
+        ".vdfsv2/subagent/reviewer", // 根本身（条目概览）也要读权限
     ] {
         let err = vdfs.read(&ctx, bad).await.unwrap_err();
         assert!(
@@ -294,12 +294,15 @@ async fn a_path_outside_the_declared_globs_never_reaches_the_provider() {
     }
     // **别人的包**不归本声明管（没有谁的 manifest 能描述别人的树）：照常放行。
     // 这是作用域边界，不是漏洞——把它写进用例，免得下一个人以为是漏判。
-    vdfs.read(&ctx, ".vdfsv2/agent/other/AGENTS.md")
+    vdfs.read(&ctx, ".vdfsv2/subagent/other/AGENTS.md")
         .await
         .unwrap();
     assert_eq!(
         rec.seen(),
-        vec!["agent/reviewer/assets/icon.svg", "agent/other/AGENTS.md"],
+        vec![
+            "subagent/reviewer/assets/icon.svg",
+            "subagent/other/AGENTS.md"
+        ],
         "被拒的请求一个都没到 provider 那儿（零副作用）"
     );
 }
@@ -315,13 +318,13 @@ async fn read_and_write_lists_are_judged_separately() {
         json!({ "fs": { "read": ["**"], "write": ["memory/**"] } }),
     );
 
-    vdfs.read(&ctx, ".vdfsv2/agent/reviewer/AGENTS.md")
+    vdfs.read(&ctx, ".vdfsv2/subagent/reviewer/AGENTS.md")
         .await
         .unwrap();
     let err = vdfs
         .write(
             &ctx,
-            ".vdfsv2/agent/reviewer/AGENTS.md",
+            ".vdfsv2/subagent/reviewer/AGENTS.md",
             &VdfsContent::text("改写我"),
         )
         .await
@@ -330,29 +333,29 @@ async fn read_and_write_lists_are_judged_separately() {
     // 写清单内：放行（子智能体改自己的记忆是声明出来的能力，不是漏洞）。
     vdfs.write(
         &ctx,
-        ".vdfsv2/agent/reviewer/memory/AGENTS.md",
+        ".vdfsv2/subagent/reviewer/memory/AGENTS.md",
         &VdfsContent::text("新记忆"),
     )
     .await
     .unwrap();
     // edit / delete / mkdir 都走写侧（`edit` 先读后写，两关都要过）。
     assert!(vdfs
-        .edit(&ctx, ".vdfsv2/agent/reviewer/AGENTS.md", "a", "b")
+        .edit(&ctx, ".vdfsv2/subagent/reviewer/AGENTS.md", "a", "b")
         .await
         .is_err());
     assert!(vdfs
-        .delete(&ctx, ".vdfsv2/agent/reviewer/AGENTS.md", false)
+        .delete(&ctx, ".vdfsv2/subagent/reviewer/AGENTS.md", false)
         .await
         .is_err());
     assert!(vdfs
-        .mkdir(&ctx, ".vdfsv2/agent/reviewer/skill")
+        .mkdir(&ctx, ".vdfsv2/subagent/reviewer/skill")
         .await
         .is_err());
     assert_eq!(
         rec.seen(),
         vec![
-            "agent/reviewer/AGENTS.md",       // 读（读清单放行）
-            "agent/reviewer/memory/AGENTS.md", // 写（写清单放行）
+            "subagent/reviewer/AGENTS.md",       // 读（读清单放行）
+            "subagent/reviewer/memory/AGENTS.md", // 写（写清单放行）
         ],
         "写侧三次调用只有清单内那次到了 provider；edit 连它的 read 都没发生——         闸门在派发之前，不在落盘那一刻"
     );
@@ -369,7 +372,7 @@ async fn an_empty_fs_list_denies_the_whole_package() {
         json!({}),
     );
     assert!(vdfs
-        .read(&ctx, ".vdfsv2/agent/reviewer/AGENTS.md")
+        .read(&ctx, ".vdfsv2/subagent/reviewer/AGENTS.md")
         .await
         .is_err());
     assert!(rec.seen().is_empty(), "一个都没放行");
@@ -381,10 +384,10 @@ async fn an_empty_fs_list_denies_the_whole_package() {
 async fn no_agent_scope_means_host_mode() {
     let rec = Rec::new();
     let vdfs = tool_with_root(rec.clone()).await;
-    vdfs.read(&ctx(), ".vdfsv2/agent/reviewer/AGENTS.md")
+    vdfs.read(&ctx(), ".vdfsv2/subagent/reviewer/AGENTS.md")
         .await
         .unwrap();
-    assert_eq!(rec.seen(), vec!["agent/reviewer/AGENTS.md"]);
+    assert_eq!(rec.seen(), vec!["subagent/reviewer/AGENTS.md"]);
 }
 
 /// 换成**物理绝对路径**必须同案：模型从概览的 `dir` 属性看得见真实目录，

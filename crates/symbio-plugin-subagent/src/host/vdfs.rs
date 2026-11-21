@@ -1,12 +1,12 @@
-//! VDFS 挂载点（`<挂载点名>/agent`）—— 本插件**直接实现 `VdfsProvider`**。
+//! VDFS 挂载点（`<挂载点名>/subagent`）—— 本插件**直接实现 `VdfsProvider`**。
 //!
 //! ## 与其它资源插件的分工差异
 //!
 //! Agent 是**目录自管型**资源：它的落盘由 [`AgentDirStore`] 负责（唯一来源就是本插件
-//! 自己的目录 `{homedir}/agent`，zip-slip 防护、导入即校验、版本硬门槛），**不经
-//! `vdfs_service`**——那三种拓扑的条目内部是**宿主自己的磁盘布局**，而 agent 条目内部是
+//! 自己的目录 `{homedir}/subagent`，zip-slip 防护、导入即校验、版本硬门槛），**不经
+//! `vdfs_service`**——那三种拓扑的条目内部是**宿主自己的磁盘布局**，而子智能体条目内部是
 //! **一棵插件树**：钻进 `<id>` 之后清单由子 composite 的 `CompositeVfs` 返回，
-//! 地址递归成 `agent/<id>/<子目录>/…`。这一跳委派才是本插件自持 `impl VdfsProvider` 的理由。
+//! 地址递归成 `subagent/<id>/<子目录>/…`。这一跳委派才是本插件自持 `impl VdfsProvider` 的理由。
 //!
 //! 相同的是**广播**：落盘后一律走 `vdfs::vdfs_notify_change`，与 `vdfs_service` 三个
 //! 实现投的是同一条频道，订阅方无需区分资源住在哪儿。
@@ -26,13 +26,13 @@
 //! **当前智能体自身**的东西不在本挂载点里：记忆在 `<根>/memory/AGENTS.md`、设置在
 //! `<根>/setting/PLUGIN.yml`——它们各有自己的插件与挂载点（分形，子树里各有一份）。
 //!
-//! 外部访问一律走 `<根>/agent/…`。
+//! 外部访问一律走 `<根>/subagent/…`。
 
 use super::plugin::AgentPlugin;
 use super::store::{AgentDirRecord, AgentDirStore};
 use async_trait::async_trait;
 use std::sync::Arc;
-use symbio_plugin_api::PLUGIN_ID_AGENT;
+use symbio_plugin_api::PLUGIN_ID_SUBAGENT;
 use symbio_plugin_api::{
     descend_addr, vdfs_context, vdfs_host_ctx, vdfs_notify_change, vdfs_unwatch_changes,
     vdfs_watch_changes, PluginInvokeRequestExt, AGENT_VDFS,
@@ -44,7 +44,7 @@ use symbio_plugin_api::{
 };
 use symbio_providers::{vdfs_id_of, VdfsPack, VdfsUnpack};
 
-const LABEL: &str = "智能体";
+const LABEL: &str = "子智能体";
 
 // ==================== 路径解析 ====================
 
@@ -74,9 +74,9 @@ fn parse_rel_path(path: &str) -> RelPath<'_> {
     }
 }
 
-/// 路径末段 → 条目 id（去掉 `.agent` 呈现扩展名）
+/// 路径末段 → 条目 id（去掉 `.subagent` 呈现扩展名）
 fn id_of(path: &str) -> String {
-    vdfs_id_of(path, PLUGIN_ID_AGENT)
+    vdfs_id_of(path, PLUGIN_ID_SUBAGENT)
 }
 
 /// 把子 composite 返回的**子树相对路径**提升为本插件空间内的路径。
@@ -90,7 +90,7 @@ fn id_of(path: &str) -> String {
 ///
 /// ⚠️ **只用于变更帧路径（[`AgentPlugin::watch_at`]），不得用于条目地址。**
 /// 两者对「本层补的前缀」要求相反：变更帧的路径会被**每一层容器**继续
-/// `child_path` 续接（父 composite 补 `agent`、`UnifiedFs` 补根名），这里给的
+/// `child_path` 续接（父 composite 补 `subagent`、`UnifiedFs` 补根名），这里给的
 /// 相对前缀正是它要的；而**条目地址不会被容器续接**（见
 /// `composite/vdfs.rs::container_leaves_item_addresses_untouched`），填进去就是一个
 /// 少了外层挂载段的假地址——访问层见非空即不再回填。踩点见 [`AgentPlugin::list_at`]。
@@ -118,7 +118,7 @@ fn mount_path(mount_rel: &str, rel: &str) -> String {
 /// 前端改动——后端不再替前端决定怎么摆，只如实交出结构（用户要求：能后端驱动的
 /// 优先后端驱动；「能力 > 元数据」）。
 ///
-/// 类别名**不做白名单**：agent 目录里挂了什么就是什么（见 `agent/README.md`
+/// 类别名**不做白名单**：agent 目录里挂了什么就是什么（见 `subagent/README.md`
 /// 「钻进后的清单由子 composite 的 `list("")` 返回自身子目录」）。写死一张
 /// 类别表会与真实来源形成两份真相——这正是本函数头一段要避免的事。
 fn agent_dir_info(r: &AgentDirRecord, store: &AgentDirStore) -> serde_json::Value {
@@ -176,7 +176,7 @@ fn agent_dir_node(r: &AgentDirRecord, store: &AgentDirStore) -> VdfsNode {
         r.manifest.name.clone()
     };
     let mut n = VdfsNode::file(id, title, VdfsAccess::READ);
-    n.kind = PLUGIN_ID_AGENT.to_string();
+    n.kind = PLUGIN_ID_SUBAGENT.to_string();
     n.ext = Some(VDFS_EXT_FORM.to_string());
     n.schema = serde_json::to_value(super::detail::agent_detail_definition()).ok();
     if !r.manifest.description.is_empty() {
@@ -195,7 +195,7 @@ impl AgentPlugin {
     /// 根 = **本插件自己持有的目录**（构造时由父插件经 `PLUGIN_DIR` 告知，落在
     /// [`AgentPlugin::dir`] 上）——与 [`AgentPlugin::sub_agent`] 取的是**同一份**。
     ///
-    /// ⚠️ **不得改回「从请求上下文取」**（`plugin_dir_from_ctx(&**host, PLUGIN_ID_AGENT)`）。
+    /// ⚠️ **不得改回「从请求上下文取」**（`plugin_dir_from_ctx(&**host, PLUGIN_ID_SUBAGENT)`）。
     /// `PLUGIN_DIR` 只在**装配期**给出：`composite::build` 构造子插件时、
     /// `AgentPlugin::sub_agent` 造子树时。请求上下文里没有它，而 core 已**不再**
     /// 提供任何全局回退（全局 agent 根那套已随 homedir 下沉到 `home` 删除）——
@@ -210,13 +210,13 @@ impl AgentPlugin {
     ///
     /// 与文件系统的「`<挂载点名>/<条目 id>` 是一个挂载点、底下挂的是子 composite 的虚拟
     /// 文件系统」同义——子 composite 与系统根用的是**同一份** `CompositeVfs`，
-    /// 因此钻进子智能体后看到的左栏（会话 / 模型 / 智能体 / MCP / 技能 / 设置）
+    /// 因此钻进子智能体后看到的左栏（会话 / 模型 / 子智能体 / MCP / 技能 / 设置）
     /// 与父智能体完全一致，且 `mcp`/`skill` 等点进去是各自 provider 的富列表，
     /// 而不是裸磁盘目录。
     ///
     /// 取回方式走 **core 查询接口 `Plugin::get_vfs_provider`**，不依赖 composite 插件的
     /// 具体类型、也不走 `Registry`（`Registry` 是 LLM 链路的能力收集
-    /// 通道，与系统 VDFS 发现无关）。`agent` 与 `composite` 之间因此没有类型耦合。
+    /// 通道，与系统 VDFS 发现无关）。`subagent` 与 `composite` 之间因此没有类型耦合。
     ///
     /// 返回 `Err` = 该 `<id>` 不在挂载根清单里（目录缺失 / manifest 缺失 / 未过 §10
     /// 门槛，判据唯一出处见 [`super::store::AgentDirStore::load_record`]）——调用方
@@ -232,7 +232,7 @@ impl AgentPlugin {
     /// `crates/symbio-plugin-vdfs/src/fs.rs` 的 `VDFS_ADDR_ROOT`），供子 provider 计算给模型 / 用户看的
     /// 展示地址。两者都由本函数给出：前者用于**路径回填**，后者经子上下文传下去。
     ///
-    /// 分形：`<id>` 只是本级的挂载名，任意层级都一样——子智能体内部的 `agent` 实例
+    /// 分形：`<id>` 只是本级的挂载名，任意层级都一样——子智能体内部的 `subagent` 实例
     /// 再钻一层时，收到的路径本就是它自己空间里的 `<sub-id>/…`。
     async fn sub_vfs(
         &self,
@@ -251,7 +251,7 @@ impl AgentPlugin {
 
         // D-515：子树的 `memory` 实例经宿主 ctx 的 `AGENT_VDFS` 读写
         // `<agentdir>/AGENTS.md`（见 `MemoryPlugin::agent_store`）。主 ctx 那份指向
-        // 系统树根（`{homedir}`，T39），执行期经 `agent/<id>/memory` 下钻必须重挂到
+        // 系统树根（`{homedir}`，T39），执行期经 `subagent/<id>/memory` 下钻必须重挂到
         // 本智能体目录，否则读到的是系统智能体记忆（T84 / T15）。
         // 与 `forward_to_sub_agent` 的收集期重挂同一口径，两条链路不漂移。
         let sub_host = host.fork();
@@ -347,10 +347,10 @@ impl AgentPlugin {
                 // `composite/vdfs.rs::container_leaves_item_addresses_untouched`）：
                 // 条目地址要么由**拥有者**填成树内绝对地址，要么**留空**由访问层
                 // （`crates/symbio-plugin-vdfs/src/host.rs::item_addr`）按请求地址回填——而请求地址
-                // 是完整地址，含本挂载点被挂在哪（`agent/`）。
+                // 是完整地址，含本挂载点被挂在哪（`subagent/`）。
                 //
                 // 本层**填不出**这个地址：`mount_rel` 只是本插件空间内的首段
-                // （不含 `agent/`），而 `mount_path` 对空 `rel` 返回的正是它——于是
+                // （不含 `subagent/`），而 `mount_path` 对空 `rel` 返回的正是它——于是
                 // 访问层见到非空地址，认为「拥有者已填好」而**不再回填**，子空间里
                 // 列出的**每一条**都顶着子空间根地址（会话节点因此变成
                 // `<根>/<agent-id>`——那是个目录，前端点开会话即「读取会话转写失败」）。
@@ -395,7 +395,7 @@ impl AgentPlugin {
             // 自身根：**名字留空**——provider 不知道自己的挂载名，由使用方回填
             RelPath::Root => Ok(
                 VdfsNode::dir("", LABEL, VdfsAccess::LIST_TRAVERSE).with_new_type(Some(
-                    VdfsNewType::new(PLUGIN_ID_AGENT, LABEL)
+                    VdfsNewType::new(PLUGIN_ID_SUBAGENT, LABEL)
                         .with_description(format!("新建{LABEL}——在详情页里导入整包（.zip）"))
                         .with_node_ext(VDFS_EXT_FORM)
                         .with_schema_opt(
@@ -517,7 +517,7 @@ impl AgentPlugin {
         store
             .delete(&id)
             .map_err(|e| VdfsError::invalid(format!("删除{LABEL}失败：{e}")))?;
-        vdfs_notify_change(PLUGIN_ID_AGENT, &id);
+        vdfs_notify_change(PLUGIN_ID_SUBAGENT, &id);
         Ok(())
     }
 
@@ -587,7 +587,7 @@ impl AgentPlugin {
             let r = store
                 .import(&bytes, true)
                 .map_err(|e| VdfsError::invalid(format!("导入失败：{e}")))?;
-            vdfs_notify_change(PLUGIN_ID_AGENT, &r.id);
+            vdfs_notify_change(PLUGIN_ID_SUBAGENT, &r.id);
             return Ok(VdfsActionResult {
                 action: VDFS_ACTION_IMPORT.to_string(),
                 ok: true,
@@ -639,7 +639,7 @@ impl AgentPlugin {
                     .ok_or_else(mismatch);
             }
         }
-        vdfs_watch_changes(PLUGIN_ID_AGENT, path, sink).await
+        vdfs_watch_changes(PLUGIN_ID_SUBAGENT, path, sink).await
     }
 
     /// 取消订阅：与 `watch_at` 同一条判定——**成对**才配对得上计数
@@ -655,7 +655,7 @@ impl AgentPlugin {
                     .ok_or_else(mismatch);
             }
         }
-        vdfs_unwatch_changes(PLUGIN_ID_AGENT, path).await
+        vdfs_unwatch_changes(PLUGIN_ID_SUBAGENT, path).await
     }
 }
 

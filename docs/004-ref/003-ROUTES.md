@@ -79,11 +79,11 @@ lists: [route-contracts=owner]
 
 ---
 
-## Agent 插件
+## 子智能体插件
 
-**本插件无自有协议路由**：agent 目录的访问 / 新建 / 删除 / 导出全部由 VDFS 承担（`<根>/agent/…`）——`vdfs/list` / `vdfs/read` / `vdfs/write`（新建类型 `zip`，即整包导入）/`vdfs/delete` / 节点动作 `export`（`vdfs/action`）。故 `route` 直接返回 `NotFound` 并指引到 VDFS。
+**本插件无自有协议路由**：agent 目录的访问 / 新建 / 删除 / 导出全部由 VDFS 承担（`<根>/subagent/…`）——`vdfs/list` / `vdfs/read` / `vdfs/write`（新建类型 `zip`，即整包导入）/`vdfs/delete` / 节点动作 `export`（`vdfs/action`）。故 `route` 直接返回 `NotFound` 并指引到 VDFS。
 
-**能力贡献（不是路由）**：唯一 LLM 工具 `agent_run`（启动 / 续跑子智能体，源码`crates/symbio-plugin-agent/src/host/subagent.rs`），由模型经能力调用触达，不经 `route`。**LLM 可见工具清单以 [RE-006 §2.1](006-当前事实表.md "RE-006-当前事实表") 为准**，本文件不重复登记。
+**能力贡献（不是路由）**：唯一 LLM 工具 `agent_run`（启动 / 续跑子智能体，源码`crates/symbio-plugin-subagent/src/host/subagent.rs`），由模型经能力调用触达，不经 `route`。**LLM 可见工具清单以 [RE-006 §2.1](006-当前事实表.md "RE-006-当前事实表") 为准**，本文件不重复登记。
 
 ---
 

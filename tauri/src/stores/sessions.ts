@@ -26,7 +26,7 @@
  *
  * - `list`           : SessionListItem[]（来自后端 list + 本地状态镜像合并）
  * - `sessionSpace`   : 当前空间的**会话挂载目录**（根空间 `<根>/session`；
- *                      子智能体空间 `<根>/agent/<id>/session`）——「会话住在哪个
+ *                      子智能体空间 `<根>/subagent/<id>/session`）——「会话住在哪个
  *                      空间」是地址的一部分，清单 / 新建 / 发送都按它寻址
  * - `sessionMounts`  : 会话 id → 它所在的挂载目录（按 id 反查空间，供叶子操作用）
  * - `activeId`       : 当前"详细窗口"展示的会话（**地址末段**；地址见 `activeAddr`）
@@ -134,7 +134,7 @@ export const useSessionsStore = defineStore('sessions', () => {
   // ===== 空间维度（「会话住在哪个空间」是地址的一部分） =====
   //
   // 会话挂载目录**不是唯一的一份**：根空间是 `<根>/session`，子智能体空间是
-  // `<根>/agent/<id>/session`（一棵完整子树，内部有自己的 `session` 挂载）。
+  // `<根>/subagent/<id>/session`（一棵完整子树，内部有自己的 `session` 挂载）。
   // 清单读哪个目录、新建写哪个目录、发送落在哪个 inbox，全都由它决定。
   //
   // 它**不是**「上次选中的会话的空间」那么简单——它同时是「我现在在哪个空间」，
@@ -743,7 +743,7 @@ export const useSessionsStore = defineStore('sessions', () => {
     error.value = null
     try {
       // 清单读**当前空间**：根空间（默认挂载目录）或子智能体空间
-      // （`<根>/agent/<id>/session`）。`sessionSpace` 为空时交给服务层回退默认。
+      // （`<根>/subagent/<id>/session`）。`sessionSpace` 为空时交给服务层回退默认。
       const mountDir = sessionSpace.value || undefined
       const items = await listSessions(undefined, mountDir)
       // 清单到手 ⇒ 本空间的挂载目录已确定（服务层刚解析出来的那个）

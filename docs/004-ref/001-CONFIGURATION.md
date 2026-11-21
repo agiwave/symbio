@@ -22,7 +22,7 @@ created: 2026-09-07
 | `~/.symbio/PLUGIN.yml` | 系统级插件（`home`）的配置——工作区与最近记录 |
 | `~/.symbio/<插件>/PLUGIN.yml` | 各插件的配置（`session` / `model` / `web` / `local` / `gateway` / `telegram` …） |
 | `~/.symbio/<插件>/<id>/<主文件>` | 插件资源条目（`model/<id>/provider.json`、`mcp/<id>/server.json`、`skill/<id>/SKILL.md`…） |
-| `~/.symbio/agent/<id>/` | agent 目录（工作区级 + 全局级双层；`AgentDirStore` 自管） |
+| `~/.symbio/subagent/<id>/` | agent 目录（工作区级 + 全局级双层；`AgentDirStore` 自管） |
 
 `PLUGIN.yml` 是一个 YAML 映射，其中两个**身份字段**——`plugin_provider`（工厂 id）与
 `plugin_name`（实例名，缺省 = 目录名）——**不参与配置反序列化**，由 `PluginDir` 读写时

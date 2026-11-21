@@ -102,7 +102,7 @@ pub struct SessionStore {
     /// 之后发布，事实源在 `append` 时取走并随驱动目标交给驱动。
     ///
     /// 键的**存在**不代表已发布（值为 `None` = 本会话没选中 Agent ⇒ 宿主态）；
-    /// 只有 agent 插件能把 `agent_id` 解析成作用域，本模块不重读 manifest。
+    /// 只有 子智能体插件能把 `agent_id` 解析成作用域，本模块不重读 manifest。
     agent_scopes: std::sync::Mutex<
         HashMap<String, Arc<std::sync::RwLock<Option<symbio_plugin_api::AgentScope>>>>,
     >,

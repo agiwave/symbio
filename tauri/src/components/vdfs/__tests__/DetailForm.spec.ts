@@ -179,7 +179,7 @@ describe('DetailForm info 绑定：只读概览 + open-container', () => {
         },
       ],
       actions: [
-        { id: 'open-container', label: '浏览内部', style: 'primary', payload: { kind: 'agent' } },
+        { id: 'open-container', label: '浏览内部', style: 'primary', payload: { kind: 'subagent' } },
         { id: 'delete', label: '删除', style: 'icon danger' },
       ],
     })
@@ -188,8 +188,8 @@ describe('DetailForm info 绑定：只读概览 + open-container', () => {
   const agentDirNode = node({
     name: 'b1',
     title: 'B1',
-    kind: 'agent',
-    path: '@vfs/agent/b1',
+    kind: 'subagent',
+    path: '@vfs/subagent/b1',
     scope: 'workspace',
     count_prompt: 2,
   })
@@ -211,7 +211,7 @@ describe('DetailForm info 绑定：只读概览 + open-container', () => {
     const buttons = w.findAll('.ea-btn')
     await buttons[0].trigger('click')
     await buttons[1].trigger('click')
-    expect(w.emitted('open-container')).toEqual([['agent']])
+    expect(w.emitted('open-container')).toEqual([['subagent']])
     expect(w.emitted('delete')).toHaveLength(1)
   })
 
@@ -223,7 +223,7 @@ describe('DetailForm info 绑定：只读概览 + open-container', () => {
     const w = mount(DetailForm, {
       props: {
         definition,
-        node: node({ name: 'b1', title: 'B', kind: 'agent' }),
+        node: node({ name: 'b1', title: 'B', kind: 'subagent' }),
         capabilities: { mutable: true },
         mechanismActions: [
           { id: 'delete', label: '删除', style: 'danger', busy_label: '删除中…' },

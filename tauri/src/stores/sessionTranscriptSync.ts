@@ -15,7 +15,7 @@
  * | `<挂载目录>/<sid>/<集合段>/<项 id>` | 集合项；`<集合段>` 是消息段时归**本模块** |
  *
  * `<挂载目录>` **不止一份**：根空间是 `<根>/session`，子智能体空间是
- * `<根>/agent/<id>/session`。转写变更按**已登记的挂载目录**取最长前缀匹配来归属，
+ * `<根>/subagent/<id>/session`。转写变更按**已登记的挂载目录**取最长前缀匹配来归属，
  * 只认根那一份会让子空间的消息变更整片收不到（`registerSessionMount` 见下）。
  *
  * 载荷是**帧本身**（与后端内存图收到的同一条 `ChatNode`），语义全在字段上，
@@ -112,7 +112,7 @@ interface SyncState {
    *
    * 不只一份：子智能体空间（`agent/<id>/…`）是一棵完整子树，内部有自己的
    * `session` 挂载。只认根那一份会让子空间的消息变更**根本收不到**——它的
-   * 地址是 `<根>/agent/<id>/session/<sid>/message/<mid>`，匹配不上根挂载的前缀。
+   * 地址是 `<根>/subagent/<id>/session/<sid>/message/<mid>`，匹配不上根挂载的前缀。
    * 「会话住在哪个空间」是地址的一部分，因此按挂载目录登记，而不是全局一份。
    */
   mounts: Map<string, string>
@@ -160,7 +160,7 @@ function messageAddr(mountDir: string, sid: string, mid: string): string {
  * 变更地址落在哪个已登记的挂载目录下（没有就是不属于本消费端）。
  *
  * 取**最长**匹配：挂载目录互为前缀时（`<根>/session` 与 `<根>/session/…`
- * 不会，但 `<根>/agent` 之下可能），最长匹配才是「属于谁」的正确答案。
+ * 不会，但 `<根>/subagent` 之下可能），最长匹配才是「属于谁」的正确答案。
  */
 function mountOf(path: string): string | null {
   let best: string | null = null

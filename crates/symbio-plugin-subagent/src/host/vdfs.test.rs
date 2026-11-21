@@ -1,4 +1,4 @@
-//! `crates/symbio-plugin-agent/src/host/vdfs.rs` 的单元测试 —— 拆自源码末尾的测试模块。
+//! `crates/symbio-plugin-subagent/src/host/vdfs.rs` 的单元测试 —— 拆自源码末尾的测试模块。
 //!
 //! 与实现**同级**分文件（约定：`X.rs` + `X.test.rs`）。
 
@@ -11,8 +11,8 @@ fn rel_path_splits_agent_and_inner_path() {
     assert!(matches!(parse_rel_path("/"), RelPath::Root));
     assert!(matches!(parse_rel_path("b1"), RelPath::Agent { id: "b1" }));
     assert!(matches!(
-        parse_rel_path("b1.agent"),
-        RelPath::Agent { id: "b1.agent" }
+        parse_rel_path("b1.subagent"),
+        RelPath::Agent { id: "b1.subagent" }
     ));
     match parse_rel_path("b1/skill/foo/SKILL.md") {
         RelPath::File { id, rel } => {
@@ -36,11 +36,11 @@ fn rel_path_splits_agent_and_inner_path() {
     ));
 }
 
-/// 路径末段 → Agent id（去掉 `.agent` 呈现扩展名）
+/// 路径末段 → 子智能体 id（去掉 `.subagent` 呈现扩展名）
 #[test]
 fn id_of_strips_presentation_extension() {
     assert_eq!(id_of("demo"), "demo");
-    assert_eq!(id_of("demo.agent"), "demo");
+    assert_eq!(id_of("demo.subagent"), "demo");
 }
 
 // ==================== 概览载荷（「已装能力」的形状） ====================

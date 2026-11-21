@@ -199,7 +199,7 @@ function buildConstTable(files) {
     const txt = readCode(abs)
     if (abs.endsWith('.rs')) {
       // `&str` 与 `&'static str` 都要认——只写 `&'?static\s+str` 会漏掉前者，
-      // 于是 `pub const PLUGIN_ID_AGENT: &str = "agent";` 整表取不到，
+      // 于是 `pub const PLUGIN_ID_SUBAGENT: &str = "agent";` 整表取不到，
       // E-001 会把每个用常量声明 meta 的插件都报成「未取到首参」。
       for (const m of txt.matchAll(
         /const\s+([A-Z][A-Z0-9_]*)\s*:\s*&\s*(?:'static\s+)?str\s*=\s*"([^"\n]*)"/g,
@@ -991,7 +991,7 @@ const sdkExemption = loadSdkExemption()
         continue
       }
       // TOML 注释：# 在行首或空白之后。注释里提到兄弟插件名是说明，不是依赖
-      // （composite 的 dev-dependencies 上方就有一句「与 symbio-plugin-agent 同一处境」）。
+      // （composite 的 dev-dependencies 上方就有一句「与 symbio-plugin-subagent 同一处境」）。
       const code = raw[i].replace(/(^|\s)#.*$/, '$1')
       if (!code.trim()) continue
       const dep = depNameOf(code)

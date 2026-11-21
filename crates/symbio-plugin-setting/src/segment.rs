@@ -21,7 +21,7 @@ use super::config::SettingConfig;
 
 /// 系统提示词条目在收集器里的注册名（同名覆盖的键）
 ///
-/// 子树里的注册会经 `agent` 插件的 `SubAgentVisitor` 加上 `agent/<id>/` 前缀，
+/// 子树里的注册会经 `subagent` 插件的 `SubAgentVisitor` 加上 `agent/<id>/` 前缀，
 /// 因此与系统侧的**同名**条目不冲突（并集）。
 /// 段名 = 覆盖键；**不得与挂载名（插件名）同键**——4d 之后提示词行与挂载行同一张表，
 /// 本插件的挂载名是 `setting`，段名于是 `agent-setting`（同构见 `memory` 插件的段名）。
