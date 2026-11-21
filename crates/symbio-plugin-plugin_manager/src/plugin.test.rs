@@ -304,6 +304,30 @@ async fn list_has_entries_then_ui_entry_without_duplicates() {
     assert_eq!(items[2].node.title, "界面");
 }
 
+/// 必装且无配置项的插件从清单隐藏：列出来既删不掉（required）也没什么可改，只是噪音。
+/// 判据取 `entry.required && 无 config`——不硬编码插件名，默认可删的插件即便无配置仍列出。
+#[tokio::test]
+async fn list_hides_required_plugins_without_config() {
+    // 测试环境没有 CONFIGURABLE_VISITOR ⇒ 所有条目的 config 都是 None。
+    // alpha 必装（required）⇒ 隐藏；beta 默认可删 ⇒ 即使同样无配置也要列出。
+    let fake = Arc::new(FakeRegistry::new(vec![
+        entry("alpha", "alpha_factory", true, true),
+        entry("beta", "beta_factory", false, true),
+    ]));
+    let p = plugin_with(fake);
+
+    let items = list(&p, &vctx()).await;
+    let names: Vec<&str> = items.iter().map(|it| it.node.name.as_str()).collect();
+    assert!(
+        !names.contains(&"alpha"),
+        "必装且无配置项的 alpha 应从清单隐藏（实际：{names:?}）"
+    );
+    assert!(
+        names.contains(&"beta"),
+        "默认可删的 beta 即便无配置也必须列出（实际：{names:?}）"
+    );
+}
+
 /// 装配态即节点状态：启用 / 停用 / 装配失败各画各的
 #[tokio::test]
 async fn entry_status_follows_assembly_state() {

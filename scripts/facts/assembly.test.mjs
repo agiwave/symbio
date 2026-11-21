@@ -37,7 +37,9 @@ function fixtureRepo(overrides = {}) {
   return root
 }
 
-const render = (root) => assembly.render({ root })
+// 临时小仓库没有 REQUIRED_IDS 里的那些插件，注入空必装集避免校验误判；
+// 「真仓一致性」用例单独用真实写死的必装集（见文件末）。
+const render = (root, requiredIds = []) => assembly.render({ root, requiredIds })
 
 function withRepo(overrides, fn) {
   const root = fixtureRepo(overrides)
@@ -104,6 +106,28 @@ test('未声明 plugin_optional ⇒ 进核心集（默认装配且不可删除�
   })
 })
 
+test('插件自行声明 plugin_required ⇒ 抛错（必装由系统写死，D-522）', () => {
+  assert.throws(
+    () =>
+      withRepo(
+        { beta: 'plugin_id: beta\nplugin_assembly: sub_agent\nplugin_order: 20\nplugin_required: true\n' },
+        (root) => render(root),
+      ),
+    /不得自行声明必装/,
+  )
+})
+
+test('必装集取自系统 REQUIRED_IDS，不来自插件声明', () => {
+  // fixture 里两个插件都没有 required 声明；系统写死的必装 id 是 plugin_manager/session/
+  // loop/model/vdfs/ui_prefs，这个临时仓库一个都没有 ⇒ 必装集应为空，仍正常生成。
+  withRepo({}, (root) => {
+    const out = render(root)
+    const required = out.slice(out.indexOf('ASSEMBLY_REQUIRED_PLUGINS'))
+    const block = required.slice(0, required.indexOf('];'))
+    assert.doesNotMatch(block, /"alpha"|"beta"/, '必装集不随插件声明变化')
+  })
+})
+
 test('可选插件同时声明不可停用 ⇒ 抛错（恒空槽位无意义）', () => {
   assert.throws(
     () =>
@@ -149,5 +173,5 @@ test('sub_agent 缺 plugin_order ⇒ 抛错', () => {
 
 test('真仓的生成物与各插件 PLUGIN.yml 一致（手改过它就红）', () => {
   const committed = fs.existsSync(GEN_FILE) ? fs.readFileSync(GEN_FILE, 'utf8') : ''
-  assert.equal(committed, render(REPO))
+  assert.equal(committed, assembly.render({ root: REPO }))
 })

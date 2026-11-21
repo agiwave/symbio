@@ -43,12 +43,12 @@
 //! 它的配置一起停下**，而不是把它留在树里只关掉行为。
 
 use serde_json::Value;
-use symbio_plugin_api::ASSEMBLY_UNDISABLABLE_PLUGINS;
 use symbio_plugin_api::{
     creator_create_object, creator_has, creator_ids, lock_read, lock_write, Plugin, PluginDir,
     PluginEntry, PluginInvokeRequest, PluginInvokeRequestExt, PluginMeta, PluginSimpleRequest,
     PluginStopReason, PLUGIN_DIR, PLUGIN_FILE, PLUGIN_KEY_PROVIDER, REQUIRED_PLUGINS,
 };
+use symbio_plugin_api::{ASSEMBLY_REQUIRED_PLUGINS, ASSEMBLY_UNDISABLABLE_PLUGINS};
 use symbio_plugin_api::{PLUGIN_ID_COMPOSITE, PLUGIN_ID_HOME};
 
 /// **系统级插件工厂**：它们的目录就是**系统根本身**，与业务插件**并列**而非包含其中。
@@ -96,7 +96,10 @@ pub struct PluginRegistry {
     mount_errors: RwLock<IndexMap<String, String>>,
     /// 插件根（= 本容器的目录；系统级容器的目录就是系统根）
     root: PathBuf,
-    /// 构造者声明的必需插件（目录必须存在；**不可删除**，但可停用）
+    /// 构造者声明的**默认装配清单**（开箱补目录、默认挂载）。
+    ///
+    /// 其中只有 [`ASSEMBLY_REQUIRED_PLUGINS`] 那份子集不可删；默认内置但可删的插件
+    /// 也在这里（否则首次启动不会补目录），删与不删由 `is_required` 另查必装集。
     required: Vec<String>,
     /// 构造上下文：运行期挂载新插件时由它派生子上下文
     ctx: Arc<dyn PluginInvokeRequest>,
@@ -177,9 +180,14 @@ impl PluginRegistry {
         }
     }
 
-    /// 构造者是否把 `name` 声明为必需（= 不可删除）
+    /// `name` 是否不可删除（= 构造者的必装底座）
+    ///
+    /// 判据取编译期 [`ASSEMBLY_REQUIRED_PLUGINS`]，与 ctx 注入的 `self.required`
+    /// （**默认装配清单**，决定 `ensure_required` 补哪些目录）刻意分开：默认内置
+    /// 可删的插件也在 `self.required` 里（开箱补目录），但不在必装集里（允许卸载）。
+    /// 「补目录」与「不可删」是两件事，各读各的清单。
     pub fn is_required(&self, name: &str) -> bool {
-        self.required.iter().any(|n| n == name)
+        ASSEMBLY_REQUIRED_PLUGINS.contains(&name)
     }
 
     /// 某插件的目录（**公开**：资源树合成挂载点节点时也要读它的身份，见 D-032）

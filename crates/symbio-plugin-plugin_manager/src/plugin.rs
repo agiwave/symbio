@@ -463,6 +463,12 @@ impl PluginManagerPlugin {
                 continue;
             }
             let config = configs.iter().find(|c| c.node.name == entry.name).cloned();
+            // 必装底座若没有可配置项，列出来既删不掉（required）也没什么可改（无 config），
+            // 只是噪音：用户点进去只有「插件名 / 工厂 / 版本」三行静态字。隐藏它们——
+            // 装配与删除能力不受影响（这仍是注册表里的真实条目，只是不在列表里出现）。
+            if entry.required && config.is_none() {
+                continue;
+            }
             out.push(VdfsItem::new(entry_node(entry, config)));
         }
         out.extend(UI_SECTIONS.iter().map(|s| VdfsItem::new(section_node(s))));

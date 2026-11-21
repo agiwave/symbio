@@ -60,7 +60,7 @@ async fn entries_cover_qualified_dirs_including_disabled_ones() {
     std::fs::create_dir_all(root.join("notes")).unwrap();
     std::fs::write(root.join("README.md"), "不是目录").unwrap();
 
-    let entries = registry_at(&root, vec!["alpha".to_string()]).entries();
+    let entries = registry_at(&root, vec![PLUGIN_ID_SESSION.to_string()]).entries();
     let names: Vec<&str> = entries.iter().map(|e| e.name.as_str()).collect();
     assert_eq!(
         names,
@@ -69,7 +69,8 @@ async fn entries_cover_qualified_dirs_including_disabled_ones() {
     );
 
     assert!(entries[0].enabled, "装配位缺省 = 启用");
-    assert!(entries[0].required, "构造者声明的必需插件");
+    // required 判据来自编译期必装集，与注入的默认装配清单无关（后者只管补目录）。
+    assert!(!entries[0].required, "alpha 不在必装集，默认可删");
     assert!(!entries[0].mounted, "没有实例 = 未挂载（停用或构造失败）");
     assert!(!entries[1].enabled, "显式停用");
     assert!(!entries[1].required);
@@ -437,16 +438,28 @@ async fn disabling_writes_the_flag_and_drops_the_instance() {
 
 // ==================== 卸载 ====================
 
-/// 必需插件不可删除（可以停用）；不存在的插件如实报错
+/// 必装插件不可删除（可以停用）；不存在的插件如实报错
+///
+/// 判据取编译期 [`ASSEMBLY_REQUIRED_PLUGINS`]，与注入的默认装配清单无关：这里的
+/// 清单刻意只放 `alpha`，验证「不在必装集 ⇒ 即便在默认装配清单里也能删」的另一半。
 #[tokio::test]
 async fn uninstall_refuses_required_and_unknown_plugins() {
     let root = temp_root("uninstall");
+    put_plugin(
+        &root,
+        PLUGIN_ID_SESSION,
+        r#"{"plugin_provider": "session"}"#,
+    );
     put_plugin(&root, "alpha", r#"{"plugin_provider": "alpha"}"#);
     let reg = registry_at(&root, vec!["alpha".to_string()]);
 
-    let err = reg.uninstall("alpha").await.unwrap_err();
-    assert!(err.contains("必需插件"), "必需插件只能停用：{err}");
-    assert!(root.join("alpha").exists(), "拒绝时不得动目录");
+    let err = reg.uninstall(PLUGIN_ID_SESSION).await.unwrap_err();
+    assert!(err.contains("必需插件"), "必装插件只能停用：{err}");
+    assert!(root.join(PLUGIN_ID_SESSION).exists(), "拒绝时不得动目录");
+
+    // alpha 虽在注入的默认装配清单里，但不在必装集 ⇒ 允许卸载。
+    reg.uninstall("alpha").await.unwrap();
+    assert!(!root.join("alpha").exists(), "默认可删插件的目录被删掉");
 
     assert!(reg
         .uninstall("ghost")
