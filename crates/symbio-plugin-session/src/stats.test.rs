@@ -10,7 +10,7 @@
 //! ## 这一份用例**不**验时延 / 兜底 / 跨度的数字
 //!
 //! 三列的口径已经搬进能力包 `slo`（名册 #13）：`P99 是什么`、`率怎么算`、`跨度怎么折`
-//! 都归 owner，判据在 `crates/symbio-plugin-slo/src/decl.test.rs`（11 条数字用例）。
+//! 都归 owner，判据在 时延能力包的判据用例（11 条数字用例）。
 //! 本测试进程**不链接** `slo`（`E-009`：本插件不引用兄弟插件），所以这里能验、也只该验
 //! **读方这一半**：
 //!
@@ -242,7 +242,7 @@ fn seed_instance(tag: &str, n: usize) -> (PathBuf, Vec<PathBuf>) {
 ///
 /// 逐档两列里**有什么**归 owner（`slo`）：本进程不链接它，于是落点整条缺席、
 /// 合计两格是有据的零（`D-488`：落点缺席与报表列同一降级语义）。这不是「少验了一条」
-/// ——是「这一格不是本插件的数」：数字在 `crates/symbio-plugin-slo/src/decl.test.rs`，
+/// ——是「这一格不是本插件的数」：数字在 时延能力包的判据用例，
 /// 组合在 e2e `t28`。
 #[test]
 fn fleet_aggregates_every_session_in_the_instance() {
@@ -371,7 +371,7 @@ fn fleet_is_empty_when_the_reader_may_not_read() {
 // ── 出口排版（本插件自己的代码，与 owner 在不在无关）────────────────────────
 //
 // 逐档行的口径与排版（`sample_ms` → `samples`、率原样搬、按档并表）已随报表登记搬回
-// owner（`D-387`），由 `crates/symbio-plugin-slo/src/decl.test.rs` 钉。本插件只剩**加法**：
+// owner（`D-387`），由 时延能力包的判据用例 钉。本插件只剩**加法**：
 // 合计两格逐档相加。
 
 /// 合计两格 = 逐档相加（计数可加）。
@@ -769,7 +769,7 @@ fn stats_recompute_equals_direct_apply() {
     // 报表列（就绪集 / 时延兜底 / 成本等）的口径与形状都归 owner（`D-387`）：本测试
     // 进程不链接任何 owner ⇒ `reports()` 为空 ⇒ 这些键整条不出现。**数字**归 owner 的
     // 单测（`crates/symbio-plugin-task/src/readyset.test.rs`、
-    // `crates/symbio-plugin-slo/src/decl.test.rs`、`crates/symbio-plugin-cost/src/decl.test.rs`），
+    // 时延能力包的判据用例、成本能力包的判据用例），
     // **组合**归 e2e（`t28-session-stats.mjs` / `t31-task-table.mjs`）。在这里补一份
     // 替身 owner 只会让那些判据变成假绿。
     assert!(
@@ -788,9 +788,9 @@ fn stats_recompute_equals_direct_apply() {
 /// 反向用例：删一格 ⇒ 对应那一列必须变（不是常数）。
 ///
 /// 这里的手术刀落在**本插件仍自己折叠的列**上：断点列数格子、转写列按事件顺序排条目。
-/// 时延 / 兜底两列的反向判据归 owner（`crates/symbio-plugin-slo/src/decl.test.rs`
+/// 时延 / 兜底两列的反向判据归 owner（时延能力包的判据用例
 /// 用同一把刀：删掉 `chat.assistant.final` ⇒ 样本 1 → 0），成本列同理归
-/// `crates/symbio-plugin-cost/src/decl.test.rs`。
+/// 成本能力包的判据用例。
 #[test]
 fn reverse_case_the_readout_moves_when_the_wal_changes() {
     let wal = seed("reverse");
@@ -1153,9 +1153,9 @@ fn a_matrix_member_reads_shared_content_and_an_outsider_still_cannot() {
 
 /// 声誉列**没有 owner** 时整条不出现（`D-387`）：本插件不再替 owner 补 `own` 行。
 ///
-/// 本测试二进制不链接 `crates/symbio-plugin-reputation`（E-009）⇒ `reports()` 为空 ⇒
+/// 本测试二进制不链接声誉能力包（E-009）⇒ `reports()` 为空 ⇒
 /// `reputation` 这个键不存在。`own` 行的主体、配对规则与 as-of 都归 owner 的单测
-/// （`crates/symbio-plugin-reputation/src/decl.rs::tests`：账记在立约方、配对靠 `id`、
+/// （声誉能力包的判据用例：账记在立约方、配对靠 `id`、
 /// 自报不进账、as-of、同切片同账），生产二进制里读得到真数归 e2e
 /// （`t30-multi-principal.mjs` / `t42-full-derives-commitment-task.mjs` 钉 `own` 的
 /// `offered` / `kept`，`t71-peer-commitment.mjs` 钉对等主体的条目，`t74-elimination-loop.mjs`

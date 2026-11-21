@@ -3,7 +3,7 @@
 //! 本插件拥有 `system.*`（定时触发与健康自检）：名字、格位与声明同在这里，写方与读方
 //! 都从本模块取名字——内核不再为它们保留常量。
 //!
-//! **`conation.expressed` 的 owner 是能力包**（`crates/symbio-plugin-conation`，站位见 `D-269`）：
+//! **`conation.expressed` 的 owner 是主动性能力包**（站位见 `D-269`）：
 //! 本插件只剩写方（自主触发的落格）。名字因此取自清单生成物
 //! `symbio_plugin_api::events`——与任务族同一条通路，不是兄弟插件、也不是内核代答。
 //!

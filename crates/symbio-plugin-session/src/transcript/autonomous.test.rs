@@ -146,7 +146,7 @@ async fn trigger_facts_land_in_order_and_no_task_grows_without_the_capability_pa
 ///
 /// ## 为什么这里断言的是「不开」而不是「只开一次」
 ///
-/// 升格判据（开关 / 授权 / 已声明）**归能力包**：`crates/symbio-plugin-conation` 的
+/// 升格判据（开关 / 授权 / 已声明）**归能力包**：主动性能力包的
 /// `DebtSource::rows` 算「哪些目标算已声明」（`D-386`）。本二进制不链接那个包（E-009），
 /// 所以这里读到的必然是**可诊断的缺席**——本文件因此只能钉本插件剩下的那一半：
 /// **读不到 ⇒ 不升格**（而不是「读不到 ⇒ 当作没声明过，于是每 tick 重开一条」，

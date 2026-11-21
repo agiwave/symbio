@@ -662,7 +662,7 @@ fn binding_grants_no_visibility_scope() {
 /// **淘汰面只认部署表**：绑定登记不构成「部署授予过 `assign.work`」。
 ///
 /// 判据取两口之差：合流面（`can_write_name`）看得见绑定来的能力，部署面
-/// （`deployed_can_write_name`）看不见——`crates/symbio-plugin-reputation/src/elimination.rs` 走后者，
+/// （`deployed_can_write_name`）看不见——声誉能力包的淘汰模块走后者，
 /// 运行期绑定的主体不会因此被回头淘汰（它本就不是部署事实）。
 #[test]
 fn the_elimination_face_ignores_bindings() {

@@ -28,112 +28,112 @@ use symbio_kernel::event::{Entity, EventDecl, FactRole, Verb};
 
 // ============ artifact ============
 
-/// artifact.added — owner `symbio-plugin-tool`，格位 `(Artifact, Asserted)`
+/// artifact.added — owner 是声明该事件的插件（见其 PLUGIN.yml），格位 `(Artifact, Asserted)`
 pub const EVENT_ARTIFACT_ADDED: &str = "artifact.added";
 
 // ============ authz ============
 
-/// authz.granted — owner `symbio-plugin-tool`，格位 `(Scope, Asserted)`
+/// authz.granted — owner 是声明该事件的插件（见其 PLUGIN.yml），格位 `(Scope, Asserted)`
 pub const EVENT_AUTHZ_GRANTED: &str = "authz.granted";
 
 // ============ chat ============
 
-/// chat.assistant.fallback — owner `symbio-plugin-session`，格位 `(Scope, Closed)`
+/// chat.assistant.fallback — owner 是声明该事件的插件（见其 PLUGIN.yml），格位 `(Scope, Closed)`
 pub const EVENT_CHAT_ASSISTANT_FALLBACK: &str = "chat.assistant.fallback";
 
-/// chat.assistant.final — owner `symbio-plugin-session`，格位 `(Scope, Closed)`
+/// chat.assistant.final — owner 是声明该事件的插件（见其 PLUGIN.yml），格位 `(Scope, Closed)`
 pub const EVENT_CHAT_ASSISTANT_FINAL: &str = "chat.assistant.final";
 
 // ============ classify ============
 
-/// classify.answered — owner `symbio-plugin-classify`，格位 `(Verdict, Asserted)`
+/// classify.answered — owner 是声明该事件的插件（见其 PLUGIN.yml），格位 `(Verdict, Asserted)`
 pub const EVENT_CLASSIFY_ANSWERED: &str = "classify.answered";
 
-/// classify.escalate — owner `symbio-plugin-classify`，格位 `(Verdict, Asserted)`
+/// classify.escalate — owner 是声明该事件的插件（见其 PLUGIN.yml），格位 `(Verdict, Asserted)`
 pub const EVENT_CLASSIFY_ESCALATE: &str = "classify.escalate";
 
 // ============ commitment ============
 
-/// commitment.broken — owner `symbio-plugin-session`，格位 `(Commitment, Closed)`
+/// commitment.broken — owner 是声明该事件的插件（见其 PLUGIN.yml），格位 `(Commitment, Closed)`
 pub const EVENT_COMMITMENT_BROKEN: &str = "commitment.broken";
 
-/// commitment.opened — owner `symbio-plugin-session`，格位 `(Commitment, Opened)`
+/// commitment.opened — owner 是声明该事件的插件（见其 PLUGIN.yml），格位 `(Commitment, Opened)`
 pub const EVENT_COMMITMENT_OPENED: &str = "commitment.opened";
 
-/// commitment.released — owner `symbio-plugin-session`，格位 `(Commitment, Closed)`
+/// commitment.released — owner 是声明该事件的插件（见其 PLUGIN.yml），格位 `(Commitment, Closed)`
 pub const EVENT_COMMITMENT_RELEASED: &str = "commitment.released";
 
 // ============ conation ============
 
-/// conation.expressed — owner `symbio-plugin-conation`，格位 `(Conation, Opened)`
+/// conation.expressed — owner 是声明该事件的插件（见其 PLUGIN.yml），格位 `(Conation, Opened)`
 pub const EVENT_CONATION_EXPRESSED: &str = "conation.expressed";
 
 // ============ memory ============
 
-/// memory.consolidated — owner `symbio-plugin-memory`，格位 `(Memory, Progressed)`
+/// memory.consolidated — owner 是声明该事件的插件（见其 PLUGIN.yml），格位 `(Memory, Progressed)`
 pub const EVENT_MEMORY_CONSOLIDATED: &str = "memory.consolidated";
 
-/// memory.encoded — owner `symbio-plugin-memory`，格位 `(Memory, Opened)`
+/// memory.encoded — owner 是声明该事件的插件（见其 PLUGIN.yml），格位 `(Memory, Opened)`
 pub const EVENT_MEMORY_ENCODED: &str = "memory.encoded";
 
 // ============ message ============
 
-/// message.added — owner `symbio-plugin-session`，格位 `(Message, Opened)`
+/// message.added — owner 是声明该事件的插件（见其 PLUGIN.yml），格位 `(Message, Opened)`
 pub const EVENT_MESSAGE_ADDED: &str = "message.added";
 
-/// message.removed — owner `symbio-plugin-session`，格位 `(Message, Closed)`
+/// message.removed — owner 是声明该事件的插件（见其 PLUGIN.yml），格位 `(Message, Closed)`
 pub const EVENT_MESSAGE_REMOVED: &str = "message.removed";
 
 // ============ scope ============
 
-/// scope.branch — owner `symbio-plugin-session`，格位 `(Scope, Asserted)`
+/// scope.branch — owner 是声明该事件的插件（见其 PLUGIN.yml），格位 `(Scope, Asserted)`
 pub const EVENT_SCOPE_BRANCH: &str = "scope.branch";
 
-/// scope.branch_selected — owner `symbio-plugin-session`，格位 `(Scope, Asserted)`
+/// scope.branch_selected — owner 是声明该事件的插件（见其 PLUGIN.yml），格位 `(Scope, Asserted)`
 pub const EVENT_SCOPE_BRANCH_SELECTED: &str = "scope.branch_selected";
 
-/// scope.dispatch — owner `symbio-plugin-session`，格位 `(Scope, Asserted)`
+/// scope.dispatch — owner 是声明该事件的插件（见其 PLUGIN.yml），格位 `(Scope, Asserted)`
 pub const EVENT_SCOPE_DISPATCH: &str = "scope.dispatch";
 
 // ============ session ============
 
-/// session.config — owner `symbio-plugin-session`，格位 `(Scope, Asserted)`
+/// session.config — owner 是声明该事件的插件（见其 PLUGIN.yml），格位 `(Scope, Asserted)`
 pub const EVENT_SESSION_CONFIG: &str = "session.config";
 
-/// session.consolidated — owner `symbio-plugin-session`，格位 `(Message, Progressed)`
+/// session.consolidated — owner 是声明该事件的插件（见其 PLUGIN.yml），格位 `(Message, Progressed)`
 pub const EVENT_SESSION_CONSOLIDATED: &str = "session.consolidated";
 
-/// session.recall — owner `symbio-plugin-session`，格位 `(Scope, Asserted)`
+/// session.recall — owner 是声明该事件的插件（见其 PLUGIN.yml），格位 `(Scope, Asserted)`
 pub const EVENT_SESSION_RECALL: &str = "session.recall";
 
 // ============ task ============
 
-/// task.asserted — owner `symbio-plugin-task`，格位 `(Task, Asserted)`
+/// task.asserted — owner 是声明该事件的插件（见其 PLUGIN.yml），格位 `(Task, Asserted)`
 pub const EVENT_TASK_ASSERTED: &str = "task.asserted";
 
-/// task.held — owner `symbio-plugin-task`，格位 `(Task, Held)`
+/// task.held — owner 是声明该事件的插件（见其 PLUGIN.yml），格位 `(Task, Held)`
 pub const EVENT_TASK_HELD: &str = "task.held";
 
-/// task.opened — owner `symbio-plugin-task`，格位 `(Task, Opened)`
+/// task.opened — owner 是声明该事件的插件（见其 PLUGIN.yml），格位 `(Task, Opened)`
 pub const EVENT_TASK_OPENED: &str = "task.opened";
 
 // ============ tool ============
 
-/// tool.call.requested — owner `symbio-plugin-model`，格位 `(Scope, Asserted)`
+/// tool.call.requested — owner 是声明该事件的插件（见其 PLUGIN.yml），格位 `(Scope, Asserted)`
 pub const EVENT_TOOL_CALL_REQUESTED: &str = "tool.call.requested";
 
-/// tool.calls.done — owner `symbio-plugin-tool`，格位 `(Scope, Asserted)`
+/// tool.calls.done — owner 是声明该事件的插件（见其 PLUGIN.yml），格位 `(Scope, Asserted)`
 pub const EVENT_TOOL_CALLS_DONE: &str = "tool.calls.done";
 
-/// tool.requested — owner `symbio-plugin-model`，格位 `(Scope, Asserted)`
+/// tool.requested — owner 是声明该事件的插件（见其 PLUGIN.yml），格位 `(Scope, Asserted)`
 pub const EVENT_TOOL_REQUESTED: &str = "tool.requested";
 
 // ============ user ============
 
-/// user.answer — owner `symbio-plugin-session`，格位 `(Scope, Asserted)`
+/// user.answer — owner 是声明该事件的插件（见其 PLUGIN.yml），格位 `(Scope, Asserted)`
 pub const EVENT_USER_ANSWER: &str = "user.answer";
 
-/// user.message — owner `symbio-plugin-session`，格位 `(Scope, Opened)`
+/// user.message — owner 是声明该事件的插件（见其 PLUGIN.yml），格位 `(Scope, Opened)`
 pub const EVENT_USER_MESSAGE: &str = "user.message";
 
 /// 跨插件共享的事件行（名字 + 格位 + 角色）——写闸的**共享臂**。

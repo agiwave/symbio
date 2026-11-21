@@ -74,7 +74,7 @@ fn spec_judgment_agrees_with_matrix_predicate_for_every_principal_shape() {
 // principal 隔离（下方验收 1/4）+ 无直连静态扫描（scripts/audits/no-direct-call-audit.mjs，
 // 出口判据「直连调用 0」；成对性拒绝 = DE-038 §6 验收 3，已在 governance 测试区覆盖）。
 // commitment 立约成格与配对判在这里；声誉台账的读数与「双跑一致」随折叠归它的 owner 包
-// （`crates/symbio-plugin-reputation/src/decl.test.rs`，DE-045 D-288），本区只留淘汰裁决那一侧。
+// （声誉能力包的判据用例，DE-045 D-288），本区只留淘汰裁决那一侧。
 
 /// DE-038 §6 验收 1 + 4：thread_private 互不可见；内容可见域放宽成 public 后，
 /// 同一主体、同一份事件切片立刻可见——证明「可见域是参数在生效」，不是投影写死。
@@ -381,7 +381,7 @@ fn the_arbiter_row_is_the_documented_five_fields() {
 
 /// DE-043 §6 断言 3：裁决 = 一条**可审计、可撤销**的 grants 变更事件。
 ///
-/// 撤销事件的**写方**是声誉 owner（`crates/symbio-plugin-reputation/src/elimination.rs`
+/// 撤销事件的**写方**是声誉 owner（声誉能力包的淘汰模块
 /// 的 `verdict_draft`，同一份载荷），本域只剩读侧翻译与恢复事件的构造。判据两条：
 /// ① 载荷六字段齐全（`score` / `threshold` 让审计方能复算）；② `verdict_grants_changes`
 /// 把事件流水折成覆盖层后，`is_revoked` 翻真、恢复事件再翻假——回路闭合。

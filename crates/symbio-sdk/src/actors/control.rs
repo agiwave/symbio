@@ -4,7 +4,7 @@
 //! 「忙则排队」）；外部执行闸门的授权在 `crates/symbio-plugin-tool/src/port.rs::gate_inputs`，
 //! 审批判据在 `crates/symbio-provider-collectors/src/approval.rs`。本模块的
 //! [`EliminationDecider`] 是唯一真正跨 owner 的策略——写侧裁决在声誉包
-//! （`crates/symbio-plugin-reputation/src/elimination.rs`）、读侧翻译就在本文件的
+//! （声誉能力包的淘汰模块）、读侧翻译就在本文件的
 //! [`EliminationDecider::verdict_grants_changes`]。
 //!
 //! **跨 owner 是它的归属，不是它的住址**（D-279）：两条判据给出相反结论——D-258 说
@@ -30,7 +30,7 @@ use symbio_kernel::LatencyTier;
 /// | 事 | 住哪 |
 /// |---|---|
 /// | 那一格事件（`verdict × asserted`）的构造 | [`Self::restoration_event`]（恢复；撤销由声誉 owner 落） |
-/// | 判据（阈值、低于即淘汰）与撤销事件的构造 | `crates/symbio-plugin-reputation`（owner：`elimination.rs`） |
+/// | 判据（阈值、低于即淘汰）与撤销事件的构造 | 声誉能力包（owner：淘汰模块） |
 /// | 读侧翻译（事件流水 → 覆盖层） | [`Self::verdict_grants_changes`] |
 ///
 /// ## 为什么 actor 是仲裁者而不是被淘汰主体
@@ -43,7 +43,7 @@ use symbio_kernel::LatencyTier;
 /// ## 判据的输入是投影不是自报
 ///
 /// `score` 来自声誉台账（声明视图 `reputation.ledger`，由声誉能力包从 `commitment.*`
-/// 三条名字折出，`crates/symbio-plugin-reputation/src/decl.rs`）；主体**自报**的那一格
+/// 三条名字折出，见声誉能力包自述文档）；主体**自报**的那一格
 /// （`commitment.asserted`）不在账的输入闭集里（断言 2：只认派生）——于是「自己报个好分数免于淘汰」
 /// 在构造上不成立，不是靠纪律拦住。
 ///

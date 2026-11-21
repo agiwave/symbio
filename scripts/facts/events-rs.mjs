@@ -298,7 +298,7 @@ export function render(rows) {
       L.push('')
     }
     L.push(
-      `/// ${r.name} — owner \`symbio-plugin-${r.owner}\`，格位 \`(${r.entity}, ${r.verb})\``,
+      `/// ${r.name} — owner 是声明该事件的插件（见其 PLUGIN.yml），格位 \`(${r.entity}, ${r.verb})\``,
     )
     L.push(`pub const ${constOf(r.name)}: &str = "${r.name}";`)
     L.push('')
