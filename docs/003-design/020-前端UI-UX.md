@@ -313,7 +313,8 @@ SVG 图元串（`with_icon(r#"<path …/>"#)`），图长什么样由插件的�
 `seed_identity` 原样投影成 manifest 的 `plugin_icon`，插件管理列表（`entry_node`）与
 挂载点（`composite/vdfs.rs::dir_node`）把它放进节点顶层属性。前端 `iconFromSvg` 拿这段
 内容直接包进 `<svg>` 壳渲染——**前端零图形资产、零「名→图」字典**，不为任何插件写死
-图标。SVG 内容非字符串 / 空串则回退到 1–4 步，不留空白图标。
+图标。非图元内容（非字符串 / 空串 / 旧版图标名）则回退到 1–4 步，不留空白图标；
+旧清单里 `plugin_icon: session` 这类名字由装配期迁移成插件自给图元串（D-524）。
 
 ### 9.2 回退顺序的判据
 

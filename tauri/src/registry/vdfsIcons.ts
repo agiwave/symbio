@@ -34,7 +34,7 @@ import { defineComponent, h, markRaw, shallowReactive, type Component } from 'vu
 export interface VdfsIconTarget {
   kind: string
   config_type?: unknown
-  /** 插件/后端在节点上自报的图标名（来自 `PluginMeta.icon`，经 manifest 投影） */
+  /** 插件在节点上自报的 SVG 图元内容（来自 `PluginMeta.icon`，经 manifest 投影） */
   plugin_icon?: unknown
 }
 
@@ -212,11 +212,16 @@ function svgIcon(inner: string): Component {
  * （如 `<path d="..."/><circle .../>`），经 manifest 投影、后端透传至此。
  * 前端不解释、不查表，只把它包进统一的 `<svg viewBox="0 0 24 24">` 壳里；
  * 因此图标长什么样完全由插件决定。同串缓存复用，避免同一图标反复建组件。
+ *
+ * ⚠️ 只认**图元内容**：以 `<` 起头才画。旧版清单存的是图标**名字**
+ * （`session` / `terminal` …，D-523 前的语义），把它当内容包进 `<svg>` 会渲染出
+ * 一片空白——图标位空着正是这么来的。这类旧值按「未自报」处理，让 `iconForNode`
+ * 回退到既有登记链；装配期后端会把它迁移成插件自给的图元串（D-524）。
  */
 const svgComponentCache = new Map<string, Component>()
 
 export function iconFromSvg(value: unknown): Component | undefined {
-  if (typeof value !== 'string' || !value.trim()) return undefined
+  if (typeof value !== 'string' || !value.trim().startsWith('<')) return undefined
   let comp = svgComponentCache.get(value)
   if (!comp) {
     comp = svgIcon(value)

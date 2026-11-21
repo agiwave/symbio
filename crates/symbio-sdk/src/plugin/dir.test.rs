@@ -266,6 +266,56 @@ fn seed_identity_is_a_no_op_when_nothing_is_missing() {
     assert_eq!(std::fs::read_to_string(d.config_path()).unwrap(), before);
 }
 
+/// ★ 旧清单迁移（D-524）：`plugin_icon: session` 是**图标名**不是图元内容。
+///
+/// 这正是「图标位置空白」的现场：旧值被前端误当成 SVG 包进壳里，渲染出空图。
+/// 读身份时按未声明处理；装配期用插件现在自给的图元串覆盖，且迁移幂等。
+#[test]
+fn seed_identity_migrates_legacy_icon_name_to_svg_content() {
+    let tmp = tempfile::TempDir::new().unwrap();
+    let d = dir_at(tmp.path());
+    std::fs::write(
+        d.config_path(),
+        "plugin_provider: demo\nplugin_name: demo\nplugin_title: 会话\nplugin_icon: session\n",
+    )
+    .unwrap();
+
+    assert_eq!(
+        d.identity().icon,
+        None,
+        "旧图标名不是 SVG 内容，读身份时按未声明处理"
+    );
+
+    let meta = PluginMeta::new("session", "会话").with_icon(r#"<path d="M4 12h16"/>"#);
+    d.seed_identity(&meta).unwrap();
+    assert_eq!(
+        d.identity().icon.as_deref(),
+        Some(r#"<path d="M4 12h16"/>"#),
+        "迁移后的内容来自插件自述，不是旧名字"
+    );
+
+    let before = std::fs::read_to_string(d.config_path()).unwrap();
+    d.seed_identity(&meta).unwrap();
+    assert_eq!(std::fs::read_to_string(d.config_path()).unwrap(), before);
+}
+
+/// 已是 SVG 的值（含用户手写）仍是 manifest 权威，出厂声明不得覆盖（D-524）。
+#[test]
+fn seed_identity_preserves_declared_svg_icon() {
+    let tmp = tempfile::TempDir::new().unwrap();
+    let d = dir_at(tmp.path());
+    let custom = r#"<circle cx="12" cy="12" r="10"/>"#;
+    std::fs::write(
+        d.config_path(),
+        format!("plugin_provider: demo\nplugin_name: demo\nplugin_icon: '{custom}'\n"),
+    )
+    .unwrap();
+
+    d.seed_identity(&PluginMeta::new("demo", "演示").with_icon(r#"<path d="M1 1h1"/>"#))
+        .unwrap();
+    assert_eq!(d.identity().icon.as_deref(), Some(custom));
+}
+
 /// 插件写自己的配置**不得冲掉身份与装配位**——它们不是配置
 ///
 /// 否则「在设置页保存一次配置」就等于把停用的插件启用了，或把用户改过的标题

@@ -415,6 +415,10 @@ impl PluginDir {
     ///
     /// 之所以能从 manifest 读（而不问 `Plugin::meta()`）：**停用的插件不被构造**，
     /// 而插件列表必须能显示它的名字。见 D-032。
+    ///
+    /// 图标键只接受 SVG 图元内容（D-523）：老清单里残留的图标**名字**（如
+    /// `session`）不是内容，按未声明处理，交给前端回退链；装配成功的插件会在
+    /// [`Self::seed_identity`] 里把它迁移成插件自给的内容（D-524）。
     pub fn identity(&self) -> PluginIdentity {
         let map = self.read_manifest().ok().flatten().unwrap_or_default();
         PluginIdentity {
@@ -422,7 +426,7 @@ impl PluginDir {
             description: optional_string_of(&map, PLUGIN_KEY_DESCRIPTION),
             version: optional_string_of(&map, PLUGIN_KEY_VERSION),
             author: optional_string_of(&map, PLUGIN_KEY_AUTHOR),
-            icon: optional_string_of(&map, PLUGIN_KEY_ICON),
+            icon: optional_string_of(&map, PLUGIN_KEY_ICON).filter(|s| is_svg_icon(s)),
         }
     }
 
@@ -432,11 +436,18 @@ impl PluginDir {
     /// 键都在时**不碰文件**——无谓的写盘会搅乱 mtime，而变更通知的消费者只关心
     /// 真正的变化。
     ///
+    /// 图标键有一个例外（D-524）：旧版清单里存的是图标**名字**，而 D-523 起这个键
+    /// 的语义是插件自给的 SVG 图元内容。名字不是内容，按「未落位」处理，用当前
+    /// 插件的出厂内容覆盖；已是 SVG 的值（含用户手写的内容）不覆盖。
+    ///
     /// 调用点在容器的装配路径（子插件构造**成功之后**）——那时手里才有 `PluginMeta`。
     /// 停用的插件不被构造、因此不会走到这里；它的身份早在首次装配时就已落位，
     /// 这正是「停用后仍显示名字」的来路。
     pub fn seed_identity(&self, meta: &symbio_kernel::plugin::PluginMeta) -> Result<(), String> {
         let mut map = self.read_manifest()?.unwrap_or_default();
+        // 先补齐保留键再投影身份：`carry_over_reserved` 会把磁盘上的旧值取回，
+        // 若放在写入前调用，图标迁移刚写下的新值又会被同名旧值盖回去（D-524）。
+        self.carry_over_reserved(&mut map);
         let mut changed = false;
 
         // 逐字段「缺失才补」——与 `identity()` 的字段一一对应，顺序即优先级
@@ -448,12 +459,21 @@ impl PluginDir {
             (PLUGIN_KEY_ICON, meta.icon.as_deref()),
         ];
         for (key, value) in seeds {
-            if map.contains_key(key) {
-                continue;
-            }
             let Some(text) = value.filter(|s| !s.is_empty()) else {
                 continue;
             };
+            let stale_icon = key == PLUGIN_KEY_ICON
+                && !map
+                    .get(key)
+                    .and_then(Value::as_str)
+                    .is_some_and(is_svg_icon);
+            if map.contains_key(key) && !stale_icon {
+                continue;
+            }
+            // 不把「名字」重新投影进 manifest——那正是要迁移走的东西。
+            if key == PLUGIN_KEY_ICON && !is_svg_icon(text) {
+                continue;
+            }
             map.insert(key.to_string(), Value::String(text.to_string()));
             changed = true;
         }
@@ -461,7 +481,6 @@ impl PluginDir {
         if !changed {
             return Ok(());
         }
-        self.carry_over_reserved(&mut map);
         self.write_map(&map)
     }
 
@@ -956,6 +975,15 @@ fn optional_string_of(map: &Map<String, Value>, key: &str) -> Option<String> {
         Some(Value::String(s)) if !s.is_empty() => Some(s.clone()),
         _ => None,
     }
+}
+
+/// `plugin_icon` 的值是**图元内容**还是旧版遗留的图标名（D-523 / D-524）。
+///
+/// 判据只取最小形状——去空白后以 `<` 起头。旧值（`session` / `terminal` /
+/// `settings` …）不含 `<`，因此能被准确认出；图元串（`<path …/><circle …/>`）
+/// 则原样透传，后端不解析、不校验 SVG 语法，那是渲染方的事。
+fn is_svg_icon(value: &str) -> bool {
+    value.trim_start().starts_with('<')
 }
 
 #[cfg(test)]

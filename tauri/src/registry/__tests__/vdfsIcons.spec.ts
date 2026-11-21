@@ -220,6 +220,17 @@ describe('插件自报图标（SVG 内容即图标，前端零字典）', () => 
     expect(iconForNode({ kind: 'plugin_manager', name: 'session', plugin_icon: 42 })).toBe(fallback)
   })
 
+  it('★ 旧版图标名不是 SVG 内容：不画空图，回退到既有登记链', () => {
+    // 回归现场：老 manifest 里是 `plugin_icon: session` / `terminal`，前端曾把它
+    // 当图元包进 <svg>，结果插件卡片的图标位整排空白（D-524）。
+    expect(iconFromSvg('session')).toBeUndefined()
+    expect(iconFromSvg('terminal')).toBeUndefined()
+    const fallback = iconForNode({ kind: 'plugin_manager', name: 'session' })
+    expect(iconForNode({ kind: 'plugin_manager', name: 'session', plugin_icon: 'session' })).toBe(
+      fallback
+    )
+  })
+
   it('多个插件各报不同 SVG ⇒ 各得互不相同的图标（整排齿轮回归）', () => {
     const svgs = [PATH_A, PATH_B, '<rect x="1" y="1" width="8" height="8"/>']
     const icons = svgs.map((svg) => iconForNode({ kind: 'plugin_manager', name: 'p', plugin_icon: svg }))

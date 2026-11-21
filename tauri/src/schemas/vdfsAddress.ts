@@ -16,7 +16,8 @@
  *    ⚠️ 非虚拟地址（不在根之下）**一律兜底 `/vdfs`**，绝不把外来地址
  *    拼进 URL——拼错的地址会静默打开一个空页面。
  * 3. **深地址判定**：`/vdfs/<something>` 才是深地址，但深地址 ≠ 该显示返回键——
- *    冷启动 `replace` 落点也是深地址却没有来源页；返回键判据见 `shouldShowBack`。
+ *    冷启动 `replace` 落点也是深地址却没有来源页；**一级类别页**（`/vdfs/<挂载名>`，
+ *    左栏切类别得到）虽有来源页，也不是「进入子页」。返回键判据见 `shouldShowBack`。
  *
  * 根叫什么不归本文件：一律读 [`vdfsRoot`]（启动期经 `vdfs/root` 引导）。
  *
@@ -74,19 +75,30 @@ export function isVdfsDeepPage(path: string): boolean {
 /**
  * 左上角返回键该不该出现。
  *
- * 两个条件缺一不可：
+ * 三个条件缺一不可：
  * 1. **深地址**（`isVdfsDeepPage`）——首页恒不显示；
  * 2. **有 push 来源**——`window.history.state.back` 非空。冷启动落点虽是深地址
  *    （会话目录），却是 `replace` 进去的、没有上一页，不是「进入子页面」，
- *    因此不显示；用户点开容器/深链内继续钻入走的是 `push`，才有来源可返。
+ *    因此不显示；
+ * 3. **地址深过一级类别页**——`/vdfs/<挂载名>`（如 `/vdfs/session` /
+ *    `/vdfs/model`）是**左栏切类别**得到的平级页面，不是子页。菜单切换本身就是
+ *    导航，给它配返回键等于在每条类别之间塞一个无意义的「回上一类」；只有
+ *    `/vdfs/<挂载名>/<…>`（点开容器 / 会话 / 工作目录钻进去）才是子页。
+ *
+ * 第 2、3 条是两件事：只看来源会把「会话 → 模型」这类平级切换误判成钻入
+ * （push 当然有来源），只看段数又会在冷启动落点上误显。两者同时成立才算
+ * 「用户从上一个页面钻进了这里」。
  *
  * `hasBackSource` 由调用方从 `window.history.state?.back != null` 求出并传入：
  * 判据本体因此不碰 DOM，可在 `vdfsAddress.spec.ts` 里直接测。与 `VdfsView.goBack`
  * 的兜底判据同源——显示与点击走同一份真相，不会出现「有键却无处可返」。
  *
- * @param path 浏览器地址（传 `route.path` 或 `route.fullPath` 均可，query 不影响前缀判定）
+ * @param path 浏览器地址（传 `route.path` 或 `route.fullPath` 均可，query 不影响段数判定）
  * @param hasBackSource 是否存在真实的 push 来源页
  */
 export function shouldShowBack(path: string, hasBackSource: boolean): boolean {
-  return hasBackSource && isVdfsDeepPage(path)
+  if (!hasBackSource || !isVdfsDeepPage(path)) return false
+  // 去掉 query / hash 再数段；空段（`/vdfs/model/`）不算一级子页。
+  const rel = (path ?? '').split(/[?#]/, 1)[0].slice(VDFS_HOME_PATH.length + 1)
+  return rel.split('/').filter(Boolean).length >= 2
 }
