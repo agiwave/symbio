@@ -182,7 +182,7 @@ board.columns: [impl]
 > ⚠️ **本区块由 `node scripts/audits/registry-audit.mjs --write` 维护（标记之间），请勿手改标记区内内容。**
 > 状态的唯一登记处是各条目文件本身，本区块是投影。字段规范见 [SP-001](../005-spec/001.md)，机制见 [DE-017 · 登记与汇总机制](017-登记与汇总机制.md "DE-017-登记与汇总机制")。
 
-**计数**：active 98 · draft 0 · retired 1（共 99）
+**计数**：active 99 · draft 0 · retired 1（共 100）
 
 ## 现行设计（active）
 
@@ -250,6 +250,7 @@ board.columns: [impl]
 | [`DE-112-architecture`](../../crates/symbio-cli/docs/112-architecture.md) | 架构 | 与代码一致 |
 | [`DE-113-heartbeat-mechanism`](../../crates/symbio-plugin-heartbeat/src/docs/113-heartbeat-mechanism.md) | 会话心跳机制（heartbeat） | 与代码一致 |
 | [`DE-114-HTTP入站网关`](../../crates/symbio-plugin-gateway/src/docs/114-HTTP入站网关.md) | HTTP 入站网关（插件专题设计） | 与代码一致 |
+| [`DE-115-技能编译与自我改进`](../../crates/symbio-plugin-skill/src/docs/115-技能编译与自我改进.md) | 技能编译与自我改进（插件专题设计） | 与代码一致 |
 | [`crates/symbio-plugin-classify/README`](../../crates/symbio-plugin-classify/README.md) | Classify 插件（对话面：判决） | 与代码一致 |
 | [`crates/symbio-plugin-compact/README`](../../crates/symbio-plugin-compact/README.md) | 上下文压缩能力包（compact） | 与代码一致 |
 | [`crates/symbio-plugin-compose/README`](../../crates/symbio-plugin-compose/README.md) | Compose 插件（对话面：措辞） | 与代码一致 |
