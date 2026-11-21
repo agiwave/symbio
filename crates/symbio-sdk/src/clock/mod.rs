@@ -7,7 +7,7 @@
 //! | 位置 | 写法 |
 //! |---|---|
 //! | 旧 core 的 `turn.rs`（2 处内联） | `time::OffsetDateTime` |
-//! | `crates/symbio-plugin-heartbeat/src/scheduler.rs` | `time::OffsetDateTime` |
+//! | 心跳调度插件的 `scheduler.rs` | `time::OffsetDateTime` |
 //! | `crates/symbio-plugin-session/src/plugin.rs` | `SystemTime` + `unwrap_or(0)` |
 //! | `providers/vdfs_service/memory.rs` | `SystemTime` + `unwrap_or(0)` |
 //!

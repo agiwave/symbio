@@ -2,8 +2,7 @@
 //!
 //! 注意与 `crates/symbio-sdk/src/chat/chat_node.rs`（消息级类型）区分：本文件
 //! 描述"会话"粒度的持久化实体。`derive_session_title` 供会话创建时兜底命名，
-//! 心跳调度参数（`HeartbeatConfig`）归心跳插件，见
-//! `crates/symbio-plugin-heartbeat/src/setting.rs`。
+//! 心跳调度参数（`HeartbeatConfig`）归心跳插件，见其自述文档。
 
 use serde::{Deserialize, Serialize};
 

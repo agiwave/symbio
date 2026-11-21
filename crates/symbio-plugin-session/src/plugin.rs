@@ -449,8 +449,8 @@ impl Plugin for SessionPlugin {
                 }
             }
         }
-        // 能力收集（available_tools）：`heartbeat` 那条随调度搬进了
-        // `crates/symbio-plugin-heartbeat`（[D-077](../../symbio-plugin-heartbeat/README.md#d-077-心跳片的落点定为一层的插件目录卸载单位与第二个消费单位都由它给出 "crates/symbio-plugin-heartbeat/src/README")）；
+        // 能力收集（available_tools）：心跳那条随调度搬进了
+        // 独立的心跳调度插件（[D-077](../../symbio-plugin-heartbeat/README.md#d-077-心跳片的落点定为一层的插件目录卸载单位与第二个消费单位都由它给出 "crates/symbio-plugin-heartbeat/src/README")）；
         // 现在贡献的 LLM 可见工具是 `agent_run`（子智能体委托）。
         // VDFS 挂载点由容器从 `get_vfs_provider` 派生（目录名 = 实例名）。
         if let Some(visitor) = ctx.get(symbio_plugin_api::CAPABILITY_VISITOR) {

@@ -72,7 +72,7 @@ provider 键，插件只经相对地址读写，物理路径只留在 provider �
 | 读点 | 用途 | 是否身份语义 | 结论 |
 |---|---|---|---|
 | `symbio-plugin-api/src/hooks.rs`（事件载荷） | hook 事件载荷 | **是**（通知身份） | 保留 |
-| `symbio-plugin-heartbeat/src/tool.rs`（配置读取） | 会话配置的 VDFS 寻址键 | 否（存储寻址） | 迁 provider |
+| 心跳调度插件的 `tool.rs`（配置读取） | 会话配置的 VDFS 寻址键 | 否（存储寻址） | 迁 provider |
 | `symbio-plugin-local/src/todo_write.rs`（内存键） | 内存键 | 否（寻址替代） | 迁 provider |
 | `symbio-plugin-session/src/route_guard.rs`（只读路由守卫） | 路由守卫 | **是**（安全） | 保留 |
 | `symbio-plugin-session/src/tools/subagent.rs`（派生子会话） | 父会话 id（派生子会话） | **是**（血缘） | 保留 |

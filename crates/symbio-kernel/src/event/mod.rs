@@ -452,7 +452,7 @@ pub const EVENT_TRIGGER_META_KEY: &str = "trigger";
 /// 触发方式的取值：**定时触发**（心跳一族的调度器）。落在 `system.triggered`
 /// 的载荷 `kind` 上，也落在写体 `meta.trigger.kind` 上——同一个名字说同一件事。
 ///
-/// 这个取值由 `symbio-plugin-heartbeat` 的 `PLUGIN.yml` 的 `trigger_kinds:` 声明，
+/// 这个取值由心跳调度插件的 `PLUGIN.yml` 的 `trigger_kinds:` 声明（实现锚点见其自述文档），
 /// 登记表见 [`EVENT_TRIGGER_KINDS`]（生成物）：加一种触发方式 = 产出方在自己目录里加一行，
 /// 消费方（session 的写臂）只判成员资格。
 pub const EVENT_TRIGGER_KIND_SCHEDULED: &str = "scheduled";

@@ -463,7 +463,7 @@ pub(crate) fn parse_inbox_message(raw: &str) -> VdfsResult<cm::ChatNode> {
 ///
 /// ## 为什么识别在这里，而落格在那里
 ///
-/// 声明的**词汇**是共享的（写方 [`symbio_plugin_heartbeat`] 与读方本写臂分属两个插件，
+/// 声明的**词汇**是共享的（写方心跳调度插件与读方本写臂分属两个插件，
 /// 故键名与 kind 住在 core 的 `event` 域）；声明的**后果**是存储所有者的写窗口纪律
 /// （先把事实源那四格落进，落成了才入队）。两者都在这条写臂上收口，见
 /// [D-076](../../../symbio-plugin-heartbeat/README.md#d-076-心跳片的八个宿主触点逐条落位调度随片走触发事实落进收件箱写臂 "crates/symbio-plugin-heartbeat/src/README") #4 与

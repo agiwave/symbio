@@ -69,7 +69,7 @@ const ROOT = rootArg
  *   插件就要同步一堆与机制无关的措辞（与 subagent 改名同病，见 D-522 / PI-001）。
  *   分批纳入保证每批提交时门禁都是绿的；不得在清理完成前提前加入。
  */
-export const IDENTITIES = ['subagent', 'gateway']
+export const IDENTITIES = ['subagent', 'gateway', 'heartbeat']
 
 /** 不允许出现的插件身份模式（对 `id` 展开）。 */
 function patterns(id) {
@@ -147,18 +147,17 @@ function isExemptLine(rel, line) {
   if (/lib\.rs$/.test(rel) && rel === 'crates/symbio/src/lib.rs') return /^\s*use\s+symbio_plugin_/.test(line.trim())
   if (/agent-ownership-audit/.test(rel)) return /AGENT_REL|const\s|path\.join/.test(line)
   if (rel.endsWith('plugin-entry-audit.test.mjs')) return true // 夹具整份豁免（文件级已列，这里冗余保险）
-  if (rel.endsWith('.md')) {
-    // 把每个 Markdown 链接的「显示文字」抠掉，剩下的目标路径若含插件身份即豁免。
-    // 形如「[显示文字](<含 symbio-plugin-id 的路径>)」的行，只认括号里的地址，
-    // 不认裸文本里的插件名——注释里不写真链接，避免被 D-010 源码链接审计当成入链。
-    const withLinksStripped = line.replace(/\[[^\]]*\]\(([^)]*)\)/g, (_m, target) => {
-      return IDENTITIES.some((id) => target.includes(`symbio-plugin-${id}`)) ? '](<plugin-doc>)' : `](${target})`
-    })
-    if (withLinksStripped !== line) {
-      // 该行含指向插件文档的链接；确认去掉这些链接后正文不再点名插件身份。
-      const body = withLinksStripped.replace(/\]\(<plugin-doc>\)/g, '')
-      if (!IDENTITIES.some((id) => patterns(id).some((re) => { re.lastIndex = 0; return re.test(body) }))) return true
-    }
+  // 指向插件自述文档的链接（含 D-NNN 历史决策锚点）是「文档在哪」：D-525 A 类迁移后
+  // 系统文档只留链接、D-004 决策正文不改写，这类链接的目标路径天然含插件身份。
+  // 只抠 Markdown 链接的 `](...)` 目标，链接显示文字与裸正文照常判——防止把
+  // 「由 symbio-plugin-x 实现」塞进链接蒙混过关。对 .md 与源码注释一视同仁：
+  // D-076 / D-077 这类历史决策锚点大量写在 Rust 文档注释里（如 [D-077](…#d-077-…)）。
+  const withLinksStripped = line.replace(/\[[^\]]*\]\(([^)]*)\)/g, (_m, target) => {
+    return IDENTITIES.some((id) => target.includes(`symbio-plugin-${id}`)) ? '](<plugin-doc>)' : `](${target})`
+  })
+  if (withLinksStripped !== line) {
+    const body = withLinksStripped.replace(/\]\(<plugin-doc>\)/g, '')
+    if (!IDENTITIES.some((id) => patterns(id).some((re) => { re.lastIndex = 0; return re.test(body) }))) return true
   }
   return false
 }

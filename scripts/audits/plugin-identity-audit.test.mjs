@@ -125,6 +125,21 @@ test('⑨ 指向插件自述文档的链接目标不误报，但链接文字点�
   }, { dirs: DIRS })
 })
 
+test('⑩ 源码注释里的 D-NNN 决策锚点链接不误报，但裸 crate 路径照常红 → exit 1', () => {
+  withTempTree({
+    ...BASE,
+    'crates/symbio-plugin-memory/src/夹具.rs': [
+      '//! 落点判据见 [D-077](../crates/symbio-plugin-heartbeat/README.md#d-077-历史决策)。',
+      '//! 但实现锚点 `crates/symbio-plugin-heartbeat/src/setting.rs` 是身份点名。',
+      '',
+    ].join('\n'),
+  }, (root) => {
+    const r = audit({ root })
+    assert.equal(r.status, 1, r.stdout)
+    assert.match(r.stdout, /PI-001 .*夹具\.rs:2/)
+  }, { dirs: DIRS })
+})
+
 test('⑧ 扫描目录缺失 → exit 2（不许静默少跑）', () => {
   withTempTree({ 'docs/003-design/.keep': '' }, (root) => {
     const r = audit({ root })

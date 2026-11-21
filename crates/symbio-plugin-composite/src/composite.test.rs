@@ -382,7 +382,7 @@ async fn resource_tree_membership_is_derived_from_providers() {
 //
 // 「切出一个插件」的**兑现判据**不是目录搬对了，而是：停用它 ⇒ 少掉的正好是它这一
 // 个功能，其余一切照旧。这条判据跨插件，故两侧各钉一半——本插件自己那半
-// （`traverse` put 两行 + `stop` ⇒ 循环退出）在 `crates/symbio-plugin-heartbeat/src/plugin.test.rs`；
+// （`traverse` put 两行 + `stop` ⇒ 循环退出）在该调度插件自己的测试里；
 // 这里钉的是**容器侧**：经**工厂 id + 真实 `mount_all`** 装配，不 import 兄弟模块
 // （E-009），停用的动作走注册表的 `set_enabled`（= 前端那个开关背后的同一个动词）。
 
