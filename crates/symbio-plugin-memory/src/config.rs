@@ -4,9 +4,9 @@
 //!
 //! | 作用域 | 字段 | 闸门 | 超限行为 |
 //! |---|---|---|---|
-//! | 智能体自身（分形：随实例走） | `memory_max_bytes` / `memory_inject_max_bytes` | `MemoryFile::write` / `MemoryFile::inject` | **拒绝** / **截断** + 告知地址 |
+//! | 智能体自身（分形：随实例走） | `agent_enabled` / `memory_max_bytes` / `memory_inject_max_bytes` | `MemoryFile::write` / `MemoryFile::inject` | **拒绝** / **截断** + 告知地址 |
 //! | 工作区（会话作用域 `ctx[WORKDIR]`） | `workspace_enabled` / `workspace_max_bytes` / `workspace_inject_max_bytes` | 同上（同一份共享实现） | 同上 |
-//! | 会话（`ctx[SESSION_DIR]`） | `session_max_bytes` / `session_inject_max_bytes` | 同上（同一份共享实现） | 同上 |
+//! | 会话（`ctx[SESSION_DIR]`） | `session_enabled` / `session_max_bytes` / `session_inject_max_bytes` | 同上（同一份共享实现） | 同上 |
 //!
 //! 注入为什么比写入小得多：注入的正文**每一轮**都在烧上下文（4 KiB），
 //! 写入是一次性的（16 KiB，超出部分模型按地址 `vdfs_read` 取全文）。
@@ -14,10 +14,10 @@
 //! 为什么写侧是拒绝：记忆是**跨会话生效**的东西，写入被截断意味着模型以为改好了、
 //! 实际少了一块——这种失败没有任何报错，只能靠「拒绝」把它变成一次显式的、可重试的失败。
 //!
-//! 为什么只有工作区有**注入开关**：工作区记忆的注入随会话上下文浮动（没选工作区
-//! 本来就不注），而智能体记忆是「这个智能体是谁」的一部分——没有「关掉自己」的
-//! 合理场景。开关继承自原 work 插件的 `memory_enabled` 语义：关掉只影响**注入**，
-//! 文件与挂载条目照旧可用。
+//! 三层记忆各有独立的**注入开关**（`agent_enabled` / `workspace_enabled` /
+//! `session_enabled`）：用户可按作用域决定是否把该层记忆注入提示词。关掉只影响
+//! **注入**，文件与挂载条目照旧可用（用户仍能在界面上读写）。三层机制一致，开关
+//! 语义也一致。
 //!
 //! ## 配置跟着**实例**走，不跟着插件走
 //!
@@ -32,10 +32,16 @@
 
 use serde::{Deserialize, Serialize};
 
-/// memory 插件配置（两个作用域各一组闸门）
+/// memory 插件配置（三个作用域各一组闸门与开关）
 #[derive(Debug, Clone, Serialize, Deserialize)]
 pub struct MemoryConfig {
     // —— 智能体自身记忆（分形：随实例落在各自宿主目录） ——
+    /// 是否向系统提示词注入智能体记忆。
+    ///
+    /// 关掉只影响**注入**：文件与挂载条目照旧可用。
+    #[serde(default = "default_true")]
+    pub agent_enabled: bool,
+
     /// 智能体自身的 `AGENTS.md` 的**写入**字节上限（硬限制，超出拒绝写入）。
     #[serde(default = "default_max_bytes")]
     pub memory_max_bytes: usize,
@@ -62,6 +68,12 @@ pub struct MemoryConfig {
     pub workspace_inject_max_bytes: usize,
 
     // —— 会话记忆（会话作用域：ctx[SESSION_DIR]，物理文件 `{session_dir}/MEMORY.md`） ——
+    /// 是否向系统提示词注入会话记忆。
+    ///
+    /// 关掉只影响**注入**：文件与挂载条目照旧可用。
+    #[serde(default = "default_true")]
+    pub session_enabled: bool,
+
     /// 会话记忆文件**单次写入**的字节上限（硬限制，超出拒绝写入）。
     #[serde(default = "default_max_bytes")]
     pub session_max_bytes: usize,
@@ -89,11 +101,13 @@ fn default_inject_max_bytes() -> usize {
 impl Default for MemoryConfig {
     fn default() -> Self {
         Self {
+            agent_enabled: true,
             memory_max_bytes: default_max_bytes(),
             memory_inject_max_bytes: default_inject_max_bytes(),
             workspace_enabled: true,
             workspace_max_bytes: default_max_bytes(),
             workspace_inject_max_bytes: default_inject_max_bytes(),
+            session_enabled: true,
             session_max_bytes: default_max_bytes(),
             session_inject_max_bytes: default_inject_max_bytes(),
         }

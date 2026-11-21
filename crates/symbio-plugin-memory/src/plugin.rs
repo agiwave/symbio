@@ -79,10 +79,22 @@ fn config_definition() -> DetailDefinition {
                 ..Default::default()
             },
             DetailField::toggle(
+                "agent_enabled",
+                "注入智能体记忆",
+                "每轮请求把本智能体的记忆追加进系统提示词（关掉只影响注入，文件照旧可编辑）",
+                d.agent_enabled,
+            ),
+            DetailField::toggle(
                 "workspace_enabled",
                 "注入工作区记忆",
                 "每轮请求把工作区记忆追加进系统提示词（会话已选工作区时生效）",
                 d.workspace_enabled,
+            ),
+            DetailField::toggle(
+                "session_enabled",
+                "注入会话记忆",
+                "每轮请求把本会话的记忆追加进系统提示词（关掉只影响注入，文件照旧可编辑）",
+                d.session_enabled,
             ),
             DetailField::number(
                 "workspace_max_bytes",
@@ -241,6 +253,7 @@ impl MemoryPlugin {
 
     /// 参与能力收集：交出**智能体记忆**的系统提示词。
     ///
+    /// `agent_enabled` 关 → 不注入（文件与挂载照旧可用）。
     /// 空文件 / 还没写过 → 静默跳过——「还没写过」不是故障，
     /// 不该往收集期错误桶里塞东西。
     async fn contribute_prompt(
@@ -248,6 +261,11 @@ impl MemoryPlugin {
         ctx: &Arc<dyn PluginInvokeRequest>,
         visitor: &Arc<dyn symbio_plugin_api::Registry>,
     ) {
+        let cfg = self.config.read().await;
+        if !cfg.agent_enabled {
+            return;
+        }
+        drop(cfg);
         let store = self.store(ctx).await;
         // 绝对地址 = 上下文父地址 + 相对地址（容器转发时已写入父地址）
         let address = symbio_plugin_api::absolute_addr(ctx, memory::rel_path());
@@ -300,6 +318,7 @@ impl MemoryPlugin {
 
     /// 参与能力收集：交出**会话记忆**的系统提示词。
     ///
+    /// `session_enabled` 关 → 不注入（文件与挂载照旧可用）。
     /// 与工作区腿同形：`ctx[SESSION_DIR]` 缺失 / 空 → 无作用域，静默跳过；有作用域
     /// 时空文件也注入（带空内容提示），让模型知道这里可以建立本会话的置顶约定。
     async fn contribute_session_prompt(
@@ -307,6 +326,11 @@ impl MemoryPlugin {
         ctx: &Arc<dyn PluginInvokeRequest>,
         visitor: &Arc<dyn symbio_plugin_api::Registry>,
     ) {
+        let cfg = self.config.read().await;
+        if !cfg.session_enabled {
+            return;
+        }
+        drop(cfg);
         let store = self.session_store_of(ctx).await;
         let address = symbio_plugin_api::absolute_addr(ctx, session::rel_path());
         match store.segment(&session::segment_spec(&address)).await {

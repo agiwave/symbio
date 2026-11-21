@@ -25,7 +25,7 @@ impl: done
 |---|---|
 | 系统提示词两段（【智能体记忆】+【工作区记忆】） | `put(CapabilityRow::prompt(…))`（地址 + 上限 + 正文 + 截断提示） |
 | VDFS 挂载点 `<根>/memory` | `impl VdfsProvider`（容器按 `get_vfs_provider` 派生挂载行；两份记忆的读写面） |
-| 配置 `<根>/memory/PLUGIN.yml` | `capability_announce_configurable`（两个作用域各一组闸门 + 工作区注入开关） |
+| 配置 `<根>/memory/PLUGIN.yml` | `capability_announce_configurable`（三个作用域各一组闸门 + 独立的注入开关） |
 
 注入与挂载缺一不可：只注入不给地址 = 只读记忆，永远长不大；只给地址不注入 =
 模型不知道它存在，等于没有。
@@ -63,7 +63,8 @@ impl: done
 缺席（`WORKSPACE.md` 如实 404）。这与智能体腿不同——智能体腿的作用域来自**装配**，
 插件被构造出来这件事本身就意味着作用域存在。
 
-`workspace_enabled` 开关只影响**注入**：文件与挂载条目照旧可用（用户仍能在界面上编辑）。
+三层各有独立的注入开关（`agent_enabled` / `workspace_enabled` / `session_enabled`），关掉
+只影响**注入**：文件与挂载条目照旧可用（用户仍能在界面上编辑）。
 工作区记忆空文件也注入（带空内容提示，教会模型建立记忆）；智能体记忆空文件整段省略
 （没写过就不占上下文）。
 

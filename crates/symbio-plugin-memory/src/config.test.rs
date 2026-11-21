@@ -7,14 +7,16 @@ use super::*;
 #[test]
 fn defaults_are_the_shipped_behaviour() {
     let c = MemoryConfig::default();
-    // 智能体作用域
+    // 智能体作用域（开关默认开）
+    assert!(c.agent_enabled);
     assert_eq!(c.memory_max_bytes, 16 * 1024);
     assert_eq!(c.memory_inject_max_bytes, 4 * 1024);
     // 工作区作用域（开关默认开——原 work 插件的出厂行为）
     assert!(c.workspace_enabled);
     assert_eq!(c.workspace_max_bytes, 16 * 1024);
     assert_eq!(c.workspace_inject_max_bytes, 4 * 1024);
-    // 会话作用域（D-513）
+    // 会话作用域（D-513，开关默认开）
+    assert!(c.session_enabled);
     assert_eq!(c.session_max_bytes, 16 * 1024);
     assert_eq!(c.session_inject_max_bytes, 4 * 1024);
 }
@@ -25,6 +27,8 @@ fn defaults_are_the_shipped_behaviour() {
 #[test]
 fn missing_fields_fall_back_to_defaults() {
     let c: MemoryConfig = serde_json::from_str("{}").unwrap();
+    assert!(c.agent_enabled);
+    assert!(c.session_enabled);
     assert_eq!(c.memory_max_bytes, MemoryConfig::default().memory_max_bytes);
     assert_eq!(
         c.workspace_max_bytes,
@@ -54,11 +58,13 @@ fn missing_fields_fall_back_to_defaults() {
 #[test]
 fn zero_limits_are_clamped_to_one() {
     let c = MemoryConfig {
+        agent_enabled: true,
         memory_max_bytes: 0,
         memory_inject_max_bytes: 0,
         workspace_enabled: true,
         workspace_max_bytes: 0,
         workspace_inject_max_bytes: 0,
+        session_enabled: true,
         session_max_bytes: 0,
         session_inject_max_bytes: 0,
     };
@@ -73,21 +79,25 @@ fn zero_limits_are_clamped_to_one() {
 #[test]
 fn roundtrip_is_lossless() {
     let c = MemoryConfig {
+        agent_enabled: false,
         memory_max_bytes: 7,
         memory_inject_max_bytes: 3,
         workspace_enabled: false,
         workspace_max_bytes: 11,
         workspace_inject_max_bytes: 5,
+        session_enabled: false,
         session_max_bytes: 13,
         session_inject_max_bytes: 7,
     };
     let json = serde_json::to_string(&c).unwrap();
     let back: MemoryConfig = serde_json::from_str(&json).unwrap();
+    assert!(!back.agent_enabled);
     assert_eq!(back.memory_max_bytes, 7);
     assert_eq!(back.memory_inject_max_bytes, 3);
     assert!(!back.workspace_enabled);
     assert_eq!(back.workspace_max_bytes, 11);
     assert_eq!(back.workspace_inject_max_bytes, 5);
+    assert!(!back.session_enabled);
     assert_eq!(back.session_max_bytes, 13);
     assert_eq!(back.session_inject_max_bytes, 7);
 }

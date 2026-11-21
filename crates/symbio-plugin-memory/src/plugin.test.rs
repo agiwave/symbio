@@ -290,6 +290,26 @@ async fn disabled_workspace_skips_injection_but_keeps_the_mount() {
     assert!(p.get_vfs_provider().is_some(), "关掉注入不等于关掉编辑面");
 }
 
+/// 智能体开关关掉 ⇒ 智能体腿不注入（文件与挂载照旧可用）
+#[tokio::test]
+async fn disabled_agent_skips_injection_but_keeps_the_mount() {
+    let tmp = TempDir::new().unwrap();
+    std::fs::write(tmp.path().join(memory::MEMORY_FILE), "会被忽略的智能体记忆").unwrap();
+    let p = Arc::new(MemoryPlugin::new(
+        symbio_plugin_api::PluginDir::at(tmp.path().join(PLUGIN_ID_MEMORY), PLUGIN_ID_MEMORY),
+        MemoryConfig {
+            agent_enabled: false,
+            ..MemoryConfig::default()
+        },
+    ));
+
+    let (ctx, visitor) = ctx(Some(tmp.path()), None, None, "@vfs/memory");
+    p.clone().traverse(String::new(), ctx).await.unwrap();
+
+    assert!(capability_prompts(&*visitor).await.is_empty());
+    assert!(p.get_vfs_provider().is_some(), "关掉注入不等于关掉编辑面");
+}
+
 // ==================== 会话腿（会话作用域） ====================
 
 /// 会话记忆的落位来自 `ctx[SESSION_DIR]`，地址落在 memory 挂载点下（D-513）
@@ -325,6 +345,37 @@ async fn session_leg_injects_from_the_context_directory() {
     assert!(sess_seg.contains("本会话用 UTC。"));
     assert!(sess_seg.contains("@vfs/memory/SESSION.md"));
     assert!(sess_seg.contains("【会话记忆】"));
+}
+
+/// 会话开关关掉 ⇒ 会话腿不注入（文件与挂载照旧可用）
+#[tokio::test]
+async fn disabled_session_skips_injection_but_keeps_the_mount() {
+    let tmp = TempDir::new().unwrap();
+    let sess = TempDir::new().unwrap();
+    std::fs::write(
+        sess.path().join(session::SESSION_MEMORY_FILE),
+        "会被忽略的会话记忆",
+    )
+    .unwrap();
+    let p = Arc::new(MemoryPlugin::new(
+        symbio_plugin_api::PluginDir::at(tmp.path().join(PLUGIN_ID_MEMORY), PLUGIN_ID_MEMORY),
+        MemoryConfig {
+            session_enabled: false,
+            ..MemoryConfig::default()
+        },
+    ));
+
+    let (ctx, visitor) = ctx(Some(tmp.path()), None, Some(sess.path()), "@vfs/memory");
+    p.clone().traverse(String::new(), ctx).await.unwrap();
+
+    assert!(
+        !capability_prompts(&*visitor)
+            .await
+            .iter()
+            .any(|(n, _)| n == session::SEGMENT_NAME),
+        "会话开关关掉后不应有会话记忆段"
+    );
+    assert!(p.get_vfs_provider().is_some(), "关掉注入不等于关掉编辑面");
 }
 
 // ==================== 无自有路由 ====================
