@@ -21,6 +21,7 @@
 //! 协议差异全部被 `ModelProtocol` 钩子吸收，本实现对所有协议通用。
 
 use std::collections::BTreeMap;
+use std::time::Duration;
 
 use crate::round::RoundOutput;
 use async_trait::async_trait;
@@ -34,7 +35,7 @@ use symbio_plugin_api::{llm_removed_frame, CapabilityMeta, ExecEnv, ExecEventSin
 
 use crate::provider::ModelProvider;
 
-use super::http::{endpoint_label, execute_post_with_abort, PostResult};
+use super::http::{endpoint_label, execute_post_with_abort, PostResult, RateGate};
 use super::model_providers::ModelProviderConfig;
 use super::protocols::{ModelProtocol, SseLineParser};
 use super::stream::parse_sse_stream;
@@ -43,12 +44,19 @@ use super::stream::parse_sse_stream;
 pub struct BoundProvider {
     cfg: ModelProviderConfig,
     protocol: Arc<dyn ModelProtocol>,
+    /// 最小请求间隔闸：配置的 `rate_limit_ms` 在此变成真实等待（0 = 不等待）。
+    rate_gate: RateGate,
 }
 
 impl BoundProvider {
     /// 绑定持久化配置与协议实现
     pub fn new(cfg: ModelProviderConfig, protocol: Arc<dyn ModelProtocol>) -> Self {
-        Self { cfg, protocol }
+        let rate_gate = RateGate::new(Duration::from_millis(cfg.rate_limit_ms));
+        Self {
+            cfg,
+            protocol,
+            rate_gate,
+        }
     }
 }
 
@@ -135,6 +143,16 @@ impl ModelProvider for BoundProvider {
                 return Err(PluginError::InternalError(format!("请求体序列化失败: {e}")));
             }
         };
+        // 最小请求间隔闸：超限不报错，等到可发送时刻再继续；abort 可打断等待。
+        // 放在「请求发起」日志之前——那条日志记的是实际派发时刻，不含等待。
+        if !self.rate_gate.wait_turn(abort).await {
+            plugin_info!(
+                "model",
+                "[LLM] 轮次在限流等待期间中止 (耗时 {:?})",
+                round_started.elapsed()
+            );
+            return Err(PluginError::Aborted);
+        }
         plugin_info!(
             "model",
             "[LLM] 请求发起 {} (model={}, msgs={}, tools={}, root={}, body={} bytes)",

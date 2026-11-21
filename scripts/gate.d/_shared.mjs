@@ -75,7 +75,7 @@ export const BASELINE = {
   //   plugin 收集期 / VDFS / 节点 / 变更投递里钉旧地址与旧闸门的用例）；同一条链路改由
   //   memory 侧 `session.test.rs` / `plugin.test.rs` / `vdfs.test.rs` 按新落位（`SESSION.md`，
   //   `ctx[SESSION_DIR]`）钉住，净 -7。覆盖没有丢，是换了承担者。非侵蚀。
-  ciRustTestsTotal: 2268,
+  ciRustTestsTotal: 2280,
   cliRustTests: 21,
   tauriRustTests: 4,
   // doc-link-allow D-010: 下一行是退役文件的历史叙述（已把这两个文件删掉），不是入链
