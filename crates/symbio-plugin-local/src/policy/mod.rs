@@ -1,4 +1,5 @@
 use std::path::{Path, PathBuf};
+use symbio_plugin_api::{ExecAbortSignal, PluginError};
 
 mod policy_tracker;
 mod policy_types;
@@ -481,13 +482,48 @@ impl SecurityPolicy {
             .any(|allowed| allowed == cmd_name || allowed == base_cmd)
     }
 
+    /// 只读判定「当前是否已达上限」——仅测试用。
+    ///
+    /// 执行路径不要用它做「判定后再记录」：那两步分开会在并发下超卖名额。
+    /// 执行路径请用 [`Self::acquire_action_slot`]。
+    #[cfg(test)]
     pub fn is_rate_limited(&self) -> bool {
         let max = self.rules().max_actions_per_hour;
         self.tracker.is_at_limit(max)
     }
 
+    #[cfg(test)]
     pub fn record_action(&self) {
         self.tracker.record();
+    }
+
+    /// 取得一次动作名额：超限**不报错**，等待到窗口释放后继续。
+    ///
+    /// 与 `is_rate_limited()` 的分工：那个只判定，本方法才是执行入口。等待期间
+    /// `abort` 置位立即返回 `PluginError::Aborted`，因此等待是有界的、不会把会话挂死。
+    /// `max_actions_per_hour == 0`（关闭限流）⇒ 立即返回，不等待。
+    ///
+    /// 循环而非「等一次就记一次」：并发调用同时被唤醒时，只有先抢到锁的那些能记录，
+    /// 其余会拿到新的等待时长继续等——这正是不超卖的代价。
+    pub async fn acquire_action_slot(&self, abort: &ExecAbortSignal) -> Result<(), PluginError> {
+        loop {
+            // 每轮重新读规则：配置热更在等待期间生效，无需重启。
+            let max = self.rules().max_actions_per_hour;
+            match self.tracker.try_record(max) {
+                Ok(()) => return Ok(()),
+                Err(wait) => {
+                    symbio_plugin_api::plugin_warn!(
+                        "local",
+                        "动作频率已达上限（{max}/小时），等待 {:?} 后继续；可中止",
+                        wait
+                    );
+                    tokio::select! {
+                        _ = tokio::time::sleep(wait) => {}
+                        _ = abort.cancelled() => return Err(PluginError::Aborted),
+                    }
+                }
+            }
+        }
     }
 
     /// 整条命令的风险等级 = **各子命令风险的最大值**。

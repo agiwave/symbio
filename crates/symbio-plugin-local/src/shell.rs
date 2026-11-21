@@ -144,12 +144,16 @@ impl ShellTool {
         }
     }
 
-    /// 公共前置：参数校验 + 速率限制 + 风险等级判定 + 动作记录。
+    /// 公共前置：参数校验 + 风险等级判定 + 限流等待 + 动作记录。
     /// 返回 `(command, risk)`。
-    fn prepare(
+    ///
+    /// 限流从「超限即报错」改为「等到窗口释放后继续」：等待由调用方的 `abort` 打断，
+    /// 不会把会话挂死。先验证命令再占名额——非法命令不该消耗用户的限流额度。
+    async fn prepare(
         &self,
         args: &Value,
         threshold: CapabilityRiskLevel,
+        abort: &ExecAbortSignal,
     ) -> Result<(String, CapabilityRiskLevel), PluginError> {
         validate_params(args, &["command"]).map_err(PluginError::ValidationError)?;
 
@@ -167,19 +171,16 @@ impl ShellTool {
             .and_then(|v| v.as_bool())
             .unwrap_or(false);
 
-        // 检查速率限制
-        if self.security.is_rate_limited() {
-            return Err(PluginError::InternalError("速率限制：操作过于频繁".into()));
-        }
-
-        // 验证命令（per-session 风险等级阈值从 ctx[RISK_LEVEL] 透传而来）
+        // 验证命令（per-session 风险等级阈值从 ctx[RISK_LEVEL] 透传而来）。
+        // 先验证后占名额：非法命令不消耗限流额度。
         let risk = self
             .security
             .validate_command_execution(&command, approved, threshold)
             .map_err(PluginError::InternalError)?;
 
-        // 记录动作
-        self.security.record_action();
+        // 频率限制：超限不报错，等待到最早记录滑出窗口后继续；abort 可打断等待。
+        // 名额的「判定 + 记录」在 tracker 内原子完成，并发下不会超卖。
+        self.security.acquire_action_slot(abort).await?;
 
         Ok((command, risk))
     }
@@ -222,7 +223,7 @@ impl ShellTool {
         abort: &ExecAbortSignal,
         target: Option<&SnapshotTarget>,
     ) -> Result<Response, PluginError> {
-        let (command, risk) = self.prepare(args, threshold)?;
+        let (command, risk) = self.prepare(args, threshold, abort).await?;
 
         let workspace_dir = std::path::PathBuf::from(shellexpand::tilde(workdir).to_string());
 

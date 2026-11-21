@@ -397,3 +397,64 @@ fn test_rules_hot_update() {
     }
     assert!(p.is_rate_limited(), "热更后的限流上限应生效");
 }
+
+/// 限流新语义：满额不报错，等待窗口释放后继续执行。
+#[tokio::test]
+async fn test_acquire_action_slot_waits_then_resumes() {
+    let p = SecurityPolicy {
+        rules: std::sync::RwLock::new(PolicyRules {
+            max_actions_per_hour: 1,
+            ..PolicyRules::default()
+        }),
+        tracker: ActionTracker::with_window_secs(1),
+    };
+    let abort = ExecAbortSignal::new();
+    // 第一次立即放行
+    p.acquire_action_slot(&abort).await.unwrap();
+
+    // 第二次必须等窗口释放：用真实时钟测耗时（虚拟时间不动 std::Instant）。
+    let started = std::time::Instant::now();
+    p.acquire_action_slot(&abort).await.unwrap();
+    assert!(
+        started.elapsed() >= std::time::Duration::from_millis(800),
+        "满额时必须先等待再放行，而不是立即返回或报错"
+    );
+}
+
+/// 等待期间中止：立即返回 `PluginError::Aborted`，不把会话挂死。
+#[tokio::test]
+async fn test_acquire_action_slot_aborts_while_waiting() {
+    let p = SecurityPolicy {
+        rules: std::sync::RwLock::new(PolicyRules {
+            max_actions_per_hour: 1,
+            ..PolicyRules::default()
+        }),
+        tracker: ActionTracker::with_window_secs(1),
+    };
+    let abort = ExecAbortSignal::new();
+    p.acquire_action_slot(&abort).await.unwrap();
+
+    let a2 = abort.clone();
+    tokio::spawn(async move {
+        tokio::time::sleep(std::time::Duration::from_millis(20)).await;
+        a2.abort();
+    });
+    let started = std::time::Instant::now();
+    let err = p.acquire_action_slot(&abort).await.unwrap_err();
+    assert!(matches!(err, PluginError::Aborted));
+    assert!(
+        started.elapsed() < std::time::Duration::from_millis(500),
+        "abort 必须立即打断等待，而不是等满窗口"
+    );
+}
+
+/// 关闭限流（0）：连续占用也不产生任何等待。
+#[tokio::test]
+async fn test_acquire_action_slot_disabled_never_waits() {
+    let p = SecurityPolicy::default();
+    let abort = ExecAbortSignal::new();
+    for _ in 0..10 {
+        p.acquire_action_slot(&abort).await.unwrap();
+    }
+    assert_eq!(p.tracker.count(), 10, "0 = 不限流，动作照常记录");
+}

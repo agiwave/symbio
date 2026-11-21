@@ -72,3 +72,34 @@ fn clone_is_independent() {
     assert_eq!(c.count(), 3);
     assert_eq!(t.count(), 2, "克隆之后两者互不影响");
 }
+
+/// `try_record`：未满立即占用，满额只报「还要等多久」且不悄悄多记一条。
+#[test]
+fn try_record_returns_wait_when_full() {
+    let t = ActionTracker::with_window_secs(1);
+    assert!(t.try_record(2).is_ok());
+    assert!(t.try_record(2).is_ok(), "两条上限内应都能占用");
+    let Err(wait) = t.try_record(2) else {
+        panic!("满额必须返回等待时长，不得当作成功")
+    };
+    assert!(wait > Duration::ZERO, "等待时长必须严格为正，否则会忙等");
+    assert_eq!(t.count(), 2, "失败的那次不得记入名额");
+    // 关闭限流时恒放行
+    assert!(t.try_record(0).is_ok());
+    assert_eq!(t.count(), 3);
+}
+
+/// `try_record` 的等待时长可被调用方消费：睡到窗口释放后重新调用即可继续。
+///
+/// 用真实时钟：`ActionTracker` 基于 `std::time::Instant`，而 tokio 的虚拟时间推进
+/// 不会动它——两者混用会让等待时长永远算不完。
+#[test]
+fn try_record_resumes_after_wait() {
+    let t = ActionTracker::with_window_secs(1);
+    t.try_record(1).unwrap();
+    let Err(wait) = t.try_record(1) else {
+        panic!("应已满")
+    };
+    std::thread::sleep(wait + Duration::from_millis(20));
+    assert!(t.try_record(1).is_ok(), "窗口释放后应能重新占用");
+}

@@ -16,6 +16,17 @@ impl ActionTracker {
         }
     }
 
+    /// 指定窗口长度构造。生产路径恒用 [`Self::new`]（一小时）；测试用短窗口把
+    /// 「等待后放行」从小时级变成毫秒级可验证行为。
+    #[cfg(test)]
+    pub fn with_window_secs(window_secs: u64) -> Self {
+        Self {
+            actions: Mutex::new(Vec::new()),
+            window_secs,
+        }
+    }
+
+    #[cfg(test)]
     pub fn record(&self) -> usize {
         let mut actions = match self.actions.lock() {
             Ok(g) => g,
@@ -27,6 +38,7 @@ impl ActionTracker {
     }
 
     /// 窗口内的动作数
+    #[cfg(test)]
     pub fn count(&self) -> usize {
         let mut actions = match self.actions.lock() {
             Ok(g) => g,
@@ -40,11 +52,46 @@ impl ActionTracker {
     ///
     /// 此前这个方法是恒 `false` 的占位（真实现被注释掉），于是
     /// `max_actions_per_hour: 100` 从未生效——限流配置形同虚设。
+    #[cfg(test)]
     pub fn is_at_limit(&self, max_actions: u32) -> bool {
         if max_actions == 0 {
             return false;
         }
         self.count() >= max_actions as usize
+    }
+
+    /// 尝试**原子地**占用一个动作名额。
+    ///
+    /// - `max_actions == 0`（关闭限流）或窗口内未满：记录本次动作并返回 `Ok(())`；
+    /// - 已满：返回 `Err(距离最早一条记录滑出窗口的时长)`，**不记录**。调用方等待该
+    ///   时长后必须**重新调用**——并发下名额可能被另一个调用抢走。
+    ///
+    /// ## 检查与记录为什么在同一把锁内
+    ///
+    /// 拆成「先问 `is_at_limit`、再 `record`」会让并发调用同时看到未满并一起放行，
+    /// 名额瞬时超卖。把两者合成一次临界区，等待留在锁外由调用方做，既无超卖也不阻塞
+    /// 别的线程。
+    pub fn try_record(&self, max_actions: u32) -> Result<(), Duration> {
+        let mut actions = match self.actions.lock() {
+            Ok(g) => g,
+            Err(p) => p.into_inner(),
+        };
+        self.cleanup_old_actions(&mut actions);
+        if max_actions == 0 || actions.len() < max_actions as usize {
+            actions.push(Instant::now());
+            return Ok(());
+        }
+        // 已满：等最早一条过期。`cleanup_old_actions` 刚跑过，它必然还在窗口内，
+        // 故到期时刻严格在未来；`unwrap_or` 只是防 `checked_add` 溢出的理论兜底。
+        let now = Instant::now();
+        let wait = actions
+            .iter()
+            .copied()
+            .min()
+            .and_then(|earliest| earliest.checked_add(Duration::from_secs(self.window_secs)))
+            .map(|expiry| expiry.saturating_duration_since(now))
+            .unwrap_or(Duration::from_millis(1));
+        Err(wait)
     }
 
     /// 清掉窗口外的记录，只留窗口内的。
