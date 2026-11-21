@@ -126,6 +126,7 @@ fn entry(name: &str, provider: &str, required: bool, enabled: bool) -> PluginEnt
         title: format!("{name} 的名字"),
         description: None,
         version: Some("1.0.0".to_string()),
+        icon: None,
         order: 10,
         required,
         enabled,
@@ -204,7 +205,10 @@ async fn metadata_is_the_plugin_manager() {
     let meta = p.meta();
     assert_eq!(PLUGIN_ID_MANAGER, "plugin_manager", "插件管理插件的挂载名");
     assert_eq!(meta.name, "插件管理");
-    assert_eq!(meta.icon.as_deref(), Some("settings"));
+    assert!(
+        meta.icon.as_deref().is_some_and(|s| s.contains("<path")),
+        "图标由插件自给：meta.icon 是一段 SVG 图元内容，不是名字"
+    );
     assert_eq!(meta.order, 6);
 
     // provider 自述不含挂载名——挂载名由使用方在注册时选定
@@ -386,6 +390,32 @@ async fn entries_without_config_get_a_readonly_overview() {
 
     // 标题回落链：配置标题（无）→ 插件元数据的名字
     assert_eq!(stat(&p, &vctx(), "beta").await.title, "beta 的名字");
+}
+
+/// 插件自报的 SVG 图元内容透传到节点顶层属性（`plugin_icon`）——前端直接渲染，
+/// 图标长什么样全由插件决定，不再让未登记的插件一律退成齿轮。后端只透传内容，不解释视觉。
+#[tokio::test]
+async fn entry_carries_self_declared_icon_svg() {
+    let svg = r#"<polygon points="22 2 15 22 11 13 2 9 22 2"/>"#;
+    let with_icon = PluginEntry {
+        icon: Some(svg.to_string()),
+        ..entry("telegram", "telegram_factory", false, true)
+    };
+    let without_icon = entry("hook", "hook_factory", false, true);
+    let fake = Arc::new(FakeRegistry::new(vec![with_icon, without_icon]));
+    let p = plugin_with(fake);
+
+    let node = stat(&p, &vctx(), "telegram").await;
+    assert_eq!(
+        node.attributes.get("plugin_icon").and_then(|v| v.as_str()),
+        Some(svg),
+        "SVG 图元内容原样透传到节点顶层属性"
+    );
+    let plain = stat(&p, &vctx(), "hook").await;
+    assert!(
+        plain.attributes.get("plugin_icon").is_none(),
+        "未声明图标的插件不带该属性，前端走类别兜底"
+    );
 }
 
 /// 有配置文档的插件沿用**拥有者给的**定义（标题 / 表单都在里面），本插件只追加装配动作

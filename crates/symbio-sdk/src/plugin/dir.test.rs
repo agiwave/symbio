@@ -215,7 +215,9 @@ fn seed_identity_fills_missing_keys_only() {
     let meta = PluginMeta::new("demo", "演示插件")
         .with_description("一句话说明")
         .with_version("1.2.0")
-        .with_author("someone");
+        .with_author("someone")
+        // 图标内容由插件自给：一段 SVG 图元串，原样投影、前端直接渲染
+        .with_icon(r#"<circle cx="12" cy="12" r="10"/>"#);
 
     // 全缺失 → 全补
     d.seed_identity(&meta).unwrap();
@@ -226,6 +228,7 @@ fn seed_identity_fills_missing_keys_only() {
             description: Some("一句话说明".into()),
             version: Some("1.2.0".into()),
             author: Some("someone".into()),
+            icon: Some(r#"<circle cx="12" cy="12" r="10"/>"#.into()),
         }
     );
 
@@ -242,6 +245,11 @@ fn seed_identity_fills_missing_keys_only() {
     assert_eq!(id.description.as_deref(), Some("我自己写的"));
     assert_eq!(id.version.as_deref(), Some("1.2.0"), "缺失的键仍被补上");
     assert_eq!(id.author.as_deref(), Some("someone"));
+    assert_eq!(
+        id.icon.as_deref(),
+        Some(r#"<circle cx="12" cy="12" r="10"/>"#),
+        "SVG 图元内容原样随投影补齐（含引号，YAML 往返不丢）"
+    );
 }
 
 /// 键都在时**不碰文件**（无谓写盘会搅乱 mtime，变更通知的消费者只认真实变化）

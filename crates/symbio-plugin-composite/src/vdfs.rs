@@ -290,6 +290,12 @@ impl CompositeVdfs {
             meta.root_access,
         );
         n.description = identity.description;
+        // 图标 SVG 内容：挂载点已构造，直接取 `PluginMeta.icon`（与身份投影同源；
+        // 停用的挂载点本就不存在）。前端直接渲染这段内容，未声明则走类别兜底。
+        if let Some(icon) = meta.icon.as_deref() {
+            n.attributes
+                .insert("plugin_icon".to_string(), serde_json::json!(icon));
+        }
         // 子目录节点：它的隐藏属性来自子插件的根声明
         n.hidden = meta.hidden;
         n

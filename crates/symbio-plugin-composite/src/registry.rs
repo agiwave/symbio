@@ -462,6 +462,7 @@ impl PluginRegistry {
                 title: identity.title,
                 description: identity.description,
                 version: identity.version,
+                icon: identity.icon,
                 order,
                 required: self.is_required(&name),
                 enabled: dir.enabled(),

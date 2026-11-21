@@ -206,6 +206,15 @@ fn entry_node(entry: &PluginEntry, config: Option<VdfsItem>) -> VdfsNode {
     let mut n = VdfsNode::file(entry.name.clone(), title, VdfsAccess::READ_WRITE);
     n.kind = PLUGIN_ID_MANAGER.to_string();
     n.ext = Some(VDFS_EXT_FORM.to_string());
+    // 插件在 `PluginMeta.icon` 自给的 SVG 图元内容（经 manifest 投影，停用也有）
+    // 透传到节点顶层属性——前端 `iconForNode` 直接渲染这段内容，图形由插件决定，
+    // 未声明的插件才走齿轮兜底。后端只透传内容，不解释视觉。
+    if let Some(icon) = entry.icon.as_deref() {
+        n.attributes.insert(
+            "plugin_icon".to_string(),
+            serde_json::Value::String(icon.to_string()),
+        );
+    }
     n.description = config
         .as_ref()
         .and_then(|c| c.node.description.clone())
@@ -329,7 +338,7 @@ impl PluginManagerPlugin {
             .with_description("本智能体的插件：启用 / 停用 / 添加 / 卸载，以及各插件的配置。")
             .with_version("0.1.0")
             .with_order(6)
-            .with_icon("settings")
+            .with_icon(r#"<circle cx="12" cy="12" r="3"/><path d="M19.4 15a1.65 1.65 0 0 0 .33 1.82l.06.06a2 2 0 0 1 0 2.83 2 2 0 0 1-2.83 0l-.06-.06a1.65 1.65 0 0 0-1.82-.33 1.65 1.65 0 0 0-1 1.51V21a2 2 0 0 1-4 0v-.09A1.65 1.65 0 0 0 9 19.4a1.65 1.65 0 0 0-1.82.33l-.06.06a2 2 0 0 1-2.83 0 2 2 0 0 1 0-2.83l.06-.06a1.65 1.65 0 0 0 .33-1.82 1.65 1.65 0 0 0-1.51-1H3a2 2 0 0 1 0-4h.09A1.65 1.65 0 0 0 4.6 9a1.65 1.65 0 0 0-.33-1.82l-.06-.06a2 2 0 0 1 0-2.83 2 2 0 0 1 2.83 0l.06.06a1.65 1.65 0 0 0 1.82.33H9a1.65 1.65 0 0 0 1-1.51V3a2 2 0 0 1 4 0v.09a1.65 1.65 0 0 0 1 1.51 1.65 1.65 0 0 0 1.82-.33l.06-.06a2 2 0 0 1 2.83 0 2 2 0 0 1 0 2.83l-.06.06a1.65 1.65 0 0 0-.33 1.82V9a1.65 1.65 0 0 0 1.51 1H21a2 2 0 0 1 0 4h-.09a1.65 1.65 0 0 0-1.51 1z"/>"#)
     }
 
     // ==================== 转发：本插件是视图，动词在容器 ====================

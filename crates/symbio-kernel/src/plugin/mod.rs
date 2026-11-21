@@ -52,7 +52,10 @@ pub struct PluginMeta {
     /// 导航排序（小者靠前；缺省 100）
     #[serde(default = "default_meta_order")]
     pub order: i32,
-    /// 图标名（使用方纯 UI 映射；缺省无）
+    /// 图标的 SVG 图元内容（插件自给、使用方直接渲染；缺省无）
+    ///
+    /// 值就是一段 SVG 图元串（如 `<path d="..."/>`），不是图标名——前端不持有图形资产，
+    /// 拿这段内容直接画。装配期经 `PluginDir::seed_identity` 投影进 manifest。
     #[serde(default, skip_serializing_if = "Option::is_none")]
     pub icon: Option<String>,
     /// 挂载点在父目录列表中的隐藏位（缺省不隐藏；语义与 `VdfsNode::hidden` 一致）
@@ -121,7 +124,7 @@ impl PluginMeta {
         self
     }
 
-    /// 图标名（使用方纯 UI 映射）
+    /// 设置图标：传入 SVG 图元内容串（不是名字），由插件自己决定图形
     pub fn with_icon(mut self, icon: impl Into<String>) -> Self {
         self.icon = Some(icon.into());
         self

@@ -46,7 +46,10 @@ async fn vdfs_self_description_has_no_mount() {
     let (_dir, p) = fixture();
     let meta = p.meta();
     assert_eq!(meta.name, "会话");
-    assert_eq!(meta.icon.as_deref(), Some("session"));
+    assert!(
+        meta.icon.as_deref().is_some_and(|s| s.contains("<path")),
+        "图标由插件自给：meta.icon 是一段 SVG 图元内容"
+    );
     // 顺序由本插件自述自持（**单一真相源**），
     // 使 `<根>` 左栏与详情恒等
     assert_eq!(meta.order, 1);

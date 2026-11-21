@@ -53,6 +53,7 @@
 //! plugin_title: 网络工具      # 身份：展示标题（装配期从 Plugin::meta() 投影一次）
 //! plugin_description: …      # 身份：语义描述
 //! plugin_version: 0.1.0     # 身份：版本
+//! plugin_icon: '<path d="..."/>' # 身份：SVG 图元内容（插件自给，使用方直接渲染）
 //! web_enabled: true         # 以下都是该插件自己的配置
 //! web_timeout: 30
 //! ```
@@ -157,6 +158,12 @@ pub const PLUGIN_KEY_DESCRIPTION: &str = "plugin_description";
 pub const PLUGIN_KEY_VERSION: &str = "plugin_version";
 /// 身份键：作者（原 `PluginMeta::author`）
 pub const PLUGIN_KEY_AUTHOR: &str = "plugin_author";
+/// 身份键：图标的 SVG 图元内容（原 `PluginMeta::icon`）
+///
+/// 值就是一段 SVG 图元串（如 `<path d="..."/>`），由插件自己写出；后端原样透传、
+/// 前端直接渲染，**没有任何「名字 → 图」映射**。与标题 / 描述一样投影进 manifest
+/// ——停用插件不被构造，列表仍要显示它的图标。
+pub const PLUGIN_KEY_ICON: &str = "plugin_icon";
 
 // ==================== 第三方插件保留键（A5：本期只定义与解析，不强制） ====================
 
@@ -187,6 +194,7 @@ pub const PLUGIN_RESERVED_KEYS: &[&str] = &[
     PLUGIN_KEY_DESCRIPTION,
     PLUGIN_KEY_VERSION,
     PLUGIN_KEY_AUTHOR,
+    PLUGIN_KEY_ICON,
     PLUGIN_KEY_API,
     PLUGIN_KEY_GRANTS,
 ];
@@ -291,6 +299,8 @@ pub struct PluginIdentity {
     pub version: Option<String>,
     /// 作者
     pub author: Option<String>,
+    /// SVG 图元内容（插件自给、使用方直接渲染；缺省 → 消费方用类别兜底）
+    pub icon: Option<String>,
 }
 
 // ==================== 插件目录 ====================
@@ -412,6 +422,7 @@ impl PluginDir {
             description: optional_string_of(&map, PLUGIN_KEY_DESCRIPTION),
             version: optional_string_of(&map, PLUGIN_KEY_VERSION),
             author: optional_string_of(&map, PLUGIN_KEY_AUTHOR),
+            icon: optional_string_of(&map, PLUGIN_KEY_ICON),
         }
     }
 
@@ -429,11 +440,12 @@ impl PluginDir {
         let mut changed = false;
 
         // 逐字段「缺失才补」——与 `identity()` 的字段一一对应，顺序即优先级
-        let seeds: [(&str, Option<&str>); 4] = [
+        let seeds: [(&str, Option<&str>); 5] = [
             (PLUGIN_KEY_TITLE, Some(meta.name.as_str())),
             (PLUGIN_KEY_DESCRIPTION, meta.description.as_deref()),
             (PLUGIN_KEY_VERSION, meta.version.as_deref()),
             (PLUGIN_KEY_AUTHOR, meta.author.as_deref()),
+            (PLUGIN_KEY_ICON, meta.icon.as_deref()),
         ];
         for (key, value) in seeds {
             if map.contains_key(key) {
@@ -606,6 +618,11 @@ pub struct PluginEntry {
     /// 版本（同上，可为空）
     #[serde(default, skip_serializing_if = "Option::is_none")]
     pub version: Option<String>,
+    /// SVG 图元内容（来自 manifest 的 `plugin_icon`；使用方直接渲染）
+    ///
+    /// 与标题 / 描述同源：停用插件不被构造，仍能从 manifest 读到，列表照常显示。
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub icon: Option<String>,
     /// 导航排序（**挂载点呈现**，来自 `PluginMeta`；未挂载时用缺省值，同一口径）
     #[serde(default = "default_entry_order")]
     pub order: i32,
