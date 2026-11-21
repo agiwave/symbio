@@ -134,7 +134,7 @@ impl GatewayPlugin {
             .with_description("本应用如何被调用（入站，对外提供服务）。")
             .with_version("0.1.0")
             .with_order(9)
-            .with_icon("plug")
+            .with_icon(r#"<path d="M4 12h4l2-5 4 10 2-5h4"/><circle cx="12" cy="12" r="10"/>"#)
             .with_hidden(true)
     }
 

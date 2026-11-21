@@ -97,6 +97,7 @@ impl ComposePlugin {
         PluginMeta::new(PLUGIN_ID_COMPOSE, "对话措辞")
             .with_description("首响 / 答话 / 汇报的措辞；只输出文本，不做判决")
             .with_version("0.4.0")
+            .with_icon(r#"<path d="M12 20h9"/><path d="M16.5 3.5a2.12 2.12 0 0 1 3 3L7 19l-4 1 1-4L16.5 3.5z"/>"#)
     }
 
     /// 路由侧的产线：**填表**（`Report`）/ **模板**（其余有固定措辞的判决）。

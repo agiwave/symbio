@@ -31,6 +31,7 @@ impl SloPlugin {
         PluginMeta::new(PLUGIN_ID_SLO, PLUGIN_TITLE)
             .with_description("时延 / 兜底 / 跨度三列：按派发档折叠，单片与跨会话两半")
             .with_version("0.1.14")
+            .with_icon(r#"<circle cx="12" cy="12" r="10"/><circle cx="12" cy="12" r="6"/><circle cx="12" cy="12" r="2"/>"#)
     }
 }
 

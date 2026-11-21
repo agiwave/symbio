@@ -58,6 +58,9 @@ impl ConationPlugin {
         PluginMeta::new(PLUGIN_ID_CONATION, PLUGIN_TITLE)
             .with_description("「欲」的表达与它的升格读数：一条事实、两条视图、一笔升格债")
             .with_version("0.1.16")
+            .with_icon(
+                r#"<path d="M12 2l3 6 6 .9-4.5 4.4 1 6.2L12 17l-5.5 2.5 1-6.2L3 8.9 9 8z"/>"#,
+            )
     }
 }
 

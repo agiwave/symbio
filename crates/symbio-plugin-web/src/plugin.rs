@@ -143,7 +143,7 @@ impl WebPlugin {
             .with_description("Web 工具的启用、超时与搜索服务凭据。")
             .with_version("0.1.0")
             .with_order(8)
-            .with_icon("globe")
+            .with_icon(r#"<circle cx="12" cy="12" r="10"/><line x1="2" y1="12" x2="22" y2="12"/><path d="M12 2a15.3 15.3 0 0 1 4 10 15.3 15.3 0 0 1-4 10 15.3 15.3 0 0 1-4-10 15.3 15.3 0 0 1 4-10z"/>"#)
             .with_hidden(true)
     }
 }

@@ -87,6 +87,7 @@ impl HeartbeatPlugin {
                 "会话空闲后的自主开轮调度：扫描会话清单，把提示词写进空闲会话的收件箱",
             )
             .with_version("0.1.0")
+            .with_icon(r#"<polyline points="22 12 18 12 15 21 9 3 6 12 2 12"/>"#)
     }
 
     /// 起常驻扫描循环。没有 runtime 时（裸构造的单测）**一条都不起**：那种场景没有

@@ -80,6 +80,7 @@ impl EventBusPlugin {
         PluginMeta::new(PLUGIN_ID_EVENT_BUS, "Event Bus")
             .with_description("统一事件总线：单连接订阅所有插件事件")
             .with_version("0.1.0")
+            .with_icon(r#"<circle cx="5" cy="12" r="2"/><circle cx="19" cy="5" r="2"/><circle cx="19" cy="19" r="2"/><line x1="7" y1="11" x2="17" y2="6"/><line x1="7" y1="13" x2="17" y2="18"/>"#)
     }
 
     /// 处理订阅请求（connect_v2）

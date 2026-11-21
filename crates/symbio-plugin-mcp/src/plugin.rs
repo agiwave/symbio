@@ -104,7 +104,7 @@ impl McpPlugin {
             .with_description("MCP server 配置（每项一份 server.json），是工具的唯一来源。")
             .with_version("0.3.0")
             .with_order(5)
-            .with_icon(PLUGIN_ID_MCP)
+            .with_icon(r#"<rect x="2" y="2" width="20" height="8" rx="2"/><rect x="2" y="14" width="20" height="8" rx="2"/><line x1="6" y1="6" x2="6.01" y2="6"/><line x1="6" y1="18" x2="6.01" y2="18"/>"#)
         // 「根下可新建类型」由 provider 自持（根节点自述里的 `VdfsNode::new_type`，
         // 见下方 `impl VdfsProvider for McpPlugin`）——它是挂载点的动态自述，容器
         // 合成根节点时向 provider 发一次 `Stat` 现场取，不进这份同步纯数据

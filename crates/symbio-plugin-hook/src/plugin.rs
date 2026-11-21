@@ -64,6 +64,7 @@ impl HooksPlugin {
         PluginMeta::new(PLUGIN_ID_HOOK, "钩子插件")
             .with_description("提供事件钩子机制，支持插件间事件订阅与触发")
             .with_version("0.1.0")
+            .with_icon(r#"<path d="M12 2v9"/><path d="M12 11a5 5 0 1 0 5 5"/>"#)
     }
 
     async fn handle_fire(

@@ -26,6 +26,7 @@ impl GlossaryPlugin {
         PluginMeta::new(PLUGIN_ID_GLOSSARY, "术语表")
             .with_description("定义项目术语（Domain×Opened），并把当前术语表作为上下文段喂回")
             .with_version("0.1.0")
+            .with_icon(r#"<path d="M4 19.5A2.5 2.5 0 0 1 6.5 17H20"/><path d="M6.5 2H20v20H6.5A2.5 2.5 0 0 1 4 19.5v-15A2.5 2.5 0 0 1 6.5 2z"/>"#)
     }
 }
 

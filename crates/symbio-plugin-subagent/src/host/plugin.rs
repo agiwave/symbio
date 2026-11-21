@@ -315,7 +315,7 @@ impl AgentPlugin {
             )
             .with_version("0.1.0")
             .with_order(3)
-            .with_icon(PLUGIN_ID_SUBAGENT)
+            .with_icon(r#"<path d="M20 21v-2a4 4 0 0 0-4-4H8a4 4 0 0 0-4 4v2"/><circle cx="12" cy="7" r="4"/>"#)
             // 根可列举 + 可递归遍历（agent 目录内部有子条目）。
             // 「根下可新建类型」不在这里——agent 目录只能整包导入（没有「先建空壳
             // 再填字段」的形态），清单由 provider 自持（见 `super::vdfs`）

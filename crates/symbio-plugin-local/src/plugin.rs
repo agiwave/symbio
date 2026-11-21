@@ -238,7 +238,9 @@ impl LocalPlugin {
             .with_description("本地 Shell / 文件工具的配置。")
             .with_version("0.1.0")
             .with_order(7)
-            .with_icon("terminal")
+            .with_icon(
+                r#"<polyline points="4 17 10 11 4 5"/><line x1="12" y1="19" x2="20" y2="19"/>"#,
+            )
             .with_hidden(true)
     }
 }

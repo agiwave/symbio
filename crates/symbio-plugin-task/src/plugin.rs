@@ -50,6 +50,7 @@ impl TaskPlugin {
         PluginMeta::new(PLUGIN_ID_TASK, PLUGIN_TITLE)
             .with_description("任务表声明、独立验证与返工、就绪集调度")
             .with_version("0.1.14")
+            .with_icon(r#"<path d="M9 11l3 3L22 4"/><path d="M21 12v7a2 2 0 0 1-2 2H5a2 2 0 0 1-2-2V5a2 2 0 0 1 2-2h11"/>"#)
     }
 }
 

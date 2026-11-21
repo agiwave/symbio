@@ -91,7 +91,7 @@ impl SkillPlugin {
             .with_description("Skill 技能包（每项一份 SKILL.md），是可复用能力片段的唯一来源。")
             .with_version("0.2.0")
             .with_order(4)
-            .with_icon(PLUGIN_ID_SKILL)
+            .with_icon(r#"<path d="M14.7 6.3a1 1 0 0 0 0 1.4l1.6 1.6a1 1 0 0 0 1.4 0l3.77-3.77a6 6 0 0 1-7.94 7.94l-6.91 6.91a2.12 2.12 0 0 1-3-3l6.91-6.91a6 6 0 0 1 7.94-7.94l-3.76 3.76z"/>"#)
         // 「根下可新建类型」由 provider 自持（根节点自述里的 `VdfsNode::new_type`，
         // 见下方 `impl VdfsProvider for SkillPlugin`）——它是挂载点的动态自述，容器
         // 合成根节点时向 provider 发一次 `Stat` 现场取，不进这份同步纯数据

@@ -65,7 +65,7 @@ impl SettingPlugin {
             .with_version("0.1.0")
             // 在既有挂载点之后（… / work 11 / memory 12）
             .with_order(13)
-            .with_icon(PLUGIN_ID_SETTING)
+            .with_icon(r#"<path d="M20 21v-2a4 4 0 0 0-4-4H8a4 4 0 0 0-4 4v2"/><circle cx="12" cy="7" r="4"/>"#)
             // 配置型挂载点：入口在**设置页**，不进侧边栏（与 web / local / gateway 同一口径）
             .with_hidden(true)
     }

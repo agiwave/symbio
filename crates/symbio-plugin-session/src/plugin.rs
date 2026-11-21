@@ -180,7 +180,9 @@ impl SessionPlugin {
             )
             .with_version("0.3.0")
             .with_order(1)
-            .with_icon("session")
+            .with_icon(
+                r#"<path d="M21 15a2 2 0 0 1-2 2H7l-4 4V5a2 2 0 0 1 2-2h14a2 2 0 0 1 2 2z"/>"#,
+            )
             // 会话是叶子文档：可列，不参与树遍历（会话内部的子结构另有容器语义）
             .with_root_access(VdfsAccess::LIST)
     }

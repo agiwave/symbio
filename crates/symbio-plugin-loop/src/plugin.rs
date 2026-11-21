@@ -25,7 +25,7 @@ impl LoopPlugin {
             .with_description("纯机制环：选债、派发、等待、配对、记账、预算与租约、重放。")
             .with_version("0.1.0")
             .with_order(90)
-            .with_icon("loop")
+            .with_icon(r#"<polyline points="17 1 21 5 17 9"/><path d="M3 11V9a4 4 0 0 1 4-4h14"/><polyline points="7 23 3 19 7 15"/><path d="M21 13v2a4 4 0 0 1-4 4H3"/>"#)
             .with_hidden(true)
     }
 }

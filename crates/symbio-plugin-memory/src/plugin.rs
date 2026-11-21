@@ -178,7 +178,7 @@ impl MemoryPlugin {
             // 在既有挂载点之后（session 1 / model 2 / agent 3 / skill 4 / mcp 5 /
             // plugin_manager 6 / local 7 / web 8 / gateway 9 / telegram 10）
             .with_order(11)
-            .with_icon(PLUGIN_ID_MEMORY)
+            .with_icon(r#"<path d="M2 3h6a4 4 0 0 1 4 4v14a3 3 0 0 0-3-3H2z"/><path d="M22 3h-6a4 4 0 0 0-4 4v14a3 3 0 0 1 3-3h7z"/>"#)
             // 根可列举 + 可递归遍历（记忆文件在根下，树视图要能走到它）
             .with_root_access(VdfsAccess::LIST_TRAVERSE)
             // 入口在**设置页**（plugin_manager 的 memory 条目），不进侧边栏：
