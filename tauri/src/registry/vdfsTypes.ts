@@ -31,7 +31,7 @@ import {
  * - `session`    会话工作区
  * - `message`    单条对话消息（**转写列表项**的只读视图）
  * - `markdown` / `json` / `text` 文本类编辑器
- * - `appearance` / `about` 前端状态自持的专属面板（外观设置 / 关于）
+ * - `appearance` 配置型插件 ui_prefs 的专属面板（外观 + 提示音）
  * - `fallback`   通用只读兜底
  */
 export type VdfsRenderer =
@@ -43,7 +43,6 @@ export type VdfsRenderer =
   | 'json'
   | 'text'
   | 'appearance'
-  | 'about'
   | 'market'
   | 'fallback'
 
@@ -126,7 +125,7 @@ export function isInboxSeg(node: { kind?: string }): boolean {
  * = 文本缓冲类 ∪ `form` ∪ `appearance`：表单字段值同样取自正文（`vdfs/read` 的
  * `text`，前端 parse 成对象后作为显式入参交给渲染器）；外观面板的偏好值来自
  * `ui_prefs` 的配置文档（一份 JSON 正文，D-521），同样必须先读。
- * 其余（`dir` / `session` / `about` / `market` / `fallback`）各有自己的数据来源——
+ * 其余（`dir` / `session` / `market` / `fallback`）各有自己的数据来源——
  * 市场的候选随 `new_type.schema` 下发（见 `rendererReadsNodeSchema`），替它们读正文
  * 是白读。
  */
@@ -157,9 +156,8 @@ const EXT_RENDERERS: Record<string, VdfsRenderer> = {
   [VDFS_EXT_JSON]: 'json',
   [VDFS_EXT_TEXT]: 'text',
   [VDFS_EXT_DIR]: 'dir',
-  // 前端状态自持的专属面板（ext 即语义类型名，由 provider 声明）
+  // 配置型插件 ui_prefs 的专属面板（ext 即语义类型名，由 provider 声明）
   appearance: 'appearance',
-  about: 'about',
   market: 'market',
   txt: 'text',
   log: 'text',

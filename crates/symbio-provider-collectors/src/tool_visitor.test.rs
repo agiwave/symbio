@@ -380,8 +380,7 @@ async fn configurable_declaration_keeps_order_and_overwrites_same_name() {
     ))))
     .await;
     mgr.put(CapabilityRow::configurable(capability_entry_of(&config(
-        "session",
-        "会话设置",
+        "session", "会话",
     ))))
     .await;
     mgr.put(CapabilityRow::configurable(capability_entry_of(&config(

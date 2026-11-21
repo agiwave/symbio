@@ -223,16 +223,9 @@ registerVdfsIcon(
   'plugin_manager:telegram',
   svgIcon('<line x1="22" y1="2" x2="11" y2="13"/><polygon points="22 2 15 22 11 13 2 9 22 2"/>')
 )
-registerVdfsIcon(
-  'ui_prefs:about',
-  svgIcon(
-    '<circle cx="12" cy="12" r="10"/><line x1="12" y1="16" x2="12" y2="12"/><line x1="12" y1="8" x2="12.01" y2="8"/>'
-  )
-)
-
-// ui_prefs 的 kind 级图标：外观 / 关于两个分区节点的 kind 已归 ui_prefs（D-521）。
+// ui_prefs 的 kind 级图标：「界面」入口节点的 kind 归 ui_prefs（D-521）。
 // 真实节点不带 config_type，项级键只在草稿里命中，故 kind 级必须登记，
-// 否则这两行退成默认兜底图标。
+// 否则这一行退成默认兜底图标。
 registerVdfsIcon(
   'ui_prefs',
   svgIcon(

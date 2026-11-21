@@ -22,7 +22,7 @@ use serde::{Deserialize, Serialize};
 
 /// 会话心跳任务配置
 ///
-/// 存储于 `Session.metadata.heartbeat`，由会话设置页（[`super::option`]）或模型侧工具
+/// 存储于 `Session.metadata.heartbeat`，由「会话」配置页（[`super::option`]）或模型侧工具
 /// （[`super::tool`]）写入；[`super::scheduler`] 据此判定「这个会话现在该不该开一轮」。
 #[derive(Debug, Clone, Serialize, Deserialize)]
 pub struct HeartbeatConfig {

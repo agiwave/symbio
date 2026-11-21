@@ -85,7 +85,7 @@ impl ClassifyPlugin {
     pub fn new(config: ClassifyConfig, dir: PluginDir) -> Self {
         Self {
             config,
-            config_file: PluginConfigFile::new(dir, "意图判决设置", config_definition()),
+            config_file: PluginConfigFile::new(dir, "意图判决", config_definition()),
         }
     }
 
@@ -255,7 +255,7 @@ symbio_plugin_api::submit_object_creator!(PLUGIN_ID_CLASSIFY, ClassifyPlugin::bu
 fn config_definition() -> DetailDefinition {
     let d = ClassifyConfig::default();
     DetailDefinition::form(
-        "意图判决设置",
+        "意图判决",
         vec![
             DetailField::toggle(
                 "classify_enabled",

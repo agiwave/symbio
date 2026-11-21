@@ -32,7 +32,12 @@ const candidate = (name: string) => ({
   label: `${name} 插件`,
 })
 
-const data = (candidates: unknown[]) => ({ candidates })
+// 真实链路里 provider_field 由后端唯一定义并随 schema 下发（VDFS_PLUGIN_PROVIDER_FIELD）。
+const PROVIDER_FIELD = 'provider'
+const data = (candidates: unknown[], providerField: string = PROVIDER_FIELD) => ({
+  candidates,
+  provider_field: providerField,
+})
 
 describe('MarketPanel', () => {
   it('把 schema 候选渲染成卡片：名称、来源与安装按钮', () => {
@@ -51,6 +56,16 @@ describe('MarketPanel', () => {
     })
     await w.find('.install-btn').trigger('click')
 
+    expect(w.emitted('save')).toEqual([[{ provider: 'slo' }]])
+  })
+
+  it('安装载荷的键名来自后端下发的 provider_field，不硬编码', async () => {
+    const w = mount(MarketPanel, {
+      props: { node: marketDraft(), data: data([candidate('slo')], 'plugin_provider') },
+    })
+    await w.find('.install-btn').trigger('click')
+
+    // 键名完全跟随后端定义——后端若改用别的键，前端无需改一行即可跟上。
     expect(w.emitted('save')).toEqual([[{ plugin_provider: 'slo' }]])
   })
 

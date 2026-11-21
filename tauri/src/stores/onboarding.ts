@@ -21,8 +21,8 @@
  * ## 「已读过」只记一条布尔
  *
  * 与外观设置同源（localStorage），因为它是**用户选择**而不是领域数据。
- * 刻意不记「走到第几步」：那会变成第四个状态需要维护，而用户可以随时从
- * 「关于」把引导重新打开（`openManually`）。
+ * 刻意不记「走到第几步」：那会变成第四个状态需要维护，而调用方可以随时
+ * 把引导重新打开（`openManually`）。
  */
 
 import { defineStore } from 'pinia'
@@ -151,13 +151,13 @@ export const useOnboardingStore = defineStore('onboarding', () => {
     })
   }
 
-  /** 从「关于」等入口手动打开（不看 `dismissed`） */
+  /** 由调用方手动打开（不看 `dismissed`） */
   function openManually(): void {
     open.value = true
     void refresh()
   }
 
-  /** 关闭面板但不记为已读（用户随时可以从「关于」再打开） */
+  /** 关闭面板但不记为已读（调用方随时可以再打开） */
   function close(): void {
     open.value = false
   }

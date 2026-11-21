@@ -77,7 +77,7 @@ impl SessionPlugin {
             session_id: Some(session_id.to_string()),
             include_history: Some(include_history),
             // 自主轮没有人在屏幕前：需交互的工具产卡会把这一轮永远挂在等待上，
-            // 所以 `mode` 不跟随会话设置，恒 `auto`（无人值守）。
+            // 所以 `mode` 不跟随「会话」配置，恒 `auto`（无人值守）。
             mode: Some("auto".to_string()),
             // 其余字段留空：`agent_id` / `risk_level` / `provider_id` 由
             // `resolve_session_params` 回退到会话 metadata，工作目录同（`start_turn` 的

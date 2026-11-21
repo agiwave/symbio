@@ -238,6 +238,13 @@ async fn root_declares_market_new_type_with_candidates() {
         schema["candidates"].is_array(),
         "候选是数组；草稿据此渲染市场卡片"
     );
+    // 安装载荷的键名随 schema 下发给前端，且必须与容器读取的字段常量一致——
+    // 两侧漂移正是「保存失败：请选择一个插件工厂」的根因（slo 装不上）。
+    assert_eq!(
+        schema["provider_field"].as_str(),
+        Some(symbio_plugin_api::VDFS_PLUGIN_PROVIDER_FIELD),
+        "下发的 provider_field 必须与容器 install_plugin 读取的字段同名"
+    );
 
     // 容器不可达时仍声明入口，只是候选为空——这是常态，不是「退化」为通用表单
     let orphan = plugin_without_registry();
@@ -257,35 +264,44 @@ async fn root_declares_market_new_type_with_candidates() {
 
 // ==================== 清单 ====================
 
-/// 清单 = 各插件条目 + 自有分区；**没有市场节点**
+/// 清单 = 各插件条目 + 配置型插件的专属入口；**没有市场节点，也没有重复项**
 ///
 /// 「进管理页先看已装插件」：市场是「添加插件」打开的一张页面（根上的 `new_type`），
 /// 不是清单里的又一项。把市场放回清单会重新引入「市场排在长列表末尾、入口看不见」
 /// 的旧问题（D-520）。
+///
+/// 「一项 = 一个插件」：ui_prefs 的普通条目被过滤，只留「界面」一项；「关于」不是
+/// 插件，已从清单移除。
 #[tokio::test]
-async fn list_has_entries_then_own_sections_without_market_node() {
+async fn list_has_entries_then_ui_entry_without_duplicates() {
     let fake = Arc::new(FakeRegistry::new(vec![
         entry("alpha", "alpha_factory", false, true),
         entry("beta", "beta_factory", false, false),
+        entry(PLUGIN_ID_UI_PREFS, "ui_prefs_factory", false, true),
     ]));
     let p = plugin_with(fake);
 
     let items = list(&p, &vctx()).await;
     let names: Vec<&str> = items.iter().map(|it| it.node.name.as_str()).collect();
-    assert_eq!(names, vec!["alpha", "beta", "appearance", "about"]);
+    assert_eq!(names, vec!["alpha", "beta", "appearance"]);
     assert!(
         !names.contains(&"market"),
         "市场不是 VDFS 节点，清单里不得出现"
     );
+    assert!(
+        !names.contains(&PLUGIN_ID_UI_PREFS),
+        "ui_prefs 的普通条目已被过滤，只留「界面」一项——不重复"
+    );
+    assert!(!names.contains(&"about"), "「关于」不是插件，已从清单移除");
 
     // 条目是定义驱动的表单文档，不是目录
     assert_eq!(items[0].node.kind, PLUGIN_ID_MANAGER);
     assert_eq!(items[0].node.ext.as_deref(), Some(VDFS_EXT_FORM));
     assert!(!items[0].node.is_dir(), "条目是文档，不是目录");
 
-    // 界面分区：`ext` 即分区 id（前端按 `ext → 渲染器` 回退到专属面板）
+    // 「界面」入口：`ext` 是 appearance（前端据此落到外观面板），标题是「界面」
     assert_eq!(items[2].node.ext.as_deref(), Some("appearance"));
-    assert_eq!(items[3].node.ext.as_deref(), Some("about"));
+    assert_eq!(items[2].node.title, "界面");
 }
 
 /// 装配态即节点状态：启用 / 停用 / 装配失败各画各的
@@ -568,49 +584,32 @@ async fn install_forwards_write_to_the_container_root() {
     assert!(writes[0].1.contains("telegram"), "表单值原样转过去");
 }
 
-// ==================== 界面分区（归属 ui_prefs） ====================
+// ==================== 配置型插件的入口（归属 ui_prefs） ====================
 
-/// 分区是叶子：归属 ui_prefs、无状态、不接受新建与列目录
+/// 入口是叶子：归属 ui_prefs、无状态、不接受新建与列目录
 #[tokio::test]
-async fn sections_are_leaves_belonging_to_ui_prefs() {
+async fn ui_entry_is_leaf_belonging_to_ui_prefs() {
     let p = plugin_without_registry();
     let s = stat(&p, &vctx(), "appearance").await;
-    assert!(!s.is_dir(), "分区是叶子文档");
+    assert!(!s.is_dir(), "入口是叶子文档");
     assert_eq!(s.kind, PLUGIN_ID_UI_PREFS, "节点归属 ui_prefs（D-521）");
-    assert_eq!(s.status, VDFS_STATUS_NONE, "静态分区没有「运行中」可言");
-    assert_eq!(s.access, VdfsAccess::READ_WRITE, "外观有后端正文，可读写");
+    assert_eq!(s.status, VDFS_STATUS_NONE, "静态入口没有「运行中」可言");
+    assert_eq!(s.access, VdfsAccess::READ_WRITE, "有后端正文，可读写");
+    assert_eq!(s.title, "界面");
     assert!(p
         .dispatch(&vctx(), "appearance", VdfsRequest::List {})
         .await
         .is_err());
 
-    let about = stat(&p, &vctx(), "about").await;
-    assert_eq!(about.kind, PLUGIN_ID_UI_PREFS);
-    assert_eq!(about.access, VdfsAccess::READ, "关于无用户数据，只读");
+    // 「关于」已移出插件列表：直接寻址不再命中专属入口（无容器时如实报错，
+    // 而不是像旧版那样返回一张静态「关于」节点）。
+    assert!(p
+        .dispatch(&vctx(), "about", VdfsRequest::Stat)
+        .await
+        .is_err());
 }
 
-/// 关于页没有用户数据：读写明确拒绝，不静默返回空
-#[tokio::test]
-async fn about_has_no_body() {
-    let p = plugin_without_registry();
-    assert!(matches!(
-        p.dispatch(&vctx(), "about", VdfsRequest::Read).await,
-        Err(VdfsError::Forbidden(_))
-    ));
-    assert!(matches!(
-        p.dispatch(
-            &vctx(),
-            "about",
-            VdfsRequest::Write {
-                content: VdfsContent::text("{}")
-            }
-        )
-        .await,
-        Err(VdfsError::Forbidden(_))
-    ));
-}
-
-/// 外观的读写转发到 ui_prefs 的配置文档（D-521）
+/// 界面入口的读写转发到 ui_prefs 的配置文档（D-521）
 #[tokio::test]
 async fn appearance_read_write_forward_to_ui_prefs() {
     let fake = Arc::new(

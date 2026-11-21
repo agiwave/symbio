@@ -95,7 +95,7 @@ const VERBOSITY_OPTIONS: [(&str, &str); 4] = [
 pub fn config_definition() -> DetailDefinition {
     DetailDefinition {
         binding: "option".to_string(),
-        title_fallback: Some("智能体设置".to_string()),
+        title_fallback: Some("智能体".to_string()),
         sections: vec![
             DetailSection {
                 title: Some("档案".to_string()),

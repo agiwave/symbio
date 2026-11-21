@@ -105,7 +105,7 @@ impl SessionPlugin {
         // 订阅方，VDFS 侧不必另开一套监听（实时链路在机制层合流）。
         let workdir_watches = super::workdir::WorkdirWatchManager::default();
         workdir_watches.set_vdfs_subs(change_subs.clone());
-        let config_file = PluginConfigFile::new(dir, "会话设置", config_definition());
+        let config_file = PluginConfigFile::new(dir, "会话", config_definition());
         // 存储根 = 本插件目录（`storage_dir` 的唯一来源，见 [`Self::storage_dir`]）
         let store_dir = config_file.dir().dir().to_path_buf();
         // 事实源开面按这个目录解析进程内唯一的 `SessionStore`（装配层 open 用）。
@@ -679,7 +679,7 @@ fn config_definition() -> DetailDefinition {
                 )],
             },
         ],
-        ..DetailDefinition::form("会话设置", vec![])
+        ..DetailDefinition::form("会话", vec![])
     }
 }
 

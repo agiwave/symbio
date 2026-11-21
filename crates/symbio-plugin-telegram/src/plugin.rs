@@ -25,7 +25,7 @@ const TELEGRAM_MAX_MESSAGE_LENGTH: usize = 4096;
 fn config_definition() -> DetailDefinition {
     let d = TelegramConfig::default();
     DetailDefinition::form(
-        "Telegram 设置",
+        "Telegram",
         vec![
             DetailField::password(
                 "bot_token",
@@ -164,7 +164,7 @@ impl TelegramPlugin {
     pub fn new(config: TelegramConfig, dir: PluginDir) -> Self {
         Self {
             config: Arc::new(RwLock::new(config)),
-            config_file: PluginConfigFile::new(dir, "Telegram 设置", config_definition()),
+            config_file: PluginConfigFile::new(dir, "Telegram", config_definition()),
             client: reqwest::Client::new(),
             listener_token: Arc::new(RwLock::new(None)),
             listener_running: Arc::new(AtomicBool::new(false)),

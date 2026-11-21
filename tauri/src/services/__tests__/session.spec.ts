@@ -196,7 +196,7 @@ describe('listSessions（<根>/session → SessionListItem）', () => {
     mockList([
       sessionItem({ name: 'abc' }),
       // 本插件的配置文件：真实文件名 `PLUGIN.yml`，ext = form（见 ../../../../docs/003-design/009-VDFS规范.md §3.4）
-      sessionItem({ name: 'PLUGIN.yml', title: '会话设置', ext: 'form' }),
+      sessionItem({ name: 'PLUGIN.yml', title: '会话', ext: 'form' }),
     ])
 
     const out = await listSessions()

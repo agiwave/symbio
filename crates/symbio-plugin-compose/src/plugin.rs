@@ -89,7 +89,7 @@ impl ComposePlugin {
     pub fn new(config: ComposeConfig, dir: PluginDir) -> Self {
         Self {
             config,
-            config_file: PluginConfigFile::new(dir, "对话措辞设置", config_definition()),
+            config_file: PluginConfigFile::new(dir, "对话措辞", config_definition()),
         }
     }
 
@@ -196,7 +196,7 @@ symbio_plugin_api::submit_object_creator!(PLUGIN_ID_COMPOSE, ComposePlugin::buil
 fn config_definition() -> DetailDefinition {
     let d = ComposeConfig::default();
     DetailDefinition::form(
-        "对话措辞设置",
+        "对话措辞",
         vec![
             DetailField::toggle(
                 "compose_enabled",

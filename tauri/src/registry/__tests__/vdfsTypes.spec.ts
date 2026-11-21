@@ -55,9 +55,8 @@ describe('resolveVdfsRenderer', () => {
     expect(resolveVdfsRenderer(node({ name: 'm1' }))).toBe('fallback')
   })
 
-  it('前端状态自持的专属面板按语义 ext 分发（设置分区与插件市场）', () => {
+  it('专属面板按语义 ext 分发（界面入口与插件市场）', () => {
     expect(resolveVdfsRenderer(node({ name: 'appearance', ext: 'appearance' }))).toBe('appearance')
-    expect(resolveVdfsRenderer(node({ name: 'about', ext: 'about' }))).toBe('about')
     expect(resolveVdfsRenderer(node({ name: 'market', ext: 'market' }))).toBe('market')
   })
 
@@ -106,7 +105,7 @@ describe('isTextualRenderer / rendererReadsNodeText', () => {
   })
 
   it('isTextualRenderer：其余一律不是（表单、选择器与二进制不可追加）', () => {
-    for (const r of ['dir', 'form', 'session', 'appearance', 'about', 'market', 'fallback'] as const) {
+    for (const r of ['dir', 'form', 'session', 'appearance', 'market', 'fallback'] as const) {
       expect(isTextualRenderer(r), r).toBe(false)
     }
   })
@@ -118,7 +117,7 @@ describe('isTextualRenderer / rendererReadsNodeText', () => {
   })
 
   it('rendererReadsNodeText：其余各有自己的数据来源，替它们读正文是白读', () => {
-    for (const r of ['dir', 'session', 'about', 'market', 'fallback'] as const) {
+    for (const r of ['dir', 'session', 'market', 'fallback'] as const) {
       expect(rendererReadsNodeText(r), r).toBe(false)
     }
   })
@@ -133,7 +132,6 @@ describe('isTextualRenderer / rendererReadsNodeText', () => {
       'json',
       'text',
       'appearance',
-      'about',
       'market',
       'fallback',
     ] as const
@@ -144,7 +142,7 @@ describe('isTextualRenderer / rendererReadsNodeText', () => {
   it('rendererPayloadIsText：只有外观面板的保存载荷是正文 JSON 文本（D-521）', () => {
     const all = [
       'dir', 'form', 'session', 'message', 'markdown', 'json', 'text',
-      'appearance', 'about', 'market', 'fallback',
+      'appearance', 'market', 'fallback',
     ] as const
     expect(all.filter((r) => rendererPayloadIsText(r))).toEqual(['appearance'])
   })

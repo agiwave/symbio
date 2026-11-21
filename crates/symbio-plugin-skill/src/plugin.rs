@@ -81,7 +81,7 @@ impl SkillPlugin {
     pub fn new(config: SkillConfig, dir: PluginDir) -> Self {
         Self {
             config: Arc::new(RwLock::new(config)),
-            config_file: PluginConfigFile::new(dir.clone(), "技能设置", config_definition()),
+            config_file: PluginConfigFile::new(dir.clone(), "技能", config_definition()),
             dir,
         }
     }
@@ -571,7 +571,7 @@ impl Plugin for SkillPlugin {
 fn config_definition() -> DetailDefinition {
     let d = SkillConfig::default();
     DetailDefinition::form(
-        "技能设置",
+        "技能",
         vec![DetailField::toggle(
             "skill_compile_enabled",
             "启用技能编译",

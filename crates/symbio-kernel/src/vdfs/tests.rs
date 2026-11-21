@@ -55,7 +55,7 @@ fn derive_ext_from_name() {
 
 #[test]
 fn effective_ext_prefers_explicit() {
-    let mut n = VdfsNode::file("session", "会话设置", VdfsAccess::READ_WRITE);
+    let mut n = VdfsNode::file("session", "会话", VdfsAccess::READ_WRITE);
     assert_eq!(n.effective_ext(), None);
     n.ext = Some("form".into());
     assert_eq!(n.effective_ext().as_deref(), Some("form"));
@@ -145,7 +145,7 @@ fn new_type_is_pure_presentation() {
 /// 宿主方言的呈现描述经 `schema` 透传，VDFS 不解释其内容
 #[test]
 fn schema_is_opaque_passthrough() {
-    let n = VdfsNode::file("session", "会话设置", VdfsAccess::READ_WRITE)
+    let n = VdfsNode::file("session", "会话", VdfsAccess::READ_WRITE)
         .with_ext("form")
         .with_schema(serde_json::json!({ "binding": "config" }));
     let v = serde_json::to_value(&n).unwrap();

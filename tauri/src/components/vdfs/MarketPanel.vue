@@ -47,11 +47,27 @@ interface Candidate {
   label: string
 }
 
+/** schema 模型：候选 + 安装载荷的键名（后者由后端唯一定义，见 `VDFS_PLUGIN_PROVIDER_FIELD`）。 */
+type MarketSchema = { candidates?: unknown; provider_field?: unknown }
+
+const schema = computed<MarketSchema | undefined>(
+  () => props.data as MarketSchema | undefined,
+)
+
 /** 候选来自 `new_type.schema`（不是正文）：机制把它作为 `data` 原样交给渲染器。 */
 const candidates = computed<Candidate[]>(() => {
-  const model = props.data as { candidates?: unknown } | undefined
-  const list = model && typeof model === 'object' ? model.candidates : null
+  const list = schema.value && typeof schema.value === 'object' ? schema.value.candidates : null
   return Array.isArray(list) ? (list as Candidate[]) : []
+})
+
+/**
+ * 安装载荷的键名由后端下发，前端不硬编码——两侧各写一遍正是「保存失败：请选择插件工厂」
+ * 的根因（前端曾写 `plugin_provider`，后端读 `provider`）。后端缺席时用一个不可能被
+ * 容器识别的哨兵键，让失败原因如实暴露为「请选择一个插件工厂」，而不是悄悄装错。
+ */
+const providerField = computed<string>(() => {
+  const f = schema.value && typeof schema.value === 'object' ? schema.value.provider_field : null
+  return typeof f === 'string' && f ? f : '__provider_field_missing__'
 })
 
 const visible = candidates
@@ -67,7 +83,7 @@ function sourceLabel(source: string): string {
  * 回到页面上，不在渲染器里再写一份 VDFS（D-520）。
  */
 function install(c: Candidate): void {
-  emit('save', { plugin_provider: c.provider })
+  emit('save', { [providerField.value]: c.provider })
 }
 </script>
 

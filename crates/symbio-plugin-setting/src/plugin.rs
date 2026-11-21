@@ -55,12 +55,12 @@ impl SettingPlugin {
     pub fn new(dir: PluginDir, config: SettingConfig) -> Self {
         Self {
             config: Arc::new(RwLock::new(config)),
-            config_file: PluginConfigFile::new(dir, "智能体设置", config_definition()),
+            config_file: PluginConfigFile::new(dir, "智能体", config_definition()),
         }
     }
 
     pub fn metadata() -> PluginMeta {
-        PluginMeta::new(PLUGIN_ID_SETTING, "智能体设置")
+        PluginMeta::new(PLUGIN_ID_SETTING, "智能体")
             .with_description("本智能体自身的信息：显示名、简介与回答偏好（语言 / 详略）。")
             .with_version("0.1.0")
             // 在既有挂载点之后（… / work 11 / memory 12）
@@ -114,7 +114,7 @@ impl Plugin for SettingPlugin {
     ) -> PluginInvokeResponse<PluginPayload> {
         let path = ctx.get(PATH).unwrap_or_default();
         Err(PluginError::NotFound(format!(
-            "setting 无自有协议路由 `{path}`：智能体设置一律经 VDFS 访问（{}）",
+            "setting 无自有协议路由 `{path}`：智能体配置一律经 VDFS 访问（{}）",
             symbio_plugin_api::absolute_addr(&ctx, symbio_plugin_api::PLUGIN_FILE)
         )))
     }
@@ -145,7 +145,7 @@ impl Plugin for SettingPlugin {
 
 impl PluginConfigMount for SettingPlugin {
     type Config = SettingConfig;
-    const TITLE: &'static str = "智能体设置";
+    const TITLE: &'static str = "智能体";
 
     fn config_file(&self) -> &PluginConfigFile {
         &self.config_file

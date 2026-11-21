@@ -65,51 +65,43 @@ use symbio_plugin_api::{
     VdfsAccess, VdfsContent, VdfsContext, VdfsError, VdfsItem, VdfsNewType, VdfsNode, VdfsProvider,
     VdfsRequest, VdfsResponse, VdfsResult, VDFS_ACTION_DISABLE, VDFS_ACTION_ENABLE,
     VDFS_ACTION_PLUGINS, VDFS_EXT_FORM, VDFS_PLUGINS_FIELD, VDFS_PLUGIN_NAME_FIELD,
-    VDFS_STATUS_ACTIVE, VDFS_STATUS_DISABLED, VDFS_STATUS_FAILED,
+    VDFS_PLUGIN_PROVIDER_FIELD, VDFS_STATUS_ACTIVE, VDFS_STATUS_DISABLED, VDFS_STATUS_FAILED,
 };
 
-/// 界面分区（固定清单）：节点挂在本插件清单里，**归属与数据权威**归 `ui_prefs`（D-521）。
+/// 配置型插件的专属入口（固定清单）：节点挂在本插件清单里，**归属与数据权威**归
+/// `ui_prefs`（D-521）。
+///
+/// 「一项 = 一个插件」：ui_prefs 是配置型插件，它没有自己的资源域，界面上只以这一项
+/// 出现——点进去就是它的配置（外观 + 提示音）。因此列表里**不再重复列出 ui_prefs 的
+/// 普通条目**（见 [`list_items`] 的过滤），也**没有独立的「关于」节点**（那不是插件，
+/// 版本信息暂不进插件列表）。
 ///
 /// `id` 同时是前端 editor 的「扩展名」（`ext`），前端按 `ext → 渲染器` 的纯 UI 映射
-/// 回退到专属面板。`body` 是配置文档在**容器根**下的地址：有它的分区（外观）读写
-/// 转发到 `ui_prefs/PLUGIN.yml`；没有的（关于）正文恒空——那里没有用户数据，
-/// 版本来自编译期、引导状态是纯 UI 流程。
+/// 落到外观面板。`body` 是配置文档在**容器根**下的地址，读写转发到 `ui_prefs/PLUGIN.yml`。
 struct SectionSpec {
     id: &'static str,
     label: &'static str,
-    body: Option<&'static str>,
+    body: &'static str,
 }
 
-const UI_SECTIONS: [SectionSpec; 2] = [
-    SectionSpec {
-        id: "appearance",
-        label: "外观",
-        body: Some("ui_prefs/PLUGIN.yml"),
-    },
-    SectionSpec {
-        id: "about",
-        label: "关于",
-        body: None,
-    },
-];
+const UI_SECTIONS: [SectionSpec; 1] = [SectionSpec {
+    id: "appearance",
+    label: "界面",
+    body: "ui_prefs/PLUGIN.yml",
+}];
 
 /// 按 id 取分区声明
 fn section_of(id: &str) -> Option<&'static SectionSpec> {
     UI_SECTIONS.iter().find(|s| s.id == id)
 }
 
-/// 分区节点：归属 `ui_prefs`，外观可读写、关于只读。
+/// 配置型插件的入口节点：归属 `ui_prefs`，可读写（它就是那份配置）。
 ///
 /// ⚠️ **显式声明无状态**（[`VDFS_STATUS_NONE`]）：分区是静态的，没有「运行中 / 就绪」
 /// 可言。节点 `status` 缺省是 `active`，不清掉就会在列表里画一个绿点——那是个不存在
 /// 的信息（见 `docs/003-design/010-VDFS前端页面规范.md` §4.2）。
 fn section_node(s: &SectionSpec) -> VdfsNode {
-    let access = if s.body.is_some() {
-        VdfsAccess::READ_WRITE
-    } else {
-        VdfsAccess::READ
-    };
-    let mut n = VdfsNode::file(s.id, s.label, access);
+    let mut n = VdfsNode::file(s.id, s.label, VdfsAccess::READ_WRITE);
     n.kind = PLUGIN_ID_UI_PREFS.to_string();
     n.ext = Some(s.id.to_string());
     n.status = symbio_plugin_api::VDFS_STATUS_NONE.to_string();
@@ -444,22 +436,32 @@ impl PluginManagerPlugin {
             node_ext: Some(MARKET_EXT.to_string()),
             title: "添加插件".to_string(),
             description: Some("从插件市场选择要安装的可选插件".to_string()),
-            schema: Some(serde_json::json!({ "candidates": candidates })),
+            // `provider_field` 随 schema 下发：安装载荷的键名只有容器一处定义
+            // （`VDFS_PLUGIN_PROVIDER_FIELD`），前端据此构造载荷，杜绝两侧各写一遍漂移。
+            schema: Some(serde_json::json!({
+                "candidates": candidates,
+                "provider_field": VDFS_PLUGIN_PROVIDER_FIELD,
+            })),
             ..Default::default()
         }));
         n
     }
 
-    /// 清单 = 各插件的条目 + 界面分区。
+    /// 清单 = 各插件的条目 + 配置型插件的专属入口。
     ///
     /// 市场不作为节点出现在清单里——它是「添加插件」打开的一张页面，不是又一个
-    /// 插件条目（D-520）。条目按容器给的 `(order, name)`，界面分区按 [`UI_SECTIONS`]
-    /// 排在末尾；它们的节点归属 `ui_prefs`，但入口仍挂在本插件清单里（D-521）。
+    /// 插件条目（D-520）。配置型插件 `ui_prefs` 也不作为普通条目出现：它没有资源域，
+    /// 界面上只以 [`UI_SECTIONS`] 的那一项（「界面」）出现，点进去就是它的配置——
+    /// 「一项 = 一个插件」，不重复（D-521）。
     async fn list_items(&self, ctx: &VdfsContext) -> VdfsResult<Vec<VdfsItem>> {
         let entries = self.entries(ctx).await?;
         let configs = Self::config_entries(ctx).await;
         let mut out: Vec<VdfsItem> = Vec::with_capacity(entries.len() + UI_SECTIONS.len());
         for entry in &entries {
+            // ui_prefs 由下面的专属入口承载，不再列一条「界面偏好」造成重复。
+            if entry.name == PLUGIN_ID_UI_PREFS {
+                continue;
+            }
             let config = configs.iter().find(|c| c.node.name == entry.name).cloned();
             out.push(VdfsItem::new(entry_node(entry, config)));
         }
@@ -680,24 +682,15 @@ impl VdfsProvider for PluginManagerPlugin {
 
         let name = leaf(path)?;
 
-        // 界面分区：归属 ui_prefs。有正文的（外观）把读写转发到它的配置文档；
-        // 没有的（关于）正文恒空——那里没有用户数据（D-521）。
+        // 配置型插件的专属入口：归属 ui_prefs，读写转发到它的配置文档（D-521）。
         if let Some(s) = section_of(name) {
-            let no_body =
-                || VdfsError::Forbidden(format!("分区 {} 没有用户数据，VDFS 侧无正文", s.id));
             return match req {
                 VdfsRequest::Stat => Ok(VdfsResponse::Stat(section_node(s))),
-                VdfsRequest::Read => match s.body {
-                    Some(body) => self.forward(ctx, body, VdfsRequest::Read).await,
-                    None => Err(no_body()),
-                },
-                VdfsRequest::Write { content } => match s.body {
-                    Some(body) => {
-                        self.forward(ctx, body, VdfsRequest::Write { content })
-                            .await
-                    }
-                    None => Err(no_body()),
-                },
+                VdfsRequest::Read => self.forward(ctx, s.body, VdfsRequest::Read).await,
+                VdfsRequest::Write { content } => {
+                    self.forward(ctx, s.body, VdfsRequest::Write { content })
+                        .await
+                }
                 _ => Err(VdfsError::not_found(format!("未知路径：{path}"))),
             };
         }

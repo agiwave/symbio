@@ -371,10 +371,10 @@ size updated_at children binary hidden schema new_type attributes
 父插件代为存储。每个插件目录下都有一个 `PLUGIN.yml`，**谁写谁读**：
 
 ```
-<根>/session/PLUGIN.yml 会话设置（与 `<根>/session/<会话 id>` 并列）
-<根>/local/PLUGIN.yml 本地工具设置
-<根>/gateway/PLUGIN.yml 开放接口设置
-<根>/telegram/PLUGIN.yml Telegram 设置
+<根>/session/PLUGIN.yml 会话（与 `<根>/session/<会话 id>` 并列）
+<根>/local/PLUGIN.yml 本地工具
+<根>/gateway/PLUGIN.yml 开放接口
+<根>/telegram/PLUGIN.yml Telegram
 ```
 
 磁盘上就是 `<homedir>/<插件>/PLUGIN.yml`，与插件自己的数据**同处一个目录**
