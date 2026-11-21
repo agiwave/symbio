@@ -59,8 +59,17 @@ const ROOT = rootArg
   ? path.resolve(rootArg.slice('--root='.length))
   : path.resolve(path.dirname(fileURLToPath(import.meta.url)), '..', '..')
 
-/** 不该被系统层点名的插件 id（crate 名 = symbio-plugin-<id>）。 */
-export const IDENTITIES = ['subagent']
+/**
+ * 不该被系统层点名的插件 id（crate 名 = symbio-plugin-<id>）。
+ *
+ * - `subagent`：历史改名牵动 117 个文件的主角（见本文件头注释）。
+ * - 其余**可选插件**（`crates/symbio-deploy/src/lib.rs` 的 `ASSEMBLY_OPTIONAL_PLUGINS`）
+ *   按「清理完毕一个、纳入一个」分批加入：能力由插件各自的自述文档描述，名字不应
+ *   出现在系统文档或其它插件目录——否则「可选能力」被写成「系统必备」，删装一个
+ *   插件就要同步一堆与机制无关的措辞（与 subagent 改名同病，见 D-522 / PI-001）。
+ *   分批纳入保证每批提交时门禁都是绿的；不得在清理完成前提前加入。
+ */
+export const IDENTITIES = ['subagent', 'gateway']
 
 /** 不允许出现的插件身份模式（对 `id` 展开）。 */
 function patterns(id) {
@@ -123,13 +132,34 @@ function decisionBodyLines(lines) {
   return skip
 }
 
-/** 行内是否只有白名单位置（链接依赖 / use / README 索引链接 / 审计功能常量）。 */
+/**
+ * 行内是否只有白名单位置（链接依赖 / use / README 索引链接 / 审计功能常量 /
+ * 指向插件自述文档的链接）。
+ *
+ * D-525 要求「能力描述迁到插件自述文档，系统文档只留指向它的链接」——这类链接的
+ * 目标路径天然含插件身份（`<id>/README.md`），但它是「文档在哪」，与 README 索引
+ * 同一性质，不是「系统描述插件能力」。只豁免**Markdown 链接目标**里的路径，
+ * 链接文字与正文措辞照常判——否则一句「由 symbio-plugin-x 实现」也能塞进链接蒙混过关。
+ */
 function isExemptLine(rel, line) {
   if (rel === 'docs/003-design/README.md') return line.includes('README.md')
   if (/Cargo\.toml$/.test(rel)) return /^\s*symbio-plugin-[a-z_]+\s*=/.test(line.trim()) || line.trim().startsWith('#')
   if (/lib\.rs$/.test(rel) && rel === 'crates/symbio/src/lib.rs') return /^\s*use\s+symbio_plugin_/.test(line.trim())
   if (/agent-ownership-audit/.test(rel)) return /AGENT_REL|const\s|path\.join/.test(line)
   if (rel.endsWith('plugin-entry-audit.test.mjs')) return true // 夹具整份豁免（文件级已列，这里冗余保险）
+  if (rel.endsWith('.md')) {
+    // 把每个 Markdown 链接的「显示文字」抠掉，剩下的目标路径若含插件身份即豁免。
+    // 形如「[显示文字](<含 symbio-plugin-id 的路径>)」的行，只认括号里的地址，
+    // 不认裸文本里的插件名——注释里不写真链接，避免被 D-010 源码链接审计当成入链。
+    const withLinksStripped = line.replace(/\[[^\]]*\]\(([^)]*)\)/g, (_m, target) => {
+      return IDENTITIES.some((id) => target.includes(`symbio-plugin-${id}`)) ? '](<plugin-doc>)' : `](${target})`
+    })
+    if (withLinksStripped !== line) {
+      // 该行含指向插件文档的链接；确认去掉这些链接后正文不再点名插件身份。
+      const body = withLinksStripped.replace(/\]\(<plugin-doc>\)/g, '')
+      if (!IDENTITIES.some((id) => patterns(id).some((re) => { re.lastIndex = 0; return re.test(body) }))) return true
+    }
+  }
   return false
 }
 

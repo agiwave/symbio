@@ -106,6 +106,25 @@ test('⑦ 插件自身目录知道自己的名字 → exit 0', () => {
   }, { dirs: DIRS })
 })
 
+test('⑨ 指向插件自述文档的链接目标不误报，但链接文字点名照常红 → exit 1', () => {
+  withTempTree({
+    ...BASE,
+    'docs/003-design/099-夹具.md': [
+      '# 夹具',
+      // 链接目标含插件身份 ⇒ D-525 允许的「文档在哪」，不判。
+      // 用字符串拼接避免 D-010 把夹具当成真实源码链接（它只解析源码文本）。
+      '专题见[说明](../crates/symbio-plugin-gateway/README.md)。',
+      // 链接文字里点名插件身份 ⇒ 是在描述能力，照常判红（target 指向真实文件，避免 D-010 误报）。
+      '而 gateway 插件的能力另见[这里](../README.md)。',
+      '',
+    ].join('\n'),
+  }, (root) => {
+    const r = audit({ root })
+    assert.equal(r.status, 1, r.stdout)
+    assert.match(r.stdout, /PI-001 .*099-夹具\.md:3/)
+  }, { dirs: DIRS })
+})
+
 test('⑧ 扫描目录缺失 → exit 2（不许静默少跑）', () => {
   withTempTree({ 'docs/003-design/.keep': '' }, (root) => {
     const r = audit({ root })
@@ -116,6 +135,7 @@ test('⑧ 扫描目录缺失 → exit 2（不许静默少跑）', () => {
 
 test('判据元数据：身份集合与白名单结构成立', () => {
   assert.ok(IDENTITIES.includes('subagent'))
+  assert.ok(IDENTITIES.includes('gateway'), '完成清理的可选插件应纳入身份集合防回潮')
   for (const [rel, why] of Object.entries(FILE_EXEMPTIONS)) {
     assert.ok(typeof rel === 'string' && rel.length > 0)
     assert.ok(typeof why === 'string' && why.length > 0, `${rel} 必须有例外理由`)

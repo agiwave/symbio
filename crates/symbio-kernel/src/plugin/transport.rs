@@ -120,14 +120,14 @@ impl Clone for PluginSerializeData {
 /// 统一有效载荷
 ///
 /// **3 态穷尽枚举**，按「怎么交付给对端」分成两类——分类点唯一
-/// （`crates/symbio-plugin-gateway/src/server.rs::classify_payload`）：
+/// （入站网关插件的 `classify_payload`，实现锚点见其自述文档）：
 /// - **一次性**：`Data` / `Empty` —— 可直接转成线上载荷；
 /// - **长连接**：`Session` —— 返回通道，后续用帧通信。
 ///
 /// ## 为什么没有「原生对象」变体
 ///
 /// 历史上这里有 `Native(Arc<dyn Any + Send + Sync>)`，自述「不可序列化的原生
-/// 接口，仅限进程内透传」。它**从未有过构造点**：唯二的匹配点都在 `gateway`，
+/// 接口，仅限进程内透传」。它**从未有过构造点**：唯二的匹配点都在入站传输层，
 /// 且都是「拒绝跨传输」——因为 `Arc<dyn Any>` 恰恰是协议层表达不了的东西，
 /// 于是那两处只能写 `Err`。
 ///

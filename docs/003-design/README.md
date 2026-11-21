@@ -86,7 +86,7 @@ board.columns: [impl]
 | [第三方插件体系](007-第三方插件体系.md "DE-007-第三方插件体系") | 外部插件怎么打包、装载与接入 |
 | [VDFS 虚拟动态文件系统规范](009-VDFS规范.md "DE-009-VDFS规范") | 纯接口、统一文件系统与容器拓扑 |
 | [会话输入与地址](012-会话输入与地址.md "DE-012-会话输入与地址") | 会话输入落在哪：`<会话地址>/inbox` + 三个动作 |
-| [HTTP 开放接口](013-HTTP开放接口.md "DE-013-HTTP开放接口") | HTTP/WS 网关插件的端点、配置与调用链 |
+| [HTTP 开放接口](013-HTTP开放接口.md "DE-013-HTTP开放接口") | 入站开放接口的系统级机制定位（实现细节归插件自述文档） |
 
 **义务环（现行入口，按阅读顺序）**：
 
@@ -182,7 +182,7 @@ board.columns: [impl]
 > ⚠️ **本区块由 `node scripts/audits/registry-audit.mjs --write` 维护（标记之间），请勿手改标记区内内容。**
 > 状态的唯一登记处是各条目文件本身，本区块是投影。字段规范见 [SP-001](../005-spec/001.md)，机制见 [DE-017 · 登记与汇总机制](017-登记与汇总机制.md "DE-017-登记与汇总机制")。
 
-**计数**：active 97 · draft 0 · retired 1（共 98）
+**计数**：active 98 · draft 0 · retired 1（共 99）
 
 ## 现行设计（active）
 
@@ -249,6 +249,7 @@ board.columns: [impl]
 | [`DE-111-INTERACTION`](../../tauri/docs/111-INTERACTION.md) | 前端交互面（用户视角） | 与代码一致 |
 | [`DE-112-architecture`](../../crates/symbio-cli/docs/112-architecture.md) | 架构 | 与代码一致 |
 | [`DE-113-heartbeat-mechanism`](../../crates/symbio-plugin-heartbeat/src/docs/113-heartbeat-mechanism.md) | 会话心跳机制（heartbeat） | 与代码一致 |
+| [`DE-114-HTTP入站网关`](../../crates/symbio-plugin-gateway/src/docs/114-HTTP入站网关.md) | HTTP 入站网关（插件专题设计） | 与代码一致 |
 | [`crates/symbio-plugin-classify/README`](../../crates/symbio-plugin-classify/README.md) | Classify 插件（对话面：判决） | 与代码一致 |
 | [`crates/symbio-plugin-compact/README`](../../crates/symbio-plugin-compact/README.md) | 上下文压缩能力包（compact） | 与代码一致 |
 | [`crates/symbio-plugin-compose/README`](../../crates/symbio-plugin-compose/README.md) | Compose 插件（对话面：措辞） | 与代码一致 |

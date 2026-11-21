@@ -13,7 +13,7 @@ impl: done
 
 ## 路由
 
-端点清单见 `docs/004-ref/003-ROUTES.md` §Gateway 插件（**权威**，含逐条路径、鉴权与只读白名单）。
+端点清单见 `docs/004-ref/003-ROUTES.md` §入站网关端点（**权威**，含逐条路径、鉴权与只读白名单）。
 入站面按交付形态分四类——健康检查、一次性调用（对齐 `route_v2`）、WS 长连接（首帧即请求体，
 此后双向 `PluginFrame`）、SSE 只读实时面（`event_bus/subscribe` 的包装）；**路径不在此复述**，
 避免第二份会漂移的端点表。本插件自身接口**恒走进程内**（in-process），前端不经 HTTP 访问
@@ -35,10 +35,10 @@ impl: done
 - **入站边界**：令牌只走 `Authorization`（浏览器 WS 走子协议 `bearer.<token>`，握手只回选
  `symbio.v1`），不接受查询串令牌；`inbound_max_connections` 经 `Semaphore` 在 `accept`
  之前取配额（背压交给内核队列）；`POST /api/v1/invoke` 的 `Idempotency-Key` 在分派前登记，
- 重复即 409、失败释放。语义与理由见 `docs/003-design/013-HTTP开放接口.md` §5.1.1 / §5.2 / §6。
+ 重复即 409、失败释放。语义与理由见本插件专题设计 `src/docs/114-HTTP入站网关.md` §5.1.1 / §5.2 / §6。
 - **鉴权与错误**：错误码遵循 `docs/004-ref/002-ERROR_CODES.md`。
 
 ## 关联
 
-- 设计文档：`docs/003-design/013-HTTP开放接口.md`
+- 专题设计（实现锚点与完整语义）：`src/docs/114-HTTP入站网关.md`
 - 数据流转：`docs/003-design/003-数据流与调用链.md`
