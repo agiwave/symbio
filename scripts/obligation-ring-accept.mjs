@@ -175,8 +175,6 @@ const DECLARED_PORTS = [
   { port: 'conation', source: 'crates/symbio-plugin-conation/src/port.rs:43（PortProvider::ports → PROMOTE_PORT，debt.rs:32）' },
   // 记忆端口
   { port: 'memory', source: 'crates/symbio-plugin-memory/src/port.rs:29（PortProvider::ports → MEMORY_PORT）' },
-  // 探针端口的回声往返（自检用）
-  { port: 'probe_echo', source: 'crates/symbio-plugin-probe/src/declarations.rs:19（PortDecl{port: PROBE_PORT}，probe/src/port.rs:10）' },
   // 演示探针（demo 插件）
   { port: 'demo', source: 'crates/symbio-demo-probe/src/port.rs:9（PortProvider::ports → DEMO_PORT）' },
   // 电报外发端口

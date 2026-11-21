@@ -90,10 +90,6 @@ pub const PLUGIN_ID_PERSONA: &str = "persona";
 // dead-code-allow R-001: 插件 id 是部署身份，未被引用不等于可删（同文件头 R-003）
 pub const PLUGIN_ID_MANAGER: &str = "plugin_manager";
 
-/// 验收探针：一个世界端口 + 一笔债 + 一个执行体（债按会话前缀惰性）
-// dead-code-allow R-001: 插件 id 是部署身份，未被引用不等于可删（同文件头 R-003）
-pub const PLUGIN_ID_PROBE: &str = "probe";
-
 /// 声誉台账：把承诺三格折成各主体的守约与违约账（淘汰裁决与出口共用的那一个口径）
 // dead-code-allow R-001: 插件 id 是部署身份，未被引用不等于可删（同文件头 R-003）
 pub const PLUGIN_ID_REPUTATION: &str = "reputation";
