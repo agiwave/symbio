@@ -18,6 +18,7 @@ import VdfsSessionDetail from '@/components/vdfs/VdfsSessionDetail.vue'
 import VdfsMessageDetail from '@/components/vdfs/VdfsMessageDetail.vue'
 import Appearance from '@/components/settings/Appearance.vue'
 import About from '@/components/settings/About.vue'
+import MarketPanel from '@/components/vdfs/MarketPanel.vue'
 import { registerVdfsRenderer } from './vdfsTypes'
 
 // 机制级呈现形态（与场景无关）
@@ -31,6 +32,8 @@ registerVdfsRenderer('text', markRaw(VdfsTextDetail))
 // 前端状态自持的专属面板（节点以语义类型名为 ext 声明，前端在此绑定组件）
 registerVdfsRenderer('appearance', markRaw(Appearance))
 registerVdfsRenderer('about', markRaw(About))
+// 插件市场：候选由后端现场计算，安装写回同一节点（D-520）
+registerVdfsRenderer('market', markRaw(MarketPanel))
 // 目录与未命中：机制级只读兜底（资源管理器永不空白的原因）
 registerVdfsRenderer('dir', markRaw(VdfsReadonlyDetail))
 registerVdfsRenderer('fallback', markRaw(VdfsReadonlyDetail))

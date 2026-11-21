@@ -55,9 +55,9 @@ describe('registerVdfsIcon / iconForNode（登记与查找）', () => {
 
 describe('iconForNode 的项级分发（kind:config_type）', () => {
   it('插件管理清单的项级图标齐备（自有分区 + 各插件配置目录）', () => {
-    // 清单 = 自有分区（appearance / about）+ 各插件的条目；
+    // 清单 = 市场（market）+ 自有分区（appearance / about）+ 各插件的条目；
     // 条目的项级标识就是**插件目录名**（config_type 携带）。
-    for (const ext of ['appearance', 'about', 'session', 'local', 'web', 'gateway', 'telegram']) {
+    for (const ext of ['market', 'appearance', 'about', 'session', 'local', 'web', 'gateway', 'telegram']) {
       expect(
         iconForNode({ kind: 'plugin_manager', name: ext, config_type: ext }),
         `${ext} 项级图标缺失`,

@@ -75,7 +75,7 @@ export const BASELINE = {
   //   plugin 收集期 / VDFS / 节点 / 变更投递里钉旧地址与旧闸门的用例）；同一条链路改由
   //   memory 侧 `session.test.rs` / `plugin.test.rs` / `vdfs.test.rs` 按新落位（`SESSION.md`，
   //   `ctx[SESSION_DIR]`）钉住，净 -7。覆盖没有丢，是换了承担者。非侵蚀。
-  ciRustTestsTotal: 2280,
+  ciRustTestsTotal: 2286,
   cliRustTests: 21,
   tauriRustTests: 4,
   // doc-link-allow D-010: 下一行是退役文件的历史叙述（已把这两个文件删掉），不是入链
@@ -88,8 +88,8 @@ export const BASELINE = {
   // baseline-allow vitestTests: 1003 → 1024（+21，折叠骨架按需重取）——新增的是判据用例：
   // `skeletonLazy.spec.ts` 钉本地释放与按需重取的折叠状态，`MessageNode` / 会话 store 补
   // 重取路径的渲染与竞态断言。不是补回覆盖。
-  vitestFiles: 82,
-  vitestTests: 1187,
+  vitestFiles: 83,
+  vitestTests: 1191,
   verifyPrograms: 17,
   verifyNegatives: 4,
   // baseline-allow e2eCases: 读通道禁令（e2e 不得读任何内部存储文件——`messages.json` / `v2-events.wal` / `session.json` 一并禁）下删 3 个用例：t33 熔断（存储层判据，已由 `wal.test.rs` / `active.test.rs` 覆盖）、t40（断言全为 WAL 白盒入格，可见效果已由 t29 记忆召回 / t35 技能编译覆盖）、t43（messages-json-is-rebuildable，判据「真源已换、缓存可弃」已下沉 `store/tests.rs`，且 messages.json 已停写）。45 → 42，非侵蚀：三条的判据都下沉到了 Rust 侧，不是丢掉覆盖。

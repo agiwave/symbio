@@ -9,8 +9,8 @@ impl: done
 
 # Plugin_manager 插件（插件管理）
 
-`<根>/plugin_manager` 挂载点的实现者：本智能体**插件集合**的门面——列出全部插件、
-启用 / 停用 / 添加 / 卸载，以及打开各插件的配置。
+`<根>/plugin_manager` 挂载点的实现者：本智能体**插件集合**的门面——列出已安装插件、
+启用 / 停用 / 卸载，从**插件市场**添加尚未安装的可选插件，以及打开各插件的配置。
 
 ## 定位：容器是权威，本插件是视图
 
@@ -31,9 +31,9 @@ impl: done
 **无**（权威登记见 [路由参考](../../docs/004-ref/003-ROUTES.md "RE-003-ROUTES") §Plugin_manager 插件）。
 本插件是无状态 provider，`route` 恒 `NotFound`。
 
-## 清单 = 各插件的条目 + 自有分区
+## 清单 = 各插件的条目 + 插件市场 + 自有分区
 
-顺序是插件条目在前、自有分区垫后（前者才是用户在管理页里要动手的东西）：
+顺序是插件条目在前、插件市场居中、自有分区垫后（前两者才是用户在管理页里要动手的东西）：
 
 - 条目来自容器的注册表（`Action(plugins)`，见 `composite/vdfs.rs`），**含没有 VDFS 的
  与已停用的**——后者必须列出来，否则用户看不到自己刚停用的那个，也就永远点不回
@@ -67,11 +67,32 @@ impl: done
 动作**恒在定义里**（只靠条件显隐），不按当下状态增删：定义是节点的一部分，而状态一变
 调用方只会**重读正文**、不会重新取节点——按状态增删会让按钮停在旧状态上。
 
-## 添加插件
+## 插件市场（`market`）
 
-根节点的「可新建类型」原样转发容器的声明（`CompositeVdfs::install_new_type`）：
-候选 = **已注册但当前未挂载**的工厂，落成动作就是容器根上的 `Write`。表单只有一份
-定义——在真正执行安装的那一层。
+「装一个还没装的插件」的入口不再是根节点上那张由容器声明的通用新建表单，而是清单中一个
+专门的 `market` 节点（`ext = market`，前端渲染 `MarketPanel`）。它夹在插件条目与自有分区
+之间——「管理已装的」和「添加未装的」是用户在管理页里要动手的两件事，挨在一起。
+
+它不是插件条目，也没有自己的配置：候选在 `read` 时现场算，安装与条目复用同一个 `write`
+动词，前端因此不必知道容器根上的安装契约（`VDFS_PLUGIN_PROVIDER_FIELD` / `create`）。
+
+候选三判据（缺一不可，见 `market_candidates` 与 D-520）：
+
+1. **可选**——`PLUGIN.yml` 声明 `plugin_optional: true`，即不在 `ASSEMBLY_CORE_PLUGINS` 内
+   （核心插件默认加载且不可删除，不进市场）；
+2. **未安装**——当前容器注册表里没有它（装过的回到列表，由列表负责卸载）；
+3. **本构建链接了工厂**——`creator_has(id)` 为真。只按清单渲染会得到一个「点了没反应」
+   的按钮：工厂没链进本二进制，容器没有它的 creator，安装只会得到 NotFound。
+
+`read` 返回 JSON 文本（`application/json`）：
+`{ "candidates": [{ name, provider, source, label }] }`。`source` 目前恒为 `builtin`——
+它是**未来外部插件的呈现位**：D-407 仍暂缓进程外插件协议，本期市场只做「编译期已链接
+插件的运行期装卸」，先把入口和契约立住。
+
+`write` 只补一层部署语义的校验：`provider` 必须属于 `ASSEMBLY_OPTIONAL_PLUGINS`，否则核心
+插件会得到「已在装配中」这种答非所问的提示。「本构建是否链接」不在这里重复判——容器
+`install` 内部的 `provider_gap` 才是那个判据的 owner（候选列表已提前把装不了的挡在展示之前）。
+校验通过后转成容器根上的 `Write { create: true }`，由容器执行真正的挂载。
 
 ## 装配态一变就广播
 
@@ -94,6 +115,8 @@ impl: done
 
 ## 关联
 
+- 核心 / 可选插件清单：`crates/symbio-deploy/src/lib.rs` 的 `ASSEMBLY_CORE_PLUGINS` /
+  `ASSEMBLY_OPTIONAL_PLUGINS`（由 `scripts/facts/assembly.mjs` 从 `PLUGIN.yml` 投影生成，D-520）
 - 装配判据与运行期增删：`crates/symbio-plugin-composite/src/registry.rs`
 - 注册表动词（根上的 `Action(plugins|enable|disable)` / `Write` / `Delete`）：
  `crates/symbio-plugin-composite/src/vdfs.rs`

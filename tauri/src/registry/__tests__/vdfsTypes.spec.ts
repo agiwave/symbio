@@ -52,9 +52,10 @@ describe('resolveVdfsRenderer', () => {
     expect(resolveVdfsRenderer(node({ name: 'm1' }))).toBe('fallback')
   })
 
-  it('前端状态自持的专属面板按语义 ext 分发（设置分区）', () => {
+  it('前端状态自持的专属面板按语义 ext 分发（设置分区与插件市场）', () => {
     expect(resolveVdfsRenderer(node({ name: 'appearance', ext: 'appearance' }))).toBe('appearance')
     expect(resolveVdfsRenderer(node({ name: 'about', ext: 'about' }))).toBe('about')
+    expect(resolveVdfsRenderer(node({ name: 'market', ext: 'market' }))).toBe('market')
   })
 
   it('未知扩展名 / 无扩展名 → fallback（页面永不空白）', () => {
@@ -79,8 +80,8 @@ describe('registerVdfsRenderer / getVdfsRenderer', () => {
  * 的错误只有把每个渲染器逐条断言才拦得住——泛泛地测两个 `true` 是测不出来的。
  */
 describe('isTextualRenderer / rendererReadsNodeText', () => {
-  it('isTextualRenderer：正文即文本缓冲的四种（追加可安全拼接）', () => {
-    for (const r of ['text', 'markdown', 'json', 'message'] as const) {
+  it('isTextualRenderer：正文即文本缓冲（市场正文是 JSON 文本，parse 归渲染器）', () => {
+    for (const r of ['text', 'markdown', 'json', 'message', 'market'] as const) {
       expect(isTextualRenderer(r), r).toBe(true)
     }
   })
@@ -92,7 +93,7 @@ describe('isTextualRenderer / rendererReadsNodeText', () => {
   })
 
   it('rendererReadsNodeText：文本缓冲 ∪ form（表单字段值也取自正文）', () => {
-    for (const r of ['text', 'markdown', 'json', 'message', 'form'] as const) {
+    for (const r of ['text', 'markdown', 'json', 'message', 'market', 'form'] as const) {
       expect(rendererReadsNodeText(r), r).toBe(true)
     }
   })
@@ -114,6 +115,7 @@ describe('isTextualRenderer / rendererReadsNodeText', () => {
       'text',
       'appearance',
       'about',
+      'market',
       'fallback',
     ] as const
     const onlyReads = all.filter((r) => rendererReadsNodeText(r) && !isTextualRenderer(r))

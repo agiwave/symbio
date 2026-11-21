@@ -47,6 +47,7 @@ use serde_json::Value;
 use std::sync::Arc;
 use symbio_plugin_api::ASSEMBLY_UNDISABLABLE_PLUGINS;
 use symbio_plugin_api::PLUGIN_ID_MANAGER;
+use symbio_plugin_api::{creator_has, ASSEMBLY_OPTIONAL_PLUGINS};
 use symbio_plugin_api::{
     vdfs_host_ctx, vdfs_notify_change, vdfs_unwatch_changes, vdfs_watch_changes, DynVdfsProvider,
 };
@@ -62,8 +63,8 @@ use symbio_plugin_api::{
 use symbio_plugin_api::{
     VdfsAccess, VdfsContent, VdfsContext, VdfsError, VdfsItem, VdfsNode, VdfsProvider, VdfsRequest,
     VdfsResponse, VdfsResult, VDFS_ACTION_DISABLE, VDFS_ACTION_ENABLE, VDFS_ACTION_PLUGINS,
-    VDFS_EXT_FORM, VDFS_PLUGINS_FIELD, VDFS_PLUGIN_NAME_FIELD, VDFS_STATUS_ACTIVE,
-    VDFS_STATUS_DISABLED, VDFS_STATUS_FAILED,
+    VDFS_EXT_FORM, VDFS_PLUGINS_FIELD, VDFS_PLUGIN_NAME_FIELD, VDFS_PLUGIN_PROVIDER_FIELD,
+    VDFS_STATUS_ACTIVE, VDFS_STATUS_DISABLED, VDFS_STATUS_FAILED,
 };
 
 /// 自有分区（固定清单）：数据由**前端状态**自持，VDFS 侧无正文。
@@ -105,6 +106,41 @@ fn section_node(s: &SectionSpec) -> VdfsNode {
     n.ext = Some(s.id.to_string());
     n.status = symbio_plugin_api::VDFS_STATUS_NONE.to_string();
     n
+}
+
+/// 插件市场分区：`ext` 是前端渲染器的选择键（与 `appearance` / `about` 同形）。
+///
+/// 它不是插件条目，而是「尚未安装的插件在哪找」这一件事的入口。候选由 `read` 现场计算，
+/// 安装走同一个 `write` 动词——前端因此不必知道容器根上的安装契约。
+const MARKET_ID: &str = "market";
+
+fn market_node() -> VdfsNode {
+    let mut n = VdfsNode::file(MARKET_ID, "插件市场", VdfsAccess::READ_WRITE);
+    n.kind = PLUGIN_ID_MANAGER.to_string();
+    n.ext = Some(MARKET_ID.to_string());
+    n.status = symbio_plugin_api::VDFS_STATUS_NONE.to_string();
+    n.description = Some("添加尚未安装的可选插件；已添加的插件在列表中可卸载".to_string());
+    n
+}
+
+/// 候选 = 声明为可选 ∧ 当前未安装 ∧ 本构建确实链接了该工厂（D-520）。
+///
+/// 第三项不可省：只按 `ASSEMBLY_OPTIONAL_PLUGINS` 渲染会给一个「点了没反应」的按钮——
+/// 那个工厂若没被链接进本二进制，容器没有它的 creator，安装只会得到 NotFound。
+fn market_candidates<F: Fn(&str) -> bool>(installed: &[String], linked: F) -> Vec<Value> {
+    ASSEMBLY_OPTIONAL_PLUGINS
+        .iter()
+        .filter(|id| !installed.contains(&id.to_string()))
+        .filter(|id| linked(id))
+        .map(|id| {
+            serde_json::json!({
+                "name": id,
+                "provider": id,
+                "source": "builtin",
+                "label": id,
+            })
+        })
+        .collect()
 }
 
 /// 条件：`key == value`
@@ -402,19 +438,20 @@ impl PluginManagerPlugin {
         n
     }
 
-    /// 清单 = **各插件的条目** + 自有分区。
+    /// 清单 = **各插件的条目** + 插件市场 + 自有分区。
     ///
-    /// 顺序上插件在前、自有分区在后：前者是用户在管理页里真正要动手的东西，后者是
-    /// 应用自身的展示项，排尾不挡路。两段各自保序（插件段按容器给的 `(order, name)`，
-    /// 分区段按 [`OWN_SECTIONS`]）。
+    /// 顺序上插件在前、市场居中、自有分区在后：前两段是用户在管理页里真正要动手的
+    /// 东西，最后一段是应用自身的展示项，排尾不挡路。各段各自保序（插件段按容器给的
+    /// `(order, name)`，分区段按 [`OWN_SECTIONS`]）。
     async fn list_items(&self, ctx: &VdfsContext) -> VdfsResult<Vec<VdfsItem>> {
         let entries = self.entries(ctx).await?;
         let configs = Self::config_entries(ctx).await;
-        let mut out: Vec<VdfsItem> = Vec::with_capacity(entries.len() + OWN_SECTIONS.len());
+        let mut out: Vec<VdfsItem> = Vec::with_capacity(entries.len() + OWN_SECTIONS.len() + 1);
         for entry in &entries {
             let config = configs.iter().find(|c| c.node.name == entry.name).cloned();
             out.push(VdfsItem::new(entry_node(entry, config)));
         }
+        out.push(VdfsItem::new(market_node()));
         out.extend(OWN_SECTIONS.iter().map(|s| VdfsItem::new(section_node(s))));
         Ok(out)
     }
@@ -552,6 +589,52 @@ impl PluginManagerPlugin {
         Ok(VdfsResponse::Write(w))
     }
 
+    /// 读市场：候选现场计算，不缓存。安装位一变，`announce` 会触发重拉。
+    async fn read_market(&self, ctx: &VdfsContext) -> VdfsResult<VdfsResponse> {
+        let entries = self.entries(ctx).await?;
+        let installed: Vec<String> = entries.iter().map(|e| e.name.clone()).collect();
+        let model = serde_json::json!({ "candidates": market_candidates(&installed, creator_has) });
+        let text = serde_json::to_string_pretty(&model)
+            .map_err(|e| VdfsError::internal(format!("插件市场序列化失败：{e}")))?;
+        Ok(VdfsResponse::Read(
+            VdfsContent::text(text).with_mime("application/json"),
+        ))
+    }
+
+    /// 从市场安装：校验工厂确实是可选插件，再复用根上的安装动词。
+    ///
+    /// 「本构建是否链接了该工厂」不在这里重复判：容器 `install` 内部的 `provider_gap`
+    /// 才是那个判据的 owner，候选列表已用 `creator_has` 把装不了的插件挡在展示之前。
+    /// 这里只补容器不知道的那层部署语义——「可选」，否则核心插件会得到「已在装配中」
+    /// 这种答非所问的提示。
+    async fn install_from_market(
+        &self,
+        ctx: &VdfsContext,
+        content: VdfsContent,
+    ) -> VdfsResult<VdfsResponse> {
+        let text = content
+            .as_text()
+            .ok_or_else(|| VdfsError::invalid("安装需要 JSON 文本内容"))?;
+        let value: Value = serde_json::from_str(text)
+            .map_err(|e| VdfsError::invalid(format!("安装参数不是合法 JSON：{e}")))?;
+        let provider = value
+            .get(VDFS_PLUGIN_PROVIDER_FIELD)
+            .and_then(Value::as_str)
+            .unwrap_or_default()
+            .trim()
+            .to_string();
+        if !ASSEMBLY_OPTIONAL_PLUGINS.contains(&provider.as_str()) {
+            return Err(VdfsError::invalid(format!(
+                "「{provider}」不是可选插件，不能从市场安装"
+            )));
+        }
+        let install_content = VdfsContent::text(
+            serde_json::json!({ VDFS_PLUGIN_PROVIDER_FIELD: provider }).to_string(),
+        )
+        .with_create();
+        self.install(ctx, install_content).await
+    }
+
     /// 广播一次变更：本目录下 `<name>` 这一条（新增 / 移除 / 状态变了）不再是旧样子。
     ///
     /// 这是**既有机制**（`vdfs_notify_change` → 前端 `useVdfs` 的防抖重拉 + 重读当前项），
@@ -631,6 +714,16 @@ impl VdfsProvider for PluginManagerPlugin {
         }
 
         let name = leaf(path)?;
+
+        // 插件市场：不是插件条目，候选现场算、安装复用根上的写动词（D-520）
+        if name == MARKET_ID {
+            return match req {
+                VdfsRequest::Stat => Ok(VdfsResponse::Stat(market_node())),
+                VdfsRequest::Read => self.read_market(ctx).await,
+                VdfsRequest::Write { content } => self.install_from_market(ctx, content).await,
+                _ => Err(VdfsError::not_found(format!("未知路径：{path}"))),
+            };
+        }
 
         // 自有分区：不是插件，数据在前端 store（见 [`OWN_SECTIONS`]）
         if let Some(s) = section_of(name) {

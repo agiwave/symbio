@@ -28,6 +28,8 @@ struct FakeRegistry {
     deletes: Mutex<Vec<String>>,
     /// 收到的安装写：`(path, 文本)`
     writes: Mutex<Vec<(String, String)>>,
+    /// 每次安装写的 `create` 位（容器要求为 true）
+    writes_create: Mutex<Vec<bool>>,
     /// `Read(<路径>)` 的正文（按路径给；缺省 = `NotFound`）
     configs: HashMap<String, String>,
     /// 安装时回包的名字（= 容器生成的插件名）
@@ -41,6 +43,7 @@ impl FakeRegistry {
             acts: Mutex::new(Vec::new()),
             deletes: Mutex::new(Vec::new()),
             writes: Mutex::new(Vec::new()),
+            writes_create: Mutex::new(Vec::new()),
             configs: HashMap::new(),
             install_name: "telegram".to_string(),
         }
@@ -89,6 +92,7 @@ impl VdfsProvider for FakeRegistry {
                     path.to_string(),
                     content.as_text().unwrap_or_default().to_string(),
                 ));
+                self.writes_create.lock().unwrap().push(content.create);
                 Ok(VdfsResponse::Write(VdfsWriteResponse {
                     name: Some(self.install_name.clone()),
                     created: true,
@@ -226,7 +230,7 @@ async fn root_new_type_is_forwarded_from_the_container() {
 
 // ==================== 清单 ====================
 
-/// 清单 = 各插件条目在前 + 自有分区垫后
+/// 清单 = 各插件条目在前 + 插件市场居中 + 自有分区垫后
 #[tokio::test]
 async fn list_puts_plugin_entries_before_own_sections() {
     let fake = Arc::new(FakeRegistry::new(vec![
@@ -237,16 +241,21 @@ async fn list_puts_plugin_entries_before_own_sections() {
 
     let items = list(&p, &vctx()).await;
     let names: Vec<&str> = items.iter().map(|it| it.node.name.as_str()).collect();
-    assert_eq!(names, vec!["alpha", "beta", "appearance", "about"]);
+    assert_eq!(
+        names,
+        vec!["alpha", "beta", "market", "appearance", "about"]
+    );
 
     // 条目是定义驱动的表单文档，不是目录
     assert_eq!(items[0].node.kind, PLUGIN_ID_MANAGER);
     assert_eq!(items[0].node.ext.as_deref(), Some(VDFS_EXT_FORM));
     assert!(!items[0].node.is_dir(), "条目是文档，不是目录");
 
+    // 市场：`ext` 是它自己的渲染器键
+    assert_eq!(items[2].node.ext.as_deref(), Some("market"));
     // 自有分区：`ext` 即分区 id（前端按 `ext → 渲染器` 回退到专属面板）
-    assert_eq!(items[2].node.ext.as_deref(), Some("appearance"));
-    assert_eq!(items[3].node.ext.as_deref(), Some("about"));
+    assert_eq!(items[3].node.ext.as_deref(), Some("appearance"));
+    assert_eq!(items[4].node.ext.as_deref(), Some("about"));
 }
 
 /// 装配态即节点状态：启用 / 停用 / 装配失败各画各的
@@ -629,4 +638,107 @@ async fn ctx_with_configs() -> VdfsContext {
     let host: Arc<dyn PluginInvokeRequest> = Arc::new(PluginSimpleRequest::new(None, None));
     host.set(CONFIGURABLE_VISITOR, visitor);
     vdfs_context(&host)
+}
+
+// ==================== 插件市场（D-520） ====================
+
+/// 市场节点在条目之后、自有分区之前：它是「去哪加插件」的入口，不是又一个插件
+#[tokio::test]
+async fn market_node_sits_between_entries_and_own_sections() {
+    let p = plugin_with(Arc::new(FakeRegistry::new(vec![entry(
+        "alpha",
+        "alpha_factory",
+        true,
+        true,
+    )])));
+    let items = list(&p, &vctx()).await;
+    let names: Vec<&str> = items.iter().map(|i| i.node.name.as_str()).collect();
+    assert_eq!(names, vec!["alpha", "market", "appearance", "about"]);
+
+    let market = stat(&p, &vctx(), "market").await;
+    assert_eq!(market.ext.as_deref(), Some("market"));
+    assert_eq!(market.status, VDFS_STATUS_NONE);
+    assert!(market.access.write, "市场要能写（写 = 安装）");
+}
+
+/// 候选判据一、二：声明可选、当前未安装（链接判据单列一测，避免受单 crate 构建影响）
+#[test]
+fn market_candidates_are_optional_and_uninstalled() {
+    let installed = vec!["setting".to_string()];
+    let candidates = market_candidates(&installed, |_| true);
+
+    assert!(
+        !candidates.iter().any(|c| c["name"] == "setting"),
+        "已安装的可选插件不在候选里"
+    );
+    assert!(
+        candidates
+            .iter()
+            .any(|c| c["name"] == "conation" && c["source"] == "builtin"),
+        "未安装的可选插件应在候选里"
+    );
+    assert!(
+        !candidates.iter().any(|c| c["name"] == "session"),
+        "核心插件不进市场"
+    );
+}
+
+/// 候选判据三：本构建没链接的工厂不渲染（否则是一个点了没反应的按钮）
+#[test]
+fn market_candidates_exclude_unlinked_factories() {
+    let candidates = market_candidates(&[], |id| id != "conation");
+    assert!(!candidates.iter().any(|c| c["name"] == "conation"));
+    assert!(candidates.iter().any(|c| c["name"] == "slo"));
+}
+
+/// 市场正文是可被前端直接消费的 JSON
+#[tokio::test]
+async fn market_read_returns_candidates_json() {
+    let p = plugin_with(Arc::new(FakeRegistry::new(vec![])));
+    let resp = p
+        .dispatch(&vctx(), "market", VdfsRequest::Read)
+        .await
+        .unwrap()
+        .into_read()
+        .unwrap();
+    let model: Value = serde_json::from_str(resp.as_text().unwrap_or_default()).unwrap();
+    assert!(model["candidates"].is_array());
+}
+
+/// 市场只装可选插件：核心插件的名字塞进来要被挡在转发之前
+#[tokio::test]
+async fn market_rejects_non_optional_provider() {
+    let p = plugin_with(Arc::new(FakeRegistry::new(vec![])));
+    let content =
+        VdfsContent::text(serde_json::json!({ VDFS_PLUGIN_PROVIDER_FIELD: "session" }).to_string());
+    let err = p
+        .dispatch(&vctx(), "market", VdfsRequest::Write { content })
+        .await
+        .unwrap_err();
+    assert!(err.to_string().contains("不是可选插件"));
+}
+
+/// 市场安装复用容器根上的写动词，并带上 `create` 意图
+#[tokio::test]
+async fn market_install_forwards_create_intent() {
+    let fake = Arc::new(FakeRegistry::new(vec![]));
+    let p = plugin_with(fake.clone());
+    let content =
+        VdfsContent::text(serde_json::json!({ VDFS_PLUGIN_PROVIDER_FIELD: "slo" }).to_string());
+
+    p.dispatch(&vctx(), "market", VdfsRequest::Write { content })
+        .await
+        .unwrap();
+
+    let writes = fake.writes.lock().unwrap();
+    assert_eq!(writes.len(), 1, "只转发一次安装");
+    let (path, text) = &writes[0];
+    assert_eq!(path, "", "安装写在容器根上");
+    let sent: Value = serde_json::from_str(text).unwrap();
+    assert_eq!(sent[VDFS_PLUGIN_PROVIDER_FIELD], "slo");
+    assert_eq!(
+        fake.writes_create.lock().unwrap().as_slice(),
+        &[true],
+        "容器只接受带 create 意图的根写"
+    );
 }

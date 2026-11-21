@@ -44,6 +44,7 @@ export type VdfsRenderer =
   | 'text'
   | 'appearance'
   | 'about'
+  | 'market'
   | 'fallback'
 
 /**
@@ -63,6 +64,8 @@ const TEXTUAL_RENDERERS: ReadonlySet<VdfsRenderer> = new Set([
   'markdown',
   'json',
   'message',
+  // 市场正文是候选 JSON：机制只负责取回文本，parse 与呈现归渲染器自己（D-520）
+  'market',
 ])
 
 /** 该渲染器把节点正文当**文本缓冲**看待（原样呈现，不 parse） */
@@ -121,6 +124,7 @@ const EXT_RENDERERS: Record<string, VdfsRenderer> = {
   // 前端状态自持的专属面板（ext 即语义类型名，由 provider 声明）
   appearance: 'appearance',
   about: 'about',
+  market: 'market',
   txt: 'text',
   log: 'text',
   yaml: 'text',
