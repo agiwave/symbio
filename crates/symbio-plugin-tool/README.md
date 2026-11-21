@@ -37,6 +37,17 @@ impl: done
 那一笔由租约收束（重试或判死），收束落进同一投影后，`round_done` 下一圈就把它算进去。
 幂等由事实键承担：同一 `request_id` 只长出一条完成事实。
 
+## 验收落点（熔断执行体）
+
+机制断言与系统级判据见 `docs/003-design/039-外部执行与熔断.md`；本插件侧的测试落点归这里：
+
+- 未授权外部写入 ⇒ 拒绝且零事件：`src/port.test.rs::unauthorized_calls_are_refused_with_zero_events`；
+- 预算耗尽 ⇒ 暴力熔断并落 `control × opened`（带 `reason`，不静默）：`src/port.test.rs::exhausted_budget_breaks_and_lands_a_control_event`；
+- 预算放宽 ⇒ `Allow` 且不产事件（与上一条对照）：`src/port.test.rs::affordable_calls_run_without_any_event`。
+
+高风险授权组合的构造期拒绝（`high_risk_grant_combo_is_rejected`）是 SDK 公共闸门判据，
+不在本插件；熔断不设 e2e 专列（读通道禁令下 e2e 不碰存储布局）。
+
 ## 关联
 
 - 端口与派发面：`docs/003-design/022-行表与派发面.md`、`docs/003-design/048-端口机制裁决.md`
