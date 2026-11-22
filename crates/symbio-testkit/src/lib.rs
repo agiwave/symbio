@@ -28,9 +28,9 @@ pub use symbio_kernel::event::EVENT_RETRY;
 pub use symbio_kernel::store::{EventStore, Store};
 pub use symbio_kernel::vdfs::VDFS_KIND_DIR;
 pub use symbio_kernel::Seq;
+pub use symbio_plugin_api::EVENT_BUS_RESYNC_MARKER_TYPE; // D-530：线上契约经门面转出（契约层）
 pub use symbio_sdk::capability::{capability_entry_of, capability_option_fields};
 pub use symbio_sdk::declarations::sealed_declarations;
-pub use symbio_sdk::event_bus::EVENT_BUS_RESYNC_MARKER_TYPE;
 pub use symbio_sdk::invariants::check_all;
 pub use symbio_sdk::keys::PRINCIPAL_MAIN;
 pub use symbio_sdk::plugin::fact_source;

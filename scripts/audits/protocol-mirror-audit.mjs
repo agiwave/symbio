@@ -194,13 +194,14 @@ const ALIASES = [
     what: '写内容（telegram / cli 调用、前端按旧名镜像）',
   },
   {
+    // D-530：event_bus 线上契约按规则 B 迁入 symbio-contract（sdk 侧只留投递机制面）。
     ts: 'VDFS_EVENT_KIND',
-    rust: { file: 'crates/symbio-sdk/src/event_bus/mod.rs', name: 'EVENT_BUS_KIND_VDFS' },
+    rust: { file: 'crates/symbio-contract/src/event_bus.rs', name: 'EVENT_BUS_KIND_VDFS' },
     what: 'VDFS 变更的总线频道名',
   },
   {
     ts: 'VDFS_BUS_RESYNC',
-    rust: { file: 'crates/symbio-sdk/src/event_bus/mod.rs', name: 'EVENT_BUS_RESYNC_MARKER_TYPE' },
+    rust: { file: 'crates/symbio-contract/src/event_bus.rs', name: 'EVENT_BUS_RESYNC_MARKER_TYPE' },
     what: '总线背压指令：通道曾满，消费端请重读作用域（不是一条变更）',
   },
   {

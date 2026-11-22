@@ -193,7 +193,10 @@ export const WHITELIST_BASELINE = 0
 // `SESSION_VDFS` 入 SDK 臂——值是进程内 `DynVdfsProvider`，不提能力名；宿主三处
 // 注入写，memory / tool / local / skill 四个插件读（远超两条准入）。裁决见
 // `003-design/057` 的 D-515。
-export const SDK_BASELINE = 112
+// 112 → 106（`D-530`）：event_bus 线上契约六条（信封 / 解包 / 频道常量）按规则 B
+// 迁入契约层，门面 SDK 臂 −6、契约臂 +6，两臂合计不变。留 SDK 的三条是投递机制面
+// （有状态 / creator 装配，规则 C）。裁决见 `003-design/054` 的 D-530。
+export const SDK_BASELINE = 106
 
 /**
  * 契约臂基线：**只许降**（`D-486`）。`symbio-contract` 是插件 ABI 的纯形状层，
@@ -202,8 +205,9 @@ export const SDK_BASELINE = 112
  * 19 → 22（`D-486` 批 2）：chat 域三条随批 1 的同一判据迁入（同一类型闭包的
  * 地址搬迁，不是新增承诺——sdk 侧同批 −3，两臂合计读数不变）。
  * 22 → 25（`D-486`）：text 域三条同判据迁入（sdk 侧同批 −3）。
+ * 25 → 31（`D-530`）：event_bus 域六条线上契约同判据迁入（sdk 侧同批 −6，两臂合计不变）。
  */
-export const CONTRACT_BASELINE = 25
+export const CONTRACT_BASELINE = 31
 
 /**
  * 语法臂基线：**只许不涨**（D-278）。

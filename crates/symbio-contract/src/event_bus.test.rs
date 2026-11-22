@@ -1,8 +1,7 @@
-//! `crates/symbio-sdk/src/event_bus/mod.rs` 的单元测试——**线上契约**的钉子。
+//! `crates/symbio-contract/src/event_bus.rs` 的单元测试——**线上契约**的钉子（`D-530`）。
 //!
-//! 与实现**同级**分文件（约定：`X.rs` + `X.test.rs`）：测试跟着被测试的实现走。
-//! 投递实现（登记表 / 扇出 / 慢消费者处置）随 `D-487` 搬进 event_bus 插件，
-//! 那一侧的测试跟着实现走（`crates/symbio-plugin-event_bus/src/bus.test.rs`）；
+//! 实现随 `D-530` 从 `symbio-sdk::event_bus` 迁入契约层，测试跟着实现走（原在
+//! `crates/symbio-sdk/src/event_bus/tests.rs`）；投递机制面留 SDK。
 //! 这里只钉**信封与解包契约**——它们是跨 crate 的线上形状，测试一律**手搓**帧
 //! （不调 `event_bus_build_envelope` / 不调实现侧的标记构造器）：
 //! 产方改了形状而这里没跟着改，本文件必须红。

@@ -177,11 +177,15 @@ pub use symbio_contract::llm::{PromptMessage, PromptToolCall};
 pub use symbio_contract::chat::{AssistReply, AssistRequest, SEG_MESSAGES};
 pub use symbio_contract::merge_kernel::truncate_chars;
 pub use symbio_contract::text::{text_floor_char_boundary, text_truncate_bytes};
-
 // ---- SDK 臂：`symbio-sdk` 的宿主机制（不依赖 core，D-258） ----
 // 这一臂的每一条都只碰内核词汇与自己的表——配置 IO、事件总线的订阅表、VDFS 地址装配、
 // 对象构造器的链接期登记、日志与协议键。它们与「插件要用一条机制」是同一件事，
 // 与「插件要认识整个宿主」被绑成同一件事。SDK 把这条绑定切开：这一臂只依赖内核。
+#[rustfmt::skip] // D-530：锁定转出块排布，净零搬迁的机械行口径与 D-404 对齐
+pub use symbio_contract::event_bus::{
+    event_bus_build_envelope, event_bus_resync_of, event_bus_vdfs_change_of, EVENT_BUS_KIND_SYSTEM,
+    EVENT_BUS_KIND_VDFS, EVENT_BUS_RESYNC_MARKER_TYPE,
+};
 pub use symbio_kernel::capability::failure_kind;
 pub use symbio_sdk::agent::{agent_perms_of, AgentPermissions, AgentScope, AGENT_PERMS};
 pub use symbio_sdk::capability::{
@@ -193,11 +197,7 @@ pub use symbio_sdk::chat::chat_node::message_of_node;
 pub use symbio_sdk::clock::clock_now_ms;
 pub use symbio_sdk::creator::{creator_create_object, creator_has, creator_ids};
 pub use symbio_sdk::embedding::{EmbeddingService, EMBEDDING_LOCAL};
-pub use symbio_sdk::event_bus::{
-    event_bus_build_envelope, event_bus_resync_of, event_bus_vdfs_change_of, EventBus,
-    EventBusPublisher, EVENT_BUS_KIND_SYSTEM, EVENT_BUS_KIND_VDFS, EVENT_BUS_RESYNC_MARKER_TYPE,
-    EVENT_BUS_SINK,
-};
+pub use symbio_sdk::event_bus::{EventBus, EventBusPublisher, EVENT_BUS_SINK};
 pub use symbio_sdk::keys::{
     AGENT_ID, AGENT_VDFS, MODE, PATH, PRINCIPAL_SCHEDULER, PRINCIPAL_USER, PROVIDER_ID,
     REQUIRED_PLUGINS, RISK_LEVEL, SESSION_DIR, SESSION_ID, SESSION_VDFS, TOOL_CALL_ID,

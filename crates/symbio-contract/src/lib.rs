@@ -30,6 +30,7 @@
 //! 本 crate（HS-001 不变）。
 pub mod chat;
 pub mod dialog;
+pub mod event_bus;
 pub mod llm;
 pub mod merge_kernel;
 pub mod text;

@@ -53,7 +53,9 @@ use symbio::symbio_kernel::plugin::{
 };
 use symbio::symbio_kernel::vdfs::{VdfsChange, VdfsNode, VDFS_STATUS_FAILED, VDFS_STATUS_WORKING};
 use symbio::symbio_plugin_api::events::EVENT_USER_MESSAGE;
-use symbio::symbio_sdk::event_bus::{
+// D-530：线上契约（解包 / 频道词表）按规则 B 迁入 symbio-contract，
+// 宿主侧经门面取用（导入路径不变，改的是转发源）。
+use symbio::symbio_plugin_api::{
     event_bus_resync_of, event_bus_vdfs_change_of, EVENT_BUS_KIND_VDFS,
 };
 use symbio::symbio_sdk::keys::{PATH, SESSION_ID, WORKDIR};
