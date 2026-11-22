@@ -99,8 +99,12 @@ export const BASELINE = {
   // baseline-allow vitestTests: 1003 → 1024（+21，折叠骨架按需重取）——新增的是判据用例：
   // `skeletonLazy.spec.ts` 钉本地释放与按需重取的折叠状态，`MessageNode` / 会话 store 补
   // 重取路径的渲染与竞态断言。不是补回覆盖。
-  vitestFiles: 84,
-  vitestTests: 1220,
+  // baseline-allow vitestFiles/vitestTests: 84/1221 → 86/1263（+2/+42）——巨型文件模块内拆分：
+  // `vdfsHelpers.spec.ts`（26 条）与 `detailForm/display.spec.ts`（14 条）为**新抽出纯函数补的
+  // 直接单测**（原先只能借 mount composable / 组件间接覆盖）；被测对象与调用点逐字保留，
+  // 依赖方向不变（composables → schemas、components → schemas）。不是补回覆盖，是新增判据。
+  vitestFiles: 86,
+  vitestTests: 1263,
   verifyPrograms: 17,
   verifyNegatives: 4,
   // baseline-allow e2eCases: 读通道禁令（e2e 不得读任何内部存储文件——`messages.json` / `v2-events.wal` / `session.json` 一并禁）下删 3 个用例：t33 熔断（存储层判据，已由 `wal.test.rs` / `active.test.rs` 覆盖）、t40（断言全为 WAL 白盒入格，可见效果已由 t29 记忆召回 / t35 技能编译覆盖）、t43（messages-json-is-rebuildable，判据「真源已换、缓存可弃」已下沉 `store/tests.rs`，且 messages.json 已停写）。45 → 42，非侵蚀：三条的判据都下沉到了 Rust 侧，不是丢掉覆盖。

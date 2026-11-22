@@ -24,6 +24,12 @@ vi.mock('@/services/completionChime', () => ({
   DEFAULT_CHIME_VOLUME: 0.6,
 }))
 
+// 引导重开入口：只验证「按钮 → openManually」这条接线，真正的行为归 onboarding store 自己测
+const openManually = vi.fn()
+vi.mock('@/stores/onboarding', () => ({
+  useOnboardingStore: () => ({ openManually }),
+}))
+
 function prefNode(): VdfsItem {
   return {
     path: '@vfs/plugin_manager/appearance',
@@ -133,6 +139,26 @@ describe('Appearance 的后端权威与首屏快照', () => {
     await nextTick()
 
     expect(useAppearanceStore().theme).toBe('dark')
+    expect(w.emitted('save')).toBeFalsy()
+  })
+})
+
+/** 引导重开：跳过后仍能在这里找回——钉住 UI 接线（DE-020 §10 的落点从已移除的 About 迁到本面板） */
+describe('Appearance 的新手引导重开入口', () => {
+  beforeEach(() => {
+    localStorage.clear()
+    openManually.mockClear()
+  })
+
+  it('点「重新查看」调用 openManually，且不触发配置写回', async () => {
+    const w = mountPanel(backend())
+    await nextTick()
+
+    const btn = w.findAll('button').find((b) => b.text().includes('重新查看'))
+    expect(btn, '应有一个可见的引导重开按钮').toBeTruthy()
+    await btn!.trigger('click')
+
+    expect(openManually).toHaveBeenCalledOnce()
     expect(w.emitted('save')).toBeFalsy()
   })
 })

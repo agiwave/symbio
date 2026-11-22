@@ -112,7 +112,7 @@ impl: partial
 **P0-2 首次启动引导（onboarding）**
 - 症状：README 写着「首次启动后在左侧模型面板新建条目填入 API Key」，界面零引导 →
  无模型 = 发不出消息 = 第一分钟必然卡住。
-- 方案：三步行进卡（可跳过、可在「帮助」重开）：① 系统目录已就位（复用 `HomedirEntry`）
+- 方案：三步行进卡（可跳过、可在「界面」设置页重开）：① 系统目录已就位（复用 `HomedirEntry`）
  ② 配一个模型（深链直达 `/vdfs/model` 草稿详情页 —— `startNew` 与 draft 态已支持）
  ③ 发第一条消息（复用 `Session.vue` 的懒创建引导卡）。
 - 落点：新建 `components/common/Onboarding.vue`，状态落 localStorage
@@ -353,7 +353,7 @@ SVG 图元串（`with_icon(r#"<path …/>"#)`），图长什么样由插件的�
 |---|---|
 | 会话「进入下一级」不再由前端硬编码——与 agent / model / mcp 同一条通道（后端声明、前端只渲染） | 后端 `crates/symbio-plugin-session/src/options/mod.rs`（`session_detail_actions`，挂在会话 `schema.actions` 上）；前端只做投影 `schemas/vdfs-form.ts` + `components/vdfs/VdfsSessionDetail.vue` |
 | 挂载层（`<根>` 的直接子节点）的左栏回到**类别清单**——冷启动落点 `/vdfs/session` 的左栏不再为空 | `composables/useVdfs.ts`（`atMountLevel`）+ `components/vdfs/VdfsWorkbench.vue`（`onRailSelect`） |
-| 首启引导：三步（系统目录 → 配模型 → 发第一条消息），可跳过、可从「关于」重开；**只在尚未配好模型时自动弹** | `stores/onboarding.ts` + `components/common/Onboarding.vue` + `MainLayout.vue` + `components/settings/About.vue` |
+| 首启引导：三步（系统目录 → 配模型 → 发第一条消息），可跳过、可从「界面」设置页重开；**只在尚未配好模型时自动弹** | `stores/onboarding.ts` + `components/common/Onboarding.vue` + `MainLayout.vue` + `components/settings/Appearance.vue`（「帮助」分节，调用 `openManually`；原 `settings/About.vue` 随「关于」插件裁决移除） |
 | 空态即引导：「新建第一个 ⟨类型标题⟩」按钮（标题来自类型自述，新增资源零改动） | `components/vdfs/VdfsWorkbench.vue` 的 `empty` 插槽 |
 | 会话级 UI 状态保持：输入草稿与**离底距离**按会话记忆（切走再切回不丢） | `stores/sessionUiState.ts` + `components/ModelChatPanel.vue` |
 | P1-1 命令面板（Cmd/Ctrl+K）：一次 `vdfs/tree` 取「类别 + 条目」两层，本地筛词、按类别分组、Enter 直达地址页；空词给「新建 ⟨类别⟩」动作 | `utils/palette.ts`（候选计算）+ `components/common/CommandPalette.vue` + `services/vdfs.ts` 的 `treeVdfs` + `MainLayout.vue` 的全局键 |

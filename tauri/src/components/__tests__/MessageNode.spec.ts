@@ -818,6 +818,14 @@ describe('MessageNode：工具确认的四档', () => {
     return { w, calls, resumed, allowed, granted }
   }
 
+  it('确认卡说明「无默认沙箱、批准不等于隔离」——与首启同一条边界声明', () => {
+    const w = mountWithPorts(confirmTree('high')).w
+    const note = w.find('.up-sandbox-hint')
+    expect(note.exists()).toBe(true)
+    expect(note.text()).toContain('没有沙箱')
+    expect(note.text()).toContain('批准不等于隔离')
+  })
+
   it('带风险档的确认卡给出两档放行；不带档位时两键都不出现', () => {
     const withRisk = mountWithPorts(confirmTree('high')).w
     expect(withRisk.find('button.up-allow-session').text()).toBe('本会话放行')

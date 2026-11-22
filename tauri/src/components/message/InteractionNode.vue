@@ -146,6 +146,12 @@
         <p class="up-scope-hint">
           批准只对这一次调用生效<template v-if="confirmRisk">；本会话放行让同档工具在本会话内不再询问；永久放行对该工具跨会话生效</template>。
         </p>
+        <!-- 与首启引导同一条边界声明：本仓无默认沙箱（README 诚实清单 / RE-011 §4）。
+             审批控制的是「让不让做」，不是「在隔离环境里做」——用户在这里做决定时
+             最需要听清这句，纯文案，不改变任何执行边界。 -->
+        <p class="up-sandbox-hint">
+          注意：默认没有沙箱，工具会直接在选定的工作目录里执行；批准不等于隔离。
+        </p>
       </template>
     </div>
 
@@ -443,6 +449,12 @@ function submitQuestions() {
   font-size: 0.72rem;
   line-height: 1.5;
   color: var(--text-muted);
+}
+.up-sandbox-hint {
+  margin: 0;
+  font-size: 0.72rem;
+  line-height: 1.5;
+  color: var(--color-tag-warn-fg);
 }
 .up-confirm {
   display: flex;

@@ -120,4 +120,13 @@ describe('Onboarding 步态呈现', () => {
     const w = bench()
     expect(w.find('button.ob-btn.primary').text()).toBe('跳过引导')
   })
+
+  it('首启就说明「无默认沙箱、审批不等于隔离」（纯文案边界声明）', () => {
+    arrange()
+    const w = bench()
+    const risk = w.find('.ob-risk')
+    expect(risk.exists()).toBe(true)
+    expect(risk.text()).toContain('没有沙箱')
+    expect(risk.text()).toContain('审批只是授权，不等于隔离')
+  })
 })

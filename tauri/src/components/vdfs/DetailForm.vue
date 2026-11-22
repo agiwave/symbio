@@ -82,11 +82,11 @@
             </div>
 
             <!-- static（只读展示：info 绑定概览 / 只读字段；options 作值→标签映射） -->
-            <div v-if="specOf(f).tag === 'static'" class="static-value">{{ staticDisplay(f) }}</div>
+            <div v-if="specOf(f).tag === 'static'" class="static-value">{{ staticDisplayOf(f, form[f.key]) }}</div>
 
             <!-- form（结构化子对象：摘要 + 打开子表单） -->
             <div v-else-if="specOf(f).tag === 'form'" class="input-row">
-              <span class="sub-summary">{{ subSummary(f) }}</span>
+              <span class="sub-summary">{{ subSummaryOf(f, form[f.key]) }}</span>
               <button
                 type="button"
                 class="icon-btn"
@@ -273,6 +273,7 @@ import {
   widgetToEdit,
 } from '@/registry/formWidgets'
 import { buildSave, type SaveContext } from './detailForm/save'
+import { staticDisplayOf, subDefinitionOf, subSummaryOf } from './detailForm/display'
 import type {
   DetailAction,
   DetailBadge,
@@ -449,46 +450,9 @@ function onPackChange(e: Event) {
 // 随外层一次提交——不产生第二个写入入口。
 const EMPTY_CAPABILITIES: Record<string, boolean> = { mutable: false, test_connection: false }
 
-/** 子表单固定的两个动作（子定义未声明时补上，声明了则以子定义为准） */
-const SUB_FORM_ACTIONS: DetailAction[] = [
-  { id: 'cancel', label: '取消', style: 'default' },
-  { id: 'save', label: '确定', style: 'primary' },
-]
-
 const subField = ref<DetailField | null>(null)
 /** 打开子表单时**定格**的子对象快照：props 恒等 → 不触发子表单的重置门闩 */
 const subValues = ref<Record<string, unknown>>({})
-
-function subLabelOf(f: DetailField, key: string): string {
-  for (const sec of f.form?.sections ?? []) {
-    const hit = sec.fields.find((x) => x.key === key)
-    if (hit) return hit.label
-  }
-  return key
-}
-
-/** 子对象摘要（一行；避免把整棵子树摊进父表单） */
-function subSummary(f: DetailField): string {
-  const v = form[f.key]
-  if (!v || typeof v !== 'object') return '未配置'
-  const entries = Object.entries(v as Record<string, unknown>).filter(
-    ([, val]) => val !== '' && val !== null && val !== undefined
-  )
-  if (!entries.length) return '未配置'
-  return entries.map(([k, val]) => `${subLabelOf(f, k)}=${String(val)}`).join('，')
-}
-
-/** 子定义：补 `binding` 兜底、标题回落、以及缺省的两个动作 */
-function subDefinitionOf(f: DetailField): DetailDefinition {
-  const def: DetailDefinition = f.form ?? { binding: 'option', sections: [] }
-  const declared = new Set((def.actions ?? []).map((a) => a.id))
-  return {
-    ...def,
-    binding: def.binding || 'option',
-    title_fallback: def.title_fallback || f.label,
-    actions: [...(def.actions ?? []), ...SUB_FORM_ACTIONS.filter((a) => !declared.has(a.id))],
-  }
-}
 
 function openSubForm(f: DetailField) {
   const cur = form[f.key]
@@ -562,20 +526,6 @@ function missingRequiredFields(): DetailField[] {
     }
   }
   return missing
-}
-
-/** static 只读展示：options 值→标签映射，数组/对象友好展开 */
-function staticDisplay(f: DetailField): string {
-  const v = form[f.key]
-  if (v == null || v === '') return '—'
-  const opt = (f.options ?? []).find((o) => o.value === v)
-  if (opt) return opt.label
-  if (Array.isArray(v)) return v.length ? v.join('、') : '—'
-  if (typeof v === 'object') {
-    const entries = Object.entries(v as Record<string, unknown>)
-    return entries.length ? entries.map(([k, val]) => `${k} ${val}`).join('、') : '—'
-  }
-  return String(v)
 }
 
 // ==================== 标题 / 徽标 / 动作 ====================

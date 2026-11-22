@@ -57,9 +57,16 @@ npm run tauri dev
  "provider": "openai",
  "api_base": "https://api.openai.com/v1",
  "api_key": "你的 API Key",
- "model": "gpt-4o"
+ "model": "gpt-4o",
+ "api_protocol": "openai_responses"
 }
 ```
+
+> 字段权威来源是[当前事实表](../004-ref/006-当前事实表.md "RE-006-当前事实表")与
+> `crates/symbio-plugin-model/src/model_providers.rs` 的 `ModelProviderConfig`：
+> `provider` 取预设表里的值（`openai` / `anthropic` / `openai_compatible` / `custom` 等），
+> `api_protocol` 取该预设支持的协议（此处 `openai` 默认 `openai_responses`，也可选 `openai_chat`）。
+> 其余字段（`temperature` / `max_tokens` / `timeout_secs` …）都有默认值，可省略。
 
 ### 4. 开始对话
 
@@ -93,8 +100,10 @@ npm test
 ### Clippy 检查
 
 ```bash
-cargo clippy --all-targets --workspace -- -D warnings
-# 期望: 0 warnings
+# 与门禁 scripts/gate.d/10-backend.mjs 保持同一条命令（dead_code 由 D-331/SD-001 台账单独管）
+cargo clippy --all-targets --workspace -- -D warnings -A dead_code
+# 期望: 0 warnings。`dead_code` 一族被让开，因为「待接入能力」必然暂未被调用；
+# 新增死码仍由 session-dead-code-audit 按台账判红，不是放宽。
 ```
 
 ---

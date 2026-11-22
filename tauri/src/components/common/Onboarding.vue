@@ -63,6 +63,14 @@
       </li>
     </ol>
 
+    <!-- 无默认沙箱是本项目最大的安全缺口（README 诚实清单 / RE-011 §4）。
+         首启就把边界说清：审批只是授权，不等于隔离——用户须知道工具直接在
+         自己选定的工作目录里读写。纯文案，不改变任何执行边界。 -->
+    <p class="ob-risk">
+      安全边界：本应用默认没有沙箱。工具会在你选定的工作目录里直接读写文件；审批只是授权，不等于隔离。
+      请只在你信任的目录里让 Agent 动手。
+    </p>
+
     <div class="ob-actions">
       <button class="ob-btn ghost" type="button" @click="store.close()">稍后再说</button>
       <button class="ob-btn primary" type="button" @click="store.dismiss()">
@@ -205,6 +213,17 @@ function goSession() {
   font-size: var(--font-size-xs);
   line-height: var(--line-height-normal);
   color: var(--text-muted);
+}
+
+.ob-risk {
+  margin: var(--space-2) 0 0;
+  padding: var(--space-2) var(--space-3);
+  border: 1px solid var(--color-tag-warn-fg);
+  border-radius: var(--radius-md);
+  background: var(--color-tag-warn-bg);
+  color: var(--color-tag-warn-fg);
+  font-size: var(--font-size-xs);
+  line-height: var(--line-height-normal);
 }
 
 .ob-actions {

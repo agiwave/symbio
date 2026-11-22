@@ -6,10 +6,19 @@
 
   ## 分区
 
-  本页承载两类设置：**外观**（主题 / 字体）与**提示音**（开关 / 分类型 / 音量）。
-  两者数据都住在前端 store、同属这个 editor，此前却完全平铺在一串 setting 行里
-  ——用户找「声音」时以为走错了页面。现在用分节标题把它们分开，并在标题上说明
-  各自的生效方式。
+  本页承载三类内容：**外观**（主题 / 字体）与**提示音**（开关 / 分类型 / 音量），
+  以及底部的**新手引导重开入口**。三者都住在前端 store、同属这个 editor。
+  外观与提示音此前完全平铺在一串 setting 行里——用户找「声音」时以为走错了页面；
+  现在用分节标题把它们分开，并在标题上说明各自的生效方式。
+
+  ## 为什么引导重开入口在这里
+
+  DE-020 §10 原把「可重开引导」落在 `settings/About.vue`，但「关于」已按裁决
+  从插件清单移除（见 `registry/vdfsRenderers.ts`），没有独立渲染器。设置里的
+  「界面」入口（`plugin_manager` 的 appearance 分区）是当前唯一承载界面偏好
+  的设置面板，因此把重开动作挂在这里——调用的是 store 早已备好的
+  `openManually()`（不看 `dismissed`），用户跳过引导后不再永久失去它。
+  这是纯 UI 接线：不涉及任何协议 / 插件拓扑 / 后端数据。
 -->
 <template>
   <SettingsFormShell title="外观与提示音" description="以下设置会立即生效并自动保存">
@@ -165,6 +174,15 @@
         <button class="preview-chip" type="button">代码片段</button>
       </div>
     </div>
+
+    <p class="section-title">帮助</p>
+    <div class="setting-item">
+      <div class="setting-info">
+        <span class="setting-label">新手引导</span>
+        <p class="setting-desc">重新查看三步上手引导（连接目录 / 配置模型 / 发第一条消息）</p>
+      </div>
+      <button type="button" class="replay-btn" @click="replayOnboarding">重新查看</button>
+    </div>
   </SettingsFormShell>
 </template>
 
@@ -172,6 +190,7 @@
 import { computed, watch } from 'vue'
 import { useAppearanceStore, type ThemeMode, type FontSize } from '@/stores/appearance'
 import { useSoundSettingsStore } from '@/stores/soundSettings'
+import { useOnboardingStore } from '@/stores/onboarding'
 import { playCompletionChime } from '@/services/completionChime'
 import { useToast } from '@/composables/useToast'
 import SettingsFormShell from './SettingsFormShell.vue'
@@ -188,6 +207,11 @@ const emit = defineEmits<{ (e: 'save', payload: string): void }>()
 const appearance = useAppearanceStore()
 const sound = useSoundSettingsStore()
 const { showToast } = useToast()
+
+/** 重新打开三步引导（不受「已读过」限制，见 stores/onboarding.openManually） */
+function replayOnboarding(): void {
+  useOnboardingStore().openManually()
+}
 
 /** 后端配置正文的形状（字段与 ui_prefs 的 UiPrefsConfig 一一对应） */
 interface BackendPrefs {
@@ -424,6 +448,20 @@ const fontSizeOptions: Array<{ value: FontSize; label: string }> = [
   cursor: pointer;
 }
 .preview-btn:hover {
+  border-color: var(--accent);
+}
+/* 引导重开按钮：与「试听」共用视觉语言，保持设置面板内控件一致 */
+.replay-btn {
+  padding: 0.3rem 0.7rem;
+  font-size: 0.8rem;
+  color: var(--accent);
+  background: var(--surface-panel);
+  border: 1px solid var(--border-default);
+  border-radius: var(--radius-md);
+  cursor: pointer;
+  flex-shrink: 0;
+}
+.replay-btn:hover {
   border-color: var(--accent);
 }
 .volume-input {
