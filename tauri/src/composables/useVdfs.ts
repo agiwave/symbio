@@ -547,13 +547,18 @@ export function useVdfs(opts: UseVdfsOptions) {
   // 列表里」：后者要等列表回来才判得出（中间那一拍右栏仍是旧的），且在还有更早
   // 分页时根本判不了——那正是旧选中项能一直挂着的漏洞。
   //
-  // 草稿不受影响：它还没有地址（`isVdfsDraft`），归属对它无意义。
+  // ⚠️ **草稿必须清**：它还没有地址（`isVdfsDraft`），归属判据套不上，但草稿正是
+  // 从**旧目录**开出来的——换地址后它必然失效。曾在这里 `if (isVdfsDraft(sel)) return`
+  // 跳过草稿，结果切类别时右栏一直挂着上一类别的草稿；新类别 `canCreate` 为真时
+  // `showList = !(hasDraft && canCreate)` 为假，中栏整个收起——用户看到的就是「左栏
+  // 切换后右侧内容区不跟着变」（真回归）。
   watch(
     () => cwd.value,
     (dir) => {
       const sel = selectedNode.value
-      if (!sel || isVdfsDraft(sel)) return
-      if (isVdfsUnder(sel.path, dir)) return
+      if (!sel) return
+      // 草稿无 path ⇒ 无法判归属，但它属于旧目录，换地址即作废
+      if (!isVdfsDraft(sel) && isVdfsUnder(sel.path, dir)) return
       clearSelection()
     },
   )

@@ -643,6 +643,30 @@ describe('useVdfs 换目录 ⇒ 旧选中项失效', () => {
     expect(api.selectedNode.value, '条目还在当前目录 ⇒ 刷新不得清空选中').not.toBeNull()
     wrapper.unmount()
   })
+
+  it('★ 换绑定地址 ⇒ 草稿（没有 path）也必须作废（草稿属于旧类别，滞留会让新类别收起中栏）', async () => {
+    // 用户报的现象：左栏切类别后右侧内容区不跟着变。链路：换类别时若右栏停在
+    // 上一类别的自动草稿（没有 path），而「换目录清选中」的 watch 跳过草稿，草稿
+    // 就一直挂着；新类别 canCreate 为真时 showList = !(hasDraft && canCreate) 为假，
+    // 中栏整个收起 ⇒ 看不到新类别的列表，看起来就是「内容没变」。
+    mocks.listVdfs.mockResolvedValue({ path: MODEL_DIR, node: dirNode(), items: [] })
+    const addrRef = ref<string>(MODEL_DIR)
+    const { api, wrapper } = mountHost(addrRef)
+    await settle()
+    api.startNew()
+    await settle()
+    expect(api.selectedNode.value, '起点：右栏是一张草稿').not.toBeNull()
+    expect(api.selectedNode.value?.path, '草稿没有地址').toBe('')
+
+    addrRef.value = '@vfs/skill'
+    await nextTick()
+
+    expect(
+      api.selectedNode.value,
+      '换类别后草稿必须作废，否则新类别的中栏会被 hasDraft 判据收起',
+    ).toBeNull()
+    wrapper.unmount()
+  })
 })
 
 describe('useVdfs 草稿上的动作（「导入整包」）：载荷编码 + 落点 + 退出草稿', () => {
