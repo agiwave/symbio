@@ -49,6 +49,10 @@ created: 2026-11-13
  *
  * `key` 指向 [`collect`] 的返回；新增一类欠账只加一行，并让 `collect` 从它的
  * owner 把数读出来。任何一格都不许写死数字——写死就制造了第二份会漂移的手抄读数。
+ *
+ * 带 `asset` 字段的行是「已由 owner 定性为契约资产 / 冻结账」的读数（D-511 / D-499），
+ * 不是待收口欠账：它们仍投影条数供核对（删了会让 owner 规模变得不可见），但单独成表、
+ * 不混进欠账读数。这是分类口径，不是改判据——owner 与 `how` 都不变。
  */
 export const ROWS = [
   {
@@ -64,6 +68,9 @@ export const ROWS = [
     label: "架构树零生产调用 `pub fn`",
     owner: "`scripts/baselines/arch-dead-code.json`",
     how: "`node scripts/audits/arch-dead-code-audit.mjs --report`",
+    // D-511：每一条都是类型自带的公开构造 / 查询口（契约实现），不是欠账。
+    // 仍投影条数供核对，但性质是契约资产，不与待收口欠账混列。
+    asset: "契约实现（D-511）",
   },
   {
     key: "sessionFrozen",
@@ -71,6 +78,8 @@ export const ROWS = [
     label: "session 退役线冻结符号",
     owner: "`scripts/exemptions/plugin-session-sdk.json`",
     how: "`node scripts/audits/session-retire-audit.mjs`",
+    // D-499 / D-460：随控制面身份永久保留的冻结账，无到期日、不再按日期续期，不是欠账。
+    asset: "冻结账（D-499）",
   },
   {
     key: "debtExemptions",
@@ -106,6 +115,8 @@ export const ROWS = [
     label: "verify 程序与生产源码耦合",
     owner: "`docs/003-design/verify/*.rs` 里指向 `crates/` 的 `#[path]` 行",
     how: "`grep -l '#\[path' docs/003-design/verify/*.rs`",
+    // D-511：这些 `#[path]` 正是「验证器跑的就是生产实现」这一保证的实现本身，不是欠账。
+    asset: "验证保证（D-511）",
     // 分子分母都由同一份目录现数：16 这个分母写进注释就会漂移（`55-verify.mjs`
     // 的头注释此前正是手抄了 `4/16`）。
     fmt: (v) => `${v.verifyCoupled} / ${v.verifyPrograms}`,
@@ -282,12 +293,17 @@ export function render(values) {
     "判据不在这里：本表只报数，不判「该不该收口」。那归各 owner 自己的判据",
     "（AD / EX / INJ / SRA / RG），把判定搬进来会让改判据与改被判物互相掩护。",
     "",
-    "## 2. 读数",
+    "## 2. 待收口欠账读数",
+    "",
+    "只列仍待收口的项。已被 owner 定性为契约资产 / 冻结账的读数在第 3 节单列——",
+    "「条数大」不等于「欠账多」，把两者混在一张表里会读出假的欠账规模。",
     "",
     "| 读数 | 当前 | owner | 怎么查 |",
     "|---|---:|---|---|",
   );
-  for (const r of ROWS) {
+  const debts = ROWS.filter((r) => !r.asset);
+  const assets = ROWS.filter((r) => r.asset);
+  for (const r of debts) {
     const cell = r.fmt ? r.fmt(values) : `${values[r.key]} ${r.unit}`;
     L.push(`| ${r.label} | ${cell} | ${r.owner} | ${r.how} |`);
   }
@@ -296,7 +312,21 @@ export function render(values) {
     "「当前」不是硬编码：每一格都由 `collect()` 从 owner 现取，owner 读不出",
     "（文件搬走 / 形状变了 / 扫描面空了）直接让生成失败，不静默报 0。",
     "",
-    "## 3. 已裁搁置（不计入上表）",
+    "## 3. 已定性的契约资产 / 冻结账（只读数，不计欠账）",
+    "",
+    "这些读数仍逐格从 owner 现取（删掉会让 owner 规模不可见），但 owner 已裁决其性质",
+    "不是待收口欠账——此处只投影条数与性质来源，不改判据、不改 owner：",
+    "",
+    "| 读数 | 当前 | 定性 | owner | 怎么查 |",
+    "|---|---:|---|---|---|",
+  );
+  for (const r of assets) {
+    const cell = r.fmt ? r.fmt(values) : `${values[r.key]} ${r.unit}`;
+    L.push(`| ${r.label} | ${cell} | ${r.asset} | ${r.owner} | ${r.how} |`);
+  }
+  L.push(
+    "",
+    "## 4. 已裁搁置（不计入上表）",
     "",
     "「明确不做」「登记，不修」「留档不做」是**已经裁决过的**，不是等待收口的欠账。",
     "裁决与理由留在各自的 owner，本表不复制：",
@@ -305,7 +335,7 @@ export function render(values) {
     "- `docs/003-design/055-能力自配置终态裁决.md` —— 「登记，不修」的边界",
     "- `docs/003-design/054-判据欠账与到期豁免.md` —— 已裁决搁置与到期豁免的台账",
     "",
-    "## 4. 新增一格读数",
+    "## 5. 新增一格读数",
     "",
     "在 `scripts/facts/open-ends.mjs` 的 `ROWS` 加一行，并让 `collect()` 从新 owner 把数",
     "读出来（`label / key / unit / owner / how`）。读不出就抛错，不要在别处手抄当前数字——",
