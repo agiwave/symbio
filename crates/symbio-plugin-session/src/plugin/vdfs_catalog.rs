@@ -340,4 +340,72 @@ impl SessionPlugin {
             _ => Err(VdfsError::NotImplemented),
         }
     }
+
+    /// 工具结果存档（`<id>/tool_archives[/<file>]`）：超长工具结果的全文存档，
+    /// 只读取回（D-528）。
+    ///
+    /// ## 为什么读段住在本插件
+    ///
+    /// 写入端（`symbio-plugin-tool`）把全文写进 `SESSION_VDFS` 根下的
+    /// `tool_archives/<file>`，占位符印出的取回地址是会话地址面上的
+    /// `<根>/session/<sid>/tool_archives/<file>`（根名由 vdfs 插件静态声明、经运行期
+    /// 数据取得）。组合 VDFS 剥掉虚拟前缀后按 `<sid>/tool_archives/<file>` 路由到
+    /// 这里——本方法必须读到**与写入端同一份物理文件**，否则占位符取回会落空。
+    /// 会话私有数据的存储 owner 是本插件
+    /// （`session_dir` 由本插件的 `SessionStore` 寻址），读段因此收在这里。
+    ///
+    /// ## 路径安全
+    ///
+    /// 复用 [`super::super::workdir`] 的 `resolve_under`（拒绝 `..` / 绝对路径，
+    /// 并在 join 后做前缀校验）——存档根目录是 `<session_dir>/tool_archives`，
+    /// `rel` 只能是它下面的相对文件名。写 / 删一律拒绝：存档的生命周期由 L0
+    /// 守卫的 `ARCHIVE_KEEP` 滚动淘汰负责，不开放外部写入面。
+    pub(super) async fn tool_archives_at(
+        &self,
+        path: &str,
+        id: &str,
+        rel: &str,
+        req: VdfsRequest,
+    ) -> VdfsResult<VdfsResponse> {
+        // 存在性校验：会话不存在时报 NotFound，而不是把空目录当空存档
+        self.session_of(id).await?;
+        let session_dir = self
+            .get_store()
+            .await
+            .map_err(vdfs_from_plugin_error)?
+            .session_dir(id)
+            .ok_or_else(|| VdfsError::not_found(format!("会话 {id} 没有数据目录")))?;
+        let root = session_dir.join("tool_archives");
+        let root = root.to_string_lossy();
+
+        match req {
+            VdfsRequest::List { .. } => super::super::workdir::list_children(&root, Some(rel))
+                .await
+                .map_err(vdfs_from_plugin_error)
+                .map(VdfsResponse::list),
+            VdfsRequest::Stat => {
+                if rel.is_empty() {
+                    return Ok(VdfsResponse::Stat(super::tool_archives_dir_node()));
+                }
+                super::super::workdir::read_node(&root, rel)
+                    .await
+                    .map_err(vdfs_from_plugin_error)
+                    .map(VdfsResponse::Stat)
+            }
+            VdfsRequest::Read => {
+                if rel.is_empty() {
+                    return Err(VdfsError::invalid(format!("该路径不可读取内容：{path}")));
+                }
+                let text = super::super::workdir::read_content(&root, rel)
+                    .await
+                    .map_err(vdfs_from_plugin_error)?;
+                Ok(VdfsResponse::Read(VdfsContent::text(text)))
+            }
+            VdfsRequest::Write { .. } => Err(VdfsError::Forbidden(format!("存档不可写入：{path}"))),
+            VdfsRequest::Delete { .. } => {
+                Err(VdfsError::Forbidden(format!("存档不可删除：{path}")))
+            }
+            _ => Err(VdfsError::NotImplemented),
+        }
+    }
 }

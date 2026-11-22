@@ -1376,6 +1376,7 @@ async fn protocol_failures_each_name_their_own_cause() {
             parse_error: None,
         },
         None,
+        None,
     )
     .await
     .expect("缺 id 必有结果");
@@ -1395,6 +1396,7 @@ async fn protocol_failures_each_name_their_own_cause() {
             parse_error: None,
         },
         None,
+        None,
     )
     .await
     .expect("缺 name 必有结果");
@@ -1408,6 +1410,7 @@ async fn protocol_failures_each_name_their_own_cause() {
             name_missing: false,
             parse_error: Some(r#"{"command": "cargo test"#),
         },
+        None,
         None,
     )
     .await

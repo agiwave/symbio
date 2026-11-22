@@ -1321,6 +1321,93 @@ async fn expand_skeleton_rejects_malformed_params() {
     );
 }
 
+// ==================== 工具结果存档读段（D-528） ====================
+
+/// 写入端（`tool` 的 L0 守卫）把超限全文写进 `SESSION_VDFS` 根下的
+/// `tool_archives/<file>`——其根就是本会话的 `session_dir`。占位符印出的取回地址
+/// 经组合 VDFS 剥前缀后按 `<sid>/tool_archives/<file>` 路由到这里。本测试模拟写入
+/// 落点，验证会话地址面能读到**同一份物理文件**（取回链路不落空）。
+#[tokio::test]
+async fn tool_archives_read_back_via_session_address() {
+    let (_dir, p) = fixture();
+    let id = "sess-archives";
+    let s = Session::new(id);
+    p.save_session(&s).await.unwrap();
+
+    // 模拟写入端：SESSION_VDFS 根 = session_dir，相对地址 tool_archives/<file>
+    let session_dir = p
+        .get_store()
+        .await
+        .unwrap()
+        .session_dir(id)
+        .expect("会话目录应已建出");
+    let archive_dir = session_dir.join("tool_archives");
+    tokio::fs::create_dir_all(&archive_dir).await.unwrap();
+    let file = "tool_1700000000123_9100_ab12cd34.txt";
+    let full_text = "这是超限工具结果的全文存档，应当能被取回。\nline2\nline3";
+    tokio::fs::write(archive_dir.join(file), full_text)
+        .await
+        .unwrap();
+
+    // 取回：会话地址面 <sid>/tool_archives/<file>（组合 VDFS 剥掉虚拟根 + session 前缀后）
+    let addr = format!("{id}/tool_archives/{file}");
+    let read = p
+        .dispatch(&vctx(), &addr, READ)
+        .await
+        .unwrap()
+        .into_read()
+        .expect("存档文件应可读");
+    assert_eq!(read.text.as_deref(), Some(full_text));
+
+    // stat 单文件与目录根都可用
+    let stat = p
+        .dispatch(&vctx(), &addr, STAT)
+        .await
+        .unwrap()
+        .into_stat()
+        .unwrap();
+    assert_eq!(stat.name, file);
+    let root_stat = p
+        .dispatch(&vctx(), &format!("{id}/tool_archives"), STAT)
+        .await
+        .unwrap()
+        .into_stat()
+        .unwrap();
+    assert_eq!(root_stat.name, "tool_archives");
+
+    // list 能列出目录里的存档文件（隐藏段，WITH_HIDDEN 之外仍可寻址）
+    let listed = p
+        .dispatch(&vctx(), &format!("{id}/tool_archives"), LIST)
+        .await
+        .unwrap()
+        .into_list()
+        .unwrap();
+    assert!(listed.iter().any(|it| it.node.name == file));
+
+    // 路径穿越被拒（与 workdir 同一道安全闸门）
+    assert!(p
+        .dispatch(
+            &vctx(),
+            &format!("{id}/tool_archives/../../etc/passwd"),
+            READ
+        )
+        .await
+        .is_err());
+
+    // 存档只读：写 / 删一律拒绝（生命周期归 L0 守卫的 ARCHIVE_KEEP）
+    assert!(p
+        .dispatch(
+            &vctx(),
+            &addr,
+            VdfsRequest::Write {
+                content: VdfsContent::text("x")
+            }
+        )
+        .await
+        .is_err());
+    assert!(p.dispatch(&vctx(), &addr, DEL).await.is_err());
+}
+
 // ==================== dispatch 请求形态（测试辅助） ====================
 
 const LIST: VdfsRequest = VdfsRequest::List {};

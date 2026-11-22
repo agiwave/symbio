@@ -79,8 +79,8 @@ fn make_archive(dir: &Path, name: &str) -> PathBuf {
 
 /// 审计 A3 契约：`replace_messages` 整体重写消息列表时**不删任何存档文件**。
 ///
-/// 归档的磁盘回收唯一归口 `tool_result_guard::prune_archive_dir`（每会话按 mtime
-/// 保留最新 `TOOL_ARCHIVE_KEEP` 个）。写入路径历史上会删"失去引用"的孤儿存档，
+/// 存档的磁盘回收唯一归口 `tool` 插件 L0 守卫的滚动淘汰（会话作用域的
+/// `ARCHIVE_KEEP`，按 mtime，D-528）。写入路径历史上会删"失去引用"的孤儿存档，
 /// 代价是把不可信的消息 meta 变成删除动作的输入（需要额外的路径逃逸校验），
 /// 且与滚动保留职责重叠；本测试锁定"只改消息、不动文件"的新契约。
 ///
@@ -337,9 +337,9 @@ async fn prune_reports_nothing_when_it_removes_nothing() {
 /// 回归（审计 A3）：写入期裁剪**只删节点、不删文件**。
 ///
 /// 旧实现在淘汰旧轮消息时按 `meta.archive_path` 物理删除 L0 存档，既把不可信的
-/// 消息 meta 当删除依据，又与 `tool_result_guard` 的每会话滚动保留职责冲突（被淘汰
-/// 的"旧轮"消息往往持有最新存档，反而被误删）。文件回收统一归口 `replace_messages`
-/// 的孤儿清理 + 守卫自身的滚动保留。
+/// 消息 meta 当删除依据，又与 `tool` 插件 L0 守卫的会话作用域滚动保留职责冲突
+/// （被淘汰的"旧轮"消息往往持有最新存档，反而被误删）。文件回收统一归口守卫
+/// 自身的滚动淘汰（D-528），写入路径不删文件。
 #[tokio::test]
 async fn prune_drops_nodes_but_never_deletes_archive_files() {
     let (session, dir, _tmp) = setup_with_config(SessionConfig {

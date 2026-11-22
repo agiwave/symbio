@@ -328,6 +328,7 @@ fn cursor_id(before: &str) -> Option<&str> {
 //   <id>/inbox[/<iid>]     → 收件箱（待消费用户消息，写即入队）
 //   <id>/subsession[/<sub>]→ 子会话清单 / 单个子会话（查看 · 删除）
 //   <id>/workdir[/<rel>]   → 工作目录树（文件可查看 / 编辑）
+//   <id>/tool_archives[/<f>]→ 工具结果超限存档（只读取回，D-528）
 //
 // **路径段一律 ASCII，中文只出现在 `title`（展示名）上**：地址要能安全地进 URL、
 // 命令行、日志与文件名，不受编码 / 输入法 / 大小写折叠的影响。标识由 `kind`
@@ -379,6 +380,9 @@ pub(crate) fn message_dir_path(session_id: &str) -> String {
 /// 与会话内部其它集合同构：`<sid>/<集合段>/<项 id>`，身份就是末段。
 /// 名字住 `plugin-api` 的词汇面（D-364），`agent` / `heartbeat` / `telegram` 共用同一常量。
 pub(crate) use symbio_plugin_api::vocab::SEG_INBOX;
+// 工具结果存档路径段（D-528）：字面量就写在这里。它是数据目录名（不含 `.` / `/`），
+// 不是挂载根名（S-010 不约束），也不另立 const——`tool` 写入端持有 `ARCHIVE_REL_DIR`
+// 那一份；两侧各写一份 const 会被 SV-001② 判成同值的两个家。
 
 /// 收件箱的**展示名**（`title`）。只影响 UI，不参与寻址。
 pub(crate) const TITLE_INBOX: &str = "收件箱";
@@ -397,6 +401,20 @@ pub(crate) fn inbox_dir_node() -> VdfsNode {
 /// 单条收件箱条目（`<sid>/inbox/<iid>`）的 provider 子树内路径
 pub(crate) fn inbox_item_path(session_id: &str, iid: &str) -> String {
     format!("{session_id}/{SEG_INBOX}/{iid}")
+}
+
+/// 工具结果存档目录的**展示名**（`title`）。只影响 UI，不参与寻址。
+pub(crate) const TITLE_TOOL_ARCHIVES: &str = "工具存档";
+
+/// 工具结果存档目录节点（`list` 与 `stat` 共用同一份形状，D-528）。
+///
+/// 它是**内部机制**（超限工具结果的全文存档，供模型按需取回），不是用户要浏览的
+/// 资源，因此 `hidden`——只影响清单；`vdfs_read` 按 `<sid>/tool_archives/<file>`
+/// 寻址照常，带 `VDFS_PARAM_WITH_HIDDEN` 的 list 也看得见。
+pub(crate) fn tool_archives_dir_node() -> VdfsNode {
+    let mut node = VdfsNode::dir("tool_archives", TITLE_TOOL_ARCHIVES, VdfsAccess::LIST);
+    node.hidden = true;
+    node
 }
 
 /// 收件箱写入的**正文** → 一条待消费的用户消息。
@@ -551,6 +569,9 @@ pub(crate) enum VdfsSessionPath<'a> {
     SubSession { id: &'a str, sub: &'a str },
     /// `<id>/workdir[/<rel>]`：工作目录树；`rel` 空 = 工作目录根
     Workdir { id: &'a str, rel: &'a str },
+    /// `<id>/tool_archives[/<file>]`：工具结果存档（只读取回，D-528）；
+    /// `rel` 空 = 存档目录根
+    ToolArchives { id: &'a str, rel: &'a str },
 }
 
 /// 解析会话挂载点内的相对路径（首段 = 会话 id，次段 = 内部区段）。
@@ -597,6 +618,10 @@ pub(crate) fn parse_session_path(path: &str) -> VdfsResult<VdfsSessionPath<'_>> 
             ))),
         },
         super::super::workdir::SEG_WORKDIR => Ok(VdfsSessionPath::Workdir {
+            id,
+            rel: sub.unwrap_or(""),
+        }),
+        "tool_archives" => Ok(VdfsSessionPath::ToolArchives {
             id,
             rel: sub.unwrap_or(""),
         }),

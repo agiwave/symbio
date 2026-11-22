@@ -21,6 +21,30 @@ provider 键，插件只经相对地址读写，物理路径只留在 provider �
 `SESSION_DIR` 保留为对外协议键，但插件内部不再拿它们寻址。身份键 `AGENT_ID` /
 `SESSION_ID` 经业务意义分析后保留，但不参与存储寻址（见 §2）。
 
+### D-528 工具结果存档归会话作用域：`tool_archives` 写在 `SESSION_VDFS`，取回走会话地址面
+
+工具结果 L0 守卫的超限全文存档（`tool_archives/`）是**会话私有数据**，落在
+`SESSION_VDFS`（根 = `session_dir`），不落在 `WORKSPACE_VDFS`（根 = `work_dir`）。
+
+判据：
+
+- **归属**：存档的生命周期与可见性都随会话——它服务的是这一会话的上下文压缩，
+  不跨会话复用。工作区作用域会让所有会话共用一个 `tool_archives/`，`ARCHIVE_KEEP`
+  的滚动淘汰因此跨会话互相挤掉；同时把会话临时数据写进用户工作区根目录，污染
+  仓库（`git status` 可见的裸露 `tool_archives/`）。
+- **写入端**：工具执行体的存档 provider 取 `ctx[SESSION_VDFS]`；缺席则降级到
+  `ctx[WORKSPACE_VDFS]`（无会话的宿主态），两者都无则不存档。相对地址仍为
+  `tool_archives/<file>`，只是根改成会话数据目录。
+- **取回端**：占位符印出的取回地址要与写入作用域同源，给出会话地址面上的
+  `<根>/session/<session_id>/tool_archives/<file>`——根名由 vdfs 插件静态声明、经
+  运行期数据取得（根名字面量只归 vdfs 插件，不在此硬编码）；会话插件的地址面暴露
+  该段（读语义），`vdfs_read` 由组合 VDFS 根解析到与写入端相同的物理文件。不印
+  物理绝对路径——虚拟地址不因机器 / 目录迁移失效，也不泄露内部布局。
+
+影响模块：`symbio-plugin-tool`（写入端 + 占位符）、`symbio-plugin-session`（地址面
+新增 `tool_archives` 读段）、两处单测与压缩相关 e2e。会话侧旧注释里的
+"每会话 `TOOL_ARCHIVE_KEEP`"由本条兑现为真实的会话作用域落点。
+
 ---
 
 ## 1. 背景与诉求

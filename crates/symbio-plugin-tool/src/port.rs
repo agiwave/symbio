@@ -55,14 +55,24 @@ use symbio_plugin_api::{
     DynVdfsProvider, Entity, ExecAbortSignal, FactDraft, LatencyTier, Plugin, PluginError,
     PluginInvokeRequest, PluginInvokeRequestExt, PluginPayload, PortErrorClass, PortExecContext,
     PortExecutor, PortInput, PortOutcome, PortProvider, Verb, ABORT_SIGNAL, AGENT_ID,
-    CAPABILITY_VISITOR, EVENT_REQUEST, EVENT_SINK, PLUGIN_ID_TOOL, SESSION_ID, TOOL_CALL_ID,
-    TOOL_NODE_ID, WORKDIR, WORKSPACE_VDFS,
+    CAPABILITY_VISITOR, EVENT_REQUEST, EVENT_SINK, PLUGIN_ID_TOOL, SESSION_ID, SESSION_VDFS,
+    TOOL_CALL_ID, TOOL_NODE_ID, WORKDIR, WORKSPACE_VDFS,
 };
 
-/// 工作区作用域 provider（D-515）：存档走它，不再拿 `scratch_dir` 拼物理路径。
-/// 宿主已在上下文注入三作用域 provider；这里只取本插件需要的那一个。
+/// 存档作用域 provider（D-528）：会话私有数据落 `SESSION_VDFS`（根 = session_dir）；
+/// 无会话的宿主态降级到 `WORKSPACE_VDFS`。都不在就不存档。宿主已在上下文注入三作用域
+/// provider；这里只取本插件需要的那一个，不再拿 `scratch_dir` 拼物理路径。
 fn archive_provider(exec: &PortExecContext) -> Option<DynVdfsProvider> {
-    exec.ctx.as_ref()?.get(WORKSPACE_VDFS).flatten()
+    let ctx = exec.ctx.as_ref()?;
+    ctx.get(SESSION_VDFS)
+        .flatten()
+        .or_else(|| ctx.get(WORKSPACE_VDFS).flatten())
+}
+
+/// 占位符取回地址用的会话 id（D-528）：只作地址前缀，不参与存储寻址。
+fn archive_session_id(exec: &PortExecContext) -> Option<&str> {
+    let sid = exec.session_id.trim();
+    (!sid.is_empty()).then_some(sid)
 }
 
 /// 端口名：名字住 `plugin-api` 的词汇面（D-364），提供者与消费方 import 同一常量。
@@ -921,6 +931,7 @@ async fn finish(
     success: bool,
     pending: Option<serde_json::Value>,
     provider: Option<&DynVdfsProvider>,
+    session_id: Option<&str>,
 ) -> PortOutcome {
     let (text, guard) = match &pending {
         Some(_) => (
@@ -932,7 +943,7 @@ async fn finish(
             }),
         ),
         None => {
-            let guarded = guard_result(&raw, DEFAULT_TOKEN_CAP, provider).await;
+            let guarded = guard_result(&raw, DEFAULT_TOKEN_CAP, provider, session_id).await;
             (
                 guarded.text,
                 serde_json::json!({
@@ -985,10 +996,11 @@ async fn finish_with(
     success: bool,
     pending: Option<serde_json::Value>,
     provider: Option<&DynVdfsProvider>,
+    session_id: Option<&str>,
     failure_kind: Option<&str>,
     why: &str,
 ) -> PortOutcome {
-    let mut out = finish(raw, success, pending, provider).await;
+    let mut out = finish(raw, success, pending, provider, session_id).await;
     if let Some(fact) = out.facts.first_mut().and_then(|f| f.as_object_mut()) {
         if let Some(kind) = failure_kind {
             fact.insert("failure_kind".into(), serde_json::json!(kind));
@@ -1158,6 +1170,7 @@ fn protocol_input(payload: &serde_json::Value) -> Option<ProtocolInput<'_>> {
 async fn refuse_protocol(
     protocol: ProtocolInput<'_>,
     provider: Option<&DynVdfsProvider>,
+    session_id: Option<&str>,
 ) -> Option<PortOutcome> {
     if protocol.id_missing {
         plugin_error!("tool", "[Tool] 协议失败：模型未返回工具调用 id");
@@ -1167,6 +1180,7 @@ async fn refuse_protocol(
                 false,
                 None,
                 provider,
+                session_id,
                 Some(failure_kind::ERROR),
                 "",
             )
@@ -1181,6 +1195,7 @@ async fn refuse_protocol(
                 false,
                 None,
                 provider,
+                session_id,
                 Some(failure_kind::ERROR),
                 "",
             )
@@ -1204,6 +1219,7 @@ async fn refuse_protocol(
             false,
             None,
             provider,
+            session_id,
             Some(failure_kind::ERROR),
             "参数 JSON 解析失败，未执行",
         )
@@ -1483,6 +1499,7 @@ impl ToolPort {
             .to_string();
         let original_args = artifact_args(&artifact.payload);
         let archive_vdfs = archive_provider(&exec);
+        let sid = archive_session_id(&exec);
         // 分岔的判据是事实里的 `kind`（动作闭集 `answer | approve | deny`），不是
         // 债行载荷：债表只问存在性、不读载荷，动作语义由写方落成具体事实。
         let (outcome, run_args) = match kind.as_str() {
@@ -1493,6 +1510,7 @@ impl ToolPort {
                     true,
                     None,
                     archive_vdfs.as_ref(),
+                    sid,
                 )
                 .await,
                 original_args,
@@ -1548,6 +1566,7 @@ impl ToolPort {
                         false,
                         None,
                         archive_vdfs.as_ref(),
+                        sid,
                         // 判决词（线上契约，与 `Authz::Denied{detail:"user_rejected"}` 同一词）。
                         Some("user_rejected"),
                         "",
@@ -1645,11 +1664,13 @@ impl ToolPort {
         // ⇒ 留痕但不冒充成功；这里就是派发处本身，不在它外面另补一个 if。
         let outcome = match &call.failure {
             Some(failure) => {
+                let overflow_archive = archive_provider(&exec);
                 let raw = finish_with(
                     failure.text.clone(),
                     false,
                     None,
-                    archive_provider(&exec).as_ref(),
+                    overflow_archive.as_ref(),
+                    archive_session_id(&exec),
                     Some(failure.kind),
                     "",
                 )
@@ -1768,6 +1789,7 @@ impl ToolPort {
             .cloned()
             .unwrap_or(serde_json::Value::Null);
         let archive_vdfs = archive_provider(&exec);
+        let sid = archive_session_id(&exec);
         // 授权专用入口（环的 gate 调用）：只判一次、只落一条授权事实，**不执行、
         // 不写 `sent`**。这是环上唯一的下判点——拒绝的债因此没有 `sent` 可等，
         // 由 `deny-tools` 直接以 `failed{denied}` 关账。
@@ -1793,7 +1815,7 @@ impl ToolPort {
         }
         // 协议失败：判定与措辞都在执行体（DE-048 D-312）。环只搬原始读数与兜底 id。
         if let Some(protocol) = protocol_input(&payload) {
-            if let Some(out) = refuse_protocol(protocol, archive_vdfs.as_ref()).await {
+            if let Some(out) = refuse_protocol(protocol, archive_vdfs.as_ref(), sid).await {
                 return out;
             }
         }
@@ -1834,6 +1856,7 @@ impl ToolPort {
                     false,
                     None,
                     archive_vdfs.as_ref(),
+                    sid,
                     Some("blocked"),
                     &why,
                 )
@@ -1849,6 +1872,7 @@ impl ToolPort {
                 false,
                 None,
                 archive_vdfs.as_ref(),
+                sid,
                 Some(failure_kind::ERROR),
                 "",
             )
@@ -1912,6 +1936,7 @@ impl ToolPort {
                 false,
                 None,
                 archive_vdfs.as_ref(),
+                sid,
             )
             .await;
         };
@@ -1923,6 +1948,7 @@ impl ToolPort {
                     false,
                     None,
                     archive_vdfs.as_ref(),
+                    sid,
                 )
                 .await
             }
@@ -2173,7 +2199,7 @@ impl ToolPort {
                         &ctx,
                     )
                     .await;
-                    return finish(text, false, None, archive_vdfs.as_ref()).await;
+                    return finish(text, false, None, archive_vdfs.as_ref(), sid).await;
                 }
                 _ = tokio::time::sleep(std::time::Duration::from_secs(TOOL_EXEC_IDLE_TIMEOUT_SECS)) => {
                     let now = progress.emitted();
@@ -2200,7 +2226,7 @@ impl ToolPort {
                         &ctx,
                     )
                     .await;
-                    return finish(text, false, None, archive_vdfs.as_ref()).await;
+                    return finish(text, false, None, archive_vdfs.as_ref(), sid).await;
                 }
             }
         };
@@ -2220,7 +2246,7 @@ impl ToolPort {
                                 &ctx,
                             )
                             .await;
-                            return finish(text, false, None, archive_vdfs.as_ref()).await;
+                            return finish(text, false, None, archive_vdfs.as_ref(), sid).await;
                         }
                     };
                     let pending = pending_prompt_from(&data);
@@ -2273,7 +2299,7 @@ impl ToolPort {
                         &ctx,
                     )
                     .await;
-                    finish(res, true, pending, archive_vdfs.as_ref()).await
+                    finish(res, true, pending, archive_vdfs.as_ref(), sid).await
                 }
                 _ => {
                     let text = "Error: Unexpected payload type".to_string();
@@ -2285,7 +2311,7 @@ impl ToolPort {
                         &ctx,
                     )
                     .await;
-                    finish(text, false, None, archive_vdfs.as_ref()).await
+                    finish(text, false, None, archive_vdfs.as_ref(), sid).await
                 }
             },
             Err(e) => {
@@ -2306,7 +2332,7 @@ impl ToolPort {
                     &ctx,
                 )
                 .await;
-                finish(text, false, None, archive_vdfs.as_ref()).await
+                finish(text, false, None, archive_vdfs.as_ref(), sid).await
             }
         }
     }

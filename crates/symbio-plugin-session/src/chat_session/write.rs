@@ -435,11 +435,11 @@ impl PersistentChatSession {
 
         if max_turns > 0 && user_indices.len() > max_turns {
             let start_idx = user_indices[user_indices.len() - max_turns];
-            // 轮次 FIFO 淘汰只删消息节点，**不动** `tool_archives/` 归档文件（审计 A3）。
-            // 理由：归档的磁盘生命周期已有专职策略——`tool_result_guard` 按修改时间
-            // 保留每会话最新 [`TOOL_ARCHIVE_KEEP`] 个文件（滚动淘汰）。写入路径上再删一遍
-            // 既与"淘汰旧轮"无关（旧轮引用的往往是最新的那几个存档），又让配置项
-            // `max_messages` 变成静默删文件的破坏性操作。
+            // 轮次 FIFO 淘汰只删消息节点，**不动** `tool_archives/` 存档文件（审计 A3）。
+            // 理由：存档的磁盘生命周期归 `tool` 插件的 L0 守卫（`ARCHIVE_KEEP`，会话
+            // 作用域，D-528）按修改时间滚动淘汰。写入路径上再删一遍既与"淘汰旧轮"
+            // 无关（旧轮引用的往往是最新的那几个存档），又让配置项 `max_messages`
+            // 变成静默删文件的破坏性操作。
             let dropped = start_idx;
             removed_ids.extend(session.messages[..start_idx].iter().map(|m| m.id.clone()));
             session.messages.drain(0..start_idx);
@@ -499,8 +499,8 @@ impl PersistentChatSession {
         assign_seq(&mut messages, max_seq(&session.messages));
         // 孤儿存档：`replace_all` 整体重写消息列表（L2 语义压缩 /
         // Streaming 清理），被丢弃消息引用的 L0 `tool_archives/` 存档随之失去引用。
-        // 此处**只统计不删除**（审计 A3）：归档的磁盘生命周期由 `tool_result_guard`
-        // 的每会话滚动保留（最新 `TOOL_ARCHIVE_KEEP` 个）统一负责，写入路径不再
+        // 此处**只统计不删除**（审计 A3）：存档的磁盘生命周期归 `tool` 插件的
+        // L0 守卫（会话作用域的 `ARCHIVE_KEEP`，D-528）统一负责，写入路径不再
         // 承担删文件职责——历史上这里需要在删除前做"拒绝 `..` + 限定 archives 根"
         // 的双重路径校验，正是因为把不可信输入变成了删除动作。
         if let Some(dir) = self.store.session_dir(&self.session_id) {
@@ -582,9 +582,9 @@ pub(super) fn ensure_durable_states(
 /// 置 `false` 后工具链裁剪完全由请求视图层（`build_request_view`）承担，
 /// 存储与前端节点树可回看全部历史。
 ///
-/// **只删节点、不删文件**（审计 A3）：`meta.archive_path` 指向的 L0 归档由
-/// `tool_result_guard` 的每会话滚动保留（最新 `TOOL_ARCHIVE_KEEP` 个，按修改时间）
-/// 统一回收。写入路径此前把不可信的消息 meta 当删除依据（需额外做 `..` 与根目录
+/// **只删节点、不删文件**（审计 A3）：`meta.archive_path` 指向的 L0 存档由
+/// `tool` 插件的 L0 守卫按会话作用域的 `ARCHIVE_KEEP`（D-528，按修改时间）统一
+/// 回收。写入路径此前把不可信的消息 meta 当删除依据（需额外做 `..` 与根目录
 /// 双重校验），且"淘汰旧轮"删掉的常是最新存档——职责错位，故收敛为纯节点裁剪。
 ///
 /// 返回**被删节点 id**（顺序 = 原列表顺序）——调用方据此落 `message.removed` 事实。

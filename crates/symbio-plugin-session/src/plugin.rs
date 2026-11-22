@@ -722,8 +722,8 @@ mod words;
 pub(crate) use self::nodes::{
     inbox_dir_node, inbox_item_node, inbox_item_path, internal_dirs, message_node, message_of,
     message_path, message_text, messages_dir_node, ordered, overlay_live, parse_inbox_message,
-    parse_session_path, session_content, session_node, subtree_nodes, transcript_window,
-    trigger_declaration, window_params, SessionRuntime, VdfsSessionPath,
+    parse_session_path, session_content, session_node, subtree_nodes, tool_archives_dir_node,
+    transcript_window, trigger_declaration, window_params, SessionRuntime, VdfsSessionPath,
 };
 pub(crate) use self::words::{
     EXT_MESSAGE, EXT_SESSION, KIND_INBOX, KIND_MESSAGES, OUTCOME_ABORTED, OUTCOME_COMPLETED,

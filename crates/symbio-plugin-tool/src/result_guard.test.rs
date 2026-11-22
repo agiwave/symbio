@@ -3,13 +3,19 @@
 //! 与实现**同级**分文件（约定：`X.rs` + `X.test.rs`，见 `CONTRIBUTING.md`）：
 //! `result_guard.rs` 只保留生产代码，测试全部放本文件。
 //!
-//! D-515 后存档走 `WORKSPACE_VDFS`：这里用 `ScopeDirVdfs` 绑一个临时根，
-//! 既验证虚拟地址（提示词里印的那条），也验证它确实落到 provider 根下。
+//! D-528 存档走 `SESSION_VDFS`（根 = 会话目录）：这里用 `ScopeDirVdfs` 绑一个临时根
+//! 模拟会话作用域，既验证虚拟地址（提示词里印的那条），也验证它确实落到 provider 根下。
 
 use super::*;
 use std::path::{Path, PathBuf};
 use symbio_plugin_api::VdfsContext;
 use symbio_providers::ScopeDirVdfs;
+
+// 本 crate 的测试二进制不链接 vdfs 插件，取回地址的根名判据需要一条静态声明才测得到。
+// 名字取测试专用值——根名字面量只归 vdfs 插件（`fs::VDFS_ADDR_ROOT`），这里不写它。
+symbio_plugin_api::inventory::submit! {
+    symbio_plugin_api::AddrRootDecl(".test-vdfs-root")
+}
 
 fn temp_dir(tag: &str) -> PathBuf {
     let dir = std::env::temp_dir().join(format!("symbio_guard_{tag}_{}", std::process::id()));
@@ -39,7 +45,7 @@ async fn list_count(provider: &DynVdfsProvider) -> usize {
 
 #[tokio::test]
 async fn short_text_passes_through() {
-    let g = guard_result("hello world", 8192, None).await;
+    let g = guard_result("hello world", 8192, None, None).await;
     assert!(!g.truncated);
     assert_eq!(g.text, "hello world");
 }
@@ -51,7 +57,7 @@ async fn long_text_is_truncated_and_keeps_head_tail() {
     let big = line.repeat(2000);
     let dir = temp_dir("truncate");
     let provider = provider_in(&dir);
-    let g = guard_result(&big, 500, Some(&provider)).await;
+    let g = guard_result(&big, 500, Some(&provider), None).await;
     assert!(g.truncated);
     assert!(g.text.contains("[... 已省略"));
     // 统一取回协议：占位符含存档相对地址与 vdfs_read 取回入口
@@ -69,7 +75,7 @@ async fn single_long_line_is_char_truncated() {
     let huge = format!("{{\"entries\":[\"{}\"]}}", "x".repeat(10_000));
     let dir = temp_dir("singleline");
     let provider = provider_in(&dir);
-    let g = guard_result(&huge, 300, Some(&provider)).await;
+    let g = guard_result(&huge, 300, Some(&provider), None).await;
     assert!(g.truncated, "单行超预算应触发存档截断");
     assert!(g.text.contains("vdfs_read"), "占位提示应存在");
     assert!(
@@ -156,12 +162,12 @@ async fn prune_keeps_only_latest_files() {
     let _ = std::fs::remove_dir_all(&dir);
 }
 
-/// 存档只落在 provider 根下（工作区作用域），地址是相对地址而非物理路径。
+/// 存档只落在 provider 根下（会话作用域），地址是相对地址而非物理路径。
 #[tokio::test]
-async fn archive_lives_under_the_workspace_scope() {
+async fn archive_lives_under_the_session_scope() {
     let dir = temp_dir("scope");
     let provider = provider_in(&dir);
-    let g = guard_result(&"line\n".repeat(3000), 500, Some(&provider)).await;
+    let g = guard_result(&"line\n".repeat(3000), 500, Some(&provider), None).await;
     assert!(g.truncated);
     let rel = g.archive_path.expect("有 provider 时应产出存档地址");
     assert!(
@@ -176,12 +182,41 @@ async fn archive_lives_under_the_workspace_scope() {
     let _ = std::fs::remove_dir_all(&dir);
 }
 
+/// D-528：有会话 id 时，占位符印会话地址面虚拟地址，取回端与写入端同源。
+#[tokio::test]
+async fn retrieval_address_uses_session_vaddr() {
+    let dir = temp_dir("vaddr");
+    let provider = provider_in(&dir);
+    let g = guard_result(
+        &"line\n".repeat(3000),
+        500,
+        Some(&provider),
+        Some("sess-abc"),
+    )
+    .await;
+    assert!(g.truncated);
+    let rel = g.archive_path.expect("有 provider 时应产出存档地址");
+    // 占位符取回地址 = 运行期根名 + session 挂载段 + 会话 id + 相对地址。
+    // 根名经 descend_addr 从 vdfs 插件的静态声明取（测试注入 `.test-vdfs-root`），不写字面量。
+    let session_mount = symbio_plugin_api::descend_addr("", symbio_plugin_api::PLUGIN_ID_SESSION);
+    let vaddr = retrieval_address(&rel, Some("sess-abc"));
+    assert_eq!(vaddr, format!("{session_mount}/sess-abc/{rel}"));
+    assert!(
+        g.text.contains(&vaddr),
+        "占位符应印会话地址面虚拟地址: {}",
+        g.text
+    );
+    // 无会话 id 时退回相对地址（宿主态按 workdir 解析）
+    assert_eq!(retrieval_address(&rel, None), rel);
+    let _ = std::fs::remove_dir_all(&dir);
+}
+
 /// 没有工作区作用域 → 不存档，占位符如实说明（不再退回物理临时目录）。
 #[tokio::test]
 async fn no_scope_means_no_archive() {
-    let g = guard_result(&"line\n".repeat(3000), 500, None).await;
+    let g = guard_result(&"line\n".repeat(3000), 500, None, None).await;
     assert!(g.truncated);
     assert!(g.archive_path.is_none());
-    assert!(g.text.contains("完整输出未存档（无工作区作用域）"));
+    assert!(g.text.contains("完整输出未存档（无可写作用域）"));
     assert!(!g.text.contains("vdfs_read"));
 }

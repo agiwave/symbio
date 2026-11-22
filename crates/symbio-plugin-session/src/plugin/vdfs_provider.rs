@@ -65,6 +65,9 @@ impl VdfsProvider for SessionPlugin {
                 self.sub_session_at(path, id, sub, req).await
             }
             VdfsSessionPath::Workdir { id, rel } => self.workdir_at(path, id, rel, req).await,
+            VdfsSessionPath::ToolArchives { id, rel } => {
+                self.tool_archives_at(path, id, rel, req).await
+            }
         }
     }
 }
