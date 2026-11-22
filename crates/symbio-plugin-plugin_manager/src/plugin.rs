@@ -65,7 +65,7 @@ use symbio_plugin_api::{
     VdfsAccess, VdfsContent, VdfsContext, VdfsError, VdfsItem, VdfsNewType, VdfsNode, VdfsProvider,
     VdfsRequest, VdfsResponse, VdfsResult, VDFS_ACTION_DISABLE, VDFS_ACTION_ENABLE,
     VDFS_ACTION_PLUGINS, VDFS_EXT_FORM, VDFS_PLUGINS_FIELD, VDFS_PLUGIN_NAME_FIELD,
-    VDFS_PLUGIN_PROVIDER_FIELD, VDFS_STATUS_ACTIVE, VDFS_STATUS_DISABLED, VDFS_STATUS_FAILED,
+    VDFS_PLUGIN_PROVIDER_FIELD, VDFS_STATUS_NONE,
 };
 
 /// 配置型插件的专属入口（固定清单）：节点挂在本插件清单里，**归属与数据权威**归
@@ -176,8 +176,11 @@ fn leaf(path: &str) -> VdfsResult<&str> {
 /// `access` 恒为 `rw`：条目的正文（那份配置）是可改的，与它是不是必需无关——「不可
 /// 删除」由动作的条件表达（见 [`management_actions`]），不靠把节点降成只读。
 ///
-/// 状态三态：`active`（启用且已挂载）/ `disabled`（停用）/ `failed`（想装它，装配失败，
-/// 原因写在描述里）。前两种由装配位给出，第三种只在容器给了失败原因时出现。
+/// **显式声明无状态**（[`VDFS_STATUS_NONE`]）：插件条目没有「运行中 / 就绪」这种会变化
+/// 的运行时状态——启用 / 停用是装配位，不是运行态；装配失败的原因随节点描述呈现。
+/// 不清掉节点 `status` 的缺省（`active`）就会在列表每一项上画一个绿点，那是凭空造出来的
+/// 信息（见 `docs/003-design/010-VDFS前端页面规范.md` §4.2）。启用 / 停用的判定仍在
+/// 动作的条件里（见 `read` 的投影键），不依赖状态点。
 fn entry_node(entry: &PluginEntry, config: Option<VdfsItem>) -> VdfsNode {
     let mut definition = match config.as_ref() {
         Some(item) => item
@@ -219,16 +222,11 @@ fn entry_node(entry: &PluginEntry, config: Option<VdfsItem>) -> VdfsNode {
         .as_ref()
         .and_then(|c| c.node.description.clone())
         .or_else(|| entry.description.clone());
-    // 第三种状态：装配失败。判据的顺序就是它的语义——`enabled` 是磁盘上的**意愿**，
-    // 而失败原因是**这次装配的读数**：用户想装它、它没起来，那「装配失败」比
-    // 「已启用」更接近他站在列表前需要知道的事。（停用的插件没有原因，见
-    // `PluginEntry::mount_error`——它压根没被尝试过，那是「停用」不是「失败」。）
-    n.status = match &entry.mount_error {
-        Some(_) => VDFS_STATUS_FAILED,
-        None if entry.enabled => VDFS_STATUS_ACTIVE,
-        None => VDFS_STATUS_DISABLED,
-    }
-    .to_string();
+    // 条目**显式无状态**：启用 / 停用是装配位、不是运行态，装配失败原因随描述呈现，
+    // 没有「运行中 / 就绪」这种会变化的量可画。留着缺省的 `active` 会在每一项上画
+    // 一个绿点——那是凭空造出来的信息（规范 §4.2）。装配态仍由 read 的投影键与
+    // 动作条件表达（见 `management_actions`），不依赖状态点。
+    n.status = VDFS_STATUS_NONE.to_string();
     if let Some(reason) = &entry.mount_error {
         // 原因写进描述：列表行与详情头部都读这一条，不必为它新增一个投影键
         // 再让前端多认一个字段——「为什么不见了」这条事实的落点就是节点的描述。

@@ -532,6 +532,43 @@ describe('useVdfs 新建 = 选中一张草稿节点（与「选中一项」同�
 
     wrapper.unmount()
   })
+
+  it('★ 换类别的那一拍：自述还没跟上 ⇒ canCreate 关、creatableType 空（MCP→Skill 串类回归）', async () => {
+    // 与 cwdAddr 那组用例同源：换地址时 `cwd` 立刻变、`cwdNode`/`cwdAddr` 要等
+    // list 回执。若不核同源，Skill 页那一拍会拿到 MCP 的 new_type，于是顶着
+    // 「新建 MCP」、点下去也开 MCP 的草稿。
+    const gates: Array<() => void> = []
+    // 只有切到 skill 之后的那次 list 才扣住；初始 model 的回执必须立即返回，
+    // 否则连起点都拿不到自述。
+    let switched = false
+    mocks.listVdfs.mockImplementation(async (_reason: unknown, path: string) => {
+      if (switched && path === '@vfs/skill') await new Promise<void>((resolve) => gates.push(resolve))
+      return { path, node: dirNode(), items: [] }
+    })
+
+    const addrRef = ref(MODEL_DIR)
+    const { api, wrapper } = mountHost(addrRef)
+    await settle()
+    expect(api.canCreate.value).toBe(true)
+    expect(api.creatableType.value?.title).toBe('模型')
+
+    switched = true
+    addrRef.value = '@vfs/skill'
+    await nextTick()
+    // 地址变了、自述还停在 model —— 这一拍绝不能把 model 的类型套到 skill 上
+    expect(api.cwd.value).toBe('@vfs/skill')
+    expect(api.cwdAddr.value, '自述还是上一份').toBe(MODEL_DIR)
+    expect(api.creatableType.value, '那一拍没有可信的新建类型').toBeUndefined()
+    expect(api.canCreate.value, '新建按钮该先缺席').toBe(false)
+
+    // 放行回执：对齐后恢复
+    switched = false
+    for (const open of gates) open()
+    await settle()
+    await settle()
+    expect(api.cwdAddr.value).toBe('@vfs/skill')
+    wrapper.unmount()
+  })
 })
 
 /**

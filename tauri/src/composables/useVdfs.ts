@@ -1003,8 +1003,21 @@ export function useVdfs(opts: UseVdfsOptions) {
   // 曾经它被表达成类型的第二种「入口形态」，于是前端要先问「选哪种方式」，
   // 还得为类型补上 `source` / `import` 两个与呈现无关的字段（见 D-029）。
 
-  /** 当前目录可接受的新建类型（至多一个；`undefined` = 该目录不可新建） */
-  const creatableType = computed<VdfsNewType | undefined>(() => cwdNode.value?.new_type)
+  /**
+   * 当前目录可接受的新建类型（至多一个；`undefined` = 该目录不可新建）。
+   *
+   * ⚠️ **自述必须与当前目录同源**：换类别时 `cwd` 立刻变，而 `cwdNode` 要等
+   * `refresh()` 的 list 回执才更新（见 `cwdAddr` 的说明），中间那一拍它还是
+   * **上一个类别**的自述。若照直取 `cwdNode.new_type`，从 MCP 切到 Skill 的
+   * 那一拍里 Skill 页会顶着「新建 MCP」的标题，点下去开的也是 MCP 的草稿
+   * ——用户报的「Mcp 项和 Skill 项都显示新建 Mcp、Skill 功能出不来」正是这条
+   * 一步滞后。判据与「当前空间声明」（`VdfsWorkbench`）同源：`cwdAddr === cwd`
+   * 才认这份自述，否则当作「还没拿到」——新建按钮与自动草稿都缺席一拍，
+   * 回执到了自然补齐，绝不会串到上一类。
+   */
+  const creatableType = computed<VdfsNewType | undefined>(() =>
+    cwdAddr.value === cwd.value ? cwdNode.value?.new_type : undefined
+  )
 
   /** 是否可新建（添加按钮可见性；机制只认节点声明） */
   const canCreate = computed(() => Boolean(creatableType.value))

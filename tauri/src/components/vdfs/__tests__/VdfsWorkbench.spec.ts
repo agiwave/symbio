@@ -173,10 +173,17 @@ function installStub(
     saveText: vi.fn(),
     removeSelected: vi.fn(),
     // 可新建类型**来自当前目录节点的自述**（前端不做任何推导）——与真实现同源：
-    // `useVdfs.creatableType = cwdNode.new_type`。桩里必须用同一个来源，
-    // 否则「进入会话空间自动开草稿」那条链会因为桩与真实现不同源而测不出来。
-    creatableType: computed(() => opts.newType ?? cwdNode.value?.new_type ?? undefined),
-    canCreate: computed(() => Boolean(opts.newType ?? cwdNode.value?.new_type)),
+    // `useVdfs.creatableType` 先核 `cwdAddr === cwd`（自述与当前目录同源），
+    // 再取 `cwdNode.new_type`。桩里必须用同一条来源，否则「换目录那一拍拿上一栏
+    // 自述开草稿 / 顶着上一栏标题」这条回归会因为桩与真实现不同源而测不出来。
+    creatableType: computed(() =>
+      cwdAddr.value !== cwd.value
+        ? undefined
+        : (opts.newType ?? cwdNode.value?.new_type ?? undefined)
+    ),
+    canCreate: computed(() =>
+      cwdAddr.value === cwd.value && Boolean(opts.newType ?? cwdNode.value?.new_type)
+    ),
     draftSeq: ref(0),
     ...hoisted.fns,
   }
@@ -223,6 +230,41 @@ describe('VdfsWorkbench 新建入口', () => {
   it('未声明可新建类型 ⇒ 没有按钮（机制只认节点声明，不做任何回退）', () => {
     installStub({ newType: null })
     expect(newButton(bench())).toBeUndefined()
+  })
+
+  it('★ 换类别的那一拍不得顶着**上一类**的标题（MCP → Skill 串类回归）', async () => {
+    // 用户报的现象：左栏 Mcp 项与 Skill 项都显示「新建Mcp」，Skill 的功能出不来。
+    // 根因：`cwdNode` 是异步 list 回执带来的滞后自述。从 MCP 切到 Skill 时
+    // `cwd` 立刻变、自述还停在 MCP，若照直取 `cwdNode.new_type`，Skill 页那一拍
+    // 顶着「新建 MCP」，点下去开的也是 MCP 的草稿。
+    const mcpType: VdfsNewType = { ext: 'mcp', title: 'MCP' }
+    const skillType: VdfsNewType = { ext: 'skill', title: '技能' }
+    installStub({
+      cwd: '@vfs/mcp',
+      cwdNode: {
+        path: '@vfs/mcp', name: 'mcp', title: 'MCP',
+        kind: 'dir', status: '', access: 'l', new_type: mcpType,
+      },
+    })
+    const w = bench()
+    expect(newButton(w)?.attributes('title'), 'MCP 页显示自己的标题').toBe('新建 MCP')
+
+    // 切到 Skill：地址先变，自述还是 MCP 的（cwdAddr 仍停在 @vfs/mcp）
+    stubRefs!.cwd.value = '@vfs/skill'
+    await nextTick()
+    expect(
+      newButton(w),
+      '自述没跟上之前按钮该先缺席，而不是拿 MCP 的标题冒充 Skill',
+    ).toBeUndefined()
+
+    // 自述回来（cwdAddr 与 cwd 同源，且换成 Skill 的类型）⇒ 标题与类型都切过来
+    stubRefs!.cwdAddr.value = '@vfs/skill'
+    stubRefs!.cwdNode.value = {
+      path: '@vfs/skill', name: 'skill', title: '技能',
+      kind: 'dir', status: '', access: 'l', new_type: skillType,
+    }
+    await nextTick()
+    expect(newButton(w)?.attributes('title'), 'Skill 页显示自己的标题').toBe('新建 技能')
   })
 
   it('点「新建」**直接进详情页**：一次无参调用，没有"选方式"这一步', async () => {

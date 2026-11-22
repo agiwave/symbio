@@ -332,9 +332,9 @@ async fn list_hides_required_plugins_without_config() {
     );
 }
 
-/// 装配态即节点状态：启用 / 停用 / 装配失败各画各的
+/// 条目显式无状态：启用 / 停用 / 装配失败都不画状态点，失败原因仍随描述呈现
 #[tokio::test]
-async fn entry_status_follows_assembly_state() {
+async fn entry_has_no_status_dot_in_any_assembly_state() {
     let fake = Arc::new(FakeRegistry::new(vec![
         entry("alpha", "alpha_factory", false, true),
         entry("beta", "beta_factory", false, false),
@@ -342,17 +342,16 @@ async fn entry_status_follows_assembly_state() {
     ]));
     let p = plugin_with(fake);
 
-    assert_eq!(stat(&p, &vctx(), "alpha").await.status, VDFS_STATUS_ACTIVE);
-    assert_eq!(
-        stat(&p, &vctx(), "beta").await.status,
-        VDFS_STATUS_DISABLED,
-        "停用的插件在清单里仍在，但状态是停用"
-    );
+    // 三种装配态都不画点——启用 / 停用是装配位、不是运行态，留着缺省的
+    // active 会在列表每一项上画一个绿点（凭空造出来的信息）。
+    for name in ["alpha", "beta", "gamma"] {
+        assert_eq!(
+            stat(&p, &vctx(), name).await.status,
+            VDFS_STATUS_NONE,
+            "{name} 不应有状态点"
+        );
+    }
     let gamma = stat(&p, &vctx(), "gamma").await;
-    assert_eq!(
-        gamma.status, VDFS_STATUS_FAILED,
-        "启用着却没挂上、且容器给了原因 ⇒ 第三种状态，不再和「已启用」混成一个点"
-    );
     assert!(
         gamma
             .description
