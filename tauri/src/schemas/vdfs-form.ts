@@ -67,6 +67,22 @@ export interface DetailOption {
 }
 
 /**
+ * 表格列定义（`widget = 'table'`）——机制原生、零业务语义。
+ *
+ * 任何插件要编辑「对象数组」都能声明列；渲染器按列生成可增删行的表格，
+ * 不理解列内容属于什么资源。`key` 是行对象字段名，`widget` ∈ text|select|number，
+ * `options` 供 select，`default` 是新增行时该列初始值。
+ */
+export interface DetailColumn {
+  key: string
+  label: string
+  widget?: string
+  options?: DetailOption[]
+  default?: unknown
+  placeholder?: string
+}
+
+/**
  * 表单字段定义。widget ∈ text|password|number|select|textarea|toggle|datalist|list|map|static|path|form
  * 结构化 widget 表单模型约定（渲染器与后端 validate_manifest 两侧一致）：
  * - list：字符串数组，编辑态每行一项
@@ -122,6 +138,11 @@ export interface DetailField {
    * 「值→标签」查表（`String(代表值)` 匹配）⇒ 仍无则回落 `label`。
    */
   form?: DetailDefinition
+  /**
+   * widget = 'table'：本字段值是对象数组，列由这份列定义描述。
+   * 与 'form' 同属结构化 widget，区别在数组 vs 单对象；保存随外层一次提交。
+   */
+  columns?: DetailColumn[]
 }
 
 /** 分区（可折叠） */
@@ -630,4 +651,34 @@ export function parseJsonText(text: unknown): { ok: boolean; value?: unknown; er
   } catch (e) {
     return { ok: false, error: e instanceof Error ? e.message : String(e) }
   }
+}
+
+// ---------------------------------------------------------------------------
+// table widget：可增删行的对象数组（编辑态 = 行对象数组，存储态同形）
+// ---------------------------------------------------------------------------
+//
+// 与 json 不同，table 的编辑态就是**结构化对象数组**本身（不是文本）。渲染器
+// 按列的 `widget` 给每个单元格渲染 input/select；这里只提供三个纯函数：行归一化、
+// 增行、删行。规则在此、状态在组件，可脱离 Vue 单测。
+
+/** 存储值 → 行数组（非法值归一成空表，页面永不空白） */
+export function tableRows(v: unknown): Record<string, unknown>[] {
+  if (!Array.isArray(v)) return []
+  return v.filter((r) => r !== null && typeof r === 'object' && !Array.isArray(r)) as Record<string, unknown>[]
+}
+
+/** 按列定义造一行（每列取 default，缺省空串） */
+export function tableNewRow(cols: DetailColumn[] | undefined): Record<string, unknown> {
+  const row: Record<string, unknown> = {}
+  for (const c of cols ?? []) row[c.key] = c.default ?? ''
+  return row
+}
+
+/** 删第 i 行（越界 / 非法 i 原样返回，不抛） */
+export function tableRemoveRow(
+  rows: Record<string, unknown>[],
+  i: number,
+): Record<string, unknown>[] {
+  if (!Number.isInteger(i) || i < 0 || i >= rows.length) return rows
+  return rows.filter((_, idx) => idx !== i)
 }

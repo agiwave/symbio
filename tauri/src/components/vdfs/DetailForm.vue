@@ -101,6 +101,64 @@
               </button>
             </div>
 
+            <!-- table（对象数组：按 columns 渲染可增删行表格） -->
+            <div v-else-if="specOf(f).tag === 'table'" class="table-widget">
+              <table class="table-grid">
+                <thead>
+                  <tr>
+                    <th v-for="c in f.columns ?? []" :key="c.key">{{ c.label }}</th>
+                    <th class="table-ops-head" aria-label="操作"></th>
+                  </tr>
+                </thead>
+                <tbody>
+                  <tr v-for="(row, ri) in tableRowsOf(f)" :key="ri">
+                    <td v-for="c in f.columns ?? []" :key="c.key">
+                      <select
+                        v-if="(c.widget || 'text') === 'select'"
+                        v-model="row[c.key]"
+                        :aria-label="c.label"
+                        :disabled="fieldDisabled(f)"
+                      >
+                        <option v-for="o in c.options ?? []" :key="o.value" :value="o.value">
+                          {{ o.label }}
+                        </option>
+                      </select>
+                      <input
+                        v-else
+                        v-model="row[c.key]"
+                        :type="(c.widget || 'text') === 'number' ? 'number' : 'text'"
+                        :aria-label="c.label"
+                        :placeholder="c.placeholder ?? ''"
+                        :disabled="fieldDisabled(f)"
+                      />
+                    </td>
+                    <td class="table-ops">
+                      <button
+                        type="button"
+                        class="icon-btn danger"
+                        :title="`删除第 ${ri + 1} 行`"
+                        :disabled="fieldDisabled(f)"
+                        @click="removeTableRow(f, ri)"
+                      >
+                        ×
+                      </button>
+                    </td>
+                  </tr>
+                </tbody>
+              </table>
+              <p v-if="tableRowsOf(f).length === 0" class="table-empty">
+                暂无行，点击「添加一行」开始配置
+              </p>
+              <button
+                type="button"
+                class="table-add"
+                :disabled="fieldDisabled(f)"
+                @click="addTableRow(f)"
+              >
+                + 添加一行
+              </button>
+            </div>
+
             <!-- toggle -->
             <label v-else-if="specOf(f).tag === 'toggle'" class="toggle">
               <input
@@ -262,6 +320,9 @@ import {
   evalDetailCondition,
   parseJsonText,
   projectDetailActions,
+  tableNewRow,
+  tableRemoveRow,
+  tableRows,
   DETAIL_PICK_DIRECTORY,
   type DetailPick,
 } from '@/schemas/vdfs-form'
@@ -468,6 +529,25 @@ function closeSubForm() {
 function onSubSave(values: Record<string, unknown>) {
   if (subField.value) form[subField.value.key] = values
   subField.value = null
+}
+
+// ==================== 表格 widget（对象数组）的状态编排 ====================
+//
+// 纯函数规则住在 `schemas/vdfs-form`（tableRows / tableNewRow / tableRemoveRow），
+// 本组件只做「读表单模型 → 改表单模型」的状态编排。`v-model` 直接绑定行对象，
+// 因此单元格输入会写回 form[f.key] 里的同一批对象，随外层一次提交。
+function tableRowsOf(f: DetailField): Record<string, unknown>[] {
+  return tableRows(form[f.key])
+}
+
+function addTableRow(f: DetailField) {
+  const rows = tableRowsOf(f)
+  rows.push(tableNewRow(f.columns))
+  form[f.key] = rows
+}
+
+function removeTableRow(f: DetailField, i: number) {
+  form[f.key] = tableRemoveRow(tableRowsOf(f), i)
 }
 
 // ==================== widget 查表（呈现与编解码的唯一来源） ====================
@@ -1047,6 +1127,68 @@ watch(
   align-items: center;
 }
 .input-row input { flex: 1; min-width: 0; }
+
+/* 表格 widget（对象数组）：按列渲染、可增删行 */
+.table-widget {
+  width: 100%;
+  display: flex;
+  flex-direction: column;
+  gap: 0.4rem;
+}
+.table-grid {
+  width: 100%;
+  border-collapse: collapse;
+  font-size: var(--font-size-sm);
+}
+.table-grid th,
+.table-grid td {
+  border: 1px solid var(--border-subtle);
+  padding: 0.3rem 0.45rem;
+  text-align: left;
+  vertical-align: middle;
+}
+.table-grid th {
+  color: var(--text-secondary);
+  font-weight: var(--font-weight-medium);
+  background: var(--surface-sunken);
+  white-space: nowrap;
+}
+.table-grid input,
+.table-grid select {
+  width: 100%;
+  min-width: 5rem;
+  border: 1px solid var(--border-default);
+  border-radius: var(--radius-md);
+  padding: 0.3rem 0.4rem;
+  font-size: var(--font-size-sm);
+  background: var(--surface-panel);
+  color: var(--text-primary);
+  box-sizing: border-box;
+}
+.table-ops-head,
+.table-ops {
+  width: 2.2rem;
+  text-align: center;
+}
+.table-empty {
+  margin: 0;
+  font-size: var(--font-size-xs);
+  color: var(--text-muted);
+}
+.table-add {
+  align-self: flex-start;
+  border: 1px dashed var(--border-strong);
+  background: transparent;
+  color: var(--text-secondary);
+  border-radius: var(--radius-md);
+  padding: 0.3rem 0.7rem;
+  font-size: var(--font-size-sm);
+  cursor: pointer;
+}
+.table-add:hover {
+  color: var(--accent);
+  border-color: var(--accent);
+}
 
 /* 结构化子对象（widget = form）：一行摘要 + 打开入口 */
 .sub-summary {

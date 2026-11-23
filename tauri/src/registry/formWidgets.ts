@@ -47,6 +47,7 @@ export type FormWidget =
   | 'path'
   | 'form'
   | 'json'
+  | 'table'
 
 /**
  * 呈现组 —— 模板真正分派的东西。
@@ -58,8 +59,9 @@ export type FormWidget =
  * - `input`    单行输入（text / password / number / datalist / path 共用）
  * - `form`     结构化子对象：值是一个对象，形状由字段 `form` 子定义描述
  *              （渲染为「摘要 + 打开子表单」，见 `DetailForm`）
+ * - `table`    对象数组：值由字段 `columns` 描述列，渲染为可增删行的表格
  */
-export type FormWidgetTag = 'static' | 'toggle' | 'select' | 'textarea' | 'input' | 'form'
+export type FormWidgetTag = 'static' | 'toggle' | 'select' | 'textarea' | 'input' | 'form' | 'table'
 
 export interface FormWidgetSpec {
   tag: FormWidgetTag
@@ -136,6 +138,12 @@ const WIDGET_SPECS: Record<FormWidget, FormWidgetSpec> = {
     fullWidth: true, readonly: false, omitWhenEmpty: true,
     placeholder: 'JSON 对象或数组；留空 = 不限制',
   },
+  // 表格：对象数组。编辑态与存储态都是行对象数组，列由字段 columns 声明，
+  // 渲染器据此画可增删行表格。初始值空表，天然占整行。
+  table: {
+    tag: 'table', initial: [], toEdit: identity, fromEdit: identity,
+    fullWidth: true, readonly: false,
+  },
 }
 
 /** 未登记 widget 名的回落（与消息域 / VDFS 域同一条兜底约定） */
@@ -174,8 +182,8 @@ export function widgetIsReadonly(widget: string | undefined): boolean {
   return widgetSpecOf(widget).readonly
 }
 
-/** static（只读展示）/ form（嵌套）/ toggle（自带 label）这几种呈现组不挂 `<label for>`。 */
-const NON_LABELABLE_TAGS: ReadonlySet<FormWidgetTag> = new Set(['static', 'form', 'toggle'])
+/** static（只读展示）/ form（嵌套）/ toggle（自带 label）/ table（自描述列头）这几种呈现组不挂 `<label for>`。 */
+const NON_LABELABLE_TAGS: ReadonlySet<FormWidgetTag> = new Set(['static', 'form', 'toggle', 'table'])
 
 /**
  * 该 widget 的呈现组是否有单一可控控件可被 `<label for>` 关联。

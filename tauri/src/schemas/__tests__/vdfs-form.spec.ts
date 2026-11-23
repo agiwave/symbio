@@ -34,7 +34,11 @@ import {
   detailPresetPatch,
   evalDetailCondition,
   mergeDetailActions,
+  tableRows,
+  tableNewRow,
+  tableRemoveRow,
 } from '../vdfs-form'
+import type { DetailColumn } from '../vdfs-form'
 import type { DetailAction, DetailField, DetailPreset, DetailPresetSpec } from '../vdfs'
 
 const save: DetailAction = { id: 'save', label: '保存', style: 'primary' }
@@ -418,5 +422,41 @@ describe('json widget 的编解码（机制唯一实现）', () => {
   it('已是结构化值（非字符串）⇒ 原样通过（兼容后端直接下发）', () => {
     const obj = { a: 1 }
     expect(parseJsonText(obj)).toEqual({ ok: true, value: obj })
+  })
+})
+
+describe('table widget 的行编排（机制唯一实现）', () => {
+  const cols: DetailColumn[] = [
+    { key: 'kind', label: '对象', widget: 'select', options: [{ value: 'shell_command', label: '命令' }] },
+    { key: 'match', label: '匹配', widget: 'select' },
+    { key: 'value', label: '值' },
+    { key: 'action', label: '动作', widget: 'select' },
+    { key: 'risk', label: '风险档', widget: 'select' },
+  ]
+
+  it('表行归一化：非数组 / 非对象项被丢弃，页面永不空白', () => {
+    expect(tableRows(null)).toEqual([])
+    expect(tableRows('oops')).toEqual([])
+    expect(tableRows([{ a: 1 }, null, 'x', [{ b: 2 }]])).toEqual([{ a: 1 }])
+  })
+
+  it('新增行按列 default 预填，缺省空串', () => {
+    const withDefault: DetailColumn[] = [
+      { key: 'kind', label: '对象', default: 'shell_command' },
+      { key: 'value', label: '值' },
+    ]
+    expect(tableNewRow(withDefault)).toEqual({ kind: 'shell_command', value: '' })
+  })
+
+  it('删行按索引，越界 / 非法索引原样返回', () => {
+    const rows = [{ a: 1 }, { a: 2 }, { a: 3 }]
+    expect(tableRemoveRow(rows, 1)).toEqual([{ a: 1 }, { a: 3 }])
+    expect(tableRemoveRow(rows, 99)).toBe(rows)
+    expect(tableRemoveRow(rows, -1)).toBe(rows)
+  })
+
+  it('列定义只有通用控件词（机制层零业务词）', () => {
+    const widgets = cols.map((c) => c.widget ?? 'text')
+    widgets.forEach((w) => expect(['text', 'select', 'number']).toContain(w))
   })
 })
