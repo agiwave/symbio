@@ -62,6 +62,7 @@ use symbio_plugin_model as _;
 use symbio_plugin_persona as _;
 use symbio_plugin_plugin_manager as _;
 use symbio_plugin_reputation as _;
+use symbio_plugin_sandbox as _;
 use symbio_plugin_session as _;
 use symbio_plugin_setting as _;
 use symbio_plugin_skill as _;

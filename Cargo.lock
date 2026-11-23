@@ -4170,6 +4170,7 @@ dependencies = [
  "symbio-plugin-persona",
  "symbio-plugin-plugin_manager",
  "symbio-plugin-reputation",
+ "symbio-plugin-sandbox",
  "symbio-plugin-session",
  "symbio-plugin-setting",
  "symbio-plugin-skill",
@@ -4595,6 +4596,19 @@ dependencies = [
  "serde_json",
  "symbio-plugin-api",
  "symbio-testkit",
+]
+
+[[package]]
+name = "symbio-plugin-sandbox"
+version = "0.1.14"
+dependencies = [
+ "async-trait",
+ "serde",
+ "serde_json",
+ "symbio-plugin-api",
+ "symbio-providers",
+ "tokio",
+ "tracing",
 ]
 
 [[package]]

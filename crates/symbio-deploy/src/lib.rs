@@ -90,6 +90,10 @@ pub const PLUGIN_ID_MANAGER: &str = "plugin_manager";
 // dead-code-allow R-001: 插件 id 是部署身份，未被引用不等于可删（同文件头 R-003）
 pub const PLUGIN_ID_REPUTATION: &str = "reputation";
 
+/// 安全运行环境（沙箱）
+// dead-code-allow R-001: 插件 id 是部署身份，未被引用不等于可删（同文件头 R-003）
+pub const PLUGIN_ID_SANDBOX: &str = "sandbox";
+
 /// 会话
 // dead-code-allow R-001: 插件 id 是部署身份，未被引用不等于可删（同文件头 R-003）
 pub const PLUGIN_ID_SESSION: &str = "session";
@@ -154,6 +158,7 @@ pub const ASSEMBLY_SUB_AGENT_PLUGINS: &[&str] = &[
     "model", // 模型服务（子智能体自己的模型；子树会话自行解析）
     "compact", // 上下文压缩：超水位时把本轮之前的上下文压成一份快照（落 session.consolidated）
     "local", // 本地文件
+    "sandbox", // 安全运行环境（沙箱）
     "tool", // 工具世界（执行 / 路由 / 结果提取）
     "web", // 网络访问
     "mcp", // 工具
@@ -182,6 +187,7 @@ pub const ASSEMBLY_CORE_PLUGINS: &[&str] = &[
     "model", // 模型服务（子智能体自己的模型；子树会话自行解析）
     "compact", // 上下文压缩：超水位时把本轮之前的上下文压成一份快照（落 session.consolidated）
     "local", // 本地文件
+    "sandbox", // 安全运行环境（沙箱）
     "tool", // 工具世界（执行 / 路由 / 结果提取）
     "web", // 网络访问
     "mcp", // 工具
