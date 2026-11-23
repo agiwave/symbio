@@ -527,12 +527,10 @@ async fn disabling_a_slice_removes_its_rows_and_keeps_the_rest() {
     // —— 而其余行照旧：会话自有项、会话挂载点 ——
     // D-531 裁决 B：mode / risk_level 已并入沙箱档案，会话自有的只剩 workdir；
     // 本测试只装了 session + heartbeat，没有沙箱插件，故 sandbox_id 也不在该容器里。
-    for expected in ["workdir"] {
-        assert!(
-            keys.contains(&expected.to_string()),
-            "停用一片插件不该动会话自己的选项：缺 {expected}"
-        );
-    }
+    assert!(
+        keys.contains(&"workdir".to_string()),
+        "停用一片插件不该动会话自己的选项：缺 workdir"
+    );
     assert!(
         mount_names(&composite)
             .await
