@@ -172,7 +172,11 @@ impl Plugin for SandboxPlugin {
 
         // 选项收集广播：贡献 sandbox_id（唯一的会话安全选项，承接 mode/risk_level）。
         // 号段 70（见 session::options 模块文档的号段约定）。
-        if path == symbio_plugin_api::TRAVERSE_AVAILABLE_OPTIONS {
+        // ⚠️ 判定必须读 `ctx[PATH]`：traverse 的 `path` 参数是路由子命令（本插件不提供，
+        // 恒为空串），广播端点写在 ctx 上（与 session / heartbeat 同一条协议）。
+        if ctx.get(symbio_plugin_api::PATH).unwrap_or_default()
+            == symbio_plugin_api::TRAVERSE_AVAILABLE_OPTIONS
+        {
             if let Some(visitor) = ctx.get(symbio_plugin_api::OPTION_VISITOR) {
                 const ORDER: i32 = 70;
                 // guard 不能跨 await：拷出候选后立即释放。

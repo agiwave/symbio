@@ -60,6 +60,8 @@ pub(crate) struct SandboxProfileConfig {
 
 /// 兼容旧 PLUGIN.yml 的集中配置形状（`{sandboxes, active}`）。
 /// 新真相是 VDFS 档案，本结构只作过渡读取与测试夹具。
+/// `#[cfg(test)]`：生产路径一律走 VDFS 档案（`from_profiles`），本形状只服务测试。
+#[cfg(test)]
 #[derive(Debug, Default, Deserialize)]
 #[serde(default)]
 pub(crate) struct SandboxConfig {
@@ -151,6 +153,7 @@ impl SandboxRegistry {
     }
 
     /// 兼容旧集中配置（过渡读取 / 测试夹具）。
+    #[cfg(test)]
     pub fn from_config(config: SandboxConfig) -> Self {
         Self::from_profiles(config.sandboxes.into_iter().collect())
     }
@@ -161,6 +164,7 @@ impl SandboxRegistry {
     }
 
     /// 安装一个具名档案（测试夹具用；生产走 `from_profiles`）。
+    #[cfg(test)]
     fn install(&mut self, name: impl Into<String>, profile: SandboxProfile) {
         self.profiles.insert(name.into(), profile);
     }

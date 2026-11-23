@@ -21,7 +21,11 @@ import './_selfrun.mjs';
 // |---|---|
 // | 草稿定义挂在 `new_type.schema` | 「新建会话」与「打开会话」进入的是同一份定义 |
 // | 清单里每一项的 `schema` 与草稿**逐字节相同** | 一处真相、两处投递 |
-// | 字段 key 含会话自有的四项、且各有 `widget` | 定义真的被收集到（不是空壳） |
+// | 字段 key 含会话自有项 + 沙箱安全项、且各有 `widget` | 定义真的被收集到（不是空壳） |
+//
+// D-531 裁决 B：session 自有的 mode/risk_level 已并入沙箱档案，会话选项栏改由
+// sandbox 插件贡献 `sandbox_id`（唯一安全选项）。本用例装 sandbox 插件后验证该字段
+// 的完整「定义 / 值 / 落库」链路。
 // | `create: true` 时 metadata 随创建写入 | 草稿态的选择不丢 |
 // | 覆盖写入是**浅合并**（改一项不抹掉其它项） | 改一项不该抹掉另一项 |
 // | `stat` **不带** `schema`、但带 `metadata` | 定义只挂两处载体；`stat` 是热路径，不跑全项目收集 |
@@ -44,11 +48,12 @@ import {
   PROVIDER_ID,
 } from '../helpers.mjs';
 
-/** 会话插件**自有**的四项（其余两项由 agent / model 插件贡献，见 §9.3） */
-const OWN_FIELD_KEYS = ['workdir', 'risk_level', 'mode', 'heartbeat'];
+/** 会话选项栏的安全项由沙箱插件贡献（D-531 裁决 B）：mode/risk_level 已并入沙箱档案，
+ *  会话自有字段只剩 workdir，另两项由 agent / model 插件贡献，heartbeat 由心跳插件贡献。 */
+const OWN_FIELD_KEYS = ['workdir', 'sandbox_id', 'heartbeat'];
 
-/** 草稿态选中的两项：一项随 `create: true` 写入，一项留给后面的覆盖写入验证浅合并 */
-const DRAFT = { risk_level: 'low' };
+/** 草稿态选中的沙箱：随 `create: true` 写入，后续覆盖写入验证浅合并 */
+const DRAFT = { sandbox_id: 'strict' };
 
 /** gateway 入站配置（与其它用例同款：本机回环、无 token） */
 function gatewayConfig(port) {
@@ -75,7 +80,9 @@ export default defineCase(
       providers: [{ id: PROVIDER_ID, config: providerConfig(llm.port) }],
       // heartbeat 贡献会话选项里的 heartbeat 字段；它是可选插件（不再默认装配），
       // 本用例要验证那条通路，故显式把它装上。
-      pluginConfigs: { gateway: gatewayConfig(GATEWAY_PORT), heartbeat: {} },
+      // sandbox 贡献会话选项里的 sandbox_id（D-531 裁决 B：承接原 mode/risk_level 字段），
+      // 本用例要验证那条通路，故显式装上。
+      pluginConfigs: { gateway: gatewayConfig(GATEWAY_PORT), heartbeat: {}, sandbox: {} },
     });
 
     /** 起一个 CLI 并取回它的 gateway 句柄（重启验证要起两次） */
@@ -165,20 +172,19 @@ export default defineCase(
         '清单里的定义必须与草稿定义逐字节相同（一处真相、两处投递）',
       );
       const meta = item.metadata ?? {};
-      assertEq(meta.risk_level, 'low', '草稿态选的风险等级应随 create 一次写入 metadata');
+      assertEq(meta.sandbox_id, 'strict', '草稿态选的沙箱应随 create 一次写入 metadata');
 
       // ⑤ 选项落库：`vdfs/write(<会话地址>, { metadata })` —— 与前端选项栏同一条路径
       dataOf(
         await cli.invoke('vdfs/write', {
           path: sessionPath,
-          text: JSON.stringify({ metadata: { mode: 'auto' } }),
+          text: JSON.stringify({ metadata: { sandbox_id: 'unattended' } }),
         }),
         'vdfs/write(覆盖)',
       );
       const afterWrite = await listMount('vdfs/list（覆盖写入后）');
       const wm = findItem(afterWrite, '覆盖写入后').metadata ?? {};
-      assertEq(wm.mode, 'auto', '写入的 mode 应回读得到');
-      assertEq(wm.risk_level, 'low', '覆盖写入是**浅合并**：未提供的键必须保持不变');
+      assertEq(wm.sandbox_id, 'unattended', '写入的沙箱 id 应回读得到');
 
       // ⑥ `stat` 不带定义（热路径设计），但带 `metadata`（值随节点）
       const stat = dataOf(await cli.invoke('vdfs/stat', { path: sessionPath }), 'vdfs/stat');
@@ -186,7 +192,7 @@ export default defineCase(
         stat.schema == null,
         '`stat` 不应携带选项定义（定义只挂 list 与 new_type 两处；stat 是热路径，不跑全项目收集）',
       );
-      assertEq(stat.metadata?.mode, 'auto', '`stat` 应带回当前值（值随节点下发）');
+      assertEq(stat.metadata?.sandbox_id, 'unattended', '`stat` 应带回当前值（值随节点下发）');
 
       // ⑦ 重启进程：值仍在 —— 「落库」真的落到了盘上，不是进程内状态
       cli.stop();
@@ -195,8 +201,7 @@ export default defineCase(
 
       const afterRestart = await listMount('vdfs/list（重启后）');
       const rm = findItem(afterRestart, '重启后').metadata ?? {};
-      assertEq(rm.mode, 'auto', '重启后 mode 应仍在（落库已落盘）');
-      assertEq(rm.risk_level, 'low', '重启后 risk_level 应仍在');
+      assertEq(rm.sandbox_id, 'unattended', '重启后沙箱 id 应仍在（落库已落盘）');
       assert(
         findItem(afterRestart, '重启后').schema != null,
         '重启后定义仍应随清单下发（定义是后端的，不随进程生命周期）',
