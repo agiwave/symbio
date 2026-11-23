@@ -164,7 +164,7 @@ impl Plugin for SandboxPlugin {
 
     async fn traverse(
         self: Arc<Self>,
-        path: String,
+        _path: String,
         ctx: Arc<dyn PluginInvokeRequest>,
     ) -> PluginInvokeResponse<PluginPayload> {
         // 收集期重建注册表（读磁盘）保证候选与句柄都是最新的。
