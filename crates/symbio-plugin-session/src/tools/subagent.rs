@@ -66,8 +66,8 @@ use symbio_plugin_api::{message_of_node, SEG_MESSAGES};
 use symbio_plugin_api::{
     port_result, ExecAbortSignal, ExecEnv, ExecEventSink, Plugin, PluginError, PluginFrame,
     PluginInvokeRequest, PluginInvokeRequestExt, PluginPayload, PortExecContext, PortExecutor,
-    PortInput, PortOutcome, MODE, PATH, PROVIDER_ID, RISK_LEVEL, SESSION_ID, TOOL_CALL_ID,
-    TOOL_NODE_ID,
+    PortInput, PortOutcome, MODE, PATH, PROVIDER_ID, RISK_LEVEL, SANDBOX_ID, SESSION_ID,
+    TOOL_CALL_ID, TOOL_NODE_ID,
 };
 use symbio_plugin_api::{vdfs_context, VdfsError};
 use symbio_plugin_api::{
@@ -322,9 +322,11 @@ impl AgentRunCapability {
                 // `parent_session_id` 由 session 存储解释为归档位置
                 // （父会话目录的 sessions/ 子目录）与列表过滤依据；
                 // `agent_id` / `workdir` 供 chat 编排回退链与详情展示。
-                // `mode` / `risk_level` / `provider_id` 也随之落成会话属性——
-                // 它们定义「这个子会话怎么跑」，属**会话事实**而非消息属性
-                // （[D-066]：地址写入不承载运行选项，三项的归属是会话 metadata）。
+                // `sandbox_id` / `provider_id` 也随之落成会话属性——它们定义
+                // 「这个子会话怎么跑」，属**会话事实**而非消息属性
+                // （[D-066]：地址写入不承载运行选项，归属是会话 metadata）。
+                // 安全语义由沙箱承接（裁决 B）：子会话继承父会话的沙箱选择，
+                // 不再分别记 mode / risk_level。
                 let sid = uuid::Uuid::new_v4().to_string();
                 if let Err(e) = register_subsession(
                     parent.clone(),
@@ -334,6 +336,8 @@ impl AgentRunCapability {
                         KEY_PARENT_SESSION_ID: parent_session_id,
                         "agent_id": agent_id,
                         "workdir": effective_workdir,
+                        "sandbox_id": ctx.get(SANDBOX_ID),
+                        // 存量兼容回退：子会话继承父会话的审批参数（沙箱句柄会覆盖）。
                         "mode": ctx.get(MODE),
                         "risk_level": ctx.get(RISK_LEVEL),
                         "provider_id": ctx.get(PROVIDER_ID),

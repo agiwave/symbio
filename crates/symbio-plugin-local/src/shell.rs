@@ -538,6 +538,21 @@ impl ShellTool {
         _env: &ExecEnv,
         ctx: Arc<dyn PluginInvokeRequest>,
     ) -> Result<Value, PluginError> {
+        // 沙箱能力约束（D-531）：命令语义由**工具自己**解析成意图事实提交给沙箱
+        // （讨论稿 §1.6）——沙箱不认识 shell 语法，只按开放 kind 匹配用户配的规则。
+        // 缺席（没有沙箱句柄）= 全放行降级；ask（询问用户）不在这里，由沙箱在拦截点
+        // 统一产出。本查询只返回 bool：许可就继续，不许可就拒。
+        if let Some(face) = symbio_plugin_api::sandbox_of(ctx.as_ref()) {
+            if let Some(command) = args.get("command").and_then(|v| v.as_str()) {
+                let fact = symbio_plugin_api::SandboxFact::new("shell_command", command);
+                if !face.permits(std::slice::from_ref(&fact)) {
+                    return Err(PluginError::InternalError(
+                        "沙箱未放行本次 shell 命令".to_string(),
+                    ));
+                }
+            }
+        }
+
         let workdir_str = ctx.get(symbio_plugin_api::WORKDIR).ok_or_else(|| {
             PluginError::ValidationError("Missing workdir in context".to_string())
         })?;

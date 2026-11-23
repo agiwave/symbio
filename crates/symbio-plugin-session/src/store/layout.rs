@@ -256,10 +256,18 @@ pub(super) fn read_meta(dir: &Path) -> Option<SessionMetaFile> {
     parse_meta_content(&content)
 }
 
-/// 会话运行参数解析后的**结果值**（三项都已落到具体取值 / 明确的缺席）。
+/// 会话运行参数解析后的**结果值**。
+///
+/// `sandbox_id` 是前端选项栏呈现的唯一安全选项；`mode` / `risk_level` 作为存量
+/// 兼容回退保留——旧会话 metadata、内部/心跳路径与无沙箱装配仍走它们，沙箱句柄
+/// 解析出的审批参数会覆盖它们（D-531 裁决 B 的渐进迁移形态）。
 #[derive(Debug, Clone, PartialEq, Eq)]
 pub(crate) struct SessionParams {
+    /// 显式选中的沙箱档案 id；`None` = 装配侧用默认沙箱 / 全放行降级。
+    pub sandbox_id: Option<String>,
+    /// 存量兼容的审批回退值（默认 `auto`）。
     pub mode: String,
+    /// 存量兼容的阈值回退值（默认 `medium`）。
     pub risk_level: String,
     /// 显式 provider；`None` = 由模型侧选默认
     pub provider_id: Option<String>,
@@ -268,6 +276,7 @@ pub(crate) struct SessionParams {
 impl Default for SessionParams {
     fn default() -> Self {
         Self {
+            sandbox_id: None,
             mode: "auto".to_string(),
             risk_level: "medium".to_string(),
             provider_id: None,
@@ -275,16 +284,18 @@ impl Default for SessionParams {
     }
 }
 
-/// 三项运行参数的**唯一解析点**：`req > session.metadata > 默认`。
+/// 运行参数的**唯一解析点**：`req > session.metadata > 默认`。
 ///
-/// - `mode` 默认 `auto`；`risk_level` 默认 `medium`；`provider_id` 无默认（缺席 =
-///   由模型侧选默认 provider）；
+/// - `sandbox_id` 无默认（缺席 = 装配侧用默认沙箱 / 全放行降级）；
+///   `provider_id` 无默认（缺席 = 由模型侧选默认 provider）；
+///   `mode` 默认 `auto`、`risk_level` 默认 `medium`（存量兼容回退）；
 /// - 空串与非字符串值一律视为缺席——「写了空值」不等于「显式要空」；
 /// - 收件箱路径的 `req` 档恒为空：地址写入面不承载运行选项（D-066），metadata 是
 ///   唯一来源；直接调用方带进来的请求级参数仍然优先。
 ///
 /// 解析结果由事实源随 `DriveTarget` 交给驱动，在驱动装配处挂进本轮 ctx——
-/// 审批闸门与模型端口都从那里读，不在执行体里二次反查。
+/// 沙箱句柄按 `sandbox_id` 解析出审批参数后**覆盖** `MODE` / `RISK_LEVEL`；没有
+/// 沙箱值时保留这里的回退值，审批闸门与模型端口照旧从这两个键读。
 pub(crate) fn resolve_session_params(
     req: &session_chat::Request,
     metadata: &serde_json::Value,
@@ -303,6 +314,7 @@ pub(crate) fn resolve_session_params(
             })
     };
     SessionParams {
+        sandbox_id: pick(req.sandbox_id.as_deref(), "sandbox_id"),
         mode: pick(req.mode.as_deref(), "mode").unwrap_or_else(|| "auto".to_string()),
         risk_level: pick(req.risk_level.as_deref(), "risk_level")
             .unwrap_or_else(|| "medium".to_string()),

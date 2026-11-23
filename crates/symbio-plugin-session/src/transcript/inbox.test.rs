@@ -125,6 +125,7 @@ async fn cancel_and_clear_only_affect_queued_items() {
 async fn enqueue_carries_request_params_and_workdir() {
     let p = plugin();
     let params = session_chat::Request {
+        sandbox_id: Some("strict".to_string()),
         mode: Some("auto".to_string()),
         risk_level: Some("high".to_string()),
         agent_id: Some("ag1".to_string()),
@@ -139,6 +140,7 @@ async fn enqueue_carries_request_params_and_workdir() {
             Some("C:/w".to_string()),
         )
         .await;
+    assert_eq!(item.params.sandbox_id.as_deref(), Some("strict"));
     assert_eq!(item.params.mode.as_deref(), Some("auto"));
     assert_eq!(item.params.risk_level.as_deref(), Some("high"));
     assert_eq!(item.params.agent_id.as_deref(), Some("ag1"));

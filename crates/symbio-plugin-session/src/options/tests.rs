@@ -3,8 +3,9 @@
 //! 与实现**同级**分文件（`options/mod.rs` + 同级 `tests.rs`，见 `CONTRIBUTING.md`）：
 //! `mod.rs` 只保留生产代码，测试全部放本文件。
 //!
-//! 这里锁的是「会话自有 3 项」这份**声明**：字段 key（= 会话解析链读取的 metadata
-//! 键）、号段顺序（= UI 顺序）、以及各字段的 widget 与锁定/缺省语义。
+//! 这里锁的是「会话自有 1 项（工作目录）」这份**声明**：字段 key（= 会话解析链读取
+//! 的 metadata 键）、号段顺序（= UI 顺序）、以及字段的 widget 与锁定/缺省语义。
+//! 安全选项（原 risk_level / mode）已随裁决 B 纳入沙箱档案，由 sandbox 插件贡献。
 
 use super::*;
 // `traverse` 是 `Plugin` 的 trait 方法，需 trait 在作用域内才可解析
@@ -32,11 +33,7 @@ fn session_option_fields_declare_the_option_bar_in_order() {
 
     assert_eq!(
         declared,
-        vec![
-            (ORDER_WORKDIR, "workdir".to_string(), "path".to_string()),
-            (ORDER_RISK, "risk_level".to_string(), "select".to_string()),
-            (ORDER_MODE, "mode".to_string(), "select".to_string()),
-        ],
+        vec![(ORDER_WORKDIR, "workdir".to_string(), "path".to_string())],
         "号段顺序即展示顺序；改号段等于改 UI，必须是有意的"
     );
 }
@@ -57,7 +54,7 @@ fn field_keys_are_the_metadata_keys_the_parsers_read() {
 
     assert_eq!(
         keys.iter().map(String::as_str).collect::<Vec<_>>(),
-        vec!["mode", "risk_level", "workdir"]
+        vec!["workdir"]
     );
 }
 
@@ -115,8 +112,8 @@ async fn option_definition_without_container_degrades_to_empty() {
 
 /// 会话作为**贡献方**：命中 `available_options` 时把字段注册进收集器。
 ///
-/// 这是「会话自有 3 项」在生产路径上的唯一注册点——漏注册的表现是选项栏少了几项，
-/// 而不会有任何编译错误。
+/// 这是「会话自有工作目录」在生产路径上的唯一注册点——漏注册的表现是选项栏少了
+/// 一项，而不会有任何编译错误。安全选项（沙箱）由 sandbox 插件走同一广播贡献。
 #[tokio::test]
 async fn session_contributes_option_fields_to_the_visitor() {
     use symbio_kernel::capability::Registry;
@@ -140,5 +137,5 @@ async fn session_contributes_option_fields_to_the_visitor() {
         .into_iter()
         .map(|f| f.key)
         .collect();
-    assert_eq!(keys, vec!["workdir", "risk_level", "mode"]);
+    assert_eq!(keys, vec!["workdir"]);
 }

@@ -1248,6 +1248,17 @@ async fn fire_post_hook(
     .await;
 }
 
+/// 沙箱拦截载荷 → 面向调用方的可读文本（不解释业务语义，只做通用取值）。
+fn sandbox_block_text(payload: &serde_json::Value) -> String {
+    payload
+        .get("text")
+        .or_else(|| payload.get("message"))
+        .or_else(|| payload.get("reason"))
+        .and_then(|v| v.as_str())
+        .map(str::to_owned)
+        .unwrap_or_else(|| "沙箱未放行本次工具调用".to_string())
+}
+
 /// 只落产物格、不执行：唤醒结果与没跑到的占位结果走这一形态。
 ///
 /// 载荷里的 `land_only` 是**结果纯值**（`text` / `success` / `needs_user_action` /
@@ -1861,6 +1872,38 @@ impl ToolPort {
                     &why,
                 )
                 .await;
+            }
+        }
+
+        // 沙箱拦截点（D-531）：与 PreToolUse 同一处收口、工具执行前统一调用。
+        // 本执行体不认识沙箱实现，也不解释载荷语义——只把 tool_name / args 不透明透传，
+        // 拦下时把沙箱交回的载荷文本作为结果沿既有出口交回。缺席 = 全放行。
+        if let Some(ctx) = request.as_ref() {
+            if let Some(face) = symbio_plugin_api::sandbox_of(ctx.as_ref()) {
+                if let Some(verdict) = face.intercept(&tool_name, &args) {
+                    let text = sandbox_block_text(&verdict);
+                    let why = format!("被沙箱拦下：{text}");
+                    if let Some(parent) = hook_parent.as_ref() {
+                        fire_post_hook(
+                            parent,
+                            &tool_name,
+                            &args,
+                            serde_json::json!({ "error": text }),
+                            ctx,
+                        )
+                        .await;
+                    }
+                    return finish_with(
+                        format!("Blocked: {text}"),
+                        false,
+                        None,
+                        archive_vdfs.as_ref(),
+                        sid,
+                        Some("blocked"),
+                        &why,
+                    )
+                    .await;
+                }
             }
         }
 

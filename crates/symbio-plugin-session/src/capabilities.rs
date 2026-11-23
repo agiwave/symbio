@@ -99,6 +99,10 @@ pub async fn collect_capabilities(
     // 调用方 ctx——工具执行期从那里读。与错误桶同一条路：容器对每个子插件各
     // fork 一份，插件写在自己那份上，收集方与兄弟都看不见，只能靠**共享的可变槽**。
     symbio_sdk::agent::agent_perms_init_slot(&traverse_ctx);
+    // 沙箱句柄共享槽（D-531）：sandbox 插件在 traverse 里发布引擎，会话在这里建槽、
+    // 收集结束后把同一个 Arc 挂回轮 ctx——工具执行期据此取句柄调 intercept / permits。
+    // 与 AGENT_PERMS 同一条路：容器对每个子插件各 fork 一份，靠共享槽跨 fork 交换句柄。
+    symbio_plugin_api::sandbox_init_slot(&traverse_ctx);
 
     if let Err(e) = parent
         .clone()
@@ -121,6 +125,10 @@ pub async fn collect_capabilities(
     // 工具侧按宿主态处理。
     if let Some(slot) = traverse_ctx.get(symbio_plugin_api::AGENT_PERMS) {
         ctx.set(symbio_plugin_api::AGENT_PERMS, slot);
+    }
+    // 沙箱句柄同理（同一个 `Arc`）：没发布 = 本会话没装沙箱插件，消费方全放行降级。
+    if let Some(slot) = traverse_ctx.get(symbio_plugin_api::SANDBOX) {
+        ctx.set(symbio_plugin_api::SANDBOX, slot);
     }
     // 端口绑定同理（同一个 `Arc`，不复制内容）：开轮装配要读「有效绑定」折工具清单，
     // 而容器只写在子 ctx 上。

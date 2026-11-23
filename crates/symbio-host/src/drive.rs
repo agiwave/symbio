@@ -46,7 +46,9 @@ use symbio_kernel::plugin::{
 };
 use symbio_plugin_api::drive::{DriveKey, EVENT_DRIVER_STALLED};
 use symbio_plugin_api::{ExecEventSink, FactDraft};
-use symbio_sdk::keys::{AGENT_ID, MODE, RISK_LEVEL, SESSION_DIR, SOURCE_PRINCIPAL, WORKDIR};
+use symbio_sdk::keys::{
+    AGENT_ID, MODE, RISK_LEVEL, SANDBOX_ID, SESSION_DIR, SOURCE_PRINCIPAL, WORKDIR,
+};
 use symbio_sdk::plugin::drive_entry::{
     declared_drive_entry, DriveBinding, DriveBindingDecl, DriveEntry, DriveTarget,
 };
@@ -69,11 +71,14 @@ pub struct FactWorld<'a> {
     /// 会话主体来源（metadata 的 `agent_id`，空串 = 无绑定主体）。
     /// 由装配层随事实源带入，`drive_on_new_fact` 只在这里设一次 `AGENT_ID`。
     pub agent_id: &'a str,
-    /// 会话运行参数（写口按 `req > metadata > 默认` 解析完的结果）。
+    /// 会话选中的沙箱档案 id（裁决 B / D-531）：前端选项栏呈现的唯一安全选项。
     ///
-    /// `append` 不携带运行选项，由事实源打开时取来；这里挂进本轮 ctx，
-    /// 审批闸门（`RISK_LEVEL` / `MODE`）只读。
+    /// `append` 不携带运行选项，由事实源打开时取来；这里挂进本轮 ctx（`SANDBOX_ID`），
+    /// 沙箱句柄按它解析出审批参数**覆盖** `MODE` / `RISK_LEVEL`。
+    pub sandbox_id: Option<&'a str>,
+    /// 存量兼容的审批回退值（无沙箱 / 沙箱未配该项时写入 ctx）。
     pub mode: &'a str,
+    /// 存量兼容的阈值回退值（见 `mode`）。
     pub risk_level: &'a str,
     /// 本会话的 Agent 权限作用域（D-153）：由轮装配发布、随驱动目标带来。
     /// `None` = 本会话没选中 Agent（宿主态）；驱动只发布槽，不解析 manifest。
@@ -151,8 +156,14 @@ pub async fn drive_on_new_fact(
         work_dir,
         world.session_dir.map(Path::new),
     );
-    // 会话运行参数同址装配：审批闸门与模型端口都从这个 ctx 读值，
-    // 与 `workdir` / `agent_id` 同一来源（会话 metadata），不在执行体里二次反查。
+    // 会话选中的沙箱 id 同址装配（裁决 B / D-531）：与 `workdir` / `agent_id` 同一来源
+    // （会话 metadata）。沙箱插件在 gather 的 traverse 里按它绑定引擎；gather 后宿主
+    // 经引擎的通用只读口解析出审批参数，再覆盖 `MODE` / `RISK_LEVEL`。
+    if let Some(sandbox_id) = world.sandbox_id {
+        ctx.set(SANDBOX_ID, sandbox_id.to_string());
+    }
+    // 存量兼容回退：先写会话解析出的 mode / risk_level；沙箱句柄在 gather 里解析到
+    // 值时覆盖这两个键。无沙箱装配 / 沙箱未配该项时保留这里的值，审批闸门照旧可读。
     ctx.set(MODE, world.mode.to_string());
     ctx.set(RISK_LEVEL, world.risk_level.to_string());
     // 入站来源主体（D-067）：同址装配，工具侧 `EffectEnv.source` 只读它；
@@ -415,6 +426,7 @@ async fn drain(root: &Arc<dyn Plugin>, target: &DriveTarget, state: &KickState) 
         workdir: &workdir,
         session_dir: target.session_dir.as_deref(),
         agent_id,
+        sandbox_id: target.sandbox_id.as_deref(),
         mode: &target.mode,
         risk_level: &target.risk_level,
         agent_scope: target.agent_scope.as_ref(),

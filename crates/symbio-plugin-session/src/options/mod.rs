@@ -3,10 +3,13 @@
 //! ## 角色
 //!
 //! session 插件是**选项宿主**：会话页输入区下方的选项栏与会话详情页的可修改项
-//! 是**同一批字段**（工作目录 / 执行风险 / 运行模式 + 各插件贡献的
-//! 智能体 / Model / 心跳任务）。本模块声明其中**会话自有**的三项；其余由贡献方在
-//! 自己的 `traverse(available_options)` 分支注册（agent → 智能体、model → Model、
-//! `heartbeat` → 心跳任务）。
+//! 是**同一批字段**（工作目录 + 各插件贡献的沙箱 / 智能体 / Model / 心跳任务）。
+//! 本模块只声明**会话自有**的工作目录；其余由贡献方在自己的
+//! `traverse(available_options)` 分支注册（sandbox → 沙箱、agent → 智能体、
+//! model → Model、`heartbeat` → 心跳任务）。
+//!
+//! 原「执行风险 / 运行模式」两项已随裁决 B 纳入沙箱档案内部（D-531）：会话不再
+//! 单独选择安全参数，只选一个沙箱；审批语义由沙箱句柄按 id 解析后写回 ctx。
 //!
 //! ## 三条通路（设计文档 §3.2）
 //!
@@ -28,8 +31,9 @@
 //! ## order 约定（跨插件协调，禁止插件间直接依赖）
 //!
 //! 插件之间不可见，故 order 采用**号段约定**（各自定义本地常量）：
-//! `10` 工作目录 / `20` 智能体 / `30` Model / `40` 风险等级 / `50` 运行模式 /
-//! `60` 心跳任务（心跳调度插件，本表只登记号段、不声明那个字段）；
+//! `10` 工作目录 / `20` 智能体 / `30` Model / `60` 心跳任务（心跳调度插件，本表
+//! 只登记号段、不声明那个字段）/ `70` 沙箱（sandbox 插件贡献，承接原 `40` 风险
+//! 与 `50` 模式两项安全选项）；`40` / `50` 号段已随裁决 B 退役。
 //! 新增贡献方取空闲号段。
 //!
 //! 号段只用于**收集层排序**，不下发：前端收到的是已排好序的字段数组
@@ -48,8 +52,6 @@ use symbio_sdk::capability::capability_option_fields;
 
 /// 会话自有选项的展示顺序（号段见模块文档）
 const ORDER_WORKDIR: i32 = 10;
-const ORDER_RISK: i32 = 40;
-const ORDER_MODE: i32 = 50;
 
 impl SessionPlugin {
     /// 会话自有选项的**字段声明**（供 `node.schema` 下发）。
@@ -61,11 +63,7 @@ impl SessionPlugin {
     ///
     /// 返回 `(order, field)`：`order` 只给收集层排序用，不下发。
     pub(crate) fn session_option_fields(&self) -> Vec<(i32, DetailField)> {
-        vec![
-            (ORDER_WORKDIR, workdir_field()),
-            (ORDER_RISK, risk_field()),
-            (ORDER_MODE, mode_field()),
-        ]
+        vec![(ORDER_WORKDIR, workdir_field())]
     }
 
     /// 会话的**选项定义**（`binding = "option"`）——选项栏与会话详情页共用同一份。
@@ -204,49 +202,6 @@ fn workdir_field() -> DetailField {
             ],
             ..Default::default()
         }),
-        ..Default::default()
-    }
-}
-
-/// 执行风险等级：low / medium / high 三档候选
-fn risk_field() -> DetailField {
-    DetailField {
-        key: "risk_level".to_string(),
-        label: "执行风险".to_string(),
-        description: Some("低于该等级的工具需用户审批".to_string()),
-        widget: "select".to_string(),
-        icon: Some("risk".to_string()),
-        default: Some(json!("medium")),
-        options: vec![
-            option("low", "低风险", "仅自动执行低风险工具；中/高风险需审批"),
-            option("medium", "中风险", "中风险及以下自动执行；高风险需审批"),
-            option("high", "高风险", "所有工具自动执行（含高风险）"),
-        ],
-        ..Default::default()
-    }
-}
-
-/// 运行模式：interactive / auto 两档候选
-fn mode_field() -> DetailField {
-    DetailField {
-        key: "mode".to_string(),
-        label: "运行模式".to_string(),
-        description: Some("工具失败时是否阻塞模型继续".to_string()),
-        widget: "select".to_string(),
-        icon: Some("run-mode".to_string()),
-        default: Some(json!("auto")),
-        options: vec![
-            option(
-                "interactive",
-                "交互",
-                "需审批/需交互的工具在会话流中显示卡片，等待用户响应",
-            ),
-            option(
-                "auto",
-                "自动",
-                "无人值守：工具失败返回友好错误让模型自行继续",
-            ),
-        ],
         ..Default::default()
     }
 }

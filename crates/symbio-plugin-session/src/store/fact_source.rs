@@ -251,6 +251,7 @@ impl FactSource for SessionFactSource {
                     agent_id: Some(self.agent_id.clone().ok_or_else(|| {
                         "会话主体不可用：带驱动的事实源缺少 agent_id".to_string()
                     })?),
+                    sandbox_id: self.params.sandbox_id.clone(),
                     mode: self.params.mode.clone(),
                     risk_level: self.params.risk_level.clone(),
                     provider_id: self.params.provider_id.clone(),
