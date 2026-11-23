@@ -30,7 +30,7 @@
  */
 
 import type { DetailField } from '@/schemas/vdfs'
-import { editTextOf, parseListValue, parseMapValue } from '@/schemas/vdfs-form'
+import { editJsonText, editTextOf, parseJsonText, parseListValue, parseMapValue } from '@/schemas/vdfs-form'
 
 /** widget 名（由后端 `DetailDefinition` 下发；前端不发明新取值） */
 export type FormWidget =
@@ -46,6 +46,7 @@ export type FormWidget =
   | 'static'
   | 'path'
   | 'form'
+  | 'json'
 
 /**
  * 呈现组 —— 模板真正分派的东西。
@@ -86,7 +87,9 @@ export interface FormWidgetSpec {
    * 只给 `number` 用：空串不是合法的数字，提交上去会让后端的 `Option<u32>` /
    * `f64` 反序列化失败（用户看到的是一句「missing field / invalid type」）。
    * 省略键后，后端自己的 `#[serde(default)]` 才能表达「不限制 / 取默认」。
-   * 文本类不标它：空串是用户明确清空该字段，与「没填」是两件事。
+   * `json`：空串 = 没有值（省略键，让后端 `serde(default)` 决定「不限制」），
+   * 与 number 同理——`JSON.parse('')` 不是合法值。
+   * 其余文本类不标它：空串是用户明确清空该字段，与「没填」是两件事。
    */
   omitWhenEmpty?: boolean
 }
@@ -125,6 +128,14 @@ const WIDGET_SPECS: Record<FormWidget, FormWidgetSpec> = {
   path: { tag: 'input', initial: '', toEdit: identity, fromEdit: identity, fullWidth: false, readonly: false, inputType: 'text' },
   // 结构化子对象：编辑态与存储态都是对象，由字段 `form` 子定义描述形状
   form: { tag: 'form', initial: {}, toEdit: identity, fromEdit: identity, fullWidth: true, readonly: false },
+  // 任意 JSON 结构：编辑态格式化文本、存储态 JSON 值。非法文本保存时由渲染器就地拦截。
+  json: {
+    tag: 'textarea', initial: '',
+    toEdit: editJsonText,
+    fromEdit: (v) => parseJsonText(v).value,
+    fullWidth: true, readonly: false, omitWhenEmpty: true,
+    placeholder: 'JSON 对象或数组；留空 = 不限制',
+  },
 }
 
 /** 未登记 widget 名的回落（与消息域 / VDFS 域同一条兜底约定） */

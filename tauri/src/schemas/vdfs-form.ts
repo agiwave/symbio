@@ -590,3 +590,44 @@ export function editTextOf(kind: 'list' | 'map', v: unknown): string {
   }
   return ''
 }
+
+// ---------------------------------------------------------------------------
+// json widget：结构化对象 / 数组的通用编辑（编辑态 = 格式化 JSON 文本）
+// ---------------------------------------------------------------------------
+//
+// `list` / `map` 只能表达「一行一项」的简单结构。嵌套对象、值列表、任意 JSON
+// 结构（如 `{kind: [value, ...]}`）需要一条更通用的路：存储态是 JSON 值，编辑态
+// 是格式化文本，保存时解析回结构。与 list/map 同属「编辑文本 ↔ 存储结构」这条
+// 机制，区别只在编解码器是 JSON 解析器。
+//
+// 关键约定：**空串 = 没有值**（省略该键），而不是 `JSON.parse('')` 报错——
+// 这样「留空 = 不限制」的字段才能直接声明 json widget，无需后端的 `_json` 字符串
+// 字段绕一圈。语法错误同样不抛异常，交给渲染器就地提示（见 DetailForm 的 json 分支）。
+
+/** 存储态 JSON 值 → 编辑态格式化文本（空值 = 空串） */
+export function editJsonText(v: unknown): string {
+  if (v === undefined || v === null || v === '') return ''
+  if (typeof v === 'string') return v // 已是文本（兼容旧存档 / 直接下发）
+  try {
+    return JSON.stringify(v, null, 2)
+  } catch {
+    return String(v)
+  }
+}
+
+/**
+ * 编辑态 JSON 文本 → 存储态值。
+ * 返回 `{ ok, value }`：空串视为「无值」（ok=true, value=undefined，保存时省略键）；
+ * 语法错误返回 ok=false，由渲染器就地提示，不阻塞其它字段编辑。
+ */
+export function parseJsonText(text: unknown): { ok: boolean; value?: unknown; error?: string } {
+  if (text === undefined || text === null || (typeof text === 'string' && text.trim() === '')) {
+    return { ok: true, value: undefined }
+  }
+  if (typeof text !== 'string') return { ok: true, value: text }
+  try {
+    return { ok: true, value: JSON.parse(text) }
+  } catch (e) {
+    return { ok: false, error: e instanceof Error ? e.message : String(e) }
+  }
+}

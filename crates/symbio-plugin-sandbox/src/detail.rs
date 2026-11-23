@@ -83,8 +83,8 @@ pub(crate) fn sandbox_detail_definition() -> DetailDefinition {
                 fields: vec![
                     DetailField {
                         required: true,
-                        placeholder: Some("例如：strict（即档案 ID）".into()),
-                        ..field("name", "名称", "用于生成档案 ID；内置档不可改名", "text")
+                        placeholder: Some("例如：办公环境".into()),
+                        ..field("name", "名称", "给这套安全设置起个名字；保存时自动生成档案标识", "text")
                     },
                     DetailField {
                         rows: Some(3),
@@ -111,7 +111,7 @@ pub(crate) fn sandbox_detail_definition() -> DetailDefinition {
                         ..field(
                             "approval_mode",
                             "审批模式",
-                            "承接原「运行模式」选项；由沙箱内部承载，会话不再单独选择",
+                            "需要审批的操作如何处置：弹卡让你确认，或无人值守自动拒绝",
                             "select",
                         )
                     },
@@ -126,7 +126,7 @@ pub(crate) fn sandbox_detail_definition() -> DetailDefinition {
                         ..field(
                             "risk_threshold",
                             "风险阈值",
-                            "承接原「风险等级」选项；由沙箱内部承载，会话不再单独选择",
+                            "越高越谨慎：更多操作会被判定为需要审批",
                             "select",
                         )
                     },
@@ -137,21 +137,21 @@ pub(crate) fn sandbox_detail_definition() -> DetailDefinition {
                 collapsed: true,
                 fields: vec![
                     DetailField {
-                        rows: Some(3),
+                        rows: Some(4),
                         ..field(
-                            "allowed_facts_json",
-                            "事实白名单（JSON）",
-                            "形如 {\"shell_command\": [\"git status\"]}；留空 = 不按事实限制",
-                            "textarea",
+                            "allowed_facts",
+                            "允许的操作（JSON）",
+                            "按工具细分允许值，如 {\"shell_command\": [\"git status\", \"ls\"]}；留空 = 不限制",
+                            "json",
                         )
                     },
                     DetailField {
-                        rows: Some(3),
+                        rows: Some(4),
                         ..field(
-                            "blocked_tools_json",
-                            "工具拦截（JSON）",
-                            "形如 {\"tool_name\": {\"blocked\": true}}；留空 = 不拦截工具名",
-                            "textarea",
+                            "blocked_tools",
+                            "拦截的工具（JSON）",
+                            "按工具名配置拦截，如 {\"dangerous_tool\": {\"blocked\": true}}；留空 = 不拦截",
+                            "json",
                         )
                     },
                 ],

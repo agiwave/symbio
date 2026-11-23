@@ -26,6 +26,8 @@
 import { describe, expect, it } from 'vitest'
 import {
   compactFieldText,
+  parseJsonText,
+  editJsonText,
   detailPresetFieldOptions,
   detailPresetFieldSuggestions,
   detailPresetOf,
@@ -390,5 +392,31 @@ describe('compactFieldText（选项栏按钮文本的唯一规则）', () => {
       form: { binding: 'option', title_from: ['enabled'], sections: [] },
     })
     expect(compactFieldText(f, 'oops')).toBe('字段名')
+  })
+})
+
+describe('json widget 的编解码（机制唯一实现）', () => {
+  it('格式化往返：嵌套对象 ↔ 多行 JSON 文本', () => {
+    const v = { shell_command: ['git status', 'ls'], url: ['https://a'] }
+    const text = editJsonText(v)
+    expect(text).toContain('\n') // 缩进格式化，不是压缩成一行
+    expect(parseJsonText(text)).toEqual({ ok: true, value: v })
+  })
+
+  it('留空 = 无值（ok=true, value=undefined）——留空 = 不限制的语义基础', () => {
+    expect(parseJsonText('')).toEqual({ ok: true, value: undefined })
+    expect(parseJsonText('   ')).toEqual({ ok: true, value: undefined })
+    expect(parseJsonText(null)).toEqual({ ok: true, value: undefined })
+  })
+
+  it('语法错误不抛异常，返回 ok=false + 错误文案（供渲染器就地提示）', () => {
+    const r = parseJsonText('{ bad json')
+    expect(r.ok).toBe(false)
+    expect(r.error).toBeTruthy()
+  })
+
+  it('已是结构化值（非字符串）⇒ 原样通过（兼容后端直接下发）', () => {
+    const obj = { a: 1 }
+    expect(parseJsonText(obj)).toEqual({ ok: true, value: obj })
   })
 })

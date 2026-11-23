@@ -81,16 +81,14 @@ fn archive_node_carries_detail_definition() {
 }
 
 #[tokio::test]
-async fn write_accepts_empty_json_facts_fields() {
-    // 回归：两个 JSON textarea 的初始值是空串（「留空=不限制」），
-    // 若 Write 直接 serde_json::from_str("") 会让新建沙箱保存失败。
+async fn write_accepts_structured_json_fields() {
+    // json widget 提交结构化值；字段留空时前端省略该键，serde default 生效。
     let plugin = test_plugin();
     let payload = serde_json::json!({
         "name": "custom",
         "approval_mode": "interactive",
         "risk_threshold": "medium",
-        "allowed_facts_json": "",
-        "blocked_tools_json": "",
+        // allowed_facts / blocked_tools 留空（前端省略）⇒ 空 HashMap
     })
     .to_string();
     let resp = plugin
@@ -102,7 +100,7 @@ async fn write_accepts_empty_json_facts_fields() {
             },
         )
         .await
-        .expect("留空的 JSON 字段必须能保存（= 不限制）");
+        .expect("结构化字段必须能保存（留空 = 不限制）");
     let VdfsResponse::Write(w) = resp else {
         panic!("期望 Write 响应，实得：{resp:?}")
     };
@@ -113,4 +111,54 @@ async fn write_accepts_empty_json_facts_fields() {
     let cfg = reg.archives().get(&id).expect("新档案必须落在注册表");
     assert!(cfg.allowed_facts.is_empty(), "留空 = 不限制（空白名单）");
     assert!(cfg.blocked_tools.is_empty(), "留空 = 不拦截（空黑名单）");
+}
+
+#[tokio::test]
+async fn write_roundtrips_structured_json_fields() {
+    // json widget 提交的对象能原样落盘、读回（格式化由前端承担，后端只存结构）。
+    let plugin = test_plugin();
+    let payload = serde_json::json!({
+        "name": "structured",
+        "allowed_facts": { "shell_command": ["git status", "ls"] },
+        "blocked_tools": { "dangerous_tool": { "blocked": true } },
+    })
+    .to_string();
+    let resp = plugin
+        .dispatch(
+            &VdfsContext::empty(),
+            "",
+            VdfsRequest::Write {
+                content: VdfsContent::text(payload).with_create(),
+            },
+        )
+        .await
+        .expect("结构化字段必须能保存");
+    let VdfsResponse::Write(w) = resp else {
+        panic!("期望 Write 响应，实得：{resp:?}")
+    };
+    let id = w.name.expect("匿名写必须回传生成的 id");
+    let read = plugin
+        .dispatch(&VdfsContext::empty(), &id, VdfsRequest::Read)
+        .await
+        .expect("读回档案");
+    let VdfsResponse::Read(content) = read else {
+        panic!("期望 Read 响应，实得：{read:?}")
+    };
+    let value: serde_json::Value = serde_json::from_str(content.text.as_deref().unwrap_or(""))
+        .expect("read 内容应是合法 JSON");
+    assert_eq!(
+        value.get("allowed_facts").unwrap(),
+        &serde_json::json!({
+            "shell_command": ["git status", "ls"]
+        })
+    );
+    assert_eq!(
+        value.get("blocked_tools").unwrap(),
+        &serde_json::json!({
+            "dangerous_tool": { "blocked": true }
+        })
+    );
+    // 不再下发 `_json` 字符串字段。
+    assert!(value.get("allowed_facts_json").is_none());
+    assert!(value.get("blocked_tools_json").is_none());
 }

@@ -278,23 +278,11 @@ impl VdfsProvider for SandboxPlugin {
                     .archives()
                     .get(&id)
                     .ok_or_else(|| VdfsError::not_found(format!("未找到{LABEL}档案：{id}")))?;
-                // 表单里的两个 JSON textarea 字段由结构化字段渲染而来。
-                let mut value = serde_json::to_value(cfg)
+                // 表单的 json 字段直接消费结构化值（allowed_facts / blocked_tools 已在
+                // cfg 里）；不再注入 `_json` 字符串——那层转换是表单机制没有 json
+                // widget 时的历史绕法，现已由通用 widget 承担。
+                let value = serde_json::to_value(cfg)
                     .map_err(|e| VdfsError::internal(format!("序列化沙箱详情失败：{e}")))?;
-                if let Some(obj) = value.as_object_mut() {
-                    obj.insert(
-                        "allowed_facts_json".into(),
-                        serde_json::json!(
-                            serde_json::to_string_pretty(&cfg.allowed_facts).unwrap_or_default()
-                        ),
-                    );
-                    obj.insert(
-                        "blocked_tools_json".into(),
-                        serde_json::json!(
-                            serde_json::to_string_pretty(&cfg.blocked_tools).unwrap_or_default()
-                        ),
-                    );
-                }
                 let text = serde_json::to_string_pretty(&value)
                     .map_err(|e| VdfsError::internal(format!("序列化沙箱详情失败：{e}")))?;
                 Ok(VdfsResponse::Read(
@@ -326,41 +314,10 @@ impl VdfsProvider for SandboxPlugin {
                     serde_json::from_str(text)
                         .map_err(|e| VdfsError::invalid(format!("沙箱档案不是合法 JSON：{e}")))?
                 };
-                // 把两个 JSON textarea 解析回结构化字段。
-                // 先把两个 JSON 字符串字段取出（避免借用 obj 后不能再 insert）。
-                let facts_json = value
-                    .get("allowed_facts_json")
-                    .and_then(|v| v.as_str())
-                    .map(str::to_owned);
-                let tools_json = value
-                    .get("blocked_tools_json")
-                    .and_then(|v| v.as_str())
-                    .map(str::to_owned);
+                // json widget 提交的是结构化值（allowed_facts / blocked_tools 已是对象），
+                // serde 直接反序列化即可；留空的 json 字段被前端省略 ⇒ `#[serde(default)]`
+                // 的空 HashMap 生效（留空 = 不限制）。旧的 `_json` 字符串转换已随机制增强删除。
                 if let Some(obj) = value.as_object_mut() {
-                    obj.remove("allowed_facts_json");
-                    obj.remove("blocked_tools_json");
-                    // 空串 = 「不限制」（与字段说明一致）：跳过解析，让 serde 默认的
-                    // 空 HashMap 生效。否则 textarea 初始值 `''` 会让新建保存直接失败。
-                    if let Some(s) = facts_json {
-                        if !s.trim().is_empty() {
-                            let parsed: std::collections::HashMap<String, Vec<String>> =
-                                serde_json::from_str(&s).map_err(|e| {
-                                    VdfsError::invalid(format!("事实白名单不是合法 JSON：{e}"))
-                                })?;
-                            if let Ok(v) = serde_json::to_value(parsed) {
-                                obj.insert("allowed_facts".into(), v);
-                            }
-                        }
-                    }
-                    if let Some(s) = tools_json {
-                        if !s.trim().is_empty() {
-                            let parsed: serde_json::Value =
-                                serde_json::from_str(&s).map_err(|e| {
-                                    VdfsError::invalid(format!("工具拦截不是合法 JSON：{e}"))
-                                })?;
-                            obj.insert("blocked_tools".into(), parsed);
-                        }
-                    }
                     obj.insert("builtin".into(), serde_json::json!(false));
                 }
                 let cfg: SandboxProfileConfig = serde_json::from_value(value)

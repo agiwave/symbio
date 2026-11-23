@@ -392,3 +392,57 @@ describe('DetailForm option 绑定（VDFS）：异步 values 到达触发预填'
     expect(payload).toEqual({ interval: 7 })
   })
 })
+
+describe('DetailForm json widget：格式化编辑 + 语法拦截', () => {
+  const jsonDef = () =>
+    def({
+      binding: 'option',
+      sections: [{ fields: [{ key: 'facts', label: '事实白名单', widget: 'json' }] }],
+      actions: [{ id: 'save', label: '保存', style: 'primary' }],
+    })
+
+  it('预填结构化对象为格式化文本，保存解析回结构', async () => {
+    const w = mount(DetailForm, {
+      props: {
+        definition: jsonDef(),
+        node: node({ name: 'sandbox' }),
+        values: { facts: { shell_command: ['git status'] } },
+        capabilities: { mutable: true },
+      },
+    })
+    const ta = w.find('textarea')
+    expect((ta.element as HTMLTextAreaElement).value).toContain('\n')
+    await w.find('button[title="保存"]').trigger('click')
+    const payload = w.emitted('save')![0][0] as Record<string, unknown>
+    expect(payload.facts).toEqual({ shell_command: ['git status'] })
+  })
+
+  it('非法 JSON 就地提示且阻止保存', async () => {
+    const w = mount(DetailForm, {
+      props: {
+        definition: jsonDef(),
+        node: node({ name: 'sandbox' }),
+        values: {},
+        capabilities: { mutable: true },
+      },
+    })
+    await w.find('textarea').setValue('{ broken')
+    expect(w.find('.field-error').text()).toContain('JSON 格式错误')
+    await w.find('button[title="保存"]').trigger('click')
+    expect(w.emitted('save')).toBeUndefined()
+  })
+
+  it('留空 json 字段省略该键（不提交空串）——留空 = 不限制', async () => {
+    const w = mount(DetailForm, {
+      props: {
+        definition: jsonDef(),
+        node: node({ name: 'sandbox' }),
+        values: {},
+        capabilities: { mutable: true },
+      },
+    })
+    await w.find('button[title="保存"]').trigger('click')
+    const payload = w.emitted('save')![0][0] as Record<string, unknown>
+    expect(payload).not.toHaveProperty('facts')
+  })
+})

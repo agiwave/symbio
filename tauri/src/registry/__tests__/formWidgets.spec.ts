@@ -109,6 +109,15 @@ describe('formWidgets：结构化编解码往返', () => {
     expect(widgetFromEdit('list', 42)).toEqual([])
     expect(widgetFromEdit('map', null)).toEqual({})
   })
+
+  it('json：结构化对象 ↔ 格式化文本，空串 = 无值（省略键）', () => {
+    const obj = { shell_command: ['git status', 'ls'] }
+    expect(widgetToEdit('json', obj)).toBe(JSON.stringify(obj, null, 2))
+    expect(widgetFromEdit('json', widgetToEdit('json', obj))).toEqual(obj)
+    // 留空 = 后端 serde(default) 决定的「不限制」
+    expect(widgetFromEdit('json', '')).toBeUndefined()
+    expect(widgetOmitsWhenEmpty('json')).toBe(true)
+  })
 })
 
 describe('formWidgets：整行 / 只读 / 占位', () => {

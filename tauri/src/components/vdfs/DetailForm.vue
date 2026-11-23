@@ -260,6 +260,7 @@ import {
   detailPresetOf,
   detailPresetPatch,
   evalDetailCondition,
+  parseJsonText,
   projectDetailActions,
   DETAIL_PICK_DIRECTORY,
   type DetailPick,
@@ -500,13 +501,28 @@ const backendFieldError = computed<Record<string, string>>(() => {
   for (const e of props.fieldErrors ?? []) if (e.field) map[e.field] = e.message
   return map
 })
-/** 字段是否处于错误态（本地缺填 / 后端校验失败） */
-function fieldHasError(f: DetailField): boolean {
-  return requiredFieldKeys.value.has(f.key) || Boolean(backendFieldError.value[f.key])
+/** json 字段的编辑态语法错误（空串 = 合法的无值） */
+function jsonFieldError(f: DetailField): string {
+  if (f.widget !== 'json') return ''
+  const r = parseJsonText(form[f.key])
+  return r.ok ? '' : `JSON 格式错误：${r.error ?? ''}`
 }
-/** 字段就地错误文案：优先后端，其次本地「必填」 */
+
+/** 字段是否处于错误态（本地缺填 / JSON 语法 / 后端校验失败） */
+function fieldHasError(f: DetailField): boolean {
+  return (
+    requiredFieldKeys.value.has(f.key) ||
+    Boolean(jsonFieldError(f)) ||
+    Boolean(backendFieldError.value[f.key])
+  )
+}
+/** 字段就地错误文案：优先后端，其次本地「必填」/ JSON 语法 */
 function fieldErrorText(f: DetailField): string {
-  return backendFieldError.value[f.key] || (requiredFieldKeys.value.has(f.key) ? '此项为必填' : '')
+  return (
+    backendFieldError.value[f.key] ||
+    (requiredFieldKeys.value.has(f.key) ? '此项为必填' : '') ||
+    jsonFieldError(f)
+  )
 }
 
 /**
@@ -628,6 +644,19 @@ function runAction(a: DetailAction) {
       }
       requiredFieldKeys.value.clear()
       requiredError.value = ''
+      // json 字段语法预检：解析失败时聚焦到该字段，避免把非法文本提交给后端
+      for (const sec of props.definition.sections) {
+        for (const f of sec.fields) {
+          const err = jsonFieldError(f)
+          if (!err) continue
+          void nextTick(() => {
+            const el = document.getElementById(fieldControlId(f))
+            el?.scrollIntoView({ block: 'center' })
+            el?.focus()
+          })
+          return
+        }
+      }
       const values = buildSave(saveCtx())
       if (!isUpload.value) {
         // 数据来自外部的绑定：只交回纯字段值，不让动作载荷污染它
