@@ -40,7 +40,7 @@ use symbio_plugin_api::{
 use symbio_plugin_api::{
     VdfsAccess, VdfsActionResult, VdfsChange, VdfsChangeSink, VdfsContent, VdfsContext, VdfsError,
     VdfsItem, VdfsNewType, VdfsNode, VdfsProvider, VdfsRequest, VdfsResponse, VdfsResult,
-    VdfsWriteResponse, VDFS_ACTION_EXPORT, VDFS_ACTION_IMPORT, VDFS_EXT_FORM,
+    VdfsWriteResponse, VDFS_ACTION_EXPORT, VDFS_ACTION_IMPORT, VDFS_EXT_FORM, VDFS_STATUS_NONE,
 };
 use symbio_providers::{vdfs_id_of, VdfsPack, VdfsUnpack};
 
@@ -178,6 +178,10 @@ fn agent_dir_node(r: &AgentDirRecord, store: &AgentDirStore) -> VdfsNode {
     let mut n = VdfsNode::file(id, title, VdfsAccess::READ);
     n.kind = PLUGIN_ID_SUBAGENT.to_string();
     n.ext = Some(VDFS_EXT_FORM.to_string());
+    // 显式声明无状态：子智能体是一份静态配置，没有「运行中 / 就绪」这种会变化的状态。
+    // 节点 status 缺省是 active，不清掉就会在列表里画一个不存在的绿点（同
+    // plugin_manager 分区节点的处置，见 010-VDFS前端页面规范 §4.2）。
+    n.status = VDFS_STATUS_NONE.to_string();
     n.schema = serde_json::to_value(super::detail::agent_detail_definition()).ok();
     if !r.manifest.description.is_empty() {
         n.description = Some(r.manifest.description.clone());

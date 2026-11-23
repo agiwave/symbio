@@ -8,6 +8,9 @@ use super::*;
 fn definition_covers_mcp_form_surface() {
     let def = mcp_detail_definition();
     assert_eq!(def.binding, "upload");
+    // 右栏标题靠 title_from=name（name 由 Read 在读时注入 = 条目 id）。
+    // 这条断言守住「选中已有 Server 时右栏显示真实标题，而不回退「新建 MCP Server」」。
+    assert_eq!(def.title_from, vec!["name".to_string()]);
     // 基本分区 + 工具过滤折叠分区
     assert_eq!(def.sections[0].fields.len(), 9);
     assert_eq!(def.sections[1].title.as_deref(), Some("工具过滤"));

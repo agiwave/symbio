@@ -347,7 +347,20 @@ impl VdfsProvider for McpPlugin {
                         "该路径是目录，不可读取内容：{path}"
                     )));
                 }
-                let text = self.store().read_text(&id_of(path)).await?;
+                let id = id_of(path);
+                let text = self.store().read_text(&id).await?;
+                // 详情读的是表单形状：name 只用于生成条目目录 id、不写入 server.json，
+                // 故在读时注入 name=id，供通用渲染器 title_from=name 显示真实标题。
+                // 不注入则 title_from 取不到值 → 回退「新建 MCP Server」。
+                // 落盘形状不变：validate_manifest 用 serde 解析 McpServerConfig，多余键被忽略。
+                let mut value: serde_json::Value = serde_json::from_str(&text).map_err(|e| {
+                    VdfsError::internal(format!("MCP Server「{id}」配置不是合法 JSON: {e}"))
+                })?;
+                if let Some(obj) = value.as_object_mut() {
+                    obj.insert("name".into(), serde_json::json!(id));
+                }
+                let text = serde_json::to_string_pretty(&value)
+                    .map_err(|e| VdfsError::internal(format!("序列化 MCP 详情失败：{e}")))?;
                 Ok(VdfsResponse::Read(
                     VdfsContent::text(text).with_mime("application/json"),
                 ))

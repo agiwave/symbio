@@ -63,7 +63,10 @@ fn when_remote() -> DetailCondition {
 pub fn mcp_detail_definition() -> DetailDefinition {
     DetailDefinition {
         binding: "upload".into(),
-        title_from: vec![],
+        // 右栏标题取 `title_from → title_fallback → node.title`；name 不写入 server.json，
+        // 由 Read 在读时注入（= 条目 id）。不声明就会出现「选中已有 Server，右栏仍叫
+        // 「新建 MCP Server」」——这类资源页共有的标题回退缺陷。
+        title_from: vec!["name".into()],
         title_fallback: Some("新建 MCP Server".into()),
         subtitle_from: vec!["type".into(), "command".into(), "url".into()],
         name_from: vec!["name".into()],

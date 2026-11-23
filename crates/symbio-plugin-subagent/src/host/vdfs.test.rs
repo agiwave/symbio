@@ -144,3 +144,23 @@ fn dir_info_lists_unknown_categories_verbatim() {
     );
     assert_eq!(info["capabilities"]["custom_widget"], serde_json::json!(1));
 }
+
+/// 列表节点显式无状态：子智能体是静态配置，不该顶着缺省 `active` 的绿点。
+///
+/// 前端按 `status` 决定画不画状态点（vdfsCards.cardStatusOf / VdfsCard.showStatus），
+/// 缺省 `active` 会画一个不存在的「就绪」提示——这里把「无状态」作为数据下发，
+/// 前端零业务改动（同 plugin_manager 分区节点的处置）。
+#[test]
+fn agent_dir_node_declares_no_status() {
+    let tmp = tempfile::tempdir().unwrap();
+    let record = agent_fixture(tmp.path(), "demo", &[("skill", 1)]);
+    let store = AgentDirStore::new(tmp.path());
+    let node = agent_dir_node(&record, &store);
+
+    assert_eq!(node.status, symbio_plugin_api::VDFS_STATUS_NONE);
+    assert_eq!(node.kind, PLUGIN_ID_SUBAGENT);
+    assert_eq!(node.name, "demo");
+    assert_eq!(node.title, "演示");
+    assert_eq!(node.ext.as_deref(), Some(VDFS_EXT_FORM));
+    assert!(!node.access.write, "子智能体条目只读");
+}
