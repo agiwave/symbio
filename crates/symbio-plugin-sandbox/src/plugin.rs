@@ -67,6 +67,13 @@ fn builtin_profiles() -> Vec<(String, SandboxProfileConfig)> {
     ]
 }
 
+/// 详情定义（JSON 形态）——**唯一出处**：档案节点的 `schema` 与新建类型的 `schema`
+/// 都读它，因此「点新建」的草稿表单与「选中一项」的详情表单是同一张。
+/// 与 mcp / skill 的 `detail_definition()` 同形；缺了它，form 渲染器拿不到 `sections`。
+fn detail_definition() -> serde_json::Value {
+    serde_json::to_value(sandbox_detail_definition()).unwrap_or(serde_json::Value::Null)
+}
+
 /// Sandbox 插件本体。
 ///
 /// **无插件级"当前选中项"**：沙箱选择是会话级数据，随 `ctx[SANDBOX_ID]` 传来，
@@ -141,6 +148,11 @@ impl SandboxPlugin {
         node.kind = PLUGIN_ID_SANDBOX.to_string();
         node.status = VDFS_STATUS_NONE.to_string();
         node.ext = Some(VDFS_EXT_FORM.to_string());
+        // 与 mcp / skill 同形：把描述下发到列表卡片与右栏副标题。
+        node.description = cfg.description.clone();
+        // 节点自携带详情定义：form 渲染器的 definition 完全来自 node.schema。
+        // 漏挂会让右栏拿到空定义（无 sections）而白屏，标题也回退成「新建沙箱」。
+        node.schema = Some(detail_definition());
         node
     }
 }
@@ -244,10 +256,7 @@ impl VdfsProvider for SandboxPlugin {
                             VdfsNewType::new(PLUGIN_ID_SANDBOX, LABEL)
                                 .with_description("新建沙箱档案（内置档只读，可复制后修改）")
                                 .with_node_ext(VDFS_EXT_FORM)
-                                .with_schema(
-                                    serde_json::to_value(sandbox_detail_definition())
-                                        .unwrap_or_default(),
-                                ),
+                                .with_schema(detail_definition()),
                         )),
                     ));
                 }
@@ -330,20 +339,27 @@ impl VdfsProvider for SandboxPlugin {
                 if let Some(obj) = value.as_object_mut() {
                     obj.remove("allowed_facts_json");
                     obj.remove("blocked_tools_json");
+                    // 空串 = 「不限制」（与字段说明一致）：跳过解析，让 serde 默认的
+                    // 空 HashMap 生效。否则 textarea 初始值 `''` 会让新建保存直接失败。
                     if let Some(s) = facts_json {
-                        let parsed: std::collections::HashMap<String, Vec<String>> =
-                            serde_json::from_str(&s).map_err(|e| {
-                                VdfsError::invalid(format!("事实白名单不是合法 JSON：{e}"))
-                            })?;
-                        if let Ok(v) = serde_json::to_value(parsed) {
-                            obj.insert("allowed_facts".into(), v);
+                        if !s.trim().is_empty() {
+                            let parsed: std::collections::HashMap<String, Vec<String>> =
+                                serde_json::from_str(&s).map_err(|e| {
+                                    VdfsError::invalid(format!("事实白名单不是合法 JSON：{e}"))
+                                })?;
+                            if let Ok(v) = serde_json::to_value(parsed) {
+                                obj.insert("allowed_facts".into(), v);
+                            }
                         }
                     }
                     if let Some(s) = tools_json {
-                        let parsed: serde_json::Value = serde_json::from_str(&s).map_err(|e| {
-                            VdfsError::invalid(format!("工具拦截不是合法 JSON：{e}"))
-                        })?;
-                        obj.insert("blocked_tools".into(), parsed);
+                        if !s.trim().is_empty() {
+                            let parsed: serde_json::Value =
+                                serde_json::from_str(&s).map_err(|e| {
+                                    VdfsError::invalid(format!("工具拦截不是合法 JSON：{e}"))
+                                })?;
+                            obj.insert("blocked_tools".into(), parsed);
+                        }
                     }
                     obj.insert("builtin".into(), serde_json::json!(false));
                 }

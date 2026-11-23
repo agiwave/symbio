@@ -137,6 +137,10 @@ const definition = computed<DetailDefinition>(() => {
   const draft = isVdfsDraft(props.node)
   return {
     ...raw,
+    // 防御：provider 漏挂 schema 时仍在 sections 上给空数组——DetailForm 直接
+    // 遍历它渲染字段，缺了会 TypeError 白屏。这是机制兜底，不替代 provider
+    // 正确下发 schema（见 sandbox 插件 archive_node 的修复）。
+    sections: raw.sections ?? [],
     binding: 'option',
     // 只读节点原先整表剥掉动作（避免渲染出无效的「保存」/「删除」），但
     // **与写无关**的动作必须保留：「浏览内部」是纯导航（agent 正是只读却

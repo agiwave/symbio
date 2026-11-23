@@ -5,7 +5,9 @@
 //! allowed_facts/blocked_tools 是沙箱内部开关。前端只按 widget 通用渲染，
 //! **不理解任何沙箱概念**——与 mcp / model 的详情走同一条通道。
 
-use symbio_plugin_api::{DetailDefinition, DetailField, DetailOption, DetailSection};
+use symbio_plugin_api::{
+    DetailAction, DetailCondition, DetailDefinition, DetailField, DetailOption, DetailSection,
+};
 
 /// 会话选项字段：`sandbox_id`（单选）。候选是档案 id → name，前端只渲染 select。
 ///
@@ -70,6 +72,8 @@ pub(crate) fn sandbox_detail_definition() -> DetailDefinition {
         binding: "upload".into(),
         title_from: vec!["name".into()],
         title_fallback: Some("新建沙箱".into()),
+        // 与 mcp / skill 同形：右栏标题下显示描述，列表卡片也有副标题来源。
+        subtitle_from: vec!["description".into()],
         name_from: vec!["name".into()],
         id_from: vec!["name".into()],
         sections: vec![
@@ -151,6 +155,37 @@ pub(crate) fn sandbox_detail_definition() -> DetailDefinition {
                         )
                     },
                 ],
+            },
+        ],
+        // 与 mcp / skill 同形：详情动作显式声明，表单渲染器据此决定显示哪些按钮。
+        // 早期这里用 `..Default::default()` 漏了 actions，导致沙箱编辑页没有「保存」。
+        // 只读（内置档）节点的写动作由前端按访问位自动剥掉，与 mcp / skill 同一机制。
+        actions: vec![
+            DetailAction {
+                id: "save".into(),
+                label: "保存".into(),
+                style: "primary".into(),
+                busy_label: Some("保存中…".into()),
+                ..Default::default()
+            },
+            DetailAction {
+                id: "divider".into(),
+                label: String::new(),
+                style: "divider".into(),
+                ..Default::default()
+            },
+            DetailAction {
+                id: "delete".into(),
+                label: "删除沙箱".into(),
+                style: "icon danger".into(),
+                // 草稿态（新建）没有目标可删，与 mcp / skill 一致。
+                disabled_when: Some(DetailCondition {
+                    key: "is_existing".into(),
+                    equals: Some(serde_json::json!(false)),
+                    ..Default::default()
+                }),
+                busy_label: Some("删除中…".into()),
+                ..Default::default()
             },
         ],
         ..Default::default()

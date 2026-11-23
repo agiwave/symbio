@@ -67,4 +67,15 @@ describe('VdfsFormDetail 传参基线（通道适配 + 直通）', () => {
     // 节点原样下传（同一份条目，不再映射成另一种摘要形状）
     expect(form.props('node')).toEqual(node)
   })
+
+  it('provider 漏挂 schema 时兜底空 sections——DetailForm 不再白屏', () => {
+    // 机制健壮性回归：早期 sandbox 档案节点漏挂 schema，DetailForm 直接
+    // 遍历 definition.sections 抛 TypeError。此处锁定渲染器这一跳的兜底。
+    const node = formNode({})
+    node.schema = { binding: 'option', actions: [] } as unknown as DetailDefinition
+    const w = mount(VdfsFormDetail, { props: { node, data: null } })
+    const def = w.findComponent(DetailForm).props('definition')
+    expect(def.sections).toEqual([])
+    expect(def.binding).toBe('option')
+  })
 })

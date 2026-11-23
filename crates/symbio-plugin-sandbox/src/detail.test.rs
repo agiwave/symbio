@@ -31,3 +31,13 @@ fn select_fields_carry_explicit_options() {
         }
     }
 }
+
+#[test]
+fn detail_declares_save_and_delete_actions() {
+    // 回归：早期这里漏了 actions，沙箱编辑页没有「保存」按钮。与 mcp / skill
+    // 同形——动作必须由定义显式声明，渲染器才据此显示按钮。
+    let d = sandbox_detail_definition();
+    let ids: Vec<&str> = d.actions.iter().map(|a| a.id.as_str()).collect();
+    assert!(ids.contains(&"save"), "详情定义必须声明保存动作：{ids:?}");
+    assert!(ids.contains(&"delete"), "详情定义必须声明删除动作：{ids:?}");
+}
