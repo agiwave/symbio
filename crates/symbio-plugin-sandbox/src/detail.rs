@@ -6,7 +6,8 @@
 //! **不理解任何沙箱概念**——与 mcp / model 的详情走同一条通道。
 
 use symbio_plugin_api::{
-    DetailAction, DetailCondition, DetailDefinition, DetailField, DetailOption, DetailSection,
+    DetailAction, DetailColumn, DetailCondition, DetailDefinition, DetailField, DetailOption,
+    DetailSection,
 };
 
 /// 会话选项字段：`sandbox_id`（单选）。候选是档案 id → name，前端只渲染 select。
@@ -63,6 +64,88 @@ fn field(key: &str, label: &str, desc: &str, widget: &str) -> DetailField {
     }
 }
 
+/// 规则表格的列定义（沙箱插件**内部**声明，机制层只有通用 table widget）。
+///
+/// 一张表同时表达命令与目录规则：每行选「匹配对象」(`kind`)、匹配模式、值、
+/// 判定动作与风险档。顺序判定、首个命中生效；某对象配了规则却全未命中 ⇒ 拒绝，
+/// 要表达「只禁几条、其余放行」就加一条 `glob / * / 允许` 兜底行。
+fn rule_table_field() -> DetailField {
+    let kinds = ["shell_command", "vdfs_path", "url"];
+    let kind_opts: Vec<DetailOption> = kinds
+        .iter()
+        .map(|k| DetailOption {
+            value: (*k).into(),
+            label: match *k {
+                "shell_command" => "命令",
+                "vdfs_path" => "路径",
+                _ => "URL",
+            }
+            .into(),
+            description: None,
+        })
+        .collect();
+    let mode_opts: Vec<DetailOption> = [
+        ("exact", "精确：值必须完全相等"),
+        ("prefix", "前缀：值以填写内容开头"),
+        ("contains", "包含：值含填写内容"),
+        ("glob", "通配：* 任意长、? 单字符"),
+    ]
+    .iter()
+    .map(|(v, l)| DetailOption {
+        value: (*v).into(),
+        label: (*l).into(),
+        description: None,
+    })
+    .collect();
+    let action_opts: Vec<DetailOption> = [("allow", "允许"), ("deny", "拒绝")]
+        .iter()
+        .map(|(v, l)| DetailOption {
+            value: (*v).into(),
+            label: (*l).into(),
+            description: None,
+        })
+        .collect();
+    let risk_opts: Vec<DetailOption> = [
+        ("inherit", "继承工具自身判定（留空同义）"),
+        ("low", "低风险（一般不触发审批）"),
+        ("medium", "中风险"),
+        ("high", "高风险（通常需要审批）"),
+    ]
+    .iter()
+    .map(|(v, l)| DetailOption {
+        value: (*v).into(),
+        label: (*l).into(),
+        description: None,
+    })
+    .collect();
+    let col = |key: &str, label: &str, widget: &str, options: Vec<DetailOption>| DetailColumn {
+        key: key.into(),
+        label: label.into(),
+        widget: widget.into(),
+        options,
+        default: None,
+        placeholder: None,
+    };
+    DetailField {
+        columns: vec![
+            col("kind", "对象", "select", kind_opts),
+            col("match", "匹配", "select", mode_opts),
+            DetailColumn {
+                placeholder: Some("要匹配的值，如 git 或 /home/me/docs/**".into()),
+                ..col("value", "值", "text", vec![])
+            },
+            col("action", "动作", "select", action_opts),
+            col("risk", "风险档", "select", risk_opts),
+        ],
+        ..field(
+            "rules",
+            "能力约束规则",
+            "按顺序逐条匹配，首个命中生效：拒绝直接拦下；允许并可指定风险档（影响是否需审批）。留空整张表 = 不限制。",
+            "table",
+        )
+    }
+}
+
 /// 沙箱档案详情定义。
 ///
 /// `binding = "upload"` + `title_from = ["name"]`：选中已有沙箱时右栏显示其名，
@@ -84,7 +167,12 @@ pub(crate) fn sandbox_detail_definition() -> DetailDefinition {
                     DetailField {
                         required: true,
                         placeholder: Some("例如：办公环境".into()),
-                        ..field("name", "名称", "给这套安全设置起个名字；保存时自动生成档案标识", "text")
+                        ..field(
+                            "name",
+                            "名称",
+                            "给这套安全设置起个名字；保存时自动生成档案标识",
+                            "text",
+                        )
                     },
                     DetailField {
                         rows: Some(3),
@@ -133,28 +221,9 @@ pub(crate) fn sandbox_detail_definition() -> DetailDefinition {
                 ],
             },
             DetailSection {
-                title: Some("能力约束（可选）".into()),
+                title: Some("能力约束规则（可选）".into()),
                 collapsed: true,
-                fields: vec![
-                    DetailField {
-                        rows: Some(4),
-                        ..field(
-                            "allowed_facts",
-                            "允许的操作（JSON）",
-                            "按工具细分允许值，如 {\"shell_command\": [\"git status\", \"ls\"]}；留空 = 不限制",
-                            "json",
-                        )
-                    },
-                    DetailField {
-                        rows: Some(4),
-                        ..field(
-                            "blocked_tools",
-                            "拦截的工具（JSON）",
-                            "按工具名配置拦截，如 {\"dangerous_tool\": {\"blocked\": true}}；留空 = 不拦截",
-                            "json",
-                        )
-                    },
-                ],
+                fields: vec![rule_table_field()],
             },
         ],
         // 与 mcp / skill 同形：详情动作显式声明，表单渲染器据此决定显示哪些按钮。

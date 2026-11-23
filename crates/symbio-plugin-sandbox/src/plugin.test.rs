@@ -162,3 +162,51 @@ async fn write_roundtrips_structured_json_fields() {
     assert!(value.get("allowed_facts_json").is_none());
     assert!(value.get("blocked_tools_json").is_none());
 }
+
+#[tokio::test]
+async fn write_roundtrips_rule_table() {
+    // 规则表格提交的对象数组能原样落盘、读回（表格 widget 的存储态就是行对象数组）。
+    let plugin = test_plugin();
+    let payload = serde_json::json!({
+        "name": "rules-profile",
+        "rules": [
+            { "kind": "shell_command", "match": "contains", "value": "rm -rf", "action": "deny", "risk": "high" },
+            { "kind": "vdfs_path", "match": "glob", "value": "/home/me/**", "action": "allow", "risk": "low" }
+        ]
+    })
+    .to_string();
+    let resp = plugin
+        .dispatch(
+            &VdfsContext::empty(),
+            "",
+            VdfsRequest::Write {
+                content: VdfsContent::text(payload).with_create(),
+            },
+        )
+        .await
+        .expect("规则表格必须能保存");
+    let VdfsResponse::Write(w) = resp else {
+        panic!("期望 Write 响应，实得：{resp:?}")
+    };
+    let id = w.name.expect("匿名写必须回传生成的 id");
+    let read = plugin
+        .dispatch(&VdfsContext::empty(), &id, VdfsRequest::Read)
+        .await
+        .expect("读回档案");
+    let VdfsResponse::Read(content) = read else {
+        panic!("期望 Read 响应，实得：{read:?}")
+    };
+    let value: serde_json::Value = serde_json::from_str(content.text.as_deref().unwrap_or(""))
+        .expect("read 内容应是合法 JSON");
+    let rules = value
+        .get("rules")
+        .and_then(|v| v.as_array())
+        .expect("rules 数组");
+    assert_eq!(rules.len(), 2);
+    assert_eq!(rules[0]["kind"], "shell_command");
+    assert_eq!(rules[0]["match"], "contains");
+    assert_eq!(rules[0]["action"], "deny");
+    assert_eq!(rules[0]["risk"], "high");
+    assert_eq!(rules[1]["kind"], "vdfs_path");
+    assert_eq!(rules[1]["match"], "glob");
+}

@@ -33,32 +33,37 @@ fn select_fields_carry_explicit_options() {
 }
 
 #[test]
-fn constraint_fields_use_json_widget() {
-    // 两个能力约束字段用通用 json widget 直接编辑结构化值——不再要求用户手写
-    // `_json` 字符串（那条绕路是表单机制没有 json widget 时的历史产物）。
+fn constraint_field_is_a_generic_rule_table() {
+    // 能力约束用通用 table widget 编辑规则列表——用户可逐行配命令/路径的
+    // 匹配模式、动作与风险档，不再手写 JSON（json widget 已被否定为终态）。
     let d = sandbox_detail_definition();
-    let json_keys: Vec<&str> = d
+    let rules = d
         .sections
         .iter()
         .flat_map(|s| s.fields.iter())
-        .filter(|f| f.widget == "json")
-        .map(|f| f.key.as_str())
-        .collect();
-    assert!(
-        json_keys.contains(&"allowed_facts"),
-        "应有 allowed_facts json 字段"
-    );
-    assert!(
-        json_keys.contains(&"blocked_tools"),
-        "应有 blocked_tools json 字段"
-    );
-    // 旧的 `_json` 字符串字段必须彻底消失。
+        .find(|f| f.key == "rules")
+        .expect("应有 rules 表格字段");
+    assert_eq!(rules.widget, "table");
+    let col_keys: Vec<&str> = rules.columns.iter().map(|c| c.key.as_str()).collect();
+    assert_eq!(col_keys, vec!["kind", "match", "value", "action", "risk"]);
+    // 列只有通用控件词，不含任何沙箱/工具业务词（架构红线）。
+    for c in &rules.columns {
+        assert!(
+            ["text", "select", "number"].contains(&c.widget.as_str()),
+            "列控件必须是通用标量 widget：{}",
+            c.widget
+        );
+        assert!(!c.label.contains("shell"), "列标签不得含业务词");
+    }
+    // 旧 json 字段与 `_json` 字符串字段都必须彻底消失。
     let all_keys: Vec<&str> = d
         .sections
         .iter()
         .flat_map(|s| s.fields.iter())
         .map(|f| f.key.as_str())
         .collect();
+    assert!(!all_keys.contains(&"allowed_facts"));
+    assert!(!all_keys.contains(&"blocked_tools"));
     assert!(!all_keys.contains(&"allowed_facts_json"));
     assert!(!all_keys.contains(&"blocked_tools_json"));
 }

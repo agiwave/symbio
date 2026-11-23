@@ -1,7 +1,7 @@
-//! `engine.rs` 的单元测试 —— 沙箱引擎的裁决语义（D-531 / DE-058）。
+//! `engine.rs` 的单元测试 —— 沙箱规则裁决语义（D-531 / DE-058）。
 //!
-//! 与实现**同级**分文件（约定：`X.rs` + `X.test.rs`）。钉住两件事：
-//! 无选中沙箱时全放行（诚实降级），以及显式配置下的白名单 / 拦截裁决。
+//! 与实现**同级**分文件（约定：`X.rs` + `X.test.rs`）。钉住四件事：
+//! 无选中沙箱全放行、有序规则首个命中、四种匹配模式、风险档与旧档迁移。
 
 use super::*;
 
@@ -14,6 +14,22 @@ fn engine_with(profile: SandboxProfile) -> Engine {
     )
 }
 
+fn rule(
+    kind: &str,
+    mode: RuleMatch,
+    value: &str,
+    action: RuleAction,
+    risk: RuleRisk,
+) -> SandboxRule {
+    SandboxRule {
+        kind: kind.into(),
+        mode,
+        value: value.into(),
+        action,
+        risk,
+    }
+}
+
 #[test]
 fn no_selected_sandbox_permits_everything() {
     let engine = Engine::new(
@@ -24,22 +40,118 @@ fn no_selected_sandbox_permits_everything() {
     assert!(engine
         .intercept("any_tool", &serde_json::json!({}))
         .is_none());
+    assert_eq!(
+        engine.risk_of(&[SandboxFact::new("shell_command", "x")]),
+        None
+    );
 }
 
 #[test]
-fn a_configured_kind_denies_values_not_in_whitelist() {
-    let mut profile = SandboxProfile::default();
-    profile.fact_rules.insert(
-        "shell_command".to_string(),
-        FactRule {
-            allowed_values: vec!["git status".to_string()],
-        },
+fn first_matching_rule_wins_deny_blocks() {
+    let profile = SandboxProfile {
+        rules: vec![
+            // 先拒绝危险命令，再允许全部命令 —— 顺序不能反。
+            rule(
+                "shell_command",
+                RuleMatch::Contains,
+                "rm -rf",
+                RuleAction::Deny,
+                RuleRisk::High,
+            ),
+            rule(
+                "shell_command",
+                RuleMatch::Prefix,
+                "",
+                RuleAction::Allow,
+                RuleRisk::Inherit,
+            ),
+        ],
+        ..Default::default()
+    };
+    let engine = engine_with(profile);
+    assert!(!engine.permits(&[SandboxFact::new("shell_command", "sudo rm -rf /")]));
+    assert!(engine.permits(&[SandboxFact::new("shell_command", "git status")]));
+    // deny 命中时风险档不参与覆盖（闸门已直接拒绝）。
+    assert_eq!(
+        engine.risk_of(&[SandboxFact::new("shell_command", "rm -rf x")]),
+        None
     );
+}
+
+#[test]
+fn all_four_match_modes() {
+    let profile = SandboxProfile {
+        rules: vec![
+            rule(
+                "shell_command",
+                RuleMatch::Exact,
+                "git status",
+                RuleAction::Allow,
+                RuleRisk::Low,
+            ),
+            rule(
+                "vdfs_path",
+                RuleMatch::Prefix,
+                "/home/me/docs",
+                RuleAction::Allow,
+                RuleRisk::Low,
+            ),
+            rule(
+                "vdfs_path",
+                RuleMatch::Glob,
+                "/tmp/**/*.rs",
+                RuleAction::Deny,
+                RuleRisk::High,
+            ),
+            // 黑名单式表达：最后一条通配兜底放行其余路径。
+            rule(
+                "vdfs_path",
+                RuleMatch::Glob,
+                "*",
+                RuleAction::Allow,
+                RuleRisk::Inherit,
+            ),
+            rule(
+                "url",
+                RuleMatch::Contains,
+                "evil.test",
+                RuleAction::Deny,
+                RuleRisk::High,
+            ),
+        ],
+        ..Default::default()
+    };
     let engine = engine_with(profile);
     assert!(engine.permits(&[SandboxFact::new("shell_command", "git status")]));
-    assert!(!engine.permits(&[SandboxFact::new("shell_command", "rm -rf /")]));
-    // 没配规则的 kind 不设限。
-    assert!(engine.permits(&[SandboxFact::new("url", "http://example.com")]));
+    assert!(!engine.permits(&[SandboxFact::new("shell_command", "git status --short")]));
+    assert!(engine.permits(&[SandboxFact::new("vdfs_path", "/home/me/docs/a.md")]));
+    assert!(!engine.permits(&[SandboxFact::new("vdfs_path", "/tmp/x/a.rs")]));
+    assert!(engine.permits(&[SandboxFact::new("vdfs_path", "/tmp/x/a.txt")]));
+    assert!(!engine.permits(&[SandboxFact::new("url", "https://evil.test/x")]));
+}
+
+#[test]
+fn allow_rule_risk_overrides_tool_risk() {
+    let profile = SandboxProfile {
+        rules: vec![rule(
+            "shell_command",
+            RuleMatch::Prefix,
+            "git ",
+            RuleAction::Allow,
+            RuleRisk::High,
+        )],
+        ..Default::default()
+    };
+    let engine = engine_with(profile);
+    assert_eq!(
+        engine.risk_of(&[SandboxFact::new("shell_command", "git push --force")]),
+        Some("high".to_string())
+    );
+    // 没命中规则不指定风险档，工具保留自己的低风险判定。
+    assert_eq!(
+        engine.risk_of(&[SandboxFact::new("shell_command", "ls")]),
+        None
+    );
 }
 
 #[test]
@@ -59,29 +171,12 @@ fn intercept_only_blocks_explicitly_configured_tools() {
 }
 
 #[test]
-fn all_facts_must_pass() {
-    let mut profile = SandboxProfile::default();
-    profile.fact_rules.insert(
-        "shell_command".to_string(),
-        FactRule {
-            allowed_values: vec!["ls".to_string()],
-        },
-    );
-    let engine = engine_with(profile);
-    // 两条事实里有一条不在白名单 ⇒ 整体拒绝。
-    assert!(!engine.permits(&[
-        SandboxFact::new("shell_command", "ls"),
-        SandboxFact::new("shell_command", "rm -rf /"),
-    ]));
-}
-
-#[test]
-fn config_builds_a_live_registry() {
+fn legacy_allowed_facts_migrate_to_exact_allow_rules() {
     let config: SandboxConfig = serde_json::from_value(serde_json::json!({
         "sandboxes": {
             "strict": {
                 "name": "严格",
-                "allowed_facts": { "shell_command": ["git status"] },
+                "allowed_facts": { "shell_command": ["git status", "ls"] },
                 "blocked_tools": { "dangerous_tool": { "blocked": true } }
             }
         },
@@ -93,6 +188,7 @@ fn config_builds_a_live_registry() {
         Some("strict".to_string()),
     );
     assert!(engine.permits(&[SandboxFact::new("shell_command", "git status")]));
+    assert!(engine.permits(&[SandboxFact::new("shell_command", "ls")]));
     assert!(!engine.permits(&[SandboxFact::new("shell_command", "rm -rf /")]));
     assert!(engine
         .intercept("dangerous_tool", &serde_json::json!({}))
@@ -100,8 +196,26 @@ fn config_builds_a_live_registry() {
 }
 
 #[test]
+fn rules_roundtrip_in_archive_config() {
+    let cfg: SandboxProfileConfig = serde_json::from_value(serde_json::json!({
+        "name": "规则档",
+        "rules": [{
+            "kind": "vdfs_path",
+            "match": "glob",
+            "value": "/home/me/**",
+            "action": "allow",
+            "risk": "low"
+        }]
+    }))
+    .unwrap();
+    assert_eq!(cfg.rules.len(), 1);
+    assert_eq!(cfg.rules[0].mode, RuleMatch::Glob);
+    let value = serde_json::to_value(&cfg).unwrap();
+    assert_eq!(value["rules"][0]["match"], "glob");
+}
+
+#[test]
 fn approval_params_flow_from_selected_archive() {
-    // 承接 mode/risk_level 的审批开关随选中档案读出，缺席 = None（装配侧回落默认）。
     let profiles = vec![(
         "strict".to_string(),
         SandboxProfileConfig {
@@ -120,7 +234,6 @@ fn approval_params_flow_from_selected_archive() {
         engine.approval_params(),
         (Some("auto".to_string()), Some("high".to_string()))
     );
-    // 选中一个不存在的档案 ⇒ 全放行降级（装配侧回落默认）。
     let empty = Engine::new(
         Arc::new(std::sync::RwLock::new(SandboxRegistry::default())),
         Some("missing".to_string()),

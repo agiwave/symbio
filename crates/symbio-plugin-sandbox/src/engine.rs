@@ -2,7 +2,7 @@
 //!
 //! ## 归属：策略与配置全在这里，架构层看不到
 //!
-//! SDK 只定义了接口形状与 ctx 键；**黑白名单规则、具名沙箱配置、虚拟环境参数**
+//! SDK 只定义了接口形状与 ctx 键；**规则表、具名沙箱配置、虚拟环境参数**
 //! 全部是本模块的内部数据。其它插件只拿到 `Arc<dyn SandboxFace>` 句柄，
 //! 看不到任何配置项——这正是用户「沙箱配置是内部开关，不暴露给其它插件」的落点。
 //!
@@ -12,6 +12,25 @@
 //!   不认识工具名；新工具提交新 kind 时，沙箱按用户配的同 kind 规则匹配，零代码改动。
 //! - [`SandboxFace::intercept`] 收到的 `tool_name` 是**不透明透传**：本实现不内置任何
 //!   工具清单，只在用户显式配了该工具名的拦截规则时才拦；默认放行。
+//!
+//! ## 统一规则模型（能力约束配置的真相）
+//!
+//! 用户要的「命令黑白名单 / 目录黑白名单 / 各自风险档」统一成一张有序规则表：
+//!
+//! ```text
+//! 规则 = { 匹配对象(kind), 匹配模式, 值, 判定动作, 风险档 }
+//! ```
+//!
+//! - **首个命中生效**：用户可用顺序表达「先 deny 危险命令，再 allow 常用命令」；
+//! - **deny ⇒ 拒绝**（闸门直接拦，工具侧再查一次作纵深防御）；
+//! - **allow + 风险档 ⇒ 参与审批**：命中规则的风险档覆盖工具自报风险，
+//!   与会话阈值比较；风险档留空 = 继承工具自己的判定；
+//! - **某 kind 有规则但全未命中 ⇒ 拒绝**（fail-closed，沿用旧白名单语义）；
+//!   要表达「只禁这几条、其余放行」，显式加一条 `glob / * / allow` 兜底规则；
+//! - **该 kind 完全没有规则 ⇒ 放行且不覆盖风险**（缺席即不设限，旧档案平滑升级）。
+//!
+//! 旧档案的 `allowed_facts`（kind → 白名单值）在载入时**迁移**成 exact/allow 规则，
+//! 不需要用户手工改文件。
 //!
 //! ## 配置真相：本插件的 VDFS 存储
 //!
@@ -32,9 +51,108 @@ use serde::{Deserialize, Serialize};
 use serde_json::Value;
 use symbio_plugin_api::{SandboxFace, SandboxFact};
 
+/// 匹配模式：开放给所有事实 kind 复用的**通用字符串谓词**。
+#[derive(Debug, Clone, Copy, Default, PartialEq, Eq, Deserialize, Serialize)]
+#[serde(rename_all = "snake_case")]
+pub(crate) enum RuleMatch {
+    /// 全等
+    #[default]
+    Exact,
+    /// 前缀（适合目录子树 `/home/me/docs`）
+    Prefix,
+    /// 包含（适合命令片段 `rm -rf`）
+    Contains,
+    /// 通配符（`*` / `?`，适合路径模式 `/home/me/docs/**`）
+    Glob,
+}
+
+impl RuleMatch {
+    fn hits(self, pattern: &str, value: &str) -> bool {
+        match self {
+            Self::Exact => pattern == value,
+            Self::Prefix => value.starts_with(pattern),
+            Self::Contains => value.contains(pattern),
+            Self::Glob => glob_match(pattern, value),
+        }
+    }
+}
+
+/// 通配符匹配（`*` 任意长、`?` 单字符）。手写 DP，不引入依赖。
+fn glob_match(pattern: &str, text: &str) -> bool {
+    let p: Vec<char> = pattern.chars().collect();
+    let t: Vec<char> = text.chars().collect();
+    let mut dp = vec![false; t.len() + 1];
+    dp[0] = true;
+    for pc in &p {
+        let mut next = vec![false; t.len() + 1];
+        if *pc == '*' {
+            next[0] = dp[0];
+            for j in 1..=t.len() {
+                next[j] = dp[j] || next[j - 1];
+            }
+        } else {
+            for j in 1..=t.len() {
+                if *pc == '?' || *pc == t[j - 1] {
+                    next[j] = dp[j - 1];
+                }
+            }
+        }
+        dp = next;
+    }
+    dp[t.len()]
+}
+
+/// 判定动作。
+#[derive(Debug, Clone, Copy, Default, PartialEq, Eq, Deserialize, Serialize)]
+#[serde(rename_all = "snake_case")]
+pub(crate) enum RuleAction {
+    #[default]
+    Allow,
+    Deny,
+}
+
+/// 命中规则的风险档。`Inherit` = 不覆盖工具自报风险（表单留空即此值）。
+#[derive(Debug, Clone, Copy, Default, PartialEq, Eq, Deserialize, Serialize)]
+#[serde(rename_all = "snake_case")]
+pub(crate) enum RuleRisk {
+    #[default]
+    Inherit,
+    Low,
+    Medium,
+    High,
+}
+
+impl RuleRisk {
+    fn as_str(self) -> Option<&'static str> {
+        match self {
+            Self::Inherit => None,
+            Self::Low => Some("low"),
+            Self::Medium => Some("medium"),
+            Self::High => Some("high"),
+        }
+    }
+}
+
+/// 一条能力约束规则（沙箱插件私有数据，前端按通用表格声明列来编辑）。
+#[derive(Debug, Clone, Default, PartialEq, Eq, Deserialize, Serialize)]
+#[serde(default)]
+pub(crate) struct SandboxRule {
+    /// 匹配对象 = 事实 kind（开放字符串；`shell_command` / `vdfs_path` / `url`…）。
+    pub(crate) kind: String,
+    /// 匹配模式。
+    #[serde(rename = "match", alias = "mode")]
+    pub(crate) mode: RuleMatch,
+    /// 匹配值（命令片段 / 路径模式）。
+    pub(crate) value: String,
+    /// 允许 / 拒绝。
+    pub(crate) action: RuleAction,
+    /// 风险档（留空 = 继承工具自身判定）。
+    pub(crate) risk: RuleRisk,
+}
+
 /// 一份沙箱档案的可序列化形状（本插件 VDFS 存储的一个 `sandbox.json`）。
 ///
-/// 这是**沙箱插件的内部数据**：具名沙箱、审批开关、事实白名单、被拦工具名。
+/// 这是**沙箱插件的内部数据**：具名沙箱、审批开关、规则表、被拦工具名。
 /// 全部带 `#[serde(default)]`——缺字段的旧档案也能读，退化成安静放行器。
 #[derive(Debug, Clone, Default, Deserialize, Serialize)]
 #[serde(default)]
@@ -44,17 +162,19 @@ pub(crate) struct SandboxProfileConfig {
     /// 描述。
     pub(crate) description: Option<String>,
     /// 内置档只读（用户不能删除/改名，只能复制后改）。
-    #[serde(default)]
     pub(crate) builtin: bool,
     /// 审批模式：`auto`（无人值守，需审批时返回友好错误）/ `interactive`（渲染审批卡）。
-    /// 承接原 `MODE` 会话选项；空 = 沿用默认 `interactive`。
     pub(crate) approval_mode: Option<String>,
     /// 风险阈值：`low` / `medium` / `high`。
-    /// 承接原 `RISK_LEVEL` 会话选项；空 = 沿用默认 `medium`。
     pub(crate) risk_threshold: Option<String>,
-    /// 事实 kind → 允许值清单；清单为空 = 该 kind 不设限。
+    /// 统一规则表（首个命中生效）。
+    #[serde(skip_serializing_if = "Vec::is_empty")]
+    pub(crate) rules: Vec<SandboxRule>,
+    /// 旧档兼容：`kind → 允许值清单`，载入时迁移成 exact/allow 规则。
+    #[serde(skip_serializing_if = "HashMap::is_empty")]
     pub(crate) allowed_facts: HashMap<String, Vec<String>>,
     /// 工具名 → 拦截载荷（不透明 JSON）；只对显式配置的工具名生效。
+    #[serde(skip_serializing_if = "HashMap::is_empty")]
     pub(crate) blocked_tools: HashMap<String, Value>,
 }
 
@@ -69,26 +189,20 @@ pub(crate) struct SandboxConfig {
     pub(crate) active: Option<String>,
 }
 
-/// 一条内部规则：对某个事实 kind 的取值集合做允许/拒绝判定。
-///
-/// 规则是**沙箱插件的私有数据**；`allowed_values` 为空表示不设限，非空则是白名单——
-/// 值不在清单里即拒（fail-closed，与 Agent 权限的空清单语义一致）。
-#[derive(Debug, Clone, Default)]
-struct FactRule {
-    allowed_values: Vec<String>,
-}
-
-impl FactRule {
-    fn permits(&self, value: &str) -> bool {
-        self.allowed_values.is_empty() || self.allowed_values.iter().any(|v| v == value)
-    }
+/// 一条事实的裁决。
+#[derive(Debug, Clone, PartialEq, Eq)]
+enum Verdict {
+    /// 命中 deny 规则：拒绝，且不再看下一条规则。
+    Deny,
+    /// 放行；`Some(档位)` 表示命中规则指定了风险档（覆盖工具自报）。
+    Allow(Option<String>),
 }
 
 /// 一个具名沙箱的内部配置（由档案投影而来）。
 #[derive(Debug, Clone, Default)]
 struct SandboxProfile {
-    /// 按事实 kind 索引的规则；kind 是开放字符串，新 kind 无需改本模块。
-    fact_rules: HashMap<String, FactRule>,
+    /// 有序规则表（首个命中生效）。
+    rules: Vec<SandboxRule>,
     /// 工具名层的拦截载荷（不透明 JSON），只在用户显式配置时才有条目。
     blocked_tools: HashMap<String, Value>,
     /// 审批开关（承接 mode/risk_level），只在装配期被读取一次写进 ctx。
@@ -98,25 +212,66 @@ struct SandboxProfile {
 
 impl SandboxProfile {
     fn from_config(cfg: SandboxProfileConfig) -> Self {
+        let mut rules = cfg.rules;
+        // 旧档迁移：allowed_facts 的每一项变成 exact/allow 规则，风险档继承工具。
+        // 按 kind 排序保证顺序稳定（HashMap 遍历序不保证），新规则始终排在迁移规则之前。
+        if !cfg.allowed_facts.is_empty() {
+            let mut legacy: Vec<_> = cfg.allowed_facts.into_iter().collect();
+            legacy.sort_by(|a, b| a.0.cmp(&b.0));
+            for (kind, values) in legacy {
+                for value in values {
+                    rules.push(SandboxRule {
+                        kind: kind.clone(),
+                        mode: RuleMatch::Exact,
+                        value,
+                        action: RuleAction::Allow,
+                        risk: RuleRisk::Inherit,
+                    });
+                }
+            }
+        }
         Self {
-            fact_rules: cfg
-                .allowed_facts
-                .into_iter()
-                .map(|(kind, allowed_values)| (kind, FactRule { allowed_values }))
-                .collect(),
+            rules,
             blocked_tools: cfg.blocked_tools,
             approval_mode: cfg.approval_mode,
             risk_threshold: cfg.risk_threshold,
         }
     }
 
-    /// 能力约束判定：工具提交的每条事实都要被对应规则放行（全部放行才放行）。
+    /// 单条事实的裁决：首个命中生效；该 kind 有规则却全未命中 ⇒ fail-closed 拒绝。
+    fn verdict(&self, fact: &SandboxFact) -> Verdict {
+        let mut has_kind_rules = false;
+        for rule in &self.rules {
+            if rule.kind != fact.kind {
+                continue;
+            }
+            has_kind_rules = true;
+            if rule.mode.hits(&rule.value, &fact.value) {
+                return match rule.action {
+                    RuleAction::Deny => Verdict::Deny,
+                    RuleAction::Allow => Verdict::Allow(rule.risk.as_str().map(str::to_string)),
+                };
+            }
+        }
+        if has_kind_rules {
+            Verdict::Deny // 白名单语义：配了就是限制，未列出即不放行
+        } else {
+            Verdict::Allow(None) // 该 kind 没配规则 = 不设限
+        }
+    }
+
+    /// 能力约束判定：工具提交的每条事实都要被放行（全部放行才放行）。
     fn permits(&self, facts: &[SandboxFact]) -> bool {
-        facts.iter().all(|f| {
-            self.fact_rules
-                .get(&f.kind)
-                .map(|rule| rule.permits(&f.value))
-                .unwrap_or(true) // 没有配该 kind 的规则 = 不设限 = 放行
+        facts
+            .iter()
+            .all(|f| !matches!(self.verdict(f), Verdict::Deny))
+    }
+
+    /// 命中允许规则的风险档（若有）。闸门用它覆盖工具自报风险。
+    fn risk_of(&self, facts: &[SandboxFact]) -> Option<String> {
+        facts.iter().find_map(|f| match self.verdict(f) {
+            Verdict::Allow(Some(risk)) => Some(risk),
+            _ => None,
         })
     }
 
@@ -200,6 +355,13 @@ impl SandboxFace for Engine {
             .profile(self.selected.as_deref())
             .map(|p| p.permits(facts))
             .unwrap_or(true) // 没选中档案 = 全放行
+    }
+
+    fn risk_of(&self, facts: &[SandboxFact]) -> Option<String> {
+        let guard = self.registry.read().unwrap_or_else(|p| p.into_inner());
+        guard
+            .profile(self.selected.as_deref())
+            .and_then(|p| p.risk_of(facts))
     }
 
     fn intercept(&self, tool_name: &str, args: &Value) -> Option<Value> {

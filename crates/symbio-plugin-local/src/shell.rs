@@ -543,13 +543,21 @@ impl ShellTool {
         // 缺席（没有沙箱句柄）= 全放行降级；ask（询问用户）不在这里，由沙箱在拦截点
         // 统一产出。本查询只返回 bool：许可就继续，不许可就拒。
         if let Some(face) = symbio_plugin_api::sandbox_of(ctx.as_ref()) {
+            let mut facts = Vec::new();
             if let Some(command) = args.get("command").and_then(|v| v.as_str()) {
-                let fact = symbio_plugin_api::SandboxFact::new("shell_command", command);
-                if !face.permits(std::slice::from_ref(&fact)) {
-                    return Err(PluginError::InternalError(
-                        "沙箱未放行本次 shell 命令".to_string(),
-                    ));
-                }
+                facts.push(symbio_plugin_api::SandboxFact::new(
+                    "shell_command",
+                    command,
+                ));
+            }
+            // 工作目录也是路径事实：目录黑白名单对「命令在哪里跑」同样生效。
+            if let Some(workdir) = ctx.get(symbio_plugin_api::WORKDIR) {
+                facts.push(symbio_plugin_api::SandboxFact::new("vdfs_path", workdir));
+            }
+            if !facts.is_empty() && !face.permits(&facts) {
+                return Err(PluginError::InternalError(
+                    "沙箱未放行本次 shell 命令 / 工作目录".to_string(),
+                ));
             }
         }
 

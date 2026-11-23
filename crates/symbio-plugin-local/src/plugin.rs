@@ -18,7 +18,7 @@ use symbio_plugin_api::{
     PluginPayload, PortExecutor,
 };
 use symbio_plugin_api::{DetailDefinition, DetailField, DetailOption};
-use symbio_providers::RiskOf;
+use symbio_providers::{FactsOf, RiskOf};
 use tokio::sync::RwLock;
 
 // ==================== 配置文档（`<根>/local/PLUGIN.yml`） ====================
@@ -122,6 +122,10 @@ struct ToolEntry {
     /// `None` = 静态档（`meta.effective_risk()`，与 `register_tool` 的 `risk = None`
     /// 分支同义）；`Some` = 风险随参数变化的覆写闭包（shell）。
     risk: Option<RiskOf>,
+    /// 沙箱事实提取器（D-531）：工具**自己**知道参数语义（`command` / 工作目录），
+    /// 把它翻成开放 kind 事实交给闸门查沙箱。沙箱不认识工具名，闸门不认识配置项。
+    /// `None` = 该工具不提交事实（绝大多数工具），走原审批判定。
+    facts: Option<FactsOf>,
     executor: Arc<dyn PortExecutor>,
 }
 
@@ -191,30 +195,51 @@ impl LocalPlugin {
                     .unwrap_or(CapabilityRiskLevel::High)
             })
         };
+        // shell 的意图事实提取器（D-531）：只有 shell 自己知道 `args["command"]`
+        // 是命令、ctx[WORKDIR] 是工作目录。翻成开放 kind 事实交给闸门查沙箱；
+        // 沙箱按用户配的规则做 deny / 风险档覆盖，双方都不认识对方的实现细节。
+        let shell_facts: FactsOf = Arc::new(|args: &Value, ctx: &Arc<dyn PluginInvokeRequest>| {
+            let mut facts = Vec::new();
+            if let Some(command) = args.get("command").and_then(|v| v.as_str()) {
+                facts.push(symbio_plugin_api::SandboxFact::new(
+                    "shell_command",
+                    command,
+                ));
+            }
+            if let Some(workdir) = ctx.get(symbio_plugin_api::WORKDIR) {
+                facts.push(symbio_plugin_api::SandboxFact::new("vdfs_path", workdir));
+            }
+            facts
+        });
         let tool_impls: Vec<ToolEntry> = vec![
             ToolEntry {
                 meta: shell.meta(),
                 risk: Some(shell_risk),
+                facts: Some(shell_facts),
                 executor: shell,
             },
             ToolEntry {
                 meta: content_search.meta(),
                 risk: None,
+                facts: None,
                 executor: content_search,
             },
             ToolEntry {
                 meta: todo_write.meta(),
                 risk: None,
+                facts: None,
                 executor: todo_write,
             },
             ToolEntry {
                 meta: codebase_search.meta(),
                 risk: None,
+                facts: None,
                 executor: codebase_search,
             },
             ToolEntry {
                 meta: ask_user.meta(),
                 risk: None,
+                facts: None,
                 executor: ask_user,
             },
         ];
@@ -287,14 +312,15 @@ impl Plugin for LocalPlugin {
         }
 
         if ctx.get(symbio_plugin_api::CAPABILITY_VISITOR).is_some() {
-            // 注册收口点（`register_tool`）一次写两处：裹闸的端口绑定 + 纯数据的
-            // 工具行。shell 的动态风险闭包随条目交上去，静态档工具传 `None`
-            // （判定回落 `meta.effective_risk()`）。
+            // 注册收口点（`register_tool_with_facts`）一次写两处：裹闸的端口绑定 +
+            // 纯数据的工具行。shell 的动态风险闭包与事实提取器随条目交上去，
+            // 静态档工具传 `None`（判定回落 `meta.effective_risk()`）。
             for entry in self.tool_impls.iter() {
-                symbio_providers::register_tool(
+                symbio_providers::register_tool_with_facts(
                     &ctx,
                     entry.meta.clone(),
                     entry.risk.clone(),
+                    entry.facts.clone(),
                     Arc::clone(&entry.executor),
                 )
                 .await;
