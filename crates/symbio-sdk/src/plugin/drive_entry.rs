@@ -52,13 +52,17 @@ pub struct DriveTarget {
     /// 由写口在打开会话事实源时取来，`drive_on_new_fact` 据此设 `AGENT_ID`——
     /// **全链路只有这一处设它**，其余执行体只读。`None` = 取不到（拒绝回落主体）。
     pub agent_id: Option<String>,
-    /// 会话运行参数：已按 `req > session.metadata > 默认` 解析完的**结果值**。
+    /// 会话选中的沙箱档案 id（裁决 B / D-531）：前端选项栏呈现的唯一安全选项。
     ///
     /// 与 `workdir` / `agent_id` 同一来源、同一理由：`append` 不携带运行选项，由写口
-    /// 在打开会话事实源时从 metadata 取来；`drive_on_new_fact` 把它们挂进本轮 ctx
-    /// （`MODE` / `RISK_LEVEL` / `PROVIDER_ID`），审批闸门与模型端口据此取值。
+    /// 在打开会话事实源时从 metadata 取来；`drive_on_new_fact` 挂进本轮 ctx
+    /// （`SANDBOX_ID`），沙箱句柄按它解析出审批参数**覆盖** `MODE` / `RISK_LEVEL`。
     /// 解析链的**唯一实现**在会话侧（`store/layout.rs::resolve_session_params`）。
+    pub sandbox_id: Option<String>,
+    /// 存量兼容的审批回退值：无沙箱 / 沙箱未配该项时，`drive_on_new_fact` 用它写
+    /// `MODE` / `RISK_LEVEL`。选项栏已不再让用户选这两项。
     pub mode: String,
+    /// 存量兼容的阈值回退值（见 `mode`）。
     pub risk_level: String,
     /// 显式指定的 provider；`None` = 由模型侧选默认（本契约不猜）。
     pub provider_id: Option<String>,

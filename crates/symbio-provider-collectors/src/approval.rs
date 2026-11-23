@@ -33,6 +33,15 @@ use symbio_plugin_api::{
 };
 use symbio_sdk::capability::ApprovalGrants;
 use symbio_sdk::keys::{APPROVAL_GRANTS, MODE, RISK_LEVEL};
+use symbio_sdk::sandbox::{sandbox_of, SandboxFact};
+
+/// 工具自声明的**意图事实提取器**：把本次调用参数翻译成 `[SandboxFact]`。
+///
+/// 这是工具侧的能力（只有工具知道 `command` / `path` 这些参数怎么解释），闸门与沙箱
+/// 都不认识工具名：闸门只拿它产出的开放 kind 事实去查沙箱，沙箱按 kind 配规则。
+/// `ctx` 一并给出，供事实依赖会话级环境（如工作目录）的工具使用。
+pub type FactsOf =
+    Arc<dyn Fn(&Value, &Arc<dyn PluginInvokeRequest>) -> Vec<SandboxFact> + Send + Sync>;
 
 /// 风险回答函数：给定本次调用参数，回答「这一笔有多危险」。
 ///
@@ -91,9 +100,54 @@ pub fn approval_gate(
     risk: &dyn Fn(&Value) -> CapabilityRiskLevel,
     args: &Value,
 ) -> Option<Value> {
+    approval_gate_inner(ctx, meta, risk, args, None)
+}
+
+/// 带**工具声明事实**的闸门入口（`D-531` 能力约束接入）。
+///
+/// `facts_of` 由工具在注册时交出（只有工具知道自己的参数语义）；闸门把它产出的
+/// 事实交给沙箱做两件事：命中 deny 规则直接拒绝；命中带风险档的 allow 规则则
+/// 把该档作为本次工具风险参与阈值比较。沙箱缺席 / 工具未声明事实 ⇒ 完全回落原判定。
+pub fn approval_gate_with_facts(
+    ctx: &Arc<dyn PluginInvokeRequest>,
+    meta: &CapabilityMeta,
+    risk: &dyn Fn(&Value) -> CapabilityRiskLevel,
+    facts_of: Option<&FactsOf>,
+    args: &Value,
+) -> Option<Value> {
+    let facts = facts_of.map(|f| f(args, ctx)).unwrap_or_default();
+    approval_gate_inner(ctx, meta, risk, args, Some(&facts))
+}
+
+fn approval_gate_inner(
+    ctx: &Arc<dyn PluginInvokeRequest>,
+    meta: &CapabilityMeta,
+    risk: &dyn Fn(&Value) -> CapabilityRiskLevel,
+    args: &Value,
+    facts: Option<&[SandboxFact]>,
+) -> Option<Value> {
     // 风险由**工具自己**回答：静态档来自 `CapabilityMeta.risk`，随参数变化档（shell）
     // 覆写它。闸门不认工具名——新增/改名工具不必回来改这里。
-    let tool_risk = risk(args);
+    let mut tool_risk = risk(args);
+    // 沙箱能力约束：工具提交的事实先过沙箱；deny 直接拒绝，allow 规则的风险档
+    // 覆盖工具自报风险。两段都是通用查询，闸门不认识任何工具 / 配置项。
+    if let Some(facts) = facts.filter(|f| !f.is_empty()) {
+        if let Some(face) = sandbox_of(ctx.as_ref()) {
+            if !face.permits(facts) {
+                return Some(json!({
+                    "error": format!("沙箱未放行工具 {} 的本次调用", meta.name),
+                    "success": false,
+                    "failure_kind": symbio_kernel::capability::failure_kind::PERMISSION_DENIED,
+                }));
+            }
+            if let Some(level) = face
+                .risk_of(facts)
+                .and_then(|name| CapabilityRiskLevel::parse(&name))
+            {
+                tool_risk = level;
+            }
+        }
+    }
     let is_approved = args
         .get("approved")
         .and_then(|v| v.as_bool())
@@ -166,6 +220,7 @@ fn confirm_prompt_payload(
 pub struct GatedExecutor {
     meta: CapabilityMeta,
     risk: RiskOf,
+    facts: Option<FactsOf>,
     inner: Arc<dyn PortExecutor>,
 }
 
@@ -173,7 +228,27 @@ impl GatedExecutor {
     /// 由一条内层执行体造闸门执行体：`meta` 是注册时的自述快照，`risk` 是工具的
     /// 风险回答（动态覆写在闭包里原样生效）。
     pub fn new(meta: CapabilityMeta, risk: RiskOf, inner: Arc<dyn PortExecutor>) -> Self {
-        Self { meta, risk, inner }
+        Self {
+            meta,
+            risk,
+            facts: None,
+            inner,
+        }
+    }
+
+    /// 带事实提取器的构造器：工具声明自己的参数如何转成沙箱事实，闸门据此查沙箱。
+    pub fn new_with_facts(
+        meta: CapabilityMeta,
+        risk: RiskOf,
+        facts: FactsOf,
+        inner: Arc<dyn PortExecutor>,
+    ) -> Self {
+        Self {
+            meta,
+            risk,
+            facts: Some(facts),
+            inner,
+        }
     }
 }
 
@@ -186,9 +261,13 @@ impl PortExecutor for GatedExecutor {
                 "工具端口执行体没有调用方上下文，无法判闸",
             );
         };
-        if let Some(payload) =
-            approval_gate(&request, &self.meta, self.risk.as_ref(), &input.payload)
-        {
+        if let Some(payload) = approval_gate_with_facts(
+            &request,
+            &self.meta,
+            self.risk.as_ref(),
+            self.facts.as_ref(),
+            &input.payload,
+        ) {
             // 闸门拦下：停等载荷是普通结果形态（`failure_kind` 在载荷里），
             // `authz` 保持放行——这不是授权拒绝，是「等用户点头」。
             return PortOutcome {

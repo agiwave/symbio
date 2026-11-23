@@ -88,6 +88,28 @@ pub struct DetailOption {
     pub description: Option<String>,
 }
 
+/// 表格列定义（`widget = "table"`）。**机制原生、零业务语义**：任何插件要编辑
+/// 一个「对象数组」都能声明列，渲染器按列生成可增删行的表格。列本身只说
+/// 「这一列叫什么、什么控件、候选是什么」，不含任何资源 / 规则业务词。
+///
+/// `key` 是行对象里的字段名；`widget` ∈ text | select | number（复用已有标量控件，
+/// 不引入新词表）；`options` 供 select 使用；`default` 是新增行时该列的初始值。
+#[derive(Debug, Clone, Serialize, Deserialize, Default, PartialEq)]
+#[serde(default)]
+pub struct DetailColumn {
+    pub key: String,
+    pub label: String,
+    /// 列控件类型（复用标量 widget 名，缺省 = text）。
+    #[serde(skip_serializing_if = "String::is_empty")]
+    pub widget: String,
+    #[serde(skip_serializing_if = "Vec::is_empty")]
+    pub options: Vec<DetailOption>,
+    #[serde(skip_serializing_if = "Option::is_none")]
+    pub default: Option<serde_json::Value>,
+    #[serde(skip_serializing_if = "Option::is_none")]
+    pub placeholder: Option<String>,
+}
+
 /// 机制原生取值原语（**闭集**）——前端实现的通用取值能力，不含任何业务语义。
 ///
 /// 后端无法唤起原生对话框，故字段可声明一个原语：前端先取值、写入本字段，再提交。
@@ -98,7 +120,8 @@ pub const DETAIL_PICK_DIRECTORY: &str = "directory";
 pub const DETAIL_PICK_FILE: &str = "file";
 
 /// 表单字段定义。`widget` ∈ text | password | number | select | textarea |
-/// toggle | datalist | list | map | static | path | form；`options`/`suggestions`
+/// toggle | datalist | list | map | static | path | form | json | table；
+/// `options`/`suggestions`
 /// 为静态候选，`*_from_preset` 为真时候选来自当前预设的 `options[key]`
 /// （如 provider 预设注入模型列表）。
 ///
@@ -108,7 +131,9 @@ pub const DETAIL_PICK_FILE: &str = "file";
 /// - `static`：只读展示（info 绑定），值来自 `item.config`/`extra`，
 ///   `options` 可作值→标签映射；
 /// - `path`：单行文本 + 原生选择入口（配 [`DetailField::pick`]）；
-/// - `form`：**结构化子对象**，形状由 [`DetailField::form`] 的子定义描述。
+/// - `form`：**结构化子对象**，形状由 [`DetailField::form`] 的子定义描述；
+/// - `json`：任意 JSON 值，编辑态为格式化文本（渲染器就地语法校验）；
+/// - `table`：**对象数组**，列由 [`DetailField::columns`] 声明，渲染为可增删行的表格。
 ///
 /// ## 字段级与动作级的能力对齐
 ///
@@ -194,6 +219,11 @@ pub struct DetailField {
     /// 指向那个「一眼能看出状态」的子字段（如心跳的 `enabled`）。
     #[serde(skip_serializing_if = "Option::is_none")]
     pub form: Option<Box<DetailDefinition>>,
+    /// `widget = "table"`：本字段值是**对象数组**，每一列的键 / 控件 / 候选由这里声明。
+    /// 与 `form` 同属「结构化 widget」，区别在数组 vs 单对象；仍是本表单模型的一个键，
+    /// 保存随外层一次提交，不产生第二个写入入口。
+    #[serde(skip_serializing_if = "Vec::is_empty")]
+    pub columns: Vec<DetailColumn>,
 }
 
 /// 分区（可折叠；`collapsed` = 默认折叠，如「高级设置」）
@@ -535,6 +565,27 @@ impl DetailField {
             }
             // 结构化子对象：形状由子定义逐字段校验（见 [`DetailDefinition::validate`]）
             "form" => (!v.is_object()).then(|| "必须是键值对象".to_string()),
+            // 表格：对象数组，且每行必须给声明的列一个标量值（select / text / number）。
+            // 键缺失/类型错会让渲染器静默显示空单元格，故在保存侧就拦下。
+            "table" => {
+                let Some(rows) = v.as_array() else {
+                    return Some("必须是表格行数组".to_string());
+                };
+                for (i, row) in rows.iter().enumerate() {
+                    let Some(obj) = row.as_object() else {
+                        return Some(format!("第 {} 行必须是对象", i + 1));
+                    };
+                    for col in &self.columns {
+                        let Some(cell) = obj.get(&col.key) else {
+                            return Some(format!("第 {} 行缺少「{}」", i + 1, col.label));
+                        };
+                        if !cell.is_string() && !cell.is_number() && !cell.is_null() {
+                            return Some(format!("第 {} 行「{}」必须是值", i + 1, col.label));
+                        }
+                    }
+                }
+                None
+            }
             "text" | "password" | "textarea" | "datalist" | "path" => {
                 (!v.is_string()).then(|| "必须是字符串".to_string())
             }

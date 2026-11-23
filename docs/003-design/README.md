@@ -182,7 +182,7 @@ board.columns: [impl]
 > ⚠️ **本区块由 `node scripts/audits/registry-audit.mjs --write` 维护（标记之间），请勿手改标记区内内容。**
 > 状态的唯一登记处是各条目文件本身，本区块是投影。字段规范见 [SP-001](../005-spec/001.md)，机制见 [DE-017 · 登记与汇总机制](017-登记与汇总机制.md "DE-017-登记与汇总机制")。
 
-**计数**：active 100 · draft 0 · retired 1（共 101）
+**计数**：active 103 · draft 0 · retired 1（共 104）
 
 ## 现行设计（active）
 
@@ -238,6 +238,8 @@ board.columns: [impl]
 | [`DE-055-能力自配置终态裁决`](055-能力自配置终态裁决.md) | 能力自配置终态裁决 | 与代码一致 |
 | [`DE-056-端口终态加严裁决`](056-端口终态加严裁决.md) | 端口终态加严裁决 | 与代码一致 |
 | [`DE-057-作用域VDFS存储机制`](057-作用域VDFS存储机制.md) | 作用域 VDFS 存储机制 | 部分落地 |
+| [`DE-058-沙箱机制`](058-沙箱机制.md) | 沙箱机制 | 部分落地 |
+| [`DE-059-通用表格列定义裁决`](059-通用表格列定义裁决.md) | 通用表格列定义裁决 | 与代码一致 |
 | [`DE-101-context-compression-design`](../../crates/symbio-plugin-session/src/docs/101-context-compression-design.md) | 会话上下文压缩设计 | 与代码一致 |
 | [`DE-104-module-layout`](../../crates/symbio-plugin-session/src/docs/104-module-layout.md) | Session / Loop 插件模块分工 | 与代码一致 |
 | [`DE-105-node-state-streaming`](../../crates/symbio-plugin-session/src/docs/105-node-state-streaming.md) | 节点状态流（Node-State Streaming）—— 实时面即节点状态 | 与代码一致 |
@@ -273,6 +275,7 @@ board.columns: [impl]
 | [`crates/symbio-plugin-persona/README`](../../crates/symbio-plugin-persona/README.md) | 人格插件 | 与代码一致 |
 | [`crates/symbio-plugin-plugin_manager/README`](../../crates/symbio-plugin-plugin_manager/README.md) | Plugin_manager 插件（插件管理） | 与代码一致 |
 | [`crates/symbio-plugin-reputation/README`](../../crates/symbio-plugin-reputation/README.md) | 声誉能力包（声誉台账折叠） | 与代码一致 |
+| [`crates/symbio-plugin-sandbox/README`](../../crates/symbio-plugin-sandbox/README.md) | 安全运行环境插件（sandbox） | 部分落地 |
 | [`crates/symbio-plugin-session/README`](../../crates/symbio-plugin-session/README.md) | Unified Session & Memory Orchestration Architecture (会话与记忆系统化管理架构说明书) | 与代码一致 |
 | [`crates/symbio-plugin-session/src/docs/README`](../../crates/symbio-plugin-session/src/docs/README.md) | Session 插件文档 | 与代码一致 |
 | [`crates/symbio-plugin-setting/README`](../../crates/symbio-plugin-setting/README.md) | Setting 插件 | 与代码一致 |

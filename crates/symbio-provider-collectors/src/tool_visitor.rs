@@ -138,11 +138,33 @@ pub async fn register_tool(
     risk: Option<RiskOf>,
     executor: Arc<dyn PortExecutor>,
 ) {
+    register_tool_with_facts(ctx, meta, risk, None, executor).await
+}
+
+/// 与 [`register_tool`] 同形，但多收一个**工具自声明的事实提取器**。
+///
+/// 事实提取器是工具侧知识（参数语义只有工具知道），注册收口点只是把它交给闸门；
+/// 闸门拿它查沙箱时只认开放 kind 事实，不认识工具名。不声明的工具完全走原路径。
+pub async fn register_tool_with_facts(
+    ctx: &Arc<dyn PluginInvokeRequest>,
+    meta: symbio_kernel::capability::CapabilityMeta,
+    risk: Option<RiskOf>,
+    facts: Option<super::approval::FactsOf>,
+    executor: Arc<dyn PortExecutor>,
+) {
     let risk: RiskOf = {
         let m = meta.clone();
         risk.unwrap_or_else(|| Arc::new(move |_| m.effective_risk()))
     };
-    let gated: Arc<dyn PortExecutor> = Arc::new(GatedExecutor::new(meta.clone(), risk, executor));
+    let gated: Arc<dyn PortExecutor> = match facts {
+        Some(f) => Arc::new(GatedExecutor::new_with_facts(
+            meta.clone(),
+            risk,
+            f,
+            executor,
+        )),
+        None => Arc::new(GatedExecutor::new(meta.clone(), risk, executor)),
+    };
     if let Some(bindings) = ctx.get(symbio_sdk::capability::port::PORT_BINDINGS) {
         let port = symbio_sdk::capability::port::scoped_port_name(ctx, &meta.name);
         symbio_sdk::capability::port::check_port_name(&port);

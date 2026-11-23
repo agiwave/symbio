@@ -218,6 +218,7 @@ const VDFS_TS_SRC = [
 const DETAIL_RS_SRC = [
   rsStruct('DetailCondition', 'key', 'equals', 'not_equals', 'truthy', 'all'),
   rsStruct('DetailOption', 'value', 'label', 'description'),
+  rsStruct('DetailColumn', 'key', 'label', 'widget', 'options', 'default', 'placeholder'),
   rsStruct(
     'DetailField',
     'key',
@@ -241,6 +242,7 @@ const DETAIL_RS_SRC = [
     'full_width',
     'default',
     'form',
+    'columns',
   ),
   rsStruct('DetailSection', 'title', 'collapsed', 'fields'),
   rsStruct('DetailPreset', 'value', 'label', 'set', 'set_always', 'options'),
@@ -270,6 +272,7 @@ const DETAIL_RS_SRC = [
 const FORM_TS_SRC = [
   tsIface('DetailCondition', 'key', 'equals', 'not_equals', 'truthy', 'all'),
   tsIface('DetailOption', 'value', 'label', 'description'),
+  tsIface('DetailColumn', 'key', 'label', 'widget', 'options', 'default', 'placeholder'),
   tsIface(
     'DetailField',
     'key',
@@ -293,6 +296,7 @@ const FORM_TS_SRC = [
     'full_width',
     'default',
     'form',
+    'columns',
   ),
   tsIface('DetailSection', 'title', 'collapsed', 'fields'),
   tsIface('DetailPreset', 'value', 'label', 'set', 'set_always', 'options'),
@@ -520,7 +524,7 @@ test('全部一致 → 退出码 0', () => {
   assert.equal(r.status, 0, r.stdout)
   assert.match(
     r.stdout,
-    /A 组 \d+ 条常量镜像 \+ B 组 2 项缺席检查 \+ C 组 7 张闭集词表 \+ D 组 30 对结构体字段 \+ E 组 6 条跨栈导航头 \+ G 组 ChatNode 顶层字段消费守卫 \+ H 组 1 个 meta 键读点/,
+    /A 组 \d+ 条常量镜像 \+ B 组 2 项缺席检查 \+ C 组 7 张闭集词表 \+ D 组 31 对结构体字段 \+ E 组 6 条跨栈导航头 \+ G 组 ChatNode 顶层字段消费守卫 \+ H 组 1 个 meta 键读点/,
   )
 })
 

@@ -152,6 +152,10 @@ define_string_key!(RiskLevelKey, RISK_LEVEL, "risk_level");
 // 跨会话工具授权清单（JSON：能力名 → 允许的最高风险档）：与会话阈值同一份配置解析点
 // 落进 ctx，审批闸门与授权级联都读它（D-170）。
 define_string_key!(ApprovalGrantsKey, APPROVAL_GRANTS, "approval_grants");
+// 会话选中的沙箱档案 id（裁决 B / D-531）：取代原会话级 MODE / RISK_LEVEL 选项——
+// 用户只在会话里选一个沙箱，审批阈值与模式由沙箱引擎按这个 id 从自己的配置表里解析。
+// 与 provider_id 同为「会话选择」，随 chat 请求 / metadata 走 req>metadata>默认 回退链。
+define_string_key!(SandboxIdKey, SANDBOX_ID, "sandbox_id");
 
 // 常用业务属性 Key
 define_string_key!(IdKey, ID, "id");

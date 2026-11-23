@@ -10,7 +10,6 @@
 //! - [`behaviors`]：行为名的收集面（实现住 sdk，本 crate 只转出，D-408）
 //! - [`effects`]：能力效果的实现端口（`ToolBehavior`）与草稿（`FactDraft`）（转出，`D-408`）
 //! - [`rows`]：能力行的执行体端口（`RowHandler`）与债实例（`RowRequest`）（转出，`D-413`）
-//! - [`rows`]：能力行的执行体端口（`RowHandler`）与债实例（`RowRequest`）（转出，`D-413`）
 //! - [`port`]：世界端口的注册面（`PortProvider` 与 port 族——名字与契约静态，提供者随活插件的能力行动态收集）
 //! - [`settle`]：收束之后贡献派生事实的端口（`Contributor`）（转出，`D-413`）
 //! - [`retrieval`]：轮首检索的端口（`Retriever`）——宿主交可见切片与发言，能力交回自有值（D-264）（转出，`D-413`）
@@ -72,18 +71,15 @@ pub use declarations::{declared_event_cell, vocab};
 // 2026-11-12 的取字同源批改走本门面）——loop 没有 sdk 直连通道（E-009 只另许 kernel），
 // 门面是 loop 的唯一合法取径（D-443）。
 pub use symbio_sdk::declarations::sealed_declarations;
-// 驱动入口模块整块归 sdk（`D-413`），门面只留扩展层插件真正要的一条：`home` 的装配根
-// 登记。驱动句柄与解析口（`DriveEntry` / `DriveTarget` / `declared_drive_binding`）只有
-// 控制面 `session` 用，而控制面按影响类运行、本就不在该门面的约束面内，直接从
-// `symbio_sdk::plugin::drive_entry` 取——留在这里会是一条零扩展消费方的空转条目（HS-003）。
+// 驱动入口整块归 sdk（D-413），门面只留扩展层要的装配根登记。驱动句柄与解析口只有控制面
+// session 用（按影响类运行、不在门面约束面内），直接从 sdk 取——留这里是零消费方空转条目（HS-003）。
 pub use effects::{
     apply as apply_effects, apply_before, BeforeDecision, BeforeReadings, BeforeRefusal,
     BeforeRequest, EffectCall, EffectEnv, EffectInput, FactDraft, FileOp, ToolBehavior,
 };
 pub use symbio_sdk::plugin::drive_entry::publish_deployment_root;
-// fact_source 登记面（`FactSource` / `FactSourceOpener` / `FACT_SOURCE` / `Fact` /
-// `declared_fact_source_opener`）不上门面（D-443）：唯一插件消费方是控制面 session
-// （owner），按 D-253 / D-428 分档走其 sdk 豁免（冻结账，D-499）直取本体；`Principal` 留下（扩展层在用）。
+// fact_source 登记面不上门面（D-443）：唯一消费方是控制面 session（owner），按 D-253 / D-428
+// 走 sdk 豁免直取本体；`Principal` 留下（扩展层在用）。
 pub use symbio_sdk::plugin::fact_source::Principal;
 // 宏用 `$crate::inventory` 展开（卫生），与 `symbio_sdk` 的 `submit_object_creator!` 同形。
 pub use inventory;
@@ -154,8 +150,8 @@ pub use symbio_kernel::plugin::{
     PluginSimpleRequest, PluginStopReason, SimpleResponse, SuccessResponse,
 };
 pub use symbio_kernel::present::{
-    DetailAction, DetailBadge, DetailCondition, DetailDefinition, DetailField, DetailOption,
-    DetailPreset, DetailPresetSpec, DetailSection,
+    DetailAction, DetailBadge, DetailColumn, DetailCondition, DetailDefinition, DetailField,
+    DetailOption, DetailPreset, DetailPresetSpec, DetailSection,
 };
 pub use symbio_kernel::vdfs::{
     vdfs_derive_ext, vdfs_has_parent_segment, vdfs_path_within, DynVdfsProvider, VdfsAccess,
@@ -200,7 +196,7 @@ pub use symbio_sdk::embedding::{EmbeddingService, EMBEDDING_LOCAL};
 pub use symbio_sdk::event_bus::{EventBus, EventBusPublisher, EVENT_BUS_SINK};
 pub use symbio_sdk::keys::{
     AGENT_ID, AGENT_VDFS, MODE, PATH, PRINCIPAL_SCHEDULER, PRINCIPAL_USER, PROVIDER_ID,
-    REQUIRED_PLUGINS, RISK_LEVEL, SESSION_DIR, SESSION_ID, SESSION_VDFS, TOOL_CALL_ID,
+    REQUIRED_PLUGINS, RISK_LEVEL, SANDBOX_ID, SESSION_DIR, SESSION_ID, SESSION_VDFS, TOOL_CALL_ID,
     TOOL_NODE_ID, TRACE_ID, VDFS_PARENT_ADDR, WORKDIR, WORKSPACE_VDFS,
 };
 pub use symbio_sdk::llm::round::{llm_emit_message, llm_removed_frame, llm_short_id};
@@ -215,6 +211,10 @@ pub use symbio_sdk::projection::vocab::CommitmentVocab;
 /// 插件默认的并发任务容量出厂值（平凡值 = 串行 FIFO）。
 pub const TASK_CAP: usize = 1;
 pub use symbio_sdk::round::node_build;
+// D-531 沙箱横切句柄：只转机制形状与 ctx 键，不含工具名 / 策略 / 配置项。
+// 发布方（sandbox 插件）与各消费方（tool 拦截 / 工具 permits 查询）共用这同一句柄。
+#[rustfmt::skip] // D-531：锁定转出块排布，压缩陈旧注释抵消新增行（同 D-530 口径）
+pub use symbio_sdk::sandbox::{sandbox_init_slot, sandbox_of, sandbox_publish, SandboxFace, SandboxFact, SANDBOX};
 pub use symbio_sdk::vdfs::address::{absolute_addr, descend_addr, join_addr, AddrRootDecl};
 pub use symbio_sdk::vdfs::host::{
     vdfs_context, vdfs_from_plugin_error, vdfs_host_ctx, vdfs_notify_change, vdfs_unwatch_changes,

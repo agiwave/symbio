@@ -433,6 +433,11 @@ const STRUCT_SETS = [
     ts: { file: FORM_TS, interface: 'DetailOption' },
   },
   {
+    what: '详情表格列',
+    rust: { file: DETAIL_RS, struct: 'DetailColumn' },
+    ts: { file: FORM_TS, interface: 'DetailColumn' },
+  },
+  {
     what: '详情表单字段',
     rust: { file: DETAIL_RS, struct: 'DetailField' },
     ts: { file: FORM_TS, interface: 'DetailField' },

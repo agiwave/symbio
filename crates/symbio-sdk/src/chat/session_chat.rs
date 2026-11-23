@@ -12,8 +12,8 @@ pub struct Request {
     /// 选定的 Model Provider ID。
     ///
     /// 随每次发送携带；为空时回退会话 `metadata.provider_id`（默认 `none` = 用默认 Provider）。
-    /// 与 `mode` / `risk_level` 是**完全对称**的三条链：`req > session.metadata > 默认`
-    /// （`crates/symbio-plugin-session/src/orchestrator/entry.rs::resolve_session_params`）。
+    /// 与 `sandbox_id` 是**完全对称**的两条链：`req > session.metadata > 默认`
+    /// （`crates/symbio-plugin-session/src/store/layout.rs::resolve_session_params`）。
     /// 这条回退是 [D-066](../../../../docs/003-design/012-会话输入与地址.md#d-066-输入面退役的前置条件解除地址写入不承载运行选项三项运行参数已有会话-metadata-回退协议面不必变宽 "DE-012-会话输入与地址") 的前提——
     /// 「地址写入不承载运行选项」正靠它成立，故它同时是一条不变量。
     #[serde(skip_serializing_if = "Option::is_none")]
@@ -23,12 +23,17 @@ pub struct Request {
     /// - `Some(false)`：本次发送不加载历史会话信息
     #[serde(default, skip_serializing_if = "Option::is_none")]
     pub include_history: Option<bool>,
-    /// 会话运行模式：auto（无人值守，需交互工具返回友好错误不弹框）/ interactive（默认，会话流中渲染交互卡）。
-    /// 随每次发送携带；为空时回退会话 metadata.mode（默认 auto
+    /// 会话选中的沙箱档案 id（裁决 B / D-531）：前端选项栏**只呈现本项**（原
+    /// `mode` / `risk_level` 两项已并入沙箱档案，不再向用户展示）。装配期经沙箱
+    /// 句柄按本 id 解析出审批参数写回 ctx。
+    /// 随每次发送携带；为空时回退会话 `metadata.sandbox_id`。
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub sandbox_id: Option<String>,
+    /// 存量兼容字段：旧会话 metadata / 无沙箱装配下的审批回退值。选项栏已不再写入
+    /// （由 `sandbox_id` 取代），仅供 `resolve_session_params` 回退与 e2e / 内部路径使用。
     #[serde(default, skip_serializing_if = "Option::is_none")]
     pub mode: Option<String>,
-    /// 会话执行风险等级阈值：low / medium / high（与 agent_id/provider_id/mode 同级别）。
-    /// 随每次发送携带；为空时回退会话 metadata.risk_level（默认 medium）。
+    /// 存量兼容字段（见 `mode`）。
     #[serde(default, skip_serializing_if = "Option::is_none")]
     pub risk_level: Option<String>,
     /// 入站请求的**来源主体**（[DE-001 §12.2](../../../../docs/003-design/001-核心架构.md "DE-001-核心架构")

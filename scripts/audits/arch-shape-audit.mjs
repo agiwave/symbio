@@ -310,15 +310,19 @@ const VOCAB_BASELINE = process.env.VOCAB_BASELINE
 // core-shape-allow structFields: D-446 `when_no_open` 的谓词要从「整条端口」放宽为「作用域」——`NoOpenScope`(2：`port` / `ids`) 是「端口干净才欠」的**同一件事的两半**，单格 `String` 表达不了「只认这一批债 id」，而那正是 D-446 要求的「本次调用集合收束」（一笔迟归的旧调用债不该把这一轮的续跑一起拖住）。两格折不开：折成元组塞回原字段，调用方各拼一半，`covers()` 这个唯一判据就无处安放；降 `pub(crate)` 不行——读它的两侧是环（`symbio-plugin-loop`）与申报方插件（跨 crate）。它补的是**新判据能力**，不是新长出的业务数据面：没有新增世界域名 / 端口名 / 事实名，也没有改动为某个插件开的口子。基线钉到实测 617，不留余量。
 // core-shape-allow structFields: D-513 会话级插件数据目录随驱动目标交回——`DriveTarget::session_dir`(1) 是「会话插件按唯一布局解析、宿主按值挂进本轮 ctx」的值面出口（memory 的会话记忆据此落位）；能力面不得自己拼会话存储路径，也不得拿它开事实源（D-084），所以它必须住在驱动目标这个装订点而不是让执行体反查。旧 `workdir` 保持不动：scratch_dir 的来源还在它身上。基线钉到实测 609，不留余量。
 // core-shape-allow structFields: D-523 图标内容由插件自给、前端直接渲染——`PluginMeta.icon` 这个字段早已存在却运行期零消费（插件管理列表一律退成齿轮本轮修的正是它），接上消费端要两个投影载体：`PluginIdentity.icon`（manifest `plugin_icon` 的读口，与 title/description/version/author 同构，停用插件也读得到）与 `PluginEntry.icon`（列表 `entry_node` 据此把 SVG 内容写进节点顶层属性）。两格承载的是插件自给的一段 SVG 图元串，不是新业务数据面——没有新增世界域名 / 端口名 / 事实名；图形资产全在每个插件自己的 `with_icon(r#"..."#)` 里，前端零字典直接渲染。被否候选「插件只给名字、前端维护名字→图字典」会让图形资产仍留在前端，违背「内容由插件提供」；「后端托管 SVG 库按名取」同样把内容挪出插件并触碰 plugin-api 转发棘轮。基线钉到实测 611，不留余量。
+// core-shape-allow structFields: D-531 沙箱意图事实的两格——`SandboxFact{kind, value}` 是工具向沙箱提交「这一次调用干了什么」的唯一数据载体（讨论稿 §1.6 / DE-058）。kind 是开放字符串（工具自报新种类，沙箱按 kind 配规则），value 是工具归一化后的语义值（沙箱只匹配、不解析语法）。两格折不开：合并成单字段就把「事实种类」与「事实值」压扁，沙箱无法按 kind 配规则；降 pub(crate) 不行——写方是各工具插件、读方是沙箱插件，跨 crate 且插件互不可见（E-009），只能经门面共用这一形状。它没有新增世界域名 / 端口名 / 事实名，也不是为某个插件开的口子——是被调用执行环境的通用载荷形状。
+// core-shape-allow structFields: D-531 会话选档 id 随两条既有装订点交回——`Request.sandbox_id`（会话输入协议）与 `DriveTarget.sandbox_id`（驱动目标）各一格，与同结构里的 `provider_id` / `mode` / `risk_level` 同形：会话只在输入里带一个沙箱 id，宿主按它挂进 ctx、沙箱引擎据此按 id 解析档案与审批参数。它不是新数据面：值仍是普通字符串，走的是既有的 req>metadata>默认 回退链，替换的正是同一结构里退场的 mode/risk 两格（后端保留兼容回退，前端不再展示）。基线钉到实测 615，不留余量。
+// core-shape-allow structFields: D-532 详情表格列是通用对象数组编辑契约——`DetailColumn{key,label,widget,options,default,placeholder}` 六格是插件声明一列「叫什么 / 显示什么 / 用什么控件编辑 / 候选值 / 默认值 / 占位提示」的最小形状，六格折不开（少 `options` 就无法渲染枚举列、少 `default` 就无法预填合法首行）；降 pub(crate) 不行——写方是声明表格的插件（沙箱）、读方是前端表单机制经门面镜像，跨 crate 且插件互不可见（E-009）。它没有新增世界域名 / 端口名 / 事实名，也不是为某个插件开的口子——任何插件编辑对象数组都复用同一列契约（DE-059）。
+// core-shape-allow structFields: D-532 `DetailField.columns`(1) 是上述列契约在字段上的唯一挂载点——`table` widget 的列定义只能随字段声明走，不能塞进 `options`（那是标量选项候选值，语义不同），也不能新增「沙箱规则字段」之类的专用类型（会让表单机制反向依赖插件业务词，正是 D-531 否定的方向）。一格承载的是「这一列数组字段每行的列结构」，与 widget 字符串配套，机制层不含任何业务词。基线钉到实测 622，不留余量。
 // 2026-11-16（D-505）：实测已收到 608（614 是 D-440 / D-446 时点的上限），基线同批
 // 钉到 608——余量不白留给下一次新增。2026-11-20（D-513）：608 → 609，`DriveTarget`
-// 增 `session_dir` 一格（放宽行见上）。2026-11-21（D-523）：609 → 611，图标自报的两个投影载体（放宽行见上），此后照旧只许降。
+// 增 `session_dir` 一格（放宽行见上）。2026-11-21（D-523）：609 → 611，图标自报的两个投影载体（放宽行见上）。2026-11-23（D-531）：611 → 613，`SandboxFact` 的两格意图事实（放宽行见上）；同日 613 → 615，`Request.sandbox_id` / `DriveTarget.sandbox_id` 两格随会话选档入装订点（放宽行见上）。2026-11-24（D-532）：615 → 622，`DetailColumn` 六格 + `DetailField.columns` 一格随通用表格 widget 入数据面（放宽行见上），此后照旧只许降。
 const DATA_BASELINE = process.env.CORE_DATA_BASELINE
   ? (() => {
       const [structFields, enumVariants] = process.env.CORE_DATA_BASELINE.split(':').map((n) => Number(n))
       return { structFields, enumVariants }
     })()
-  : { structFields: 611, enumVariants: 256 }
+  : { structFields: 622, enumVariants: 256 }
 
 const CELL_LABEL = {
   traits: '`pub trait` 数（接缝数）',
