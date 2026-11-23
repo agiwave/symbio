@@ -164,10 +164,17 @@ function analyzePlugin(crateDirName, ids) {
     }
     if (t.includes("capability_announce_configurable(")) hasConfig = true;
     for (const n of extractToolNames(t, consts)) tools.add(n);
+    // trait 检测必须接受带命名空间路径的写法：`impl symbio_plugin_api::VdfsProvider for X`。
+    // 早先的正则要求 trait 名以大写开头，而路径首段 `symbio_plugin_api` 是小写，
+    // 于是整条 impl 匹配失败——某个插件明明实现了 VdfsProvider，事实表却只认出
+    // Plugin（"资源"列表空缺陷排查时顺带暴露：缺 VdfsProvider 的实现声明会被
+    // 误读成"该插件没有挂载点"）。判据：允许 `::` 路径前缀，取末段（真正的 trait 名）
+    // 再对白名单，命名空间不参与判定——与 `extractToolNames` 取 `CONST.to_string()` 末段同构。
     for (const mm of t.matchAll(
-      /impl\s+(?:<[^>]*>\s*)?([A-Z][A-Za-z0-9_]*)(?:<[^>]*>)?\s+for\s+/g
+      /impl\s+(?:<[^>]*>\s*)?([A-Za-z_][A-Za-z0-9_]*(?:::[A-Za-z_][A-Za-z0-9_]*)*)(?:<[^>]*>)?\s+for\s+/g
     )) {
-      if (CORE_TRAITS.includes(mm[1])) traits.add(mm[1]);
+      const traitName = mm[1].split("::").pop();
+      if (CORE_TRAITS.includes(traitName)) traits.add(traitName);
     }
     for (const arm of extractRouteArms(t, dirName)) routes.add(arm);
   }
