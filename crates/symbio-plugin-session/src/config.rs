@@ -21,13 +21,65 @@
 //! 未知键仍被静默忽略。存量配置文件**无需迁移**。
 
 use serde::{Deserialize, Serialize};
+use symbio_kernel::chat::chat_node::{ChatNode, NodeRole};
 use symbio_sdk::capability::ApprovalGrants;
 
-// 建树策略的形状与 flat 折叠住 core `node_build`（[D-082](../../../docs/003-design/014-单环一表.md#d-082-6b驱动器成片落为独立插件-loop触发走地址面服务走端口词表先上移分四刀 "DE-014-单环一表")
-// 裁决三）：写侧构造
-// 词表被留守与驱动器两个插件共用，隔着 E-009 的插件墙只能住 core；配置面在这里
-// **续一发短路径**——`plugin.rs` / `state.rs` / `tool_dispatch.rs` 等既有引用不经改动。
-pub use symbio_sdk::round::node_build::PresentationTree;
+#[derive(Debug, Clone, Copy, PartialEq, Eq, serde::Serialize)]
+pub enum PresentationTree {
+    Flat,
+    Grouped,
+    Deep,
+}
+
+impl PresentationTree {
+    pub fn as_str(self) -> &'static str {
+        match self {
+            Self::Flat => "flat",
+            Self::Grouped => "grouped",
+            Self::Deep => "deep",
+        }
+    }
+
+    pub const OPTIONS: [(&'static str, &'static str); 3] = [
+        ("grouped", "本轮归到响应骨架下（默认）"),
+        ("flat", "本轮全部铺平到会话根"),
+        ("deep", "子会话挂到发起它的工具卡内（递归嵌套）"),
+    ];
+}
+
+pub fn flatten_whole_tree(nodes: &mut [ChatNode], mode: PresentationTree) {
+    if mode != PresentationTree::Flat {
+        return;
+    }
+    let tool_cards: std::collections::HashSet<String> = nodes
+        .iter()
+        .filter(|n| n.is_tool_call())
+        .map(|n| n.id.clone())
+        .collect();
+    let run_roots: std::collections::HashSet<String> = nodes
+        .iter()
+        .filter(|n| n.is_run() || (n.is_text() && n.node_role() == Some(NodeRole::User)))
+        .filter(|n| {
+            n.parent_id
+                .as_deref()
+                .map(|p| !tool_cards.contains(p))
+                .unwrap_or(true)
+        })
+        .map(|n| n.id.clone())
+        .collect();
+    for n in nodes.iter_mut() {
+        let p = match n.parent_id.as_deref() {
+            Some(p) if run_roots.contains(p) => p.to_string(),
+            _ => continue,
+        };
+        n.parent_id = None;
+        let mut meta = n.meta.take().unwrap_or_else(|| serde_json::json!({}));
+        if let Some(obj) = meta.as_object_mut() {
+            obj.insert("scope_root".to_string(), serde_json::json!(p));
+        }
+        n.meta = Some(meta);
+    }
+}
 
 /// 会话配置 —— 本插件的旋钮（字段真源）。
 ///

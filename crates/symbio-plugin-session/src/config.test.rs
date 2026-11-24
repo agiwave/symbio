@@ -15,6 +15,9 @@
 //! 记忆闸门已随 D-513 归 `memory` 插件，由那里的 `config.test.rs` 钉住。
 
 use super::*;
+use symbio_kernel::chat::chat_node::{NodeKind, CHAT_STYLE_TAG_RUN, CHAT_STYLE_TAG_TOOL};
+use symbio_kernel::chat::principal::{Principal, PrincipalKind};
+use symbio_sdk::round::node_build::scope_root_of;
 
 /// 出厂**关闭**中途汇报，但三个上界仍是"打开即生效"的有意义取值。
 ///
@@ -137,4 +140,153 @@ fn missing_presentation_tree_key_falls_back_to_default() {
     let c: SessionConfig = serde_json::from_str(r#"{"max_messages": 42}"#).unwrap();
     assert_eq!(c.presentation_tree, default_presentation_tree());
     assert_eq!(c.presentation_tree(), PresentationTree::Grouped);
+}
+
+// ── 建树策略 flat 折叠（原 message_build.test.rs）──────────────
+
+fn node(id: &str, parent: Option<&str>) -> ChatNode {
+    ChatNode {
+        id: id.to_string(),
+        parent_id: parent.map(str::to_string),
+        ..Default::default()
+    }
+}
+
+fn run_node(id: &str) -> ChatNode {
+    ChatNode {
+        id: id.to_string(),
+        msg_type: Some(NodeKind::Skeleton),
+        ..Default::default()
+    }
+    .with_style_tag(CHAT_STYLE_TAG_RUN)
+}
+
+fn tool_node(id: &str, parent: &str) -> ChatNode {
+    ChatNode {
+        id: id.to_string(),
+        parent_id: Some(parent.to_string()),
+        msg_type: Some(NodeKind::Skeleton),
+        ..Default::default()
+    }
+    .with_style_tag(CHAT_STYLE_TAG_TOOL)
+}
+
+#[test]
+fn flatten_whole_tree_detaches_run_children_keeps_tool_results() {
+    let mut tree = vec![
+        run_node("run-1"),
+        node("reasoning-1", Some("run-1")),
+        node("text-1", Some("run-1")),
+        tool_node("tool-1", "run-1"),
+        node("result-1", Some("tool-1")),
+    ];
+    flatten_whole_tree(&mut tree, PresentationTree::Flat);
+    // 骨架自身留在根；它的直接子节点（含工具调用骨架）升根 + 打记号。
+    assert_eq!(tree[0].parent_id, None);
+    for row in tree.iter().skip(1).take(3) {
+        assert_eq!(row.parent_id, None, "本轮直接子节点升根");
+        assert_eq!(scope_root_of(row), Some("run-1"));
+    }
+    // 工具结果挂在工具调用骨架下——与建树策略正交，flat 不碰。
+    assert_eq!(tree[4].parent_id.as_deref(), Some("tool-1"));
+    assert_eq!(scope_root_of(&tree[4]), None);
+}
+
+/// D-335：Turn 并入用户消息节点后，读侧重建树里**没有** `Skeleton{run}`；
+/// 该轮的轮锚就是用户消息节点，flat 必须按它折叠（不能继续只认 `is_run()`）。
+#[test]
+fn flatten_whole_tree_detaches_children_of_user_turn_anchor() {
+    let mut user = node("user-1", None);
+    user.msg_type = Some(NodeKind::Body);
+    user.principal = Some(Principal::new(PrincipalKind::Person, "person/local"));
+    let mut tree = vec![
+        user,
+        node("reasoning-1", Some("user-1")),
+        tool_node("tool-1", "user-1"),
+        node("result-1", Some("tool-1")),
+    ];
+    flatten_whole_tree(&mut tree, PresentationTree::Flat);
+    assert_eq!(tree[1].parent_id, None, "轮锚的直接子节点升根");
+    assert_eq!(scope_root_of(&tree[1]), Some("user-1"));
+    assert_eq!(tree[2].parent_id, None, "工具卡也升根");
+    assert_eq!(scope_root_of(&tree[2]), Some("user-1"));
+    assert_eq!(tree[3].parent_id.as_deref(), Some("tool-1"));
+    assert_eq!(scope_root_of(&tree[3]), None);
+}
+
+#[test]
+fn flatten_whole_tree_grouped_is_noop() {
+    let mut tree = vec![run_node("run-1"), node("text-1", Some("run-1"))];
+    flatten_whole_tree(&mut tree, PresentationTree::Grouped);
+    assert_eq!(
+        tree[1].parent_id.as_deref(),
+        Some("run-1"),
+        "grouped 保持今天形状"
+    );
+    assert_eq!(scope_root_of(&tree[1]), None);
+}
+
+/// flat 折叠**不拆子会话**：转播桥把子会话顶层节点无条件挂到父工具卡下，那个
+/// 转发来的 `Skeleton{run}` 仍 `is_run()`，但它的父是一张工具卡——必须跳过，否则
+/// 子会话的孙节点会被错误升到会话根、拆散嵌套树。
+#[test]
+fn flatten_whole_tree_skips_run_skeleton_nested_in_tool_card() {
+    let subrun = ChatNode {
+        id: "subrun-1".to_string(),
+        parent_id: Some("tool-1".to_string()),
+        msg_type: Some(NodeKind::Skeleton),
+        ..Default::default()
+    }
+    .with_style_tag(CHAT_STYLE_TAG_RUN);
+    let mut tree = vec![
+        run_node("run-1"),
+        tool_node("tool-1", "run-1"),
+        subrun,
+        node("subtext-1", Some("subrun-1")),
+    ];
+    flatten_whole_tree(&mut tree, PresentationTree::Flat);
+    // 顶层本轮骨架的直接子节点（工具卡）照常升根。
+    assert_eq!(tree[1].parent_id, None, "工具卡升根");
+    assert_eq!(scope_root_of(&tree[1]), Some("run-1"));
+    // 子会话的 run 骨架仍挂在工具卡下（未被当作折叠根）。
+    assert_eq!(
+        tree[2].parent_id.as_deref(),
+        Some("tool-1"),
+        "夹在工具卡内的子会话骨架不折叠"
+    );
+    // 其孙节点保持嵌套，绝不升根。
+    assert_eq!(
+        tree[3].parent_id.as_deref(),
+        Some("subrun-1"),
+        "子会话孙节点不被错误升根"
+    );
+    assert_eq!(scope_root_of(&tree[3]), None);
+}
+
+/// `deep` 与 `grouped` 逐字相同：读侧投影都不升根，区别只在前端如何展开嵌套树。
+#[test]
+fn flatten_whole_tree_deep_is_noop() {
+    let mut tree = vec![run_node("run-1"), node("text-1", Some("run-1"))];
+    let before = serde_json::to_value(&tree).unwrap();
+    flatten_whole_tree(&mut tree, PresentationTree::Deep);
+    assert_eq!(
+        serde_json::to_value(&tree).unwrap(),
+        before,
+        "deep 不做任何升根折叠"
+    );
+    assert_eq!(tree[1].parent_id.as_deref(), Some("run-1"));
+    assert_eq!(scope_root_of(&tree[1]), None);
+}
+
+#[test]
+fn flatten_whole_tree_is_idempotent() {
+    let mut once = vec![run_node("run-1"), node("text-1", Some("run-1"))];
+    flatten_whole_tree(&mut once, PresentationTree::Flat);
+    let mut twice = once.clone();
+    flatten_whole_tree(&mut twice, PresentationTree::Flat);
+    assert_eq!(
+        serde_json::to_value(&once).unwrap(),
+        serde_json::to_value(&twice).unwrap(),
+        "投影叠在已升根的树上不二次变形"
+    );
 }

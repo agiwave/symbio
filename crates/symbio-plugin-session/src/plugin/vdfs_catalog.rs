@@ -118,7 +118,7 @@ impl SessionPlugin {
                 // `loadMessages`（读叶子）会在流式期间看不到正在跑的那一轮。
                 // 详见 `session_content` 的文档。
                 let live = self.live_messages_of(id).await;
-                let mode = self.presentation_mode().await;
+                let mode = self.config.read().await.presentation_tree();
                 let events = self
                     .get_store()
                     .await
@@ -229,7 +229,7 @@ impl SessionPlugin {
                 // 子会话是**独立会话**（有自己的 id 与活跃状态），因此叠加的是它
                 // 自己的在途缓冲，而不是父会话的——父会话的在途消息不属于它。
                 let live = self.live_messages_of(&session.id).await;
-                let mode = self.presentation_mode().await;
+                let mode = self.config.read().await.presentation_tree();
                 let events = self
                     .get_store()
                     .await

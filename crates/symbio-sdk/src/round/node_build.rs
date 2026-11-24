@@ -8,7 +8,8 @@
 //! 把驱动器切成独立插件 `loop`（裁决一）后，写侧（驱动器）与
 //! 读侧投影（留守 `rebuild`）隔着 E-009 的插件墙共用同一份形状源，同一条判据在两个插件
 //! 之间不再有用 ⇒ 按 D-082 裁决三上移回 core。**同一条判据的第二个形态**：单插件时代
-//! 它确实只有 session 一个消费方。
+//! 它确实只有 session 一个消费方。建树策略后来只剩 session 消费，已按同一判据回到
+//! session；本模块保留共享的节点构造与轮范围收集。
 //!
 //! 落点是**本模块**而非 [`crate::chat::chat_node`]：`chat_node.rs` 是前端机制化显示节点的
 //! **形状定义**（角色 / 形状五值 / style_tag 词表 / 线格式），不收留写侧机制；
@@ -20,14 +21,14 @@
 //! |---|---|
 //! | [`dialog_node`] | [`crate::round::facts::ReportDraft::to_message`]（汇报落格；调用口在 loop 侧 `report_exec`） |
 //! | [`llm_build_text_node`] / [`llm_build_tool_call_node`] / [`tool_call_args_text`] / [`llm_build_tool_message`] | 落库构造 · 工具分发 · 重建引擎 |
-//! | [`PresentationTree`] / [`flatten_whole_tree`] / [`scope_root_of`] | 读侧投影（`PresentationTree` 的解析与整树折叠） |
+//! | [`scope_root_of`] / [`subtree_of`] | 跨插件读侧投影（按轮范围收集节点） |
 //!
 //! core 侧**没有任何东西反过来调本模块**——方向永远是消费方 → core。
 
 use crate::clock::clock_now_ms;
 use crate::llm::llm_short_id;
 use symbio_kernel::chat::chat_node::{
-    ChatNode, MessageContent, NodeKind, NodeRole, NodeStatus, CHAT_STYLE_TAG_TOOL,
+    ChatNode, MessageContent, NodeKind, NodeStatus, CHAT_STYLE_TAG_TOOL,
 };
 use symbio_kernel::chat::principal::Principal;
 
@@ -187,100 +188,6 @@ pub fn llm_build_tool_message(
     }
 }
 
-// ==================== 建树折叠（`presentation_tree` 的节点侧） ====================
-//
-// 建树策略的 flat 折叠。`grouped` 是今天行为：本轮 reasoning/text/tool_call
-// 挂 `Skeleton{run}` 根下；`flat` 把本轮**响应骨架的直接子节点**升到会话根
-// （`parent_id: None`），工具结果仍挂自己的 tool_call 骨架下（那是「工具调用内部
-// 有自己的骨架」，与建树策略正交）。前端只看 `parent_id`、**不知道这个开关**——
-// 切档零代码改动是本任务的判据核心。
-//
-// 脱父子节点带 `meta.scope_root = <骨架 id>`：后端两个「本轮工作」子树遍历器
-// （`resume::process_retry_subtree` 的 BFS、`failure::subtree_of`）按 `parent_id`
-// 收集后代，脱父子节点够不着。记号让「本轮工作 = 骨架 ∪ {scope_root==骨架}」与
-// grouped 的「骨架子树」逐字等价，遍历器多一条并集即可。`grouped` 从不写这个键，
-// 存量数据零字节改动，两档各自可独立回退。
-
-/// 建树策略 —— 后端组树时新节点 `parent_id` 的挂法。
-///
-/// 这是一个**纯后端旋钮**：前端只按 `parent_id` 插树，不知道本开关存在，切档
-/// 前端零代码改动（这是本任务判据的核心）。档间差异只在「本轮节点挂会话根，
-/// 还是挂本轮的 `Skeleton{run}` 根」这一件事上——工具结果始终挂在自己的
-/// `tool_call` 骨架下（那是「工具调用内部有自己的骨架」，与建树策略正交）。
-///
-/// `deep`（子智能体递归嵌套）随子会话转播桥在 149-ii 接线：子会话的节点早已由
-/// `relay_bridge` 无条件挂到发起它的父工具卡下，本档只是让读侧投影**保留**那棵嵌套树
-/// （与 `grouped` 同样不升根），语义差异全在前端如何展开。
-///
-/// `Serialize` 只为端口回体（`session-config` 的 `settings.presentation_tree`）：
-/// 变体名即载荷值，改名 = 协议改动。
-#[derive(Debug, Clone, Copy, PartialEq, Eq, serde::Serialize)]
-pub enum PresentationTree {
-    /// 本轮所有节点挂会话根（与用户发言互为兄弟）；只有工具调用内部保留自己的骨架。
-    Flat,
-    /// 每条用户消息开一个 `Skeleton{run}` 根，本轮其余节点挂它下（**出厂默认 = 今天行为**）。
-    Grouped,
-    /// 子会话递归挂到发起它的那张工具卡内（多智能体嵌套）。存储与 `grouped` 逐字相同，
-    /// 区别只在读侧投影：本档**不做**任何升根折叠，保留转播桥已建好的嵌套树。
-    Deep,
-}
-
-impl PresentationTree {
-    /// `PLUGIN.yml` / wire 里的字符串值。
-    pub fn as_str(self) -> &'static str {
-        match self {
-            Self::Flat => "flat",
-            Self::Grouped => "grouped",
-            Self::Deep => "deep",
-        }
-    }
-
-    /// 建树策略候选（表单与说明同源，不写第二份字面量）。
-    pub const OPTIONS: [(&'static str, &'static str); 3] = [
-        ("grouped", "本轮归到响应骨架下（默认）"),
-        ("flat", "本轮全部铺平到会话根"),
-        ("deep", "子会话挂到发起它的工具卡内（递归嵌套）"),
-    ];
-}
-
-/// 对刚落库 / 重建的一整棵树套用 flat 折叠（rebuild 读层用：rebuild 核心 config-free、
-/// 自行重derive了 grouped 父，这里据 `is_run()` 认出各轮骨架再把它们的孩子升根）。
-pub fn flatten_whole_tree(nodes: &mut [ChatNode], mode: PresentationTree) {
-    if mode != PresentationTree::Flat {
-        return;
-    }
-    // 工具卡 id 集合：夹在工具卡内的 `Skeleton{run}` 是**子会话**转播来的（`relay_bridge`
-    // 无条件把子会话顶层节点挂到父工具卡下），它虽仍 `is_run()`，但绝不能被折叠——
-    // 否则子会话的孙节点会被错误升到会话根，拆散嵌套树。只有**会话根级**的 run 骨架才折叠。
-    let tool_cards: std::collections::HashSet<String> = nodes
-        .iter()
-        .filter(|n| n.is_tool_call())
-        .map(|n| n.id.clone())
-        .collect();
-    // 轮锚有两态：D-335 之前是 `Skeleton{run}`；D-335 之后骨架并入**用户消息节点**
-    // （其 id 就是骨架 id），读侧重建出来的树上已没有 run 骨架。两种都要认，
-    // 否则 flat 对存量树（旧 WAL 里仍有骨架）与现行树（只有用户节点）只生效一半。
-    let run_roots: std::collections::HashSet<String> = nodes
-        .iter()
-        .filter(|n| n.is_run() || (n.is_text() && n.node_role() == Some(NodeRole::User)))
-        .filter(|n| {
-            n.parent_id
-                .as_deref()
-                .map(|p| !tool_cards.contains(p))
-                .unwrap_or(true)
-        })
-        .map(|n| n.id.clone())
-        .collect();
-    for n in nodes.iter_mut() {
-        let p = match n.parent_id.as_deref() {
-            Some(p) if run_roots.contains(p) => p.to_string(),
-            _ => continue,
-        };
-        n.parent_id = None;
-        n.meta = merge_scope_root(n.meta.take(), &p);
-    }
-}
-
 /// 读 `meta.scope_root`（遍历器并集用）。
 pub fn scope_root_of(node: &ChatNode) -> Option<&str> {
     node.meta
@@ -314,15 +221,6 @@ pub fn subtree_of(messages: &[ChatNode], root: &str) -> std::collections::HashSe
         }
     }
     ids
-}
-
-/// 把 `scope_root` 合并进已有 meta（不覆盖其它键）。
-fn merge_scope_root(meta: Option<serde_json::Value>, root_id: &str) -> Option<serde_json::Value> {
-    let mut m = meta.unwrap_or_else(|| serde_json::json!({}));
-    if let Some(obj) = m.as_object_mut() {
-        obj.insert("scope_root".to_string(), serde_json::json!(root_id));
-    }
-    Some(m)
 }
 
 #[cfg(test)]

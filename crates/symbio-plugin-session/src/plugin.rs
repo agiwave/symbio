@@ -358,16 +358,6 @@ impl SessionPlugin {
     ) -> Result<Arc<PersistentChatSession>, PluginError> {
         self.convergence.open_chat_session(session_id).await
     }
-
-    /// 本插件当前的**建树策略**（`SessionConfig::presentation_tree`）。
-    ///
-    /// 呈现读侧的投影取值点（`session_content` 的两个 Read 分支经它）。与写侧
-    /// 请求级快照（`ChatOrchestrator::presentation_tree`）同一个 `SessionConfig`
-    /// 来源、同一个解析（`presentation_tree()` 未知值回落 `grouped`）——锁不跨
-    /// 呈现序列化，取一次值即放。
-    pub(crate) async fn presentation_mode(&self) -> PresentationTree {
-        self.config.read().await.presentation_tree()
-    }
 }
 
 #[async_trait]

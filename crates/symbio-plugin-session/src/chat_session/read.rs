@@ -22,10 +22,7 @@ impl PersistentChatSession {
         // 成 grouped（哪怕落库/消息文件写的是 flat）。`flat` 档在这里把本轮响应骨架的
         // 直接子节点升根并打 `scope_root` 记号——与 live 流式帧、`session_content` 呈现
         // 同一个投影，三格锁步。`grouped` 档下 `flatten_whole_tree` 立即返回，零改动。
-        symbio_sdk::round::node_build::flatten_whole_tree(
-            &mut messages,
-            self.cfg_or_default().presentation_tree(),
-        );
+        crate::config::flatten_whole_tree(&mut messages, self.cfg_or_default().presentation_tree());
         // 分支标注是**读时投影**：`meta.branch` 不由写方入库（写事件只说 `of/into`），
         // 必须每次从事实重折。这既是前端叶子（`session_content`）的出口，也是请求包
         // 的入口——`get_context_messages` 按标注裁掉未选中支的子树。存储缓存里早于
