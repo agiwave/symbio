@@ -102,12 +102,14 @@ const SESSION_SRC_REL = 'crates/symbio-plugin-session/src'
  * 下调只有两种合法来源：① 符号在 session 源码里零命中（账本余量或用法退场）；
  * ② 取字改走 `symbio_plugin_api::` 门面后不再直取 `symbio_sdk::` 本体。每次下调
  * 都对应一条 D-NNN 裁决（D-452…D-455），理由与符号清单归裁决与 `git log`；这里只留当前值。
+ * `D-534` 的所有权迁移是唯一已裁决的上调：摘掉三条零命中符号，再加入随 rebuild 下沉的
+ * 九条实际依赖（48 → 54）；这不是能力扩面，此后仍只许降。
  *
  * 边界：`D-443` 第 3 条的「控制面专属读口」（`FactSource` 登记面 / `PRINCIPAL_MAIN` /
- * `session_chat` / `rebuild` / `SKILL_TAG` / `commitment_records` /
+ * `session_chat` / `SKILL_TAG` / `commitment_records` /
  * `VdfsChangeSubscriptions` / `DriveEntry` / 词汇结构体）**不上门面**，不因换径退场。
  */
-const SYMBOL_BASELINE = 48
+const SYMBOL_BASELINE = 54
 
 const errors = []
 const notes = []

@@ -16,14 +16,14 @@ use crate::declarations::MESSAGE_VOCAB as MESSAGE;
 use crate::declarations::{EVENT_CHAT_ASSISTANT_REPORTED, EVENT_MESSAGE_EDITED};
 use symbio_kernel::chat::chat_node::{MessageContent, NodeKind, NodeRole, NodeStatus};
 use symbio_kernel::event::{Entity, Event, Verb};
-use symbio_plugin_api::events;
+use symbio_plugin_api::{events, PRINCIPAL_USER};
 
 /// 身份写 `principal`（D-147）：夹具/载荷模仿的是**落库面**，而重建产物同样
 /// 只带主体；`role` 只是反序列化落点，不是写侧的身份来源。
 fn principal_for(role: NodeRole) -> symbio_kernel::chat::principal::Principal {
     use symbio_kernel::chat::principal::Principal;
     match role {
-        NodeRole::User => Principal::from_legacy(symbio_sdk::keys::PRINCIPAL_USER),
+        NodeRole::User => Principal::from_legacy(PRINCIPAL_USER),
         NodeRole::Assistant => Principal::from_legacy("session/main"),
         NodeRole::Tool => Principal::from_legacy("legacy/unknown"),
         NodeRole::System => Principal::from_legacy("system/local"),

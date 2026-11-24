@@ -87,8 +87,9 @@ use symbio_kernel::event::{
     event_produced_text_node_id, event_result_node_id, EVENT_FAILED, EVENT_REQUEST, EVENT_RESPONSE,
 };
 use symbio_kernel::event::{Entity, Event, Verb};
+use symbio_plugin_api::debt::{STAMP_FAILURE, STAMP_KEY};
 use symbio_plugin_api::vocab::PORT_TOOL;
-use symbio_sdk::port_stamp::{STAMP_FAILURE, STAMP_KEY};
+use symbio_plugin_api::PRINCIPAL_USER;
 use symbio_sdk::projection::mutations::added_messages;
 use symbio_sdk::projection::mutations::is_reader_reply;
 use symbio_sdk::projection::vocab::{slot_of, ChatSlot};
@@ -112,7 +113,7 @@ fn actor_principal(e: &Event) -> Principal {
 
 /// 用户一侧（发言 / 补充）：写侧 `attributed` 判 `NodeRole::User` ⇒ `person/local`。
 fn user_principal() -> Principal {
-    Principal::from_legacy(symbio_sdk::keys::PRINCIPAL_USER)
+    Principal::from_legacy(PRINCIPAL_USER)
 }
 
 /// **重建号**：[`rebuild`] 自己那台发号器（四套序号的归一表见 session 域文档

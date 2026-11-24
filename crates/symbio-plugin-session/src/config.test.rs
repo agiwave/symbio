@@ -17,7 +17,12 @@
 use super::*;
 use symbio_kernel::chat::chat_node::{NodeKind, CHAT_STYLE_TAG_RUN, CHAT_STYLE_TAG_TOOL};
 use symbio_kernel::chat::principal::{Principal, PrincipalKind};
-use symbio_sdk::round::node_build::scope_root_of;
+fn marked_scope_root(node: &ChatNode) -> Option<&str> {
+    node.meta
+        .as_ref()
+        .and_then(|meta| meta.get("scope_root"))
+        .and_then(serde_json::Value::as_str)
+}
 
 /// 出厂**关闭**中途汇报，但三个上界仍是"打开即生效"的有意义取值。
 ///
@@ -185,11 +190,11 @@ fn flatten_whole_tree_detaches_run_children_keeps_tool_results() {
     assert_eq!(tree[0].parent_id, None);
     for row in tree.iter().skip(1).take(3) {
         assert_eq!(row.parent_id, None, "本轮直接子节点升根");
-        assert_eq!(scope_root_of(row), Some("run-1"));
+        assert_eq!(marked_scope_root(row), Some("run-1"));
     }
     // 工具结果挂在工具调用骨架下——与建树策略正交，flat 不碰。
     assert_eq!(tree[4].parent_id.as_deref(), Some("tool-1"));
-    assert_eq!(scope_root_of(&tree[4]), None);
+    assert_eq!(marked_scope_root(&tree[4]), None);
 }
 
 /// D-335：Turn 并入用户消息节点后，读侧重建树里**没有** `Skeleton{run}`；
@@ -207,11 +212,11 @@ fn flatten_whole_tree_detaches_children_of_user_turn_anchor() {
     ];
     flatten_whole_tree(&mut tree, PresentationTree::Flat);
     assert_eq!(tree[1].parent_id, None, "轮锚的直接子节点升根");
-    assert_eq!(scope_root_of(&tree[1]), Some("user-1"));
+    assert_eq!(marked_scope_root(&tree[1]), Some("user-1"));
     assert_eq!(tree[2].parent_id, None, "工具卡也升根");
-    assert_eq!(scope_root_of(&tree[2]), Some("user-1"));
+    assert_eq!(marked_scope_root(&tree[2]), Some("user-1"));
     assert_eq!(tree[3].parent_id.as_deref(), Some("tool-1"));
-    assert_eq!(scope_root_of(&tree[3]), None);
+    assert_eq!(marked_scope_root(&tree[3]), None);
 }
 
 #[test]
@@ -223,7 +228,7 @@ fn flatten_whole_tree_grouped_is_noop() {
         Some("run-1"),
         "grouped 保持今天形状"
     );
-    assert_eq!(scope_root_of(&tree[1]), None);
+    assert_eq!(marked_scope_root(&tree[1]), None);
 }
 
 /// flat 折叠**不拆子会话**：转播桥把子会话顶层节点无条件挂到父工具卡下，那个
@@ -247,7 +252,7 @@ fn flatten_whole_tree_skips_run_skeleton_nested_in_tool_card() {
     flatten_whole_tree(&mut tree, PresentationTree::Flat);
     // 顶层本轮骨架的直接子节点（工具卡）照常升根。
     assert_eq!(tree[1].parent_id, None, "工具卡升根");
-    assert_eq!(scope_root_of(&tree[1]), Some("run-1"));
+    assert_eq!(marked_scope_root(&tree[1]), Some("run-1"));
     // 子会话的 run 骨架仍挂在工具卡下（未被当作折叠根）。
     assert_eq!(
         tree[2].parent_id.as_deref(),
@@ -260,7 +265,7 @@ fn flatten_whole_tree_skips_run_skeleton_nested_in_tool_card() {
         Some("subrun-1"),
         "子会话孙节点不被错误升根"
     );
-    assert_eq!(scope_root_of(&tree[3]), None);
+    assert_eq!(marked_scope_root(&tree[3]), None);
 }
 
 /// `deep` 与 `grouped` 逐字相同：读侧投影都不升根，区别只在前端如何展开嵌套树。
@@ -275,7 +280,7 @@ fn flatten_whole_tree_deep_is_noop() {
         "deep 不做任何升根折叠"
     );
     assert_eq!(tree[1].parent_id.as_deref(), Some("run-1"));
-    assert_eq!(scope_root_of(&tree[1]), None);
+    assert_eq!(marked_scope_root(&tree[1]), None);
 }
 
 #[test]
