@@ -68,6 +68,62 @@ fn heartbeat_flag_is_bool_and_excludes_message() {
 }
 
 #[test]
+fn serve_subcommand_parses_server_options() {
+    let cwd = std::env::current_dir().unwrap();
+    let Command::Serve(args) = parse([
+        "serve".to_string(),
+        "--bind".to_string(),
+        "0.0.0.0".to_string(),
+        "--port=9232".to_string(),
+        "--token".to_string(),
+        "secret".to_string(),
+        "--homedir".to_string(),
+        "runtime".to_string(),
+        "--frontend-dist".to_string(),
+        "web".to_string(),
+        "--max-connections".to_string(),
+        "12".to_string(),
+        "--allowed-origin".to_string(),
+        "https://console.example".to_string(),
+        "--verbose".to_string(),
+    ])
+    .unwrap() else {
+        panic!("expected Serve");
+    };
+    assert_eq!(args.homedir, cwd.join("runtime"));
+    assert_eq!(args.config.bind, "0.0.0.0");
+    assert_eq!(args.config.port, 9232);
+    assert_eq!(args.config.token, "secret");
+    assert_eq!(args.config.frontend_dist, cwd.join("web"));
+    assert_eq!(args.config.max_connections, 12);
+    assert_eq!(
+        args.config.allowed_origin.as_deref(),
+        Some("https://console.example")
+    );
+    assert!(args.verbose);
+}
+
+#[test]
+fn serve_help_and_invalid_values_are_explicit() {
+    assert!(matches!(
+        parse(["serve".to_string(), "--help".to_string()]),
+        Ok(Command::ServeHelp)
+    ));
+    assert!(parse([
+        "serve".to_string(),
+        "--max-connections".to_string(),
+        "0".to_string()
+    ])
+    .is_err());
+    assert!(parse([
+        "serve".to_string(),
+        "--port".to_string(),
+        "70000".to_string()
+    ])
+    .is_err());
+}
+
+#[test]
 fn relative_paths_resolve_against_cwd() {
     // 绝对路径样例需带盘符才算 Windows 绝对路径（is_absolute 语义）。
     let abs = if cfg!(windows) {

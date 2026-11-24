@@ -22,7 +22,10 @@ vi.mock('@/services/vdfsScheme', () => ({
   findMountDirByNewTypeExt: hoisted.findMountDirByNewTypeExt,
 }))
 // 连接状态是模块级 ref；引导只读它，故给一个可写对象即可
-vi.mock('@/services/systemLocation', () => ({ locationError: { value: null } }))
+vi.mock('@/services/systemLocation', () => ({
+  locationError: { value: null },
+  isBrowserEnvironment: () => false,
+}))
 vi.mock('@/utils/logger', () => ({
   logger: { info: vi.fn(), warn: vi.fn(), error: vi.fn(), debug: vi.fn() },
 }))

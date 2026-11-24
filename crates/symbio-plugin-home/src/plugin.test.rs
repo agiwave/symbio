@@ -10,6 +10,33 @@ fn isolated_home() -> HomePlugin {
 }
 
 #[tokio::test]
+async fn reload_rejects_missing_target_before_changing_home_state() {
+    let temp = tempfile::tempdir().unwrap();
+    let home = isolated_home();
+    let mut config = HomeConfig::default();
+    config.ensure_defaults();
+    config
+        .work
+        .insert("workdir".into(), serde_json::json!("/keep"));
+    *home.config.write().await = config.clone();
+    let missing = temp.path().join("missing");
+
+    let error = home.reload(Some(missing.clone())).await.unwrap_err();
+    assert!(matches!(error, PluginError::ValidationError(_)));
+    assert_eq!(home.config.read().await.work, config.work);
+    assert!(home.instances.read().await.is_empty());
+}
+
+#[tokio::test]
+async fn reload_rejects_empty_target() {
+    let home = isolated_home();
+    assert!(matches!(
+        home.reload(Some(PathBuf::new())).await,
+        Err(PluginError::ValidationError(_))
+    ));
+}
+
+#[tokio::test]
 async fn workspace_save_failure_keeps_previous_memory_and_disk() {
     let temp = tempfile::tempdir().unwrap();
     let dir = PluginDir::at(temp.path(), PLUGIN_ID_HOME);

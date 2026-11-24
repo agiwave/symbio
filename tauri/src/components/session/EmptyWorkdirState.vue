@@ -22,17 +22,28 @@
     >
       {{ picking ? '应用中…' : '使用最近的工作目录' }}
     </button>
-    <p v-if="lastError" class="error-text">{{ lastError }}</p>
+    <p v-if="lastError" class="error-text" role="alert">{{ lastError }}</p>
   </div>
+
+  <DirectoryPicker
+    v-if="pickerOpen"
+    :visible="true"
+    title="选择工作目录"
+    :initial-path="store.lastUsedWorkdir || undefined"
+    @close="pickerOpen = false"
+    @select="onDirectorySelected"
+  />
 </template>
 
 <script setup lang="ts">
 import { ref } from 'vue'
 import { useSessionsStore } from '@/stores/sessions'
-import { open } from '@tauri-apps/plugin-dialog'
+import { pickPath } from '@/services/nativePick'
+import DirectoryPicker from '@/components/common/DirectoryPicker.vue'
 
 const store = useSessionsStore()
 const picking = ref(false)
+const pickerOpen = ref(false)
 const lastError = ref('')
 
 async function onPick() {
@@ -43,14 +54,28 @@ async function onPick() {
   picking.value = true
   lastError.value = ''
   try {
-    const selected = await open({
-      directory: true,
-      multiple: false,
-      title: '选择工作目录'
+    const selected = await pickPath('directory', {
+      title: '选择工作目录',
+      initialPath: store.lastUsedWorkdir || undefined,
+      onBrowserPick: () => { pickerOpen.value = true },
     })
-    if (!selected) return
-    const path = typeof selected === 'string' ? selected : Array.isArray(selected) ? selected[0] : null
-    if (!path) return
+    if (selected) await store.setActiveWorkdir(selected)
+  } catch (e) {
+    lastError.value = e instanceof Error ? e.message : String(e)
+  } finally {
+    picking.value = false
+  }
+}
+
+async function onDirectorySelected(path: string) {
+  pickerOpen.value = false
+  if (!store.activeId) {
+    lastError.value = '请先选择或创建一个会话'
+    return
+  }
+  picking.value = true
+  lastError.value = ''
+  try {
     await store.setActiveWorkdir(path)
   } catch (e) {
     lastError.value = e instanceof Error ? e.message : String(e)

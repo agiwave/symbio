@@ -115,7 +115,7 @@ function onConfirm() {
 <style scoped>
 /* 遮罩与面板的底色 / 圆角 / 阴影 / 层级由 `BaseModal` 统一提供（`.modal-mask` /
    `.modal-panel`）；这里只写确认框自己的尺寸与边框。 */
-.confirm-dialog {
+:global(.modal-panel.confirm-dialog) {
   border: 1px solid var(--border-default);
   min-width: 20rem;
   max-width: 30rem;

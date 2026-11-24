@@ -66,6 +66,23 @@ test('A 不误报：类定义在全局 CSS 里 → 不红', () => {
   assert.equal(r.status, 0)
 })
 
+test('A 不误报：scoped 样式里的 :global 语义面板根按全局定义解析', () => {
+  const r = audit({
+    'tauri/src/main.ts': `import './components/Parent.vue'\n`,
+    'tauri/src/components/BaseModal.vue': vue(
+      '<div class="modal-panel"><slot /></div>',
+      '<style scoped>\n.modal-panel { color: red; }\n</style>'
+    ),
+    'tauri/src/components/Parent.vue': vue(
+      `<div class="local"><BaseModal panel-class="directory-picker" /></div>`,
+      `<style scoped>\n:global(.modal-panel.directory-picker) { width: 100%; }\n.local { color: blue; }\n</style>\n` +
+        `<script setup>\nimport BaseModal from './BaseModal.vue'\n</script>`
+    ),
+  }, { strict: true })
+  assert.equal(r.status, 0, r.stdout)
+  assert.doesNotMatch(r.stdout, /scoped 类 "\.modal-panel"/)
+})
+
 test('A 命中：动态类前缀没有任何已定义类以它开头 → ERROR', () => {
   // `:class="\`ghost-${kind}\`"` 这类拼接，前缀至少要能命中一个已定义类
   const r = audit({

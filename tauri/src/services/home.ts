@@ -57,36 +57,29 @@ export async function getHomedirInfo(): Promise<home_get_homedir.Response> {
  * 切换 homedir（热重载）
  *
  * 调用 `home/reload` 路由。后端流程：
- * 1. 持久化新 homedir 到 `~/.symbio_bootstrap` 并更新内存
- * 2. 旧 config 写回旧 homedir（如有切换）
- * 3. 从新 homedir 重新读 config
- * 4. 清空 `instances` map
- * 5. 重建 worker composite
- * 6. 异步恢复 workdir
+ * 1. 校验目标目录并在目标 homedir 构造候选配置与 worker composite
+ * 2. 把当前 config 持久化到旧 homedir（如有切换）
+ * 3. 全部成功后持久化 bootstrap，并一次性替换 config / instances
+ * 4. 异步恢复 workdir
  *
  * **前端责任**（调用本函数前/后）：
  * 1. 关闭所有活跃 chat 会话（disconnectPlugin）
  * 2. 调用成功后重新拉取数据（refreshData）
  *
  * @param homedir 目标 homedir（绝对路径或 `~` 前缀）
- * @param opts.forceNative 是否强制走本机原生传输（切换系统目录时必须为 true，
- *        否则当前出站协议若指向远端会把 reload 路由到远端而失败）
- * @returns 切换结果；失败时返回 null
+ * @param opts.forceNative embedded 中固定本机控制面；browser 应省略此选项，
+ *        由当前 Server HTTP 出站处理 home/reload
+ * @returns 切换结果；失败时抛出，调用方不得持久化目标或报告成功
  */
 export async function switchHomedir(
   homedir: string,
   opts?: { forceNative?: boolean }
-): Promise<home_reload.Response | null> {
-  return withFallback(
-    () =>
-      callPlugin<home_reload.Response>(
-        ROUTE_HOME_RELOAD,
-        { homedir },
-        undefined,
-        opts?.forceNative ? { forceNative: true } : undefined
-      ),
-    () => null,
-    { tag: 'home-service', what: `switchHomedir(${homedir}) failed` }
+): Promise<home_reload.Response> {
+  return callPlugin<home_reload.Response>(
+    ROUTE_HOME_RELOAD,
+    { homedir },
+    undefined,
+    opts?.forceNative ? { forceNative: true } : undefined
   )
 }
 

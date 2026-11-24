@@ -182,7 +182,7 @@ board.columns: [impl]
 > ⚠️ **本区块由 `node scripts/audits/registry-audit.mjs --write` 维护（标记之间），请勿手改标记区内内容。**
 > 状态的唯一登记处是各条目文件本身，本区块是投影。字段规范见 [SP-001](../005-spec/001.md)，机制见 [DE-017 · 登记与汇总机制](017-登记与汇总机制.md "DE-017-登记与汇总机制")。
 
-**计数**：active 103 · draft 0 · retired 1（共 104）
+**计数**：active 105 · draft 0 · retired 1（共 106）
 
 ## 现行设计（active）
 
@@ -240,6 +240,7 @@ board.columns: [impl]
 | [`DE-057-作用域VDFS存储机制`](057-作用域VDFS存储机制.md) | 作用域 VDFS 存储机制 | 部分落地 |
 | [`DE-058-沙箱机制`](058-沙箱机制.md) | 沙箱机制 | 部分落地 |
 | [`DE-059-通用表格列定义裁决`](059-通用表格列定义裁决.md) | 通用表格列定义裁决 | 与代码一致 |
+| [`DE-060-Server运行时与会话执行`](060-Server运行时与会话执行.md) | Server 运行时与会话执行 | 部分落地 |
 | [`DE-101-context-compression-design`](../../crates/symbio-plugin-session/src/docs/101-context-compression-design.md) | 会话上下文压缩设计 | 与代码一致 |
 | [`DE-104-module-layout`](../../crates/symbio-plugin-session/src/docs/104-module-layout.md) | Session / Loop 插件模块分工 | 与代码一致 |
 | [`DE-105-node-state-streaming`](../../crates/symbio-plugin-session/src/docs/105-node-state-streaming.md) | 节点状态流（Node-State Streaming）—— 实时面即节点状态 | 与代码一致 |
@@ -288,6 +289,7 @@ board.columns: [impl]
 | [`crates/symbio-plugin-ui_prefs/README`](../../crates/symbio-plugin-ui_prefs/README.md) | UI_prefs 插件（界面偏好） | 与代码一致 |
 | [`crates/symbio-plugin-vdfs/README`](../../crates/symbio-plugin-vdfs/README.md) | VDFS 插件 | 与代码一致 |
 | [`crates/symbio-plugin-web/README`](../../crates/symbio-plugin-web/README.md) | Web 插件 | 与代码一致 |
+| [`crates/symbio-server/README`](../../crates/symbio-server/README.md) | Server 与共享运行时 | 部分落地 |
 | [`scripts/README`](../../scripts/README.md) | ''`scripts/` —— 脚本目录的布局与机制'' | 与代码一致 |
 | [`scripts/facts/README`](../../scripts/facts/README.md) | ''`scripts/facts/` —— 事实生成器目录'' | 与代码一致 |
 | [`tauri/README`](../../tauri/README.md) | Tauri 前端 | 与代码一致 |

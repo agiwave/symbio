@@ -1,0 +1,27 @@
+[package]
+name = "symbio-server"
+version = "0.1.14"
+description = "Symbio shared runtime host and browser server library"
+authors = ["Symbio Team"]
+license = "MIT"
+edition = "2021"
+rust-version = "1.91"
+
+[lints.rust]
+unused_imports = "warn"
+unused_variables = "warn"
+dead_code = "warn"
+
+[dependencies]
+symbio = { path = "../symbio" }
+symbio-http = { path = "../symbio-http" }
+async-trait = { workspace = true }
+dirs = { workspace = true }
+serde = { workspace = true, features = ["derive"] }
+serde_json = { workspace = true }
+tokio = { workspace = true, features = ["full"] }
+tracing = { workspace = true }
+urlencoding = { workspace = true }
+
+[dev-dependencies]
+tempfile = { workspace = true }

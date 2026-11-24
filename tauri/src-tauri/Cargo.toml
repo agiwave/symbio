@@ -12,6 +12,8 @@ tauri-build = { workspace = true, features = [] }
 
 [dependencies]
 symbio = { path = "../../crates/symbio" }
+symbio-http = { path = "../../crates/symbio-http" }
+symbio-server = { path = "../../crates/symbio-server" }
 tauri = { workspace = true, features = [] }
 tauri-plugin-dialog = { workspace = true }
 serde = { workspace = true, features = ["derive"] }

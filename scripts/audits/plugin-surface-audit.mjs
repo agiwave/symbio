@@ -254,7 +254,9 @@ export const CONTRACT_BASELINE = 31
 // 109 → 110（`D-532`）：`DetailColumn` 经 sdk 的 `present` 整模块转出到 plugin-api 门面——插件要声明 `DetailField.columns` 就必须能在自己 crate 里构造列定义，而门面是插件唯一可依赖的机制层（E-009 插件互不可见）。同名的 kernel 共享语法换的是门面可见性，不是新增可写路径；通用表格列契约见 DE-059 / D-532。
 // 110 → 111（`D-533`）：`vdfs_normalize_path` 是地址契约的共享纯语法，VDFS / local / sandbox 三个插件必须用同一份归一化事实，不能各自解释分隔符与绝对锚点。
 // 111 → 112（`D-533`）：`vdfs_resolve_path` 同属地址契约的共享纯语法，按有效 WORKDIR 解析相对路径；三个插件必须共用，不能各自解释盘符相对路径与工作目录。
-export const GRAMMAR_BASELINE = 112
+// 112 → 111（`D-535`）：`PluginPayloadWire` 是线路载荷，消费方转为共享传输
+// `symbio-http`；插件门面不再为桌面 IPC / HTTP 双协议转发它。
+export const GRAMMAR_BASELINE = 111
 
 /**
  * 模块级转发的基线：**只许不涨**（D-278）。

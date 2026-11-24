@@ -288,7 +288,7 @@ function tauriViews() {
 /**
  * CLI 面：进程选项 + REPL 内置命令。
  *
- * 权威来源是 `crates/symbio-cli/src/args.rs` 的 `HELP` 常量（无子命令树、不依赖 clap）。
+ * 权威来源是 `crates/symbio-cli/src/args.rs` 的 `HELP` 与 `SERVE_HELP` 常量。
  * 之所以用提取而非手写清单：手写时我把「交互模式内置命令」当成了不存在的
  * 「子命令」，还漏掉了 `--heartbeat`——事实表里的清单一旦手写就会腐烂。
  */
@@ -297,21 +297,27 @@ function cliSurface() {
   const txt = requiredSource(file, "CLI 面（进程选项与 REPL 命令）");
   const m = txt.match(/const HELP: &str = "\s*([\s\S]*?)\n"/);
   if (!m) throw new Error("结构事实提取为空：CLI 的 `HELP` 常量在 args.rs 里找不到");
+  const serveMatch = txt.match(/const SERVE_HELP: &str = "\s*([\s\S]*?)\n"/);
+  if (!serveMatch) throw new Error("结构事实提取为空：CLI 的 `SERVE_HELP` 常量在 args.rs 里找不到");
   const help = m[1];
-  const section = (from, to) => {
-    const a = help.indexOf(from);
+  const serveHelp = serveMatch[1];
+  const section = (text, from, to) => {
+    const a = text.indexOf(from);
     if (a < 0) return "";
-    const rest = help.slice(a + from.length);
+    const rest = text.slice(a + from.length);
     const b = to ? rest.indexOf(to) : -1;
     return b < 0 ? rest : rest.slice(0, b);
   };
-  const optBlock = section("选项:", "交互模式内置命令:");
-  const replBlock = section("交互模式内置命令:", "输出约定:");
+  const optBlock = section(help, "选项:", "交互模式内置命令:");
+  const serveOptBlock = section(serveHelp, "Server 选项:", "环境变量:");
+  const replBlock = section(help, "交互模式内置命令:", "输出约定:");
   const out = {
-    longs: [...new Set([...optBlock.matchAll(/--[a-z][\w-]*/g)].map((g) => g[0]))],
-    shorts: [...new Set([...optBlock.matchAll(/(?:^|\s)-([A-Za-z])(?=[\s,])/g)].map((g) => `-${g[1]}`))],
+    subcommands: [...new Set([...help.matchAll(/^\s+symbio-cli ([a-z][\w-]*)/gm)].map((g) => g[1]))],
+    longs: [...new Set([...`${optBlock}\n${serveOptBlock}`.matchAll(/--[a-z][\w-]*/g)].map((g) => g[0]))],
+    shorts: [...new Set([...`${optBlock}\n${serveOptBlock}`.matchAll(/(?:^|\s)-([A-Za-z])(?=[\s,])/g)].map((g) => `-${g[1]}`))],
     repl: [...new Set([...replBlock.matchAll(/(?:^|\s)(\/[\w-]+)/g)].map((g) => g[1]))],
   };
+  requiredHits(out.subcommands, "CLI 子命令");
   requiredHits(out.longs, "CLI 长选项");
   requiredHits(out.shorts, "CLI 短选项");
   requiredHits(out.repl, "CLI 交互模式内置命令");
@@ -321,23 +327,26 @@ function cliSurface() {
 /**
  * Gateway 对外端点：从 `server.rs` 的分派代码提取，而不是从 README 抄。
  *
- * 端点由 `req.path.starts_with("…")` 决定，所以正则扫代码就是权威；插件 README
+ * 端点由 `request.path.starts_with("…")` 决定，所以正则扫代码就是权威；插件 README
  * 只指向 003-ROUTES.md、不再自列端点（早年 README 写 `/api/route`、`/api/ws` 而代码
  * 是 `/api/v1/invoke`、`/api/v1/health`，是文档腐烂的活案例）。
+ * WS 升级口归共享传输 `symbio-http`，Gateway 只声明入站策略。
  */
 function gatewayEndpoints() {
   const file = path.join(ROOT, "crates", "symbio-plugin-gateway", "src", "server.rs");
   const txt = stripComments(requiredSource(file, "Gateway 端点"));
   const http = [
     ...new Set(
-      [...txt.matchAll(/req\.method == "(\w+)" && req\.path\.starts_with\("([^"]+)"\)/g)].map(
+      [...txt.matchAll(/request\.method == "(\w+)" && request\.path\.starts_with\("([^"]+)"\)/g)].map(
         (g) => `${g[1]} ${g[2]}`
       )
     ),
   ];
   requiredHits(http, "Gateway HTTP 端点");
-  if (!/fn\s+ws_handshake/.test(txt)) {
-    throw new Error("结构事实提取为空：Gateway 的 WS 升级口 `ws_handshake` 在 server.rs 里找不到");
+  const transportFile = path.join(ROOT, "crates", "symbio-http", "src", "server.rs");
+  const transport = stripComments(requiredSource(transportFile, "共享 HTTP 传输"));
+  if (!/async fn\s+ws_handshake/.test(transport)) {
+    throw new Error("结构事实提取为空：共享传输的 WS 升级口 `ws_handshake` 在 symbio-http/server.rs 里找不到");
   }
   return { http, ws: true };
 }
@@ -569,17 +578,17 @@ function render() {
   const gw = gatewayEndpoints();
   L.push(
     `- **Gateway 端点**：${fmtList(gw.http)}${gw.ws ? " + WS 升级（任意 path，首帧 = `PluginMessageWire`）" : ""}` +
-      "（提取自 `gateway/server.rs` 的 `req.path.starts_with`）"
+      "（端点提取自 `gateway/server.rs` 的 `request.path.starts_with`，WS 升级归 `symbio-http`）"
   );
   const cli = cliSurface();
   L.push("<!-- list:cli-options owner -->");
   L.push("");
   L.push(
-    `- **CLI 面**：进程选项 ${cli.longs.length} 个长 + ${cli.shorts.length} 个短（${fmtList(
+    `- **CLI 面**：子命令 ${fmtList(cli.subcommands)}；进程选项 ${cli.longs.length} 个长 + ${cli.shorts.length} 个短（${fmtList(
       cli.longs
     )}）；交互模式内置命令 ${cli.repl.length} 个（${fmtList(
       cli.repl
-    )}）。无子命令树、不依赖 clap，权威来源是 \`crates/symbio-cli/src/args.rs\` 的 \`HELP\`。` +
+    )}）。不依赖 clap，权威来源是 \`crates/symbio-cli/src/args.rs\` 的 \`HELP\` / \`SERVE_HELP\`。` +
       ' 本清单的 owner 是本行：它从 `crates/symbio-cli/src/args.rs` 的 `HELP` 提取，改代码即变。' +
       '`crates/symbio-cli/README.md` 与 `crates/symbio-cli/docs/004-usage.md` 是它的 `view`（只指路，不抄表）。'
   );

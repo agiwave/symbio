@@ -214,7 +214,7 @@ function activate(key?: string) {
 </script>
 
 <style scoped>
-.palette {
+:global(.modal-panel.palette) {
   width: min(38rem, 94vw);
   padding: var(--space-4);
   display: flex;

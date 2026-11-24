@@ -23,13 +23,13 @@
 // ==================== 详情页定义（definition-driven detail） ====================
 
 /**
- * 机制原生取值原语（`DetailField.pick`）——**跨栈闭集**，唯一定义处。
+ * 机制路径取值原语（`DetailField.pick`）——**跨栈闭集**，唯一定义处。
  *
  * 后端 `crates/symbio-kernel/src/present/detail.rs` 用一组 `pub const DETAIL_PICK_*: &str`
  * 表达同一个闭集（不是枚举，故字面即线上取值）。`protocol-mirror-audit` 的 C 组
  * 按前缀提取后端取值、与本词表逐词比对。
  *
- * 语义：后端唤不起原生对话框，故字段可声明一个原语，由前端取值后写入该字段。
+ * 语义：后端唤不起用户对话框，故字段可声明一个原语，由前端按运行环境取值后写入该字段。
  */
 export const DETAIL_PICK_DIRECTORY = 'directory'
 export const DETAIL_PICK_FILE = 'file'
@@ -88,7 +88,7 @@ export interface DetailColumn {
  * - list：字符串数组，编辑态每行一项
  * - map：字符串键值对，编辑态每行 KEY=VALUE
  * - static：只读展示（info 绑定），options 可作值→标签映射
- * - path：单行文本 + 原生选择入口（配 `pick`）
+ * - path：单行文本 + 统一路径选择入口（配 `pick`）
  * - form：结构化子对象，形状由 `form` 子定义描述
  */
 export interface DetailField {

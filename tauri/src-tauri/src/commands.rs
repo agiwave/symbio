@@ -1,15 +1,13 @@
 //! 三个 IPC 命令的实现：`route_v2` / `route_v2_send` / `route_v2_close`。
 //!
-//! 只做「metadata → ctx → `root.route` → 载荷分派」与连接生命周期，不含插件树知识与业务判定。
+//! 只做「请求 → RuntimeHost → 载荷分派」与连接生命周期，不含插件树知识与业务判定。
 
 use crate::AppState;
 use serde_json::Value;
 use symbio::symbio_kernel::keys::SymbioKey;
-use symbio::symbio_kernel::plugin::{
-    PluginFrame, PluginInvokeRequestExt, PluginMessageWire, PluginPayload, PluginPayloadWire,
-};
-use symbio::symbio_plugin_api::{VdfsCaller, VDFS_CALLER};
+use symbio::symbio_kernel::plugin::{PluginFrame, PluginMessageWire, PluginPayload};
 use symbio::symbio_sdk::keys::TRACE_ID;
+use symbio_http::PluginPayloadWire;
 use tauri::Emitter;
 use tokio::sync::mpsc;
 use tokio_util::sync::CancellationToken;
@@ -89,21 +87,10 @@ pub async fn route_v2(
 
     info!(trace_id = %trace_id, origin = %origin, path = %path, "Start routing");
 
-    // 创建插件上下文——装配在 core，与 gateway 的 `build_ctx` 是**同一份**：
-    // metadata 的字符串 / JSON 两种落桶规则只在这里定义一次。
-    let context = std::sync::Arc::new(
-        symbio::symbio_kernel::plugin::PluginSimpleRequest::from_parts(
-            request.payload,
-            request.metadata.as_object(),
-        ),
-    );
-    context.set(VDFS_CALLER, VdfsCaller::Manager);
-
-    let root = state.root.clone();
     let rm = state.route_manager.clone();
-    let payload = root.route(context).await.map_err(|e| {
-        error!(trace_id = %trace_id, path = %path, error = %e, "Error routing");
-        e.to_string()
+    let payload = state.host.invoke(request).await.map_err(|error| {
+        error!(trace_id = %trace_id, path = %path, error = %error, "Error routing");
+        error
     })?;
 
     debug!(trace_id = %trace_id, path = %path, "Routing finished");

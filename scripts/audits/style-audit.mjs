@@ -9,8 +9,8 @@
  *
  * 覆盖范围：
  *   - 全局 CSS：tauri/src 下的 styles/ 与 assets/ 目录
- *   - Vue 组件：<style> / <style scoped> 块；scoped 样式视为组件私有，
- *     非 scoped 的 <style> 视为全局定义
+ *   - Vue 组件：<style> / <style scoped> 块；scoped 样式视为组件私有
+ *     （`:global(...)` 段除外），非 scoped 的 <style> 视为全局定义
  *   - 类名使用来源：静态 class="a b"、:class="{ key: ... }" / :class="['a']"
  *     / :class="'a'" 字面量、classList.add/remove/toggle/toggle 字面量、
  *     <script> 中的 kebab-case 字符串字面量（覆盖 computed 返回动态 class 的场景，
@@ -106,10 +106,12 @@ const stripJsComments = (src) =>
   src.replace(/\/\*[\s\S]*?\*\//g, ' ').replace(/(^|[^:])\/\/[^\n]*/g, '$1');
 
 /** 提取 CSS 文本中的类名定义与自定义属性定义。
- *  返回 classes: Map<name, deep:boolean> —— deep=true 表示该类出现在
- *  :deep(...) 内（编译后可匹配任意后代/插槽内容，属跨组件共享定义）。 */
+ *  返回 classes: Map<name, deep:boolean> 与 globalClasses: Set；deep=true 表示该类出现在
+ *  :deep(...) 内（编译后可匹配任意后代/插槽内容），globalClasses 表示 :global(...)
+ *  段内的类（编译后不带 scope）。 */
 function extractCssDefs(cssText) {
   const classes = new Map(); // name -> deep
+  const globalClasses = new Set();
   const props = new Set();
   const text = stripCssComments(cssText);
   // 逐条规则扫描（选择器 { 声明 }），用简单括号配对，避免把声明区的 .5 小数当成类名
@@ -127,20 +129,24 @@ function extractCssDefs(cssText) {
       j++;
     }
     const body = text.slice(open + 1, j - 1);
-    // :deep(...) 段内的类 → 跨组件共享；其余 → 组件私有
+    // :deep(...) / :global(...) 段内的类分别记入共享定义；其余 → 组件私有
     const deepSegs = [...selector.matchAll(/:deep\s*\(([^)]*)\)/g)].map((m) => m[1]);
+    const globalSegs = [...selector.matchAll(/:global\s*\(([^)]*)\)/g)].map((m) => m[1]);
     for (const seg of deepSegs) {
       for (const m of seg.matchAll(/\.([a-zA-Z_][\w-]*)/g)) classes.set(m[1], true);
     }
-    const plain = selector.replace(/:deep\s*\([^)]*\)/g, '');
+    for (const seg of globalSegs) {
+      for (const m of seg.matchAll(/\.([a-zA-Z_][\w-]*)/g)) globalClasses.add(m[1]);
+    }
+    const plain = selector.replace(/:deep\s*\([^)]*\)/g, '').replace(/:global\s*\([^)]*\)/g, '');
     for (const m of plain.matchAll(/\.([a-zA-Z_][\w-]*)/g)) {
-      if (!classes.has(m[1])) classes.set(m[1], false);
+      if (!classes.has(m[1]) && !globalClasses.has(m[1])) classes.set(m[1], false);
     }
     // 声明区的自定义属性定义
     for (const m of body.matchAll(/(--[\w-]+)\s*:/g)) props.add(m[1]);
     i = j;
   }
-  return { classes, props };
+  return { classes, globalClasses, props };
 }
 
 // ── 1. 收集全局 CSS 定义 ───────────────────────────────────────
@@ -425,9 +431,10 @@ for (const f of vueFiles) {
   const globalFromVue = new Set(); // 组件内非 scoped <style> 提供的全局类
   const vueProps = new Set(); // 组件内定义的自定义属性（scoped 与否均可继承）
   for (const s of styles) {
-    const { classes, props } = extractCssDefs(s.css);
+    const { classes, globalClasses, props } = extractCssDefs(s.css);
+    for (const n of globalClasses) globalFromVue.add(n);
     for (const [n, deep] of classes) {
-      if (s.scoped) scopedClasses.set(n, deep);
+      if (s.scoped && !globalFromVue.has(n)) scopedClasses.set(n, deep);
       else globalFromVue.add(n);
     }
     for (const n of props) vueProps.add(n);

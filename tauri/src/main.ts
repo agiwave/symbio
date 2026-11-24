@@ -28,6 +28,6 @@ await ensureVdfsRoot()
 
 app.mount('#app')
 
-// 启动期预读网关出站配置（Promise 已缓存；首次出站请求前必已完成，消除竞态）。
-// 始终走原生 invoke 读取，不受出站协议切换影响，无「鸡生蛋」问题。
+// 启动期预读连接模型（Promise 已缓存）：embedded 默认 native，browser 默认同源 Server。
+// ensureVdfsRoot 的首次出站也会等待同一 Promise，不会与初始化竞态。
 void initGatewayTransport()

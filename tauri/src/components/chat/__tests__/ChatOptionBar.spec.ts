@@ -26,12 +26,22 @@ import { flushPromises, mount } from '@vue/test-utils'
 
 const hoisted = vi.hoisted(() => ({
   updateSession: vi.fn(async (_id: string, _patch: Record<string, unknown>) => {}),
-  pickNative: vi.fn(async () => null as string | null),
+  pickPath: vi.fn(async (
+    _kind?: string,
+    _options?: { initialPath?: string; onBrowserPick?: (request: { kind: string; initialPath?: string }) => void },
+  ) => null as string | null),
   applySessionMetadataPatch: vi.fn(),
 }))
 
 vi.mock('@/services/session', () => ({ updateSession: hoisted.updateSession }))
-vi.mock('@/services/nativePick', () => ({ pickNative: hoisted.pickNative }))
+vi.mock('@/services/nativePick', () => ({ pickPath: hoisted.pickPath }))
+vi.mock('@/services/hostDirectories', () => ({
+  getHostRuntime: vi.fn(async () => ({
+    homedir: '/srv/home/me', bootstrap_path: '/srv/bootstrap', deployment: 'server',
+    capabilities: { directory_browser: true },
+  })),
+  listHostDirectories: vi.fn(async () => ({ path: '/srv/home/me', parent: '/srv', roots: [], entries: [] })),
+}))
 // store 只出「会话 metadata 的唯一写入实现」一个动作（`patchSessionMetadata`
 // = 后端写 + 本地镜射）。这里按它的真实两步复刻，使既有断言仍能分别看见
 // 「写了什么」与「镜射了什么」——组件本身只该知道「保存一次」。
@@ -46,6 +56,7 @@ vi.mock('@/stores/sessions', () => ({
 
 import ChatOptionBar from '../ChatOptionBar.vue'
 import OptionFormDialog from '../OptionFormDialog.vue'
+import DirectoryPicker from '@/components/common/DirectoryPicker.vue'
 import DetailForm from '@/components/vdfs/DetailForm.vue'
 import type { DetailDefinition } from '@/schemas/vdfs'
 
@@ -123,9 +134,9 @@ function btn(w: ReturnType<typeof mount>, i: number) {
 
 beforeEach(() => {
   hoisted.updateSession.mockClear()
-  hoisted.pickNative.mockClear()
+  hoisted.pickPath.mockClear()
   hoisted.applySessionMetadataPatch.mockClear()
-  hoisted.pickNative.mockResolvedValue(null)
+  hoisted.pickPath.mockResolvedValue(null)
 })
 
 describe('ChatOptionBar：按钮文本（紧凑形态的取值规则）', () => {
@@ -212,18 +223,39 @@ describe('ChatOptionBar：select 分派（菜单 → 落库）', () => {
 
 describe('ChatOptionBar：path 分派（原生取值 → 落库）', () => {
   it('点击唤起原生取值原语，取值即写入（无候选菜单）', async () => {
-    hoisted.pickNative.mockResolvedValue('/tmp/picked')
+    hoisted.pickPath.mockResolvedValue('/tmp/picked')
     const w = mountBar({ sessionId: 's1' })
 
     await btn(w, 0).trigger('click')
     await flushPromises()
 
-    expect(hoisted.pickNative).toHaveBeenCalledWith('directory')
+    expect(hoisted.pickPath).toHaveBeenCalledWith('directory', expect.objectContaining({
+      onBrowserPick: expect.any(Function),
+    }))
     expect(hoisted.updateSession).toHaveBeenCalledWith('s1', { alpha: '/tmp/picked' })
   })
 
+  it('browser 取值请求打开 Server 目录组件，选择后写回字段', async () => {
+    hoisted.pickPath.mockImplementationOnce(async (kind, options) => {
+      options?.onBrowserPick?.({ kind: kind ?? 'directory' })
+      return null
+    })
+    const w = mountBar({ sessionId: 's1', values: { alpha: '/srv/projects' } })
+
+    await btn(w, 0).trigger('click')
+    await flushPromises()
+    const picker = w.findComponent(DirectoryPicker)
+    expect(picker.exists()).toBe(true)
+    expect(picker.props('initialPath')).toBe('/srv/projects')
+
+    picker.vm.$emit('select', '/srv/projects/app')
+    await flushPromises()
+    expect(hoisted.updateSession).toHaveBeenCalledWith('s1', { alpha: '/srv/projects/app' })
+    expect(w.findComponent(DirectoryPicker).exists()).toBe(false)
+  })
+
   it('用户取消取值 ⇒ 不落库', async () => {
-    hoisted.pickNative.mockResolvedValue(null)
+    hoisted.pickPath.mockResolvedValue(null)
     const w = mountBar({ sessionId: 's1' })
 
     await btn(w, 0).trigger('click')
@@ -238,7 +270,7 @@ describe('ChatOptionBar：path 分派（原生取值 → 落库）', () => {
 
     await btn(w, 0).trigger('click')
     await flushPromises()
-    expect(hoisted.pickNative).not.toHaveBeenCalled()
+    expect(hoisted.pickPath).not.toHaveBeenCalled()
 
     // 同样的值，但会话还没有历史 ⇒ 不锁
     const free = mountBar({ sessionId: 's1', values: { alpha: '/a' }, scope: { message_count: 0 } })

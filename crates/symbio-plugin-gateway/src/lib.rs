@@ -17,8 +17,8 @@
 //!
 //! 本插件**不定义任何新协议**。所有对外端点都是既有 Tauri 命令的一对一映射，
 //! 传输的是完全相同的 `PluginMessageWire` / `PluginPayloadWire` / `PluginFrame`。
-//! 入站服务（`server.rs`）仅做「行李搬运」：把 HTTP/WS 请求翻译成 `PluginSimpleRequest`，
-//! 交给既有的分形路由（`parent.route(ctx)`），再把响应原样送回。
+//! HTTP/WS/SSE 线路机制由 `symbio-http` 提供；本插件的 `server.rs` 只保留入站策略：
+//! 只读白名单、Model 调用上下文、幂等与事件总线订阅，再交给既有的分形路由。
 mod config;
 mod plugin;
 mod server;

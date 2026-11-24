@@ -123,7 +123,7 @@ function goSession() {
 </script>
 
 <style scoped>
-.onboarding {
+:global(.modal-panel.onboarding) {
   width: min(34rem, 94vw);
   padding: var(--space-5);
   display: flex;

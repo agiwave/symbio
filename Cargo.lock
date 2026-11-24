@@ -4195,6 +4195,7 @@ dependencies = [
  "serde_json",
  "symbio",
  "symbio-sdk",
+ "symbio-server",
  "tokio",
 ]
 
@@ -4228,6 +4229,22 @@ dependencies = [
  "symbio-providers",
  "symbio-sdk",
  "tokio",
+ "tracing",
+]
+
+[[package]]
+name = "symbio-http"
+version = "0.1.14"
+dependencies = [
+ "async-trait",
+ "base64 0.22.1",
+ "serde",
+ "serde_json",
+ "symbio-kernel",
+ "symbio-plugin-api",
+ "tempfile",
+ "tokio",
+ "tokio-util",
  "tracing",
 ]
 
@@ -4373,16 +4390,15 @@ name = "symbio-plugin-gateway"
 version = "0.1.14"
 dependencies = [
  "async-trait",
- "base64 0.22.1",
  "grep",
  "serde",
  "serde_json",
+ "symbio-http",
  "symbio-plugin-api",
  "symbio-providers",
  "tempfile",
  "time",
  "tokio",
- "tokio-util",
  "tracing",
 ]
 
@@ -4906,6 +4922,22 @@ dependencies = [
 ]
 
 [[package]]
+name = "symbio-server"
+version = "0.1.14"
+dependencies = [
+ "async-trait",
+ "dirs",
+ "serde",
+ "serde_json",
+ "symbio",
+ "symbio-http",
+ "tempfile",
+ "tokio",
+ "tracing",
+ "urlencoding",
+]
+
+[[package]]
 name = "symbio-tauri"
 version = "0.1.14"
 dependencies = [
@@ -4913,6 +4945,8 @@ dependencies = [
  "serde",
  "serde_json",
  "symbio",
+ "symbio-http",
+ "symbio-server",
  "tauri",
  "tauri-build",
  "tauri-plugin-dialog",

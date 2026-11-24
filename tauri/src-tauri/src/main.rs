@@ -3,14 +3,13 @@ mod route_connection;
 
 use route_connection::RouteConnectionManager;
 use std::sync::Arc;
-use symbio::init::create_root_plugin;
-use symbio::symbio_kernel::plugin::Plugin;
+use symbio_server::RuntimeHost;
 use tauri::{Listener, Manager};
 use tracing::info;
 use tracing_subscriber::{fmt, prelude::*, EnvFilter};
 
 struct AppState {
-    root: Arc<dyn Plugin>,
+    host: Arc<RuntimeHost>,
     route_manager: Arc<RouteConnectionManager>,
 }
 
@@ -70,11 +69,10 @@ fn main() {
         .setup(|app| {
             info!("Setup starting");
 
-            // 创建 root plugin（包含所有子插件注册）
-            let root = tauri::async_runtime::block_on(async {
-                create_root_plugin().await
-            });
-            info!("Root plugin created with all plugins registered");
+            let host = Arc::new(tauri::async_runtime::block_on(async {
+                RuntimeHost::create().await
+            }));
+            info!("RuntimeHost created with all plugins registered");
 
             let route_manager = Arc::new(RouteConnectionManager::new());
 
@@ -87,7 +85,7 @@ fn main() {
             }
 
             app.manage(AppState {
-                root,
+                host,
                 route_manager: route_manager.clone(),
             });
 
@@ -116,15 +114,12 @@ fn main() {
             // CLI 的退出路径走的是同一条——两个前端一种语义。
             if let tauri::RunEvent::Exit = event {
                 if let Some(state) = app_handle.try_state::<AppState>() {
-                    let root = state.root.clone();
+                    let host = state.host.clone();
                     tauri::async_runtime::block_on(async move {
-                        if let Err(e) = root
-                            .stop(symbio::symbio_kernel::plugin::PluginStopReason::Shutdown)
-                            .await
-                        {
-                            tracing::warn!(error = %e, "root plugin stop(Shutdown) failed");
+                        if let Err(e) = host.root().stop(symbio::symbio_kernel::plugin::PluginStopReason::Shutdown).await {
+                            tracing::warn!(error = %e, "RuntimeHost stop(Shutdown) failed");
                         } else {
-                            info!("root plugin stopped (Shutdown)");
+                            info!("RuntimeHost stopped (Shutdown)");
                         }
                     });
                 }

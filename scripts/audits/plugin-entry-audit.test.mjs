@@ -774,6 +774,18 @@ test('E-009 不误报：依赖 `symbio-plugin-api`（宿主词汇层，不含任
   assert.equal(r.status, 0, r.stdout)
 })
 
+test('E-009 不误报：通用线路设施 symbio-http 与宿主词汇层同档', () => {
+  const r = audit({
+    ...CLEAN,
+    ...mcpManifest(
+      '\n[dependencies]\n' +
+        'symbio-plugin-api = { path = "../symbio-plugin-api" }\n' +
+        'symbio-http = { path = "../symbio-http" }\n',
+    ),
+  })
+  assert.equal(r.status, 0, r.stdout)
+})
+
 test('E-009 不误报：清单里自身的 name 行', () => {
   const r = audit({ ...CLEAN, ...mcpManifest('') })
   assert.equal(r.status, 0, r.stdout)

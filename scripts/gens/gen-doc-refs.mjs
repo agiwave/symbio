@@ -281,12 +281,12 @@ export function runGenDocRefs(argv) {
   }
   // 裸编号索引：`<前缀>-<三位序号>` → 条目。冲突（同前缀同序号两条）⇒ 该键不可用，
   // 引用必须写全 id——装 two 条目进同一键会让后写者赢，宁可解析不出（RF-001 报错）
-  // 也不静默指错。
+  // 也不静默指错。键必须连序号一起捕获；只捕获前缀会把整个 design 目录误作冲突。
   const byShort = new Map()
   for (const e of entries) {
-    const m = typeof e.meta?.id === 'string' ? e.meta.id.match(/^(.+)-\d{3}[a-z]?/) : null
-    if (m && !byShort.has(m[1])) byShort.set(m[1], e)
-    else if (m && byShort.get(m[1]) !== e) byShort.set(m[1], undefined)
+    const m = typeof e.meta?.id === "string" ? e.meta.id.match(/^(.+-\d{3}[a-z]?)/) : null;
+    if (m && !byShort.has(m[1])) byShort.set(m[1], e);
+    else if (m && byShort.get(m[1]) !== e) byShort.set(m[1], undefined);
   }
   for (const [k, v] of [...byShort]) if (v === undefined) byShort.delete(k)
   /** 引用解析：全 id 优先，裸编号兜底（歧义键已剔除）。 */

@@ -11,7 +11,7 @@
  * 本身不可判，且所有路由的信封形状都会悄悄变一遍）。
  */
 
-import { beforeEach, describe, expect, it, vi } from 'vitest'
+import { afterEach, beforeEach, describe, expect, it, vi } from 'vitest'
 
 vi.mock('@tauri-apps/api/core', () => ({ invoke: vi.fn() }))
 vi.mock('@tauri-apps/api/event', () => ({ listen: vi.fn(async () => () => {}) }))
@@ -38,8 +38,13 @@ function stubImmediateData(): void {
 }
 
 beforeEach(() => {
+  vi.stubGlobal('window', { __TAURI_INTERNALS__: { invoke: vi.fn() } })
   vi.mocked(invoke).mockReset()
   stubImmediateData()
+})
+
+afterEach(() => {
+  vi.unstubAllGlobals()
 })
 
 describe('buildMetadata：来源随请求走', () => {

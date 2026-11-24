@@ -75,7 +75,7 @@ function onSave(values: Record<string, unknown>) {
 <style scoped>
 /* 遮罩与面板底色 / 圆角 / 阴影 / 层级由 `BaseModal` 统一提供；这里只写尺寸与排布。
    顺带补上了原先缺的 ESC 关闭与焦点陷阱（此前只有点遮罩能关）。 */
-.ofd-dialog {
+:global(.modal-panel.ofd-dialog) {
   width: 100%;
   max-width: 32rem;
   height: min(38rem, 86vh);

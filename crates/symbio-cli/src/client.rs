@@ -43,7 +43,6 @@ use std::time::{Duration, SystemTime, UNIX_EPOCH};
 use serde_json::{json, Value};
 use tokio::sync::mpsc;
 
-use symbio::init::create_root_plugin;
 use symbio::routes::{
     ROUTE_EVENT_BUS_SUBSCRIBE, ROUTE_VDFS_ROOT, ROUTE_VDFS_STAT, ROUTE_VDFS_WRITE,
 };
@@ -53,6 +52,7 @@ use symbio::symbio_kernel::plugin::{
 };
 use symbio::symbio_kernel::vdfs::{VdfsChange, VdfsNode, VDFS_STATUS_FAILED, VDFS_STATUS_WORKING};
 use symbio::symbio_plugin_api::events::EVENT_USER_MESSAGE;
+use symbio_server::RuntimeHost;
 // D-530：线上契约（解包 / 频道词表）按规则 B 迁入 symbio-contract，
 // 宿主侧经门面取用（导入路径不变，改的是转发源）。
 use symbio::symbio_plugin_api::{
@@ -173,7 +173,8 @@ impl SymbioClient {
         std::fs::create_dir_all(homedir)
             .map_err(|e| format!("创建系统目录失败 {}: {e}", homedir.display()))?;
 
-        let root = create_root_plugin().await;
+        let host = RuntimeHost::create().await;
+        let root = host.root();
 
         // **一条**下行通道：事件总线的 `vdfs` 频道（消息 + 会话运行态 + 资源信号）。
         //

@@ -22,6 +22,7 @@ import { mount } from '@vue/test-utils'
 const hoisted = vi.hoisted(() => ({
   getHomedirInfo: vi.fn(() => Promise.resolve({ homedir: '/home/x/.symbio' })),
   loadSystemLocation: vi.fn(() => ({ kind: 'local' as const, localPath: '/ persisted' })),
+  browser: false,
 }))
 
 vi.mock('@/services/home', () => ({ getHomedirInfo: hoisted.getHomedirInfo }))
@@ -30,7 +31,11 @@ vi.mock('@/services/home', () => ({ getHomedirInfo: hoisted.getHomedirInfo }))
 // ref 来驱动显示。
 vi.mock('@/services/systemLocation', async (importOriginal) => {
   const actual = await importOriginal<typeof import('@/services/systemLocation')>()
-  return { ...actual, loadSystemLocation: hoisted.loadSystemLocation }
+  return {
+    ...actual,
+    loadSystemLocation: hoisted.loadSystemLocation,
+    isBrowserEnvironment: () => hoisted.browser,
+  }
 })
 // 切换对话框是另一个 300 行的组件（另有其用例），这里只要能触发 reloaded
 vi.mock('@/components/common/HomedirSwitcher.vue', () => ({
@@ -58,6 +63,7 @@ beforeEach(() => {
   hoisted.getHomedirInfo.mockClear()
   hoisted.getHomedirInfo.mockResolvedValue({ homedir: '/home/x/.symbio' })
   hoisted.loadSystemLocation.mockClear()
+  hoisted.browser = false
   currentLocation.value = { kind: 'local', localPath: '' }
   locationError.value = null
   clearToasts()
@@ -70,6 +76,17 @@ describe('HomedirEntry — 显示', () => {
     await new Promise((r) => setTimeout(r, 0))
     expect(w.find('.nav-btn').attributes('title')).toContain('本地')
     expect(w.find('.nav-btn').attributes('title')).toContain('/home/x/.symbio')
+  })
+
+  it('browser local 标注当前 Server，连接错误不声称回退本地', () => {
+    hoisted.browser = true
+    currentLocation.value = { kind: 'local', localPath: '/server/home/x' }
+    locationError.value = '远端不可达'
+    const w = mount(HomedirEntry)
+    const title = w.find('.nav-btn').attributes('title')
+    expect(title).toContain('当前 Server')
+    expect(title).toContain('/server/home/x')
+    expect(title).not.toContain('已回退本地')
   })
 
   it('远端时标注「远端」', async () => {

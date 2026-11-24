@@ -9,9 +9,26 @@
  * - 表单取值 = 显式 `values` 入参（VDFS 的 read 内容），节点自身不携带正文
  */
 // @vitest-environment happy-dom
-import { describe, expect, it } from 'vitest'
+import { describe, expect, it, vi } from 'vitest'
 import { mount } from '@vue/test-utils'
+
+const P = vi.hoisted(() => ({
+  pickPath: vi.fn(async (
+    _kind?: string,
+    _options?: { initialPath?: string; onBrowserPick?: (request: { kind: string; initialPath?: string }) => void },
+  ) => null as string | null),
+}))
+vi.mock('@/services/nativePick', () => ({ pickPath: P.pickPath }))
+vi.mock('@/services/hostDirectories', () => ({
+  getHostRuntime: vi.fn(async () => ({
+    homedir: '/srv/home/me', bootstrap_path: '/srv/bootstrap', deployment: 'server',
+    capabilities: { directory_browser: true },
+  })),
+  listHostDirectories: vi.fn(async () => ({ path: '/srv/home/me', parent: '/srv', roots: [], entries: [] })),
+}))
+
 import DetailForm from '../DetailForm.vue'
+import DirectoryPicker from '@/components/common/DirectoryPicker.vue'
 import type { DetailDefinition, VdfsNode } from '@/schemas/vdfs'
 
 function def(partial: Partial<DetailDefinition>): DetailDefinition {
@@ -537,6 +554,33 @@ describe('DetailForm option 绑定（VDFS）：异步 values 到达触发预填'
     await w.find('button[title="保存"]').trigger('click')
     const payload = w.emitted('save')![0][0] as Record<string, unknown>
     expect(payload).toEqual({ interval: 7 })
+  })
+})
+
+describe('DetailForm path 取值', () => {
+  it('browser 打开 Server 目录选择器，选择结果写入表单模型', async () => {
+    P.pickPath.mockImplementationOnce(async (kind, options) => {
+      options?.onBrowserPick?.({ kind: kind ?? 'directory' })
+      return null
+    })
+    const definition = def({
+      sections: [{
+        fields: [{ key: 'location', label: '位置', widget: 'path', pick: 'directory' }],
+      }],
+      actions: [{ id: 'save', label: '保存', style: 'primary' }],
+    })
+    const w = mount(DetailForm, {
+      props: { definition, node: null, values: { location: '/srv/old' }, capabilities: { mutable: true } },
+    })
+
+    await w.find('button[title="选择目录"]').trigger('click')
+    const picker = w.findComponent(DirectoryPicker)
+    expect(picker.exists()).toBe(true)
+    expect(picker.props('initialPath')).toBe('/srv/old')
+    picker.vm.$emit('select', '/srv/new')
+    await w.find('button[title="保存"]').trigger('click')
+
+    expect(w.emitted('save')![0][0]).toEqual(expect.objectContaining({ location: '/srv/new' }))
   })
 })
 

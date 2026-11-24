@@ -20,7 +20,7 @@
 //! 自己的应用级状态（工作区 / 最近记录）。「一个插件的配置」因此只有一个落位，
 //! 不存在集中合并这一层。
 
-use super::homedir::HomedirRegistry;
+use super::homedir::{normalize_homedir, HomedirRegistry};
 use super::schemas::{home_get_homedir, home_get_workspace, home_reload, home_set_workspace};
 use serde_json::Value;
 use std::collections::HashMap;
@@ -168,12 +168,8 @@ impl HomePlugin {
 
     /// 热重载：用于 homedir 切换或 bootstrap 恢复后的整体重建
     ///
-    /// 流程：
-    /// 1. （可选）切换 homedir：先持久化到 bootstrap，再更新内存
-    /// 2. 把当前 config 持久化到**旧** homedir（如果换了的话）
-    /// 3. 从**新** homedir 重新读 config
-    /// 4. 清空所有子插件实例
-    /// 5. 重建 worker composite（子插件会从新 homedir 加载数据）
+    /// 先在目标目录构造完整候选插件树；全部可能失败的步骤完成后，才持久化 bootstrap
+    /// 并原子替换内存中的 config / instances。失败时旧 homedir 与旧插件树保持不变。
     ///
     /// 注意：本方法**不**异步恢复 workdir（需要 `Arc<Self>` 才能 spawn task），
     /// 由 route handler 在 reload 完成后自行 spawn。
@@ -185,38 +181,31 @@ impl HomePlugin {
         new_homedir: Option<PathBuf>,
     ) -> Result<home_reload::Response, PluginError> {
         let old_homedir = HomedirRegistry::get();
-        let mut homedir_changed = false;
-
-        // 1. 切换 homedir（如有）
-        if let Some(target) = new_homedir {
-            if target != old_homedir {
-                HomedirRegistry::set(target.clone())
-                    .map_err(|e| PluginError::InternalError(format!("切换 homedir 失败: {e}")))?;
-                homedir_changed = true;
-                plugin_info!(
-                    "home",
-                    "homedir 已切换: {} -> {}",
-                    old_homedir.display(),
-                    target.display()
-                );
-            }
+        let target = match new_homedir {
+            Some(raw) => Some(
+                normalize_homedir(&raw.to_string_lossy())
+                    .ok_or_else(|| PluginError::ValidationError("homedir 不能为空".to_string()))?,
+            ),
+            None => None,
+        };
+        let homedir_changed = target.as_ref().is_some_and(|path| path != &old_homedir);
+        let target_homedir = target.clone().unwrap_or_else(|| old_homedir.clone());
+        if homedir_changed && !target_homedir.is_dir() {
+            return Err(PluginError::ValidationError(format!(
+                "目标 homedir 不是已存在的目录: {}",
+                target_homedir.display()
+            )));
         }
 
-        let new_homedir = HomedirRegistry::get();
-
-        // 2. 把旧 config 写回旧 homedir（仅在 homedir_changed 时）
         if homedir_changed {
-            if let Err(e) = self.flush().await {
-                plugin_warn!(
-                    "home",
-                    "homedir 切换前持久化旧 config 失败（忽略继续）: {}",
-                    e
-                );
-            }
+            let old_config = self.config.read().await.clone();
+            let old_dir = PluginDir::at(old_homedir.clone(), PLUGIN_ID_HOME);
+            old_dir.save(&old_config).map_err(|e| {
+                PluginError::InternalError(format!("切换前持久化旧 config 失败: {e}"))
+            })?;
         }
 
-        // 3. 从新 homedir 读 config（路径现取，因为上面已 set）
-        let dir = home_dir();
+        let dir = PluginDir::at(target_homedir.clone(), PLUGIN_ID_HOME);
         let mut new_config: HomeConfig = match dir.load::<HomeConfig>() {
             Ok(Some(c)) => c,
             Ok(None) => HomeConfig::default(),
@@ -226,30 +215,35 @@ impl HomePlugin {
             }
         };
         new_config.ensure_defaults();
+        let worker = self.build_worker_composite(&dir)?;
 
-        // 4. 清空所有子插件实例（持有锁期间不会有人访问）
-        {
-            let mut instances = self.instances.write().await;
-            instances.clear();
+        let mut instances = self.instances.write().await;
+        let mut config = self.config.write().await;
+        if homedir_changed {
+            HomedirRegistry::set(target_homedir.clone())
+                .map_err(|e| PluginError::InternalError(format!("切换 homedir 失败: {e}")))?;
         }
-
-        // 5. 替换 config 缓存
-        {
-            let mut cfg = self.config.write().await;
-            *cfg = new_config.clone();
+        instances.clear();
+        if let Some(worker) = worker.as_ref() {
+            instances.insert("worker".to_string(), Arc::clone(worker));
         }
-
-        // 6. 重建 worker composite
-        if let Err(e) = self.rebuild_worker_sync() {
-            return Err(PluginError::InternalError(format!(
-                "重建 worker composite 失败: {e}"
-            )));
+        *config = new_config;
+        if let Some(worker) = worker.as_ref() {
+            symbio_plugin_api::publish_deployment_root(Arc::clone(worker));
         }
-        let reloaded_plugins = {
-            let instances = self.instances.read().await;
-            instances.get("worker").map(|_| 1).unwrap_or(0)
-        };
+        drop(config);
+        drop(instances);
 
+        let reloaded_plugins = usize::from(worker.is_some());
+        let new_homedir = target_homedir;
+        if homedir_changed {
+            plugin_info!(
+                "home",
+                "homedir 已切换: {} -> {}",
+                old_homedir.display(),
+                new_homedir.display()
+            );
+        }
         plugin_info!(
             "home",
             "reload 完成: old={}, new={}, changed={}",
@@ -309,18 +303,38 @@ impl HomePlugin {
     /// 每个插件从自己的目录读配置。容器是 home 的**动态内置替身**，因此拿到的
     /// 也是系统根目录——它据此定位插件根 `<系统根>/plugins`。
     pub fn rebuild_worker_sync(&self) -> Result<(), PluginError> {
+        let worker = self.build_worker_composite(&home_dir())?;
+        if let Some(worker) = worker {
+            self.add_instance_sync("worker".to_string(), Arc::clone(&worker));
+            // 登记主部署的驱动根：业务插件都挂在 worker 下，插件 `drive_entry` 绑的也是它；
+            // 宿主入口（`settled` / `kick`）经同一张表解析——绑 home 会造出第二份驱动，
+            // `settled` 等的那份永远空闲（t29 / D-365）。reload 重建后这里覆盖。
+            symbio_plugin_api::publish_deployment_root(worker);
+            plugin_info!(
+                "home",
+                "工作区插件 'worker' (Composite) 构造完成并已挂载 (Stateless Singleton)"
+            );
+        }
+        Ok(())
+    }
+
+    fn build_worker_composite(
+        &self,
+        dir: &PluginDir,
+    ) -> Result<Option<Arc<dyn Plugin>>, PluginError> {
         use symbio_plugin_api::creator_has;
         if !creator_has(PLUGIN_ID_COMPOSITE) {
-            return Ok(());
+            return Ok(None);
         }
 
-        // 创建子上下文（self_weak 在 set_self_sync 之后一定存在）
         let self_weak = self
             .self_weak
             .try_read()
-            .expect("HomePlugin::rebuild_worker_sync: self_weak lock contended")
+            .expect("HomePlugin::build_worker_composite: self_weak lock contended")
             .clone()
-            .expect("HomePlugin self_weak not set");
+            .ok_or_else(|| {
+                PluginError::InternalError("HomePlugin self_weak not set".to_string())
+            })?;
 
         // 子上下文继承父上下文的环境变量（收口在 `PluginSimpleRequest::child_of`）
         let sub_context = Arc::new(PluginSimpleRequest::child_of(
@@ -330,28 +344,18 @@ impl HomePlugin {
 
         // 告知容器它的目录（顶层时就是系统根），以及系统必备插件清单。
         // 容器只知道这个目录；它把它当自己的插件根去扫描——不关心它是不是 homedir。
-        sub_context.set(
-            PLUGIN_DIR,
-            PluginDir::at(HomedirRegistry::get(), PLUGIN_ID_COMPOSITE),
-        );
+        sub_context.set(PLUGIN_DIR, PluginDir::at(dir.dir(), PLUGIN_ID_COMPOSITE));
         sub_context.set(
             REQUIRED_PLUGINS,
             SYSTEM_PLUGINS.iter().map(|s| (*s).to_string()).collect(),
         );
 
-        let worker_plugin: Arc<dyn Plugin> =
+        let worker =
             symbio_plugin_api::creator_create_object::<dyn Plugin>("composite", sub_context)
-                .expect("composite creator registered but failed to construct");
-        self.add_instance_sync("worker".to_string(), Arc::clone(&worker_plugin));
-        // 登记主部署的驱动根：业务插件都挂在 worker 下，插件 `drive_entry` 绑的也是它；
-        // 宿主入口（`settled` / `kick`）经同一张表解析——绑 home 会造出第二份驱动，
-        // `settled` 等的那份永远空闲（t29 / D-365）。reload 重建后这里覆盖。
-        symbio_plugin_api::publish_deployment_root(worker_plugin);
-        plugin_info!(
-            "home",
-            "工作区插件 'worker' (Composite) 构造完成并已挂载 (Stateless Singleton)"
-        );
-        Ok(())
+                .ok_or_else(|| {
+                    PluginError::InternalError("composite creator 已注册但构造失败".to_string())
+                })?;
+        Ok(Some(worker))
     }
 
     /// 切换工作区：候选配置保存成功后才发布到内存。
@@ -635,4 +639,4 @@ mod tests;
 // 判据见 `scripts/audits/panic-audit.mjs`。**加一处 panic 必须同时加一行登记，理由非空。**
 // panic-allow crates/symbio-plugin-home/src/plugin.rs::set_self_sync: 装配期：拿不到就是启动失败。带着半套插件继续跑，比崩掉更难诊断。
 // panic-allow crates/symbio-plugin-home/src/plugin.rs::add_instance_sync: 装配期：拿不到就是启动失败。带着半套插件继续跑，比崩掉更难诊断。
-// panic-allow crates/symbio-plugin-home/src/plugin.rs::rebuild_worker_sync: 装配期：拿不到就是启动失败。带着半套插件继续跑，比崩掉更难诊断。
+// panic-allow crates/symbio-plugin-home/src/plugin.rs::build_worker_composite: 装配期：拿不到就是启动失败。带着半套插件继续跑，比崩掉更难诊断。

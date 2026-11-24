@@ -1,49 +1,61 @@
 /**
- * 系统目录 (System Location) —— 前端唯一的「连接目标」事实源
+ * 系统目录 (System Location) —— 前端持久化的「连接目标」事实源。
  *
- * ## 为什么需要它
+ * 运行环境与连接目标是两条独立坐标，不能互相推断：
+ * - 运行环境：`embedded`（Tauri WebView，有 IPC）或 `browser`（普通浏览器，无 IPC）；
+ * - 连接目标：`native`（embedded 进程内后端）或 `server`（HTTP/WS Server）。
  *
- * 历史上「系统目录」被拆成两个互不相通的概念：
- * - 后端 `HomedirRegistry`：仅本地路径（`~/.symbio` 之类）
- * - 网关插件 `outbound_*`：仅远端 HTTP 地址（且会在「开放接口」设置表单暴露）
+ * `local` / `remote` 只是连接目标的 UI 兼容写法：
+ * - embedded + local：native，homedir 位于这台机器；
+ * - browser + local：同源 Server，homedir 位于该 Server，而不是浏览器本机；
+ * - remote：另一台 Server 的 HTTP/WS 地址，Bearer token 只放 Authorization 请求头。
  *
- * 两者在 UI 上无法统一，且一旦把 outbound 写成无效远端地址并在设置页提交，前端
- * `initGatewayTransport` 会把它当成全局连接目标，导致主页面所有数据请求都打到死端点、
- * 且切换按钮自身也被路由到死端点 —— 永久卡死，无恢复路径。
- *
- * 本模块把二者收敛为单一概念 **SystemLocation**，并以**前端 localStorage 为权威**：
- * - `local`：连接本机后端（native 传输），并可切换本地 homedir 路径
- * - `remote`：连接远端 Symbio 网关（HTTP/WS），地址字符串可内嵌 key（`?token=`）
- *
- * 连接目标完全由左下角「系统目录」切换器管理；网关插件不再持有出站配置
- * （`outbound_*` 字段已移除），「开放接口」设置页仅保留入站（对外提供服务）配置。
- *
- * 好处：
- * 1. 启动自动恢复上次选择（纯前端逻辑）
- * 2. 控制面操作（切换目录、读写本机网关配置）永远走 `forceNative`，命中本机后端，
- *    不会被当前出站协议指到远端 —— 因此**永不卡死**，无效远端可随时切回
- * 3. 远端不可达时 `initGatewayTransport` 安全回退 native，并通过 `locationError` 提示
- *
- * 对应后端：
- * - 本地模式：`home/reload`（经 `forceNative`）热重载本机 homedir
- * - 远端模式：仅前端侧记录，经网关入站服务连接远端实例
+ * 浏览器没有 native 出口：远端不可达只记录 `locationError`，绝不回退 Tauri IPC。
+ * `forceNative` 在 embedded 中表示本机控制面，在 browser 中表示当前 Server 的
+ * 控制面 HTTP。homedir 是 Symbio 配置根，workdir 是会话工作区，两者不互换。
  */
 
 import { ref, type Ref } from 'vue'
 
-/** 系统目录类型 */
+/** 前端运行环境；由 Tauri IPC 是否存在决定，不由持久化配置决定。 */
+export type RuntimeEnvironment = 'embedded' | 'browser'
+
+/** 传输连接目标；server 同时覆盖同源 Server 与远端 Server。 */
+export type ConnectionTarget = 'native' | 'server'
+
+/** 运行环境 + 连接目标的显式模型。 */
+export interface FrontendConnectionModel {
+  environment: RuntimeEnvironment
+  target: ConnectionTarget
+}
+
+/** 系统目录类型（保留 local / remote 作为持久化与 UI 兼容层）。 */
 export type SystemLocationKind = 'local' | 'remote'
 
-/** 系统目录描述 */
+/** 系统目录描述。localPath 始终是目标后端的 homedir，不是会话 workdir。 */
 export interface SystemLocation {
   /** 连接目标类型 */
   kind: SystemLocationKind
-  /** 本地模式：homedir 路径；空串表示默认 `~/.symbio` */
+  /** local：目标后端 homedir；embedded 为本机，browser 为同源 Server。空串表示后端默认值。 */
   localPath?: string
-  /** 远端模式：网关基础地址（不含 token），如 `http://host:port` */
+  /** remote：Server 基础地址（不含 token），如 `http://host:port` */
   remoteUrl?: string
-  /** 远端模式：访问密钥（Bearer Token） */
+  /** remote：访问密钥（Bearer Token），不得拼进 WS URL。 */
   remoteKey?: string
+}
+
+/**
+ * 是否运行在无 Tauri IPC 的浏览器中。
+ *
+ * Tauri v2 在注入原生桥时提供 `window.__TAURI_INTERNALS__.invoke`；Node 单测或普通
+ * 浏览器没有它，一律按 browser 处理。宁可保守判定，也不能在无 IPC 时尝试原生调用。
+ */
+export function isBrowserEnvironment(): boolean {
+  if (typeof window === 'undefined') return true
+  const internals = (window as Window & {
+    __TAURI_INTERNALS__?: { invoke?: unknown }
+  }).__TAURI_INTERNALS__
+  return typeof internals?.invoke !== 'function'
 }
 
 const STORAGE_KEY = 'symbio.systemLocation'
@@ -146,5 +158,6 @@ export function isValidRemoteUrl(url: string): boolean {
 /** 展示用文本 */
 export function formatLocation(loc: SystemLocation): string {
   if (loc.kind === 'remote') return loc.remoteUrl || '(远端)'
+  if (isBrowserEnvironment()) return loc.localPath ? `当前 Server：${loc.localPath}` : '当前 Server'
   return loc.localPath ? loc.localPath : '默认 (~/.symbio)'
 }

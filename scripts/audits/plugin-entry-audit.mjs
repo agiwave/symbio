@@ -792,8 +792,9 @@ function pluginIdOfDir(dir) {
 /**
  * 插件生产依赖的 `symbio-*` 闭集：**按插件身份分档**（D-418）。
  *
- * - 扩展层插件只有 `symbio-plugin-api`（宿主词汇层、唯一宿主依赖）与
- *   `symbio-providers`（外部世界连接原语库，等同第三方）。共享语法由门面的语法臂
+ * - 扩展层插件的宿主机制依赖只有 `symbio-plugin-api`（宿主词汇层），另许
+ *   `symbio-providers`（外部世界连接原语库）与 `symbio-http`（通用入站线路设施）
+ *   这两类不认插件或应用装配的第三方等价库。共享语法由门面的语法臂
  *   转出，manifest 直连 kernel 等于绕开门面的计件与消费方核对。
  * - 控制面（`loop` / `session`，DE-026 的影响类）另许 `symbio-kernel`：它们按轮的
  *   顺序运行、直接读事件流，源码前缀也按同一身份豁免（HS-001）。
@@ -805,7 +806,7 @@ function pluginIdOfDir(dir) {
  * 三条条件由下面的 providers 条件块实际检查，不是写在注释里就算数。
  */
 const CONTROL_PLANE_IDS = new Set(['loop', 'session'])
-const PLUGIN_DEP_WHITELIST = new Set(['symbio-plugin-api', 'symbio-providers'])
+const PLUGIN_DEP_WHITELIST = new Set(['symbio-plugin-api', 'symbio-providers', 'symbio-http'])
 const CONTROL_PLANE_DEP_WHITELIST = new Set([...PLUGIN_DEP_WHITELIST, 'symbio-kernel'])
 function depWhitelistFor(id) {
   return CONTROL_PLANE_IDS.has(id) ? CONTROL_PLANE_DEP_WHITELIST : PLUGIN_DEP_WHITELIST

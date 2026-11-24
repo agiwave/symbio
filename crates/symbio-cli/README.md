@@ -9,7 +9,8 @@ created: 2026-09-11
 # symbio-cli
 
 与 [`../tauri`](../../tauri) **并列**的第二种 Symbio 前端形态：纯 Rust 的命令行客户端，
-支持**交互（REPL）**、**非交互（单次 / 管道）**与**心跳守护（`--heartbeat`）**三种形态。
+支持**交互（REPL）**、**非交互（单次 / 管道）**、**心跳守护（`--heartbeat`）**与
+**浏览器 Server（`serve`）**四种形态。Server 不是另一个二进制。
 
 ## 它和 tauri 前端的唯一差别是传输层
 
@@ -63,7 +64,13 @@ printf '第一轮\n/provider\n/exit\n' | ../../target/debug/symbio-cli.exe --rep
 
 # 心跳守护：驻留并为本目录所有启用心跳的会话触发空闲心跳
 ../../target/debug/symbio-cli.exe --homedir ~/.symbio --heartbeat
+
+# Server：同一个二进制通过 HTTP/WS 提供 Tauri 的 Vue 前端
+../../target/debug/symbio-cli.exe serve --homedir ~/.symbio --frontend-dist ../../tauri/dist
 ```
+
+Server 默认只允许同源访问；跨源部署必须同时提供 `--token` 和精确的
+`--allowed-origin <Origin>`，边界见 [crates/symbio-server/README](../symbio-server/README.md)。
 
 产物：`../../target/debug/symbio-cli.exe`（相对 `crates/symbio-cli/`；仓库根看就是 `target/debug/…`）。
 

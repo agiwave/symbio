@@ -29,7 +29,11 @@ const hoisted = vi.hoisted(() => ({
   reloadGatewayTransport: vi.fn(() => Promise.resolve()),
   loadSystemLocation: vi.fn(() => ({ kind: 'local' as const, localPath: '/saved' })),
   saveSystemLocation: vi.fn(),
-  openDialog: vi.fn(() => Promise.resolve('/ picked/dir')),
+  browser: false,
+  pickPath: vi.fn(async (
+    _kind?: string,
+    _options?: { initialPath?: string; onBrowserPick?: (request: { kind: string; initialPath?: string }) => void },
+  ) => '/ picked/dir' as string | null),
 }))
 
 vi.mock('@/services/home', () => ({
@@ -37,7 +41,14 @@ vi.mock('@/services/home', () => ({
   switchHomedir: hoisted.switchHomedir,
 }))
 vi.mock('@/services/plugin', () => ({ reloadGatewayTransport: hoisted.reloadGatewayTransport }))
-vi.mock('@tauri-apps/plugin-dialog', () => ({ open: hoisted.openDialog }))
+vi.mock('@/services/nativePick', () => ({ pickPath: hoisted.pickPath }))
+vi.mock('@/services/hostDirectories', () => ({
+  getHostRuntime: vi.fn(async () => ({
+    homedir: '/srv/home/me', bootstrap_path: '/srv/bootstrap', deployment: 'server',
+    capabilities: { directory_browser: true },
+  })),
+  listHostDirectories: vi.fn(async () => ({ path: '/srv/home/me', parent: '/srv', roots: [], entries: [] })),
+}))
 vi.mock('@/utils/logger', () => ({
   logger: { info: vi.fn(), warn: vi.fn(), error: vi.fn(), debug: vi.fn() },
 }))
@@ -48,10 +59,12 @@ vi.mock('@/services/systemLocation', async (importOriginal) => {
     ...actual,
     loadSystemLocation: hoisted.loadSystemLocation,
     saveSystemLocation: hoisted.saveSystemLocation,
+    isBrowserEnvironment: () => hoisted.browser,
   }
 })
 
 import HomedirSwitcher from '../HomedirSwitcher.vue'
+import DirectoryPicker from '../DirectoryPicker.vue'
 import { currentLocation } from '@/services/systemLocation'
 import { useToast } from '@/composables/useToast'
 
@@ -76,8 +89,9 @@ beforeEach(() => {
   hoisted.reloadGatewayTransport.mockClear()
   hoisted.reloadGatewayTransport.mockResolvedValue(undefined)
   hoisted.saveSystemLocation.mockClear()
-  hoisted.openDialog.mockClear()
-  hoisted.openDialog.mockResolvedValue('/ picked/dir')
+  hoisted.browser = false
+  hoisted.pickPath.mockReset()
+  hoisted.pickPath.mockResolvedValue('/ picked/dir')
   currentLocation.value = { kind: 'local', localPath: '' }
   const { toasts } = useToast()
   toasts.value.splice(0, toasts.value.length)
@@ -189,9 +203,26 @@ describe('HomedirSwitcher — 二次确认与执行', () => {
     })
     // 控制面必须强制命中本机后端，否则远端不可达时就切不回来了
     expect(hoisted.switchHomedir).toHaveBeenCalledWith('/new/home', { forceNative: true })
+    expect(hoisted.switchHomedir.mock.invocationCallOrder[0])
+      .toBeLessThan(hoisted.saveSystemLocation.mock.invocationCallOrder[0])
     expect(hoisted.reloadGatewayTransport).toHaveBeenCalled()
     expect(w.emitted('reloaded')).toHaveLength(1)
     expect(w.emitted('update:open')).toEqual([[false]])
+  })
+
+  it('browser local 先切到同源 Server，再经 HTTP home/reload（不 force native）', async () => {
+    hoisted.browser = true
+    const w = await openSwitcher({ localPath: '/srv/new/home' })
+    expect(w.text()).toContain('当前 Server')
+
+    await w.find('.btn-primary').trigger('click')
+    await w.findComponent({ name: 'ConfirmDialog' }).vm.$emit('confirm')
+    await flush()
+
+    expect(hoisted.switchHomedir).toHaveBeenCalledWith('/srv/new/home')
+    expect(hoisted.reloadGatewayTransport).toHaveBeenCalled()
+    expect(hoisted.reloadGatewayTransport.mock.invocationCallOrder[0])
+      .toBeLessThan(hoisted.switchHomedir.mock.invocationCallOrder[0])
   })
 
   it('远端：密钥输入框优先于地址里的 token', async () => {
@@ -219,13 +250,36 @@ describe('HomedirSwitcher — 二次确认与执行', () => {
 })
 
 describe('HomedirSwitcher — 失败与忙态', () => {
-  it('切换失败：错误留在框里，且**不关闭**对话框', async () => {
+  it('切换失败：错误留在框里，不持久化目标、不报告重载成功，也不关闭对话框', async () => {
     hoisted.switchHomedir.mockRejectedValueOnce(new Error('reload 失败'))
     const w = await openSwitcher({ localPath: '/x' })
     await w.find('.btn-primary').trigger('click')
     await w.findComponent({ name: 'ConfirmDialog' }).vm.$emit('confirm')
     await flush()
     expect(w.find('.error').text()).toContain('切换失败')
+    expect(hoisted.saveSystemLocation).not.toHaveBeenCalled()
+    expect(w.emitted('reloaded')).toBeUndefined()
+    expect(w.emitted('update:open')).toBeUndefined()
+  })
+
+  it('browser local 重载失败：恢复原连接目标与传输，不报告成功', async () => {
+    hoisted.browser = true
+    hoisted.switchHomedir.mockRejectedValueOnce(new Error('Server reload 失败'))
+    const w = await openSwitcher({ localPath: '/srv/old' })
+    await w.find('#sysdir-input').setValue('/srv/new')
+    await w.find('.btn-primary').trigger('click')
+    await w.findComponent({ name: 'ConfirmDialog' }).vm.$emit('confirm')
+    await flush()
+
+    expect(hoisted.saveSystemLocation).toHaveBeenNthCalledWith(1, {
+      kind: 'local', localPath: '/srv/new',
+    })
+    expect(hoisted.saveSystemLocation).toHaveBeenNthCalledWith(2, {
+      kind: 'local', localPath: '/srv/old',
+    })
+    expect(hoisted.reloadGatewayTransport).toHaveBeenCalledTimes(2)
+    expect(w.find('.error').text()).toContain('Server reload 失败')
+    expect(w.emitted('reloaded')).toBeUndefined()
     expect(w.emitted('update:open')).toBeUndefined()
   })
 
@@ -253,17 +307,38 @@ describe('HomedirSwitcher — 失败与忙态', () => {
   })
 })
 
-describe('HomedirSwitcher — 浏览本地目录', () => {
+describe('HomedirSwitcher — 浏览目标目录', () => {
+  it('browser Browse 打开 Server 目录组件，选择后填入 homedir', async () => {
+    hoisted.browser = true
+    hoisted.pickPath.mockImplementationOnce(async (kind, options) => {
+      options?.onBrowserPick?.({ kind: kind ?? 'directory' })
+      return null
+    })
+    const w = await openSwitcher({ localPath: '/srv/old' })
+    await w.findAll('.btn').find((b) => b.text() === '浏览…')!.trigger('click')
+    await flush()
+
+    const picker = w.findComponent(DirectoryPicker)
+    expect(picker.exists()).toBe(true)
+    expect(picker.props('initialPath')).toBe('/srv/old')
+    picker.vm.$emit('select', '/srv/new')
+    await flush()
+    expect((w.find('#sysdir-input').element as HTMLInputElement).value).toBe('/srv/new')
+    expect(hoisted.pickPath).toHaveBeenCalledWith('directory', expect.objectContaining({
+      onBrowserPick: expect.any(Function),
+    }))
+  })
+
   it('选中后填入路径', async () => {
     const w = await openSwitcher({ localPath: '' })
     await w.findAll('.btn').find((b) => b.text() === '浏览…')!.trigger('click')
     await flush()
-    expect(hoisted.openDialog).toHaveBeenCalled()
+    expect(hoisted.pickPath).toHaveBeenCalled()
     expect((w.find('#sysdir-input').element as HTMLInputElement).value).toBe('/ picked/dir')
   })
 
   it('对话框抛错不炸（只记日志）', async () => {
-    hoisted.openDialog.mockRejectedValueOnce(new Error('用户取消'))
+    hoisted.pickPath.mockRejectedValueOnce(new Error('用户取消'))
     const w = await openSwitcher({ localPath: '' })
     await w.findAll('.btn').find((b) => b.text() === '浏览…')!.trigger('click')
     await flush()
@@ -271,7 +346,7 @@ describe('HomedirSwitcher — 浏览本地目录', () => {
   })
 
   it('用户未选（返回 null）时不覆盖已填路径', async () => {
-    hoisted.openDialog.mockResolvedValueOnce(null as unknown as string)
+    hoisted.pickPath.mockResolvedValueOnce(null as unknown as string)
     const w = await openSwitcher({ localPath: '/keep' })
     await w.findAll('.btn').find((b) => b.text() === '浏览…')!.trigger('click')
     await flush()

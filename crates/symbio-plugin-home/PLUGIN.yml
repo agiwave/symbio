@@ -2,3 +2,4 @@
 plugin_id: home
 plugin_comment: 系统根
 plugin_assembly: none
+plugin_routes: home/get_homedir, home/reload

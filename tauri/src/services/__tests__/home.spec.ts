@@ -20,7 +20,7 @@
  * | 臂 | 地址 | 副作用 |
  * |---|---|---|
  * | `getHomedirInfo` | `home/get_homedir` | 无（缺字段 ⇒ 退形状合法的空值，页面照常渲染） |
- * | `switchHomedir` | `home/reload` | 无（失败 ⇒ `null`，调用方自己分支） |
+ * | `switchHomedir` | `home/reload` | 无（失败 ⇒ 抛出，调用方不得持久化目标或报告成功） |
  * | `getWorkspacePath` | `home/get_workspace` | 记最近目录（占位值不记） |
  * | `setWorkspacePath` | `home/set_workspace` | 记最近目录 |
  *
@@ -85,10 +85,10 @@ describe('home 服务：home/* 两条臂', () => {
     )
   })
 
-  it('switchHomedir：失败回 null（调用方据此决定要不要刷新数据）', async () => {
+  it('switchHomedir：失败直抛——不得吞成可被调用方误判为成功的 null', async () => {
     callPluginMock.mockRejectedValueOnce(new Error('reload failed'))
 
-    await expect(switchHomedir('/x')).resolves.toBeNull()
+    await expect(switchHomedir('/x')).rejects.toThrow('reload failed')
   })
 })
 

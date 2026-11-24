@@ -15,8 +15,17 @@ pub const DEFAULT_MODE: &str = crate::protocol::MODE_AUTO;
 /// 解析结果。
 pub enum Command {
     Run(Box<Args>),
+    Serve(Box<ServeArgs>),
     Help,
+    ServeHelp,
     Version,
+}
+
+#[derive(Debug, Clone)]
+pub struct ServeArgs {
+    pub homedir: PathBuf,
+    pub config: symbio_server::ServerConfig,
+    pub verbose: bool,
 }
 
 #[derive(Debug, Clone)]
@@ -61,6 +70,7 @@ symbio-cli — Symbio 命令行前端（纯 Rust）
   symbio-cli [选项] [消息...]        一次性发送消息后退出（非交互）
   symbio-cli [选项]                  进入交互式 REPL
   echo \"你好\" | symbio-cli [选项]    从标准输入读取消息（非交互）
+  symbio-cli serve [选项]           启动浏览器可访问的 Server
 
 选项:
   -m, --message <文本>    发送单条消息后退出（等价于位置参数）
@@ -79,6 +89,9 @@ symbio-cli — Symbio 命令行前端（纯 Rust）
   -h, --help              显示本帮助
   -V, --version           显示版本
 
+Server 模式:
+  symbio-cli serve --help 查看 Server 专属选项
+
 交互模式内置命令:
   /help                   显示命令列表
   /new                    新建会话
@@ -95,13 +108,45 @@ symbio-cli — Symbio 命令行前端（纯 Rust）
   auto 下本轮以未完成收尾；interactive 下停在等用户，请在桌面端处理该卡片。
 ";
 
+const SERVE_HELP: &str = "\
+symbio-cli serve — 启动浏览器可访问的 Symbio Server
+
+用法:
+  symbio-cli serve [选项]
+
+Server 选项:
+      --bind <地址>          监听地址（默认 127.0.0.1）
+      --port <端口>          监听端口（默认 9231）
+      --token <令牌>         Bearer Token；非回环地址必填
+      --homedir <路径>       系统目录（默认 <当前目录>/.symbio）
+      --frontend-dist <路径> Vue 构建产物（默认 tauri/dist）
+      --max-connections <数>  并发连接上限（默认 64）
+      --allowed-origin <源>   允许的精确浏览器 Origin；设置时必须同时提供 token
+  -v, --verbose              显示更多诊断
+  -h, --help                 显示本帮助
+  -V, --version              显示版本
+
+环境变量:
+  SYMBIO_SERVER_BIND / SYMBIO_SERVER_PORT / SYMBIO_SERVER_TOKEN
+  SYMBIO_SERVER_ALLOWED_ORIGIN / SYMBIO_FRONTEND_DIST / SYMBIO_SERVER_MAX_CONNECTIONS
+";
+
 pub fn help_text() -> &'static str {
     HELP
+}
+
+pub fn serve_help_text() -> &'static str {
+    SERVE_HELP
 }
 
 /// 解析进程参数。
 pub fn parse<I: IntoIterator<Item = String>>(argv: I) -> Result<Command, String> {
     let cwd = std::env::current_dir().map_err(|e| format!("无法获取当前目录: {e}"))?;
+    let mut it = argv.into_iter().peekable();
+    if it.peek().is_some_and(|arg| arg == "serve") {
+        it.next();
+        return parse_serve(it, &cwd);
+    }
 
     let mut args = Args {
         message: None,
@@ -118,7 +163,6 @@ pub fn parse<I: IntoIterator<Item = String>>(argv: I) -> Result<Command, String>
     };
 
     let mut positional: Vec<String> = Vec::new();
-    let mut it = argv.into_iter().peekable();
 
     while let Some(raw) = it.next() {
         // 支持 `--key=value` 与 `--key value` 两种写法
@@ -187,6 +231,96 @@ pub fn parse<I: IntoIterator<Item = String>>(argv: I) -> Result<Command, String>
     }
 
     Ok(Command::Run(Box::new(args)))
+}
+
+fn parse_serve<I: IntoIterator<Item = String>>(
+    argv: I,
+    cwd: &std::path::Path,
+) -> Result<Command, String> {
+    let mut config = symbio_server::ServerConfig::default();
+    config.bind = std::env::var("SYMBIO_SERVER_BIND").unwrap_or(config.bind);
+    config.token = std::env::var("SYMBIO_SERVER_TOKEN").unwrap_or(config.token);
+    config.allowed_origin = std::env::var("SYMBIO_SERVER_ALLOWED_ORIGIN").ok();
+    config.port = std::env::var("SYMBIO_SERVER_PORT")
+        .ok()
+        .map(|value| {
+            value
+                .parse::<u16>()
+                .map_err(|_| "SYMBIO_SERVER_PORT 必须是 0–65535".to_string())
+        })
+        .transpose()?
+        .unwrap_or(config.port);
+    config.max_connections = std::env::var("SYMBIO_SERVER_MAX_CONNECTIONS")
+        .ok()
+        .map(|value| {
+            value
+                .parse::<usize>()
+                .ok()
+                .filter(|value| *value > 0)
+                .ok_or_else(|| "SYMBIO_SERVER_MAX_CONNECTIONS 必须是正整数".to_string())
+        })
+        .transpose()?
+        .unwrap_or(config.max_connections);
+    config.frontend_dist = std::env::var("SYMBIO_FRONTEND_DIST")
+        .map(|value| resolve_path(&value, cwd))
+        .unwrap_or(config.frontend_dist);
+
+    let mut args = ServeArgs {
+        homedir: cwd.join(".symbio"),
+        config,
+        verbose: false,
+    };
+    let mut it = argv.into_iter();
+    while let Some(raw) = it.next() {
+        let (flag, inline) = match raw.split_once('=') {
+            Some((flag, value)) if flag.starts_with('-') => {
+                (flag.to_string(), Some(value.to_string()))
+            }
+            _ => (raw.clone(), None),
+        };
+        let mut take_value = |name: &str, inline: Option<String>| -> Result<String, String> {
+            if let Some(value) = inline {
+                return Ok(value);
+            }
+            it.next()
+                .filter(|value| !value.is_empty())
+                .ok_or_else(|| format!("{name} 缺少取值"))
+        };
+        match flag.as_str() {
+            "-h" | "--help" => return Ok(Command::ServeHelp),
+            "-V" | "--version" => return Ok(Command::Version),
+            "--bind" => args.config.bind = take_value("--bind", inline)?,
+            "--port" => {
+                args.config.port = take_value("--port", inline)?
+                    .parse()
+                    .map_err(|_| "--port 必须是 0–65535".to_string())?
+            }
+            "--token" => args.config.token = take_value("--token", inline)?,
+            "--allowed-origin" => {
+                args.config.allowed_origin = Some(take_value("--allowed-origin", inline)?)
+            }
+            "--homedir" => args.homedir = resolve_path(&take_value("--homedir", inline)?, cwd),
+            "--frontend-dist" => {
+                args.config.frontend_dist =
+                    resolve_path(&take_value("--frontend-dist", inline)?, cwd)
+            }
+            "--max-connections" => {
+                args.config.max_connections = take_value("--max-connections", inline)?
+                    .parse()
+                    .ok()
+                    .filter(|value| *value > 0)
+                    .ok_or_else(|| "--max-connections 必须是正整数".to_string())?
+            }
+            "-v" | "--verbose" => args.verbose = true,
+            other if other.starts_with('-') => {
+                return Err(format!(
+                    "未知 Server 选项: {other}（用 serve --help 查看用法）"
+                ))
+            }
+            _ => return Err(format!("serve 不接受位置参数: {raw}")),
+        }
+    }
+    Ok(Command::Serve(Box::new(args)))
 }
 
 /// 相对路径按调用时的当前目录解析，`~` 前缀交给核心库展开。

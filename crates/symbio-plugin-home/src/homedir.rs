@@ -117,7 +117,7 @@ fn bootstrap_path() -> Option<PathBuf> {
 /// - 已是绝对路径 → 原样返回
 /// - 相对路径（如存量 bootstrap 中存的 `.symbio`）→ 解析为 `<user_home>/<relative>`
 ///   （兼容已落盘的相对路径写法）
-fn normalize_homedir(raw: &str) -> Option<PathBuf> {
+pub(crate) fn normalize_homedir(raw: &str) -> Option<PathBuf> {
     let trimmed = raw.trim();
     if trimmed.is_empty() {
         return None;

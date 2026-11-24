@@ -182,7 +182,7 @@ impl GatewayPlugin {
     /// 停止入站服务
     pub async fn stop_server(&self) {
         if let Some(handle) = self.server.write().await.take() {
-            server::stop(handle);
+            server::stop(handle).await;
             info!("[gateway] 入站服务已停止");
         }
     }

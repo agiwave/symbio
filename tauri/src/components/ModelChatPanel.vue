@@ -840,7 +840,7 @@ watch(sessionError, (now) => {
 /* ── 编辑单条消息的浮层（edit-box …）────────────────────────
    遮罩（定位 / 主题化底色 / 层级）与面板底色、圆角、阴影均由 `BaseModal` 提供。 */
 
-.edit-box {
+:global(.modal-panel.edit-box) {
   width: min(34rem, 92vw);
   border: 1px solid var(--border-default);
   padding: var(--space-4);

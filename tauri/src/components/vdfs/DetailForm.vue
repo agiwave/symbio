@@ -249,7 +249,7 @@
               spellcheck="false"
             />
 
-            <!-- text / password / number / datalist / path（path 可带原生取值入口） -->
+            <!-- text / password / number / datalist / path（path 可带统一取值入口） -->
             <div v-else-if="specOf(f).revealable" class="input-row">
               <input
                 :id="fieldControlId(f)"
@@ -317,7 +317,7 @@
                 :placeholder="widgetPlaceholderOf(f)"
                 :disabled="fieldDisabled(f)"
               />
-              <!-- 机制原生取值原语（字段声明 pick 时给入口；后端唤不起原生对话框） -->
+              <!-- 统一路径取值（embedded 原生对话框 / browser Server 目录选择器） -->
               <button
                 v-if="f.pick"
                 type="button"
@@ -362,6 +362,15 @@
       aria-label="选择动作载荷文件"
       @change="onPackChange"
     />
+
+    <DirectoryPicker
+      v-if="pickerField"
+      :visible="true"
+      :title="`选择${pickerField.label}`"
+      :initial-path="typeof form[pickerField.key] === 'string' ? form[pickerField.key] : ''"
+      @close="pickerField = null"
+      @select="onDirectorySelected"
+    />
   </DetailShell>
 </template>
 
@@ -369,8 +378,9 @@
 import { computed, nextTick, onMounted, reactive, ref, watch } from 'vue'
 import DetailShell from './DetailShell.vue'
 import BaseModal from '@/components/common/BaseModal.vue'
+import DirectoryPicker from '@/components/common/DirectoryPicker.vue'
 import { useToast } from '@/composables/useToast'
-import { pickNative } from '@/services/nativePick'
+import { pickPath } from '@/services/nativePick'
 import {
   detailPresetFieldOptions,
   detailPresetFieldSuggestions,
@@ -526,16 +536,26 @@ function fieldDisabled(f: DetailField): boolean {
 // 后端唤不起原生对话框，故闭集（DETAIL_PICKS）里这几个取值由前端实现：
 // 先取值、写入本字段，再由调用方按自己的绑定提交。
 const { showToast } = useToast()
+const pickerField = ref<DetailField | null>(null)
 
 async function onPick(f: DetailField) {
   // 原生取值也会失败（权限 / 路径失效 / 系统对话框异常）。失败必须说出来，
   // 否则用户点完「选择目录」看到的是毫无反应，只能反复点。
   try {
-    const picked = await pickNative(f.pick as DetailPick | undefined)
+    const initial = form[f.key]
+    const picked = await pickPath(f.pick as DetailPick | undefined, {
+      initialPath: typeof initial === 'string' ? initial : '',
+      onBrowserPick: () => { pickerField.value = f },
+    })
     if (picked != null) form[f.key] = picked
   } catch (e) {
     showToast('error', `${f.label}取值失败：${e instanceof Error ? e.message : String(e)}`)
   }
+}
+
+function onDirectorySelected(path: string) {
+  if (pickerField.value) form[pickerField.value.key] = path
+  pickerField.value = null
 }
 
 // ==================== 机制原生取值原语（DetailAction.pack） ====================
@@ -1311,7 +1331,7 @@ watch(
 }
 
 /* 子表单弹窗外框：底色 / 圆角 / 阴影 / 层级由 BaseModal 提供，这里只写尺寸 */
-.sub-form-dialog {
+:global(.modal-panel.sub-form-dialog) {
   width: 100%;
   max-width: 32rem;
   height: min(34rem, 84vh);

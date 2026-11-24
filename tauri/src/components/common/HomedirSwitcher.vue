@@ -1,13 +1,12 @@
 <!--
   HomedirSwitcher.vue  —  系统目录 (System Location) 切换对话框
 
-  统一「本地目录 / 远端地址」两类系统目录：
-  - 本地目录：连本机后端（native），可切换本地 homedir 路径（沿用 home/reload）
-  - 远端地址：连远端 Symbio 网关（HTTP/WS），地址字符串可内嵌 key（?token=）
+  统一「当前 Server（或本机）/ 远端地址」两类连接目标：
+  - local：embedded 连本机 native；browser 连同源 Server，可切换 Server homedir
+  - remote：连另一台 Symbio Server（HTTP/WS），地址字符串可内嵌 key（?token=）
 
-  关键设计：所有控制面调用（home/reload / gateway/config/*）均走 forceNative，
-  永远命中本机后端，因此即便当前已指向远端、或远端不可达，也能随时切回 / 修正，
-  不会出现「切到坏地址后主页面卡死且无法恢复」的旧问题。
+  控制面在 embedded 中走 native，在 browser 中走当前 Server HTTP；浏览器没有 IPC
+  回退。目录浏览始终操作目标 Server 的文件系统，homedir 不是会话 workdir。
 
   对应后端: symbio/src/plugins/home/plugin.rs::route "home/reload"
             symbio/src/plugins/gateway/plugin.rs（入站配置 = `<根>/gateway/PLUGIN.yml`）
@@ -30,7 +29,7 @@
             :class="{ active: mode === 'local' }"
             :aria-pressed="mode === 'local'"
             @click="mode = 'local'"
-          >本地目录</button>
+          >{{ inBrowser ? '当前 Server' : '本地目录' }}</button>
           <button
             class="seg-btn"
             :class="{ active: mode === 'remote' }"
@@ -42,7 +41,7 @@
         <!-- 本地目录 -->
         <template v-if="mode === 'local'">
           <div class="row">
-            <label class="label" for="sysdir-input">本地 homedir 路径</label>
+            <label class="label" for="sysdir-input">{{ inBrowser ? '当前 Server homedir 路径' : '本地 homedir 路径' }}</label>
             <div class="input-row">
               <input
                 id="sysdir-input"
@@ -56,6 +55,7 @@
             </div>
             <div class="hint">
               切换后，Symbio 会从新 homedir 重新加载所有子插件（Agent / LLM / MCP / Skill / Session）。
+              homedir 是配置根，不是会话工作目录。
               <br />
               bootstrap 写入位置: <span class="mono">{{ bootstrapPath || '—' }}</span>
             </div>
@@ -77,6 +77,7 @@
             <div class="hint">
               直接粘贴远端地址；若地址内含访问密钥，可写成
               <span class="mono">?token=KEY</span> 形式一并带入。
+              含有密钥的 URL 不要分享；WS 不会把 token 放进 URL。
             </div>
           </div>
           <div class="row">
@@ -110,6 +111,15 @@
       </footer>
   </BaseModal>
 
+  <DirectoryPicker
+    v-if="open && pickerOpen"
+    :visible="true"
+    title="选择系统目录（homedir）"
+    :initial-path="localPath"
+    @close="pickerOpen = false"
+    @select="onDirectorySelected"
+  />
+
   <!-- 二次确认：提示活跃 chat 会话将被关闭。
        它原本嵌在遮罩内（靠更高的 z-index 盖在上面）；现在与 BaseModal 平级，
        用 `v-if="open"` 保持「父弹窗关了它也走」的原行为。 -->
@@ -128,7 +138,6 @@
 
 <script setup lang="ts">
 import { computed, onMounted, ref, watch } from 'vue'
-import { open as openDialog } from '@tauri-apps/plugin-dialog'
 import {
   getHomedirInfo,
   switchHomedir,
@@ -140,13 +149,16 @@ import {
   parseRemoteAddress,
   isValidRemoteUrl,
   formatLocation,
+  isBrowserEnvironment,
   type SystemLocation,
 } from '@/services/systemLocation'
 import { reloadGatewayTransport } from '@/services/plugin'
+import { pickPath } from '@/services/nativePick'
 import { logger } from '@/utils/logger'
 import { isImeComposing } from '@/utils/keyboard'
 import { useToast } from '@/composables/useToast'
 import BaseModal from './BaseModal.vue'
+import DirectoryPicker from './DirectoryPicker.vue'
 import ConfirmDialog from './ConfirmDialog.vue'
 import type { home_reload } from '@/schemas/home'
 
@@ -160,6 +172,7 @@ const emit = defineEmits<{
 }>()
 
 const { showToast } = useToast()
+const inBrowser = isBrowserEnvironment()
 
 const mode = ref<'local' | 'remote'>('local')
 const localPath = ref('')
@@ -169,6 +182,7 @@ const bootstrapPath = ref('')
 const error = ref('')
 const busy = ref(false)
 const browsing = ref(false)
+const pickerOpen = ref(false)
 const confirmOpen = ref(false)
 const confirmMessage = ref('')
 
@@ -201,7 +215,7 @@ async function refresh() {
   } else {
     localPath.value = saved.localPath ?? ''
   }
-  // 本地模式下顺带拉取当前 homedir 与 bootstrap 位置（native 调用，安全）
+  // local 模式拉取目标后端（embedded 本机 / browser 当前 Server）的 homedir 与 bootstrap。
   if (saved.kind === 'local') {
     try {
       const info = await getHomedirInfo()
@@ -220,25 +234,29 @@ function handleClose() {
   localPath.value = ''
   remoteUrl.value = ''
   remoteKey.value = ''
+  pickerOpen.value = false
 }
 
 async function handleBrowse() {
   browsing.value = true
   try {
-    const selected = await openDialog({
-      directory: true,
-      multiple: false,
+    const selected = await pickPath('directory', {
       title: '选择系统目录 (homedir)',
+      initialPath: localPath.value,
+      onBrowserPick: () => { pickerOpen.value = true },
     })
-    if (typeof selected === 'string' && selected.length > 0) {
-      localPath.value = selected
-    }
+    if (selected) localPath.value = selected
   } catch (err) {
     logger.error('sysdir-switcher', 'Browse failed:', err)
     showToast('error', `选择目录失败：${err instanceof Error ? err.message : String(err)}`)
   } finally {
     browsing.value = false
   }
+}
+
+function onDirectorySelected(path: string) {
+  localPath.value = path
+  pickerOpen.value = false
 }
 
 /** 路径可能含中文：回车先让给输入法上屏，再谈提交 */
@@ -291,18 +309,32 @@ async function handleConfirm() {
   }
 }
 
-/** 本地目录：持久化 + 本机 home/reload（forceNative 命中本机后端） */
+/** local：确认后端重载成功后才持久化目标；browser 始终经当前 Server HTTP。 */
 async function applyLocal(path: string) {
+  const previous = loadSystemLocation()
   const loc: SystemLocation = { kind: 'local', localPath: path }
-  saveSystemLocation(loc)
-  // 热重载本机 homedir（控制面，强制 native）
-  const resp = await switchHomedir(path, { forceNative: true })
-  reloadGatewayTransport()
-  if (!resp) {
-    showToast('info', `已切换到本地目录：${path}`)
+  if (inBrowser) {
+    // 先把出站地址切到同源 Server，再调用 home/reload；不能借用旧远端的控制面。
+    saveSystemLocation(loc)
+    try {
+      await reloadGatewayTransport()
+      await switchHomedir(path)
+    } catch (error) {
+      saveSystemLocation(previous)
+      try {
+        await reloadGatewayTransport()
+      } catch (rollbackError) {
+        logger.error('sysdir-switcher', '恢复原传输失败:', rollbackError)
+      }
+      throw error
+    }
   } else {
-    showToast('success', `已切换到本地目录：${path}`)
+    await switchHomedir(path, { forceNative: true })
+    saveSystemLocation(loc)
+    await reloadGatewayTransport()
   }
+  const label = inBrowser ? '当前 Server' : '本地目录'
+  showToast('success', `已切换到${label}：${path}`)
 }
 
 /** 远端地址：解析(含 key) + 校验 + 重载传输（不可达自动回退 native） */
@@ -314,9 +346,10 @@ async function applyRemote() {
   }
   const loc: SystemLocation = { kind: 'remote', remoteUrl: url, remoteKey: key }
   saveSystemLocation(loc)
-  // 重载传输：内部做健康探测，不可达则安全回退 native 并置 locationError
+  // 重载传输：browser 不可达时保留 HTTP 并置 locationError；embedded 才回退 native。
   await reloadGatewayTransport()
-  showToast('info', `已切换到远端：${url}（若不可达将自动回退本地）`)
+  const suffix = inBrowser ? '（不可达时会显示连接错误，不会回退本机）' : '（若不可达将自动回退本地）'
+  showToast('info', `已切换到远端：${url}${suffix}`)
 }
 
 function resetFields() {
@@ -330,7 +363,7 @@ function resetFields() {
 /* 遮罩与面板底色 / 圆角 / 阴影 / 层级由 `BaseModal` 统一提供；这里只写尺寸。
    顺带修掉一处层级错位：原遮罩用 `--z-overlay`(1000)，低于其它弹窗的
    `--z-dialog`(1500)，与内嵌确认框的层级关系反直觉。 */
-.modal {
+:global(.modal-panel.modal) {
   width: min(38rem, 92vw);
   display: flex;
   flex-direction: column;

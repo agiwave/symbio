@@ -55,7 +55,7 @@ CLI 不硬编码 provider id：它按系统目录（homedir，默认 `<当前目
 
 ---
 
-## 三种运行模式
+## 五种运行模式
 
 ### ① 非交互：单条消息（`-m` 或位置参数）
 
@@ -97,7 +97,21 @@ printf '第一轮\n/provider\n/exit\n' | ../../target/debug/symbio-cli.exe --rep
 心跳提示词驱动一轮工作），并把工作/空闲/错误状态渲染到 stderr。与 `-m`、`--repl` 互斥。
 机制细节见 [会话心跳机制（heartbeat）](../../symbio-plugin-heartbeat/src/docs/113-heartbeat-mechanism.md "DE-113-heartbeat-mechanism")。
 
-模式判定顺序：`--heartbeat` → `-m`/位置参数 → `--repl` → stdin 非终端则走管道 → 否则 REPL。
+### ⑤ 浏览器 Server（`serve`）
+
+```bash
+../../target/debug/symbio-cli.exe serve \
+  --homedir ~/.symbio \
+  --frontend-dist ../../tauri/dist
+```
+
+Server 与 CLI 共用同一个二进制和 `RuntimeHost`，通过 HTTP/WS 提供 Tauri 的 Vue 构建
+产物。目录选择读取的是 Server 文件系统；非回环监听必须提供 `--token`。默认只允许
+同源访问；确需跨源时同时提供 `--allowed-origin https://console.example` 与 `--token`，
+Origin 必须精确匹配且不能使用通配符。接入与生命周期边界见
+[crates/symbio-server/README](../../symbio-server/README.md)，完整 Server 选项用 `symbio-cli serve --help` 查看。
+
+终端模式判定顺序：`--heartbeat` → `-m`/位置参数 → `--repl` → stdin 非终端则走管道 → 否则 REPL。
 
 ---
 

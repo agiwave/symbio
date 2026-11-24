@@ -146,8 +146,8 @@ pub use symbio_kernel::keys::SymbioKey;
 pub use symbio_kernel::plugin::error::{lock_read, lock_write};
 pub use symbio_kernel::plugin::{
     Plugin, PluginChannel, PluginError, PluginFrame, PluginInvokeRequest, PluginInvokeRequestExt,
-    PluginInvokeResponse, PluginMessageWire, PluginMeta, PluginPayload, PluginPayloadWire,
-    PluginSimpleRequest, PluginStopReason, SimpleResponse, SuccessResponse,
+    PluginInvokeResponse, PluginMessageWire, PluginMeta, PluginPayload, PluginSimpleRequest,
+    PluginStopReason, SimpleResponse, SuccessResponse,
 };
 pub use symbio_kernel::present::{
     DetailAction, DetailBadge, DetailColumn, DetailCondition, DetailDefinition, DetailField,

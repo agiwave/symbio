@@ -8,21 +8,24 @@
  * 3. 增强类型安全性与协议严格性。
  */
 
-import { invoke } from '@tauri-apps/api/core'
-import { listen, UnlistenFn } from '@tauri-apps/api/event'
+import type { UnlistenFn } from '@tauri-apps/api/event'
 import { logger } from '@/utils/logger'
 import {
+  isBrowserEnvironment,
   loadSystemLocation,
+  parseRemoteAddress,
   setCurrentLocation,
   setLocationError,
+  type ConnectionTarget,
+  type FrontendConnectionModel,
+  type RuntimeEnvironment,
 } from './systemLocation'
 
 /**
- * 网关插件名（它的路由都是**控制面**接口：读写本机网关设置 / 出站协议）。
+ * 网关插件名（它的路由都是**控制面**接口：读写当前目标的网关设置）。
  *
- * 因此 `gateway/*` 必须始终走本机 native 传输——若跟随当前出站配置走 http，
- * 就会去读远端实例的网关设置，既看不到本机配置，也切不回 native（死锁）。
- * 判定在 `sendRouteRequest`。
+ * embedded 中控制面固定走本机 native；browser 中固定走当前 Server 的控制面 HTTP。
+ * 两种环境都不允许 browser 回退 IPC。判定在 `sendRouteRequest`。
  */
 const GATEWAY_PATH = 'gateway'
 
@@ -130,6 +133,7 @@ export class Connection {
       throw new Error(`[Protocol Error] Connection is stale or inactive: ${this.connectionId} (${this.path})`);
     }
     this.lastActivity = Date.now();
+    const { invoke } = await import('@tauri-apps/api/core');
     await invoke('route_v2_send', {
       connectionId: this.connectionId,
       frame: { Data: data }
@@ -142,6 +146,7 @@ export class Connection {
     this.unlistenFn();
     this.eofUnlistenFn();
     try {
+      const { invoke } = await import('@tauri-apps/api/core');
       await invoke('route_v2_close', { connectionId: this.connectionId });
     } catch (err) {
       logger.warn('Connection', `Close error for ${this.path}:`, err);
@@ -200,89 +205,114 @@ class ProtocolEnforcer {
 
 export type TransportMode = 'native' | 'http'
 
-interface OutboundConfig {
+/** 出站配置的唯一真相；宿主 HTTP API 也从此处取 endpoint/token。 */
+export interface OutboundConfig {
   protocol: TransportMode
   endpoint: string
   token: string
 }
 
-/**
- * 出站配置：前端以何种协议连接后端。
- * - native：进程内直连本机后端（默认，本地系统目录）
- * - http：连接另一个 Symbio 实例的网关入站服务（远端系统目录）
- *
- * 其值由 `initGatewayTransport()` 依据前端持久化的「系统目录」(`systemLocation`) 决定；
- * 连接目标完全由左下角「系统目录」切换器统一管理，网关插件不再持有出站配置。
- * 远端不可达时自动回退 native，确保主页面始终可渲染。
- */
-let outbound: OutboundConfig = { protocol: 'native', endpoint: '', token: '' }
-let outboundReady: Promise<void> | null = null
+const browser = (): RuntimeEnvironment => isBrowserEnvironment() ? 'browser' : 'embedded'
+
+function sameOriginEndpoint(): string {
+  return typeof location === 'undefined' ? '' : location.origin
+}
+
+function defaultOutbound(): OutboundConfig {
+  return isBrowserEnvironment()
+    ? { protocol: 'http', endpoint: sameOriginEndpoint(), token: '' }
+    : { protocol: 'native', endpoint: '', token: '' }
+}
 
 /**
- * 应用启动时调用一次：读取「系统目录」持久化选择，决定前端连接方式。
+ * 出站配置：embedded 默认 native，browser 默认同源 Server HTTP。
+ * remote 选择另一台 Server；browser 永不切换到 native。
+ */
+let outbound: OutboundConfig = defaultOutbound()
+let outboundReady: Promise<void> | null = null
+
+/** 当前运行环境与连接目标；供 UI 区分“本机”与“当前 Server”。 */
+export function getConnectionModel(): FrontendConnectionModel {
+  const target: ConnectionTarget = outbound.protocol === 'native' ? 'native' : 'server'
+  return { environment: browser(), target }
+}
+
+/**
+ * 应用启动时调用一次：读取持久化选择并决定传输。
  *
- * 前端 localStorage 为权威（避免被坏配置卡死）：
- * - 远端模式做健康探测：可达 → 出站切 HTTP；不可达 → 安全回退 native（绝不卡死主页面），
- *   并通过 `locationError` 提示用户，便于从系统目录按钮切回。
- * - 本地模式（含 localStorage 为空时的默认）直连本机后端。
- *
- * 返回的 Promise 被缓存，供 `sendRouteRequest` 在首次调用前等待就绪（消除竞态）。
+ * browser + local → 同源 HTTP；embedded + local → native；remote → HTTP。
+ * 远端不可达时，embedded 可回退 native；browser 保留远端 HTTP 并显示错误，绝不调用 IPC。
+ * 返回的 Promise 被缓存，供首次出站请求等待，消除初始化竞态。
  */
 export function initGatewayTransport(): Promise<void> {
   if (!outboundReady) outboundReady = doInitGatewayTransport()
   return outboundReady
 }
 
-/**
- * 探测远端网关是否可达（健康检查端点不校验令牌）。
- */
+/** 探测远端网关是否可达（健康检查端点不校验令牌）。 */
 async function pingRemote(url: string): Promise<boolean> {
+  const controller = new AbortController()
+  const timer = setTimeout(() => controller.abort(), 3000)
   try {
-    const controller = new AbortController()
-    const timer = setTimeout(() => controller.abort(), 3000)
     const res = await fetch(`${url}/api/v1/health`, { method: 'GET', signal: controller.signal })
-    clearTimeout(timer)
     return res.ok
   } catch {
     return false
+  } finally {
+    clearTimeout(timer)
   }
 }
 
 async function doInitGatewayTransport(): Promise<void> {
   const loc = loadSystemLocation()
+  const inBrowser = isBrowserEnvironment()
 
-  // 远端模式：健康探测，不可达则安全回退 native
   if (loc.kind === 'remote' && loc.remoteUrl) {
-    const ok = await pingRemote(loc.remoteUrl)
-    if (ok) {
-      outbound = { protocol: 'http', endpoint: loc.remoteUrl, token: loc.remoteKey ?? '' }
+    const parsedRemote = parseRemoteAddress(loc.remoteUrl)
+    const endpoint = parsedRemote.url
+    const token = loc.remoteKey || parsedRemote.key
+    const ok = await pingRemote(endpoint)
+    if (ok || inBrowser) {
+      outbound = { protocol: 'http', endpoint, token }
       setCurrentLocation(loc)
-      setLocationError(null)
-      logger.info('Transport', `系统目录=远端，出站协议已切换为 HTTP: ${outbound.endpoint}`)
+      setLocationError(ok ? null : `远端地址不可达：${endpoint}（浏览器不会回退本机连接）`)
+      if (ok) logger.info('Transport', `系统目录=远端，出站协议已切换为 HTTP: ${endpoint}`)
+      else logger.warn('Transport', '远端地址不可达，保留 Server HTTP 连接:', endpoint)
       return
     }
-    // 不可达：回退 native，但保留远端配置，方便用户切回/重试
+
+    // 只有 embedded 允许回退 native，确保坏远端不会让桌面端永久卡死。
     outbound = { protocol: 'native', endpoint: '', token: '' }
     setCurrentLocation(loc)
-    setLocationError(`远端地址不可达，已回退到本地连接：${loc.remoteUrl}`)
-    logger.warn('Transport', '远端地址不可达，回退 native:', loc.remoteUrl)
+    setLocationError(`远端地址不可达，已回退到本地连接：${endpoint}`)
+    logger.warn('Transport', '远端地址不可达，回退 native:', endpoint)
     return
   }
 
-  // 本地模式（含 localStorage 为空时的默认）
-  outbound = { protocol: 'native', endpoint: '', token: '' }
+  outbound = defaultOutbound()
+  if (outbound.protocol === 'http' && !outbound.endpoint) {
+    setLocationError('无法确定浏览器同源 Server 地址')
+  } else {
+    setLocationError(null)
+  }
   setCurrentLocation(loc)
-  setLocationError(null)
 }
 
 export function getOutboundConfig(): OutboundConfig {
   return outbound
 }
 
-/**
- * 重新读取「系统目录」选择（切换后调用）。
- * 清除缓存并依据最新 localStorage 重新决定出站协议，使切换立即生效。
- */
+/** 宿主 HTTP API 的统一 endpoint 出口；不得再读 localStorage 推导地址。 */
+export function getOutboundEndpoint(): string {
+  return outbound.endpoint
+}
+
+/** 宿主 HTTP API 的统一 Bearer token 出口。 */
+export function getOutboundToken(): string {
+  return outbound.token
+}
+
+/** 重新读取「系统目录」选择（切换后调用），立即重算传输。 */
 export function reloadGatewayTransport(): Promise<void> {
   outboundReady = doInitGatewayTransport()
   return outboundReady
@@ -333,9 +363,8 @@ export interface PluginOptions {
    */
   origin?: string;
   /**
-   * 强制走原生 Tauri IPC 传输（native），绕过出站 http。
-   * 控制面操作（切换系统目录、读写本机网关配置等）必须命中本机后端，
-   * 不能被当前 outbound 指到远端，否则会出现「切到远端后无法切回」的死锁。
+   * 强制走控制面：embedded 为本机 Tauri IPC，browser 为当前 Server 的 HTTP。
+   * browser 中此选项绝不是原生调用，也不会改变已选择的 Server 地址。
    */
   forceNative?: boolean;
 }
@@ -403,12 +432,19 @@ async function sendRouteRequest(
   await initGatewayTransport();
   const ob = getOutboundConfig();
 
-  // 网关自身（`gateway` / `gateway/…`）始终打本机 native，理由见文件顶部 `GATEWAY_PATH`；
-  // 与 initGatewayTransport 的启动期读取是同一个口径。
   const target = request.path.replace(/^\/+/, '');
   const isGatewaySelf = target === GATEWAY_PATH || target.startsWith(`${GATEWAY_PATH}/`);
 
-  // 控制面操作（forceNative）一律命中本机后端，避免被当前 outbound 指到远端而陷入死锁。
+  // 浏览器只有 Server HTTP 一个出口。forceNative / gateway 控制面也必须走 HTTP，
+  // 不能因为“需要控制面”而获得 native 特权。
+  if (isBrowserEnvironment()) {
+    if (ob.protocol !== 'http' || !ob.endpoint) {
+      throw new Error('[Transport] 浏览器需要可用的 Server HTTP 地址，不能回退 Tauri IPC')
+    }
+    return httpTransport(request, mode, ob, onFrame, onEof)
+  }
+
+  // embedded：控制面固定本机 native，其余请求按当前 outbound 选择。
   const useNative = request.forceNative || isGatewaySelf || !(ob.protocol === 'http' && ob.endpoint);
   if (!useNative) {
     return httpTransport(request, mode, ob, onFrame, onEof);
@@ -432,6 +468,12 @@ async function nativeTransport(
 
   let currentUnlisten: UnlistenFn | undefined;
   let currentEofUnlisten: UnlistenFn | undefined;
+
+  // 只有 embedded 分支能到达这里；动态导入避免浏览器静态初始化原生能力。
+  const [{ invoke }, { listen }] = await Promise.all([
+    import('@tauri-apps/api/core'),
+    import('@tauri-apps/api/event'),
+  ]);
 
   // 1. 预监听 (消除竞态)
   currentUnlisten = await listen<unknown>(`route/${sessionId}`, (event) => {
@@ -557,8 +599,13 @@ async function httpWsTransport(
   onFrame?: (frame: PluginFrame) => void,
   onEof?: () => void
 ): Promise<{ response: PluginMessage; connection?: Connection }> {
-  const wsUrl = `${ob.endpoint}/api/v1/ws` + (ob.token ? `?token=${encodeURIComponent(ob.token)}` : '');
-  const ws = new WebSocket(wsUrl);
+  const wsUrl = new URL(`${ob.endpoint.replace(/\/+$/, '')}/api/v1/ws`)
+  wsUrl.protocol = wsUrl.protocol === 'https:' ? 'wss:' : 'ws:'
+  // token 只走 Sec-WebSocket-Protocol；URL 不得残留 query / hash。
+  wsUrl.search = ''
+  wsUrl.hash = ''
+  const protocols = ['symbio.v1', ...(ob.token ? [`bearer.${ob.token}`] : [])]
+  const ws = new WebSocket(wsUrl.toString(), protocols);
 
   await new Promise<void>((resolve, reject) => {
     ws.onopen = () => resolve();

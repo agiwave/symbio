@@ -34,6 +34,7 @@ import {
   currentLocation,
   locationError,
   formatLocation,
+  isBrowserEnvironment,
 } from '@/services/systemLocation'
 import { useToast } from '@/composables/useToast'
 import { logger } from '@/utils/logger'
@@ -46,6 +47,7 @@ const emit = defineEmits<{
 
 const { showToast } = useToast()
 const open = ref(false)
+const inBrowser = isBrowserEnvironment()
 
 onMounted(async () => {
   // 本地模式下异步加载 homedir 显示（不阻塞首屏）；远端模式由系统目录状态直接展示
@@ -73,8 +75,11 @@ watch(locationError, (msg) => {
 
 const homedirTitle = computed(() => {
   const loc = currentLocation.value
-  const label = loc.kind === 'remote' ? `远端 ${formatLocation(loc)}` : `本地 ${formatLocation(loc)}`
-  return locationError.value ? `${label}（连接异常，已回退本地）` : `${label}（点击切换）`
+  const label = loc.kind === 'remote'
+    ? `远端 ${formatLocation(loc)}`
+    : inBrowser ? formatLocation(loc) : `本地 ${formatLocation(loc)}`
+  const errorSuffix = inBrowser ? '连接异常' : '连接异常，已回退本地'
+  return locationError.value ? `${label}（${errorSuffix}）` : `${label}（点击切换）`
 })
 
 async function onReloaded() {

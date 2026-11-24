@@ -5,11 +5,13 @@
 //!
 //! - 非交互：`symbio-cli -m "问题"` 或 `echo 问题 | symbio-cli`（可管道、可脚本化）
 //! - 交互：`symbio-cli`（REPL，多轮对话）
+//! - Server：`symbio-cli serve`（同一二进制，通过 HTTP/WS 提供浏览器前端）
 
 mod args;
 mod client;
 mod protocol;
 mod render;
+mod server;
 
 use std::io::{IsTerminal, Write};
 use std::process::ExitCode;
@@ -44,10 +46,15 @@ async fn main() -> ExitCode {
             print!("{}", args::help_text());
             return ExitCode::SUCCESS;
         }
+        Command::ServeHelp => {
+            print!("{}", args::serve_help_text());
+            return ExitCode::SUCCESS;
+        }
         Command::Version => {
             println!("symbio-cli {}", env!("CARGO_PKG_VERSION"));
             return ExitCode::SUCCESS;
         }
+        Command::Serve(args) => return server::run(*args).await,
         Command::Run(a) => *a,
     };
 

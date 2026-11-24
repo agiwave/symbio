@@ -69,7 +69,7 @@ watch(
 </script>
 
 <style scoped>
-.hotkey-sheet {
+:global(.modal-panel.hotkey-sheet) {
   width: min(30rem, 92vw);
   padding: var(--space-4);
   display: flex;

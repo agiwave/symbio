@@ -5,7 +5,7 @@
   `binding = "option"`）的字段，按 `DetailField.widget` 分派交互：
 
   - `select`：点击展开候选菜单（一层；候选 = `field.options`）；
-  - `path`  （带 `pick`）：唤起原生选择对话框，取值即写入；
+  - `path`  （带 `pick`）：embedded 原生对话框 / browser Server 目录选择器，取值即写入；
   - `form`  ：打开子表单（`OptionFormDialog` → `DetailForm`，同一套方言）；
   - `toggle`：点击翻转布尔值。
 
@@ -108,6 +108,15 @@
       @close="formField = null"
       @save="onFormSave"
     />
+
+    <DirectoryPicker
+      v-if="pickerField"
+      :visible="true"
+      :title="`选择${pickerField.label}`"
+      :initial-path="String(effectiveValue(pickerField) ?? '')"
+      @close="pickerField = null"
+      @select="onDirectorySelected"
+    />
   </div>
 </template>
 
@@ -117,14 +126,15 @@
  *
  * 数据全部由调用方经 props 注入（定义 + 值 + 条件作用域），本组件**不出站**——
  * 出站只在 `useSessionOptionBar.save`（写会话 metadata）与 `services/nativePick`
- * （原生取值原语）两处。
+ * / `DirectoryPicker`（embedded 原生取值 / browser Server 目录取值）两处。
  */
 import { computed, inject, nextTick, onBeforeUnmount, onMounted, ref, type Ref } from 'vue'
 import { routerKey } from 'vue-router'
 import OptionFormDialog from './OptionFormDialog.vue'
+import DirectoryPicker from '@/components/common/DirectoryPicker.vue'
 import { useSessionOptionBar } from '@/composables/useSessionOptionBar'
 import { fieldIcon } from '@/registry/vdfsIcons'
-import { pickNative } from '@/services/nativePick'
+import { pickPath } from '@/services/nativePick'
 import { useToast } from '@/composables/useToast'
 import {
   compactFieldText,
@@ -211,6 +221,7 @@ function scopeOf(key: string): unknown {
 const openKey = ref<string | null>(null)
 const menuLeft = ref(0)
 const formField = ref<DetailField | null>(null)
+const pickerField = ref<DetailField | null>(null)
 /** 打开菜单的触发按钮：关闭时焦点要回到它，而不是丢到 body 上 */
 const menuTrigger: Ref<HTMLElement | null> = ref(null)
 /** 候选菜单容器（键盘导航在它内部移动焦点） */
@@ -287,11 +298,14 @@ async function commit(f: DetailField, value: unknown) {
 async function onFieldClick(f: DetailField, ev: MouseEvent) {
   if (isDisabled(f) || busy.value) return
 
-  // ① 原生取值原语：后端唤不起原生对话框，由前端取值后直接写入。
-  //    取值本身也可能失败（权限 / 路径失效 / 原生接口异常），失败必须说出来。
+  // ① 统一路径取值：embedded 用原生 dialog，browser 打开 Server 目录选择器。
+  //    取值本身也可能失败（权限 / 路径失效 / 接口异常），失败必须说出来。
   if (f.pick) {
     try {
-      const picked = await pickNative(f.pick as DetailPick)
+      const picked = await pickPath(f.pick as DetailPick, {
+        initialPath: String(effectiveValue(f) ?? ''),
+        onBrowserPick: () => { pickerField.value = f },
+      })
       if (picked != null) await commit(f, picked)
     } catch (e) {
       showToast('error', `${f.label}取值失败：${e instanceof Error ? e.message : String(e)}`)
@@ -342,6 +356,12 @@ async function onFormSave(values: Record<string, unknown>) {
   if (!f) return
   formField.value = null
   await commit(f, values)
+}
+
+async function onDirectorySelected(path: string) {
+  const f = pickerField.value
+  pickerField.value = null
+  if (f) await commit(f, path)
 }
 
 function onDocClick() {

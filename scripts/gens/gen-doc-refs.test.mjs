@@ -91,6 +91,20 @@ test('地址重算（RF-002）：标签是编号、地址漂移 ⇒ 自愈；已
   assert.equal(r.changed.length, 1)
 })
 
+test('裸编号按前缀+序号索引：同前缀多篇不互相冲突', () => {
+  const numbered = (id, title) =>
+    fm({ kind: 'design', id, title, status: 'active', impl: 'done', created: '2026-10-11' }) + `# ${title}\n`
+  const base = caseRoot({
+    'docs/003-design/060-server.md': numbered('DE-060-Server运行时与会话执行', 'Server 运行时与会话执行'),
+    'docs/003-design/061-worker.md': numbered('DE-061-Worker协议', 'Worker 协议'),
+    'docs/003-design/x.md': designDoc('docs/003-design/x.md', '# X\n\n见 [[DE-060]] 与 [[DE-061]]。\n'),
+  })
+  const r = runGenDocRefs([`--root=${base}`])
+  assert.equal(r.code, 0, out(r))
+  const text = read(base, 'docs/003-design/x.md')
+  assert.match(text, /\[DE-060\]\(060-server\.md\) 与 \[DE-061\]\(061-worker\.md\)/)
+})
+
 test('RF-001：未登记的编号引用 ⇒ 红，且**一个文件都不改**（改一半 = 两份半截状态）', () => {
   const base = caseRoot({
     'docs/003-design/x.md': designDoc('docs/003-design/x.md', '# X\n\n见 [[T-999]]。\n'),

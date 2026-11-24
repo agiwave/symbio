@@ -9,7 +9,7 @@
  * 4. HTTP 两条传输（invoke / ws）的错误路径不会产生「全绿但没数据」。
  */
 
-import { beforeEach, describe, expect, it, vi } from 'vitest'
+import { afterEach, beforeEach, describe, expect, it, vi } from 'vitest'
 
 /** vi.mock 工厂在 import 前执行，共享状态必须走 vi.hoisted。 */
 const S = vi.hoisted(() => ({
@@ -30,20 +30,48 @@ vi.mock('@tauri-apps/api/event', () => ({
 vi.mock('@/utils/logger', () => ({
   logger: { error: vi.fn(), warn: vi.fn(), debug: vi.fn(), info: vi.fn() },
 }))
-vi.mock('../systemLocation', () => ({
-  loadSystemLocation: vi.fn(() => S.location),
-  setCurrentLocation: vi.fn(),
-  setLocationError: vi.fn(),
-}))
+vi.mock('../systemLocation', async (importOriginal) => {
+  const actual = await importOriginal<typeof import('../systemLocation')>()
+  return {
+    ...actual,
+    loadSystemLocation: vi.fn(() => S.location),
+    setCurrentLocation: vi.fn(),
+    setLocationError: vi.fn(),
+  }
+})
 
 import { invoke } from '@tauri-apps/api/core'
 import { listen } from '@tauri-apps/api/event'
 import { logger } from '@/utils/logger'
+import { setLocationError } from '../systemLocation'
 import {
   callPlugin,
   connectPlugin,
+  getConnectionModel,
   reloadGatewayTransport,
 } from '../plugin'
+
+class FakeWebSocket {
+  static readonly OPEN = 1
+  static instances: FakeWebSocket[] = []
+  readyState = 0
+  onopen: (() => void) | null = null
+  onmessage: ((event: { data: string }) => void) | null = null
+  onclose: (() => void) | null = null
+  onerror: (() => void) | null = null
+  sent: string[] = []
+
+  constructor(public readonly url: string, public readonly protocols: string[]) {
+    FakeWebSocket.instances.push(this)
+    queueMicrotask(() => {
+      this.readyState = FakeWebSocket.OPEN
+      this.onopen?.()
+    })
+  }
+
+  send(data: string): void { this.sent.push(data) }
+  close(): void { this.readyState = 3; this.onclose?.() }
+}
 
 /** 让 `route_v2` 回一个 Connection 帧，且 `data` 取它收到的 clientId（满足契约）。 */
 function stubConnectionResponse(): void {
@@ -73,7 +101,9 @@ function fireEof(sessionId: string): void {
   S.eofListeners.get(`route/${sessionId}/eof`)?.()
 }
 
-beforeEach(() => {
+beforeEach(async () => {
+  vi.stubGlobal('window', { __TAURI_INTERNALS__: { invoke: vi.fn() } })
+  vi.stubGlobal('location', { origin: 'http://localhost:1420' })
   vi.mocked(invoke).mockReset()
   vi.mocked(invoke).mockResolvedValue({
     metadata: {},
@@ -81,10 +111,17 @@ beforeEach(() => {
   } as never)
   vi.mocked(listen).mockClear()
   vi.mocked(logger.error).mockClear()
+  vi.mocked(setLocationError).mockClear()
   S.frameListeners.clear()
   S.eofListeners.clear()
   S.unlistened.length = 0
   S.location = { kind: 'local' }
+  FakeWebSocket.instances = []
+  await reloadGatewayTransport()
+})
+
+afterEach(() => {
+  vi.unstubAllGlobals()
 })
 
 describe('nativeTransport：握手契约', () => {
@@ -204,7 +241,7 @@ describe('协议违规：非法帧不击穿边界', () => {
 })
 
 describe('http 传输：远端不可达回退 + invoke 错误', () => {
-  it('健康探测失败 ⇒ 回退 native（不卡死）', async () => {
+  it('embedded 健康探测失败 ⇒ 回退 native（不卡死）', async () => {
     S.location = { kind: 'remote', remoteUrl: 'http://remote.invalid', remoteKey: 'k' }
     const fetchMock = vi.fn().mockRejectedValue(new Error('offline'))
     vi.stubGlobal('fetch', fetchMock)
@@ -214,7 +251,6 @@ describe('http 传输：远端不可达回退 + invoke 错误', () => {
 
     expect(fetchMock).toHaveBeenCalledTimes(1)
     expect(vi.mocked(invoke)).toHaveBeenCalled()
-    vi.unstubAllGlobals()
   })
 
   it('invoke 非 2xx ⇒ 带 error 正文抛错', async () => {
@@ -231,6 +267,80 @@ describe('http 传输：远端不可达回退 + invoke 错误', () => {
 
     await reloadGatewayTransport()
     await expect(callPlugin('vdfs/stat')).rejects.toThrow('gateway exploded')
-    vi.unstubAllGlobals()
+  })
+})
+
+describe('browser 传输模型', () => {
+  it('local 默认同源 Server；普通路由、forceNative 与 gateway 控制面均不 invoke', async () => {
+    vi.stubGlobal('window', {})
+    const fetchMock = vi.fn(async (_url: string, _init?: RequestInit) => ({
+      ok: true,
+      text: async () => JSON.stringify({ type: 'Data', data: { ok: true } }),
+    }))
+    vi.stubGlobal('fetch', fetchMock)
+    await reloadGatewayTransport()
+
+    expect(getConnectionModel()).toEqual({ environment: 'browser', target: 'server' })
+    await expect(callPlugin('vdfs/stat')).resolves.toEqual({ ok: true })
+    await expect(callPlugin('home/reload', {}, 0, { forceNative: true })).resolves.toEqual({ ok: true })
+    await expect(callPlugin('gateway/config', {}, 0, { forceNative: true })).resolves.toEqual({ ok: true })
+
+    expect(fetchMock.mock.calls.map((call) => call[0])).toEqual([
+      'http://localhost:1420/api/v1/invoke',
+      'http://localhost:1420/api/v1/invoke',
+      'http://localhost:1420/api/v1/invoke',
+    ])
+    expect(invoke).not.toHaveBeenCalled()
+    expect(listen).not.toHaveBeenCalled()
+  })
+
+  it('远端不可达只显示 locationError，保留 HTTP 且绝不回退 native', async () => {
+    vi.stubGlobal('window', {})
+    S.location = { kind: 'remote', remoteUrl: 'http://remote.test', remoteKey: 'k' }
+    const fetchMock = vi.fn().mockRejectedValue(new Error('offline'))
+    vi.stubGlobal('fetch', fetchMock)
+    await reloadGatewayTransport()
+
+    await expect(callPlugin('vdfs/stat', {}, 0, { forceNative: true })).rejects.toThrow('offline')
+    expect(setLocationError).toHaveBeenCalledWith(expect.stringContaining('浏览器不会回退本机连接'))
+    expect(getConnectionModel()).toEqual({ environment: 'browser', target: 'server' })
+    expect(fetchMock.mock.calls.map((call) => call[0])).toEqual([
+      'http://remote.test/api/v1/health',
+      'http://remote.test/api/v1/invoke',
+    ])
+    expect(invoke).not.toHaveBeenCalled()
+    expect(listen).not.toHaveBeenCalled()
+  })
+})
+
+describe('WebSocket 传输', () => {
+  it('URL 无 token，Bearer 通过子协议传递，http 映射为 ws', async () => {
+    S.location = { kind: 'remote', remoteUrl: 'http://remote.test?token=url-key', remoteKey: '' }
+    vi.stubGlobal('fetch', vi.fn(async (_url: string, _init?: RequestInit) => ({ ok: true })))
+    vi.stubGlobal('WebSocket', FakeWebSocket)
+    await reloadGatewayTransport()
+
+    await connectPlugin('event/bus', { channel: 'x' })
+    const ws = FakeWebSocket.instances[0]
+    expect(ws.url).toBe('ws://remote.test/api/v1/ws')
+    expect(ws.url).not.toContain('token')
+    expect(ws.protocols).toEqual(['symbio.v1', 'bearer.url-key'])
+    expect(ws.sent).toHaveLength(1)
+  })
+
+  it('无 token 时只发送 symbio.v1 子协议', async () => {
+    vi.stubGlobal('window', {})
+    vi.stubGlobal('fetch', vi.fn(async (_url: string, _init?: RequestInit) => ({
+      ok: true,
+      text: async () => JSON.stringify({ type: 'Data', data: null }),
+    })))
+    vi.stubGlobal('WebSocket', FakeWebSocket)
+    await reloadGatewayTransport()
+
+    await connectPlugin('event/bus')
+    const ws = FakeWebSocket.instances[0]
+    expect(ws.url).toBe('ws://localhost:1420/api/v1/ws')
+    expect(ws.protocols).toEqual(['symbio.v1'])
+    expect(invoke).not.toHaveBeenCalled()
   })
 })

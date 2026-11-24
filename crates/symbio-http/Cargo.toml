@@ -1,0 +1,28 @@
+[package]
+name = "symbio-http"
+version = "0.1.14"
+description = "Symbio shared HTTP/1.1, WebSocket, and SSE ingress transport"
+authors = ["Symbio Team"]
+license = "MIT"
+edition = "2021"
+rust-version = "1.91"
+
+[lints.rust]
+unused_imports = "warn"
+unused_variables = "warn"
+dead_code = "warn"
+
+[dependencies]
+symbio-kernel = { path = "../symbio-kernel" }
+symbio-plugin-api = { path = "../symbio-plugin-api" }
+async-trait = { workspace = true }
+base64 = { workspace = true }
+serde = { workspace = true }
+serde_json = { workspace = true }
+tokio = { workspace = true, features = ["full"] }
+tokio-util = { workspace = true, features = ["rt"] }
+tracing = { workspace = true }
+
+[dev-dependencies]
+tempfile = { workspace = true }
+tokio = { workspace = true, features = ["test-util"] }

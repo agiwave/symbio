@@ -50,6 +50,14 @@ pub const ROUTE_COMPOSE_WORDING: &str = "compose/wording";
 /// event_bus/subscribe — 建立进程内帧订阅连接（前端实时面与 CLI 都走它收会话帧）。
 pub const ROUTE_EVENT_BUS_SUBSCRIBE: &str = "event_bus/subscribe";
 
+// ============ home ============
+
+/// home/get_homedir — 取回当前系统目录（homedir）与引导路径。
+pub const ROUTE_HOME_GET_HOMEDIR: &str = "home/get_homedir";
+
+/// home/reload — 热重载：切换 homedir（可选）并重建全部子插件。
+pub const ROUTE_HOME_RELOAD: &str = "home/reload";
+
 // ============ hook ============
 
 /// hook/fire — 触发一次命名 hook（生命周期点调用，插件之间的通用挂钩）。
