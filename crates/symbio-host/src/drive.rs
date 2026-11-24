@@ -47,7 +47,8 @@ use symbio_kernel::plugin::{
 use symbio_plugin_api::drive::{DriveKey, EVENT_DRIVER_STALLED};
 use symbio_plugin_api::{ExecEventSink, FactDraft};
 use symbio_sdk::keys::{
-    AGENT_ID, MODE, RISK_LEVEL, SANDBOX_ID, SESSION_DIR, SOURCE_PRINCIPAL, WORKDIR,
+    VdfsCaller, AGENT_ID, MODE, RISK_LEVEL, SANDBOX_ID, SESSION_DIR, SOURCE_PRINCIPAL, VDFS_CALLER,
+    WORKDIR,
 };
 use symbio_sdk::plugin::drive_entry::{
     declared_drive_entry, DriveBinding, DriveBindingDecl, DriveEntry, DriveTarget,
@@ -137,6 +138,7 @@ pub async fn drive_on_new_fact(
     // 父句柄交给执行体：工具 / 钩子按「调用方插件」路由，装配层给的是根插件
     // （环不碰这个字段，只原样转交）。
     let ctx = PluginSimpleRequest::new(Some(Arc::downgrade(root)), None);
+    ctx.set(VDFS_CALLER, VdfsCaller::Model);
     ctx.set(WORKDIR, world.workdir.to_string());
     // 会话级数据目录（D-513）：会话插件按唯一布局解析，宿主只递值；能力插件据此
     // 存取自己的会话数据，不反向拼会话存储布局，也不拿它开事实源。

@@ -78,7 +78,7 @@
             <div class="setting-info">
               <label :for="isLabelable(f) ? fieldControlId(f) : undefined">{{ f.label }}<span v-if="f.required" class="required">*</span></label>
               <p v-if="f.description" class="setting-desc">{{ f.description }}</p>
-              <p v-if="fieldErrorText(f)" class="field-error" role="alert">{{ fieldErrorText(f) }}</p>
+              <p v-if="fieldErrorText(f)" :id="fieldErrorId(f)" class="field-error" role="alert">{{ fieldErrorText(f) }}</p>
             </div>
 
             <!-- static（只读展示：info 绑定概览 / 只读字段；options 作值→标签映射） -->
@@ -101,7 +101,7 @@
               </button>
             </div>
 
-            <!-- table（对象数组：按 columns 渲染可增删行表格） -->
+            <!-- table（对象数组：按 columns 渲染可编排行表格） -->
             <div v-else-if="specOf(f).tag === 'table'" class="table-widget">
               <table class="table-grid">
                 <thead>
@@ -111,37 +111,89 @@
                   </tr>
                 </thead>
                 <tbody>
-                  <tr v-for="(row, ri) in tableRowsOf(f)" :key="ri">
+                  <tr v-for="(row, ri) in tableRowsOf(f)" :key="tableRowKey(row)">
                     <td v-for="c in f.columns ?? []" :key="c.key">
                       <select
                         v-if="(c.widget || 'text') === 'select'"
                         v-model="row[c.key]"
+                        :class="{ 'input-invalid': tableCellErrorText(f, ri, c.key) }"
+                        :aria-invalid="Boolean(tableCellErrorText(f, ri, c.key))"
+                        :aria-describedby="tableCellErrorId(f, ri, c.key)"
                         :aria-label="c.label"
                         :disabled="fieldDisabled(f)"
                       >
+                        <option value="">请选择</option>
                         <option v-for="o in c.options ?? []" :key="o.value" :value="o.value">
                           {{ o.label }}
                         </option>
                       </select>
+                      <template v-else-if="c.widget === 'datalist'">
+                        <input
+                          v-model="row[c.key]"
+                          :list="`table-dl-${uid}-${f.key}-${ri}`"
+                          :class="{ 'input-invalid': tableCellErrorText(f, ri, c.key) }"
+                          :aria-invalid="Boolean(tableCellErrorText(f, ri, c.key))"
+                          :aria-describedby="tableCellErrorId(f, ri, c.key)"
+                          :aria-label="c.label"
+                          :placeholder="c.placeholder ?? ''"
+                          :disabled="fieldDisabled(f)"
+                        />
+                        <datalist :id="`table-dl-${uid}-${f.key}-${ri}`">
+                          <option v-for="o in c.options ?? []" :key="o.value" :value="o.value" />
+                        </datalist>
+                      </template>
                       <input
                         v-else
                         v-model="row[c.key]"
+                        :class="{ 'input-invalid': tableCellErrorText(f, ri, c.key) }"
+                        :aria-invalid="Boolean(tableCellErrorText(f, ri, c.key))"
+                        :aria-describedby="tableCellErrorId(f, ri, c.key)"
                         :type="(c.widget || 'text') === 'number' ? 'number' : 'text'"
                         :aria-label="c.label"
                         :placeholder="c.placeholder ?? ''"
                         :disabled="fieldDisabled(f)"
                       />
+                      <span v-if="tableCellErrorText(f, ri, c.key)" :id="tableCellErrorId(f, ri, c.key)" class="field-error" role="alert">
+                        {{ tableCellErrorText(f, ri, c.key) }}
+                      </span>
                     </td>
                     <td class="table-ops">
-                      <button
-                        type="button"
-                        class="icon-btn danger"
-                        :title="`删除第 ${ri + 1} 行`"
-                        :disabled="fieldDisabled(f)"
-                        @click="removeTableRow(f, ri)"
-                      >
-                        ×
-                      </button>
+                      <div class="table-row-actions">
+                        <button
+                          type="button"
+                          class="icon-btn"
+                          :title="`上移第 ${ri + 1} 行`"
+                          :aria-label="`上移第 ${ri + 1} 行`"
+                          :disabled="fieldDisabled(f) || ri === 0"
+                          @click="moveTableRow(f, ri, ri - 1)"
+                        >↑</button>
+                        <button
+                          type="button"
+                          class="icon-btn"
+                          :title="`下移第 ${ri + 1} 行`"
+                          :aria-label="`下移第 ${ri + 1} 行`"
+                          :disabled="fieldDisabled(f) || ri === tableRowsOf(f).length - 1"
+                          @click="moveTableRow(f, ri, ri + 1)"
+                        >↓</button>
+                        <button
+                          type="button"
+                          class="icon-btn"
+                          :title="`复制第 ${ri + 1} 行`"
+                          :aria-label="`复制第 ${ri + 1} 行`"
+                          :disabled="fieldDisabled(f)"
+                          @click="duplicateTableRow(f, ri)"
+                        >⧉</button>
+                        <button
+                          type="button"
+                          class="icon-btn danger"
+                          :title="`删除第 ${ri + 1} 行`"
+                          :aria-label="`删除第 ${ri + 1} 行`"
+                          :disabled="fieldDisabled(f)"
+                          @click="removeTableRow(f, ri)"
+                        >
+                          ×
+                        </button>
+                      </div>
                     </td>
                   </tr>
                 </tbody>
@@ -165,6 +217,7 @@
                 type="checkbox"
                 v-model="form[f.key]"
                 :aria-label="f.label"
+              :aria-describedby="fieldErrorText(f) ? fieldErrorId(f) : undefined"
                 :disabled="fieldDisabled(f)"
               />
               <span class="toggle-slider" />
@@ -176,6 +229,7 @@
               :id="fieldControlId(f)"
               v-model="form[f.key]"
               :aria-label="f.label"
+              :aria-describedby="fieldErrorText(f) ? fieldErrorId(f) : undefined"
               :disabled="fieldDisabled(f)"
               @change="onPresetFieldChange(f)"
             >
@@ -188,6 +242,7 @@
               :id="fieldControlId(f)"
               v-model="form[f.key]"
               :aria-label="f.label"
+              :aria-describedby="fieldErrorText(f) ? fieldErrorId(f) : undefined"
               :rows="f.rows ?? 3"
               :placeholder="widgetPlaceholderOf(f)"
               :disabled="fieldDisabled(f)"
@@ -201,6 +256,7 @@
                 v-model="form[f.key]"
                 :type="reveal[f.key] ? 'text' : 'password'"
                 :aria-label="f.label"
+              :aria-describedby="fieldErrorText(f) ? fieldErrorId(f) : undefined"
                 :placeholder="f.placeholder"
                 :disabled="fieldDisabled(f)"
               />
@@ -227,6 +283,7 @@
               v-model.number="form[f.key]"
               type="number"
               :aria-label="f.label"
+              :aria-describedby="fieldErrorText(f) ? fieldErrorId(f) : undefined"
               :min="f.min"
               :max="f.max"
               :step="f.step"
@@ -241,6 +298,7 @@
                 type="text"
                 :list="`dl-${uid}-${f.key}`"
                 :aria-label="f.label"
+              :aria-describedby="fieldErrorText(f) ? fieldErrorId(f) : undefined"
                 :placeholder="f.placeholder"
                 :disabled="fieldDisabled(f)"
               />
@@ -255,6 +313,7 @@
                 v-model="form[f.key]"
                 :type="specOf(f).inputType ?? 'text'"
                 :aria-label="f.label"
+              :aria-describedby="fieldErrorText(f) ? fieldErrorId(f) : undefined"
                 :placeholder="widgetPlaceholderOf(f)"
                 :disabled="fieldDisabled(f)"
               />
@@ -323,6 +382,8 @@ import {
   tableNewRow,
   tableRemoveRow,
   tableRows,
+  tableMoveRow,
+  tableDuplicateRow,
   DETAIL_PICK_DIRECTORY,
   type DetailPick,
 } from '@/schemas/vdfs-form'
@@ -533,17 +594,49 @@ function onSubSave(values: Record<string, unknown>) {
 
 // ==================== 表格 widget（对象数组）的状态编排 ====================
 //
-// 纯函数规则住在 `schemas/vdfs-form`（tableRows / tableNewRow / tableRemoveRow），
-// 本组件只做「读表单模型 → 改表单模型」的状态编排。`v-model` 直接绑定行对象，
-// 因此单元格输入会写回 form[f.key] 里的同一批对象，随外层一次提交。
+// 纯函数规则住在 `schemas/vdfs-form`，本组件只做「读表单模型 → 改表单模型」的
+// 状态编排。`v-model` 直接绑定行对象，单元格输入随外层一次提交。
 function tableRowsOf(f: DetailField): Record<string, unknown>[] {
   return tableRows(form[f.key])
+}
+
+function fieldErrorId(f: DetailField): string {
+  return `${fieldControlId(f)}-error`
+}
+
+function tableCellErrorId(f: DetailField, row: number, column: string): string {
+  return `df-${uid}-${f.key}-${row}-${column}-error`
+}
+
+function tableCellErrorText(f: DetailField, row: number, column: string): string {
+  const key = `${f.key}.${row}.${column}`
+  return props.fieldErrors?.find((error) => error.field === key)?.message ?? ''
+}
+
+// key 跟行对象走，排序时保留控件状态；不写入保存数据。
+const tableRowKeys = new WeakMap<object, number>()
+let nextTableRowKey = 0
+function tableRowKey(row: object): number {
+  let key = tableRowKeys.get(row)
+  if (key === undefined) {
+    key = nextTableRowKey++
+    tableRowKeys.set(row, key)
+  }
+  return key
 }
 
 function addTableRow(f: DetailField) {
   const rows = tableRowsOf(f)
   rows.push(tableNewRow(f.columns))
   form[f.key] = rows
+}
+
+function moveTableRow(f: DetailField, from: number, to: number) {
+  form[f.key] = tableMoveRow(tableRowsOf(f), from, to)
+}
+
+function duplicateTableRow(f: DetailField, i: number) {
+  form[f.key] = tableDuplicateRow(tableRowsOf(f), i)
 }
 
 function removeTableRow(f: DetailField, i: number) {
@@ -578,7 +671,14 @@ const requiredFieldKeys = ref(new Set<string>())
 /** 后端字段级错误：key → 文案（把机器 key 映射回字段 label 展示） */
 const backendFieldError = computed<Record<string, string>>(() => {
   const map: Record<string, string> = {}
-  for (const e of props.fieldErrors ?? []) if (e.field) map[e.field] = e.message
+  for (const e of props.fieldErrors ?? []) {
+    if (!e.field) continue
+    map[e.field] = e.message
+    const root = e.field.split('.')[0]
+    if (root && root !== e.field) {
+      map[root] = map[root] ? `${map[root]}；${e.message}` : e.message
+    }
+  }
   return map
 })
 /** json 字段的编辑态语法错误（空串 = 合法的无值） */
@@ -728,7 +828,7 @@ function runAction(a: DetailAction) {
       for (const sec of props.definition.sections) {
         for (const f of sec.fields) {
           const err = jsonFieldError(f)
-          if (!err) continue
+          if (!err || !fieldVisible(f)) continue
           void nextTick(() => {
             const el = document.getElementById(fieldControlId(f))
             el?.scrollIntoView({ block: 'center' })
@@ -1026,7 +1126,9 @@ watch(
 }
 .setting-item.field-invalid input,
 .setting-item.field-invalid select,
-.setting-item.field-invalid textarea {
+.setting-item.field-invalid textarea,
+.table-grid input.input-invalid,
+.table-grid select.input-invalid {
   border-color: var(--danger-fg);
 }
 
@@ -1128,7 +1230,7 @@ watch(
 }
 .input-row input { flex: 1; min-width: 0; }
 
-/* 表格 widget（对象数组）：按列渲染、可增删行 */
+/* 表格 widget（对象数组）：按列渲染、可编排行 */
 .table-widget {
   width: 100%;
   display: flex;
@@ -1167,8 +1269,14 @@ watch(
 }
 .table-ops-head,
 .table-ops {
-  width: 2.2rem;
+  width: 8.25rem;
   text-align: center;
+}
+.table-row-actions {
+  display: flex;
+  align-items: center;
+  justify-content: center;
+  gap: 0.15rem;
 }
 .table-empty {
   margin: 0;

@@ -658,8 +658,8 @@ export function parseJsonText(text: unknown): { ok: boolean; value?: unknown; er
 // ---------------------------------------------------------------------------
 //
 // 与 json 不同，table 的编辑态就是**结构化对象数组**本身（不是文本）。渲染器
-// 按列的 `widget` 给每个单元格渲染 input/select；这里只提供三个纯函数：行归一化、
-// 增行、删行。规则在此、状态在组件，可脱离 Vue 单测。
+// 按列的 `widget` 给每个单元格渲染 input/select；行编排规则在此、状态在组件，
+// 可脱离 Vue 单测。
 
 /** 存储值 → 行数组（非法值归一成空表，页面永不空白） */
 export function tableRows(v: unknown): Record<string, unknown>[] {
@@ -672,6 +672,43 @@ export function tableNewRow(cols: DetailColumn[] | undefined): Record<string, un
   const row: Record<string, unknown> = {}
   for (const c of cols ?? []) row[c.key] = c.default ?? ''
   return row
+}
+
+/** 移动一行：保留行对象引用，让 DOM 状态跟着行走而不是跟着索引跳。 */
+export function tableMoveRow(
+  rows: Record<string, unknown>[],
+  from: number,
+  to: number,
+): Record<string, unknown>[] {
+  if (
+    !Number.isInteger(from) || !Number.isInteger(to) ||
+    from < 0 || from >= rows.length || to < 0 || to >= rows.length
+  ) return rows
+  const out = rows.slice()
+  const [row] = out.splice(from, 1)
+  out.splice(to, 0, row)
+  return out
+}
+
+function cloneTableValue(value: unknown): unknown {
+  if (Array.isArray(value)) return value.map(cloneTableValue)
+  if (value !== null && typeof value === 'object') {
+    return Object.fromEntries(
+      Object.entries(value).map(([key, item]) => [key, cloneTableValue(item)]),
+    )
+  }
+  return value
+}
+
+/** 深拷贝一行插到其后，避免副本的嵌套值与原行联动。 */
+export function tableDuplicateRow(
+  rows: Record<string, unknown>[],
+  i: number,
+): Record<string, unknown>[] {
+  if (!Number.isInteger(i) || i < 0 || i >= rows.length) return rows
+  const out = rows.slice()
+  out.splice(i + 1, 0, cloneTableValue(rows[i]) as Record<string, unknown>)
+  return out
 }
 
 /** 删第 i 行（越界 / 非法 i 原样返回，不抛） */

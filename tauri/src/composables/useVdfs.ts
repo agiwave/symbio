@@ -927,6 +927,14 @@ export function useVdfs(opts: UseVdfsOptions) {
       }
       // 动作可能改变条目集合（导入建出一条、清空删掉一片）→ 重拉收敛
       await refresh()
+      const data = r?.data
+      const createdId = data && typeof data === 'object' && 'id' in data
+        ? (data as { id?: unknown }).id
+        : undefined
+      if (r?.ok && typeof createdId === 'string' && createdId) {
+        const target = items.value.find((n) => n.path === vdfsJoin(cwd.value, createdId))
+        if (target) void select(target)
+      }
       // 草稿是**瞬态**：动作在草稿上成功 = 它已经落盘（如「导入整包」建出一条），
       // 草稿页的使命到此结束——继续留着它，等于显示一个并不存在的资源的详情。
       if (r?.ok && isVdfsDraft(node)) clearSelection()

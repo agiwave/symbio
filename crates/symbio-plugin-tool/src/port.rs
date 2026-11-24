@@ -33,7 +33,9 @@
 //! 工具失败**不**映射成 `PortOutcome.error`——失败是信息性事实（模型据此自我纠正），
 //! 与「这一笔协议失败」是两件事。
 
-use std::sync::Arc;
+use std::collections::HashSet;
+use std::sync::{Arc, OnceLock};
+use std::time::Duration;
 
 use serde_json::json;
 
@@ -51,12 +53,13 @@ use symbio_plugin_api::{
     events::EVENT_ARTIFACT_ADDED,
     events::EVENT_AUTHZ_GRANTED,
     events::EVENT_TOOL_REQUESTED,
-    failure_kind, family, plugin_error, plugin_info, plugin_warn, CapabilityRiskLevel,
-    DynVdfsProvider, Entity, ExecAbortSignal, FactDraft, LatencyTier, Plugin, PluginError,
-    PluginInvokeRequest, PluginInvokeRequestExt, PluginPayload, PortErrorClass, PortExecContext,
-    PortExecutor, PortInput, PortOutcome, PortProvider, Verb, ABORT_SIGNAL, AGENT_ID,
-    CAPABILITY_VISITOR, EVENT_REQUEST, EVENT_SINK, PLUGIN_ID_TOOL, SESSION_ID, SESSION_VDFS,
-    TOOL_CALL_ID, TOOL_NODE_ID, WORKDIR, WORKSPACE_VDFS,
+    failure_kind, family, plugin_error, plugin_info, plugin_warn, ApprovalGrant,
+    CapabilityRiskLevel, DynVdfsProvider, Entity, ExecAbortSignal, FactDraft, LatencyTier, Plugin,
+    PluginError, PluginInvokeRequest, PluginInvokeRequestExt, PluginPayload, PortErrorClass,
+    PortExecContext, PortExecutor, PortInput, PortOutcome, PortProvider, VdfsCaller, Verb,
+    ABORT_SIGNAL, AGENT_ID, CAPABILITY_VISITOR, EVENT_REQUEST, EVENT_SINK, PLUGIN_ID_TOOL,
+    SANDBOX_ID, SESSION_ID, SESSION_VDFS, TOOL_CALL_ID, TOOL_NODE_ID, VDFS_CALLER, WORKDIR,
+    WORKSPACE_VDFS,
 };
 
 /// 存档作用域 provider（D-528）：会话私有数据落 `SESSION_VDFS`（根 = session_dir）；
@@ -118,7 +121,6 @@ const FACT_GUARD: &str = "guard";
 const KEY_TOOL: &str = "tool";
 const KEY_RISK: &str = "risk";
 const KEY_THRESHOLD: &str = "threshold";
-const KEY_APPROVED: &str = "approved";
 const KEY_GRANT: &str = "grant";
 const KEY_DEFERRED: &str = "deferred";
 /// 不可派发的成因词（缺 id / 解析失败 → `invalid_tool_call`；超限丢弃 →
@@ -233,15 +235,13 @@ fn authorize(payload: &serde_json::Value) -> Authz {
             why: "unknown_risk",
         };
     };
-    let approved = payload
-        .get(KEY_APPROVED)
-        .and_then(|v| v.as_bool())
-        .unwrap_or(false);
+    // 历史 request 载荷里的 approved 字段只保留线格式兼容，不是授权依据。执行授权仍由
+    // collectors 的 mandatory gate 验证并消费一次性 ApprovalGrant。
     let grant = payload
         .get(KEY_GRANT)
         .and_then(|v| v.as_str())
         .and_then(CapabilityRiskLevel::parse);
-    match risk.approval_basis(threshold, approved, grant) {
+    match risk.approval_basis(threshold, false, grant) {
         Some(basis) => Authz::Granted {
             risk: risk.as_str(),
             basis: Some(basis.as_str()),
@@ -517,10 +517,8 @@ async fn open_drafts(exec: &PortExecContext, payload: &serde_json::Value) -> Vec
             .as_ref()
             .and_then(|(canonical, _)| grants.get(canonical))
             .map(|level| level.as_str());
-        let approved = args
-            .get(KEY_APPROVED)
-            .and_then(|v| v.as_bool())
-            .unwrap_or(false);
+        // 模型参数里的 approved 不是授权：历史线格式保留该字段，但开账时固定为 false。
+        // 真正的一次性授权由 tool 恢复路径签发 ApprovalGrant，执行闸门原子消费。
         out.push(FactDraft {
             key: format!("{EVENT_REQUEST}-{TOOL}-{id}-1"),
             kind: EVENT_REQUEST.to_string(),
@@ -534,7 +532,7 @@ async fn open_drafts(exec: &PortExecContext, payload: &serde_json::Value) -> Vec
                 "args": args,
                 "risk": risk_name,
                 "threshold": threshold.as_str(),
-                "approved": approved,
+                "approved": false,
                 // 缺注册面 / 风险未知 = route-only：授权按 `deferred` 放行。
                 "deferred": risk.is_none(),
                 "grant": grant,
@@ -903,7 +901,7 @@ async fn declared_table_of(exec: &PortExecContext) -> Vec<(String, &'static [&'s
 }
 
 /// 产物里的 `args` 是**定稿参数文本**（[`artifact_payload`] 按 `to_string` 落格）；
-/// 恢复要重跑同一调用时必须先解析回值，才能把 `approved` 合并进去。
+/// 恢复时按原值解析，用来绑定并重放同一次调用，不插入任何模型可见的批准位。
 fn artifact_args(payload: &serde_json::Value) -> serde_json::Value {
     match payload.get("args") {
         Some(serde_json::Value::String(text)) => {
@@ -912,6 +910,94 @@ fn artifact_args(payload: &serde_json::Value) -> serde_json::Value {
         Some(other) => other.clone(),
         None => serde_json::Value::Null,
     }
+}
+
+/// 恢复只能针对仍等待用户动作的产物；已落成的 resume 结果不能被同一答复重放。
+fn artifact_awaits_user(payload: &serde_json::Value) -> bool {
+    payload
+        .get("needs_user_action")
+        .and_then(serde_json::Value::as_bool)
+        == Some(true)
+        || matches!(
+            payload
+                .get("failure_kind")
+                .and_then(serde_json::Value::as_str),
+            Some(failure_kind::NEEDS_APPROVAL | failure_kind::NEEDS_INTERACTION)
+        )
+        || payload
+            .get("prompt")
+            .is_some_and(|prompt| !prompt.is_null())
+}
+
+/// 恢复授权只发给你注册表里的 canonical 工具；线上别名只是协议投影。
+async fn canonical_tool_for_resume(exec: &PortExecContext, wire: &str) -> Option<String> {
+    let ctx = exec.ctx.as_ref()?;
+    let visitor = ctx.get(CAPABILITY_VISITOR)?;
+    let aliases = exposure_aliases(exec);
+    let canonical = resolve(wire, &aliases)?;
+    visitor.get(&canonical).await.map(|_| canonical)
+}
+
+/// 为一次已验证的 approve 恢复派生独立执行上下文，并签发短期一次性凭据。
+///
+/// 会话 ctx 不被修改：grant 只挂在 fork 上。档案版本必须来自**原调用的新鲜裁决**；
+/// 裁决拒绝或拦截时不签发。真正执行时 collectors 还会再读一次快照，版本变化会使
+/// 旧 grant 失效并重新停等审批。
+fn approved_resume_exec(
+    exec: &PortExecContext,
+    call_id: &str,
+    canonical_tool: &str,
+    original_args: &serde_json::Value,
+) -> Result<PortExecContext, String> {
+    let request = exec
+        .ctx
+        .clone()
+        .ok_or_else(|| "恢复批准失败：缺少调用方上下文".to_string())?;
+    let profile_version = match symbio_plugin_api::sandbox_of(request.as_ref()) {
+        Some(face) => {
+            let decision = face.decide(&[], canonical_tool, original_args);
+            if let Some(intercept) = decision.intercept {
+                return Err(format!(
+                    "恢复批准失败：沙箱拦截原调用：{}",
+                    sandbox_block_text(&intercept)
+                ));
+            }
+            if !decision.permitted {
+                let reason = decision
+                    .reason
+                    .unwrap_or_else(|| "sandbox denied the call".to_string());
+                return Err(format!("恢复批准失败：沙箱拒绝原调用：{reason}"));
+            }
+            decision.profile_version
+        }
+        None if request.get(SANDBOX_ID).is_none() => 0,
+        None => {
+            return Err("恢复批准失败：已选择沙箱但沙箱句柄不可用".to_string());
+        }
+    };
+    let session_id = request
+        .get(SESSION_ID)
+        .filter(|value| !value.trim().is_empty())
+        .or_else(|| {
+            let value = exec.session_id.trim();
+            (!value.is_empty()).then(|| value.to_string())
+        });
+    let grant = ApprovalGrant::issue(
+        call_id,
+        canonical_tool,
+        original_args,
+        session_id.clone(),
+        profile_version,
+        Duration::from_secs(60),
+    );
+    let approved_ctx = request.fork();
+    if let Some(session_id) = session_id {
+        approved_ctx.set(SESSION_ID, session_id);
+    }
+    grant.attach(&approved_ctx);
+    let mut approved_exec = exec.clone();
+    approved_exec.ctx = Some(approved_ctx);
+    Ok(approved_exec)
 }
 
 /// 答复原文：字符串按原文用（不再套一层 JSON 引号），其余按 JSON 文本。
@@ -1367,6 +1453,33 @@ fn window_for(session_id: &str) -> Arc<ExecWindow> {
         .clone()
 }
 
+static RESUME_CLAIMS: OnceLock<std::sync::Mutex<HashSet<String>>> = OnceLock::new();
+
+struct ResumeClaim(String);
+
+impl ResumeClaim {
+    fn acquire(session_id: &str, answer_id: &str) -> Option<Self> {
+        let key = format!("{session_id}\0{answer_id}");
+        let claims = RESUME_CLAIMS.get_or_init(|| std::sync::Mutex::new(HashSet::new()));
+        claims
+            .lock()
+            .unwrap_or_else(|poisoned| poisoned.into_inner())
+            .insert(key.clone())
+            .then(|| Self(key))
+    }
+}
+
+impl Drop for ResumeClaim {
+    fn drop(&mut self) {
+        if let Some(claims) = RESUME_CLAIMS.get() {
+            claims
+                .lock()
+                .unwrap_or_else(|poisoned| poisoned.into_inner())
+                .remove(&self.0);
+        }
+    }
+}
+
 /// `port.tool` 的提供者：无状态前端（执行期从调用方 ctx 读能力表）。
 pub(crate) struct ToolPort;
 
@@ -1434,9 +1547,9 @@ struct RequestedFailure {
 
 impl ToolPort {
     /// 答复恢复：`user.answer` 已经落了事实；按事实里的 `kind` 分岔——
-    /// `answer` 把答复原文作为那次调用的结果、`approve` 合并 `approved:true` 走
-    /// **正常执行路径**、`deny` 不执行并以 `user_rejected` 收尾。三者都不新开
-    /// 端口往返：这是同一笔调用的第二次落格（产物键带 [`RESUME_ARTIFACT_SUFFIX`]）。
+    /// `answer` 把答复原文作为那次调用的结果、`approve` 在验证原 artifact 后签发
+    /// 绑定原调用的一次性 [`ApprovalGrant`] 并走**正常执行路径**、`deny` 不执行并以
+    /// `user_rejected` 收尾。三者都不新开端口往返：这是同一笔调用的第二次落格。
     async fn run_resume(&self, exec: PortExecContext, payload: serde_json::Value) -> PortOutcome {
         let Some(reader) = exec.reader.clone() else {
             return PortOutcome {
@@ -1482,6 +1595,32 @@ impl ToolPort {
             .and_then(|v| v.as_str())
             .unwrap_or_default()
             .to_string();
+        if call_id.is_empty() {
+            return PortOutcome {
+                facts: Vec::new(),
+                error: Some((
+                    PortErrorClass::NonRetryable,
+                    "恢复目标缺失：user.answer 没有 call_id".to_string(),
+                )),
+                ..PortOutcome::ok()
+            };
+        }
+        if let Some(requested) = payload
+            .get(KEY_TOOL_CALL_ID)
+            .and_then(|v| v.as_str())
+            .filter(|value| !value.is_empty())
+        {
+            if requested != call_id {
+                return PortOutcome {
+                    facts: Vec::new(),
+                    error: Some((
+                        PortErrorClass::NonRetryable,
+                        format!("恢复目标不匹配：答复属于 {call_id}，载荷要求 {requested}"),
+                    )),
+                    ..PortOutcome::ok()
+                };
+            }
+        }
         let answer_value = answer
             .payload
             .get("answer")
@@ -1502,12 +1641,44 @@ impl ToolPort {
                 ..PortOutcome::ok()
             };
         };
+        if !artifact_awaits_user(&artifact.payload) {
+            return PortOutcome {
+                facts: Vec::new(),
+                error: Some((
+                    PortErrorClass::NonRetryable,
+                    format!("恢复目标已收束：{call_id} 的产物不再等待用户动作"),
+                )),
+                ..PortOutcome::ok()
+            };
+        }
+        let Some(_resume_claim) =
+            ResumeClaim::acquire(archive_session_id(&exec).unwrap_or_default(), &answer.id)
+        else {
+            return PortOutcome {
+                facts: Vec::new(),
+                error: Some((
+                    PortErrorClass::NonRetryable,
+                    format!("恢复目标已领取：答复 {} 已处理", answer.id),
+                )),
+                ..PortOutcome::ok()
+            };
+        };
         let tool_name = artifact
             .payload
             .get("tool")
             .and_then(|v| v.as_str())
             .unwrap_or_default()
             .to_string();
+        if tool_name.trim().is_empty() {
+            return PortOutcome {
+                facts: Vec::new(),
+                error: Some((
+                    PortErrorClass::NonRetryable,
+                    "恢复目标缺失：产物没有工具名".to_string(),
+                )),
+                ..PortOutcome::ok()
+            };
+        }
         let original_args = artifact_args(&artifact.payload);
         let archive_vdfs = archive_provider(&exec);
         let sid = archive_session_id(&exec);
@@ -1526,44 +1697,62 @@ impl ToolPort {
                 .await,
                 original_args,
             ),
-            // 批准：批准位**只进 args**（活闸门读的就是 `args.approved`），不另开
-            // 端口载荷键——载荷键是机制形状，批准是这一次调用的参数值。
+            // 批准：只签发绑定原 call/tool/args/session/profile 的内存一次性凭据；
+            // 不把 approved 写进 args，也不修改会话 ctx。正常执行仍经过 GatedExecutor。
             "approve" => {
-                let Some(mut args) = original_args.as_object().cloned() else {
+                let Some(canonical_tool) = canonical_tool_for_resume(&exec, &tool_name).await
+                else {
                     return PortOutcome {
                         facts: Vec::new(),
                         error: Some((
                             PortErrorClass::NonRetryable,
-                            "恢复批准失败：产物里的 args 不是 JSON 对象".to_string(),
+                            format!("恢复批准失败：工具 {tool_name} 未注册或无法解析 canonical 名"),
                         )),
                         ..PortOutcome::ok()
                     };
                 };
-                args.insert(KEY_APPROVED.to_string(), serde_json::Value::Bool(true));
-                let args = serde_json::Value::Object(args);
-                // 批准留痕（D-368）：批准结论先落事实，再执行；风险档从产物载荷原样搬。
-                if let Some(draft) = approval_granted_draft(
-                    &exec.idempotency_key,
-                    &artifact.payload,
-                    &call_id,
-                    &tool_name,
-                ) {
-                    exec.emit.emit(vec![draft]).await;
-                }
-                let outcome = self
-                    .run(
-                        exec.clone(),
-                        PortInput {
-                            port: TOOL.to_string(),
-                            payload: json!({
-                                KEY_TOOL_NAME: tool_name.clone(),
-                                KEY_ARGS: args.clone(),
-                                KEY_TOOL_CALL_ID: call_id.clone(),
-                            }),
-                        },
-                    )
-                    .await;
-                (outcome, args)
+                let (outcome, run_args) =
+                    match approved_resume_exec(&exec, &call_id, &canonical_tool, &original_args) {
+                        Ok(approved_exec) => {
+                            // 批准留痕（D-368）：凭据签发后、执行前落事实；风险档从产物载荷原样搬。
+                            if let Some(draft) = approval_granted_draft(
+                                &exec.idempotency_key,
+                                &artifact.payload,
+                                &call_id,
+                                &canonical_tool,
+                            ) {
+                                exec.emit.emit(vec![draft]).await;
+                            }
+                            let outcome = self
+                                .run(
+                                    approved_exec,
+                                    PortInput {
+                                        port: TOOL.to_string(),
+                                        payload: json!({
+                                            KEY_TOOL_NAME: tool_name.clone(),
+                                            KEY_ARGS: original_args.clone(),
+                                            KEY_TOOL_CALL_ID: call_id.clone(),
+                                        }),
+                                    },
+                                )
+                                .await;
+                            (outcome, original_args)
+                        }
+                        Err(reason) => (
+                            finish_with(
+                                format!("Blocked: {reason}"),
+                                false,
+                                None,
+                                archive_vdfs.as_ref(),
+                                sid,
+                                Some(failure_kind::PERMISSION_DENIED),
+                                &reason,
+                            )
+                            .await,
+                            original_args,
+                        ),
+                    };
+                (outcome, run_args)
             }
             // 拒绝：不执行，按失败收尾（`user_rejected` 是判决词，不是「等用户」）。
             "deny" => {
@@ -1875,38 +2064,6 @@ impl ToolPort {
             }
         }
 
-        // 沙箱拦截点（D-531）：与 PreToolUse 同一处收口、工具执行前统一调用。
-        // 本执行体不认识沙箱实现，也不解释载荷语义——只把 tool_name / args 不透明透传，
-        // 拦下时把沙箱交回的载荷文本作为结果沿既有出口交回。缺席 = 全放行。
-        if let Some(ctx) = request.as_ref() {
-            if let Some(face) = symbio_plugin_api::sandbox_of(ctx.as_ref()) {
-                if let Some(verdict) = face.intercept(&tool_name, &args) {
-                    let text = sandbox_block_text(&verdict);
-                    let why = format!("被沙箱拦下：{text}");
-                    if let Some(parent) = hook_parent.as_ref() {
-                        fire_post_hook(
-                            parent,
-                            &tool_name,
-                            &args,
-                            serde_json::json!({ "error": text }),
-                            ctx,
-                        )
-                        .await;
-                    }
-                    return finish_with(
-                        format!("Blocked: {text}"),
-                        false,
-                        None,
-                        archive_vdfs.as_ref(),
-                        sid,
-                        Some("blocked"),
-                        &why,
-                    )
-                    .await;
-                }
-            }
-        }
-
         // 授权只走上面那条 gate 入口（单一判定点）：执行这一笔时不再重判。
         // 通用端口调用可能不带协议读数；名字仍为空时按协议失败拒绝。
         if tool_name.trim().is_empty() {
@@ -2031,6 +2188,48 @@ impl ToolPort {
             );
         }
 
+        // 注册工具由 collectors 的 GatedExecutor 执行唯一一次 decide。这里只为
+        // route-only / 未注册调用保留沙箱拦截，且必须等到 canonical 名解析之后。
+        if resolved_name.is_none() {
+            if let Some(face) = symbio_plugin_api::sandbox_of(ctx.as_ref()) {
+                let decision = face.decide(&[], &invoke_name, &args);
+                let blocked = decision.intercept.clone().or_else(|| {
+                    (!decision.permitted).then(|| {
+                        serde_json::json!({
+                            "error": decision
+                                .reason
+                                .clone()
+                                .unwrap_or_else(|| "sandbox denied the call".to_string()),
+                            "success": false,
+                            "failure_kind": failure_kind::PERMISSION_DENIED,
+                        })
+                    })
+                });
+                if let Some(verdict) = blocked {
+                    let text = sandbox_block_text(&verdict);
+                    let why = format!("被沙箱拦下：{text}");
+                    fire_post_hook(
+                        &parent,
+                        &tool_name,
+                        &args,
+                        serde_json::json!({ "error": text }),
+                        &ctx,
+                    )
+                    .await;
+                    return finish_with(
+                        format!("Blocked: {text}"),
+                        false,
+                        None,
+                        archive_vdfs.as_ref(),
+                        sid,
+                        Some("blocked"),
+                        &why,
+                    )
+                    .await;
+                }
+            }
+        }
+
         // 声明闸（DE-025 D-219）：宿主闸之后、执行窗口之前，按 owner 序问这个工具
         // 声明过的前置判断，先拒绝者胜。判据只认工具自己的 `CapabilityMeta.behaviors`
         // ——本执行体不认识任何工具名。历史交 `reader.events()`（与行执行体同一份）。
@@ -2125,6 +2324,7 @@ impl ToolPort {
         let workdir = ctx.get(WORKDIR).unwrap_or_default();
 
         let tool_ctx = ctx.fork();
+        tool_ctx.set(VDFS_CALLER, VdfsCaller::Model);
         tool_ctx.set(WORKDIR, workdir);
         tool_ctx.set(AGENT_ID, agent_id);
         tool_ctx.set(SESSION_ID, session_id);

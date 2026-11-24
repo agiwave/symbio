@@ -1,22 +1,25 @@
 //! `providers/collectors/approval.rs` 的单元测试。
 //!
 //! 覆盖审批闸门的两处形状：
-//! 1. **判定 [`approval_gate`]**——风险档与阈值的比较、`approved: true` 放行、
-//!    逐工具的永久放行上限、`mode=auto` 走 `PERMISSION_DENIED`（无人可授权时
-//!    **不产卡**），其余产卡。
+//! 1. **判定 [`approval_gate`]**——风险档与阈值的比较、模型 `approved` 无效、
+//!    一次性 `ApprovalGrant` 的绑定/消费/重放/过期/版本校验、逐工具永久放行上限、
+//!    沙箱单次裁决与 `mode=auto` 拒绝。
 //! 2. **端口执行体 [`GatedExecutor`]**——判定是执行的第一段：拦下时停等载荷按
-//!    `RESULT_KEY` 交回且**不落内层**；放行才透传给内层执行体。这条是 vdfs / web /
-//!    mcp / skill 都受益的唯一路径（`register_tool` 裹上的那个执行体）。
+//!    `RESULT_KEY` 交回且**不落内层**；有效 typed grant 放行才透传给内层执行体。
 
 use super::*;
 use serde_json::json;
+use std::sync::atomic::{AtomicUsize, Ordering};
+use std::time::Duration;
 use symbio_kernel::capability::failure_kind;
 use symbio_kernel::exec::{ExecAbortSignal, ExecEventSink};
 use symbio_kernel::plugin::{PluginInvokeRequestExt, PluginSimpleRequest};
 use symbio_plugin_api::port::PortFactEmit;
 use symbio_plugin_api::{
-    port_result, PortErrorClass, PortExecContext, PortExecutor, PortInput, PortOutcome,
+    port_result, ApprovalGrant, PortErrorClass, PortExecContext, PortExecutor, PortInput,
+    PortOutcome, SESSION_ID, TOOL_CALL_ID,
 };
+use symbio_sdk::sandbox::{sandbox_init_slot, sandbox_publish, SandboxDecision, SandboxFace};
 
 /// 最小可判定的执行体桩：固定风险、可选动态覆写、记录是否被真正执行。
 struct StubTool {
@@ -86,6 +89,70 @@ fn gated(tool: &Arc<StubTool>) -> Arc<GatedExecutor> {
 
 fn ctx() -> Arc<dyn PluginInvokeRequest> {
     Arc::new(PluginSimpleRequest::new(None, None))
+}
+
+struct FakeSandbox {
+    decision: SandboxDecision,
+    decide_calls: AtomicUsize,
+}
+
+impl FakeSandbox {
+    fn new(decision: SandboxDecision) -> Arc<Self> {
+        Arc::new(Self {
+            decision,
+            decide_calls: AtomicUsize::new(0),
+        })
+    }
+}
+
+impl SandboxFace for FakeSandbox {
+    fn permits(&self, _facts: &[SandboxFact]) -> bool {
+        self.decision.permitted
+    }
+
+    fn intercept(&self, _tool_name: &str, _args: &Value) -> Option<Value> {
+        self.decision.intercept.clone()
+    }
+
+    fn decide(&self, _facts: &[SandboxFact], _tool_name: &str, _args: &Value) -> SandboxDecision {
+        self.decide_calls.fetch_add(1, Ordering::SeqCst);
+        self.decision.clone()
+    }
+}
+
+fn ctx_with_sandbox(decision: SandboxDecision) -> (Arc<dyn PluginInvokeRequest>, Arc<FakeSandbox>) {
+    let ctx = ctx();
+    let sandbox = FakeSandbox::new(decision);
+    sandbox_init_slot(&ctx);
+    assert!(sandbox_publish(&ctx, sandbox.clone()));
+    (ctx, sandbox)
+}
+
+#[test]
+fn explicit_sandbox_selection_without_a_handle_fails_closed() {
+    let tool = StubTool::new("read_file", CapabilityRiskLevel::Low);
+    let ctx = ctx();
+    ctx.set(symbio_plugin_api::SANDBOX_ID, "strict".to_string());
+    let payload = approval_gate(
+        &ctx,
+        &tool.meta(),
+        StubTool::risk_of(&tool).as_ref(),
+        &json!({}),
+    )
+    .expect("显式选档但句柄缺失必须拦截");
+    assert_eq!(
+        payload["failure_kind"].as_str(),
+        Some(failure_kind::PERMISSION_DENIED)
+    );
+    assert!(payload["error"]
+        .as_str()
+        .is_some_and(|error| error.contains("沙箱句柄不可用")));
+    assert!(!tool.executed.load(Ordering::SeqCst));
+}
+
+fn bind_call(ctx: &Arc<dyn PluginInvokeRequest>, call_id: &str, session_id: &str) {
+    ctx.set(TOOL_CALL_ID, call_id.to_string());
+    ctx.set(SESSION_ID, session_id.to_string());
 }
 
 /// 端口执行上下文：与派发侧同形（ctx 是唯一被用到的字段）。
@@ -161,19 +228,256 @@ fn low_risk_passes_through_default_threshold() {
     );
 }
 
-/// `approved: true` 覆盖判据——用户已在卡上批过，二次进入直接放行。
-/// 这是 t27 审批恢复链路的工作方式：编排层重放原调用时把 `approved` 塞进参数。
+/// 模型参数 `approved: true` 对高风险调用完全无效；没有 typed grant 必须停等。
 #[test]
-fn approved_argument_bypasses_gate_even_for_high_risk() {
+fn raw_approved_argument_cannot_bypass_the_gate() {
     let tool = StubTool::new("vdfs_delete", CapabilityRiskLevel::High);
     let c = ctx();
-    assert!(approval_gate(
+    bind_call(&c, "call-1", "session-1");
+    c.set_raw(TRUSTED_APPROVED, Arc::new("true".to_string()));
+    let payload = approval_gate(
         &c,
         &tool.meta(),
         StubTool::risk_of(&tool).as_ref(),
-        &json!({"approved": true})
+        &json!({"path": "tmp/x", "approved": true}),
     )
-    .is_none());
+    .expect("模型自称已批准不能放行");
+    assert_eq!(
+        payload["failure_kind"].as_str(),
+        Some(failure_kind::NEEDS_APPROVAL)
+    );
+    assert_eq!(
+        c.get_raw(TRUSTED_APPROVED)
+            .and_then(|value| value.downcast::<String>().ok())
+            .as_deref()
+            .map(ToString::to_string),
+        Some("false".to_string()),
+        "未消费 grant 时必须清掉继承来的旧标记"
+    );
+}
+
+/// 有效 typed grant 放行，且只在 mandatory gate 消费一次；重放不能复用。
+#[test]
+fn valid_grant_passes_once_and_replay_is_consumed() {
+    let tool = StubTool::new("vdfs_delete", CapabilityRiskLevel::High);
+    let (c, sandbox) = ctx_with_sandbox(SandboxDecision {
+        permitted: true,
+        profile_version: 7,
+        ..Default::default()
+    });
+    bind_call(&c, "call-1", "session-1");
+    let args = json!({"path": "tmp/x"});
+    ApprovalGrant::issue(
+        "call-1",
+        "vdfs_delete",
+        &args,
+        Some("session-1".into()),
+        7,
+        Duration::from_secs(60),
+    )
+    .attach(&c);
+
+    assert!(
+        approval_gate(&c, &tool.meta(), StubTool::risk_of(&tool).as_ref(), &args,).is_none(),
+        "绑定一致的 grant 应放行"
+    );
+    assert_eq!(
+        c.get_raw(TRUSTED_APPROVED)
+            .and_then(|value| value.downcast::<String>().ok())
+            .as_deref()
+            .map(ToString::to_string),
+        Some("true".to_string()),
+        "只有 grant 消费成功后才能发布内层可信标记"
+    );
+    assert!(
+        approval_gate(&c, &tool.meta(), StubTool::risk_of(&tool).as_ref(), &args,).is_some(),
+        "同一 grant 重放必须再次停等"
+    );
+    assert_eq!(
+        c.get_raw(TRUSTED_APPROVED)
+            .and_then(|value| value.downcast::<String>().ok())
+            .as_deref()
+            .map(ToString::to_string),
+        Some("false".to_string()),
+        "重放不能留下上一轮的可信标记"
+    );
+    assert_eq!(sandbox.decide_calls.load(Ordering::SeqCst), 2);
+}
+
+/// grant 的 call/tool/args/session/version 任一变化都不能放行。
+#[test]
+fn grant_is_bound_to_call_tool_args_session_and_profile_version() {
+    let tool = StubTool::new("vdfs_delete", CapabilityRiskLevel::High);
+    let original = json!({"path": "tmp/x"});
+    let cases = [
+        (
+            "other-call",
+            "vdfs_delete",
+            original.clone(),
+            "session-1",
+            7,
+        ),
+        ("call-1", "other_tool", original.clone(), "session-1", 7),
+        (
+            "call-1",
+            "vdfs_delete",
+            json!({"path": "tmp/y"}),
+            "session-1",
+            7,
+        ),
+        (
+            "call-1",
+            "vdfs_delete",
+            original.clone(),
+            "other-session",
+            7,
+        ),
+        ("call-1", "vdfs_delete", original.clone(), "session-1", 6),
+    ];
+    for (call_id, granted_tool, args, session_id, version) in cases {
+        let (c, _) = ctx_with_sandbox(SandboxDecision {
+            permitted: true,
+            profile_version: 7,
+            ..Default::default()
+        });
+        bind_call(&c, "call-1", "session-1");
+        ApprovalGrant::issue(
+            call_id,
+            granted_tool,
+            &original,
+            Some(session_id.into()),
+            version,
+            Duration::from_secs(60),
+        )
+        .attach(&c);
+        assert!(
+            approval_gate(
+                &c,
+                &tool.meta(),
+                StubTool::risk_of(&tool).as_ref(),
+                &args,
+            )
+            .is_some(),
+            "grant 绑定变化必须失效: call={call_id}, tool={granted_tool}, session={session_id}, version={version}"
+        );
+    }
+}
+
+#[tokio::test]
+async fn expired_grant_cannot_pass() {
+    let tool = StubTool::new("vdfs_delete", CapabilityRiskLevel::High);
+    let c = ctx();
+    bind_call(&c, "call-1", "session-1");
+    let args = json!({"path": "tmp/x"});
+    ApprovalGrant::issue(
+        "call-1",
+        "vdfs_delete",
+        &args,
+        Some("session-1".into()),
+        0,
+        Duration::from_millis(1),
+    )
+    .attach(&c);
+    tokio::time::sleep(Duration::from_millis(5)).await;
+    assert!(
+        approval_gate(&c, &tool.meta(), StubTool::risk_of(&tool).as_ref(), &args,).is_some(),
+        "过期 grant 必须失效"
+    );
+}
+
+/// 沙箱只读一次 decide；规则风险是下限，审批模式/阈值取新裁决而非旧 ctx。
+#[test]
+fn sandbox_decision_is_one_snapshot_and_rule_risk_is_a_floor() {
+    let tool = StubTool::new("read_file", CapabilityRiskLevel::Low);
+    let (c, sandbox) = ctx_with_sandbox(SandboxDecision {
+        permitted: true,
+        risk: Some("high".into()),
+        approval_mode: Some("interactive".into()),
+        risk_threshold: Some("low".into()),
+        ..Default::default()
+    });
+    c.set(RISK_LEVEL, "high".to_string());
+    c.set(MODE, "auto".to_string());
+    let payload = approval_gate(
+        &c,
+        &tool.meta(),
+        StubTool::risk_of(&tool).as_ref(),
+        &json!({}),
+    )
+    .expect("规则 High > 新阈值 Low，必须停等");
+    assert_eq!(
+        payload["failure_kind"].as_str(),
+        Some(failure_kind::NEEDS_APPROVAL),
+        "新裁决 interactive 必须覆盖 ctx 的 stale auto"
+    );
+    assert_eq!(payload["prompt"]["risk_level"].as_str(), Some("high"));
+    assert_eq!(sandbox.decide_calls.load(Ordering::SeqCst), 1);
+
+    let high_tool = StubTool::new("vdfs_delete", CapabilityRiskLevel::High);
+    let (c, sandbox) = ctx_with_sandbox(SandboxDecision {
+        permitted: true,
+        risk: Some("low".into()),
+        risk_threshold: Some("high".into()),
+        ..Default::default()
+    });
+    assert!(
+        approval_gate(
+            &c,
+            &high_tool.meta(),
+            StubTool::risk_of(&high_tool).as_ref(),
+            &json!({}),
+        )
+        .is_none(),
+        "规则 Low 不能把工具 High 调低"
+    );
+    assert_eq!(sandbox.decide_calls.load(Ordering::SeqCst), 1);
+}
+
+#[test]
+fn sandbox_deny_and_intercept_are_honored_before_grant_consumption() {
+    let tool = StubTool::new("vdfs_delete", CapabilityRiskLevel::High);
+    let args = json!({"path": "tmp/x"});
+    let (c, _) = ctx_with_sandbox(SandboxDecision::denied("policy says no"));
+    bind_call(&c, "call-1", "session-1");
+    ApprovalGrant::issue(
+        "call-1",
+        "vdfs_delete",
+        &args,
+        Some("session-1".into()),
+        0,
+        Duration::from_secs(60),
+    )
+    .attach(&c);
+    let denied = approval_gate(&c, &tool.meta(), StubTool::risk_of(&tool).as_ref(), &args)
+        .expect("deny 必须拒绝");
+    assert_eq!(
+        denied["failure_kind"].as_str(),
+        Some(failure_kind::PERMISSION_DENIED)
+    );
+    assert!(
+        ApprovalGrant::take(
+            c.as_ref(),
+            "call-1",
+            "vdfs_delete",
+            &args,
+            Some("session-1"),
+            0,
+        ),
+        "沙箱 deny 必须先于 grant 消费"
+    );
+    assert!(c.get_raw(TRUSTED_APPROVED).is_none(), "deny 不应发布标记");
+
+    let intercept = json!({"failure_kind": "needs_approval", "prompt": {"kind": "confirm"}});
+    let (c, sandbox) = ctx_with_sandbox(SandboxDecision {
+        permitted: false,
+        intercept: Some(intercept.clone()),
+        ..Default::default()
+    });
+    assert_eq!(
+        approval_gate(&c, &tool.meta(), StubTool::risk_of(&tool).as_ref(), &args,),
+        Some(intercept)
+    );
+    assert_eq!(sandbox.decide_calls.load(Ordering::SeqCst), 1);
 }
 
 /// 会话阈值 `high` 抬高 ⇒ High 风险也放行（`>` 是严格大于）。
@@ -311,18 +615,30 @@ fn grant_ceiling_below_the_call_risk_still_asks() {
 
 // ==================== 端口执行体：GatedExecutor ====================
 
-/// 放行路径：`approved: true` 时执行体透传到内层；`executed` 置位，结果按
-/// `RESULT_KEY` 交回。
+/// 放行路径：有效 typed grant 透传到内层；`executed` 置位，结果按
+/// `RESULT_KEY` 交回。模型参数里的 `approved` 不会被注入或信任。
 #[tokio::test]
-async fn executor_executes_inner_when_approved() {
+async fn executor_executes_inner_with_a_valid_grant() {
     let tool = StubTool::new("vdfs_delete", CapabilityRiskLevel::High);
     let g = gated(&tool);
+    let c = ctx();
+    bind_call(&c, "call-1", "session-1");
+    let args = json!({"path": "tmp/x"});
+    ApprovalGrant::issue(
+        "call-1",
+        "vdfs_delete",
+        &args,
+        Some("session-1".into()),
+        0,
+        Duration::from_secs(60),
+    )
+    .attach(&c);
     let out = g
         .execute(
-            exec_ctx(ctx()),
+            exec_ctx(c.clone()),
             PortInput {
                 port: "vdfs_delete".to_string(),
-                payload: json!({"approved": true}),
+                payload: args,
             },
         )
         .await;
@@ -332,6 +648,36 @@ async fn executor_executes_inner_when_approved() {
         tool.executed.load(std::sync::atomic::Ordering::SeqCst),
         "闸门放行必须落到内层"
     );
+    assert_eq!(
+        c.get_raw(TRUSTED_APPROVED)
+            .and_then(|value| value.downcast::<String>().ok())
+            .as_deref()
+            .map(ToString::to_string),
+        Some("true".to_string())
+    );
+}
+
+/// 原始模型 `approved:true` 即使到达执行体也不能绕过高风险闸门。
+#[tokio::test]
+async fn executor_ignores_raw_approved_argument() {
+    let tool = StubTool::new("vdfs_delete", CapabilityRiskLevel::High);
+    let g = gated(&tool);
+    let c = ctx();
+    bind_call(&c, "call-1", "session-1");
+    let out = g
+        .execute(
+            exec_ctx(c),
+            PortInput {
+                port: "vdfs_delete".to_string(),
+                payload: json!({"path": "tmp/x", "approved": true}),
+            },
+        )
+        .await;
+    assert_eq!(
+        result_of(&out)["failure_kind"].as_str(),
+        Some(failure_kind::NEEDS_APPROVAL)
+    );
+    assert!(!tool.executed.load(std::sync::atomic::Ordering::SeqCst));
 }
 
 /// 拦截路径：执行体交回确认卡载荷（`failure_kind` 在结果里）、**不**触发内层执行。

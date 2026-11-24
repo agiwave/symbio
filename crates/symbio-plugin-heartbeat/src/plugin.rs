@@ -217,7 +217,15 @@ impl Plugin for HeartbeatPlugin {
         if path == TRAVERSE_AVAILABLE_TOOLS && ctx.get(CAPABILITY_VISITOR).is_some() {
             let tool = HeartbeatTool::new(Arc::downgrade(&self));
             let meta = tool.meta();
-            symbio_providers::register_tool(&ctx, meta, None, Arc::new(tool)).await;
+            let facts: symbio_providers::FactsOf = Arc::new(HeartbeatTool::intent_facts);
+            symbio_providers::register_tool_with_facts(
+                &ctx,
+                meta,
+                None,
+                Some(facts),
+                Arc::new(tool),
+            )
+            .await;
         }
         if path == TRAVERSE_AVAILABLE_OPTIONS {
             if let Some(visitor) = ctx.get(OPTION_VISITOR) {

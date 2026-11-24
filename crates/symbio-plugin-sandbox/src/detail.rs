@@ -14,30 +14,52 @@ use symbio_plugin_api::{
 ///
 /// 这是 mode / risk_level 消失后**唯一的会话安全选项**——用户选一个沙箱，
 /// 审批模式与风险阈值由该沙箱档案内部承载（裁决 B）。
+pub(crate) const ACTION_COPY: &str = "copy";
+
 pub(crate) fn sandbox_option_field(
     archives: &[(String, String)],
     active: Option<&str>,
+    warning: Option<&str>,
+    has_snapshot: bool,
 ) -> DetailField {
-    let options: Vec<DetailOption> = if archives.is_empty() {
-        vec![DetailOption {
-            value: String::new(),
-            label: "未配置".to_string(),
-            description: Some("暂无沙箱，请前往「安全运行环境」添加".to_string()),
-        }]
-    } else {
+    let mut options = vec![DetailOption {
+        value: String::new(),
+        label: "禁用沙箱（不启用保护）".to_string(),
+        description: Some("本应用没有容器级隔离；禁用后仅保留工具自身审批".to_string()),
+    }];
+    options.extend(
         archives
             .iter()
+            .filter(|(id, _)| !id.is_empty())
             .map(|(id, name)| DetailOption {
                 value: id.clone(),
                 label: name.clone(),
                 description: None,
-            })
-            .collect()
-    };
+            }),
+    );
+    if let Some(active) = active.filter(|id| !id.is_empty()) {
+        if !archives.iter().any(|(id, _)| id == active) {
+            options.push(DetailOption {
+                value: active.to_string(),
+                label: format!("{active}（档案缺失或不可用）"),
+                description: Some("请重新选择可用档案，或禁用沙箱".to_string()),
+            });
+        }
+    }
+    let mut description =
+        "选择本次会话的安全运行环境（含审批策略）；禁用表示不启用沙箱保护".to_string();
+    if let Some(warning) = warning.filter(|value| !value.is_empty()) {
+        let impact = if has_snapshot {
+            "当前继续使用上一份良好快照"
+        } else {
+            "当前没有可用快照，沙箱执行将失败关闭；请修复档案后重试"
+        };
+        description.push_str(&format!("。警告：{warning}，{impact}"));
+    }
     DetailField {
         key: "sandbox_id".to_string(),
         label: "沙箱".to_string(),
-        description: Some("选择本次会话的安全运行环境（含审批策略）".to_string()),
+        description: Some(description),
         widget: "select".to_string(),
         icon: Some("sandbox".to_string()),
         default: active.map(|id| serde_json::json!(id)),
@@ -70,23 +92,33 @@ fn field(key: &str, label: &str, desc: &str, widget: &str) -> DetailField {
 /// 判定动作与风险档。顺序判定、首个命中生效；某对象配了规则却全未命中 ⇒ 拒绝，
 /// 要表达「只禁几条、其余放行」就加一条 `glob / * / 允许` 兜底行。
 fn rule_table_field() -> DetailField {
-    let kinds = ["shell_command", "vdfs_path", "url"];
+    let kinds = [
+        ("shell_command", "完整命令"),
+        ("shell_subcommand", "子命令"),
+        ("shell_executable", "可执行程序"),
+        ("shell_redirection_target", "重定向目标"),
+        ("shell_unresolved_argument", "未解析参数"),
+        ("shell_unparseable", "无法解析命令"),
+        ("shell_expansion", "命令展开表达式"),
+        ("vdfs_path", "路径"),
+        ("url", "URL"),
+        ("mcp_tool", "MCP 工具"),
+        ("mcp_argument", "MCP 参数"),
+        ("agent_id", "子智能体"),
+        ("session_id", "会话"),
+        ("heartbeat_action", "心跳动作"),
+    ];
     let kind_opts: Vec<DetailOption> = kinds
         .iter()
-        .map(|k| DetailOption {
-            value: (*k).into(),
-            label: match *k {
-                "shell_command" => "命令",
-                "vdfs_path" => "路径",
-                _ => "URL",
-            }
-            .into(),
+        .map(|(value, label)| DetailOption {
+            value: (*value).into(),
+            label: (*label).into(),
             description: None,
         })
         .collect();
     let mode_opts: Vec<DetailOption> = [
         ("exact", "精确：值必须完全相等"),
-        ("prefix", "前缀：值以填写内容开头"),
+        ("prefix", "前缀：命令按原文前缀；路径按目录段匹配"),
         ("contains", "包含：值含填写内容"),
         ("glob", "通配：* 任意长、? 单字符"),
     ]
@@ -107,9 +139,9 @@ fn rule_table_field() -> DetailField {
         .collect();
     let risk_opts: Vec<DetailOption> = [
         ("inherit", "继承工具自身判定（留空同义）"),
-        ("low", "低风险（一般不触发审批）"),
-        ("medium", "中风险"),
-        ("high", "高风险（通常需要审批）"),
+        ("low", "低风险（最低风险）"),
+        ("medium", "中风险（最低风险）"),
+        ("high", "高风险（最低风险）"),
     ]
     .iter()
     .map(|(v, l)| DetailOption {
@@ -128,19 +160,22 @@ fn rule_table_field() -> DetailField {
     };
     DetailField {
         columns: vec![
-            col("kind", "对象", "select", kind_opts),
+            DetailColumn {
+                placeholder: Some("选择或输入事实种类".into()),
+                ..col("kind", "对象", "datalist", kind_opts)
+            },
             col("match", "匹配", "select", mode_opts),
             DetailColumn {
                 placeholder: Some("要匹配的值，如 git 或 /home/me/docs/**".into()),
                 ..col("value", "值", "text", vec![])
             },
             col("action", "动作", "select", action_opts),
-            col("risk", "风险档", "select", risk_opts),
+            col("risk", "风险下限", "select", risk_opts),
         ],
         ..field(
             "rules",
             "能力约束规则",
-            "按顺序逐条匹配，首个命中生效：拒绝直接拦下；允许并可指定风险档（影响是否需审批）。留空整张表 = 不限制。",
+            "按顺序逐条匹配，首个命中生效：拒绝直接拦下；允许规则的风险档是工具风险的下限（最低风险），不得调低工具风险。路径规则存在时，shell 无法判定的参数默认拒绝，需另加「未解析参数」规则放行。留空整张表 = 不限制。",
             "table",
         )
     }
@@ -164,6 +199,17 @@ pub(crate) fn sandbox_detail_definition() -> DetailDefinition {
                 title: None,
                 collapsed: false,
                 fields: vec![
+                    DetailField {
+                        default: Some(serde_json::json!(
+                            "仅按工具声明的事实执行授权；不提供容器、网络或进程隔离。"
+                        )),
+                        ..field(
+                            "boundary",
+                            "能力边界",
+                            "规则命中与审批不等于执行隔离；Shell、文件和出站请求仍运行在宿主权限下",
+                            "static",
+                        )
+                    },
                     DetailField {
                         required: true,
                         placeholder: Some("例如：办公环境".into()),
@@ -206,15 +252,15 @@ pub(crate) fn sandbox_detail_definition() -> DetailDefinition {
                     DetailField {
                         required: true,
                         options: vec![
-                            opt("low", "低（放行大多数操作）"),
-                            opt("medium", "中（默认）"),
-                            opt("high", "高（更多操作需审批）"),
+                            opt("low", "低（仅低风险自动放行）"),
+                            opt("medium", "中（中风险及以下自动放行）"),
+                            opt("high", "高（高风险及以下自动放行）"),
                         ],
                         default: Some(serde_json::json!("medium")),
                         ..field(
                             "risk_threshold",
                             "风险阈值",
-                            "越高越谨慎：更多操作会被判定为需要审批",
+                            "最大自动放行风险；高于阈值需审批",
                             "select",
                         )
                     },
@@ -235,6 +281,18 @@ pub(crate) fn sandbox_detail_definition() -> DetailDefinition {
                 label: "保存".into(),
                 style: "primary".into(),
                 busy_label: Some("保存中…".into()),
+                ..Default::default()
+            },
+            DetailAction {
+                id: ACTION_COPY.into(),
+                label: "复制为可编辑档案".into(),
+                style: "secondary".into(),
+                disabled_when: Some(DetailCondition {
+                    key: "is_existing".into(),
+                    equals: Some(serde_json::json!(false)),
+                    ..Default::default()
+                }),
+                busy_label: Some("复制中…".into()),
                 ..Default::default()
             },
             DetailAction {

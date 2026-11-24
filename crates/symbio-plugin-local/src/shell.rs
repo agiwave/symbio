@@ -5,7 +5,8 @@
 //! - `command` 字段是用户/Agent 提供的**整条 shell 命令**，不是部分插值。
 //!   因此不构成"把不可信数据拼进固定命令"的注入模式。
 //! - 真正的注入防御靠 `SecurityPolicy::is_command_allowed`（白名单）+ 风险等级判定。
-//! - 中/高风险命令必须 `approved: true` 才会执行（AutonomyLevel::Supervised 模式）。
+//! - 中/高风险命令必须持有 collectors 消费一次性授权后写入的 ctx `approved="true"`
+//!   可信标记才会执行（AutonomyLevel::Supervised 模式）；模型参数 `args.approved` 一律忽略。
 //! - 执行通过 `tokio::process::Command` 显式 spawn shell（`cmd /C` 或 `sh -c`），
 //!   没有把任何不可信片段拼到固定的 argv 里。
 //! - Unix 上进一步清空 env，只透传白名单变量，减小环境变量泄漏面。
@@ -152,6 +153,7 @@ impl ShellTool {
     async fn prepare(
         &self,
         args: &Value,
+        ctx: &dyn PluginInvokeRequest,
         threshold: CapabilityRiskLevel,
         abort: &ExecAbortSignal,
     ) -> Result<(String, CapabilityRiskLevel), PluginError> {
@@ -166,10 +168,12 @@ impl ShellTool {
             }
         };
 
-        let approved = args
-            .get("approved")
-            .and_then(|v| v.as_bool())
-            .unwrap_or(false);
+        // 授权只认 collectors 在一次性 grant 原子消费后写入的 ctx 字符串标记。
+        // `args.approved` 是模型可伪造的历史载荷，不能进入执行判据。
+        let approved = ctx
+            .get_raw("approved")
+            .and_then(|value| value.downcast::<String>().ok())
+            .is_some_and(|value| value.as_str() == "true");
 
         // 验证命令（per-session 风险等级阈值从 ctx[RISK_LEVEL] 透传而来）。
         // 先验证后占名额：非法命令不消耗限流额度。
@@ -217,13 +221,14 @@ impl ShellTool {
     async fn execute_streaming(
         &self,
         args: &Value,
+        ctx: &dyn PluginInvokeRequest,
         workdir: &str,
         threshold: CapabilityRiskLevel,
         sink: &ExecEventSink,
         abort: &ExecAbortSignal,
         target: Option<&SnapshotTarget>,
     ) -> Result<Response, PluginError> {
-        let (command, risk) = self.prepare(args, threshold, abort).await?;
+        let (command, risk) = self.prepare(args, ctx, threshold, abort).await?;
 
         let workspace_dir = std::path::PathBuf::from(shellexpand::tilde(workdir).to_string());
 
@@ -538,29 +543,8 @@ impl ShellTool {
         _env: &ExecEnv,
         ctx: Arc<dyn PluginInvokeRequest>,
     ) -> Result<Value, PluginError> {
-        // 沙箱能力约束（D-531）：命令语义由**工具自己**解析成意图事实提交给沙箱
-        // （讨论稿 §1.6）——沙箱不认识 shell 语法，只按开放 kind 匹配用户配的规则。
-        // 缺席（没有沙箱句柄）= 全放行降级；ask（询问用户）不在这里，由沙箱在拦截点
-        // 统一产出。本查询只返回 bool：许可就继续，不许可就拒。
-        if let Some(face) = symbio_plugin_api::sandbox_of(ctx.as_ref()) {
-            let mut facts = Vec::new();
-            if let Some(command) = args.get("command").and_then(|v| v.as_str()) {
-                facts.push(symbio_plugin_api::SandboxFact::new(
-                    "shell_command",
-                    command,
-                ));
-            }
-            // 工作目录也是路径事实：目录黑白名单对「命令在哪里跑」同样生效。
-            if let Some(workdir) = ctx.get(symbio_plugin_api::WORKDIR) {
-                facts.push(symbio_plugin_api::SandboxFact::new("vdfs_path", workdir));
-            }
-            if !facts.is_empty() && !face.permits(&facts) {
-                return Err(PluginError::InternalError(
-                    "沙箱未放行本次 shell 命令 / 工作目录".to_string(),
-                ));
-            }
-        }
-
+        // 沙箱裁决由注册收口点的 GatedExecutor 在执行前一次性完成；shell 不在这里
+        // 再读 permits / risk_of，避免把不同档案快照拼成第二次判定。
         let workdir_str = ctx.get(symbio_plugin_api::WORKDIR).ok_or_else(|| {
             PluginError::ValidationError("Missing workdir in context".to_string())
         })?;
@@ -588,6 +572,7 @@ impl ShellTool {
         let resp = self
             .execute_streaming(
                 &args,
+                ctx.as_ref(),
                 &workdir_str,
                 threshold,
                 &sink,

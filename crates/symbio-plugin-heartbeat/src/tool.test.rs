@@ -38,6 +38,33 @@ fn view_matches_config_slots() {
     assert_eq!(v["include_history"], json!(false));
 }
 
+#[test]
+fn intent_facts_expose_action_and_trusted_session_without_prompt() {
+    let ctx: Arc<dyn PluginInvokeRequest> = Arc::new(PluginSimpleRequest::new(None, None));
+    ctx.set(SESSION_ID, "session-1".to_string());
+
+    let facts = HeartbeatTool::intent_facts(
+        &json!({ "action": "set", "prompt": "读取 /etc/passwd" }),
+        &ctx,
+    );
+    assert_eq!(
+        facts,
+        vec![
+            SandboxFact::new("heartbeat_action", "set"),
+            SandboxFact::new("session_id", "session-1"),
+        ]
+    );
+
+    let defaults = HeartbeatTool::intent_facts(&json!({}), &ctx);
+    assert_eq!(
+        defaults,
+        vec![
+            SandboxFact::new("heartbeat_action", "get"),
+            SandboxFact::new("session_id", "session-1"),
+        ]
+    );
+}
+
 /// 宿主插件已被释放（能力行里的 `Weak` 失效）⇒ 诚实报错。
 ///
 /// 工具行随能力表活到下一轮收集，而插件实例可能先走。这一跳不报错的替代方案是

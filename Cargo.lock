@@ -4473,6 +4473,7 @@ dependencies = [
  "time",
  "tokio",
  "tracing",
+ "url",
  "uuid",
  "which",
  "zip",
@@ -4789,7 +4790,9 @@ name = "symbio-plugin-web"
 version = "0.1.14"
 dependencies = [
  "async-trait",
+ "encoding_rs",
  "glob",
+ "http",
  "regex",
  "reqwest 0.13.5",
  "serde",

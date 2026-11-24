@@ -25,6 +25,231 @@ fn session_node(status: &str, error: Option<&str>) -> VdfsNode {
     n
 }
 
+#[tokio::test]
+async fn agent_run_facts_include_target_agent_and_effective_workdir() {
+    let ctx: Arc<dyn PluginInvokeRequest> = Arc::new(PluginSimpleRequest::new(None, None));
+    ctx.set(AGENT_ID, "current-agent".to_string());
+    ctx.set(WORKDIR, "/workspace/current".to_string());
+
+    let facts = AgentRunCapability::intent_facts(
+        &json!({
+            "agent_id": "child-agent",
+            "working_dir": "/workspace\\child",
+            "prompt": "读取 /etc/passwd",
+        }),
+        &ctx,
+        None,
+    )
+    .await
+    .unwrap();
+    assert_eq!(
+        facts,
+        vec![
+            SandboxFact::new("agent_id", "child-agent"),
+            SandboxFact::new("vdfs_path", "/workspace/child"),
+        ]
+    );
+
+    let inherited = AgentRunCapability::intent_facts(&json!({}), &ctx, None)
+        .await
+        .unwrap();
+    assert_eq!(
+        inherited,
+        vec![
+            SandboxFact::new("agent_id", "current-agent"),
+            SandboxFact::new("vdfs_path", "/workspace/current"),
+        ]
+    );
+}
+
+#[tokio::test]
+async fn continuation_facts_fail_closed_without_authoritative_session_view() {
+    let ctx: Arc<dyn PluginInvokeRequest> = Arc::new(PluginSimpleRequest::new(None, None));
+    let error = AgentRunCapability::intent_facts(
+        &json!({ "session_id": "child-1", "working_dir": "/allowed" }),
+        &ctx,
+        None,
+    )
+    .await
+    .unwrap_err();
+    assert!(error.contains("路由入口"), "{error}");
+}
+
+#[test]
+fn continuation_cannot_replace_the_stored_workdir() {
+    assert!(ensure_continuation_workdir(None, Some("/workspace/child")).is_ok());
+    assert!(
+        ensure_continuation_workdir(Some("/workspace\\child"), Some("/workspace/child")).is_ok()
+    );
+    assert!(ensure_continuation_workdir(Some("/other"), Some("/workspace/child")).is_err());
+    assert!(ensure_continuation_workdir(Some("/other"), None).is_err());
+}
+
+#[test]
+fn continuation_cannot_replace_the_stored_agent() {
+    assert!(ensure_continuation_agent(None, Some("stored-agent")).is_ok());
+    assert!(ensure_continuation_agent(Some("stored-agent"), Some("stored-agent")).is_ok());
+    assert!(ensure_continuation_agent(Some("other-agent"), Some("stored-agent")).is_err());
+    assert!(ensure_continuation_agent(Some("other-agent"), None).is_err());
+}
+
+struct StoredWorkdirProvider {
+    node: VdfsNode,
+    seen_path: std::sync::Mutex<Option<String>>,
+}
+
+#[async_trait::async_trait]
+impl VdfsProvider for StoredWorkdirProvider {
+    async fn dispatch(
+        &self,
+        _ctx: &symbio_plugin_api::VdfsContext,
+        path: &str,
+        request: VdfsRequest,
+    ) -> Result<symbio_plugin_api::VdfsResponse, VdfsError> {
+        assert!(matches!(request, VdfsRequest::Stat));
+        *self.seen_path.lock().unwrap() = Some(path.to_string());
+        Ok(symbio_plugin_api::VdfsResponse::Stat(self.node.clone()))
+    }
+}
+
+struct StoredWorkdirParent {
+    provider: Arc<StoredWorkdirProvider>,
+}
+
+#[async_trait::async_trait]
+impl Plugin for StoredWorkdirParent {
+    fn meta(&self) -> symbio_kernel::plugin::PluginMeta {
+        symbio_kernel::plugin::PluginMeta::new("stored-workdir-test", "stored-workdir-test")
+    }
+
+    fn get_vfs_provider(self: Arc<Self>) -> Option<Arc<dyn VdfsProvider>> {
+        Some(self.provider.clone())
+    }
+
+    async fn route(
+        self: Arc<Self>,
+        _ctx: Arc<dyn PluginInvokeRequest>,
+    ) -> symbio_plugin_api::PluginInvokeResponse<PluginPayload> {
+        Err(PluginError::NotFound("stored-workdir-test".into()))
+    }
+
+    async fn traverse(
+        self: Arc<Self>,
+        _path: String,
+        _ctx: Arc<dyn PluginInvokeRequest>,
+    ) -> symbio_plugin_api::PluginInvokeResponse<PluginPayload> {
+        Ok(PluginPayload::new(&Vec::<Value>::new()))
+    }
+}
+
+#[tokio::test]
+async fn continuation_facts_read_the_target_sessions_stored_workdir() {
+    let mut node = VdfsNode::dir("child-1", "子会话", VdfsAccess::READ);
+    node.attributes.insert("message_count".into(), json!(2));
+    node.attributes.insert(
+        "metadata".into(),
+        json!({
+            "parent_session_id": "parent-1",
+            "agent_id": "stored-agent",
+            "workdir": "/workspace\\stored-child"
+        }),
+    );
+    let provider = Arc::new(StoredWorkdirProvider {
+        node,
+        seen_path: std::sync::Mutex::new(None),
+    });
+    let parent: Arc<dyn Plugin> = Arc::new(StoredWorkdirParent {
+        provider: provider.clone(),
+    });
+    let ctx: Arc<dyn PluginInvokeRequest> = Arc::new(PluginSimpleRequest::new(None, None));
+    ctx.set(AGENT_ID, "parent".to_string());
+    ctx.set(SESSION_ID, "parent-1".to_string());
+    ctx.set(WORKDIR, "/workspace/parent".to_string());
+
+    let facts = AgentRunCapability::intent_facts(
+        &json!({ "session_id": "child-1", "working_dir": "/wrong" }),
+        &ctx,
+        Some(&Arc::downgrade(&parent)),
+    )
+    .await
+    .unwrap();
+
+    assert_eq!(
+        facts,
+        vec![
+            SandboxFact::new("agent_id", "stored-agent"),
+            SandboxFact::new("vdfs_path", "/workspace/stored-child"),
+            SandboxFact::new("session_id", "child-1"),
+        ]
+    );
+    assert_eq!(
+        provider.seen_path.lock().unwrap().as_deref(),
+        Some("session/child-1")
+    );
+}
+
+#[tokio::test]
+async fn continuation_rejects_an_explicit_agent_that_differs_from_storage() {
+    let mut node = VdfsNode::dir("child-1", "子会话", VdfsAccess::READ);
+    node.attributes.insert("message_count".into(), json!(2));
+    node.attributes.insert(
+        "metadata".into(),
+        json!({
+            "parent_session_id": "parent-1",
+            "agent_id": "restricted-agent",
+            "workdir": "/workspace/child"
+        }),
+    );
+    let provider = Arc::new(StoredWorkdirProvider {
+        node,
+        seen_path: std::sync::Mutex::new(None),
+    });
+    let parent: Arc<dyn Plugin> = Arc::new(StoredWorkdirParent {
+        provider: provider.clone(),
+    });
+    let ctx: Arc<dyn PluginInvokeRequest> = Arc::new(PluginSimpleRequest::new(None, None));
+    ctx.set(SESSION_ID, "parent-1".to_string());
+
+    let error = AgentRunCapability::intent_facts(
+        &json!({ "session_id": "child-1", "agent_id": "allowed-agent" }),
+        &ctx,
+        Some(&Arc::downgrade(&parent)),
+    )
+    .await
+    .unwrap_err();
+
+    assert!(error.contains("不能更改 agent_id"), "{error}");
+}
+
+#[tokio::test]
+async fn continuation_rejects_a_session_owned_by_another_parent() {
+    let mut node = VdfsNode::dir("child-1", "子会话", VdfsAccess::READ);
+    node.attributes.insert("message_count".into(), json!(2));
+    node.attributes.insert(
+        "metadata".into(),
+        json!({ "parent_session_id": "other-parent", "workdir": "/workspace/child" }),
+    );
+    let provider = Arc::new(StoredWorkdirProvider {
+        node,
+        seen_path: std::sync::Mutex::new(None),
+    });
+    let parent: Arc<dyn Plugin> = Arc::new(StoredWorkdirParent {
+        provider: provider.clone(),
+    });
+    let ctx: Arc<dyn PluginInvokeRequest> = Arc::new(PluginSimpleRequest::new(None, None));
+    ctx.set(SESSION_ID, "parent-1".to_string());
+
+    let error = AgentRunCapability::intent_facts(
+        &json!({ "session_id": "child-1" }),
+        &ctx,
+        Some(&Arc::downgrade(&parent)),
+    )
+    .await
+    .unwrap_err();
+
+    assert!(error.contains("不属于当前会话"), "{error}");
+}
+
 /// 仍在 `working` ⇒ `None`（继续等）。这一格判错会表现为「子会话没跑完就收尾」。
 #[test]
 fn working_session_is_not_an_end() {
@@ -238,6 +463,25 @@ fn removal_and_user_frames_take_their_own_paths() {
 }
 
 // ── 转播锚的选值：优先工具卡的节点地址 ──────────────────────────────
+
+/// 父会话恢复动作只认 collectors 发布的 ctx 标记；历史 `args.approved` 不构成授权。
+#[test]
+fn resume_action_ignores_model_approved_and_requires_collector_marker() {
+    let ctx = PluginSimpleRequest::from_parts(
+        json!({"session_id": "child-1", "target_id": "card-1", "approved": true}),
+        None,
+    );
+    assert!(
+        matches!(resume_action(&ctx), ResumeAction::Retry),
+        "模型参数 approved 不能把恢复动作提升为 Approve"
+    );
+
+    ctx.set_raw("approved", Arc::new("true".to_string()));
+    assert!(
+        matches!(resume_action(&ctx), ResumeAction::Approve),
+        "collector 消费 grant 后的可信标记才可提升为 Approve"
+    );
+}
 
 /// 有 `TOOL_NODE_ID` ⇒ 锚到工具卡的**真实节点 id**。锚错一格（锚到 wire id）的
 /// 表现：卡的 id 格是节点 id、wire id 只存在 `meta.tool_call_id`，前端按

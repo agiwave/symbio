@@ -204,6 +204,17 @@ describe('DetailForm info 绑定：只读概览 + open-container', () => {
     expect(w.emitted('save')).toBeUndefined()
   })
 
+  it('static 字段无节点值时展示声明的固定文案', () => {
+    const definition = def({
+      binding: 'option',
+      sections: [{ fields: [{ key: 'boundary', label: '能力边界', widget: 'static', default: '不提供容器隔离' }] }],
+    })
+    const w = mount(DetailForm, {
+      props: { definition, node: node({ name: 'sandbox' }), values: {}, capabilities: { mutable: true } },
+    })
+    expect(w.find('.static-value').text()).toBe('不提供容器隔离')
+  })
+
   it('open-container 动作携带 payload.kind 上抛，delete 走机制通道', async () => {
     const w = mount(DetailForm, {
       props: { definition: infoDef(), node: agentDirNode, capabilities: { mutable: true } },
@@ -253,6 +264,119 @@ describe('DetailForm info 绑定：只读概览 + open-container', () => {
     const titles = w.findAll('.ea-btn').map((b) => b.attributes('title'))
     expect(titles).toEqual(['浏览内部（子会话）'])
     expect(w.find('.ea-divider').exists()).toBe(false)
+  })
+})
+
+describe('DetailForm table：行编排与单元格错误', () => {
+  const definition = def({
+    sections: [
+      {
+        fields: [
+          {
+            key: 'items',
+            label: '项目',
+            widget: 'table',
+            columns: [
+              { key: 'kind', label: '类型', widget: 'select', options: [{ value: 'a', label: 'A' }] },
+              { key: 'value', label: '值' },
+            ],
+          },
+        ],
+      },
+    ],
+    actions: [{ id: 'save', label: '保存', style: 'primary' }],
+  })
+
+  it('上移与复制写回同一表单模型，保存保留新顺序', async () => {
+    const w = mount(DetailForm, {
+      props: {
+        definition,
+        node: node({ name: 'srv' }),
+        values: { items: [{ kind: 'a', value: 'first' }, { kind: 'a', value: 'second' }] },
+        capabilities: { mutable: true },
+      },
+    })
+    await w.find('button[aria-label="下移第 1 行"]').trigger('click')
+    await w.find('button[aria-label="复制第 1 行"]').trigger('click')
+    await w.find('button[title="保存"]').trigger('click')
+    expect((w.emitted('save')![0][0] as Record<string, unknown>).items).toEqual([
+      { kind: 'a', value: 'second' },
+      { kind: 'a', value: 'second' },
+      { kind: 'a', value: 'first' },
+    ])
+  })
+
+  it('表格预填与保存都丢弃非法行', async () => {
+    const tableDef = def({
+      binding: 'option',
+      sections: [{
+        fields: [{
+          key: 'rules', label: '规则', widget: 'table',
+          columns: [{ key: 'value', label: '值' }],
+        }],
+      }],
+      actions: [{ id: 'save', label: '保存', style: 'primary' }],
+    })
+    const w = mount(DetailForm, {
+      props: {
+        definition: tableDef,
+        node: node({ name: 'sandbox' }),
+        values: { rules: [{ value: 'keep' }, null, 'bad', [{ value: 'nested' }]] },
+        capabilities: { mutable: true },
+      },
+    })
+    expect(w.findAll('.table-grid tbody tr')).toHaveLength(1)
+    await w.find('button[title="保存"]').trigger('click')
+    expect((w.emitted('save')![0][0] as Record<string, unknown>).rules).toEqual([{ value: 'keep' }])
+  })
+
+  it('表格 select 保留空选择，datalist 允许输入自定义事实种类', async () => {
+    const tableDef = def({
+      sections: [{
+        fields: [{
+          key: 'rules', label: '规则', widget: 'table',
+          columns: [
+            { key: 'kind', label: '对象', widget: 'datalist', options: [{ value: 'url', label: 'URL' }] },
+            { key: 'action', label: '动作', widget: 'select', options: [{ value: 'allow', label: '允许' }] },
+          ],
+        }],
+      }],
+      actions: [{ id: 'save', label: '保存', style: 'primary' }],
+    })
+    const w = mount(DetailForm, {
+      props: {
+        definition: tableDef,
+        node: node({ name: 'srv' }),
+        values: { rules: [{ kind: '', action: '' }] },
+        capabilities: { mutable: true },
+      },
+    })
+    expect(w.find<HTMLSelectElement>('.table-grid select').element.value).toBe('')
+    expect(w.find('.table-grid select option').text()).toBe('请选择')
+    const kind = w.find<HTMLInputElement>('.table-grid input[list]')
+    expect(kind.attributes('list')).toBeTruthy()
+    expect(w.find('datalist option').attributes('value')).toBe('url')
+    await kind.setValue('custom_fact')
+    await w.find('button[title="保存"]').trigger('click')
+    expect((w.emitted('save')![0][0] as Record<string, unknown>).rules).toEqual([
+      { kind: 'custom_fact', action: '' },
+    ])
+  })
+
+  it('行.列错误就地标记单元格，并汇总到所属字段', () => {
+    const w = mount(DetailForm, {
+      props: {
+        definition,
+        node: node({ name: 'srv' }),
+        values: { items: [{ kind: 'a', value: 'first' }, { kind: '', value: '' }] },
+        fieldErrors: [{ field: 'items.1.kind', message: '请选择类型' }],
+        capabilities: { mutable: true },
+      },
+    })
+    expect(w.findAll('.table-grid .input-invalid')).toHaveLength(1)
+    expect(w.find('.table-grid .input-invalid').attributes('aria-invalid')).toBe('true')
+    expect(w.text()).toContain('请选择类型')
+    expect(w.find('.setting-info .field-error').text()).toBe('请选择类型')
   })
 })
 
@@ -372,6 +496,29 @@ describe('DetailForm option 绑定（VDFS）：异步 values 到达触发预填'
     // 编辑现场被保留（此处无用户编辑，故维持首次预填值 A，而非 A-REFRESH）
     await w.setProps({ values: { name: 'A-REFRESH', provider: 'anthropic', model: 'a-m2' } })
     expect(w.find('.title-text').text()).toBe('A')
+  })
+
+  it('option 绑定隐藏字段既不校验也不保存', async () => {
+    const w = mount(DetailForm, {
+      props: {
+        definition: def({
+          binding: 'option',
+          sections: [{
+            fields: [
+              { key: 'mode', label: '模式', widget: 'select', options: [{ value: 'off', label: '关闭' }] },
+              { key: 'payload', label: '隐藏载荷', widget: 'json', visible_when: { key: 'mode', equals: 'on' } },
+            ],
+          }],
+          actions: [{ id: 'save', label: '保存', style: 'primary' }],
+        }),
+        node: node({ name: 'settings' }),
+        values: { mode: 'off', payload: '{ broken' },
+        capabilities: { mutable: true },
+      },
+    })
+    expect(w.text()).not.toContain('隐藏载荷')
+    await w.find('button[title="保存"]').trigger('click')
+    expect(w.emitted('save')![0][0]).toEqual({ mode: 'off' })
   })
 
   it('option 绑定保存只交回纯字段值（不带 id，也不被动作载荷污染）', async () => {

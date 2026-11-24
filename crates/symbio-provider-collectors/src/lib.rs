@@ -37,8 +37,10 @@
 mod approval;
 mod tool_visitor;
 
-pub use approval::{approval_gate, approval_gate_with_facts, FactsOf, RiskOf};
-pub use tool_visitor::{register_tool, register_tool_with_facts, DefaultToolVisitor};
+pub use approval::{approval_gate, approval_gate_with_facts, AsyncFactsOf, FactsOf, RiskOf};
+pub use tool_visitor::{
+    register_tool, register_tool_with_async_facts, register_tool_with_facts, DefaultToolVisitor,
+};
 
 use std::sync::Arc;
 use symbio_kernel::capability::Registry;

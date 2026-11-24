@@ -131,6 +131,176 @@ async fn pack_roundtrips_through_the_binary_channel() {
     assert_eq!(s.read_text("p1").await.unwrap(), "{\"id\":\"p1\"}");
 }
 
+/// 克隆与临时重建的 store 共享 base 锁；并发保存后只能是完整内容之一。
+#[tokio::test]
+async fn cloned_and_reconstructed_stores_serialize_writes() {
+    let tmp = tempfile::tempdir().unwrap();
+    let base = tmp.path().join("model");
+    let mut tasks = Vec::new();
+    for i in 0..16 {
+        // 每个任务都重新构造，而不是依赖某个实例字段里的锁。
+        let store = store_in(&base);
+        let payload = format!("{i:02}:{}:complete", "y".repeat(48 * 1024));
+        tasks.push(tokio::spawn(async move {
+            store.write_text("p1", &payload).await.unwrap();
+            payload
+        }));
+    }
+    let mut expected = Vec::new();
+    for task in tasks {
+        expected.push(task.await.unwrap());
+    }
+
+    let store = store_in(&base);
+    let actual = store.read_text("p1").await.unwrap();
+    assert!(expected.contains(&actual));
+    let names: Vec<_> = std::fs::read_dir(store.entry_dir("p1"))
+        .unwrap()
+        .map(|e| e.unwrap().file_name())
+        .collect();
+    assert_eq!(names, vec![std::ffi::OsString::from("provider.json")]);
+}
+
+fn zip_bytes(entries: &[(&str, &[u8])]) -> Vec<u8> {
+    use std::io::Write as _;
+    let mut cursor = std::io::Cursor::new(Vec::new());
+    {
+        let mut writer = zip::ZipWriter::new(&mut cursor);
+        let options = zip::write::SimpleFileOptions::default();
+        for (name, content) in entries {
+            writer.start_file(*name, options).unwrap();
+            writer.write_all(content).unwrap();
+        }
+        writer.finish().unwrap();
+    }
+    cursor.into_inner()
+}
+
+#[tokio::test]
+async fn export_rejects_linked_entry_and_linked_children() {
+    let tmp = tempfile::tempdir().unwrap();
+    let outside = tmp.path().join("outside");
+    std::fs::create_dir_all(&outside).unwrap();
+    std::fs::write(outside.join("secret.txt"), "secret").unwrap();
+    let s = store_in(&tmp.path().join("model"));
+    s.write_text("p1", "{}").await.unwrap();
+
+    #[cfg(unix)]
+    let linked = std::os::unix::fs::symlink(&outside, s.entry_dir("p1").join("escape")).is_ok();
+    #[cfg(windows)]
+    let linked =
+        std::os::windows::fs::symlink_dir(&outside, s.entry_dir("p1").join("escape")).is_ok() || {
+            use std::os::windows::process::CommandExt as _;
+            let command = format!(
+                "mklink /J \"{}\" \"{}\"",
+                s.entry_dir("p1").join("escape").display(),
+                outside.display()
+            );
+            std::process::Command::new("cmd")
+                .args(["/D", "/C"])
+                .raw_arg(command)
+                .status()
+                .map(|status| status.success())
+                .unwrap_or(false)
+        };
+    if !linked {
+        eprintln!("directory link creation unsupported; skipping export link test");
+        return;
+    }
+
+    assert!(matches!(
+        s.export_pack("p1").await,
+        Err(VdfsError::Forbidden(_))
+    ));
+}
+
+#[tokio::test]
+async fn failed_import_keeps_old_entry_and_removes_private_staging() {
+    let tmp = tempfile::tempdir().unwrap();
+    let s = store_in(&tmp.path().join("model"));
+    s.write_text("p1", "old complete").await.unwrap();
+    std::fs::write(s.entry_dir("p1").join("stale.txt"), "stale").unwrap();
+    let bytes = zip_bytes(&[("a", b"file"), ("a/b.txt", b"conflict")]);
+
+    assert!(s.import_pack("p1", &bytes).await.is_err());
+    assert_eq!(s.read_text("p1").await.unwrap(), "old complete");
+    assert!(s.entry_dir("p1").join("stale.txt").exists());
+    let leftovers: Vec<_> = std::fs::read_dir(&s.base)
+        .unwrap()
+        .map(|entry| entry.unwrap().file_name())
+        .collect();
+    assert_eq!(leftovers, vec![std::ffi::OsString::from("p1")]);
+}
+
+#[tokio::test]
+async fn successful_import_replaces_whole_entry_and_leaves_no_staging() {
+    let tmp = tempfile::tempdir().unwrap();
+    let s = store_in(&tmp.path().join("model"));
+    s.write_text("p1", "old").await.unwrap();
+    std::fs::write(s.entry_dir("p1").join("stale.txt"), "stale").unwrap();
+    let bytes = zip_bytes(&[
+        ("p1/provider.json", b"new complete"),
+        ("p1/sub/a.txt", b"a"),
+    ]);
+
+    assert!(!s.import_pack("p1", &bytes).await.unwrap());
+    assert_eq!(s.read_text("p1").await.unwrap(), "new complete");
+    assert_eq!(
+        std::fs::read_to_string(s.entry_dir("p1").join("sub/a.txt")).unwrap(),
+        "a"
+    );
+    assert!(!s.entry_dir("p1").join("stale.txt").exists());
+    let leftovers: Vec<_> = std::fs::read_dir(&s.base)
+        .unwrap()
+        .map(|entry| entry.unwrap().file_name())
+        .collect();
+    assert_eq!(leftovers, vec![std::ffi::OsString::from("p1")]);
+}
+
+#[test]
+fn import_guard_restores_old_entry_and_cleans_only_its_staging() {
+    let tmp = tempfile::tempdir().unwrap();
+    let root = tmp.path().join(".private-staging");
+    let target = tmp.path().join("p1");
+    std::fs::create_dir_all(&root).unwrap();
+    std::fs::create_dir_all(&target).unwrap();
+    std::fs::write(target.join("provider.json"), "old").unwrap();
+    std::fs::create_dir_all(root.join("new")).unwrap();
+    std::fs::write(root.join("new/provider.json"), "partial").unwrap();
+    let mut guard = ImportGuard::new(root.clone(), target.clone());
+    std::fs::rename(&target, &guard.old).unwrap();
+    guard.old_moved = true;
+    drop(guard);
+
+    assert_eq!(
+        std::fs::read_to_string(target.join("provider.json")).unwrap(),
+        "old"
+    );
+    assert!(!root.exists());
+}
+
+#[test]
+fn import_guard_preserves_the_only_old_copy_when_rollback_fails() {
+    let tmp = tempfile::tempdir().unwrap();
+    let root = tmp.path().join(".private-staging");
+    let target = tmp.path().join("p1");
+    std::fs::create_dir_all(&root).unwrap();
+    std::fs::create_dir_all(&target).unwrap();
+    std::fs::write(target.join("provider.json"), "old").unwrap();
+    let mut guard = ImportGuard::new(root.clone(), target.clone());
+    std::fs::rename(&target, &guard.old).unwrap();
+    guard.old_moved = true;
+    std::fs::create_dir_all(&target).unwrap();
+    std::fs::write(target.join("unexpected"), "conflict").unwrap();
+
+    drop(guard);
+
+    assert_eq!(
+        std::fs::read_to_string(root.join("old/provider.json")).unwrap(),
+        "old"
+    );
+}
+
 /// 未声明的操作保持 `NotImplemented`（机制据此隐藏入口）
 #[tokio::test]
 async fn unsupported_ops_stay_not_implemented() {

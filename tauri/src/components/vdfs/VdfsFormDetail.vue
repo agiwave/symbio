@@ -104,11 +104,17 @@ defineEmits<{
 
 const access = computed(() => vdfsAccessOf(props.node))
 
-/** 后端字段级错误的机器 key → 表单里的中文 label（认不出就原样显示 key） */
+/** 后端字段级错误的机器 key → 表单里的中文 label（表格追加行号与列名） */
 function fieldLabelOf(key: string): string {
+  const [fieldKey, rowIndex, columnKey] = key.split('.')
   for (const sec of (props.node.schema as DetailDefinition | undefined)?.sections ?? []) {
-    const f = sec.fields.find((x) => x.key === key)
-    if (f) return f.label || key
+    const field = sec.fields.find((x) => x.key === fieldKey)
+    if (!field) continue
+    if (rowIndex === undefined || columnKey === undefined) return field.label || key
+    const row = Number(rowIndex)
+    if (!Number.isSafeInteger(row) || row < 0) return key
+    const column = field.columns?.find((x) => x.key === columnKey)
+    return `${field.label || fieldKey} · 第 ${row + 1} 行 · ${column?.label || columnKey}`
   }
   return key
 }
@@ -125,6 +131,7 @@ const DRAFT_UNAVAILABLE_ACTIONS = new Set<string>([
   VDFS_ACTION_TEST,
   VDFS_ACTION_EXPORT,
   'open-container',
+  'copy',
 ])
 
 /**
@@ -143,14 +150,14 @@ const definition = computed<DetailDefinition>(() => {
     sections: raw.sections ?? [],
     binding: 'option',
     // 只读节点原先整表剥掉动作（避免渲染出无效的「保存」/「删除」），但
-    // **与写无关**的动作必须保留：「浏览内部」是纯导航（agent 正是只读却
-    // 最需要它的那类资源），「测试连接」是只读自检，「导出」是只读打包，
-    // 三者都不依赖写权限。
+    // **不依赖原条目写权限**的动作必须保留：「浏览内部」是纯导航，
+    // 「测试连接」是只读自检，「导出」是只读打包，「复制」新建另一份档案。
+    // 写动作仍由 provider 的可信管理上下文把关，不由前端授权。
     actions: (access.value.write
       ? raw.actions
       : (raw.actions ?? []).filter(
           (a) =>
-            a.id === 'open-container' || a.id === VDFS_ACTION_TEST || a.id === VDFS_ACTION_EXPORT
+            a.id === 'open-container' || a.id === 'copy' || a.id === VDFS_ACTION_TEST || a.id === VDFS_ACTION_EXPORT
         )
     )?.filter((a) => !draft || !DRAFT_UNAVAILABLE_ACTIONS.has(a.id)),
   }

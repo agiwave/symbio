@@ -49,7 +49,10 @@ export function subDefinitionOf(f: DetailField): DetailDefinition {
 
 /** static 只读展示：options 值→标签映射，数组/对象友好展开 */
 export function staticDisplayOf(f: DetailField, value: unknown): string {
-  if (value == null || value === '') return '—'
+  if (value == null || value === '') {
+    if (f.default != null && f.default !== '') return String(f.default)
+    return '—'
+  }
   const opt = (f.options ?? []).find((o) => o.value === value)
   if (opt) return opt.label
   if (Array.isArray(value)) return value.length ? value.join('、') : '—'

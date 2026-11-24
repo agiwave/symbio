@@ -3,6 +3,7 @@
 //! 与实现**同级**分文件（约定：`X.rs` + `X.test.rs`）。
 
 use super::*;
+use symbio_plugin_api::{SandboxDecision, SandboxFact};
 
 fn tool() -> WebSearchTool {
     WebSearchTool::new(Arc::new(RwLock::new(WebConfig::default())))
@@ -90,4 +91,120 @@ fn upstream_base_override_replaces_host_and_trims_slash() {
         upstream_base("http://127.0.0.1:18090///", DUCKDUCKGO_OFFICIAL_BASE),
         "http://127.0.0.1:18090"
     );
+}
+
+#[test]
+fn url_facts_use_the_selected_providers_final_endpoint() {
+    let tavily = WebConfig {
+        tavily_api_key: Some("tavily-secret".to_string()),
+        serper_api_key: Some("serper-secret".to_string()),
+        ..WebConfig::default()
+    };
+    let serper = WebConfig {
+        serper_api_key: Some("serper-secret".to_string()),
+        ..WebConfig::default()
+    };
+    let args = json!({"query": "rust news"});
+
+    assert_eq!(
+        upstream_url(&tavily, &args),
+        "https://api.tavily.com/search"
+    );
+    assert_eq!(
+        upstream_url(&serper, &args),
+        "https://google.serper.dev/search"
+    );
+    assert_eq!(
+        upstream_url(&WebConfig::default(), &args),
+        "https://html.duckduckgo.com/html/?q=rust%20news"
+    );
+}
+
+#[test]
+fn configured_base_keeps_provider_path_and_never_exposes_api_key() {
+    let config = WebConfig {
+        tavily_api_key: Some("  top-secret  ".to_string()),
+        search_api_base: "https://proxy.example/root///".to_string(),
+        ..WebConfig::default()
+    };
+    let tavily = upstream_url(&config, &json!({"query": "q"}));
+    assert_eq!(tavily, "https://proxy.example/root/search");
+    assert!(!tavily.contains("top-secret"));
+
+    let serper = WebConfig {
+        tavily_api_key: Some("   ".to_string()),
+        serper_api_key: Some("serper-secret".to_string()),
+        search_api_base: "https://proxy.example/".to_string(),
+        ..WebConfig::default()
+    };
+    let endpoint = upstream_url(&serper, &json!({"query": "q"}));
+    assert_eq!(endpoint, "https://proxy.example/search");
+    assert!(!endpoint.contains("serper-secret"));
+
+    let ddg = WebConfig {
+        search_api_base: "https://proxy.example/".to_string(),
+        ..WebConfig::default()
+    };
+    assert_eq!(
+        upstream_url(&ddg, &json!({"query": "rust & security", "lr": "zh-CN"})),
+        "https://proxy.example/html/?q=rust%20%26%20security&kl=zh-CN"
+    );
+}
+
+struct DenyingSandbox {
+    calls: std::sync::atomic::AtomicUsize,
+}
+
+impl SandboxFace for DenyingSandbox {
+    fn permits(&self, _facts: &[SandboxFact]) -> bool {
+        false
+    }
+
+    fn intercept(&self, _tool_name: &str, _args: &Value) -> Option<Value> {
+        None
+    }
+
+    fn decide(&self, facts: &[SandboxFact], tool_name: &str, args: &Value) -> SandboxDecision {
+        self.calls.fetch_add(1, std::sync::atomic::Ordering::SeqCst);
+        assert_eq!(tool_name, "web_search");
+        assert_eq!(args, &json!({"query": "guarded"}));
+        assert_eq!(facts.len(), 1);
+        assert_eq!(facts[0].kind, "url");
+        SandboxDecision {
+            permitted: false,
+            reason: Some("test denial".into()),
+            ..SandboxDecision::default()
+        }
+    }
+}
+
+#[tokio::test]
+async fn every_search_provider_is_denied_before_dns_or_connect() {
+    for config in [
+        WebConfig {
+            tavily_api_key: Some("tavily-secret".into()),
+            search_api_base: "https://guarded.example".into(),
+            ..WebConfig::default()
+        },
+        WebConfig {
+            serper_api_key: Some("serper-secret".into()),
+            search_api_base: "https://guarded.example".into(),
+            ..WebConfig::default()
+        },
+        WebConfig {
+            search_api_base: "https://guarded.example".into(),
+            ..WebConfig::default()
+        },
+    ] {
+        let sandbox = DenyingSandbox {
+            calls: std::sync::atomic::AtomicUsize::new(0),
+        };
+        let tool = WebSearchTool::new(Arc::new(RwLock::new(config)));
+        let error = tool
+            .execute_inner(&json!({"query": "guarded"}), None, Some(&sandbox))
+            .await
+            .expect_err("沙箱拒绝必须终止搜索");
+        assert!(error.to_string().contains("test denial"), "{error}");
+        assert_eq!(sandbox.calls.load(std::sync::atomic::Ordering::SeqCst), 1);
+    }
 }

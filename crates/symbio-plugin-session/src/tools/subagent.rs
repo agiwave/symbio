@@ -44,10 +44,11 @@
 //! 自然延续，LLM 无需转述历史。
 //!
 //! 恢复调用（用户在父会话审批后，`session/resume` 按普通工具恢复机制重执行
-//! 本工具，args 追加 `session_id` / `target_id` / `approved`）：
-//! 对 `<会话地址>/message/<target_id>` 发**动作**（恢复动作的 snake_case 线上词），
-//! 在子会话内恢复被审批的工具；随后同 4-5。恢复不走入队——它不是一条新消息，
-//! 而是对当时那条消息的操作。父子关系始终由子会话存储元数据承载，无进程内状态。
+//! 本工具，args 只带 `session_id` / `target_id`）：collectors 验证一次性授权后
+//! 在 ctx 写入可信批准标记；本工具据此对 `<会话地址>/message/<target_id>` 发
+//! **动作**（恢复动作的 snake_case 线上词），在子会话内恢复被审批的工具；随后同
+//! 4-5。恢复不走入队——它不是一条新消息，而是对当时那条消息的操作。父子关系
+//! 始终由子会话存储元数据承载，无进程内状态。
 
 use super::behavior::{ASSIGN_WORK, DELEGATION_PROMISE};
 use serde_json::{json, Value};
@@ -66,8 +67,8 @@ use symbio_plugin_api::{message_of_node, SEG_MESSAGES};
 use symbio_plugin_api::{
     port_result, ExecAbortSignal, ExecEnv, ExecEventSink, Plugin, PluginError, PluginFrame,
     PluginInvokeRequest, PluginInvokeRequestExt, PluginPayload, PortExecContext, PortExecutor,
-    PortInput, PortOutcome, MODE, PATH, PROVIDER_ID, RISK_LEVEL, SANDBOX_ID, SESSION_ID,
-    TOOL_CALL_ID, TOOL_NODE_ID,
+    PortInput, PortOutcome, SandboxFact, AGENT_ID, MODE, PATH, PROVIDER_ID, RISK_LEVEL, SANDBOX_ID,
+    SESSION_ID, TOOL_CALL_ID, TOOL_NODE_ID, WORKDIR,
 };
 use symbio_plugin_api::{vdfs_context, VdfsError};
 use symbio_plugin_api::{
@@ -113,7 +114,76 @@ impl AgentRunCapability {
     }
 }
 
+struct SubsessionMetadata {
+    workdir: Option<String>,
+    agent_id: Option<String>,
+}
+
 impl AgentRunCapability {
+    pub(crate) async fn intent_facts(
+        args: &Value,
+        ctx: &Arc<dyn PluginInvokeRequest>,
+        router: Option<&std::sync::Weak<dyn Plugin>>,
+    ) -> Result<Vec<SandboxFact>, String> {
+        let requested_agent = args
+            .get("agent_id")
+            .and_then(Value::as_str)
+            .map(str::trim)
+            .filter(|value| !value.is_empty())
+            .map(str::to_string);
+        let session_id = args
+            .get("session_id")
+            .and_then(Value::as_str)
+            .filter(|value| !value.trim().is_empty());
+        let stored = if let Some(session_id) = session_id {
+            let parent = router
+                .and_then(|router| router.upgrade())
+                .ok_or_else(|| "续会话事实解析缺少路由入口".to_string())?;
+            Some(
+                validate_subsession_exists(parent, ctx, session_id)
+                    .await
+                    .map_err(|error| error.to_string())?,
+            )
+        } else {
+            None
+        };
+        let agent_id = match &stored {
+            Some(stored) => {
+                ensure_continuation_agent(requested_agent.as_deref(), stored.agent_id.as_deref())
+                    .map_err(|error| error.to_string())?;
+                stored.agent_id.clone()
+            }
+            None => requested_agent.or_else(|| ctx.get(AGENT_ID)),
+        };
+        let mut facts = Vec::new();
+        if let Some(agent_id) = agent_id.filter(|value| !value.trim().is_empty()) {
+            facts.push(SandboxFact::new("agent_id", agent_id));
+        }
+        let working_dir = match stored {
+            Some(stored) => stored.workdir,
+            None => args
+                .get("working_dir")
+                .and_then(Value::as_str)
+                .map(|value| {
+                    symbio_plugin_api::plugin_expand_tilde_path(std::path::Path::new(value))
+                })
+                .or_else(|| ctx.get(WORKDIR).map(std::path::PathBuf::from))
+                .map(|path| path.to_string_lossy().to_string()),
+        };
+        if let Some(working_dir) = working_dir {
+            let validated =
+                validate_working_dir(&working_dir).map_err(|error| error.to_string())?;
+            facts.push(SandboxFact::new(
+                "vdfs_path",
+                symbio_plugin_api::vdfs_normalize_path(&validated),
+            ));
+        }
+        if let Some(session_id) = session_id {
+            facts.push(SandboxFact::new("session_id", session_id));
+        }
+        Ok(facts)
+    }
+
     pub fn meta(&self) -> symbio_plugin_api::CapabilityMeta {
         symbio_plugin_api::CapabilityMeta {
             name: NAME.to_string(),
@@ -181,6 +251,20 @@ impl PortExecutor for AgentRunCapability {
     }
 }
 
+/// 父会话批准只通过 collectors 消费一次性 grant 后写入的 ctx 标记传递。
+/// 模型可伪造的 `args.approved` 不参与恢复动作选择（历史字段仍可被 serde 忽略读取）。
+fn resume_action(ctx: &dyn PluginInvokeRequest) -> ResumeAction {
+    let approved = ctx
+        .get_raw("approved")
+        .and_then(|value| value.downcast::<String>().ok())
+        .is_some_and(|value| value.as_str() == "true");
+    if approved {
+        ResumeAction::Approve
+    } else {
+        ResumeAction::Retry
+    }
+}
+
 impl AgentRunCapability {
     async fn run(
         &self,
@@ -208,9 +292,6 @@ impl AgentRunCapability {
             /// 子会话内待恢复节点 id（仅审批恢复时由 resume 机制注入）
             #[serde(default)]
             target_id: Option<String>,
-            /// 用户审批结果（session/resume 的 Approve 分支注入）
-            #[serde(default)]
-            approved: Option<bool>,
         }
         let req: RunRequest = serde_json::from_value(args).map_err(|e| {
             PluginError::ValidationError(format!("参数反序列化失败，请核对契约类型或 Schema: {e}"))
@@ -294,12 +375,11 @@ impl AgentRunCapability {
             Option<ChatNode>,
         ) = match (req.session_id.as_deref(), req.target_id.as_deref()) {
             (Some(sid), Some(tid)) if !sid.is_empty() && !tid.is_empty() => {
-                // 恢复调用：在子会话内恢复被审批的工具（普通 resume 语义透传）。
-                let action = if req.approved == Some(true) {
-                    ResumeAction::Approve
-                } else {
-                    ResumeAction::Retry
-                };
+                let stored = validate_subsession_exists(parent.clone(), &ctx, sid).await?;
+                ensure_continuation_workdir(req.working_dir.as_deref(), stored.workdir.as_deref())?;
+                ensure_continuation_agent(req.agent_id.as_deref(), stored.agent_id.as_deref())?;
+                // 恢复调用：动作只认 collectors 发布的 ctx 可信标记，不读模型参数。
+                let action = resume_action(ctx.as_ref());
                 (
                     sid.to_string(),
                     Some(ResumeRequest {
@@ -314,7 +394,9 @@ impl AgentRunCapability {
             }
             (Some(sid), None) if !sid.is_empty() => {
                 // 续会话：prompt 作为该子会话的下一轮用户消息，上下文自然延续。
-                validate_subsession_exists(parent.clone(), &ctx, sid).await?;
+                let stored = validate_subsession_exists(parent.clone(), &ctx, sid).await?;
+                ensure_continuation_workdir(req.working_dir.as_deref(), stored.workdir.as_deref())?;
+                ensure_continuation_agent(req.agent_id.as_deref(), stored.agent_id.as_deref())?;
                 (sid.to_string(), None, Some(user_message()))
             }
             _ => {
@@ -346,11 +428,9 @@ impl AgentRunCapability {
                 )
                 .await
                 {
-                    symbio_plugin_api::plugin_warn!(
-                        "session",
-                        "登记子会话元数据失败（不影响委托执行）: {}",
-                        e
-                    );
+                    return Err(PluginError::InternalError(format!(
+                        "登记子会话安全元数据失败，已中止委托：{e}"
+                    )));
                 }
                 (sid, None, Some(user_message()))
             }
@@ -560,6 +640,43 @@ async fn agent_exists(
         .is_ok()
 }
 
+fn ensure_continuation_workdir(
+    provided: Option<&str>,
+    stored: Option<&str>,
+) -> Result<(), PluginError> {
+    if let Some(provided) = provided {
+        let provided = validate_working_dir(provided)?;
+        let Some(stored) = stored else {
+            return Err(PluginError::ValidationError(
+                "目标子会话没有工作目录，续会话不能声明 working_dir".to_string(),
+            ));
+        };
+        if symbio_plugin_api::vdfs_normalize_path(&provided)
+            != symbio_plugin_api::vdfs_normalize_path(stored)
+        {
+            return Err(PluginError::ValidationError(
+                "续会话不能更改 working_dir；请省略该参数以沿用子会话原工作目录".to_string(),
+            ));
+        }
+    }
+    Ok(())
+}
+
+fn ensure_continuation_agent(
+    provided: Option<&str>,
+    stored: Option<&str>,
+) -> Result<(), PluginError> {
+    let Some(provided) = provided.map(str::trim).filter(|value| !value.is_empty()) else {
+        return Ok(());
+    };
+    if stored != Some(provided) {
+        return Err(PluginError::Forbidden(format!(
+            "续会话不能更改 agent_id；目标子会话使用的智能体与声明不一致（{provided}）"
+        )));
+    }
+    Ok(())
+}
+
 /// 校验 working_dir：绝对路径、拒绝 `..` 段、支持 `~` 展开。
 fn validate_working_dir(provided: &str) -> Result<String, PluginError> {
     let trimmed = provided.trim();
@@ -574,7 +691,7 @@ fn validate_working_dir(provided: &str) -> Result<String, PluginError> {
         )));
     }
     let expanded = symbio_plugin_api::plugin_expand_tilde_path(std::path::Path::new(trimmed));
-    if !expanded.is_absolute() {
+    if !expanded.is_absolute() && !expanded.has_root() {
         return Err(PluginError::ValidationError(format!(
             "Invalid working_dir '{provided}': must be an absolute path. \
              Examples: `/tmp/proj`, `C:\\repo\\myproj`, `~/work`."
@@ -603,42 +720,77 @@ async fn validate_subsession_exists(
     parent: Arc<dyn Plugin>,
     ctx: &Arc<dyn PluginInvokeRequest>,
     session_id: &str,
-) -> Result<(), PluginError> {
+) -> Result<SubsessionMetadata, PluginError> {
+    let current_session_id = ctx.get(SESSION_ID).unwrap_or_default();
+    if current_session_id.is_empty() {
+        return Err(PluginError::ValidationError(
+            "续会话需要当前会话上下文（SESSION_ID）".to_string(),
+        ));
+    }
     let provider = parent.get_vfs_provider().ok_or_else(|| {
         PluginError::InternalError(
             "agent_run 无法取得本作用域的 VDFS 视图（容器未暴露 provider）".to_string(),
         )
     })?;
     let addr = format!("{PLUGIN_ID_SESSION}/{session_id}");
-    let exists = match provider
+    let node = match provider
         .dispatch(&vdfs_context(ctx), &addr, VdfsRequest::Stat)
         .await
     {
-        // 节点存在且已有消息 ⇒ 续会话合法。`message_count` 由会话 provider 投影
-        // （落库 ∪ 在途），与「消息列表非空」是同一判据。
         Ok(resp) => match resp.into_stat() {
-            Some(node) => {
-                node.attributes
+            Some(node)
+                if node
+                    .attributes
                     .get("message_count")
                     .and_then(Value::as_u64)
                     .unwrap_or(0)
-                    > 0
+                    > 0 =>
+            {
+                Some(node)
             }
-            // dispatch 成功但响应形状不符：按「节点不存在」处理（与旧缺省实现一致）
-            None => false,
+            _ => None,
         },
-        // 只把「节点不存在」读作「会话不存在」；存储故障等照实上抛——
-        // 否则一次 IO 抖动会被讲成「LLM 编造了 id」。
-        Err(VdfsError::NotFound(_)) => false,
+        Err(VdfsError::NotFound(_)) => None,
         Err(e) => return Err(e.into()),
     };
-    if !exists {
+    let Some(node) = node else {
         return Err(PluginError::NotFound(format!(
             "子会话 '{session_id}' 不存在或无消息记录，无法继续该对话。\
              请省略 session_id 参数以新开一个委托会话。"
         )));
+    };
+    let metadata = node
+        .attributes
+        .get("metadata")
+        .and_then(Value::as_object)
+        .ok_or_else(|| {
+            PluginError::Forbidden("子会话缺少归属元数据，无法继续该对话".to_string())
+        })?;
+    let owner = metadata
+        .get(KEY_PARENT_SESSION_ID)
+        .and_then(Value::as_str)
+        .unwrap_or_default();
+    if owner != current_session_id {
+        return Err(PluginError::Forbidden(format!(
+            "子会话 '{session_id}' 不属于当前会话，无法注入或读取其上下文"
+        )));
     }
-    Ok(())
+    Ok(SubsessionMetadata {
+        workdir: metadata
+            .get("workdir")
+            .and_then(Value::as_str)
+            .map(str::trim)
+            .filter(|workdir| !workdir.is_empty())
+            .map(validate_working_dir)
+            .transpose()?
+            .map(|workdir| symbio_plugin_api::vdfs_normalize_path(&workdir)),
+        agent_id: metadata
+            .get("agent_id")
+            .and_then(Value::as_str)
+            .map(str::trim)
+            .filter(|agent_id| !agent_id.is_empty())
+            .map(str::to_string),
+    })
 }
 
 /// 登记子会话：经**进程内 VDFS 纯接口**在 `<挂载名>/<sid>` 上写一次。

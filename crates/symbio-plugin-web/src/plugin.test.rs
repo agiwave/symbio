@@ -28,3 +28,53 @@ async fn route_does_not_execute_tools_by_name() {
         "按工具名 route 必须 NotFound（工具只经端口执行）"
     );
 }
+
+/// 搜索注册事实必须来自当前配置的实际 endpoint，且不能夹带凭据。
+#[test]
+fn web_search_registration_publishes_configured_upstream_url_fact() {
+    let dir = PluginDir::at(
+        std::env::temp_dir().join("symbio-web-plugin-search-facts"),
+        PLUGIN_ID_WEB,
+    );
+    let plugin = WebPlugin::new(
+        None,
+        WebConfig {
+            tavily_api_key: Some("never-publish-this-key".to_string()),
+            search_api_base: "https://proxy.example/base/".to_string(),
+            ..WebConfig::default()
+        },
+        dir,
+    );
+    let entry = plugin
+        .tool_impls
+        .iter()
+        .find(|entry| entry.meta.name == "web_search")
+        .unwrap();
+    let facts_of = entry.facts.as_ref().unwrap();
+    let ctx: Arc<dyn PluginInvokeRequest> =
+        Arc::new(PluginSimpleRequest::from_parts(serde_json::json!({}), None));
+
+    let facts = facts_of(&serde_json::json!({"query": "rust"}), &ctx);
+
+    assert_eq!(facts.len(), 1);
+    assert_eq!(facts[0].kind, "url");
+    assert_eq!(facts[0].value, "https://proxy.example/base/search");
+    assert!(!facts[0].value.contains("never-publish-this-key"));
+
+    {
+        let mut cfg = plugin.config.blocking_write();
+        cfg.search_api_base = "https://current.example/".to_string();
+    }
+    let facts = facts_of(&serde_json::json!({"query": "rust"}), &ctx);
+    assert_eq!(facts[0].value, "https://current.example/search");
+
+    // 同步事实回调在写锁窗口也必须可用：退稳定官方 endpoint，不 panic、不读 key。
+    let fallback = {
+        let _cfg = plugin.config.blocking_write();
+        facts_of(&serde_json::json!({"query": "rust"}), &ctx)
+    };
+    assert_eq!(
+        fallback[0].value,
+        "https://html.duckduckgo.com/html/?q=rust"
+    );
+}

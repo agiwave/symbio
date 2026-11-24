@@ -9,14 +9,14 @@ use async_trait::async_trait;
 use std::sync::{Arc, Weak};
 use tokio::sync::RwLock;
 
-use std::sync::atomic::{AtomicUsize, Ordering};
+use std::sync::atomic::{AtomicBool, AtomicUsize, Ordering};
 
 use symbio_plugin_api::{
     port_result, CapabilityFamily, CapabilityMeta, CapabilityRiskLevel, CapabilityRow,
     ExecAbortSignal, ExecEnv, ExecEventSink, Plugin, PluginError, PluginInvokeRequest,
     PluginInvokeResponse, PluginMeta, PluginPayload, PluginSimpleRequest, PortBindings,
     PortErrorClass, PortExecContext, PortExecutor, PortInput, PortOutcome, Registry,
-    CAPABILITY_VISITOR, PORT_BINDINGS, TOOL_CALL_ID, TOOL_NODE_ID,
+    CAPABILITY_VISITOR, PORT_BINDINGS, RISK_LEVEL, TOOL_CALL_ID, TOOL_NODE_ID,
 };
 
 // ==================== 记账 fail-closed：造格型的账没落就不许报成功 ====================
@@ -714,6 +714,423 @@ impl symbio_plugin_api::port::PortFactReader for StaticReader {
     }
 }
 
+/// 恢复探针：记录原始参数与 collector 可信标记，证明恢复路径不插入 args.approved。
+struct ResumeProbeTool {
+    meta: CapabilityMeta,
+    seen: Arc<std::sync::Mutex<Vec<(serde_json::Value, bool)>>>,
+}
+
+#[async_trait]
+impl PortExecutor for ResumeProbeTool {
+    async fn execute(&self, exec: PortExecContext, input: PortInput) -> PortOutcome {
+        let approved = exec.ctx.as_ref().is_some_and(|ctx| {
+            ctx.get_raw("approved")
+                .and_then(|value| value.downcast::<String>().ok())
+                .is_some_and(|value| value.as_str() == "true")
+        });
+        self.seen.lock().unwrap().push((input.payload, approved));
+        port_result(Ok(serde_json::json!({"content": "resumed"})))
+    }
+}
+
+async fn ctx_with_resume_tool(
+    parent: &Arc<dyn Plugin>,
+) -> (
+    Arc<dyn PluginInvokeRequest>,
+    Arc<std::sync::Mutex<Vec<(serde_json::Value, bool)>>>,
+) {
+    let req = PluginSimpleRequest::new(Some(Weak::clone(&Arc::downgrade(parent))), None);
+    static NEXT_SESSION: std::sync::atomic::AtomicU64 = std::sync::atomic::AtomicU64::new(1);
+    let session = NEXT_SESSION.fetch_add(1, std::sync::atomic::Ordering::Relaxed);
+    req.set(SESSION_ID, format!("session-test-{session}"));
+    req.set(RISK_LEVEL, "low".to_string());
+    let registry: Arc<dyn Registry> = Arc::new(FakeRegistry::new());
+    req.set(CAPABILITY_VISITOR, registry);
+    req.set(PORT_BINDINGS, Arc::new(PortBindings::default()));
+    let ctx: Arc<dyn PluginInvokeRequest> = Arc::new(req);
+    let seen = Arc::new(std::sync::Mutex::new(Vec::new()));
+    let tool = ResumeProbeTool {
+        meta: CapabilityMeta {
+            name: "strict".to_string(),
+            risk: Some(CapabilityRiskLevel::Medium),
+            ..Default::default()
+        },
+        seen: seen.clone(),
+    };
+    symbio_providers::register_tool(&ctx, tool.meta.clone(), None, Arc::new(tool)).await;
+    (ctx, seen)
+}
+
+struct ResumeSandbox {
+    decision: symbio_plugin_api::SandboxDecision,
+    decide_calls: AtomicUsize,
+}
+
+impl symbio_plugin_api::SandboxFace for ResumeSandbox {
+    fn permits(&self, _facts: &[symbio_plugin_api::SandboxFact]) -> bool {
+        self.decision.permitted
+    }
+
+    fn intercept(&self, _tool_name: &str, _args: &serde_json::Value) -> Option<serde_json::Value> {
+        self.decision.intercept.clone()
+    }
+
+    fn decide(
+        &self,
+        _facts: &[symbio_plugin_api::SandboxFact],
+        _tool_name: &str,
+        _args: &serde_json::Value,
+    ) -> symbio_plugin_api::SandboxDecision {
+        self.decide_calls.fetch_add(1, Ordering::SeqCst);
+        self.decision.clone()
+    }
+}
+
+fn attach_resume_sandbox(
+    ctx: &Arc<dyn PluginInvokeRequest>,
+    decision: symbio_plugin_api::SandboxDecision,
+) -> Arc<ResumeSandbox> {
+    let sandbox = Arc::new(ResumeSandbox {
+        decision,
+        decide_calls: AtomicUsize::new(0),
+    });
+    symbio_plugin_api::sandbox_init_slot(ctx);
+    assert!(symbio_plugin_api::sandbox_publish(ctx, sandbox.clone()));
+    sandbox
+}
+
+fn pending_artifact(
+    call_id: &str,
+    tool: &str,
+    args: &serde_json::Value,
+) -> symbio_plugin_api::port::PortFact {
+    symbio_plugin_api::port::PortFact {
+        id: format!("artifact:{call_id}"),
+        port: String::new(),
+        kind: EVENT_ARTIFACT_ADDED.into(),
+        payload: serde_json::json!({
+            "tool_call_id": call_id,
+            "tool": tool,
+            "args": args.to_string(),
+            "needs_user_action": true,
+            "failure_kind": failure_kind::NEEDS_APPROVAL,
+            "prompt": {"kind": "confirm", "risk_level": "medium"},
+        }),
+    }
+}
+
+fn answer_fact(call_id: &str, kind: &str) -> symbio_plugin_api::port::PortFact {
+    symbio_plugin_api::port::PortFact {
+        id: format!("user-answer:{call_id}"),
+        port: String::new(),
+        kind: symbio_plugin_api::events::EVENT_USER_ANSWER.into(),
+        payload: serde_json::json!({"call_id": call_id, "kind": kind, "by": "user"}),
+    }
+}
+
+fn resume_call(
+    ctx: Arc<dyn PluginInvokeRequest>,
+    recorder: Arc<dyn symbio_plugin_api::port::PortFactWriter>,
+    aliases: &[(&str, &str)],
+    answer: symbio_plugin_api::port::PortFact,
+    artifacts: Vec<symbio_plugin_api::port::PortFact>,
+) -> (PortExecContext, PortInput) {
+    let call_id = answer
+        .payload
+        .get("call_id")
+        .and_then(serde_json::Value::as_str)
+        .unwrap_or_default();
+    let mut facts = vec![aliases_fact(aliases)];
+    facts.extend(artifacts);
+    facts.push(answer.clone());
+    let session_id = ctx.get(SESSION_ID).expect("恢复夹具必须有会话");
+    (
+        PortExecContext {
+            abort: ExecAbortSignal::new(),
+            idempotency_key: "resume-1".to_string(),
+            sink: ExecEventSink::silent(),
+            emit: symbio_plugin_api::port::PortFactEmit::new(recorder),
+            ctx: Some(ctx),
+            subject: String::new(),
+            session_id,
+            origin: None,
+            scratch_dir: None,
+            source: String::new(),
+            reader: Some(Arc::new(StaticReader(facts))),
+        },
+        PortInput {
+            port: TOOL.to_string(),
+            payload: serde_json::json!({
+                "resume": "answer",
+                "answer_event": answer.id,
+                "call_id": call_id,
+            }),
+        },
+    )
+}
+
+/// approve 恢复：canonical 绑定 + 新鲜档案版本 + 原参数 + ctx fork，且不污染会话 ctx。
+#[tokio::test]
+async fn approve_resume_issues_a_bound_grant_without_mutating_session_ctx() {
+    let parent: Arc<dyn Plugin> = Arc::new(NopPlugin);
+    let (ctx, seen) = ctx_with_resume_tool(&parent).await;
+    let sandbox = attach_resume_sandbox(
+        &ctx,
+        symbio_plugin_api::SandboxDecision {
+            permitted: true,
+            profile_version: 11,
+            ..Default::default()
+        },
+    );
+    let args = serde_json::json!({"content": "original"});
+    let recorder = Arc::new(RecordingWriter::default());
+    let (exec, input) = resume_call(
+        ctx.clone(),
+        recorder.clone(),
+        &[("strict", "strict-alias")],
+        answer_fact("call-1", "approve"),
+        vec![pending_artifact("call-1", "strict-alias", &args)],
+    );
+
+    let out = ToolPort.execute(exec, input).await;
+    let (text, success, _) = decode(&out);
+    assert_eq!(text, "resumed");
+    assert!(success, "{out:?}");
+    assert_eq!(
+        seen.lock().unwrap().as_slice(),
+        &[(args, true)],
+        "恢复必须交回原参数，且内层只看到 grant 消费后的可信标记"
+    );
+    assert_eq!(
+        sandbox.decide_calls.load(Ordering::SeqCst),
+        2,
+        "恢复前新鲜 decide 一次，GatedExecutor 执行时再 decide 一次"
+    );
+    assert!(
+        ctx.get_raw("approval_grant").is_none(),
+        "grant 不能挂在会话 ctx"
+    );
+    assert!(
+        ctx.get_raw("approved").is_none(),
+        "可信标记不能污染会话 ctx"
+    );
+}
+
+/// 新鲜沙箱裁决拒绝时不签发、不执行、不落批准授权事实。
+#[tokio::test]
+async fn approve_resume_denied_by_fresh_sandbox_does_not_issue_or_execute() {
+    let parent: Arc<dyn Plugin> = Arc::new(NopPlugin);
+    let (ctx, seen) = ctx_with_resume_tool(&parent).await;
+    let sandbox = attach_resume_sandbox(
+        &ctx,
+        symbio_plugin_api::SandboxDecision::denied("profile changed"),
+    );
+    let args = serde_json::json!({"content": "original"});
+    let recorder = Arc::new(RecordingWriter::default());
+    let (exec, input) = resume_call(
+        ctx,
+        recorder.clone(),
+        &[("strict", "strict")],
+        answer_fact("call-1", "approve"),
+        vec![pending_artifact("call-1", "strict", &args)],
+    );
+
+    let out = ToolPort.execute(exec, input).await;
+    let (_, success, _) = decode(&out);
+    assert!(!success, "沙箱拒绝必须落失败结果");
+    assert!(seen.lock().unwrap().is_empty());
+    assert_eq!(sandbox.decide_calls.load(Ordering::SeqCst), 1);
+    assert!(
+        recorder
+            .drafts
+            .lock()
+            .unwrap()
+            .iter()
+            .all(|draft| draft.kind != EVENT_AUTHZ_GRANTED),
+        "拒绝时不能留下已批准授权结论"
+    );
+}
+
+/// deny / 已完成产物重放都不签发 grant，也不执行内层。
+#[tokio::test]
+async fn deny_and_completed_artifact_replay_never_execute() {
+    let parent: Arc<dyn Plugin> = Arc::new(NopPlugin);
+    let (ctx, seen) = ctx_with_resume_tool(&parent).await;
+    let args = serde_json::json!({"content": "original"});
+
+    let recorder = Arc::new(RecordingWriter::default());
+    let (exec, input) = resume_call(
+        ctx.clone(),
+        recorder,
+        &[("strict", "strict")],
+        answer_fact("call-1", "deny"),
+        vec![pending_artifact("call-1", "strict", &args)],
+    );
+    let out = ToolPort.execute(exec, input).await;
+    assert!(!decode(&out).1, "deny 必须失败收尾");
+    assert!(seen.lock().unwrap().is_empty());
+
+    let completed = symbio_plugin_api::port::PortFact {
+        id: "artifact:call-1:resume".into(),
+        port: String::new(),
+        kind: EVENT_ARTIFACT_ADDED.into(),
+        payload: serde_json::json!({
+            "tool_call_id": "call-1",
+            "tool": "strict",
+            "args": args.to_string(),
+            "success": true,
+            "needs_user_action": false,
+        }),
+    };
+    let recorder = Arc::new(RecordingWriter::default());
+    let (exec, input) = resume_call(
+        ctx,
+        recorder,
+        &[("strict", "strict")],
+        answer_fact("call-1", "approve"),
+        vec![pending_artifact("call-1", "strict", &args), completed],
+    );
+    let out = ToolPort.execute(exec, input).await;
+    assert!(out.error.is_some(), "已完成产物不能再次恢复");
+    assert!(seen.lock().unwrap().is_empty());
+}
+
+#[tokio::test]
+async fn concurrent_approve_resume_executes_only_once() {
+    struct PausingWriter {
+        entered: tokio::sync::mpsc::Sender<()>,
+        release: tokio::sync::Notify,
+        first_emit: AtomicBool,
+    }
+
+    #[async_trait]
+    impl symbio_plugin_api::port::PortFactWriter for PausingWriter {
+        async fn emit(&self, _facts: Vec<symbio_plugin_api::FactDraft>) {
+            if self.first_emit.swap(false, Ordering::SeqCst) {
+                let _ = self.entered.send(()).await;
+                self.release.notified().await;
+            }
+        }
+    }
+
+    let parent: Arc<dyn Plugin> = Arc::new(NopPlugin);
+    let (ctx, seen) = ctx_with_resume_tool(&parent).await;
+    let args = serde_json::json!({"content": "original"});
+    let answer = answer_fact("call-1", "approve");
+    let (entered_tx, mut entered_rx) = tokio::sync::mpsc::channel(1);
+    let writer = Arc::new(PausingWriter {
+        entered: entered_tx,
+        release: tokio::sync::Notify::new(),
+        first_emit: AtomicBool::new(true),
+    });
+    let (exec_a, input_a) = resume_call(
+        ctx.clone(),
+        writer.clone(),
+        &[("strict", "strict")],
+        answer.clone(),
+        vec![pending_artifact("call-1", "strict", &args)],
+    );
+    let (exec_b, input_b) = resume_call(
+        ctx,
+        Arc::new(RecordingWriter::default()),
+        &[("strict", "strict")],
+        answer,
+        vec![pending_artifact("call-1", "strict", &args)],
+    );
+    let first = tokio::spawn(async move { ToolPort.execute(exec_a, input_a).await });
+    tokio::time::timeout(std::time::Duration::from_secs(5), entered_rx.recv())
+        .await
+        .expect("首个恢复必须进入批准留痕")
+        .expect("批准留痕通道不得关闭");
+
+    let out_b = tokio::time::timeout(
+        std::time::Duration::from_secs(5),
+        ToolPort.execute(exec_b, input_b),
+    )
+    .await
+    .expect("进行中的同一答复重放必须立即返回");
+    assert!(out_b.error.is_some(), "进行中的同一答复只能被领取一次");
+    assert!(seen.lock().unwrap().is_empty(), "重放不得先于首个恢复执行");
+
+    writer.release.notify_one();
+    let out_a = tokio::time::timeout(std::time::Duration::from_secs(5), first)
+        .await
+        .expect("首个恢复必须在释放留痕后完成")
+        .expect("首个恢复任务不得 panic");
+    assert!(decode(&out_a).1, "{out_a:?}");
+    assert_eq!(seen.lock().unwrap().len(), 1, "并发重放不得执行两次");
+}
+
+/// 答复 id 只在会话内配对；不同会话不得互相占用领取键。
+#[tokio::test]
+async fn identical_answer_ids_in_different_sessions_resume_independently() {
+    let parent: Arc<dyn Plugin> = Arc::new(NopPlugin);
+    let (ctx_a, seen_a) = ctx_with_resume_tool(&parent).await;
+    let (ctx_b, seen_b) = ctx_with_resume_tool(&parent).await;
+    ctx_b.set(SESSION_ID, "session-2".to_string());
+    attach_resume_sandbox(
+        &ctx_a,
+        symbio_plugin_api::SandboxDecision {
+            permitted: true,
+            profile_version: 11,
+            ..Default::default()
+        },
+    );
+    attach_resume_sandbox(
+        &ctx_b,
+        symbio_plugin_api::SandboxDecision {
+            permitted: true,
+            profile_version: 11,
+            ..Default::default()
+        },
+    );
+    let args = serde_json::json!({"content": "original"});
+    let answer = answer_fact("call-1", "approve");
+    let (exec_a, input_a) = resume_call(
+        ctx_a,
+        Arc::new(RecordingWriter::default()),
+        &[("strict", "strict")],
+        answer.clone(),
+        vec![pending_artifact("call-1", "strict", &args)],
+    );
+    let (exec_b, input_b) = resume_call(
+        ctx_b,
+        Arc::new(RecordingWriter::default()),
+        &[("strict", "strict")],
+        answer,
+        vec![pending_artifact("call-1", "strict", &args)],
+    );
+    let port_a = ToolPort;
+    let port_b = ToolPort;
+    let (out_a, out_b) = tokio::join!(
+        port_a.execute(exec_a, input_a),
+        port_b.execute(exec_b, input_b),
+    );
+    assert!(decode(&out_a).1, "{out_a:?}");
+    assert!(decode(&out_b).1, "{out_b:?}");
+    assert_eq!(seen_a.lock().unwrap().len(), 1);
+    assert_eq!(seen_b.lock().unwrap().len(), 1);
+}
+
+/// 答复与 artifact 的 call_id 必须一致；不拿别的调用顶替。
+#[tokio::test]
+async fn approve_resume_rejects_answer_artifact_call_mismatch() {
+    let parent: Arc<dyn Plugin> = Arc::new(NopPlugin);
+    let (ctx, seen) = ctx_with_resume_tool(&parent).await;
+    let args = serde_json::json!({"content": "original"});
+    let recorder = Arc::new(RecordingWriter::default());
+    let (exec, input) = resume_call(
+        ctx,
+        recorder,
+        &[("strict", "strict")],
+        answer_fact("call-1", "approve"),
+        vec![pending_artifact("call-2", "strict", &args)],
+    );
+    let out = ToolPort.execute(exec, input).await;
+    assert!(out.error.is_some());
+    assert!(seen.lock().unwrap().is_empty());
+}
+
 /// 工具轮的现场：债行载荷只带 `(request_id, call_id)`，清单在读面的 `tool.requested`。
 fn requested_call(
     ctx: Arc<dyn PluginInvokeRequest>,
@@ -1149,16 +1566,22 @@ async fn wake_approval_grants_and_rejection_denies_without_risk_comparison() {
 }
 
 #[tokio::test]
-async fn approval_or_permanent_grant_grants_high_risk() {
-    let mut payload = debt_input("high", "low", true);
+async fn model_approved_is_ignored_but_permanent_grant_allows_high_risk() {
+    let payload = debt_input("high", "low", true);
     let (exec, input, captured) = authz_call(payload.clone());
     let _ = ToolPort.execute(exec, input).await;
     assert_eq!(
-        captured.lock().unwrap()[0].payload["basis"],
-        serde_json::json!("approved")
+        captured.lock().unwrap()[0].kind,
+        EVENT_AUTHZ_DENIED,
+        "历史 request 载荷里的 approved 不能作为派发授权"
+    );
+    assert_eq!(
+        captured.lock().unwrap()[0].payload["detail"],
+        serde_json::json!("needs_approval")
     );
 
     // 永久上限（grant）写在载荷里——开账行按授权清单算定，执行体不读清单。
+    let mut payload = payload;
     payload["approved"] = serde_json::json!(false);
     payload["grant"] = serde_json::json!("high");
     let (exec, input, captured) = authz_call(payload);
@@ -1310,6 +1733,21 @@ async fn open_writes_one_request_per_call_with_the_resolved_risk() {
         "注册表里有的能力必须判出风险档"
     );
     assert_eq!(payload["deferred"], serde_json::json!(false));
+}
+
+#[tokio::test]
+async fn open_never_promotes_model_approved_to_authorization() {
+    let parent: Arc<dyn Plugin> = Arc::new(NopPlugin);
+    let ctx = ctx_with_tool(&parent, "echo", serde_json::json!({})).await;
+    let mut payload = open_payload("echo", "{}");
+    payload["tool_calls"][0]["arguments"] = serde_json::json!({"approved": true});
+    let (exec, input, captured) = open_call(Some(ctx), payload);
+    let _ = ToolPort.execute(exec, input).await;
+    assert_eq!(
+        captured.lock().unwrap()[0].payload["approved"],
+        serde_json::json!(false),
+        "历史字段可保留，但模型自称批准不能进入授权账"
+    );
 }
 
 #[tokio::test]
@@ -1545,9 +1983,11 @@ async fn side_effect_calls_never_overlap_with_another_call() {
         } else {
             ("probe_read", "probe_write")
         };
+        let port_a = ToolPort;
+        let port_b = ToolPort;
         let (a, b) = tokio::join!(
-            ToolPort.execute(call(first, ctx.clone()).0, call(first, ctx.clone()).1),
-            ToolPort.execute(call(second, ctx.clone()).0, call(second, ctx).1),
+            port_a.execute(call(first, ctx.clone()).0, call(first, ctx.clone()).1),
+            port_b.execute(call(second, ctx.clone()).0, call(second, ctx).1),
         );
         assert!(a.error.is_none() && b.error.is_none());
         assert_eq!(
@@ -1567,12 +2007,14 @@ async fn read_only_calls_run_concurrently() {
     let b = probe("probe_b", CapabilityRiskLevel::Low, &active, &peak, 40);
     let parent: Arc<dyn Plugin> = Arc::new(NopPlugin);
     let ctx = ctx_with_probes(&parent, "test-exec-window-read", vec![a, b]).await;
+    let port_a = ToolPort;
+    let port_b = ToolPort;
     let (x, y) = tokio::join!(
-        ToolPort.execute(
+        port_a.execute(
             call("probe_a", ctx.clone()).0,
             call("probe_a", ctx.clone()).1
         ),
-        ToolPort.execute(call("probe_b", ctx.clone()).0, call("probe_b", ctx).1),
+        port_b.execute(call("probe_b", ctx.clone()).0, call("probe_b", ctx).1),
     );
     assert!(x.error.is_none() && y.error.is_none());
     assert_eq!(

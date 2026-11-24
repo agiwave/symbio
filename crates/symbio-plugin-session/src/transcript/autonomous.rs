@@ -76,16 +76,11 @@ impl SessionPlugin {
         let params = session_chat::Request {
             session_id: Some(session_id.to_string()),
             include_history: Some(include_history),
-            // 自主轮没有人在屏幕前：需交互的工具产卡会把这一轮永远挂在等待上，
-            // 所以安全语义不跟随「会话」配置，恒用内置 `unattended` 档（auto 审批）。
-            // mode/risk 已随裁决 B 纳入沙箱档案（D-531），会话只选沙箱。
-            sandbox_id: Some("unattended".to_string()),
-            // 存量兼容回退：mode 恒 auto（无人值守），沙箱句柄会按 sandbox_id 覆盖。
-            mode: Some("auto".to_string()),
-            // 其余字段留空：`agent_id` / `provider_id` 由
-            // `resolve_session_params` 回退到会话 metadata，工作目录同（`start_turn` 的
-            // `ctx > metadata > 报错` 第一档之前没有更早的来源）。自主触发是**本机**路径，
-            // 无「来源声明」——轮末承诺的 `to` 由取值点落本机用户（那条不一致的归属见 D-076 后果）。
+            // 运行选项唯一真源是会话 metadata；自主触发不得在消息级 Request 里
+            // 另选 sandbox_id / mode，否则同一会话会随触发来源出现两套安全语义。
+            // `agent_id` / `provider_id` / `sandbox_id` 均由 resolve_session_params
+            // 回退到会话 metadata，工作目录同（`start_turn` 的 `ctx > metadata > 报错`
+            // 第一档之前没有更早的来源）。自主触发是**本机**路径，无「来源声明」。
             ..Default::default()
         };
         Some(

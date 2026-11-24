@@ -93,7 +93,7 @@ export const BASELINE = {
   //   缺席放行 / 白名单裁决 / 仅拦显式配置工具 / 多事实全过 / 配置构造注册表 / traverse 发布句柄。
   //   SDK 侧沙箱四测（缺席降级 / 发布可见 / 二次发布拒绝 / 开放事实词表）此前已在 2313 内计入。
   //   非侵蚀：纯新增判据，覆盖横切句柄的发布—消费闭环。
-  ciRustTestsTotal: 2332,
+  ciRustTestsTotal: 2477,
   cliRustTests: 21,
   tauriRustTests: 4,
   // doc-link-allow D-010: 下一行是退役文件的历史叙述（已把这两个文件删掉），不是入链
@@ -111,7 +111,7 @@ export const BASELINE = {
   // 直接单测**（原先只能借 mount composable / 组件间接覆盖）；被测对象与调用点逐字保留，
   // 依赖方向不变（composables → schemas、components → schemas）。不是补回覆盖，是新增判据。
   vitestFiles: 86,
-  vitestTests: 1276,
+  vitestTests: 1290,
   verifyPrograms: 17,
   verifyNegatives: 4,
   // baseline-allow e2eCases: 读通道禁令（e2e 不得读任何内部存储文件——`messages.json` / `v2-events.wal` / `session.json` 一并禁）下删 3 个用例：t33 熔断（存储层判据，已由 `wal.test.rs` / `active.test.rs` 覆盖）、t40（断言全为 WAL 白盒入格，可见效果已由 t29 记忆召回 / t35 技能编译覆盖）、t43（messages-json-is-rebuildable，判据「真源已换、缓存可弃」已下沉 `store/tests.rs`，且 messages.json 已停写）。45 → 42，非侵蚀：三条的判据都下沉到了 Rust 侧，不是丢掉覆盖。

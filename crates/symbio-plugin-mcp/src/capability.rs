@@ -21,8 +21,9 @@ use serde_json::Value;
 use std::sync::Arc;
 use symbio_plugin_api::{
     missing_caller, port_result, CapabilityCategory, CapabilityMeta, ExecEnv, PluginError,
-    PluginInvokeRequest, PortExecContext, PortExecutor, PortInput, PortOutcome,
+    PluginInvokeRequest, PortExecContext, PortExecutor, PortInput, PortOutcome, SandboxFact,
 };
+use symbio_providers::FactsOf;
 
 use super::manager::McpManager;
 use super::types::{McpTool, McpToolCallResponse};
@@ -75,6 +76,125 @@ impl McpToolCapability {
             examples: None,
             ..Default::default()
         }
+    }
+
+    /// 注册给审批闸门的事实提取器：工具身份固定，参数语义按本次调用提取。
+    pub(crate) fn facts(&self) -> FactsOf {
+        let tool_name = Self::namespaced_name(&self.server_name, &self.tool_name);
+        Arc::new(move |args, _ctx| intent_facts(&tool_name, args))
+    }
+}
+
+#[derive(Clone, Copy)]
+enum ArgumentKind {
+    Path,
+    Url,
+    Command,
+}
+
+/// MCP 工具调用的沙箱事实。所有 server / tool 共用这套投影，不依赖特定 MCP 实现。
+pub(crate) fn intent_facts(tool_name: &str, args: &Value) -> Vec<SandboxFact> {
+    let mut facts = vec![SandboxFact::new("mcp_tool", tool_name)];
+    collect_argument_facts(args, None, &mut facts);
+    facts
+}
+
+fn collect_argument_facts(
+    value: &Value,
+    inherited_kind: Option<ArgumentKind>,
+    facts: &mut Vec<SandboxFact>,
+) {
+    match value {
+        Value::String(value) => {
+            let value = redact_embedded_credentials(value);
+            facts.push(SandboxFact::new("mcp_argument", value.clone()));
+            match inherited_kind {
+                Some(ArgumentKind::Path) => facts.push(SandboxFact::new(
+                    "vdfs_path",
+                    symbio_plugin_api::vdfs_normalize_path(&value),
+                )),
+                Some(ArgumentKind::Url) => {
+                    let normalized = url::Url::parse(&value)
+                        .map(|mut url| {
+                            url.set_fragment(None);
+                            url.to_string()
+                        })
+                        .unwrap_or_else(|_| value.trim().to_string());
+                    facts.push(SandboxFact::new("url", normalized));
+                }
+                Some(ArgumentKind::Command) => {
+                    facts.push(SandboxFact::new("shell_command", value.trim()));
+                }
+                None => {}
+            }
+        }
+        Value::Array(values) => {
+            for value in values {
+                collect_argument_facts(value, inherited_kind, facts);
+            }
+        }
+        Value::Object(values) => {
+            for (key, value) in values {
+                // 凭据字段及其整棵子树都不进入规则 / 审计可见的事实。
+                if is_sensitive_key(key) {
+                    continue;
+                }
+                collect_argument_facts(value, argument_kind(key), facts);
+            }
+        }
+        _ => {}
+    }
+}
+
+fn redact_embedded_credentials(value: &str) -> String {
+    let Ok(mut url) = url::Url::parse(value) else {
+        return value.to_string();
+    };
+    if url.username().is_empty() && url.password().is_none() {
+        return value.to_string();
+    }
+    let _ = url.set_username("");
+    let _ = url.set_password(None);
+    url.to_string()
+}
+
+fn is_sensitive_key(key: &str) -> bool {
+    let key = key.to_ascii_lowercase();
+    [
+        "password",
+        "passwd",
+        "token",
+        "secret",
+        "credential",
+        "authorization",
+        "cookie",
+        "api_key",
+        "apikey",
+        "key",
+    ]
+    .iter()
+    .any(|marker| key.contains(marker))
+}
+
+fn argument_kind(key: &str) -> Option<ArgumentKind> {
+    let key = key.to_ascii_lowercase();
+    if ["path", "file", "dir", "directory", "workdir"]
+        .iter()
+        .any(|marker| key.contains(marker))
+    {
+        Some(ArgumentKind::Path)
+    } else if ["url", "uri", "endpoint"]
+        .iter()
+        .any(|marker| key.contains(marker))
+    {
+        Some(ArgumentKind::Url)
+    } else if ["command", "shell", "exec"]
+        .iter()
+        .any(|marker| key.contains(marker))
+    {
+        Some(ArgumentKind::Command)
+    } else {
+        None
     }
 }
 

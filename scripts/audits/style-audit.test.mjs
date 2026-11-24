@@ -67,10 +67,29 @@ test('A 不误报：类定义在全局 CSS 里 → 不红', () => {
 })
 
 test('A 命中：动态类前缀没有任何已定义类以它开头 → ERROR', () => {
-  // `:class="\`ghost-${x}\`"` 这类拼接，前缀至少要能命中一个已定义类
+  // `:class="\`ghost-${kind}\`"` 这类拼接，前缀至少要能命中一个已定义类
   const r = audit({
     'tauri/src/components/Dyn.vue': vue('<div :class="`ghost-${kind}`" />'),
   })
+  assert.equal(r.status, 1)
+  assert.match(r.stdout, /ghost/)
+})
+
+test('A 不误报：对象绑定里的函数实参不是简写类名', () => {
+  const r = audit({
+    'tauri/src/components/Ok.vue': vue(
+      `<div :class="{ 'input-invalid': cellError(field, rowIndex, column) }" />`,
+      '<style scoped>\n.input-invalid { color: red; }\n</style>'
+    ),
+  })
+  assert.equal(r.status, 0, r.stdout)
+})
+
+test('A 仍识别简写对象键，未定义的简写类名照样报错', () => {
+  const files = {
+    'tauri/src/components/Ghost.vue': vue('<div :class="{ ghost }" />'),
+  }
+  const r = audit(files)
   assert.equal(r.status, 1)
   assert.match(r.stdout, /ghost/)
 })

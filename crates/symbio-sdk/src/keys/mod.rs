@@ -121,6 +121,32 @@ define_string_key!(SessionDirKey, SESSION_DIR, "session_dir");
 define_vdfs_key!(AgentVdfsKey, AGENT_VDFS, "agent_vdfs_provider");
 define_vdfs_key!(WorkspaceVdfsKey, WORKSPACE_VDFS, "workspace_vdfs_provider");
 define_vdfs_key!(SessionVdfsKey, SESSION_VDFS, "session_vdfs_provider");
+
+/// VDFS 调用主体。只有宿主入口能写入，模型经元数据提供的同名字符串不会通过类型检查。
+#[derive(Debug, Clone, Copy, PartialEq, Eq)]
+pub enum VdfsCaller {
+    Manager,
+    Model,
+}
+
+pub struct VdfsCallerKey;
+impl SymbioKey for VdfsCallerKey {
+    type Value = VdfsCaller;
+    const WIRE: bool = false;
+    fn name(&self) -> &'static str {
+        "vdfs_caller"
+    }
+    fn parse(&self, _s: &str) -> Option<Self::Value> {
+        None
+    }
+    fn format(&self, v: &Self::Value) -> String {
+        match v {
+            VdfsCaller::Manager => "manager".to_string(),
+            VdfsCaller::Model => "model".to_string(),
+        }
+    }
+}
+pub const VDFS_CALLER: VdfsCallerKey = VdfsCallerKey;
 // 入站请求的**来源主体**（DE-001 §12.2 跨体承诺的「向谁宣告」）：调用方经请求
 // `metadata.source_principal` 声明「这条消息是谁发的」（完整主体名，如
 // `agent:main`）；网关 `build_ctx` 把 metadata 落进 ctx，会话插件的收件箱入队口

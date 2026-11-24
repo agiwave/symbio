@@ -199,17 +199,33 @@ impl LocalPlugin {
         // 是命令、ctx[WORKDIR] 是工作目录。翻成开放 kind 事实交给闸门查沙箱；
         // 沙箱按用户配的规则做 deny / 风险档覆盖，双方都不认识对方的实现细节。
         let shell_facts: FactsOf = Arc::new(|args: &Value, ctx: &Arc<dyn PluginInvokeRequest>| {
-            let mut facts = Vec::new();
-            if let Some(command) = args.get("command").and_then(|v| v.as_str()) {
-                facts.push(symbio_plugin_api::SandboxFact::new(
-                    "shell_command",
-                    command,
-                ));
-            }
-            if let Some(workdir) = ctx.get(symbio_plugin_api::WORKDIR) {
-                facts.push(symbio_plugin_api::SandboxFact::new("vdfs_path", workdir));
-            }
-            facts
+            args.get("command")
+                .and_then(|v| v.as_str())
+                .map(|command| {
+                    super::policy::command_intent_facts(
+                        command,
+                        ctx.get(symbio_plugin_api::WORKDIR).as_deref(),
+                    )
+                })
+                .unwrap_or_default()
+        });
+        let search_facts: FactsOf = Arc::new(|args: &Value, ctx: &Arc<dyn PluginInvokeRequest>| {
+            args.get("path")
+                .and_then(|v| v.as_str())
+                .map(|path| {
+                    let expanded =
+                        symbio_plugin_api::plugin_expand_tilde_path(std::path::Path::new(path));
+                    vec![symbio_plugin_api::SandboxFact::new(
+                        "vdfs_path",
+                        symbio_plugin_api::vdfs_resolve_path(
+                            &expanded.to_string_lossy(),
+                            ctx.get(symbio_plugin_api::WORKDIR)
+                                .as_deref()
+                                .unwrap_or_default(),
+                        ),
+                    )]
+                })
+                .unwrap_or_default()
         });
         let tool_impls: Vec<ToolEntry> = vec![
             ToolEntry {
@@ -221,7 +237,7 @@ impl LocalPlugin {
             ToolEntry {
                 meta: content_search.meta(),
                 risk: None,
-                facts: None,
+                facts: Some(search_facts.clone()),
                 executor: content_search,
             },
             ToolEntry {
@@ -233,7 +249,7 @@ impl LocalPlugin {
             ToolEntry {
                 meta: codebase_search.meta(),
                 risk: None,
-                facts: None,
+                facts: Some(search_facts),
                 executor: codebase_search,
             },
             ToolEntry {

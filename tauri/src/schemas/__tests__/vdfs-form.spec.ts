@@ -37,6 +37,8 @@ import {
   tableRows,
   tableNewRow,
   tableRemoveRow,
+  tableMoveRow,
+  tableDuplicateRow,
 } from '../vdfs-form'
 import type { DetailColumn } from '../vdfs-form'
 import type { DetailAction, DetailField, DetailPreset, DetailPresetSpec } from '../vdfs'
@@ -453,6 +455,46 @@ describe('table widget 的行编排（机制唯一实现）', () => {
     expect(tableRemoveRow(rows, 1)).toEqual([{ a: 1 }, { a: 3 }])
     expect(tableRemoveRow(rows, 99)).toBe(rows)
     expect(tableRemoveRow(rows, -1)).toBe(rows)
+  })
+
+  it('上移 / 下移返回新数组，保留行对象引用且不改原数组', () => {
+    const rows = [{ a: 1 }, { a: 2 }, { a: 3 }]
+    const up = tableMoveRow(rows, 2, 1)
+    const down = tableMoveRow(rows, 0, 2)
+
+    expect(up).toEqual([{ a: 1 }, { a: 3 }, { a: 2 }])
+    expect(up[1]).toBe(rows[2])
+    expect(down).toEqual([{ a: 2 }, { a: 3 }, { a: 1 }])
+    expect(down[2]).toBe(rows[0])
+    expect(rows).toEqual([{ a: 1 }, { a: 2 }, { a: 3 }])
+  })
+
+  it('移动的边界 / 非法索引原样返回', () => {
+    const rows = [{ a: 1 }]
+    expect(tableMoveRow(rows, 0, 0)).toEqual(rows)
+    expect(tableMoveRow(rows, -1, 0)).toBe(rows)
+    expect(tableMoveRow(rows, 0, 1)).toBe(rows)
+    expect(tableMoveRow(rows, 0.5, 0)).toBe(rows)
+    expect(tableMoveRow(rows, 0, Number.NaN)).toBe(rows)
+  })
+
+  it('复制行插到其后，修改副本及嵌套值不影响原行', () => {
+    const rows = [{ a: 1, nested: { values: ['x'] } }]
+    const copied = tableDuplicateRow(rows, 0)
+
+    expect(copied).toHaveLength(2)
+    expect(copied[1]).toEqual(rows[0])
+    expect(copied[1]).not.toBe(rows[0])
+    copied[1].a = 2
+    ;(copied[1].nested as { values: string[] }).values.push('y')
+    expect(rows).toEqual([{ a: 1, nested: { values: ['x'] } }])
+  })
+
+  it('复制的非法索引原样返回', () => {
+    const rows = [{ a: 1 }]
+    expect(tableDuplicateRow(rows, -1)).toBe(rows)
+    expect(tableDuplicateRow(rows, 1)).toBe(rows)
+    expect(tableDuplicateRow(rows, 0.5)).toBe(rows)
   })
 
   it('列定义只有通用控件词（机制层零业务词）', () => {

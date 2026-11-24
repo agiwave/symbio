@@ -142,6 +142,35 @@ async fn trigger_facts_land_in_order_and_no_task_grows_without_the_capability_pa
     );
 }
 
+#[tokio::test]
+async fn autonomous_request_does_not_override_session_sandbox_metadata() {
+    let (_dir, p) = autonomy_plugin();
+    let sid = "s-sandbox";
+    seed_one_fact(&p, sid);
+    let message = cm::ChatNode {
+        principal: Some(symbio_kernel::chat::principal::Principal::from_legacy(
+            symbio_plugin_api::PRINCIPAL_AUTONOMOUS,
+        )),
+        msg_type: Some(cm::NodeKind::Body),
+        content: Some(cm::MessageContent::Text("检查待办".into())),
+        ..Default::default()
+    };
+
+    let item = p
+        .request_autonomous_round(
+            sid,
+            None,
+            &serde_json::json!({ "sandbox_id": "strict" }),
+            message,
+            1_000,
+        )
+        .await
+        .expect("有事实源与触发声明即应入队");
+
+    assert!(item.params.sandbox_id.is_none(), "消息级不得另选沙箱");
+    assert!(item.params.mode.is_none(), "消息级不得另设审批模式");
+}
+
 /// **能力包不在 ⇒ 升格这一步消失**（T3 形状）：触发与欲照样入格，但不长出任务。
 ///
 /// ## 为什么这里断言的是「不开」而不是「只开一次」

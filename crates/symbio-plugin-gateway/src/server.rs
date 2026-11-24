@@ -47,8 +47,8 @@ use std::time::{Duration, Instant};
 use symbio_plugin_api::routes::ROUTE_EVENT_BUS_SUBSCRIBE;
 use symbio_plugin_api::{
     Plugin, PluginChannel, PluginFrame, PluginInvokeRequest, PluginInvokeRequestExt,
-    PluginMessageWire, PluginPayload, PluginPayloadWire, PluginSimpleRequest, SymbioKey, PATH,
-    TRACE_ID,
+    PluginMessageWire, PluginPayload, PluginPayloadWire, PluginSimpleRequest, SymbioKey,
+    VdfsCaller, PATH, TRACE_ID, VDFS_CALLER,
 };
 use tokio::io::{AsyncRead, AsyncReadExt, AsyncWrite, AsyncWriteExt};
 use tokio::net::{TcpListener, TcpStream};
@@ -849,10 +849,12 @@ async fn dispatch_once(
 /// 装配本身在 core（[`PluginSimpleRequest::from_parts`]）：桌面命令层走同一份，
 /// 两个入口看到的 metadata 类型不能分叉。
 fn build_ctx(msg: &PluginMessageWire) -> Arc<dyn PluginInvokeRequest> {
-    Arc::new(PluginSimpleRequest::from_parts(
+    let ctx = Arc::new(PluginSimpleRequest::from_parts(
         msg.payload.clone(),
         msg.metadata.as_object(),
-    ))
+    ));
+    ctx.set(VDFS_CALLER, VdfsCaller::Model);
+    ctx
 }
 
 // ==================== SSE 实时面 ====================
@@ -898,6 +900,7 @@ fn sse_data_line(value: &Value) -> Vec<u8> {
 async fn handle_sse(stream: TcpStream, router: Arc<dyn Plugin>, cancel: CancellationToken) {
     let (mut read_half, mut write_half) = stream.into_split();
     let ctx = Arc::new(PluginSimpleRequest::new(None, None));
+    ctx.set(VDFS_CALLER, VdfsCaller::Model);
     ctx.set(PATH, ROUTE_EVENT_BUS_SUBSCRIBE.to_string());
     if let Err(e) = ctx.set_payload(serde_json::json!({})) {
         let b = format!("{{\"error\":\"{e}\"}}").into_bytes();

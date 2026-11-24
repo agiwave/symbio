@@ -11,12 +11,98 @@
 
 use super::entry;
 use async_trait::async_trait;
-use std::path::PathBuf;
+use std::path::{Path, PathBuf};
 use symbio_kernel::vdfs::{
     VdfsAccess, VdfsActionResult, VdfsContent, VdfsContext, VdfsError, VdfsNode, VdfsProvider,
     VdfsRequest, VdfsResponse, VdfsResult, VdfsWriteResponse, VDFS_ACTION_EXPORT,
 };
 use symbio_sdk::vdfs::host::{vdfs_notify_change, vdfs_unwatch_changes, vdfs_watch_changes};
+
+struct ImportGuard {
+    root: PathBuf,
+    target: PathBuf,
+    old: PathBuf,
+    new: PathBuf,
+    old_moved: bool,
+    published: bool,
+}
+
+impl ImportGuard {
+    fn new(root: PathBuf, target: PathBuf) -> Self {
+        Self {
+            old: root.join("old"),
+            new: root.join("new"),
+            root,
+            target,
+            old_moved: false,
+            published: false,
+        }
+    }
+}
+
+impl Drop for ImportGuard {
+    fn drop(&mut self) {
+        if self.old_moved && !self.published {
+            let restored = match std::fs::symlink_metadata(&self.target) {
+                Err(e) if e.kind() == std::io::ErrorKind::NotFound => {
+                    if ordinary_components(&self.target) {
+                        std::fs::rename(&self.old, &self.target).is_ok()
+                    } else {
+                        false
+                    }
+                }
+                _ => false,
+            };
+            // 回滚失败时保留私有暂存中的唯一旧副本，不能用清理把它一起删掉。
+            if !restored {
+                return;
+            }
+        }
+        remove_owned_tree(&self.root);
+    }
+}
+
+fn ordinary_components(path: &Path) -> bool {
+    let mut current = path.to_path_buf();
+    loop {
+        match std::fs::symlink_metadata(&current) {
+            Ok(meta) if entry::is_reparse_point(&meta) => return false,
+            Ok(_) => {}
+            Err(e) if e.kind() == std::io::ErrorKind::NotFound => {}
+            Err(_) => return false,
+        }
+        let Some(parent) = current.parent() else {
+            return true;
+        };
+        if parent.as_os_str().is_empty() || parent == current {
+            return true;
+        }
+        current = parent.to_path_buf();
+    }
+}
+
+fn remove_owned_tree(path: &Path) {
+    if !ordinary_components(path) {
+        return;
+    }
+    let Ok(meta) = std::fs::symlink_metadata(path) else {
+        return;
+    };
+    if entry::is_reparse_point(&meta) {
+        return;
+    }
+    if meta.is_dir() {
+        let Ok(rd) = std::fs::read_dir(path) else {
+            return;
+        };
+        for child in rd.flatten() {
+            remove_owned_tree(&child.path());
+        }
+        let _ = std::fs::remove_dir(path);
+    } else if meta.is_file() {
+        let _ = std::fs::remove_file(path);
+    }
+}
 
 /// 单文件型条目存储（同时是一个可直接注册的 `VdfsProvider`）
 #[derive(Debug, Clone)]
@@ -88,7 +174,10 @@ impl SingleFileVdfs {
 
     /// 写主文件（原子落盘）+ 变更广播；返回是否为**新建**
     pub async fn write_text(&self, id: &str, text: &str) -> VdfsResult<bool> {
-        let created = entry::write_entry(&self.base, id, &self.manifest, text).await?;
+        let lock = entry::mutation_lock(&self.base);
+        let _guard = lock.lock().await;
+        let created = entry::write_entry_locked(&self.base, id, &self.manifest, text).await?;
+        // 广播也留在锁内：并发 save 的通知顺序与落盘顺序一致，reload 不会倒序。
         self.announce(id, created);
         Ok(created)
     }
@@ -106,7 +195,9 @@ impl SingleFileVdfs {
 
     /// 删除条目目录 + 变更广播（磁盘上已无目录时告警而非报错——**幂等**）
     pub async fn remove(&self, id: &str) -> VdfsResult<()> {
-        match entry::remove_entry(&self.base, id).await {
+        let lock = entry::mutation_lock(&self.base);
+        let _guard = lock.lock().await;
+        match entry::remove_entry_locked(&self.base, id).await {
             Ok(()) => {}
             Err(VdfsError::NotFound(_)) => {
                 symbio_sdk::plugin_warn!(&self.kind, "磁盘上已无条目 {id} 目录，仅清理内存");
@@ -122,20 +213,66 @@ impl SingleFileVdfs {
         entry::entry_exists(&self.base, id)
     }
 
-    /// 整包导入（zip）：解到条目目录，**整目录覆盖**
+    /// 整包导入（zip）：私有暂存完整后发布，覆盖旧条目
     pub async fn import_pack(&self, id: &str, bytes: &[u8]) -> VdfsResult<bool> {
-        let existed = self.exists(id);
-        super::pack::extract_pack(&self.entry_dir(id), bytes).await?;
+        let lock = entry::mutation_lock(&self.base);
+        let _guard = lock.lock().await;
+        entry::validate_base(&self.base).await?;
+        tokio::fs::create_dir_all(&self.base)
+            .await
+            .map_err(|e| VdfsError::internal(format!("创建类别根失败：{e}")))?;
+        entry::validate_base(&self.base).await?;
+        let target = self.entry_dir(id);
+        let existed = match tokio::fs::symlink_metadata(&target).await {
+            Ok(_) => {
+                entry::validate_entry_tree(&self.base, id).await?;
+                true
+            }
+            Err(e) if e.kind() == std::io::ErrorKind::NotFound => false,
+            Err(e) => return Err(VdfsError::internal(format!("检查旧条目失败：{e}"))),
+        };
+
+        let root = loop {
+            let candidate = self.base.join(format!(
+                ".symbio-import-{}-{}.tmp",
+                std::process::id(),
+                uuid::Uuid::new_v4().simple()
+            ));
+            match std::fs::create_dir(&candidate) {
+                Ok(()) => break candidate,
+                Err(e) if e.kind() == std::io::ErrorKind::AlreadyExists => continue,
+                Err(e) => return Err(VdfsError::internal(format!("创建导入暂存目录失败：{e}"))),
+            }
+        };
+        let mut import_guard = ImportGuard::new(root, target.clone());
+        super::pack::extract_pack(&import_guard.new, bytes).await?;
+        entry::sync_tree(&import_guard.new).await?;
+        entry::validate_base(&self.base).await?;
+        if existed {
+            entry::validate_entry_tree(&self.base, id).await?;
+        } else if tokio::fs::symlink_metadata(&target).await.is_ok() {
+            return Err(VdfsError::Conflict(format!("导入目标已存在：{id}")));
+        }
+        if existed {
+            // 两步发布之间没有取消点，避免 tokio 的脱离式 rename 在 Drop 后才完成。
+            std::fs::rename(&target, &import_guard.old)
+                .map_err(|e| VdfsError::internal(format!("暂存旧条目失败：{e}")))?;
+            import_guard.old_moved = true;
+        }
+        std::fs::rename(&import_guard.new, &target)
+            .map_err(|e| VdfsError::internal(format!("发布导入条目失败：{e}")))?;
+        import_guard.published = true;
+        entry::sync_parent_best_effort(&self.base);
+        // 发布即提交；暂存清理由 guard 尽力执行，不再引入发布后的取消点。
         self.announce(id, !existed);
         Ok(!existed)
     }
 
     /// 整包导出：条目目录打成 zip（顶层目录名 = id，可原样导回）
     pub async fn export_pack(&self, id: &str) -> VdfsResult<super::pack::VdfsPack> {
-        let dir = self.entry_dir(id);
-        if !dir.is_dir() {
-            return Err(VdfsError::NotFound(format!("未找到条目「{id}」")));
-        }
+        let lock = entry::mutation_lock(&self.base);
+        let _guard = lock.lock().await;
+        let dir = entry::validate_entry_tree(&self.base, id).await?;
         let bytes = super::pack::zip_dir(&dir, id).map_err(|e| VdfsError::Internal(e.0))?;
         Ok(super::pack::VdfsPack::new(id, &bytes))
     }

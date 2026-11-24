@@ -1,6 +1,11 @@
 //! `ApprovalGrants` 的判据：读侧逐条容错、上限只抬不降、线格式就是一张映射。
 
 use super::*;
+use symbio_kernel::plugin::PluginSimpleRequest;
+
+fn ctx() -> Arc<dyn PluginInvokeRequest> {
+    Arc::new(PluginSimpleRequest::new(None, None))
+}
 
 /// 清单按**能力名**记，值只认三个档位词；认不出的那一行被丢掉（fail-closed）。
 #[test]
@@ -74,4 +79,73 @@ fn wire_format_round_trips_as_a_plain_map() {
 fn null_deserializes_to_empty() {
     let g: ApprovalGrants = serde_json::from_str("null").unwrap();
     assert_eq!(g, ApprovalGrants::default());
+}
+
+#[test]
+fn one_time_grant_is_bound_and_ignores_model_approved_field() {
+    let c = ctx();
+    let args = serde_json::json!({"command":"git status","approved":true});
+    let grant = ApprovalGrant::issue(
+        "call-1",
+        "shell",
+        &args,
+        Some("session-1".into()),
+        7,
+        Duration::from_secs(60),
+    );
+    grant.attach(&c);
+    assert!(ApprovalGrant::take(
+        c.as_ref(),
+        "call-1",
+        "shell",
+        &serde_json::json!({"command":"git status"}),
+        Some("session-1"),
+        7,
+    ));
+    assert!(!ApprovalGrant::take(
+        c.as_ref(),
+        "call-1",
+        "shell",
+        &serde_json::json!({"command":"git status"}),
+        Some("session-1"),
+        7,
+    ));
+}
+
+#[test]
+fn grant_rejects_changed_call_tool_args_session_version_and_expiry() {
+    let args = serde_json::json!({"command":"git status"});
+    for (index, (call, tool, changed, session, version, ttl)) in [
+        ("other", "shell", args.clone(), "s", 1, 60),
+        ("c", "other", args.clone(), "s", 1, 60),
+        (
+            "c",
+            "shell",
+            serde_json::json!({"command":"rm -rf /"}),
+            "s",
+            1,
+            60,
+        ),
+        ("c", "shell", args.clone(), "other", 1, 60),
+        ("c", "shell", args.clone(), "s", 2, 60),
+        ("c", "shell", args.clone(), "s", 1, 0),
+    ]
+    .into_iter()
+    .enumerate()
+    {
+        let c = ctx();
+        ApprovalGrant::issue(
+            "c",
+            "shell",
+            &args,
+            Some("s".into()),
+            1,
+            Duration::from_secs(ttl),
+        )
+        .attach(&c);
+        assert!(
+            !ApprovalGrant::take(c.as_ref(), call, tool, &changed, Some(session), version,),
+            "case {index} must reject"
+        );
+    }
 }

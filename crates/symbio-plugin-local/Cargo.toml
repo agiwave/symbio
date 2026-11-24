@@ -33,6 +33,7 @@ shellexpand = { workspace = true }
 glob = { workspace = true }
 which = { workspace = true }
 regex = { workspace = true }
+url = { workspace = true }
 # 跨平台内容搜索：直接调用 ripgrep 库（替代对 rg/PowerShell/grep 可执行文件的依赖），并遵循 .gitignore
 grep = { workspace = true }
 ignore = { workspace = true }

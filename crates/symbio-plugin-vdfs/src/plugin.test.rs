@@ -16,6 +16,22 @@ fn ctx_with_path(path: &str) -> Arc<dyn PluginInvokeRequest> {
     ctx
 }
 
+#[test]
+fn tool_path_facts_resolve_physical_addresses_but_preserve_virtual_root() {
+    assert_eq!(
+        path_intent_fact(r"src\main.rs", r"C:\work\repo"),
+        symbio_plugin_api::SandboxFact::new("vdfs_path", "c:/work/repo/src/main.rs")
+    );
+    assert_eq!(
+        path_intent_fact(".vdfsv2/sandbox/strict", "/workspace"),
+        symbio_plugin_api::SandboxFact::new("vdfs_path", ".vdfsv2/sandbox/strict")
+    );
+    assert_eq!(
+        path_intent_fact("/etc/passwd", "/workspace"),
+        symbio_plugin_api::SandboxFact::new("vdfs_path", "/etc/passwd")
+    );
+}
+
 #[tokio::test]
 async fn route_unknown_path_is_not_found() {
     let err = build_plugin()

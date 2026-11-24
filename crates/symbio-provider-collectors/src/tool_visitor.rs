@@ -156,13 +156,54 @@ pub async fn register_tool_with_facts(
         let m = meta.clone();
         risk.unwrap_or_else(|| Arc::new(move |_| m.effective_risk()))
     };
+    register_gated(
+        ctx,
+        meta,
+        risk,
+        facts.map(super::approval::FactSource::Sync),
+        executor,
+    )
+    .await
+}
+
+pub async fn register_tool_with_async_facts(
+    ctx: &Arc<dyn PluginInvokeRequest>,
+    meta: symbio_kernel::capability::CapabilityMeta,
+    risk: Option<RiskOf>,
+    facts: Option<super::approval::AsyncFactsOf>,
+    executor: Arc<dyn PortExecutor>,
+) {
+    let risk: RiskOf = {
+        let m = meta.clone();
+        risk.unwrap_or_else(|| Arc::new(move |_| m.effective_risk()))
+    };
+    register_gated(
+        ctx,
+        meta,
+        risk,
+        facts.map(super::approval::FactSource::Async),
+        executor,
+    )
+    .await
+}
+
+async fn register_gated(
+    ctx: &Arc<dyn PluginInvokeRequest>,
+    meta: symbio_kernel::capability::CapabilityMeta,
+    risk: RiskOf,
+    facts: Option<super::approval::FactSource>,
+    executor: Arc<dyn PortExecutor>,
+) {
     let gated: Arc<dyn PortExecutor> = match facts {
-        Some(f) => Arc::new(GatedExecutor::new_with_facts(
+        Some(super::approval::FactSource::Sync(f)) => Arc::new(GatedExecutor::new_with_facts(
             meta.clone(),
             risk,
             f,
             executor,
         )),
+        Some(super::approval::FactSource::Async(f)) => Arc::new(
+            GatedExecutor::new_with_async_facts(meta.clone(), risk, f, executor),
+        ),
         None => Arc::new(GatedExecutor::new(meta.clone(), risk, executor)),
     };
     if let Some(bindings) = ctx.get(symbio_sdk::capability::port::PORT_BINDINGS) {

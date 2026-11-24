@@ -15,6 +15,7 @@ async fn private_and_local_targets_are_rejected_before_any_request() {
     let t = tool();
     for bad in [
         "http://127.0.0.1/admin",
+        "http://2130706433/admin", // URL 解析后为 127.0.0.1
         "http://127.0.0.2/",
         "http://[::1]:8080/",
         "http://0.0.0.0/",
@@ -22,12 +23,13 @@ async fn private_and_local_targets_are_rejected_before_any_request() {
         "http://192.168.1.1/",
         "http://169.254.169.254/latest/meta-data/",
         "http://localhost/",
+        "http://localhost./",
         "http://foo.localhost/",
         "http://printer.local/",
         "http://db.internal/",
     ] {
         let err = t
-            .execute_inner(json!({ "url": bad }), None)
+            .execute_inner(json!({ "url": bad }), None, None)
             .await
             .expect_err(&format!("应拒绝：{bad}"));
         assert!(
@@ -43,10 +45,10 @@ async fn invalid_scheme_is_rejected() {
     let t = tool();
     for bad in ["ftp://example.com", "file:///etc/passwd"] {
         let err = t
-            .execute_inner(json!({ "url": bad }), None)
+            .execute_inner(json!({ "url": bad }), None, None)
             .await
             .expect_err(&format!("应拒绝：{bad}"));
-        assert!(err.to_string().contains("只支持 HTTP/HTTPS"));
+        assert!(err.to_string().contains("只允许 HTTP/HTTPS"));
     }
 }
 

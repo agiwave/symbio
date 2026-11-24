@@ -204,7 +204,11 @@ export const WHITELIST_BASELINE = 0
 // String）入 SDK 臂——§5.1 两条准入逐条过：不提能力名（中性机制词汇），消费方跨
 // session（写入 metadata / DriveTarget）与 sandbox（traverse 里按 id 选档）两个插件。
 // 会话选项栏由 sandbox 插件贡献字段，前端零业务改动。裁决见 `003-design/058` D-531。
-export const SDK_BASELINE = 113
+// 113 → 117（`D-533`）：`SandboxDecision` 让 sandbox 发布方与 tool 执行闸门交换同一次
+// 快照裁决；`ApprovalGrant` 让 tool 审批恢复与 collectors 执行闸门交换一次性凭据；
+// `VdfsCaller` / `VDFS_CALLER` 让宿主管理入口与模型执行链交换进程内可信主体。
+// 四条均不含工具清单 / 策略 / 业务字段，消费方跨至少两个插件。
+export const SDK_BASELINE = 117
 
 /**
  * 契约臂基线：**只许降**（`D-486`）。`symbio-contract` 是插件 ABI 的纯形状层，
@@ -248,7 +252,9 @@ export const CONTRACT_BASELINE = 31
 // 108 → 109（`D-513`）：实测已为 109，基线同批收平；不是放宽，账本只许降，
 // 基线跟着实测走。新增的一条要有决策号，本批记在 D-513。
 // 109 → 110（`D-532`）：`DetailColumn` 经 sdk 的 `present` 整模块转出到 plugin-api 门面——插件要声明 `DetailField.columns` 就必须能在自己 crate 里构造列定义，而门面是插件唯一可依赖的机制层（E-009 插件互不可见）。同名的 kernel 共享语法换的是门面可见性，不是新增可写路径；通用表格列契约见 DE-059 / D-532。
-export const GRAMMAR_BASELINE = 110
+// 110 → 111（`D-533`）：`vdfs_normalize_path` 是地址契约的共享纯语法，VDFS / local / sandbox 三个插件必须用同一份归一化事实，不能各自解释分隔符与绝对锚点。
+// 111 → 112（`D-533`）：`vdfs_resolve_path` 同属地址契约的共享纯语法，按有效 WORKDIR 解析相对路径；三个插件必须共用，不能各自解释盘符相对路径与工作目录。
+export const GRAMMAR_BASELINE = 112
 
 /**
  * 模块级转发的基线：**只许不涨**（D-278）。

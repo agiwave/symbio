@@ -1,7 +1,11 @@
 //! Web Tools 插件实现
 
+use super::net_guard::normalized_url_fact;
 pub use super::web_config::WebConfig;
-use super::{http_request::HttpRequestTool, web_fetch::WebFetchTool, web_search::WebSearchTool};
+use super::{
+    http_request::HttpRequestTool, web_fetch::WebFetchTool, web_search::upstream_url,
+    web_search::WebSearchTool,
+};
 // 审批闸门住在能力注册收口点（`providers/collectors/approval.rs`）；本插件只交声明，
 // 不再有第二条路径去判闸（D-466）——`http_request` 声明 `High` 而「风险只是宣传语」
 // 的第二个洞随 `route` 执行分支一起消失。
@@ -14,6 +18,7 @@ use symbio_plugin_api::{
     PortExecutor,
 };
 use symbio_plugin_api::{DetailDefinition, DetailField};
+use symbio_providers::FactsOf;
 use tokio::sync::RwLock;
 
 // ==================== 配置文档（`<根>/web/PLUGIN.yml`） ====================
@@ -70,6 +75,7 @@ fn config_definition() -> DetailDefinition {
 /// 一起消失，`register_tool` 一律收 `risk = None`（判定回落 `meta.effective_risk()`）。
 struct ToolEntry {
     meta: CapabilityMeta,
+    facts: Option<FactsOf>,
     executor: Arc<dyn PortExecutor>,
 }
 
@@ -109,18 +115,52 @@ impl WebPlugin {
         let web_search = Arc::new(WebSearchTool::new(Arc::clone(&config_lock)));
         let http_request = Arc::new(HttpRequestTool::new(Arc::clone(&config_lock)));
 
+        let url_facts: FactsOf = Arc::new(
+            |args: &serde_json::Value, _ctx: &Arc<dyn symbio_plugin_api::PluginInvokeRequest>| {
+                args.get("url")
+                    .and_then(|value| value.as_str())
+                    .map(|raw| {
+                        vec![symbio_plugin_api::SandboxFact::new(
+                            "url",
+                            normalized_url_fact(raw),
+                        )]
+                    })
+                    .unwrap_or_default()
+            },
+        );
+        // FactsOf 是同步回调，不能用会在 async runtime 里 panic 的 blocking_read。
+        // 正常路径现读当前配置；若正逢极短写锁窗口，退到稳定官方 endpoint，并共享实际 URL 投影。
+        // WHY：回调无法 await，宁可交稳定 URL 让规则显式裁决，也不把模型 query 冒充上游。
+        // 只提交实际 endpoint（DuckDuckGo 含查询参数），API key 留在 body/header，绝不进 URL fact。
+        let search_config = Arc::clone(&config_lock);
+        let search_facts: FactsOf = Arc::new(
+            move |args: &serde_json::Value,
+                  _ctx: &Arc<dyn symbio_plugin_api::PluginInvokeRequest>| {
+                let upstream = match search_config.try_read() {
+                    Ok(cfg) => upstream_url(&cfg, args),
+                    Err(_) => upstream_url(&WebConfig::default(), args),
+                };
+                vec![symbio_plugin_api::SandboxFact::new(
+                    "url",
+                    normalized_url_fact(&upstream),
+                )]
+            },
+        );
         // 三个工具都是**静态档**：风险交 `register_tool` 的 `None` 分支兜底。
         let tool_impls: Vec<ToolEntry> = vec![
             ToolEntry {
                 meta: web_fetch.meta(),
+                facts: Some(url_facts.clone()),
                 executor: web_fetch,
             },
             ToolEntry {
                 meta: web_search.meta(),
+                facts: Some(search_facts),
                 executor: web_search,
             },
             ToolEntry {
                 meta: http_request.meta(),
+                facts: Some(url_facts),
                 executor: http_request,
             },
         ];
@@ -193,10 +233,11 @@ impl Plugin for WebPlugin {
             // 注册收口点（`register_tool`）一次写两处：裹闸的端口绑定 + 纯数据的
             // 工具行。本插件全部工具都是静态档（`risk = None`）。
             for entry in self.tool_impls.iter() {
-                symbio_providers::register_tool(
+                symbio_providers::register_tool_with_facts(
                     &ctx,
                     entry.meta.clone(),
                     None,
+                    entry.facts.clone(),
                     Arc::clone(&entry.executor),
                 )
                 .await;

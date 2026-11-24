@@ -314,15 +314,17 @@ const VOCAB_BASELINE = process.env.VOCAB_BASELINE
 // core-shape-allow structFields: D-531 会话选档 id 随两条既有装订点交回——`Request.sandbox_id`（会话输入协议）与 `DriveTarget.sandbox_id`（驱动目标）各一格，与同结构里的 `provider_id` / `mode` / `risk_level` 同形：会话只在输入里带一个沙箱 id，宿主按它挂进 ctx、沙箱引擎据此按 id 解析档案与审批参数。它不是新数据面：值仍是普通字符串，走的是既有的 req>metadata>默认 回退链，替换的正是同一结构里退场的 mode/risk 两格（后端保留兼容回退，前端不再展示）。基线钉到实测 615，不留余量。
 // core-shape-allow structFields: D-532 详情表格列是通用对象数组编辑契约——`DetailColumn{key,label,widget,options,default,placeholder}` 六格是插件声明一列「叫什么 / 显示什么 / 用什么控件编辑 / 候选值 / 默认值 / 占位提示」的最小形状，六格折不开（少 `options` 就无法渲染枚举列、少 `default` 就无法预填合法首行）；降 pub(crate) 不行——写方是声明表格的插件（沙箱）、读方是前端表单机制经门面镜像，跨 crate 且插件互不可见（E-009）。它没有新增世界域名 / 端口名 / 事实名，也不是为某个插件开的口子——任何插件编辑对象数组都复用同一列契约（DE-059）。
 // core-shape-allow structFields: D-532 `DetailField.columns`(1) 是上述列契约在字段上的唯一挂载点——`table` widget 的列定义只能随字段声明走，不能塞进 `options`（那是标量选项候选值，语义不同），也不能新增「沙箱规则字段」之类的专用类型（会让表单机制反向依赖插件业务词，正是 D-531 否定的方向）。一格承载的是「这一列数组字段每行的列结构」，与 widget 字符串配套，机制层不含任何业务词。基线钉到实测 622，不留余量。
+// core-shape-allow structFields: D-533 同一次沙箱裁决的七格回体 `SandboxDecision` 与私有凭据载体 `ApprovalGrant` 各一格，是授权双方必须共同消费的完整快照和一次性凭据形状：缺许可/风险/拦截/审批模式/阈值/版本/原因任一项都会迫使执行闸门再次读策略或猜失败原因，重新引入 D-533 要消除的跨版本组合；凭据不能降为私有类型，因为签发方 tool 与消费方 collectors 跨 crate。八格承载的是通用授权结果，不含工具清单、路径策略或业务字段。基线钉到实测 630，不留余量。
+// core-shape-allow enumVariants: D-533 `VdfsCaller::{Manager, Model}` 两格是宿主注入的进程内可信主体闭集：管理写入与模型文件访问必须可区分，且未知主体失败关闭；复用布尔或字符串都能由模型载荷伪造，开放枚举又失去闭集。它只表达调用来源，不认插件 id 或 VDFS 操作。基线钉到实测 258，不留余量。
 // 2026-11-16（D-505）：实测已收到 608（614 是 D-440 / D-446 时点的上限），基线同批
 // 钉到 608——余量不白留给下一次新增。2026-11-20（D-513）：608 → 609，`DriveTarget`
-// 增 `session_dir` 一格（放宽行见上）。2026-11-21（D-523）：609 → 611，图标自报的两个投影载体（放宽行见上）。2026-11-23（D-531）：611 → 613，`SandboxFact` 的两格意图事实（放宽行见上）；同日 613 → 615，`Request.sandbox_id` / `DriveTarget.sandbox_id` 两格随会话选档入装订点（放宽行见上）。2026-11-24（D-532）：615 → 622，`DetailColumn` 六格 + `DetailField.columns` 一格随通用表格 widget 入数据面（放宽行见上），此后照旧只许降。
+// 增 `session_dir` 一格（放宽行见上）。2026-11-21（D-523）：609 → 611，图标自报的两个投影载体（放宽行见上）。2026-11-23（D-531）：611 → 613，`SandboxFact` 的两格意图事实（放宽行见上）；同日 613 → 615，`Request.sandbox_id` / `DriveTarget.sandbox_id` 两格随会话选档入装订点（放宽行见上）。2026-11-24（D-532）：615 → 622，`DetailColumn` 六格 + `DetailField.columns` 一格随通用表格 widget 入数据面（放宽行见上）。同日（D-533）：622 → 630，`SandboxDecision` 七格 + `ApprovalGrant` 一格；枚举 256 → 258，`VdfsCaller` 两格（放宽行见上），此后照旧只许降。
 const DATA_BASELINE = process.env.CORE_DATA_BASELINE
   ? (() => {
       const [structFields, enumVariants] = process.env.CORE_DATA_BASELINE.split(':').map((n) => Number(n))
       return { structFields, enumVariants }
     })()
-  : { structFields: 622, enumVariants: 256 }
+  : { structFields: 630, enumVariants: 258 }
 
 const CELL_LABEL = {
   traits: '`pub trait` 数（接缝数）',

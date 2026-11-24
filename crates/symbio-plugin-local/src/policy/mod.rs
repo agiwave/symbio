@@ -1,5 +1,5 @@
 use std::path::{Path, PathBuf};
-use symbio_plugin_api::{ExecAbortSignal, PluginError};
+use symbio_plugin_api::{ExecAbortSignal, PluginError, SandboxFact};
 
 mod policy_tracker;
 mod policy_types;
@@ -370,22 +370,50 @@ const WRITE_COMMANDS: &[&str] = &[
 /// 因此直接拒绝（双引号内同样生效——`sh` 在双引号里照样执行替换）。
 /// 变量展开（`$VAR` / `%VAR%`）只替换文本、不执行命令，故不在此列。
 fn split_subcommands(command: &str) -> Result<Vec<String>, String> {
+    #[cfg(windows)]
+    if command.contains('^') {
+        return Err("Windows cmd 的插入符转义无法安全枚举，请改写命令".to_string());
+    }
     let mut segments: Vec<String> = Vec::new();
     let mut current = String::new();
     let mut quote: Option<char> = None;
+    let mut escaped = false;
     let mut chars = command.chars().peekable();
 
     while let Some(c) = chars.next() {
+        if escaped {
+            current.push(c);
+            escaped = false;
+            continue;
+        }
         match quote {
-            Some(q) => {
-                if c == q {
+            Some('\'') => {
+                if c == '\'' {
                     quote = None;
-                } else if c == '`' || (c == '$' && chars.peek() == Some(&'(')) {
-                    return Err(format!("不允许命令替换：{command}"));
                 }
                 current.push(c);
             }
+            Some('"') => match c {
+                '"' => {
+                    quote = None;
+                    current.push(c);
+                }
+                '\\' => {
+                    current.push(c);
+                    escaped = true;
+                }
+                '`' => return Err(format!("不允许命令替换：{command}")),
+                '$' if chars.peek() == Some(&'(') => {
+                    return Err(format!("不允许命令替换：{command}"))
+                }
+                _ => current.push(c),
+            },
+            Some(_) => current.push(c),
             None => match c {
+                '\\' => {
+                    current.push(c);
+                    escaped = true;
+                }
                 '\'' | '"' => {
                     quote = Some(c);
                     current.push(c);
@@ -393,6 +421,9 @@ fn split_subcommands(command: &str) -> Result<Vec<String>, String> {
                 '`' => return Err(format!("不允许命令替换：{command}")),
                 '$' if chars.peek() == Some(&'(') => {
                     return Err(format!("不允许命令替换：{command}"))
+                }
+                '<' | '>' if chars.peek() == Some(&'(') => {
+                    return Err(format!("不允许进程替换：{command}"))
                 }
                 // fd 重定向（`2>&1` / `1>&2`）：`&` 是重定向语法的一部分，不是
                 // 分隔符——当分隔符会把后面的 `1` 切成独立「命令」，整条命令被
@@ -410,6 +441,9 @@ fn split_subcommands(command: &str) -> Result<Vec<String>, String> {
         }
     }
 
+    if escaped {
+        return Err(format!("转义未闭合：{command}"));
+    }
     if quote.is_some() {
         return Err(format!("引号未闭合：{command}"));
     }
@@ -421,6 +455,298 @@ fn split_subcommands(command: &str) -> Result<Vec<String>, String> {
         return Err("空命令".to_string());
     }
     Ok(segments)
+}
+
+fn shell_words(segment: &str) -> Vec<String> {
+    let mut words = Vec::new();
+    let mut current = String::new();
+    let mut quote = None;
+    let mut escaped = false;
+    for c in segment.chars() {
+        if escaped {
+            if !matches!(
+                c,
+                ' ' | '\t' | ';' | '|' | '&' | '<' | '>' | '\'' | '"' | '\\' | '`' | '$'
+            ) {
+                current.push('\\');
+            }
+            current.push(c);
+            escaped = false;
+            continue;
+        }
+        match quote {
+            Some('\'') => {
+                if c == '\'' {
+                    quote = None;
+                } else {
+                    current.push(c);
+                }
+            }
+            Some('"') => match c {
+                '"' => quote = None,
+                '\\' => escaped = true,
+                _ => current.push(c),
+            },
+            Some(_) => current.push(c),
+            None if c == '\'' || c == '"' => quote = Some(c),
+            None if c == '\\' => escaped = true,
+            None if c.is_whitespace() => {
+                if !current.is_empty() {
+                    words.push(std::mem::take(&mut current));
+                }
+            }
+            None => current.push(c),
+        }
+    }
+    if !current.is_empty() {
+        words.push(current);
+    }
+    words
+}
+
+fn redirection_targets(segment: &str) -> Vec<String> {
+    let mut targets = Vec::new();
+    let mut quote = None;
+    let mut escaped = false;
+    let mut chars = segment.chars().peekable();
+    while let Some(c) = chars.next() {
+        if escaped {
+            escaped = false;
+            continue;
+        }
+        match quote {
+            Some(q) if c == q => quote = None,
+            Some('"') if c == '\\' => escaped = true,
+            Some(_) => {}
+            None if c == '\'' || c == '"' => quote = Some(c),
+            None if c == '\\' => escaped = true,
+            None if c == '>' || c == '<' => {
+                while chars.peek().is_some_and(|c| c.is_whitespace()) {
+                    chars.next();
+                }
+                if chars.peek() == Some(&'&') {
+                    chars.next();
+                }
+                let mut target = String::new();
+                let mut target_quote = None;
+                let mut target_escaped = false;
+                for next in chars.by_ref() {
+                    if target_escaped {
+                        if !matches!(
+                            next,
+                            ' ' | '\t'
+                                | ';'
+                                | '|'
+                                | '&'
+                                | '<'
+                                | '>'
+                                | '\''
+                                | '"'
+                                | '\\'
+                                | '`'
+                                | '$'
+                        ) {
+                            target.push('\\');
+                        }
+                        target.push(next);
+                        target_escaped = false;
+                        continue;
+                    }
+                    match target_quote {
+                        Some(q) if next == q => target_quote = None,
+                        Some('"') if next == '\\' => target_escaped = true,
+                        Some(_) => target.push(next),
+                        None if next == '\'' || next == '"' => target_quote = Some(next),
+                        None if next.is_whitespace()
+                            || matches!(next, ';' | '|' | '&' | '<' | '>') =>
+                        {
+                            break;
+                        }
+                        None if next == '\\' => target_escaped = true,
+                        None => target.push(next),
+                    }
+                }
+                if !target.is_empty() {
+                    targets.push(target);
+                }
+            }
+            None => {}
+        }
+    }
+    targets
+}
+
+fn has_write_redirection(segment: &str) -> bool {
+    let mut quote = None;
+    let mut escaped = false;
+    for c in segment.chars() {
+        if escaped {
+            escaped = false;
+            continue;
+        }
+        match quote {
+            Some(q) if c == q => quote = None,
+            Some('"') if c == '\\' => escaped = true,
+            Some(_) => {}
+            None if c == '\'' || c == '"' => quote = Some(c),
+            None if c == '\\' => escaped = true,
+            None if c == '>' => return true,
+            None => {}
+        }
+    }
+    false
+}
+
+fn looks_like_path(word: &str) -> bool {
+    let word = word.rsplit('=').next().unwrap_or(word);
+    !word.contains("://")
+        && (word.contains(['/', '\\']) || word.starts_with('~') || word.rsplit_once('.').is_some())
+}
+
+fn command_path_fact(path: &str, workdir: Option<&str>) -> SandboxFact {
+    let expanded = symbio_plugin_api::plugin_expand_tilde_path(Path::new(path));
+    SandboxFact::new(
+        "vdfs_path",
+        symbio_plugin_api::vdfs_resolve_path(
+            &expanded.to_string_lossy(),
+            workdir.unwrap_or_default(),
+        ),
+    )
+}
+
+fn redact_url_credentials(command: &str) -> String {
+    let mut out = String::with_capacity(command.len());
+    let mut cursor = 0;
+    while cursor < command.len() {
+        let lower = command[cursor..].to_ascii_lowercase();
+        let Some(relative) = ["http://", "https://"]
+            .into_iter()
+            .filter_map(|scheme| lower.find(scheme).map(|index| (index, scheme.len())))
+            .min_by_key(|(index, _)| *index)
+        else {
+            out.push_str(&command[cursor..]);
+            break;
+        };
+        let start = cursor + relative.0;
+        let mut end = start + relative.1;
+        while end < command.len() {
+            let Some(ch) = command[end..].chars().next() else {
+                break;
+            };
+            if ch.is_whitespace() || matches!(ch, '\'' | '"' | ';' | '|' | '&' | '<' | '>' | '`') {
+                break;
+            }
+            end += ch.len_utf8();
+        }
+        out.push_str(&command[cursor..start]);
+        match url::Url::parse(&command[start..end]) {
+            Ok(mut url) if !url.username().is_empty() || url.password().is_some() => {
+                let _ = url.set_username("");
+                let _ = url.set_password(None);
+                out.push_str(url.as_str());
+            }
+            _ => out.push_str(&command[start..end]),
+        }
+        cursor = end;
+    }
+    out
+}
+
+/// 工具侧唯一的命令意图投影：风险判定与沙箱规则共享同一组子命令和路径事实。
+pub(crate) fn command_intent_facts(command: &str, workdir: Option<&str>) -> Vec<SandboxFact> {
+    let mut facts = Vec::new();
+    collect_command_intents(command, workdir, 0, &mut facts);
+    facts
+}
+
+fn collect_command_intents(
+    command: &str,
+    workdir: Option<&str>,
+    depth: usize,
+    facts: &mut Vec<SandboxFact>,
+) {
+    let command = redact_url_credentials(command);
+    let command = command.as_str();
+    facts.push(SandboxFact::new("shell_command", command.trim()));
+    if let Some(workdir) = workdir.filter(|value| !value.is_empty()) {
+        facts.push(command_path_fact(workdir, None));
+    }
+    let Ok(segments) = split_subcommands(command) else {
+        facts.push(SandboxFact::new("shell_unparseable", command));
+        return;
+    };
+    for segment in segments {
+        facts.push(SandboxFact::new("shell_subcommand", segment.clone()));
+        let words = shell_words(&segment);
+        if let Some(executable) = words.first() {
+            facts.push(SandboxFact::new(
+                "shell_executable",
+                normalize_base_command(executable),
+            ));
+        }
+        let targets = redirection_targets(&segment);
+        for target in &targets {
+            facts.push(SandboxFact::new("shell_redirection_target", target.clone()));
+            if !target.chars().all(|c| c.is_ascii_digit()) {
+                facts.push(command_path_fact(target, workdir));
+            }
+        }
+        let inner_script = inner_shell_script(&words);
+        for word in words.iter().skip(1) {
+            if targets.iter().any(|target| target == word)
+                || is_redirection_syntax(word)
+                || inner_script == Some(word.as_str())
+            {
+                continue;
+            }
+            if let Ok(mut url) = url::Url::parse(word) {
+                if matches!(url.scheme(), "http" | "https") {
+                    url.set_fragment(None);
+                    let _ = url.set_username("");
+                    let _ = url.set_password(None);
+                    facts.push(SandboxFact::new("url", url.to_string()));
+                    continue;
+                }
+            }
+            if looks_like_path(word) {
+                facts.push(command_path_fact(word, workdir));
+            } else if !word.starts_with('-') {
+                facts.push(SandboxFact::new("shell_unresolved_argument", word.clone()));
+            }
+        }
+        if let Some(script) = inner_script {
+            if depth >= 8 {
+                facts.push(SandboxFact::new("shell_unparseable", script));
+            } else {
+                collect_command_intents(script, workdir, depth + 1, facts);
+            }
+        }
+        if segment.contains('$') || segment.contains('%') {
+            facts.push(SandboxFact::new("shell_expansion", segment));
+        }
+    }
+}
+
+fn is_redirection_syntax(word: &str) -> bool {
+    !word.is_empty()
+        && word
+            .chars()
+            .all(|c| c.is_ascii_digit() || matches!(c, '<' | '>' | '&'))
+        && word.chars().any(|c| matches!(c, '<' | '>'))
+}
+
+fn inner_shell_script(words: &[String]) -> Option<&str> {
+    let executable = words.first()?;
+    let flag = match normalize_base_command(executable) {
+        "sh" | "bash" | "zsh" | "dash" | "fish" | "ksh" | "csh" | "tcsh" => "-c",
+        "cmd" => "/c",
+        "powershell" | "pwsh" => "-command",
+        _ => return None,
+    };
+    let index = words.iter().position(|word| {
+        word.eq_ignore_ascii_case(flag) || (flag == "-command" && word.eq_ignore_ascii_case("-c"))
+    })?;
+    words.get(index + 1).map(String::as_str)
 }
 
 impl SecurityPolicy {
@@ -555,6 +881,10 @@ impl SecurityPolicy {
         let base_cmd = normalize_base_command(base_cmd);
 
         // 危险模式优先：即使首词是只读命令，参数里也可能藏着执行 / 删除。
+        // 用分词后的单空格形状比较，避免连续空格或引号改变判定。
+        let words = shell_words(&command_lower);
+        let original_words = shell_words(segment);
+        let normalized = words.join(" ");
         let high_risk_patterns = [
             "rm -rf /",
             "rm -fr /",
@@ -563,22 +893,46 @@ impl SecurityPolicy {
             "sudo",
             "git reset --hard",
             "git clean -",
-            "find -delete",
-            "-exec ",
-            "-execdir ",
             "remove-item",
             "invoke-expression",
             "set-executionpolicy",
-            "| sh",
-            "| bash",
-            "| powershell",
-            "| cmd",
         ];
         if high_risk_patterns
             .iter()
-            .any(|pattern| command_lower.contains(pattern))
+            .any(|pattern| normalized.contains(pattern))
+            || (base_cmd == "git" && original_words.iter().any(|word| word == "-c"))
+            || (base_cmd == "git"
+                && (words
+                    .windows(2)
+                    .any(|pair| pair[0] == "reset" && pair[1] == "--hard")
+                    || (words.iter().any(|word| word == "clean")
+                        && words.iter().any(|word| word.starts_with('-')))))
+            || (base_cmd == "find"
+                && words.iter().any(|word| {
+                    matches!(
+                        word.as_str(),
+                        "-delete"
+                            | "-exec"
+                            | "-execdir"
+                            | "-ok"
+                            | "-okdir"
+                            | "-fprint"
+                            | "-fprintf"
+                            | "-fls"
+                    )
+                }))
+            || (base_cmd == "sort"
+                && words
+                    .iter()
+                    .any(|word| word == "-o" || word.starts_with("--output=")))
         {
             return CapabilityRiskLevel::High;
+        }
+        if segment.contains('$') || segment.contains('%') {
+            return CapabilityRiskLevel::High;
+        }
+        if has_write_redirection(segment) {
+            return CapabilityRiskLevel::Medium;
         }
 
         if CODE_RUNNERS.contains(&base_cmd) || DESTRUCTIVE_COMMANDS.contains(&base_cmd) {
@@ -588,14 +942,21 @@ impl SecurityPolicy {
             return CapabilityRiskLevel::Medium;
         }
         if base_cmd == "git" {
-            // `git -c alias.x='!sh'` 能把任意命令挂到别名上；`-C` 只切目录，
-            // 两者都以 `-` 开头，必须分开判。
-            // 大小写敏感：`git -c` 是配置注入，`git -C` 只是切目录。
-            let second_raw = segment.split_whitespace().nth(1).unwrap_or("");
-            if second_raw == "-c" {
-                return CapabilityRiskLevel::High;
+            // 全局选项可能出现在子命令前；`-C <dir>` 的值不是子命令。
+            let mut index = 1;
+            while let Some(word) = words.get(index) {
+                if matches!(
+                    word.as_str(),
+                    "-C" | "-c" | "--git-dir" | "--work-tree" | "--namespace"
+                ) {
+                    index += 2;
+                } else if word.starts_with('-') {
+                    index += 1;
+                } else {
+                    break;
+                }
             }
-            let second = command_lower.split_whitespace().nth(1).unwrap_or("");
+            let second = words.get(index).map_or("", String::as_str);
             // `git reset --hard` / `git clean -` 已由上面的模式拦成 High；
             // 其余写操作按「可回滚的写入」处理，只读子命令仍是 Low。
             let git_ops = [

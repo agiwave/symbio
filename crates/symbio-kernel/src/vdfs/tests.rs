@@ -286,6 +286,38 @@ fn path_within_respects_segment_boundary() {
 }
 
 #[test]
+fn path_normalization_preserves_anchor_and_parent_intent() {
+    assert_eq!(vdfs_normalize_path(r"src\.\lib\main.rs"), "src/lib/main.rs");
+    assert_eq!(vdfs_normalize_path("/docs//README.md"), "/docs/README.md");
+    assert_eq!(vdfs_normalize_path(r"C:\Users\a\..\b"), "c:/Users/a/../b");
+    assert_eq!(vdfs_normalize_path(r"\\server\share\x"), "//server/share/x");
+    assert_eq!(vdfs_normalize_path(r"\\?\C:\docs\x"), "c:/docs/x");
+    assert_eq!(vdfs_normalize_path("a/../b"), "a/../b");
+}
+
+#[test]
+fn path_resolution_uses_workdir_without_absolutizing_drive_relative_paths() {
+    assert_eq!(
+        vdfs_resolve_path(r"src\main.rs", r"C:\work\repo"),
+        "c:/work/repo/src/main.rs"
+    );
+    assert_eq!(
+        vdfs_resolve_path("/etc/passwd", "/workspace"),
+        "/etc/passwd"
+    );
+    assert_eq!(vdfs_resolve_path(r"D:\docs\a", "/workspace"), "d:/docs/a");
+    assert_eq!(
+        vdfs_resolve_path(r"\\srv\share\a", "/workspace"),
+        "//srv/share/a"
+    );
+    assert_eq!(vdfs_resolve_path("C:secret", "/workspace"), "c:secret");
+    assert_eq!(
+        vdfs_resolve_path("a/../b", "/workspace"),
+        "/workspace/a/../b"
+    );
+}
+
+#[test]
 fn context_downcast_and_require() {
     let ctx = VdfsContext::new(7u32);
     assert_eq!(ctx.host::<u32>(), Some(&7));

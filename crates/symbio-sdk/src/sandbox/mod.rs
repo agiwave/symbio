@@ -67,6 +67,29 @@ impl SandboxFact {
     }
 }
 
+/// 一次调用在同一档案快照内得到的完整裁决（D-533）。
+#[derive(Debug, Clone, Default, PartialEq)]
+pub struct SandboxDecision {
+    pub permitted: bool,
+    /// 规则给出的最低风险；消费方不得用它调低工具自身风险。
+    pub risk: Option<String>,
+    pub intercept: Option<Value>,
+    pub approval_mode: Option<String>,
+    pub risk_threshold: Option<String>,
+    pub profile_version: u64,
+    pub reason: Option<String>,
+}
+
+impl SandboxDecision {
+    pub fn denied(reason: impl Into<String>) -> Self {
+        Self {
+            permitted: false,
+            reason: Some(reason.into()),
+            ..Self::default()
+        }
+    }
+}
+
 /// 沙箱向其它插件提供的**通用能力句柄**（与 hook 同形，机制侧不认业务）。
 ///
 /// 实现方是沙箱插件；消费方是会话/编排层（拦截）与工具执行体（查询）。
@@ -108,6 +131,22 @@ pub trait SandboxFace: Send + Sync {
     /// 询问统一由沙箱在拦截点产出（与 [`Self::permits`] 同一裁决）。
     fn approval_params(&self) -> (Option<String>, Option<String>) {
         (None, None)
+    }
+
+    /// 一次读取完成本次调用的全部裁决；执行链应优先消费该方法，避免跨快照组合。
+    fn decide(&self, facts: &[SandboxFact], tool_name: &str, args: &Value) -> SandboxDecision {
+        let intercept = self.intercept(tool_name, args);
+        let permitted = self.permits(facts) && intercept.is_none();
+        let (approval_mode, risk_threshold) = self.approval_params();
+        SandboxDecision {
+            permitted,
+            risk: self.risk_of(facts),
+            intercept,
+            approval_mode,
+            risk_threshold,
+            reason: (!permitted).then(|| "sandbox denied the call".to_string()),
+            ..SandboxDecision::default()
+        }
     }
 }
 

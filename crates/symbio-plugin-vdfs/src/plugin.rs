@@ -128,9 +128,15 @@ impl Plugin for VdfsPlugin {
             // 知道这是路径、翻成开放 kind 事实；沙箱按用户配的目录黑白名单裁决。
             // 沙箱不认识工具名，闸门不认识目录配置——两边只经 `vdfs_path` 对接。
             let path_facts: symbio_providers::FactsOf = Arc::new(
-                |args: &serde_json::Value, _ctx: &std::sync::Arc<dyn symbio_plugin_api::PluginInvokeRequest>| {
+                |args: &serde_json::Value,
+                 ctx: &std::sync::Arc<dyn symbio_plugin_api::PluginInvokeRequest>| {
                     match args.get("path").and_then(|v| v.as_str()) {
-                        Some(path) => vec![symbio_plugin_api::SandboxFact::new("vdfs_path", path)],
+                        Some(path) => vec![path_intent_fact(
+                            path,
+                            ctx.get(symbio_plugin_api::WORKDIR)
+                                .as_deref()
+                                .unwrap_or_default(),
+                        )],
                         None => Vec::new(),
                     }
                 },
@@ -149,6 +155,22 @@ impl Plugin for VdfsPlugin {
 
         Ok(PluginPayload::new(&Vec::<serde_json::Value>::new()))
     }
+}
+
+fn path_intent_fact(path: &str, workdir: &str) -> symbio_plugin_api::SandboxFact {
+    let expanded = symbio_plugin_api::plugin_expand_tilde_path(std::path::Path::new(path));
+    let normalized = symbio_plugin_api::vdfs_normalize_path(&expanded.to_string_lossy());
+    let root = super::fs::VDFS_ADDR_ROOT;
+    let value = if normalized == root
+        || normalized
+            .strip_prefix(root)
+            .is_some_and(|rest| rest.starts_with('/'))
+    {
+        normalized
+    } else {
+        symbio_plugin_api::vdfs_resolve_path(&normalized, workdir)
+    };
+    symbio_plugin_api::SandboxFact::new("vdfs_path", value)
 }
 
 symbio_plugin_api::submit_object_creator!(PLUGIN_ID_VDFS, VdfsPlugin::build, dyn Plugin);

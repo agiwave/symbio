@@ -472,7 +472,29 @@ impl Plugin for SessionPlugin {
                 self.agent_id_candidates(&ctx).await,
                 self.parent.clone(),
             );
-            symbio_providers::register_tool(&ctx, agent_run.meta(), None, agent_run).await;
+            let agent_run_router = self.parent.clone();
+            let agent_run_facts: symbio_providers::AsyncFactsOf =
+                Arc::new(move |args: &Value, ctx: &Arc<dyn PluginInvokeRequest>| {
+                    let args = args.clone();
+                    let ctx = ctx.clone();
+                    let agent_run_router = agent_run_router.clone();
+                    Box::pin(async move {
+                        crate::tools::subagent::AgentRunCapability::intent_facts(
+                            &args,
+                            &ctx,
+                            agent_run_router.as_ref(),
+                        )
+                        .await
+                    })
+                });
+            symbio_providers::register_tool_with_async_facts(
+                &ctx,
+                agent_run.meta(),
+                None,
+                Some(agent_run_facts),
+                agent_run,
+            )
+            .await;
 
             // 三层文件记忆（智能体 / 工作区 / 会话）归 memory 插件（D-513）：
             // 谁能读写它，谁负责注入它。本插件只解析并递出 `SESSION_DIR`，

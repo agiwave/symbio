@@ -34,6 +34,126 @@ fn strict() -> SecurityPolicy {
     p
 }
 
+#[test]
+fn command_facts_expose_subcommands_redirections_and_normalized_paths() {
+    let facts = command_intent_facts(
+        r"git status && echo payload > .\secrets\out.txt 2>&1",
+        Some(r"C:\work\repo"),
+    );
+    assert!(facts.contains(&SandboxFact::new("shell_executable", "git")));
+    assert!(facts.contains(&SandboxFact::new("shell_executable", "echo")));
+    assert!(facts.contains(&SandboxFact::new(
+        "shell_redirection_target",
+        r".\secrets\out.txt"
+    )));
+    assert!(facts.contains(&SandboxFact::new("vdfs_path", "c:/work/repo")));
+    assert!(facts.contains(&SandboxFact::new(
+        "vdfs_path",
+        "c:/work/repo/secrets/out.txt"
+    )));
+    assert!(!facts.contains(&SandboxFact::new("vdfs_path", "1")));
+}
+
+#[test]
+fn unparseable_or_expanding_commands_are_high_risk_and_visible() {
+    let p = policy();
+    assert_eq!(
+        p.command_risk_level("echo payload > out.txt"),
+        CapabilityRiskLevel::Medium
+    );
+    assert_eq!(
+        p.command_risk_level("echo $HOME"),
+        CapabilityRiskLevel::High
+    );
+    assert!(!p.is_command_allowed("cat <(rm -rf /)", CapabilityRiskLevel::High));
+    assert!(!p.is_command_allowed("echo payload\\", CapabilityRiskLevel::High));
+    let facts = command_intent_facts("cat <(rm -rf /)", None);
+    assert!(facts.contains(&SandboxFact::new("shell_unparseable", "cat <(rm -rf /)")));
+}
+
+#[test]
+fn escaped_shell_syntax_cannot_hide_subcommands_or_paths() {
+    let p = whitelisted(&["echo"]);
+    assert_eq!(
+        p.command_risk_level(r#"echo \" ; rm -rf /"#),
+        CapabilityRiskLevel::High
+    );
+    assert!(!p.is_command_allowed(r#"echo \" ; rm -rf /"#, CapabilityRiskLevel::High));
+    assert_eq!(
+        p.command_risk_level(r"echo literal\;separator"),
+        CapabilityRiskLevel::Low
+    );
+    assert_eq!(
+        p.command_risk_level(r"echo \>literal"),
+        CapabilityRiskLevel::Low
+    );
+    assert_eq!(
+        p.command_risk_level("echo '`literal`'"),
+        CapabilityRiskLevel::Low
+    );
+
+    let facts = command_intent_facts(r#"echo payload > "secrets/out file.txt""#, None);
+    assert!(facts.contains(&SandboxFact::new(
+        "shell_redirection_target",
+        "secrets/out file.txt"
+    )));
+    assert!(facts.contains(&SandboxFact::new("vdfs_path", "secrets/out file.txt")));
+}
+
+#[test]
+fn bare_arguments_urls_and_inner_shell_scripts_are_visible_to_sandbox_rules() {
+    let bare = command_intent_facts("cat README", Some("/workspace"));
+    assert!(bare.contains(&SandboxFact::new("shell_unresolved_argument", "README")));
+    assert!(!bare.contains(&SandboxFact::new("vdfs_path", "README")));
+
+    let inner = command_intent_facts(r#"sh -c 'cat /etc/passwd; echo $HOME'"#, Some("/workspace"));
+    assert!(inner.contains(&SandboxFact::new("shell_executable", "cat")));
+    assert!(inner.contains(&SandboxFact::new("vdfs_path", "/etc/passwd")));
+    let relative_inner = command_intent_facts(r#"sh -c 'cat secret/key'"#, Some("/workspace"));
+    assert!(relative_inner.contains(&SandboxFact::new("vdfs_path", "/workspace/secret/key")));
+    assert!(!inner
+        .iter()
+        .any(|fact| { fact.kind == "vdfs_path" && fact.value.contains("cat /etc/passwd") }));
+    assert!(inner
+        .iter()
+        .any(|fact| { fact.kind == "shell_expansion" && fact.value.contains("$HOME") }));
+
+    let network = command_intent_facts("curl https://Example.com/a#frag", None);
+    assert!(network.contains(&SandboxFact::new("url", "https://example.com/a")));
+    let credentialed = command_intent_facts("curl https://user:password@Example.com/a", None);
+    assert!(credentialed.contains(&SandboxFact::new("url", "https://example.com/a")));
+    assert!(!credentialed
+        .iter()
+        .any(|fact| fact.value.contains("password")));
+}
+
+#[cfg(windows)]
+#[test]
+fn windows_caret_escaping_fails_closed() {
+    let command = r#"echo ^" & del /f C:\x & rem ^""#;
+    let facts = command_intent_facts(command, None);
+    assert!(facts.contains(&SandboxFact::new("shell_unparseable", command)));
+    assert!(!policy().is_command_allowed(command, CapabilityRiskLevel::High));
+}
+
+#[test]
+fn dangerous_flags_are_risk_even_with_global_options_or_spacing() {
+    let p = policy();
+    for cmd in [
+        "find . -delete",
+        "find . -exec rm {} ;",
+        "git -C repo reset --hard",
+        "git reset   --hard",
+        "sort -o output.txt input.txt",
+    ] {
+        assert_eq!(
+            p.command_risk_level(cmd),
+            CapabilityRiskLevel::High,
+            "{cmd}"
+        );
+    }
+}
+
 /// 默认策略即「全放开」：空白名单不限命令、限流关闭、审批/拦截开关全关
 #[test]
 fn test_default_policy_is_unrestricted() {

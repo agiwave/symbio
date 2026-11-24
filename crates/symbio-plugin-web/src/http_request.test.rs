@@ -3,7 +3,7 @@
 //! 与实现**同级**分文件（约定：`X.rs` + `X.test.rs`）。
 
 use super::*;
-use crate::net_guard::is_private_or_local_host;
+use crate::net_guard::{is_private_or_local_host, next_redirect};
 
 fn tool_with_domains(domains: &[&str]) -> HttpRequestTool {
     HttpRequestTool::new(Arc::new(RwLock::new(crate::web_config::WebConfig {
@@ -12,7 +12,7 @@ fn tool_with_domains(domains: &[&str]) -> HttpRequestTool {
     })))
 }
 
-fn validate(tool: &HttpRequestTool, url: &str) -> Result<String, PluginError> {
+fn validate(tool: &HttpRequestTool, url: &str) -> Result<url::Url, PluginError> {
     let domains = tool.config.blocking_read().http_allowed_domains.clone();
     HttpRequestTool::validate_url(url, &domains)
 }
@@ -87,6 +87,8 @@ fn validate_url_rejects_non_http_and_private_targets() {
         "file:///etc/passwd",
         "https://exa mple.com",
         "http://127.0.0.1/admin",
+        "http://2130706433/admin", // URL 解析后为 127.0.0.1
+        "http://localhost./",
         "http://169.254.169.254/latest/meta-data/",
         "http://[::1]:8080/",
     ] {
@@ -137,4 +139,71 @@ fn validate_method_accepts_known_and_rejects_unknown() {
     for bad in ["TRACE", "CONNECT", "", "GETY"] {
         assert!(t.validate_method(bad).is_err(), "{bad}");
     }
+}
+
+#[test]
+fn redirect_revalidates_host_allowlist_before_next_hop() {
+    let current = url::Url::parse("https://api.example.com/start").unwrap();
+    let domains = vec!["*.example.com".to_string()];
+    let err = next_redirect(
+        &current,
+        reqwest::StatusCode::FOUND,
+        Some("https://outside.example.net/"),
+        0,
+        |host| {
+            if !host_matches_allowlist(host, &domains) {
+                return Err(PluginError::ValidationError(format!(
+                    "主机 '{host}' 不在 allowed_domains 中"
+                )));
+            }
+            agent_network_allowed(host, None)
+        },
+    )
+    .expect_err("跳出自定义域名白名单必须拒绝");
+    assert!(err.to_string().contains("不在 allowed_domains 中"), "{err}");
+}
+
+#[test]
+fn redirect_revalidates_agent_scope_and_allows_safe_target() {
+    let current = url::Url::parse("https://api.example.com/start").unwrap();
+    let agent = symbio_plugin_api::AgentScope {
+        id: "reviewer".into(),
+        root: std::path::PathBuf::from("/nowhere/agent/reviewer"),
+        permissions: serde_json::from_value(json!({
+            "network": { "domains": ["api.example.com"] }
+        }))
+        .unwrap(),
+    };
+
+    let err = next_redirect(
+        &current,
+        reqwest::StatusCode::TEMPORARY_REDIRECT,
+        Some("https://other.example.com/next"),
+        0,
+        |host| agent_network_allowed(host, Some(&agent)),
+    )
+    .expect_err("跳出 Agent 授权域必须拒绝");
+    assert!(
+        err.to_string().contains("permissions.network.domains"),
+        "{err}"
+    );
+
+    let safe = symbio_plugin_api::AgentScope {
+        id: "reviewer".into(),
+        root: std::path::PathBuf::from("/nowhere/agent/reviewer"),
+        permissions: serde_json::from_value(json!({
+            "network": { "domains": ["*.example.com"] }
+        }))
+        .unwrap(),
+    };
+    let target = next_redirect(
+        &current,
+        reqwest::StatusCode::PERMANENT_REDIRECT,
+        Some("/next"),
+        0,
+        |host| agent_network_allowed(host, Some(&safe)),
+    )
+    .unwrap()
+    .expect("安全跳应通过");
+    assert_eq!(target.as_str(), "https://api.example.com/next");
 }

@@ -270,11 +270,150 @@ async fn watch_and_unwatch_are_paired() {
     assert_eq!(seen.lock().unwrap().len(), 1, "unwatch 后不得再收到事件");
 }
 
-/// 反斜杠形式的 `..` 不得逃出条目目录——**不依赖访问层**的纵深防御。
-///
-/// 访问层 `normalize_addr` 已拦一道，但 provider 可能经别的访问路径被复用
-/// （解包、直接构造），因此这条防线必须独立成立。`remove_inner` 用
-/// `remove_dir_all`，一旦逃逸即可删除任意目录。
+#[tokio::test]
+async fn locked_list_and_delete_do_not_reenter_the_mutation_lock() {
+    let tmp = tempfile::tempdir().unwrap();
+    let s = store_in(tmp.path());
+    let ctx = VdfsContext::empty();
+    s.write_text("demo", "# demo").await.unwrap();
+
+    tokio::time::timeout(std::time::Duration::from_secs(5), s.entries())
+        .await
+        .expect("持锁列表不得重入变更锁")
+        .unwrap();
+    tokio::time::timeout(
+        std::time::Duration::from_secs(5),
+        s.dispatch(&ctx, "demo", VdfsRequest::Delete { recursive: true }),
+    )
+    .await
+    .expect("持锁删除不得重入变更锁")
+    .unwrap();
+    assert!(!s.exists("demo"));
+}
+
+#[cfg(unix)]
+fn try_directory_link(target: &Path, link: &Path) -> bool {
+    std::os::unix::fs::symlink(target, link).is_ok()
+}
+
+#[cfg(windows)]
+fn try_directory_link(target: &Path, link: &Path) -> bool {
+    if std::os::windows::fs::symlink_dir(target, link).is_ok() {
+        return true;
+    }
+    use std::os::windows::process::CommandExt as _;
+    let command = format!("mklink /J \"{}\" \"{}\"", link.display(), target.display());
+    std::process::Command::new("cmd")
+        .args(["/D", "/C"])
+        .raw_arg(command)
+        .status()
+        .map(|status| status.success())
+        .unwrap_or(false)
+}
+
+#[tokio::test]
+async fn inner_operations_reject_preexisting_directory_links() {
+    let tmp = tempfile::tempdir().unwrap();
+    let s = store_in(tmp.path());
+    let ctx = VdfsContext::empty();
+    s.write_text("demo", "# demo").await.unwrap();
+    let outside = tmp.path().join("outside");
+    std::fs::create_dir_all(&outside).unwrap();
+    std::fs::write(outside.join("secret.txt"), "keep").unwrap();
+    if !try_directory_link(&outside, &s.entry_dir("demo").join("link")) {
+        eprintln!("directory link creation unsupported; skipping inner-link test");
+        return;
+    }
+
+    for result in [
+        s.dispatch(&ctx, "demo/link/secret.txt", VdfsRequest::Read)
+            .await
+            .map(|_| ()),
+        s.dispatch(&ctx, "demo/link", VdfsRequest::List {})
+            .await
+            .map(|_| ()),
+        s.dispatch(&ctx, "demo/link", VdfsRequest::Stat)
+            .await
+            .map(|_| ()),
+        s.dispatch(
+            &ctx,
+            "demo/link/new.txt",
+            VdfsRequest::Write {
+                content: VdfsContent::text("escape"),
+            },
+        )
+        .await
+        .map(|_| ()),
+        s.dispatch(&ctx, "demo/link/new-dir", VdfsRequest::Mkdir)
+            .await
+            .map(|_| ()),
+        s.dispatch(&ctx, "demo/link", VdfsRequest::Delete { recursive: true })
+            .await
+            .map(|_| ()),
+    ] {
+        assert!(matches!(result, Err(VdfsError::Forbidden(_))), "{result:?}");
+    }
+    assert_eq!(
+        std::fs::read_to_string(outside.join("secret.txt")).unwrap(),
+        "keep"
+    );
+    assert!(!outside.join("new.txt").exists());
+    assert!(!outside.join("new-dir").exists());
+}
+
+#[tokio::test]
+async fn inner_write_is_atomic_and_uses_the_shared_mutation_lock() {
+    let tmp = tempfile::tempdir().unwrap();
+    let s = store_in(tmp.path());
+    s.write_text("demo", "# demo").await.unwrap();
+    let target = s.inner_path("demo", "a.txt");
+    let old_view = s.inner_path("demo", "old-view.txt");
+    std::fs::write(&target, "old complete").unwrap();
+    std::fs::hard_link(&target, &old_view).unwrap();
+
+    let lock = entry::mutation_lock(&s.base);
+    let guard = lock.lock().await;
+    let writer = {
+        let s = s.clone();
+        tokio::spawn(async move { s.write_inner("demo", "a.txt", "new complete").await })
+    };
+    tokio::task::yield_now().await;
+    assert!(
+        !writer.is_finished(),
+        "内层写必须等待整包发布使用的同一把锁"
+    );
+    drop(guard);
+    tokio::time::timeout(std::time::Duration::from_secs(5), writer)
+        .await
+        .expect("内层写不得在释放锁后继续卡住")
+        .expect("内层写任务不得 panic")
+        .unwrap_or_else(|error| panic!("内层写失败：{error:?}"));
+
+    assert_eq!(std::fs::read_to_string(&target).unwrap(), "new complete");
+    assert_eq!(std::fs::read_to_string(&old_view).unwrap(), "old complete");
+    assert_eq!(std::fs::read_dir(s.entry_dir("demo")).unwrap().count(), 3);
+}
+
+#[cfg(unix)]
+#[tokio::test]
+async fn inner_atomic_replacement_preserves_existing_file_mode() {
+    use std::os::unix::fs::PermissionsExt as _;
+    let tmp = tempfile::tempdir().unwrap();
+    let s = store_in(tmp.path());
+    let target = s.inner_path("demo", "a.txt");
+    std::fs::create_dir_all(target.parent().unwrap()).unwrap();
+    std::fs::write(&target, "old").unwrap();
+    std::fs::set_permissions(&target, std::fs::Permissions::from_mode(0o640)).unwrap();
+
+    s.write_inner("demo", "a.txt", "new").await.unwrap();
+    assert_eq!(std::fs::read_to_string(&target).unwrap(), "new");
+    assert_eq!(
+        std::fs::metadata(&target).unwrap().permissions().mode() & 0o777,
+        0o640
+    );
+}
+
+/// 反斜杠形式的 `..` 不得逃出条目目录，provider 直接复用时也必须独立成立。
 #[tokio::test]
 async fn inner_rel_rejects_separator_smuggling() {
     let tmp = tempfile::tempdir().unwrap();

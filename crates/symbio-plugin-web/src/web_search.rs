@@ -1,6 +1,9 @@
 //! Web 搜索工具 —— 工具端口执行体（`PortExecutor`）
 
-use super::net_guard::{agent_network_allowed, extract_host};
+use super::net_guard::{
+    agent_network_allowed, read_response_text, send_with_safe_redirects,
+    validate_upstream_http_url, OutboundBody, OutboundRequest, SandboxPolicy,
+};
 use super::web_config::WebConfig;
 use async_trait::async_trait;
 use regex::Regex;
@@ -9,12 +12,13 @@ use std::sync::Arc;
 use std::time::Duration;
 use symbio_plugin_api::{
     missing_caller, port_result, CapabilityMeta, ExecEnv, PluginError, PluginInvokeRequest,
-    PluginInvokeResponse, PortExecContext, PortExecutor, PortInput, PortOutcome,
+    PluginInvokeResponse, PortExecContext, PortExecutor, PortInput, PortOutcome, SandboxFace,
 };
 use tokio::sync::RwLock;
 
 const DEFAULT_MAX_RESULTS: usize = 5;
 const MAX_RESULTS_LIMIT: usize = 10;
+const MAX_RESPONSE_SIZE: usize = 2_097_152;
 
 /// 三家供应商的官方上游基址与路径。**路径是供应商契约的一部分**（Tavily/Serper
 /// 是 `POST /search`、DuckDuckGo HTML 是 `GET /html/?q=…`），配置只允许替换
@@ -32,6 +36,68 @@ fn upstream_base(configured: &str, official: &str) -> String {
         return official.to_string();
     }
     configured.trim_end_matches('/').to_string()
+}
+
+#[derive(Clone, Copy, Debug, PartialEq, Eq)]
+enum SearchProvider {
+    Tavily,
+    Serper,
+    DuckDuckGo,
+}
+
+fn has_api_key(value: &Option<String>) -> bool {
+    value.as_deref().is_some_and(|key| !key.trim().is_empty())
+}
+
+fn selected_provider(config: &WebConfig) -> SearchProvider {
+    if has_api_key(&config.tavily_api_key) {
+        SearchProvider::Tavily
+    } else if has_api_key(&config.serper_api_key) {
+        SearchProvider::Serper
+    } else {
+        SearchProvider::DuckDuckGo
+    }
+}
+
+impl SearchProvider {
+    fn official_base(self) -> &'static str {
+        match self {
+            Self::Tavily => TAVILY_OFFICIAL_BASE,
+            Self::Serper => SERPER_OFFICIAL_BASE,
+            Self::DuckDuckGo => DUCKDUCKGO_OFFICIAL_BASE,
+        }
+    }
+}
+
+/// 注册事实与实际请求共用同一 URL 投影，避免「面板显示走 A、裁决却查 B」。
+/// API key 不参与 URL：Tavily 在 body，Serper 在 header；DuckDuckGo 的查询按供应商
+/// 契约位于 query string。 WHY：沙箱只掌握配置与工具参数，无法从模型 query 反推出上游。
+pub(super) fn upstream_url(config: &WebConfig, args: &Value) -> String {
+    let provider = selected_provider(config);
+    let base = upstream_base(&config.search_api_base, provider.official_base());
+    match provider {
+        SearchProvider::Tavily | SearchProvider::Serper => format!("{base}/search"),
+        SearchProvider::DuckDuckGo => {
+            let query = args.get("query").and_then(Value::as_str).unwrap_or("");
+            let mut url = format!("{base}/html/?q={}", urlencoding::encode(query));
+            if let Some(lr) = args.get("lr").and_then(Value::as_str) {
+                url.push_str(&format!("&kl={}", urlencoding::encode(lr)));
+            }
+            url
+        }
+    }
+}
+
+struct JsonSearchRequest<'a> {
+    endpoint: &'a str,
+    query: &'a str,
+    api_key: &'a str,
+    max_results: usize,
+    lr: Option<&'a str>,
+    timeout_secs: u64,
+    agent_scope: Option<&'a symbio_plugin_api::AgentScope>,
+    policy: SandboxPolicy<'a>,
+    trusted_origin: Option<url::Origin>,
 }
 
 /// Web 搜索工具
@@ -53,6 +119,7 @@ impl WebSearchTool {
         &self,
         args: &Value,
         agent_scope: Option<&symbio_plugin_api::AgentScope>,
+        sandbox: Option<&dyn SandboxFace>,
     ) -> PluginInvokeResponse<Value> {
         let query = args
             .get("query")
@@ -74,16 +141,16 @@ impl WebSearchTool {
             return Err(PluginError::ValidationError("搜索查询不能为空".to_string()));
         }
 
-        // 配置在入口读一次并拷走所需字段：不把读锁带过 `await`——
+        // 配置在入口读一次并拷走：不把读锁带过 `await`——
         // 一次搜索最长可跑 `web_timeout` 秒，期间保存配置不该被堵住。
-        let (base, timeout_secs, tavily_api_key, serper_api_key) = {
-            let cfg = self.config.read().await;
-            (
-                cfg.search_api_base.clone(),
-                cfg.web_timeout,
-                cfg.tavily_api_key.clone(),
-                cfg.serper_api_key.clone(),
-            )
+        let config = self.config.read().await.clone();
+        let timeout_secs = config.web_timeout;
+        let tavily_api_key = config.tavily_api_key.as_deref();
+        let serper_api_key = config.serper_api_key.as_deref();
+        let trusted_origin = if config.search_api_base.trim().is_empty() {
+            None
+        } else {
+            Some(validate_upstream_http_url(&config.search_api_base)?.origin())
         };
 
         // ── 第三道闸：出站主机须在 Agent 声明的域名白名单里（D-153）──
@@ -91,34 +158,32 @@ impl WebSearchTool {
         // 上游主机 = 「走哪家」×「有没有配 `search_api_base`」，三者都在上面这一块
         // 里定下来了，所以在分支**之前**算一次、判一次——三个分支各判一遍会得到
         // 三份同形代码，而漏一个分支就是「同一个 Agent，Tavily 能搜、Serper 不能」。
-        // 数据照样经这个主机出境（查询内容 + API key），所以它和 `web_fetch` 的
-        // 模型自选主机同案，不因「主机由宿主配置决定」而豁免。
-        let official = if tavily_api_key.is_some() {
-            TAVILY_OFFICIAL_BASE
-        } else if serper_api_key.is_some() {
-            SERPER_OFFICIAL_BASE
-        } else {
-            DUCKDUCKGO_OFFICIAL_BASE
-        };
-        let upstream = format!("{}/search", upstream_base(&base, official));
-        agent_network_allowed(&extract_host(&upstream)?, agent_scope)?;
+        // 数据照样经这个主机出境（查询内容 + API key），所以 Agent 域名授权不因
+        // 「主机由宿主配置决定」而豁免；只有管理员显式配置的上游 origin 可用内网。
+        let provider = selected_provider(&config);
+        let upstream = upstream_url(&config, args);
+        let policy = SandboxPolicy::new(
+            sandbox,
+            "web_search",
+            args,
+            symbio_plugin_api::CapabilityRiskLevel::Low,
+        );
 
         // 优先使用 Tavily
-        if let Some(api_key) = tavily_api_key
-            .as_deref()
-            .map(str::trim)
-            .filter(|k| !k.is_empty())
-        {
-            return match self
-                .search_tavily(
-                    &base,
-                    query,
-                    api_key,
-                    max_results,
-                    lr.as_deref(),
-                    timeout_secs,
-                )
-                .await
+        if provider == SearchProvider::Tavily {
+            let api_key = tavily_api_key.unwrap_or_default().trim(); // selected_provider 已保证非空
+            return match Self::search_tavily(JsonSearchRequest {
+                endpoint: &upstream,
+                query,
+                api_key,
+                max_results,
+                lr: None,
+                timeout_secs,
+                agent_scope,
+                policy,
+                trusted_origin,
+            })
+            .await
             {
                 Ok(results) => Ok(json!({
                     "success": true,
@@ -130,21 +195,20 @@ impl WebSearchTool {
         }
 
         // 其次使用 Serper
-        if let Some(api_key) = serper_api_key
-            .as_deref()
-            .map(str::trim)
-            .filter(|k| !k.is_empty())
-        {
-            return match self
-                .search_serper(
-                    &base,
-                    query,
-                    api_key,
-                    max_results,
-                    lr.as_deref(),
-                    timeout_secs,
-                )
-                .await
+        if provider == SearchProvider::Serper {
+            let api_key = serper_api_key.unwrap_or_default().trim(); // selected_provider 已保证非空
+            return match Self::search_serper(JsonSearchRequest {
+                endpoint: &upstream,
+                query,
+                api_key,
+                max_results,
+                lr: lr.as_deref(),
+                timeout_secs,
+                agent_scope,
+                policy,
+                trusted_origin,
+            })
+            .await
             {
                 Ok(results) => Ok(json!({
                     "success": true,
@@ -157,7 +221,14 @@ impl WebSearchTool {
 
         // 最后回退到 DuckDuckGo (HTML 抓取)
         match self
-            .search_duckduckgo(&base, query, max_results, lr.as_deref(), timeout_secs)
+            .search_duckduckgo(
+                &upstream,
+                max_results,
+                timeout_secs,
+                agent_scope,
+                policy,
+                trusted_origin,
+            )
             .await
         {
             Ok(results) => Ok(json!({
@@ -169,43 +240,49 @@ impl WebSearchTool {
         }
     }
 
-    async fn search_tavily(
-        &self,
-        base: &str,
-        query: &str,
-        api_key: &str,
-        max_results: usize,
-        _lr: Option<&str>,
-        timeout_secs: u64,
-    ) -> Result<Vec<Value>, String> {
-        let client = reqwest::Client::builder()
-            .timeout(Duration::from_secs(timeout_secs))
-            .build()
-            .map_err(|e| format!("创建 HTTP 客户端失败: {e}"))?;
-
-        let response = client
-            .post(format!(
-                "{}/search",
-                upstream_base(base, TAVILY_OFFICIAL_BASE)
-            ))
-            .json(&json!({
-                "api_key": api_key,
-                "query": query,
-                "max_results": max_results,
-                "search_depth": "basic"
-            }))
-            .send()
-            .await
-            .map_err(|e| format!("Tavily 请求失败: {e}"))?;
+    async fn search_tavily(request: JsonSearchRequest<'_>) -> Result<Vec<Value>, String> {
+        let JsonSearchRequest {
+            endpoint,
+            query,
+            api_key,
+            max_results,
+            timeout_secs,
+            agent_scope,
+            policy,
+            trusted_origin,
+            ..
+        } = request;
+        let endpoint = validate_upstream_http_url(endpoint).map_err(|error| error.to_string())?;
+        let response = send_with_safe_redirects(
+            endpoint,
+            OutboundRequest {
+                method: reqwest::Method::POST,
+                headers: Vec::new(),
+                body: Some(OutboundBody::Json(json!({
+                    "api_key": api_key,
+                    "query": query,
+                    "max_results": max_results,
+                    "search_depth": "basic"
+                }))),
+            },
+            Duration::from_secs(timeout_secs),
+            None,
+            policy,
+            trusted_origin,
+            |host| agent_network_allowed(host, agent_scope),
+        )
+        .await
+        .map_err(|error| error.to_string())?;
 
         if !response.status().is_success() {
             return Err(format!("Tavily 响应错误: {}", response.status()));
         }
 
-        let body: Value = response
-            .json()
+        let (text, _, _) = read_response_text(response, MAX_RESPONSE_SIZE)
             .await
-            .map_err(|e| format!("解析 Tavily 响应失败: {e}"))?;
+            .map_err(|error| error.to_string())?;
+        let body: Value =
+            serde_json::from_str(&text).map_err(|e| format!("解析 Tavily 响应失败: {e}"))?;
 
         let results = body
             .get("results")
@@ -224,20 +301,19 @@ impl WebSearchTool {
             .collect())
     }
 
-    async fn search_serper(
-        &self,
-        base: &str,
-        query: &str,
-        api_key: &str,
-        max_results: usize,
-        lr: Option<&str>,
-        timeout_secs: u64,
-    ) -> Result<Vec<Value>, String> {
-        let client = reqwest::Client::builder()
-            .timeout(Duration::from_secs(timeout_secs))
-            .build()
-            .map_err(|e| format!("创建 HTTP 客户端失败: {e}"))?;
-
+    async fn search_serper(request: JsonSearchRequest<'_>) -> Result<Vec<Value>, String> {
+        let JsonSearchRequest {
+            endpoint,
+            query,
+            api_key,
+            max_results,
+            lr,
+            timeout_secs,
+            agent_scope,
+            policy,
+            trusted_origin,
+        } = request;
+        let endpoint = validate_upstream_http_url(endpoint).map_err(|error| error.to_string())?;
         let mut payload = json!({
             "q": query,
             "num": max_results
@@ -246,25 +322,31 @@ impl WebSearchTool {
             payload["hl"] = json!(l);
         }
 
-        let response = client
-            .post(format!(
-                "{}/search",
-                upstream_base(base, SERPER_OFFICIAL_BASE)
-            ))
-            .header("X-API-KEY", api_key)
-            .json(&payload)
-            .send()
-            .await
-            .map_err(|e| format!("Serper 请求失败: {e}"))?;
+        let response = send_with_safe_redirects(
+            endpoint,
+            OutboundRequest {
+                method: reqwest::Method::POST,
+                headers: vec![("X-API-KEY".to_string(), api_key.to_string())],
+                body: Some(OutboundBody::Json(payload)),
+            },
+            Duration::from_secs(timeout_secs),
+            None,
+            policy,
+            trusted_origin,
+            |host| agent_network_allowed(host, agent_scope),
+        )
+        .await
+        .map_err(|error| error.to_string())?;
 
         if !response.status().is_success() {
             return Err(format!("Serper 响应错误: {}", response.status()));
         }
 
-        let body: Value = response
-            .json()
+        let (text, _, _) = read_response_text(response, MAX_RESPONSE_SIZE)
             .await
-            .map_err(|e| format!("解析 Serper 响应失败: {e}"))?;
+            .map_err(|error| error.to_string())?;
+        let body: Value =
+            serde_json::from_str(&text).map_err(|e| format!("解析 Serper 响应失败: {e}"))?;
 
         let organic = body
             .get("organic")
@@ -285,32 +367,29 @@ impl WebSearchTool {
 
     async fn search_duckduckgo(
         &self,
-        base: &str,
-        query: &str,
+        endpoint: &str,
         max_results: usize,
-        lr: Option<&str>,
         timeout_secs: u64,
+        agent_scope: Option<&symbio_plugin_api::AgentScope>,
+        policy: SandboxPolicy<'_>,
+        trusted_origin: Option<url::Origin>,
     ) -> Result<Vec<Value>, String> {
-        let encoded_query = urlencoding::encode(query);
-        let mut search_url = format!(
-            "{}/html/?q={encoded_query}",
-            upstream_base(base, DUCKDUCKGO_OFFICIAL_BASE)
-        );
-        if let Some(l) = lr {
-            search_url.push_str(&format!("&kl={}", urlencoding::encode(l)));
-        }
-
-        let client = reqwest::Client::builder()
-            .timeout(Duration::from_secs(timeout_secs))
-            .user_agent("Mozilla/5.0 (Windows NT 10.0; Win64; x64) AppleWebKit/537.36 (KHTML, like Gecko) Chrome/120.0.0.0 Safari/537.36")
-            .build()
-            .map_err(|e| format!("创建 HTTP 客户端失败: {e}"))?;
-
-        let response = client
-            .get(&search_url)
-            .send()
-            .await
-            .map_err(|e| format!("请求失败: {e}"))?;
+        let endpoint = validate_upstream_http_url(endpoint).map_err(|error| error.to_string())?;
+        let response = send_with_safe_redirects(
+            endpoint,
+            OutboundRequest {
+                method: reqwest::Method::GET,
+                headers: Vec::new(),
+                body: None,
+            },
+            Duration::from_secs(timeout_secs),
+            Some("Mozilla/5.0 (Windows NT 10.0; Win64; x64) AppleWebKit/537.36 (KHTML, like Gecko) Chrome/120.0.0.0 Safari/537.36"),
+            policy,
+            trusted_origin,
+            |host| agent_network_allowed(host, agent_scope),
+        )
+        .await
+        .map_err(|error| error.to_string())?;
 
         if !response.status().is_success() {
             return Err(format!(
@@ -319,10 +398,9 @@ impl WebSearchTool {
             ));
         }
 
-        let html = response
-            .text()
+        let (html, _, _) = read_response_text(response, MAX_RESPONSE_SIZE)
             .await
-            .map_err(|e| format!("读取响应失败: {e}"))?;
+            .map_err(|error| error.to_string())?;
 
         self.parse_duckduckgo_results(&html, max_results)
     }
@@ -428,7 +506,16 @@ impl WebSearchTool {
         ctx: Arc<dyn PluginInvokeRequest>,
     ) -> Result<Value, PluginError> {
         let scope = symbio_plugin_api::agent_perms_of(ctx.as_ref());
-        let data = self.execute_inner(&args, scope.as_ref()).await?;
+        let sandbox = symbio_plugin_api::sandbox_of(ctx.as_ref());
+        let timeout_secs = self.config.read().await.web_timeout;
+        let data = tokio::time::timeout(
+            Duration::from_secs(timeout_secs),
+            self.execute_inner(&args, scope.as_ref(), sandbox.as_deref()),
+        )
+        .await
+        .map_err(|_| {
+            PluginError::InternalError(format!("搜索超时：{timeout_secs}s 内未完成请求与响应解析"))
+        })??;
         Ok(serde_json::to_value(&data)?)
     }
 }

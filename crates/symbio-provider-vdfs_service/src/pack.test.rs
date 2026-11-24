@@ -47,24 +47,22 @@ fn parse_pack_skips_dirs_and_metadata() {
     assert_eq!(out[0].1, b"# demo".to_vec());
 }
 
-/// zip-slip：包内条目**一律不得**写到目标目录之外
-///
-/// 两道防线任一生效即可（隐藏段过滤会先丢弃 `..` 段，显式守卫是第二道）；
-/// 这里断言的是**可观察性质**而不是走哪条分支——分支属于实现细节。
+/// zip-slip 与 Windows 绝对路径必须在解析阶段显式拒绝，不能静默跳过。
 #[test]
 fn parse_pack_never_yields_an_escaping_entry() {
     for hostile in [
         "evil/../../escape.txt",
         "../../escape.txt",
         "a/../../../escape.txt",
+        "..\\..\\escape.txt",
+        "/absolute.txt",
+        "C:/absolute.txt",
+        "C:drive-relative.txt",
+        "//server/share/escape.txt",
+        "safe/file:stream.txt",
     ] {
         let bytes = make_zip(&[(hostile, Some(b"boom"))]);
-        let out = parse_pack(&bytes).unwrap_or_default();
-        assert!(
-            out.iter()
-                .all(|(p, _)| !p.split(['/', '\\']).any(|s| s == "..")),
-            "条目 `{hostile}` 逃出了目标目录：{out:?}"
-        );
+        assert!(parse_pack(&bytes).is_err(), "条目 `{hostile}` 必须被拒绝");
     }
 }
 
@@ -76,12 +74,11 @@ async fn extract_pack_confines_writes_to_the_entry_directory() {
     let bytes = make_zip(&[
         ("SKILL.md", Some(b"# ok")),
         ("evil/../../escape.txt", Some(b"boom")),
-        ("../../escape2.txt", Some(b"boom")),
     ]);
-    extract_pack(&entry_dir, &bytes).await.unwrap();
-    assert!(entry_dir.join("SKILL.md").exists());
+    assert!(extract_pack(&entry_dir, &bytes).await.is_err());
+    assert!(!entry_dir.exists(), "解析失败不得创建目标目录");
     assert!(
-        !tmp.path().join("escape.txt").exists() && !tmp.path().join("escape2.txt").exists(),
+        !tmp.path().join("escape.txt").exists(),
         "包内 `..` 条目不得写到条目目录之外"
     );
 }
@@ -152,6 +149,11 @@ async fn extract_pack_replaces_whole_directory() {
         !dir.join("stale/old.txt").exists(),
         "导入即替换：旧目录里未被包覆盖的文件必须消失"
     );
+    let leftovers: Vec<_> = std::fs::read_dir(tmp.path())
+        .unwrap()
+        .map(|entry| entry.unwrap().file_name())
+        .collect();
+    assert_eq!(leftovers, vec![std::ffi::OsString::from("demo")]);
 }
 
 /// 载荷形状：`filename` + `b64` 就是前端认得的全部（它不认识「导出」）
@@ -180,6 +182,167 @@ fn unpack_mirrors_pack() {
 }
 
 /// 缺载荷 / 缺字段 / 非对象：都转为可读错误，不 panic
+#[test]
+fn pack_rejects_too_many_entries_and_oversized_files() {
+    let mut buf = Vec::new();
+    {
+        let mut writer = zip::ZipWriter::new(Cursor::new(&mut buf));
+        let options = zip::write::SimpleFileOptions::default();
+        for i in 0..=MAX_PACK_ENTRIES {
+            writer.start_file(format!("{i}.txt"), options).unwrap();
+        }
+        writer.finish().unwrap();
+    }
+    assert!(parse_pack(&buf).unwrap_err().0.contains("条目过多"));
+
+    let bytes = make_zip(&[("large.bin", Some(&vec![0; MAX_PACK_ENTRY_SIZE + 1]))]);
+    assert!(parse_pack(&bytes).unwrap_err().0.contains("条目过大"));
+}
+
+#[tokio::test]
+async fn pack_rejects_duplicate_and_file_directory_collisions() {
+    for entries in [
+        vec![
+            ("a.txt", Some(b"a".as_slice())),
+            ("./a.txt", Some(b"b".as_slice())),
+        ],
+        vec![
+            ("a", Some(b"a".as_slice())),
+            ("a/b.txt", Some(b"b".as_slice())),
+        ],
+        vec![
+            ("a/b.txt", Some(b"b".as_slice())),
+            ("a", Some(b"a".as_slice())),
+        ],
+        vec![
+            ("a", Some(b"a".as_slice())),
+            ("a-foo", Some(b"other".as_slice())),
+            ("a/b.txt", Some(b"b".as_slice())),
+        ],
+        vec![
+            ("a/b.txt", Some(b"b".as_slice())),
+            ("a-foo", Some(b"other".as_slice())),
+            ("a", Some(b"a".as_slice())),
+        ],
+    ] {
+        let bytes = make_zip(&entries);
+        let tmp = tempfile::tempdir().unwrap();
+        let target = tmp.path().join("demo");
+        assert!(extract_pack(&target, &bytes).await.is_err());
+        assert!(!target.exists(), "冲突包失败时不得留下目标目录");
+    }
+}
+
+#[test]
+fn publish_guard_restores_the_old_directory_after_a_failed_publish() {
+    let tmp = tempfile::tempdir().unwrap();
+    let target = tmp.path().join("demo");
+    let staging = tmp.path().join("staging");
+    let backup = tmp.path().join("backup");
+    std::fs::create_dir_all(&staging).unwrap();
+    std::fs::write(staging.join("new.txt"), "new").unwrap();
+    std::fs::create_dir_all(&backup).unwrap();
+    std::fs::write(backup.join("old.txt"), "old").unwrap();
+
+    drop(PackPublishGuard {
+        target: target.clone(),
+        staging,
+        backup,
+        old_moved: true,
+        published: false,
+    });
+
+    assert_eq!(
+        std::fs::read_to_string(target.join("old.txt")).unwrap(),
+        "old"
+    );
+    let leftovers: Vec<_> = std::fs::read_dir(tmp.path())
+        .unwrap()
+        .map(|entry| entry.unwrap().file_name())
+        .collect();
+    assert_eq!(leftovers, vec![std::ffi::OsString::from("demo")]);
+}
+
+#[test]
+fn publish_guard_keeps_the_only_old_copy_when_rollback_cannot_replace_target() {
+    let tmp = tempfile::tempdir().unwrap();
+    let target = tmp.path().join("demo");
+    let staging = tmp.path().join("staging");
+    let backup = tmp.path().join("backup");
+    std::fs::create_dir_all(&target).unwrap();
+    std::fs::write(target.join("other.txt"), "other").unwrap();
+    std::fs::create_dir_all(&staging).unwrap();
+    std::fs::create_dir_all(&backup).unwrap();
+    std::fs::write(backup.join("old.txt"), "old").unwrap();
+
+    drop(PackPublishGuard {
+        target: target.clone(),
+        staging: staging.clone(),
+        backup: backup.clone(),
+        old_moved: true,
+        published: false,
+    });
+
+    assert_eq!(
+        std::fs::read_to_string(target.join("other.txt")).unwrap(),
+        "other"
+    );
+    assert_eq!(
+        std::fs::read_to_string(backup.join("old.txt")).unwrap(),
+        "old"
+    );
+    assert!(!staging.exists());
+}
+
+#[test]
+fn published_guard_cleans_the_backup_without_rolling_back() {
+    let tmp = tempfile::tempdir().unwrap();
+    let target = tmp.path().join("demo");
+    let staging = tmp.path().join("staging");
+    let backup = tmp.path().join("backup");
+    std::fs::create_dir_all(&target).unwrap();
+    std::fs::write(target.join("new.txt"), "new").unwrap();
+    std::fs::create_dir_all(&backup).unwrap();
+    std::fs::write(backup.join("old.txt"), "old").unwrap();
+
+    drop(PackPublishGuard {
+        target: target.clone(),
+        staging,
+        backup: backup.clone(),
+        old_moved: true,
+        published: true,
+    });
+
+    assert_eq!(
+        std::fs::read_to_string(target.join("new.txt")).unwrap(),
+        "new"
+    );
+    assert!(!backup.exists());
+}
+
+#[test]
+fn zip_export_rejects_links_instead_of_copying_their_targets() {
+    let tmp = tempfile::tempdir().unwrap();
+    let dir = tmp.path().join("demo");
+    let outside = tmp.path().join("secret.txt");
+    std::fs::create_dir_all(&dir).unwrap();
+    std::fs::write(&outside, "secret").unwrap();
+
+    #[cfg(unix)]
+    let linked = std::os::unix::fs::symlink(&outside, dir.join("link.txt")).is_ok();
+    #[cfg(windows)]
+    let linked = std::os::windows::fs::symlink_file(&outside, dir.join("link.txt")).is_ok();
+    if !linked {
+        eprintln!("file link creation unsupported; skipping export-link test");
+        return;
+    }
+
+    assert!(zip_dir(&dir, "demo")
+        .unwrap_err()
+        .0
+        .contains("链接或重解析点"));
+}
+
 #[test]
 fn unpack_rejects_malformed_payload() {
     for bad in [

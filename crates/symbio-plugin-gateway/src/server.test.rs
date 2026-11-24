@@ -20,6 +20,19 @@ fn req_with(headers: &[(&str, &str)]) -> HttpRequest {
     }
 }
 
+#[test]
+fn build_ctx_marks_untrusted_gateway_calls_as_model_and_overwrites_forged_metadata() {
+    let mut msg = PluginMessageWire {
+        metadata: serde_json::json!({}),
+        payload: serde_json::json!({}),
+    };
+    for caller in ["model", "manager"] {
+        msg.metadata[VDFS_CALLER.name()] = Value::String(caller.into());
+        let ctx = build_ctx(&msg);
+        assert_eq!(ctx.get(VDFS_CALLER), Some(VdfsCaller::Model));
+    }
+}
+
 // ---- SHA-1 与握手 ----
 
 /// SHA-1 已知答案。算法一旦被改坏，握手会**静默**失败（表现为"客户端连不上"，

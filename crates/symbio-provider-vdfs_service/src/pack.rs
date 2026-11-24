@@ -9,9 +9,13 @@
 //! [`strip_common_root`] 恰好剥掉这一层——导出的包能原样导回。
 
 use serde::{Deserialize, Serialize};
+use std::collections::HashSet;
 use std::io::{Cursor, Read, Write};
-use std::path::Path;
-use symbio_kernel::vdfs::vdfs_has_parent_segment;
+use std::path::{Path, PathBuf};
+
+const MAX_PACK_ENTRIES: usize = 4096;
+const MAX_PACK_ENTRY_SIZE: usize = 64 * 1024 * 1024;
+const MAX_PACK_TOTAL_SIZE: usize = 256 * 1024 * 1024;
 
 /// 整包载荷的**出向**形态（VDFS 动作 `export` 的 `data`）
 ///
@@ -141,8 +145,16 @@ fn add_dir_to_zip<W: Write + std::io::Seek>(
         if name.starts_with('.') {
             continue;
         }
+        let meta = std::fs::symlink_metadata(&path)
+            .map_err(|e| PackError(format!("读取文件元数据失败: {e}")))?;
+        if super::entry::is_reparse_point(&meta) {
+            return Err(PackError(format!(
+                "拒绝打包链接或重解析点：{}",
+                path.display()
+            )));
+        }
         let arc = format!("{prefix}/{name}");
-        if path.is_dir() {
+        if meta.is_dir() {
             w.add_directory(&arc, opts)
                 .map_err(|e| PackError(format!("zip 写目录失败: {e}")))?;
             add_dir_to_zip(w, &path, &arc, opts)?;
@@ -166,8 +178,14 @@ pub fn parse_pack(bytes: &[u8]) -> Result<Vec<(String, Vec<u8>)>, PackError> {
     let cursor = Cursor::new(bytes);
     let mut archive =
         zip::ZipArchive::new(cursor).map_err(|e| PackError(format!("非法 zip: {e}")))?;
+    if archive.len() > MAX_PACK_ENTRIES {
+        return Err(PackError(format!(
+            "zip 条目过多：最多允许 {MAX_PACK_ENTRIES} 个"
+        )));
+    }
 
     let mut out = Vec::new();
+    let mut total_size = 0usize;
     for i in 0..archive.len() {
         let mut file = archive
             .by_index(i)
@@ -177,12 +195,10 @@ pub fn parse_pack(bytes: &[u8]) -> Result<Vec<(String, Vec<u8>)>, PackError> {
         if file.is_dir() {
             continue;
         }
-        // 先规范化再判隐藏：否则 `./a/b.txt` 的首段 `.` 会被当成隐藏文件整条丢弃 // doc-link-allow D-010: 路径形态示例
-        let rel = normalize_pack_path(&raw);
+        let rel = normalize_pack_path(&raw)?;
         if rel.is_empty() {
             continue;
         }
-        // 跳过 macOS 元数据 / 隐藏文件
         if rel.contains("__MACOSX")
             || rel
                 .split('/')
@@ -190,13 +206,27 @@ pub fn parse_pack(bytes: &[u8]) -> Result<Vec<(String, Vec<u8>)>, PackError> {
         {
             continue;
         }
-        // 路径穿越防线：包内条目只允许落在目标目录**之内**（zip-slip）
-        if vdfs_has_parent_segment(&rel) {
-            return Err(PackError(format!("zip 条目越出目标目录：{rel}")));
+        if file.size() > MAX_PACK_ENTRY_SIZE as u64 {
+            return Err(PackError(format!(
+                "zip 条目过大：{rel}（单文件上限 {MAX_PACK_ENTRY_SIZE} 字节）"
+            )));
         }
         let mut buf = Vec::new();
-        file.read_to_end(&mut buf)
+        file.by_ref()
+            .take(MAX_PACK_ENTRY_SIZE as u64 + 1)
+            .read_to_end(&mut buf)
             .map_err(|e| PackError(format!("读取 zip 条目内容失败: {e}")))?;
+        if buf.len() > MAX_PACK_ENTRY_SIZE {
+            return Err(PackError(format!("zip 条目过大：{rel}")));
+        }
+        total_size = total_size
+            .checked_add(buf.len())
+            .filter(|size| *size <= MAX_PACK_TOTAL_SIZE)
+            .ok_or_else(|| {
+                PackError(format!(
+                    "zip 解压总大小超过上限：{MAX_PACK_TOTAL_SIZE} 字节"
+                ))
+            })?;
         out.push((rel, buf));
     }
     Ok(out)
@@ -235,37 +265,170 @@ pub async fn extract_pack(entry_dir: &Path, bytes: &[u8]) -> Result<usize, PackE
     if entries.is_empty() {
         return Err(PackError("zip 中没有任何可用的文件".to_string()));
     }
-
-    if entry_dir.exists() {
-        tokio::fs::remove_dir_all(entry_dir)
-            .await
-            .map_err(|e| PackError(format!("清理旧条目目录失败: {e}")))?;
+    let paths: Vec<(String, &str)> = entries
+        .iter()
+        .map(|(rel, _)| {
+            #[cfg(windows)]
+            let key = rel.to_ascii_lowercase();
+            #[cfg(not(windows))]
+            let key = rel.clone();
+            (key, rel.as_str())
+        })
+        .collect();
+    let mut files = HashSet::with_capacity(paths.len());
+    for (key, rel) in &paths {
+        if !files.insert(key.clone()) {
+            return Err(PackError(format!("zip 包含重复文件路径：{rel}")));
+        }
+    }
+    for (key, rel) in &paths {
+        let mut parent = key.as_str();
+        while let Some((head, _)) = parent.rsplit_once('/') {
+            if files.contains(head) {
+                return Err(PackError(format!(
+                    "zip 路径同时作为文件和目录：{rel}（祖先文件 {head}）"
+                )));
+            }
+            parent = head;
+        }
     }
 
+    let parent = entry_dir
+        .parent()
+        .ok_or_else(|| PackError("导入目标没有父目录，无法建立私有暂存目录".to_string()))?;
+    tokio::fs::create_dir_all(parent)
+        .await
+        .map_err(|e| PackError(format!("创建导入父目录失败: {e}")))?;
+    match tokio::fs::symlink_metadata(entry_dir).await {
+        Ok(meta) if meta.is_dir() => {}
+        Ok(_) => {
+            return Err(PackError(format!(
+                "导入目标不是普通目录：{}",
+                entry_dir.display()
+            )))
+        }
+        Err(e) if e.kind() == std::io::ErrorKind::NotFound => {}
+        Err(e) => return Err(PackError(format!("读取导入目标元数据失败: {e}"))),
+    }
+
+    let token = uuid::Uuid::new_v4().simple().to_string();
+    let staging = parent.join(format!(".symbio-pack-{token}.tmp"));
+    let backup = parent.join(format!(".symbio-pack-{token}.bak"));
+    tokio::fs::create_dir(&staging)
+        .await
+        .map_err(|e| PackError(format!("创建私有暂存目录失败: {e}")))?;
+    let mut guard = PackPublishGuard::new(entry_dir.to_path_buf(), staging.clone(), backup.clone());
+
     for (rel, content) in &entries {
-        let path = entry_dir.join(rel);
+        let path = staging.join(rel);
         if let Some(parent) = path.parent() {
             tokio::fs::create_dir_all(parent)
                 .await
-                .map_err(|e| PackError(format!("创建目录失败: {e}")))?;
+                .map_err(|e| PackError(format!("创建暂存目录失败: {e}")))?;
         }
         tokio::fs::write(&path, content)
             .await
-            .map_err(|e| PackError(format!("写入文件失败: {e}")))?;
+            .map_err(|e| PackError(format!("写入暂存文件失败: {e}")))?;
     }
+
+    super::entry::sync_tree(&staging)
+        .await
+        .map_err(|e| PackError(format!("同步暂存目录失败: {e}")))?;
+
+    // 两步发布之间不留取消点，避免 tokio 的脱离式 rename 在 Drop 后才完成。
+    if entry_dir.exists() {
+        std::fs::rename(entry_dir, &backup)
+            .map_err(|e| PackError(format!("移出旧条目目录失败: {e}")))?;
+        guard.old_moved = true;
+    }
+    if let Err(e) = std::fs::rename(&staging, entry_dir) {
+        return Err(PackError(format!("发布完整条目目录失败: {e}")));
+    }
+    guard.published = true;
+    super::entry::sync_parent_best_effort(parent);
+    // 发布即提交；旧目录清理由 guard 尽力执行，不能再把已提交结果改成失败。
     Ok(entries.len())
 }
 
-/// 规范化 zip 内部相对路径文本（去掉前导 `./` 与 `/`）
-fn normalize_pack_path(p: &str) -> String {
-    p.trim_start_matches("./")
-        .trim_start_matches('/')
-        .to_string()
+struct PackPublishGuard {
+    target: PathBuf,
+    staging: PathBuf,
+    backup: PathBuf,
+    old_moved: bool,
+    published: bool,
 }
 
-// 解包侧的路径穿越防线复用协议层的 `vdfs_has_parent_segment`（按**段**判定，`/` 与
-// `\` 都算）：zip 条目是**包内自带**的路径，不经过请求地址那条守卫，所以必须
-// 自己判一次；但**规则本体只该有一份**，这里不再另写实现。
+impl PackPublishGuard {
+    fn new(target: PathBuf, staging: PathBuf, backup: PathBuf) -> Self {
+        Self {
+            target,
+            staging,
+            backup,
+            old_moved: false,
+            published: false,
+        }
+    }
+}
+
+impl Drop for PackPublishGuard {
+    fn drop(&mut self) {
+        if self.published {
+            let _ = std::fs::remove_dir_all(&self.backup);
+            return;
+        }
+        if self.old_moved
+            && matches!(
+                std::fs::symlink_metadata(&self.target),
+                Err(e) if e.kind() == std::io::ErrorKind::NotFound
+            )
+            && std::fs::rename(&self.backup, &self.target).is_ok()
+        {
+            let _ = std::fs::remove_dir_all(&self.staging);
+            return;
+        }
+        let _ = std::fs::remove_dir_all(&self.staging);
+    }
+}
+
+/// 规范化 zip 内部相对路径文本（去掉前导 `./` 与 `/`）
+fn normalize_pack_path(p: &str) -> Result<String, PackError> {
+    if p.as_bytes().contains(&0) || p.starts_with('/') {
+        return Err(PackError("zip 条目必须使用安全的相对路径".into()));
+    }
+    let bytes = p.as_bytes();
+    if bytes.get(1) == Some(&b':') && bytes.first().is_some_and(u8::is_ascii_alphabetic) {
+        return Err(PackError(format!("zip 条目不得使用盘符绝对路径：{p}")));
+    }
+    let mut segments = Vec::new();
+    for segment in p.split('/') {
+        match segment {
+            "" | "." => continue,
+            ".." => return Err(PackError(format!("zip 条目越出目标目录：{p}"))),
+            segment if segment.contains(':') => {
+                return Err(PackError(format!("zip 条目不得包含盘符或流分隔符：{p}")));
+            }
+            segment if segment.ends_with('.') || segment.ends_with(' ') => {
+                return Err(PackError(format!("zip 条目含 Windows 不安全的尾字符：{p}")));
+            }
+            segment => {
+                let stem = segment
+                    .split('.')
+                    .next()
+                    .unwrap_or(segment)
+                    .to_ascii_uppercase();
+                if matches!(stem.as_str(), "CON" | "PRN" | "AUX" | "NUL")
+                    || (stem.len() == 4
+                        && matches!(&stem[..3], "COM" | "LPT")
+                        && stem.as_bytes()[3].is_ascii_digit())
+                {
+                    return Err(PackError(format!("zip 条目使用 Windows 保留名：{p}")));
+                }
+                segments.push(segment);
+            }
+        }
+    }
+    Ok(segments.join("/"))
+}
 
 #[cfg(test)]
 #[path = "pack.test.rs"]

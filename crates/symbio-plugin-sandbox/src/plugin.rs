@@ -12,17 +12,19 @@
 use std::sync::{Arc, RwLock};
 
 use async_trait::async_trait;
+use symbio_plugin_api::VdfsCaller;
 use symbio_plugin_api::{
-    plugin_dir_from_ctx, sandbox_publish, vdfs_unwatch_changes, vdfs_watch_changes, Plugin,
-    PluginDir, PluginError, PluginInvokeRequest, PluginInvokeRequestExt, PluginInvokeResponse,
-    PluginMeta, PluginPayload, SandboxFace, VdfsAccess, VdfsContent, VdfsContext, VdfsError,
-    VdfsNewType, VdfsNode, VdfsProvider, VdfsRequest, VdfsResponse, VdfsResult, VdfsWriteResponse,
-    PLUGIN_ID_SANDBOX, VDFS_EXT_FORM, VDFS_STATUS_NONE,
+    plugin_dir_from_ctx, sandbox_publish, vdfs_host_ctx, vdfs_unwatch_changes, vdfs_watch_changes,
+    Plugin, PluginDir, PluginError, PluginInvokeRequest, PluginInvokeRequestExt,
+    PluginInvokeResponse, PluginMeta, PluginPayload, SandboxFace, VdfsAccess, VdfsActionResult,
+    VdfsContent, VdfsContext, VdfsError, VdfsNewType, VdfsNode, VdfsProvider, VdfsRequest,
+    VdfsResponse, VdfsResult, VdfsValidationError, VdfsWriteResponse, PLUGIN_ID_SANDBOX,
+    VDFS_CALLER, VDFS_EXT_FORM, VDFS_STATUS_NONE,
 };
-use symbio_providers::{vdfs_id_of, SingleFileVdfs};
+use symbio_providers::{vdfs_id_of, vdfs_safe_segment, SingleFileVdfs};
 
 use crate::detail::sandbox_detail_definition;
-use crate::engine::{Engine, SandboxProfileConfig, SandboxRegistry};
+use crate::engine::{Engine, SandboxProfileConfig, SandboxRegistry, SandboxValidationError};
 
 const LABEL: &str = "沙箱";
 const MANIFEST: &str = "sandbox.json";
@@ -46,10 +48,10 @@ fn builtin_profiles() -> Vec<(String, SandboxProfileConfig)> {
             "strict".into(),
             SandboxProfileConfig {
                 name: "严格".into(),
-                description: Some("交互模式 + 高风险阈值，更多操作需审批".into()),
+                description: Some("交互模式 + 低风险阈值，仅低风险操作自动放行".into()),
                 builtin: true,
                 approval_mode: Some("interactive".into()),
-                risk_threshold: Some("high".into()),
+                risk_threshold: Some("low".into()),
                 ..Default::default()
             },
         ),
@@ -74,6 +76,24 @@ fn detail_definition() -> serde_json::Value {
     serde_json::to_value(sandbox_detail_definition()).unwrap_or(serde_json::Value::Null)
 }
 
+/// 管理面只接受宿主显式注入的可信 Manager；模型与未知主体一律拒绝。
+fn ensure_management_context(ctx: &VdfsContext) -> VdfsResult<()> {
+    let host = vdfs_host_ctx(ctx)
+        .map_err(|_| VdfsError::Forbidden("沙箱管理缺少可信宿主上下文".into()))?;
+    if host.get(VDFS_CALLER) != Some(VdfsCaller::Manager) {
+        return Err(VdfsError::Forbidden("只有管理界面可以修改沙箱策略".into()));
+    }
+    Ok(())
+}
+
+fn invalid_profile(errors: Vec<SandboxValidationError>) -> VdfsError {
+    let mut validation = VdfsValidationError::new("沙箱档案不合法");
+    for error in errors {
+        validation = validation.with_field(error.field, error.message);
+    }
+    VdfsError::Invalid(validation)
+}
+
 /// Sandbox 插件本体。
 ///
 /// **无插件级"当前选中项"**：沙箱选择是会话级数据，随 `ctx[SANDBOX_ID]` 传来，
@@ -83,6 +103,7 @@ pub struct SandboxPlugin {
     dir: PluginDir,
     /// 注册表：内置档 + 用户自定义档，收集期重建，执行期只读。
     registry: Arc<RwLock<SandboxRegistry>>,
+    reload_lock: Arc<tokio::sync::Mutex<()>>,
 }
 
 impl SandboxPlugin {
@@ -92,6 +113,7 @@ impl SandboxPlugin {
         Arc::new(SandboxPlugin {
             dir,
             registry: Arc::new(RwLock::new(SandboxRegistry::default())),
+            reload_lock: Arc::new(tokio::sync::Mutex::new(())),
         }) as Arc<dyn Plugin>
     }
 
@@ -110,31 +132,184 @@ impl SandboxPlugin {
     }
 
     fn id_of(path: &str) -> String {
-        vdfs_id_of(path, PLUGIN_ID_SANDBOX)
+        vdfs_safe_segment(&vdfs_id_of(path.trim_matches('/'), PLUGIN_ID_SANDBOX))
     }
 
-    /// 从存储重建注册表（内置档 + 自定义档）。
-    async fn reload(&self) {
+    /// 读完全部档案并构造/校验候选集；任一条读取、解析或校验失败都不发布。
+    async fn load_registry(&self) -> Result<SandboxRegistry, String> {
+        let entries = self
+            .store()
+            .entries()
+            .await
+            .map_err(|e| format!("读取沙箱档案失败：{e}"))?;
         let mut profiles = builtin_profiles();
-        match self.store().entries().await {
-            Ok(entries) => {
-                for e in entries {
-                    match e
-                        .raw
-                        .as_deref()
-                        .and_then(|t| serde_json::from_str::<SandboxProfileConfig>(t).ok())
-                    {
-                        Some(cfg) => profiles.push((e.id.clone(), cfg)),
-                        None => {
-                            symbio_plugin_api::plugin_warn!("sandbox", "解析沙箱档案 {} 失败", e.id)
-                        }
+        for entry in entries {
+            let raw = entry
+                .raw
+                .ok_or_else(|| format!("读取沙箱档案 {} 失败：主文件不可用", entry.id))?;
+            let cfg = serde_json::from_str::<SandboxProfileConfig>(&raw)
+                .map_err(|e| format!("解析沙箱档案 {} 失败：{e}", entry.id))?;
+            profiles.push((entry.id, cfg));
+        }
+        SandboxRegistry::try_from_profiles(profiles).map_err(|errors| {
+            errors
+                .iter()
+                .map(|error| format!("{}：{}", error.field, error.message))
+                .collect::<Vec<_>>()
+                .join("；")
+        })
+    }
+
+    /// 事务性重载：完整候选集通过后才在同一个写锁内替换已知良好快照。
+    async fn reload(&self) {
+        let _reload = self.reload_lock.lock().await;
+        if let Err(error) = self.reload_locked().await {
+            let has_snapshot = self
+                .registry
+                .read()
+                .unwrap_or_else(|p| p.into_inner())
+                .has_snapshot();
+            if has_snapshot {
+                symbio_plugin_api::plugin_warn!(
+                    "sandbox",
+                    "重载沙箱档案失败，保留上一份快照：{error}"
+                )
+            } else {
+                symbio_plugin_api::plugin_warn!(
+                    "sandbox",
+                    "首次加载沙箱档案失败，没有可用快照，执行将失败关闭：{error}"
+                )
+            }
+        }
+    }
+
+    async fn reload_locked(&self) -> Result<(), String> {
+        match self.load_registry().await {
+            Ok(next) => {
+                let mut registry = self.registry.write().unwrap_or_else(|p| p.into_inner());
+                registry.replace(next);
+                Ok(())
+            }
+            Err(error) => {
+                let mut registry = self.registry.write().unwrap_or_else(|p| p.into_inner());
+                registry.reload_error = Some(error.clone());
+                Err(error)
+            }
+        }
+    }
+
+    async fn previous_profile(&self, id: &str) -> VdfsResult<Option<String>> {
+        match self.store().entry(id).await {
+            Ok(entry) => entry
+                .raw
+                .map(Some)
+                .ok_or_else(|| VdfsError::internal(format!("沙箱档案「{id}」原文不可读"))),
+            Err(VdfsError::NotFound(_)) => Ok(None),
+            Err(error) => Err(error),
+        }
+    }
+
+    /// 调用方持有 `reload_lock`；候选集发布失败时恢复本次变更，不能向管理面报假成功。
+    async fn reload_after_mutation(&self, id: &str, previous: Option<String>) -> VdfsResult<()> {
+        if let Err(error) = self.reload_locked().await {
+            let rollback = match previous {
+                Some(text) => self.store().write_text(id, &text).await.map(|_| ()),
+                None => self.store().remove(id).await,
+            };
+            match rollback {
+                Ok(()) => {
+                    if let Err(rollback_reload_error) = self.reload_locked().await {
+                        symbio_plugin_api::plugin_warn!(
+                            "sandbox",
+                            "沙箱档案「{id}」已回滚但重载仍失败：{rollback_reload_error}"
+                        )
                     }
+                    Err(VdfsError::internal(format!(
+                        "沙箱档案「{id}」已回滚；重载失败：{error}"
+                    )))
+                }
+                Err(rollback_error) => Err(VdfsError::internal(format!(
+                    "沙箱档案「{id}」重载失败且回滚失败：{error}；回滚错误：{rollback_error}"
+                ))),
+            }
+        } else {
+            Ok(())
+        }
+    }
+
+    /// 管理写入的定义校验 + 类型/语义校验；错误保留表单可定位的字段路径。
+    fn parse_profile(value: &serde_json::Value) -> VdfsResult<SandboxProfileConfig> {
+        let definition = sandbox_detail_definition();
+        definition.validate(value).map_err(VdfsError::Invalid)?;
+        Self::validate_rule_table_options(&definition, value)?;
+        let cfg: SandboxProfileConfig = serde_json::from_value(value.clone()).map_err(|e| {
+            VdfsError::Invalid(VdfsValidationError::new(format!(
+                "沙箱档案字段类型不合法：{e}"
+            )))
+        })?;
+        let errors = cfg.validate();
+        if errors.is_empty() {
+            Ok(cfg)
+        } else {
+            Err(invalid_profile(errors))
+        }
+    }
+
+    /// 通用 table 校验只保证单元格是标量；select 列的候选集合由本插件补齐校验。
+    fn validate_rule_table_options(
+        definition: &symbio_plugin_api::DetailDefinition,
+        value: &serde_json::Value,
+    ) -> VdfsResult<()> {
+        let Some(rows) = value.get("rules").and_then(serde_json::Value::as_array) else {
+            return Ok(());
+        };
+        let Some(rules) = definition
+            .sections
+            .iter()
+            .flat_map(|section| section.fields.iter())
+            .find(|field| field.key == "rules")
+        else {
+            return Ok(());
+        };
+        let mut validation = VdfsValidationError::new("规则表格不合法");
+        for (i, row) in rows.iter().enumerate() {
+            let Some(row) = row.as_object() else {
+                continue; // 通用定义校验已报告行形状
+            };
+            for column in &rules.columns {
+                let Some(cell) = row.get(&column.key) else {
+                    continue; // 通用定义校验已报告缺列
+                };
+                let field = format!("rules.{i}.{}", column.key);
+                let Some(text) = cell.as_str() else {
+                    validation = validation.with_field(field, "必须是字符串");
+                    continue;
+                };
+                // kind 是开放事实种类，只由语义校验要求非空，不用 UI 候选封死。
+                if column.key != "kind"
+                    && !column.options.is_empty()
+                    && !column.options.iter().any(|option| option.value == text)
+                {
+                    validation = validation.with_field(
+                        field,
+                        format!(
+                            "必须是以下之一：{}",
+                            column
+                                .options
+                                .iter()
+                                .map(|option| option.value.as_str())
+                                .collect::<Vec<_>>()
+                                .join(" / ")
+                        ),
+                    );
                 }
             }
-            Err(e) => symbio_plugin_api::plugin_warn!("sandbox", "读取沙箱档案失败：{e}"),
         }
-        *self.registry.write().unwrap_or_else(|p| p.into_inner()) =
-            SandboxRegistry::from_profiles(profiles);
+        if validation.has_fields() {
+            Err(VdfsError::Invalid(validation))
+        } else {
+            Ok(())
+        }
     }
 
     /// VDFS 列表节点：档案标题取 name，内置档以只读访问位呈现。
@@ -201,7 +376,21 @@ impl Plugin for SandboxPlugin {
                 };
                 archives.sort_by(|a, b| a.1.cmp(&b.1));
                 let selected = ctx.get(symbio_plugin_api::SANDBOX_ID);
-                let field = crate::detail::sandbox_option_field(&archives, selected.as_deref());
+                let warning = {
+                    let reg = self.registry.read().unwrap_or_else(|p| p.into_inner());
+                    reg.reload_error.clone()
+                };
+                let has_snapshot = self
+                    .registry
+                    .read()
+                    .unwrap_or_else(|p| p.into_inner())
+                    .has_snapshot();
+                let field = crate::detail::sandbox_option_field(
+                    &archives,
+                    selected.as_deref(),
+                    warning.as_deref(),
+                    has_snapshot,
+                );
                 visitor
                     .put(symbio_plugin_api::CapabilityRow::option(ORDER, field))
                     .await;
@@ -231,10 +420,16 @@ impl Plugin for SandboxPlugin {
 impl VdfsProvider for SandboxPlugin {
     async fn dispatch(
         &self,
-        _ctx: &VdfsContext,
+        ctx: &VdfsContext,
         path: &str,
         req: VdfsRequest,
     ) -> VdfsResult<VdfsResponse> {
+        if matches!(
+            &req,
+            VdfsRequest::Write { .. } | VdfsRequest::Delete { .. } | VdfsRequest::Action { .. }
+        ) {
+            ensure_management_context(ctx)?;
+        }
         match req {
             VdfsRequest::List { .. } => {
                 if !path.trim_matches('/').is_empty() {
@@ -297,36 +492,39 @@ impl VdfsProvider for SandboxPlugin {
                     if !content.create {
                         return Err(VdfsError::invalid("写挂载根需要 create 意图"));
                     }
-                    symbio_providers::vdfs_auto_id(PLUGIN_ID_SANDBOX)
+                    vdfs_safe_segment(&symbio_providers::vdfs_auto_id(PLUGIN_ID_SANDBOX))
                 } else {
                     Self::id_of(path)
                 };
-                // 内置档只读：拒绝写入内置 id。
+                // 地址先按存储口径规范化，再保护内置 id；路径字符串不是授权依据。
                 if builtin_profiles().iter().any(|(k, _)| k == &id) {
                     return Err(VdfsError::Forbidden(format!(
                         "内置沙箱「{id}」只读；请复制后修改"
                     )));
                 }
                 let text = content.as_text().unwrap_or_default();
-                let mut value: serde_json::Value = if text.trim().is_empty() {
-                    serde_json::json!({ "name": id })
-                } else {
-                    serde_json::from_str(text)
-                        .map_err(|e| VdfsError::invalid(format!("沙箱档案不是合法 JSON：{e}")))?
-                };
+                if text.trim().is_empty() {
+                    return Err(VdfsError::Invalid(
+                        VdfsValidationError::new("沙箱档案不能为空")
+                            .with_field("content", "请提交完整的沙箱档案 JSON"),
+                    ));
+                }
+                let mut value: serde_json::Value = serde_json::from_str(text)
+                    .map_err(|e| VdfsError::invalid(format!("沙箱档案不是合法 JSON：{e}")))?;
                 // json widget 提交的是结构化值（allowed_facts / blocked_tools 已是对象），
                 // serde 直接反序列化即可；留空的 json 字段被前端省略 ⇒ `#[serde(default)]`
                 // 的空 HashMap 生效（留空 = 不限制）。旧的 `_json` 字符串转换已随机制增强删除。
                 if let Some(obj) = value.as_object_mut() {
                     obj.insert("builtin".into(), serde_json::json!(false));
                 }
-                let cfg: SandboxProfileConfig = serde_json::from_value(value)
-                    .map_err(|e| VdfsError::invalid(format!("沙箱档案字段不合法：{e}")))?;
+                let cfg = Self::parse_profile(&value)?;
+                let _reload = self.reload_lock.lock().await;
+                let previous = self.previous_profile(&id).await?;
                 let created = self
                     .store()
                     .write_json(&id, &serde_json::to_value(&cfg).unwrap_or_default())
                     .await?;
-                self.reload().await;
+                self.reload_after_mutation(&id, previous).await?;
                 let generated = path.trim_matches('/').is_empty().then_some(id);
                 Ok(VdfsResponse::Write(VdfsWriteResponse {
                     name: generated,
@@ -341,12 +539,42 @@ impl VdfsProvider for SandboxPlugin {
                 if builtin_profiles().iter().any(|(k, _)| k == &id) {
                     return Err(VdfsError::Forbidden(format!("内置沙箱「{id}」不可删除")));
                 }
-                self.store().entry(&id).await?;
+                let _reload = self.reload_lock.lock().await;
+                let previous = self.previous_profile(&id).await?;
                 self.store().remove(&id).await?;
-                self.reload().await;
+                self.reload_after_mutation(&id, previous).await?;
                 Ok(VdfsResponse::Unit)
             }
-            VdfsRequest::Action { .. } => Err(VdfsError::invalid(format!("{LABEL}不支持动作"))),
+            VdfsRequest::Action { action, .. } => {
+                if action != crate::detail::ACTION_COPY {
+                    return Err(VdfsError::invalid(format!("{LABEL}不支持动作：{action}")));
+                }
+                let id = Self::id_of(path);
+                let _reload = self.reload_lock.lock().await;
+                let mut cfg = {
+                    let reg = self.registry.read().unwrap_or_else(|p| p.into_inner());
+                    reg.archives()
+                        .get(&id)
+                        .cloned()
+                        .ok_or_else(|| VdfsError::not_found(format!("未找到{LABEL}档案：{id}")))?
+                };
+                cfg.builtin = false;
+                cfg.name = format!("{}（副本）", cfg.name);
+                let cfg = Self::parse_profile(&serde_json::to_value(cfg).map_err(|error| {
+                    VdfsError::internal(format!("序列化沙箱档案失败：{error}"))
+                })?)?;
+                let new_id = vdfs_safe_segment(&symbio_providers::vdfs_auto_id(PLUGIN_ID_SANDBOX));
+                self.store()
+                    .write_json(&new_id, &serde_json::to_value(&cfg).unwrap_or_default())
+                    .await?;
+                self.reload_after_mutation(&new_id, None).await?;
+                Ok(VdfsResponse::Action(VdfsActionResult {
+                    action,
+                    ok: true,
+                    message: format!("已创建沙箱「{}」", cfg.name),
+                    data: Some(serde_json::json!({ "id": new_id })),
+                }))
+            }
             VdfsRequest::Mkdir => Err(VdfsError::NotImplemented),
             VdfsRequest::Watch { sink } => {
                 vdfs_watch_changes(PLUGIN_ID_SANDBOX, path, sink).await?;

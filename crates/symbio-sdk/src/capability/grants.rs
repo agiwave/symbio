@@ -15,6 +15,12 @@ use super::CapabilityRiskLevel;
 use serde::{Deserialize, Deserializer, Serialize, Serializer};
 use serde_json::Value;
 use std::collections::BTreeMap;
+use std::sync::atomic::{AtomicBool, Ordering};
+use std::sync::Arc;
+use std::time::{Duration, SystemTime};
+use symbio_kernel::plugin::PluginInvokeRequest;
+
+const APPROVAL_GRANT: &str = "approval_grant";
 
 /// 工具授权清单：能力名 → 允许的最高风险档。
 ///
@@ -86,6 +92,86 @@ impl<'de> Deserialize<'de> for ApprovalGrants {
         // `null` 与缺席同解（表单可能交回空槽位）。
         let raw = Option::<BTreeMap<String, Value>>::deserialize(deserializer)?;
         Ok(raw.map(Self::from_wire).unwrap_or_default())
+    }
+}
+
+/// 宿主为一次已批准调用签发的短期一次性凭据（D-533）。
+#[derive(Debug, Clone)]
+pub struct ApprovalGrant {
+    inner: Arc<GrantInner>,
+}
+
+#[derive(Debug)]
+struct GrantInner {
+    call_id: String,
+    tool: String,
+    args: Value,
+    session_id: Option<String>,
+    profile_version: u64,
+    expires_at: SystemTime,
+    consumed: AtomicBool,
+}
+
+impl ApprovalGrant {
+    pub fn issue(
+        call_id: impl Into<String>,
+        tool: impl Into<String>,
+        args: &Value,
+        session_id: Option<String>,
+        profile_version: u64,
+        ttl: Duration,
+    ) -> Self {
+        let mut bound_args = args.clone();
+        if let Some(object) = bound_args.as_object_mut() {
+            object.remove("approved");
+        }
+        Self {
+            inner: Arc::new(GrantInner {
+                call_id: call_id.into(),
+                tool: tool.into(),
+                args: bound_args,
+                session_id,
+                profile_version,
+                expires_at: SystemTime::now() + ttl,
+                consumed: AtomicBool::new(false),
+            }),
+        }
+    }
+
+    pub fn attach(&self, ctx: &Arc<dyn PluginInvokeRequest>) {
+        ctx.set_raw(APPROVAL_GRANT, Arc::new(self.clone()));
+    }
+
+    pub fn take(
+        ctx: &dyn PluginInvokeRequest,
+        call_id: &str,
+        tool: &str,
+        args: &Value,
+        session_id: Option<&str>,
+        profile_version: u64,
+    ) -> bool {
+        let Some(grant) = ctx
+            .get_raw(APPROVAL_GRANT)
+            .and_then(|raw| raw.downcast::<ApprovalGrant>().ok())
+        else {
+            return false;
+        };
+        let mut bound_args = args.clone();
+        if let Some(object) = bound_args.as_object_mut() {
+            object.remove("approved");
+        }
+        let valid = grant.inner.call_id == call_id
+            && grant.inner.tool == tool
+            && grant.inner.args == bound_args
+            && grant.inner.session_id.as_deref() == session_id
+            && grant.inner.profile_version == profile_version
+            && SystemTime::now() <= grant.inner.expires_at;
+        valid
+            && grant
+                .inner
+                .consumed
+                .compare_exchange(false, true, Ordering::AcqRel, Ordering::Acquire)
+                .is_ok()
     }
 }
 

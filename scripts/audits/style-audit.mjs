@@ -258,6 +258,42 @@ function splitVue(text) {
 
 const VALID_CLASS = /^[a-zA-Z_][\w-]*$/;
 
+function maskCallAndIndexArguments(text) {
+  let out = '';
+  let round = 0;
+  let square = 0;
+  let quote = '';
+  let escaped = false;
+  for (const ch of text) {
+    if (quote) {
+      out += ' ';
+      if (escaped) escaped = false;
+      else if (ch === '\\') escaped = true;
+      else if (ch === quote) quote = '';
+      continue;
+    }
+    if (ch === "'" || ch === '"' || ch === '`') {
+      quote = ch;
+      out += ' ';
+    } else if (ch === '(') {
+      round += 1;
+      out += ' ';
+    } else if (ch === ')') {
+      round = Math.max(0, round - 1);
+      out += ' ';
+    } else if (ch === '[') {
+      square += 1;
+      out += ' ';
+    } else if (ch === ']') {
+      square = Math.max(0, square - 1);
+      out += ' ';
+    } else {
+      out += round || square ? ' ' : ch;
+    }
+  }
+  return out;
+}
+
 /**
  * 从 :class 绑定表达式提取静态可解析的类名（写入 usages）与动态前缀（写入 prefixes）。
  * 捕获规则（刻意保守，宁可漏报不可误报）：
@@ -318,8 +354,9 @@ function extractBindingClasses(expr, usages, prefixes) {
   }
   addKeys(expr);
   // 简写对象键 { expanded }：只走非数组路径（数组里的裸标识符是变量，见函数头注）。
-  // 仍须剔除 `${...}` 插值，理由同 addKeys。
-  const noInterp = expr.replace(/\$\{[^{}]*\}/g, ' ');
+  // 仍须剔除 `${...}` 插值与函数/数组实参，否则 `{ invalid: hasError(f, ri) }`
+  // 里的 `ri` 会被误认成简写类名。
+  const noInterp = maskCallAndIndexArguments(expr.replace(/\$\{[^{}]*\}/g, ' '));
   for (const s of noInterp.matchAll(/([{,]\s*)([a-zA-Z_][\w-]*)\s*(?=[},])/g)) add(s[2]);
   addTernary(expr);
   addPrefixes(expr);

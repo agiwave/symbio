@@ -154,12 +154,13 @@ pub use symbio_kernel::present::{
     DetailOption, DetailPreset, DetailPresetSpec, DetailSection,
 };
 pub use symbio_kernel::vdfs::{
-    vdfs_derive_ext, vdfs_has_parent_segment, vdfs_path_within, DynVdfsProvider, VdfsAccess,
-    VdfsActionResult, VdfsChange, VdfsChangeSink, VdfsContent, VdfsContext, VdfsError, VdfsItem,
-    VdfsListResponse, VdfsNewType, VdfsNode, VdfsParams, VdfsProvider, VdfsRequest, VdfsResponse,
-    VdfsResult, VdfsValidationError, VdfsWriteResponse, VDFS_ACTION_DISABLE, VDFS_ACTION_ENABLE,
-    VDFS_ACTION_EXPORT, VDFS_ACTION_IMPORT, VDFS_ACTION_PLUGINS, VDFS_ACTION_TEST, VDFS_EXT_FORM,
-    VDFS_EXT_ZIP, VDFS_PARAM_BEFORE, VDFS_PARAM_LIMIT, VDFS_PARAM_WITH_HIDDEN, VDFS_PARAM_WORKDIR,
+    vdfs_derive_ext, vdfs_has_parent_segment, vdfs_normalize_path, vdfs_path_within,
+    vdfs_resolve_path, DynVdfsProvider, VdfsAccess, VdfsActionResult, VdfsChange, VdfsChangeSink,
+    VdfsContent, VdfsContext, VdfsError, VdfsItem, VdfsListResponse, VdfsNewType, VdfsNode,
+    VdfsParams, VdfsProvider, VdfsRequest, VdfsResponse, VdfsResult, VdfsValidationError,
+    VdfsWriteResponse, VDFS_ACTION_DISABLE, VDFS_ACTION_ENABLE, VDFS_ACTION_EXPORT,
+    VDFS_ACTION_IMPORT, VDFS_ACTION_PLUGINS, VDFS_ACTION_TEST, VDFS_EXT_FORM, VDFS_EXT_ZIP,
+    VDFS_PARAM_BEFORE, VDFS_PARAM_LIMIT, VDFS_PARAM_WITH_HIDDEN, VDFS_PARAM_WORKDIR,
     VDFS_PLUGINS_FIELD, VDFS_PLUGIN_NAME_FIELD, VDFS_PLUGIN_PROVIDER_FIELD, VDFS_STATUS_ACTIVE,
     VDFS_STATUS_DISABLED, VDFS_STATUS_FAILED, VDFS_STATUS_NONE, VDFS_STATUS_UNKNOWN,
     VDFS_STATUS_WORKING,
@@ -187,7 +188,8 @@ pub use symbio_sdk::agent::{agent_perms_of, AgentPermissions, AgentScope, AGENT_
 pub use symbio_sdk::capability::{
     capability_announce_config_snapshot, capability_announce_configurable,
     capability_configurables, capability_prompts, capability_report_error, capability_take_errors,
-    capability_vdfs_root, CAPABILITY_VISITOR, CONFIGURABLE_VISITOR, OPTION_VISITOR, SCOPE_TWIN,
+    capability_vdfs_root, ApprovalGrant, CAPABILITY_VISITOR, CONFIGURABLE_VISITOR, OPTION_VISITOR,
+    SCOPE_TWIN,
 };
 pub use symbio_sdk::chat::chat_node::message_of_node;
 pub use symbio_sdk::clock::clock_now_ms;
@@ -195,9 +197,9 @@ pub use symbio_sdk::creator::{creator_create_object, creator_has, creator_ids};
 pub use symbio_sdk::embedding::{EmbeddingService, EMBEDDING_LOCAL};
 pub use symbio_sdk::event_bus::{EventBus, EventBusPublisher, EVENT_BUS_SINK};
 pub use symbio_sdk::keys::{
-    AGENT_ID, AGENT_VDFS, MODE, PATH, PRINCIPAL_SCHEDULER, PRINCIPAL_USER, PROVIDER_ID,
+    VdfsCaller, AGENT_ID, AGENT_VDFS, MODE, PATH, PRINCIPAL_SCHEDULER, PRINCIPAL_USER, PROVIDER_ID,
     REQUIRED_PLUGINS, RISK_LEVEL, SANDBOX_ID, SESSION_DIR, SESSION_ID, SESSION_VDFS, TOOL_CALL_ID,
-    TOOL_NODE_ID, TRACE_ID, VDFS_PARENT_ADDR, WORKDIR, WORKSPACE_VDFS,
+    TOOL_NODE_ID, TRACE_ID, VDFS_CALLER, VDFS_PARENT_ADDR, WORKDIR, WORKSPACE_VDFS,
 };
 pub use symbio_sdk::llm::round::{llm_emit_message, llm_removed_frame, llm_short_id};
 pub use symbio_sdk::plugin::{
@@ -208,13 +210,11 @@ pub use symbio_sdk::plugin::{
 };
 pub use symbio_sdk::projection::task_vocab::TaskVocab;
 pub use symbio_sdk::projection::vocab::CommitmentVocab;
-/// 插件默认的并发任务容量出厂值（平凡值 = 串行 FIFO）。
 pub const TASK_CAP: usize = 1;
 pub use symbio_sdk::round::node_build;
-// D-531 沙箱横切句柄：只转机制形状与 ctx 键，不含工具名 / 策略 / 配置项。
-// 发布方（sandbox 插件）与各消费方（tool 拦截 / 工具 permits 查询）共用这同一句柄。
+// D-531 沙箱横切句柄：发布方与消费方共用机制形状与 ctx 键，不含工具名、策略或配置项。
 #[rustfmt::skip] // D-531：锁定转出块排布，压缩陈旧注释抵消新增行（同 D-530 口径）
-pub use symbio_sdk::sandbox::{sandbox_init_slot, sandbox_of, sandbox_publish, SandboxFace, SandboxFact, SANDBOX};
+pub use symbio_sdk::sandbox::{sandbox_init_slot, sandbox_of, sandbox_publish, SandboxDecision, SandboxFace, SandboxFact, SANDBOX};
 pub use symbio_sdk::vdfs::address::{absolute_addr, descend_addr, join_addr, AddrRootDecl};
 pub use symbio_sdk::vdfs::host::{
     vdfs_context, vdfs_from_plugin_error, vdfs_host_ctx, vdfs_notify_change, vdfs_unwatch_changes,

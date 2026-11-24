@@ -17,7 +17,7 @@ import { widgetFromEdit, widgetIsReadonly, widgetOmitsWhenEmpty } from '@/regist
 export interface SaveContext {
   definition: DetailDefinition
   form: Record<string, unknown>
-  /** `visible_when` 求值（住在组件里）；`ignoreVisibility = false` 时按它过滤字段 */
+  /** `visible_when` 求值（住在组件里）；隐藏字段不参与保存 */
   isVisible: (f: DetailField) => boolean
   isUpload: boolean
   node: VdfsNode | null
@@ -53,17 +53,15 @@ export function generateId(base: string, existingIds: string[]): string {
 /**
  * 字段序列化（机制唯一实现）：list → string[]、map → 对象；static 只读。
  *
- * `ignoreVisibility = false`（upload 绑定）时，`visible_when` 不满足的字段
- * 不参与保存（如 mcp 的 stdio/http 互斥字段）；
- * `ignoreVisibility = true`（其余绑定）时保存全部字段——表单对应的是一份
- * **完整配置对象**（如心跳任务：关闭开关不得丢失间隔/提示词）。
+ * `visible_when` 不满足的字段不参与保存（如 mcp 的 stdio/http 互斥字段），
+ * 也不参与本地必填与 JSON 语法预检。
  */
-function buildValues(ctx: SaveContext, ignoreVisibility: boolean): Record<string, unknown> {
+function buildValues(ctx: SaveContext): Record<string, unknown> {
   const out: Record<string, unknown> = {}
   for (const sec of ctx.definition.sections) {
     for (const f of sec.fields) {
       if (widgetIsReadonly(f.widget)) continue
-      if (!ignoreVisibility && !ctx.isVisible(f)) continue
+      if (!ctx.isVisible(f)) continue
       // 数字字段的编辑态空串 = 没填：省略键，让后端的 `serde(default)` 决定
       // 「不限制 / 取默认」。提交空串会让 `Option<u32>` / `f64` 反序列化失败。
       if (widgetOmitsWhenEmpty(f.widget) && isEmpty(ctx.form[f.key])) continue
@@ -80,9 +78,9 @@ function buildValues(ctx: SaveContext, ignoreVisibility: boolean): Record<string
  *   并补齐 name 回落链（首个非空字段补 name，不覆盖用户已填的 name）。
  */
 export function buildSave(ctx: SaveContext): Record<string, unknown> {
-  if (!ctx.isUpload) return buildValues(ctx, true)
+  if (!ctx.isUpload) return buildValues(ctx)
   const id = ctx.node?.name || generateId(ctx.idFrom || 'resource', ctx.existingIds)
-  const values = buildValues(ctx, false)
+  const values = buildValues(ctx)
   const manifest: Record<string, unknown> = { id, ...values }
   const nameKey = ctx.definition.name_from?.[0]
   if (nameKey && ctx.nameFrom && isEmpty(ctx.form[nameKey])) {

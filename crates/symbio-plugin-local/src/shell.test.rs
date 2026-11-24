@@ -41,11 +41,9 @@ fn make_ctx(
     }
     req.set(symbio_plugin_api::EVENT_SINK, sink);
     req.set(symbio_plugin_api::ABORT_SIGNAL, ExecAbortSignal::new());
-    // 用裸字面量而非 PLUGIN_PAYLOAD_KEY：本行同时验证「桶名就是 "payload"」这一契约
-    req.set_raw(
-        "payload",
-        Arc::new(json!({ "command": command, "approved": true })),
-    );
+    // 用裸字面量而非 PLUGIN_PAYLOAD_KEY：本行同时验证「桶名就是 "payload"」这一契约。
+    // 这里刻意不带 approved：模型参数不是授权，测试夹具也不能伪造授权。
+    req.set_raw("payload", Arc::new(json!({ "command": command })));
     Arc::new(req)
 }
 
@@ -214,6 +212,83 @@ async fn execute_rejects_empty_command() {
         "错误信息应指向缺失的参数，实际: {err}"
     );
     assert!(ops.lock().unwrap().is_empty(), "未执行就不该有快照");
+}
+
+fn supervised_policy() -> Arc<SecurityPolicy> {
+    Arc::new(SecurityPolicy::new(crate::policy::PolicyRules {
+        autonomy: crate::policy::AutonomyLevel::Supervised,
+        require_approval_for_medium_risk: true,
+        block_high_risk_commands: false,
+        ..Default::default()
+    }))
+}
+
+/// 模型参数自称 approved 不能通过 shell 自己的策略前置。
+#[tokio::test]
+async fn prepare_ignores_model_supplied_approved() {
+    let tool = ShellTool::new(supervised_policy(), 60);
+    let (sink, _) = recording_sink();
+    let ctx = make_ctx("rm -rf ./build", sink, None);
+    let err = tool
+        .prepare(
+            &json!({"command": "rm -rf ./build", "approved": true}),
+            ctx.as_ref(),
+            CapabilityRiskLevel::Medium,
+            &ExecAbortSignal::new(),
+        )
+        .await
+        .unwrap_err();
+    assert!(
+        format!("{err}").contains("批准"),
+        "模型 approved 应被忽略，实际: {err}"
+    );
+}
+
+/// collectors 消费 typed grant 后写入的字符串标记是唯一可信授权来源。
+#[tokio::test]
+async fn prepare_trusts_only_the_collector_ctx_marker() {
+    let tool = ShellTool::new(supervised_policy(), 60);
+    let (sink, _) = recording_sink();
+    let ctx = make_ctx("rm -rf ./build", sink, None);
+    let args = json!({"command": "rm -rf ./build"});
+
+    ctx.set_raw("approved", Arc::new("false".to_string()));
+    assert!(
+        tool.prepare(
+            &args,
+            ctx.as_ref(),
+            CapabilityRiskLevel::Medium,
+            &ExecAbortSignal::new(),
+        )
+        .await
+        .is_err(),
+        "false 字符串不是授权"
+    );
+
+    ctx.set_raw("approved", Arc::new(true));
+    assert!(
+        tool.prepare(
+            &args,
+            ctx.as_ref(),
+            CapabilityRiskLevel::Medium,
+            &ExecAbortSignal::new(),
+        )
+        .await
+        .is_err(),
+        "错误类型（bool）不能冒充可信字符串标记"
+    );
+
+    ctx.set_raw("approved", Arc::new("true".to_string()));
+    let (_, risk) = tool
+        .prepare(
+            &args,
+            ctx.as_ref(),
+            CapabilityRiskLevel::Medium,
+            &ExecAbortSignal::new(),
+        )
+        .await
+        .expect("collector 可信标记应允许已批准的高风险命令");
+    assert_eq!(risk, CapabilityRiskLevel::High);
 }
 
 // ── ctx 读取口径 ──────────────────────────────────────────────────────

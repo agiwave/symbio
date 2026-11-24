@@ -78,4 +78,56 @@ describe('VdfsFormDetail 传参基线（通道适配 + 直通）', () => {
     expect(def.sections).toEqual([])
     expect(def.binding).toBe('option')
   })
+
+  it('只读档案保留 copy 与导出，剥掉保存和删除', () => {
+    const node = formNode({
+      actions: [
+        { id: 'save', label: '保存', style: 'primary' },
+        { id: 'copy', label: '复制为可编辑档案', style: 'secondary' },
+        { id: 'export', label: '导出', style: 'secondary' },
+        { id: 'delete', label: '删除', style: 'danger' },
+      ],
+    })
+    node.access = 'r'
+    const w = mount(VdfsFormDetail, { props: { node, data: {} } })
+    expect(w.findComponent(DetailForm).props('definition').actions?.map((a) => a.id)).toEqual([
+      'copy',
+      'export',
+    ])
+  })
+
+  it('草稿态剥掉 copy（没有可复制的已存在资源）', () => {
+    const node = formNode({
+      actions: [
+        { id: 'save', label: '保存', style: 'primary' },
+        { id: 'copy', label: '复制', style: 'secondary' },
+      ],
+    })
+    node.path = ''
+    const w = mount(VdfsFormDetail, { props: { node, data: null } })
+    expect(w.findComponent(DetailForm).props('definition').actions?.map((a) => a.id)).toEqual(['save'])
+  })
+
+  it('表格字段错误展示行号与中文列名，未知机器 key 原样保留', () => {
+    const node = formNode({
+      sections: [{
+        fields: [{
+          key: 'rules', label: '能力约束规则', widget: 'table',
+          columns: [{ key: 'kind', label: '对象' }],
+        }],
+      }],
+    })
+    const w = mount(VdfsFormDetail, {
+      props: {
+        node,
+        data: {},
+        fieldErrors: [
+          { field: 'rules.1.kind', message: '请选择对象' },
+          { field: 'future_field', message: '未知错误' },
+        ],
+      },
+    })
+    expect(w.find('.banner-fields code').text()).toBe('能力约束规则 · 第 2 行 · 对象')
+    expect(w.findAll('.banner-fields code')[1].text()).toBe('future_field')
+  })
 })

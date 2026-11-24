@@ -42,6 +42,7 @@ reqwest = { workspace = true, features = [
     "native-tls",
 ] }
 url = { workspace = true }
+encoding_rs = { workspace = true }
 glob = { workspace = true }
 regex = { workspace = true }
 urlencoding = { workspace = true }
@@ -53,5 +54,6 @@ tracing = { workspace = true }
 
 [dev-dependencies]
 tempfile = { workspace = true }
+http = { workspace = true }
 # 测试用：tokio 时间控制（start_paused / advance）
 tokio = { workspace = true, features = ["test-util"] }

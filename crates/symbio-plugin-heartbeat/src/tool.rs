@@ -28,7 +28,8 @@ use symbio_plugin_api::PLUGIN_ID_SESSION;
 use symbio_plugin_api::{
     missing_caller, port_result, vdfs_context, CapabilityMeta, DynVdfsProvider, ExecEnv,
     PluginError, PluginInvokeRequest, PluginInvokeRequestExt, PortExecContext, PortExecutor,
-    PortInput, PortOutcome, VdfsContent, VdfsContext, VdfsRequest, VdfsResponse, SESSION_ID,
+    PortInput, PortOutcome, SandboxFact, VdfsContent, VdfsContext, VdfsRequest, VdfsResponse,
+    SESSION_ID,
 };
 
 /// 心跳间隔下限（秒）：调度器扫描周期 15s + 抖动 0-30s，低于 10s 的间隔
@@ -50,6 +51,18 @@ impl HeartbeatTool {
 }
 
 impl HeartbeatTool {
+    pub(crate) fn intent_facts(
+        args: &Value,
+        ctx: &Arc<dyn PluginInvokeRequest>,
+    ) -> Vec<SandboxFact> {
+        let action = args.get("action").and_then(Value::as_str).unwrap_or("get");
+        let mut facts = vec![SandboxFact::new("heartbeat_action", action)];
+        if let Some(session_id) = ctx.get(SESSION_ID) {
+            facts.push(SandboxFact::new("session_id", session_id));
+        }
+        facts
+    }
+
     pub fn meta(&self) -> CapabilityMeta {
         CapabilityMeta {
             name: "heartbeat".to_string(),

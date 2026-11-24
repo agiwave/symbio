@@ -26,6 +26,34 @@ fn temp(tag: &str) -> PathBuf {
     d
 }
 
+fn workspace_fs() -> PhysicalFs {
+    PhysicalFs {
+        policy: FsPolicy {
+            workspace_only: true,
+            allowed_roots: Vec::new(),
+            forbidden_paths: Vec::new(),
+        },
+    }
+}
+
+#[cfg(unix)]
+fn directory_symlink(link: &Path, target: &Path) -> std::io::Result<()> {
+    std::os::unix::fs::symlink(target, link)
+}
+
+#[cfg(windows)]
+fn try_directory_junction(link: &Path, target: &Path) -> bool {
+    use std::os::windows::process::CommandExt as _;
+    // cmd 的 /C 只有一个命令字符串参数；交给 Command 逐个 quoting 会把内层引号转义掉。
+    let command = format!("mklink /J \"{}\" \"{}\"", link.display(), target.display());
+    std::process::Command::new("cmd")
+        .args(["/D", "/C"])
+        .raw_arg(command)
+        .status()
+        .map(|s| s.success())
+        .unwrap_or(false)
+}
+
 #[tokio::test]
 async fn writes_then_reads_back_relative_address() {
     let base = temp("rw");
@@ -101,6 +129,512 @@ async fn write_creates_missing_parents() {
     assert!(r.created);
     assert!(base.join("x/y/z.txt").exists());
     let _ = std::fs::remove_dir_all(&base);
+}
+
+/// 工作区限制必须覆盖“目标尚不存在”的嵌套父目录。
+#[tokio::test]
+async fn workspace_only_allows_safe_nonexistent_nested_parents() {
+    let tmp = tempfile::tempdir().unwrap();
+    let base = tmp.path().join("workspace");
+    std::fs::create_dir_all(&base).unwrap();
+    let fs = workspace_fs();
+    let ctx = ctx_in(&base);
+
+    fs.dispatch(
+        &ctx,
+        "new/deep/file.txt",
+        VdfsRequest::Write {
+            content: VdfsContent::text("safe"),
+        },
+    )
+    .await
+    .unwrap();
+    assert_eq!(
+        std::fs::read_to_string(base.join("new/deep/file.txt")).unwrap(),
+        "safe"
+    );
+}
+
+/// Unix：父目录链接不能把不存在的后续组件写到工作区外；删 / 建目录同样拒绝。
+#[cfg(unix)]
+#[tokio::test]
+async fn unix_parent_symlink_escape_is_rejected_for_all_mutations() {
+    let tmp = tempfile::tempdir().unwrap();
+    let base = tmp.path().join("workspace");
+    let outside = tmp.path().join("outside");
+    std::fs::create_dir_all(&base).unwrap();
+    std::fs::create_dir_all(&outside).unwrap();
+    std::fs::write(outside.join("sentinel"), "keep").unwrap();
+    directory_symlink(&base.join("escape"), &outside).unwrap();
+    let fs = workspace_fs();
+    let ctx = ctx_in(&base);
+
+    let write = fs
+        .dispatch(
+            &ctx,
+            "escape/new/deep.txt",
+            VdfsRequest::Write {
+                content: VdfsContent::text("owned"),
+            },
+        )
+        .await
+        .unwrap_err();
+    assert!(matches!(write, VdfsError::Forbidden(_)), "{write:?}");
+    assert!(!outside.join("new/deep.txt").exists());
+
+    assert!(fs
+        .dispatch(&ctx, "escape", VdfsRequest::Delete { recursive: true })
+        .await
+        .is_err());
+    assert!(fs
+        .dispatch(&ctx, "escape/created", VdfsRequest::Mkdir)
+        .await
+        .is_err());
+    assert!(!outside.join("created").exists());
+    assert_eq!(
+        std::fs::read_to_string(outside.join("sentinel")).unwrap(),
+        "keep"
+    );
+}
+
+/// Unix：目标本身是符号链接时，write / delete / mkdir 都不能操作链接指向的文件。
+#[cfg(unix)]
+#[tokio::test]
+async fn unix_target_symlink_is_rejected_for_all_mutations() {
+    let tmp = tempfile::tempdir().unwrap();
+    let base = tmp.path().join("workspace");
+    let outside = tmp.path().join("outside.txt");
+    std::fs::create_dir_all(&base).unwrap();
+    std::fs::write(&outside, "keep").unwrap();
+    std::os::unix::fs::symlink(&outside, base.join("link.txt")).unwrap();
+    let fs = workspace_fs();
+    let ctx = ctx_in(&base);
+
+    assert!(fs
+        .dispatch(
+            &ctx,
+            "link.txt",
+            VdfsRequest::Write {
+                content: VdfsContent::text("changed"),
+            },
+        )
+        .await
+        .is_err());
+    assert!(fs
+        .dispatch(&ctx, "link.txt", VdfsRequest::Delete { recursive: false })
+        .await
+        .is_err());
+    assert!(fs
+        .dispatch(&ctx, "link.txt", VdfsRequest::Mkdir)
+        .await
+        .is_err());
+    assert_eq!(std::fs::read_to_string(&outside).unwrap(), "keep");
+}
+
+/// Windows：junction 父目录必须按重解析点拒绝，不能靠 canonicalize 跟随。
+#[cfg(windows)]
+#[tokio::test]
+async fn windows_junction_parent_escape_is_rejected() {
+    let tmp = tempfile::tempdir().unwrap();
+    let base = tmp.path().join("workspace");
+    let outside = tmp.path().join("outside");
+    std::fs::create_dir_all(&base).unwrap();
+    std::fs::create_dir_all(&outside).unwrap();
+    if !try_directory_junction(&base.join("escape"), &outside) {
+        eprintln!("junction creation unsupported; skipping junction escape test");
+        return;
+    }
+    let fs = workspace_fs();
+    let ctx = ctx_in(&base);
+    assert!(fs
+        .dispatch(
+            &ctx,
+            "escape/new/file.txt",
+            VdfsRequest::Write {
+                content: VdfsContent::text("owned"),
+            },
+        )
+        .await
+        .is_err());
+    assert!(!outside.join("new/file.txt").exists());
+    assert!(fs
+        .dispatch(&ctx, "escape", VdfsRequest::Delete { recursive: true })
+        .await
+        .is_err());
+    assert!(fs
+        .dispatch(&ctx, "escape/new", VdfsRequest::Mkdir)
+        .await
+        .is_err());
+}
+
+/// Windows：有权限创建符号链接时，目标链接同样不能绕过三种变更操作。
+#[cfg(windows)]
+#[tokio::test]
+async fn windows_target_symlink_is_rejected_when_supported() {
+    let tmp = tempfile::tempdir().unwrap();
+    let base = tmp.path().join("workspace");
+    let outside = tmp.path().join("outside.txt");
+    std::fs::create_dir_all(&base).unwrap();
+    std::fs::write(&outside, "keep").unwrap();
+    if let Err(e) = std::os::windows::fs::symlink_file(&outside, base.join("link.txt")) {
+        eprintln!("directory symlink creation unsupported: {e}");
+        return;
+    }
+    let fs = workspace_fs();
+    let ctx = ctx_in(&base);
+    assert!(fs
+        .dispatch(
+            &ctx,
+            "link.txt",
+            VdfsRequest::Write {
+                content: VdfsContent::text("changed"),
+            },
+        )
+        .await
+        .is_err());
+    assert!(fs
+        .dispatch(&ctx, "link.txt", VdfsRequest::Delete { recursive: false })
+        .await
+        .is_err());
+    assert!(fs
+        .dispatch(&ctx, "link.txt", VdfsRequest::Mkdir)
+        .await
+        .is_err());
+    assert_eq!(std::fs::read_to_string(&outside).unwrap(), "keep");
+}
+
+#[cfg(not(windows))]
+fn try_directory_link(target: &Path, link: &Path) -> bool {
+    directory_symlink(target, link).is_ok()
+}
+
+#[cfg(windows)]
+fn try_directory_link(target: &Path, link: &Path) -> bool {
+    std::os::windows::fs::symlink_dir(target, link).is_ok() || try_directory_junction(link, target)
+}
+
+#[tokio::test]
+async fn linked_base_or_base_ancestor_is_rejected_before_every_operation() {
+    let tmp = tempfile::tempdir().unwrap();
+    let outside = tmp.path().join("outside");
+    let parent = tmp.path().join("parent");
+    std::fs::create_dir_all(&outside).unwrap();
+    std::fs::write(outside.join("keep.txt"), "keep").unwrap();
+    if !try_directory_link(&outside, &parent) {
+        eprintln!("directory link creation unsupported; skipping base ancestor test");
+        return;
+    }
+    let base = parent.join("workspace");
+    std::fs::create_dir_all(&base).unwrap();
+    let fs = workspace_fs();
+    let ctx = ctx_in(&base);
+
+    assert!(matches!(
+        fs.dispatch(&ctx, "keep.txt", VdfsRequest::Read).await,
+        Err(VdfsError::Forbidden(_))
+    ));
+    assert!(matches!(
+        fs.dispatch(&ctx, "", VdfsRequest::List {}).await,
+        Err(VdfsError::Forbidden(_))
+    ));
+    assert!(matches!(
+        fs.dispatch(
+            &ctx,
+            "new.txt",
+            VdfsRequest::Write {
+                content: VdfsContent::text("owned")
+            }
+        )
+        .await,
+        Err(VdfsError::Forbidden(_))
+    ));
+    assert!(matches!(
+        fs.dispatch(&ctx, "keep.txt", VdfsRequest::Delete { recursive: false })
+            .await,
+        Err(VdfsError::Forbidden(_))
+    ));
+    assert!(matches!(
+        fs.dispatch(&ctx, "new-dir", VdfsRequest::Mkdir).await,
+        Err(VdfsError::Forbidden(_))
+    ));
+    assert_eq!(
+        std::fs::read_to_string(outside.join("keep.txt")).unwrap(),
+        "keep"
+    );
+    assert!(!outside.join("new.txt").exists());
+    assert!(!outside.join("new-dir").exists());
+}
+
+#[tokio::test]
+async fn reads_reject_links_even_when_the_target_is_inside_the_workspace() {
+    let tmp = tempfile::tempdir().unwrap();
+    let base = tmp.path().join("workspace");
+    std::fs::create_dir_all(base.join("denied")).unwrap();
+    std::fs::write(base.join("denied/secret.txt"), "secret").unwrap();
+    if !try_directory_link(&base.join("denied"), &base.join("link")) {
+        eprintln!("directory link creation unsupported; skipping read-link test");
+        return;
+    }
+    let fs = workspace_fs();
+    let ctx = ctx_in(&base);
+
+    assert!(matches!(
+        fs.dispatch(&ctx, "link/secret.txt", VdfsRequest::Read)
+            .await,
+        Err(VdfsError::Forbidden(_))
+    ));
+    assert!(matches!(
+        fs.dispatch(&ctx, "link", VdfsRequest::List {}).await,
+        Err(VdfsError::Forbidden(_))
+    ));
+}
+
+#[tokio::test]
+async fn write_replaces_the_file_instead_of_truncating_it_in_place() {
+    let tmp = tempfile::tempdir().unwrap();
+    let base = tmp.path().join("workspace");
+    std::fs::create_dir_all(&base).unwrap();
+    let target = base.join("a.txt");
+    let old_link = base.join("old-view.txt");
+    std::fs::write(&target, "old complete").unwrap();
+    std::fs::hard_link(&target, &old_link).unwrap();
+    let fs = workspace_fs();
+    let ctx = ctx_in(&base);
+
+    fs.dispatch(
+        &ctx,
+        "a.txt",
+        VdfsRequest::Write {
+            content: VdfsContent::text("new complete"),
+        },
+    )
+    .await
+    .unwrap();
+    assert_eq!(std::fs::read_to_string(&target).unwrap(), "new complete");
+    assert_eq!(std::fs::read_to_string(&old_link).unwrap(), "old complete");
+    let names: Vec<_> = std::fs::read_dir(&base)
+        .unwrap()
+        .map(|entry| entry.unwrap().file_name())
+        .collect();
+    assert_eq!(names.len(), 2, "原子写不得留下临时文件");
+}
+
+#[cfg(unix)]
+#[tokio::test]
+async fn atomic_replacement_preserves_existing_file_mode() {
+    use std::os::unix::fs::PermissionsExt as _;
+    let base = temp("mode");
+    let target = base.join("a.txt");
+    std::fs::write(&target, "old").unwrap();
+    std::fs::set_permissions(&target, std::fs::Permissions::from_mode(0o640)).unwrap();
+    let fs = workspace_fs();
+    let ctx = ctx_in(&base);
+
+    fs.dispatch(
+        &ctx,
+        "a.txt",
+        VdfsRequest::Write {
+            content: VdfsContent::text("new"),
+        },
+    )
+    .await
+    .unwrap();
+    assert_eq!(std::fs::read_to_string(&target).unwrap(), "new");
+    assert_eq!(
+        std::fs::metadata(&target).unwrap().permissions().mode() & 0o777,
+        0o640
+    );
+    let _ = std::fs::remove_dir_all(&base);
+}
+
+#[cfg(windows)]
+#[tokio::test]
+async fn atomic_replacement_preserves_existing_file_acl() {
+    let base = temp("windows-acl");
+    let target = base.join("a.txt");
+    std::fs::write(&target, "old").unwrap();
+    let status = std::process::Command::new("icacls")
+        .arg(&target)
+        .arg("/grant:r")
+        .arg("*S-1-1-0:(R)")
+        .status()
+        .unwrap();
+    assert!(status.success());
+    let acl = |path: &Path| {
+        let output = std::process::Command::new("icacls")
+            .arg(path)
+            .output()
+            .unwrap();
+        String::from_utf8_lossy(&output.stdout)
+            .lines()
+            .skip(1)
+            .collect::<Vec<_>>()
+            .join("\n")
+    };
+    let before = acl(&target);
+    let fs = workspace_fs();
+    let ctx = ctx_in(&base);
+
+    fs.dispatch(
+        &ctx,
+        "a.txt",
+        VdfsRequest::Write {
+            content: VdfsContent::text("new"),
+        },
+    )
+    .await
+    .unwrap();
+    assert_eq!(acl(&target), before);
+    assert_eq!(std::fs::read_to_string(&target).unwrap(), "new");
+    let _ = std::fs::remove_dir_all(&base);
+}
+
+#[tokio::test]
+async fn recursive_delete_rejects_nested_links_before_deleting_any_child() {
+    let tmp = tempfile::tempdir().unwrap();
+    let base = tmp.path().join("workspace");
+    let outside = tmp.path().join("outside");
+    std::fs::create_dir_all(base.join("tree/nested")).unwrap();
+    std::fs::create_dir_all(&outside).unwrap();
+    std::fs::write(base.join("tree/first.txt"), "keep").unwrap();
+    std::fs::write(outside.join("sentinel"), "keep").unwrap();
+    if !try_directory_link(&outside, &base.join("tree/nested/escape")) {
+        eprintln!("directory link creation unsupported; skipping recursive delete test");
+        return;
+    }
+    let fs = workspace_fs();
+    let ctx = ctx_in(&base);
+
+    assert!(matches!(
+        fs.dispatch(&ctx, "tree", VdfsRequest::Delete { recursive: true })
+            .await,
+        Err(VdfsError::Forbidden(_))
+    ));
+    assert_eq!(
+        std::fs::read_to_string(base.join("tree/first.txt")).unwrap(),
+        "keep"
+    );
+    assert_eq!(
+        std::fs::read_to_string(outside.join("sentinel")).unwrap(),
+        "keep"
+    );
+}
+
+#[tokio::test]
+async fn concurrent_reads_and_writes_never_observe_partial_content() {
+    let tmp = tempfile::tempdir().unwrap();
+    let base = tmp.path().join("workspace");
+    std::fs::create_dir_all(&base).unwrap();
+    let fs = workspace_fs();
+    let ctx = ctx_in(&base);
+    let payloads: std::sync::Arc<Vec<String>> = std::sync::Arc::new(
+        (0..8)
+            .map(|i| format!("{i:02}:{}:complete", "z".repeat(96 * 1024)))
+            .collect(),
+    );
+    let mut tasks = Vec::new();
+    for payload in payloads.iter() {
+        let fs = PhysicalFs {
+            policy: fs.policy.clone(),
+        };
+        let ctx = ctx.clone();
+        let payload = payload.clone();
+        tasks.push(tokio::spawn(async move {
+            fs.dispatch(
+                &ctx,
+                "shared.txt",
+                VdfsRequest::Write {
+                    content: VdfsContent::text(payload),
+                },
+            )
+            .await
+            .unwrap();
+        }));
+    }
+    for _ in 0..4 {
+        let fs = PhysicalFs {
+            policy: fs.policy.clone(),
+        };
+        let ctx = ctx.clone();
+        let expected = payloads.clone();
+        tasks.push(tokio::spawn(async move {
+            for _ in 0..32 {
+                let VdfsResponse::Read(content) = fs
+                    .dispatch(&ctx, "shared.txt", VdfsRequest::Read)
+                    .await
+                    .unwrap()
+                else {
+                    panic!("应为 Read 响应");
+                };
+                assert!(expected.contains(&content.text.unwrap()));
+            }
+        }));
+    }
+    for task in tasks {
+        task.await.unwrap();
+    }
+}
+
+#[test]
+fn temp_file_guard_removes_only_its_owned_path() {
+    let tmp = tempfile::tempdir().unwrap();
+    let owned = tmp.path().join("owned.tmp");
+    let other = tmp.path().join("other.tmp");
+    std::fs::write(&owned, "partial").unwrap();
+    std::fs::write(&other, "keep").unwrap();
+    let mut guard = TempFileGuard::new(owned.clone());
+    guard.arm();
+    drop(guard);
+    assert!(!owned.exists());
+    assert_eq!(std::fs::read_to_string(other).unwrap(), "keep");
+}
+
+/// 兄弟目录只共享字符串前缀，不共享路径段前缀。
+#[tokio::test]
+async fn workspace_only_rejects_sibling_prefix_on_actual_write() {
+    let tmp = tempfile::tempdir().unwrap();
+    let base = tmp.path().join("workspace");
+    let sibling = tmp.path().join("workspace-other");
+    std::fs::create_dir_all(&base).unwrap();
+    std::fs::create_dir_all(&sibling).unwrap();
+    let fs = workspace_fs();
+    let ctx = ctx_in(&base);
+    let addr = sibling.join("escape.txt").to_string_lossy().into_owned();
+    assert!(fs
+        .dispatch(
+            &ctx,
+            &addr,
+            VdfsRequest::Write {
+                content: VdfsContent::text("owned"),
+            },
+        )
+        .await
+        .is_err());
+    assert!(!sibling.join("escape.txt").exists());
+}
+
+#[cfg(windows)]
+#[test]
+fn windows_policy_comparison_normalizes_case_and_verbatim_paths() {
+    let tmp = tempfile::tempdir().unwrap();
+    let base = tmp.path().join("Workspace");
+    std::fs::create_dir_all(&base).unwrap();
+    let base_text = base.to_string_lossy();
+    let verbatim = PathBuf::from(format!(r"\\?\{base_text}"));
+    let upper = PathBuf::from(base_text.to_ascii_uppercase()).join("New/File.txt");
+    let p = workspace_fs().policy;
+    assert!(p.writable(&verbatim.join("new/file.txt"), &base));
+    assert!(p.writable(&upper, &PathBuf::from(base_text.to_ascii_lowercase())));
+
+    let forbidden = FsPolicy {
+        forbidden_paths: vec![verbatim.to_string_lossy().into_owned()],
+        ..Default::default()
+    };
+    assert!(!forbidden.writable(&upper, &base));
+    assert_eq!(
+        normalize_for_comparison(Path::new(r"\\?\UNC\Server\Share\Dir")),
+        PathBuf::from(r"\\server\share\dir")
+    );
 }
 
 #[tokio::test]

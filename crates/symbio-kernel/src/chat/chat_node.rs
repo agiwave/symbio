@@ -463,7 +463,7 @@ pub enum ResumeAction {
     RetrySubtree,
     /// 工具失败重试：删除 Failed 工具结果子节点，重新执行工具（用原 args）
     Retry,
-    /// 工具审批通过：删除 user_prompt 子节点，重新执行工具（带 approved=true）
+    /// 工具审批通过：删除 user_prompt 子节点，以绑定原调用的一次性授权重新执行工具（原 args）
     Approve,
     /// 工具审批拒绝：删除 user_prompt 子节点，生成拒绝结果子节点
     Reject,

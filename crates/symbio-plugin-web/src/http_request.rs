@@ -1,14 +1,18 @@
 //! HTTP 请求工具 —— 工具端口执行体（`PortExecutor`）
 
-use super::net_guard::{agent_network_allowed, extract_host, is_private_or_local_host};
+use super::net_guard::{
+    agent_network_allowed, extract_host, read_response_text, send_with_safe_redirects,
+    validate_http_url, OutboundBody, OutboundRequest, SandboxPolicy,
+};
 use super::web_config::WebConfig;
 use async_trait::async_trait;
 use serde_json::{json, Value};
 use std::sync::Arc;
 use std::time::Duration;
 use symbio_plugin_api::{
-    missing_caller, port_result, CapabilityMeta, ExecEnv, PluginError, PluginInvokeRequest,
-    PluginInvokeResponse, PortExecContext, PortExecutor, PortInput, PortOutcome,
+    missing_caller, port_result, sandbox_of, CapabilityMeta, ExecEnv, PluginError,
+    PluginInvokeRequest, PluginInvokeResponse, PortExecContext, PortExecutor, PortInput,
+    PortOutcome, SandboxFace,
 };
 use tokio::sync::RwLock;
 
@@ -38,6 +42,7 @@ impl HttpRequestTool {
         &self,
         args: &Value,
         agent_scope: Option<&symbio_plugin_api::AgentScope>,
+        sandbox: Option<&dyn SandboxFace>,
     ) -> PluginInvokeResponse<Value> {
         let url = args
             .get("url")
@@ -57,133 +62,100 @@ impl HttpRequestTool {
 
         // Agent 声明的出站白名单（第三道闸，D-153）。放在宿主白名单**之后**：
         // 两个清单取交集——宿主说「这些站能去」、Agent 说「这些站我要去」，
-        // 少任何一票都不发。
-        agent_network_allowed(&extract_host(&validated_url)?, agent_scope)?;
+        // 少任何一票都不发。发送循环还会对每一个重定向跳重复这道判据。
+        agent_network_allowed(&extract_host(validated_url.as_str())?, agent_scope)?;
 
         // 验证方法
         let http_method = self.validate_method(method)?;
 
         // 解析请求头
-        let headers = args.get("headers").and_then(|v| v.as_object());
+        let headers = args
+            .get("headers")
+            .and_then(|v| v.as_object())
+            .map(|headers| {
+                headers
+                    .iter()
+                    .filter_map(|(key, value)| {
+                        value.as_str().map(|value| (key.clone(), value.to_string()))
+                    })
+                    .collect::<Vec<_>>()
+            })
+            .unwrap_or_default();
 
-        // 解析请求体
-        let body = args.get("body");
-
-        // 构建客户端
-        let client = reqwest::Client::builder()
-            .timeout(Duration::from_secs(timeout_secs))
-            .build()
-            .map_err(|e| PluginError::InternalError(format!("创建 HTTP 客户端失败: {e}")))?;
-
-        // 构建请求
-        let mut request = match http_method {
-            reqwest::Method::GET => client.get(&validated_url),
-            reqwest::Method::POST => client.post(&validated_url),
-            reqwest::Method::PUT => client.put(&validated_url),
-            reqwest::Method::DELETE => client.delete(&validated_url),
-            reqwest::Method::PATCH => client.patch(&validated_url),
-            reqwest::Method::HEAD => client.head(&validated_url),
-            reqwest::Method::OPTIONS => client.request(reqwest::Method::OPTIONS, &validated_url),
-            _ => {
-                return Err(PluginError::ValidationError(format!(
-                    "不支持的 HTTP 方法: {method}"
-                )))
-            }
-        };
-
-        // 添加请求头
-        if let Some(headers_obj) = headers {
-            for (key, value) in headers_obj {
-                if let Some(str_val) = value.as_str() {
-                    request = request.header(key, str_val);
-                }
-            }
-        }
-
-        // 添加请求体
-        if let Some(body_val) = body {
-            if let Some(body_str) = body_val.as_str() {
-                request = request.body(body_str.to_string());
+        // 解析请求体；保存为可重放模板，307/308 需要原样带到下一跳。
+        let body = args.get("body").map(|body| {
+            if let Some(body) = body.as_str() {
+                OutboundBody::Text(body.to_string())
             } else {
-                request = request.json(body_val);
+                OutboundBody::Json(body.clone())
             }
-        }
-
-        // 发送请求。**错误要分流**（②，与 `web_fetch` 同一形状）：
-        // reqwest 的 Display 把超时与连接失败收成同一句 `error sending request…`
-        // ⇒ 用户看不出该重试还是该改地址。
-        let response = request.send().await.map_err(|e| {
-            if e.is_timeout() {
-                PluginError::InternalError(format!(
-                    "请求超时：{timeout_secs}s 内未完成（可调大 web_timeout 后重试）",
-                ))
-            } else if e.is_connect() {
-                PluginError::InternalError(format!(
-                    "连接失败：无法连到 {validated_url}（请检查地址与网络后重试）"
-                ))
-            } else {
-                PluginError::InternalError(format!("请求失败: {e}"))
-            }
-        })?;
-
-        let status = response.status();
-        let headers_out: Vec<(String, String)> = response
-            .headers()
-            .iter()
-            .map(|(k, v)| (k.to_string(), v.to_str().unwrap_or("").to_string()))
-            .collect();
-
-        // 读取响应体
-        let body_bytes = response
-            .bytes()
-            .await
-            .map_err(|e| PluginError::InternalError(format!("读取响应失败: {e}")))?;
-
-        // 检查响应大小
-        let truncated = body_bytes.len() > self.max_response_size;
-        let body_text = if truncated {
-            String::from_utf8_lossy(&body_bytes[..self.max_response_size]).to_string()
-        } else {
-            String::from_utf8_lossy(&body_bytes).to_string()
+        });
+        let request = OutboundRequest {
+            method: http_method,
+            headers,
+            body,
         };
+        let timeout = Duration::from_secs(timeout_secs);
 
-        Ok(json!({
-            "success": true,
-            "status": status.as_u16(),
-            "status_text": status.canonical_reason().unwrap_or(""),
-            "headers": headers_out,
-            "body": body_text,
-            "truncated": truncated,
-            "size": body_bytes.len()
-        }))
+        // 超时包住整个手动重定向链与响应体读取，避免逐跳各给一份 timeout
+        // 后把实际总时限放大到 6 倍。reqwest 侧仍保留单请求超时作为内层保护。
+        let result = tokio::time::timeout(timeout, async {
+            let response = send_with_safe_redirects(
+                validated_url,
+                request,
+                timeout,
+                None,
+                SandboxPolicy::new(
+                    sandbox,
+                    "http_request",
+                    args,
+                    symbio_plugin_api::CapabilityRiskLevel::High,
+                ),
+                None,
+                |host| {
+                    if !host_matches_allowlist(host, &allowed_domains) {
+                        return Err(PluginError::ValidationError(format!(
+                            "主机 '{host}' 不在 allowed_domains 中"
+                        )));
+                    }
+                    agent_network_allowed(host, agent_scope)
+                },
+            )
+            .await?;
+
+            let status = response.status();
+            let headers_out: Vec<(String, String)> = response
+                .headers()
+                .iter()
+                .map(|(k, v)| (k.to_string(), v.to_str().unwrap_or("").to_string()))
+                .collect();
+
+            let (body_text, truncated, size) =
+                read_response_text(response, self.max_response_size).await?;
+
+            Ok::<_, PluginError>(json!({
+                "success": true,
+                "status": status.as_u16(),
+                "status_text": status.canonical_reason().unwrap_or(""),
+                "headers": headers_out,
+                "body": body_text,
+                "truncated": truncated,
+                "size": size
+            }))
+        })
+        .await;
+
+        match result {
+            Ok(result) => result,
+            Err(_) => Err(PluginError::InternalError(format!(
+                "请求超时：{timeout_secs}s 内未完成（可调大 web_timeout 后重试）",
+            ))),
+        }
     }
 
-    fn validate_url(url: &str, allowed_domains: &[String]) -> Result<String, PluginError> {
-        let url = url.trim();
-
-        if url.is_empty() {
-            return Err(PluginError::ValidationError("URL 不能为空".to_string()));
-        }
-
-        if url.chars().any(char::is_whitespace) {
-            return Err(PluginError::ValidationError("URL 不能包含空格".to_string()));
-        }
-
-        if !url.starts_with("http://") && !url.starts_with("https://") {
-            return Err(PluginError::ValidationError(
-                "只允许 http:// 和 https:// URL".to_string(),
-            ));
-        }
-
-        // 提取主机
-        let host = extract_host(url)?;
-
-        // 阻止私有/本地主机（SSRF 防护）
-        if is_private_or_local_host(&host) {
-            return Err(PluginError::ValidationError(format!(
-                "阻止本地/私有主机: {host}"
-            )));
-        }
+    fn validate_url(url: &str, allowed_domains: &[String]) -> Result<url::Url, PluginError> {
+        let parsed = validate_http_url(url)?;
+        let host = extract_host(parsed.as_str())?;
 
         // 检查允许的域名
         if !host_matches_allowlist(&host, allowed_domains) {
@@ -192,7 +164,7 @@ impl HttpRequestTool {
             )));
         }
 
-        Ok(url.to_string())
+        Ok(parsed)
     }
 
     fn validate_method(&self, method: &str) -> Result<reqwest::Method, PluginError> {
@@ -259,7 +231,10 @@ impl HttpRequestTool {
         ctx: Arc<dyn PluginInvokeRequest>,
     ) -> Result<Value, PluginError> {
         let scope = symbio_plugin_api::agent_perms_of(ctx.as_ref());
-        let data = self.execute_inner(&args, scope.as_ref()).await?;
+        let sandbox = sandbox_of(ctx.as_ref());
+        let data = self
+            .execute_inner(&args, scope.as_ref(), sandbox.as_deref())
+            .await?;
         Ok(serde_json::to_value(&data)?)
     }
 }

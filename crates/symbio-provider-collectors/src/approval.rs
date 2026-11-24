@@ -29,11 +29,18 @@ use serde_json::{json, Value};
 use symbio_kernel::capability::{CapabilityMeta, CapabilityRiskLevel};
 use symbio_kernel::plugin::{PluginInvokeRequest, PluginInvokeRequestExt};
 use symbio_plugin_api::{
-    AuthzVerdict, PortErrorClass, PortExecContext, PortExecutor, PortInput, PortOutcome, RESULT_KEY,
+    ApprovalGrant, AuthzVerdict, PortErrorClass, PortExecContext, PortExecutor, PortInput,
+    PortOutcome, RESULT_KEY, SANDBOX_ID, SESSION_ID, TOOL_CALL_ID,
 };
 use symbio_sdk::capability::ApprovalGrants;
 use symbio_sdk::keys::{APPROVAL_GRANTS, MODE, RISK_LEVEL};
 use symbio_sdk::sandbox::{sandbox_of, SandboxFact};
+
+/// collectors 在一次性授权凭据消费成功后写给内层执行体的可信标记。
+///
+/// 这不是模型参数，也不是可持久化授权：只有本闸门验证并消费 [`ApprovalGrant`] 后才能写
+/// `"true"`。shell 等内层执行体只认这个 ctx 标记，绝不读 `args.approved`。
+const TRUSTED_APPROVED: &str = "approved";
 
 /// 工具自声明的**意图事实提取器**：把本次调用参数翻译成 `[SandboxFact]`。
 ///
@@ -42,6 +49,21 @@ use symbio_sdk::sandbox::{sandbox_of, SandboxFact};
 /// `ctx` 一并给出，供事实依赖会话级环境（如工作目录）的工具使用。
 pub type FactsOf =
     Arc<dyn Fn(&Value, &Arc<dyn PluginInvokeRequest>) -> Vec<SandboxFact> + Send + Sync>;
+
+pub type AsyncFactsOf = Arc<
+    dyn Fn(
+            &Value,
+            &Arc<dyn PluginInvokeRequest>,
+        ) -> std::pin::Pin<
+            Box<dyn std::future::Future<Output = Result<Vec<SandboxFact>, String>> + Send>,
+        > + Send
+        + Sync,
+>;
+
+pub(crate) enum FactSource {
+    Sync(FactsOf),
+    Async(AsyncFactsOf),
+}
 
 /// 风险回答函数：给定本次调用参数，回答「这一笔有多危险」。
 ///
@@ -88,9 +110,13 @@ pub fn grants_from_ctx(ctx: &Arc<dyn PluginInvokeRequest>) -> ApprovalGrants {
 /// 审批闸门的**唯一**判定：需要审批 ⇒ `Some(停等载荷)`；放行 ⇒ `None`。
 ///
 /// 三条放行条件，任一成立即过（[`CapabilityRiskLevel::approval_basis`]）：
-/// - 参数带 `approved: true`（用户已在审批卡上批过）；
+/// - 本次调用绑定的 [`ApprovalGrant`] 已原子消费；
 /// - `risk(args) ≤ threshold`（工具本次不比会话更危险）；
 /// - `risk(args) ≤ grant`（该工具有永久放行上限，且本次风险不超过它）。
+///
+/// 模型参数 `args.approved` 永远不是授权。沙箱存在时只调用一次
+/// [`symbio_sdk::sandbox::SandboxFace::decide`]，
+/// 许可、拦截、风险下限、审批模式与阈值都取自同一份快照。
 ///
 /// 需要审批时，`mode=auto` ⇒ `PERMISSION_DENIED` 友好错误（无人值守，不产卡），
 /// 其余（含 `interactive` 与未设置）⇒ `NEEDS_APPROVAL` 载荷交编排层建 user_prompt 节点。
@@ -129,30 +155,65 @@ fn approval_gate_inner(
     // 风险由**工具自己**回答：静态档来自 `CapabilityMeta.risk`，随参数变化档（shell）
     // 覆写它。闸门不认工具名——新增/改名工具不必回来改这里。
     let mut tool_risk = risk(args);
-    // 沙箱能力约束：工具提交的事实先过沙箱；deny 直接拒绝，allow 规则的风险档
-    // 覆盖工具自报风险。两段都是通用查询，闸门不认识任何工具 / 配置项。
-    if let Some(facts) = facts.filter(|f| !f.is_empty()) {
-        if let Some(face) = sandbox_of(ctx.as_ref()) {
-            if !face.permits(facts) {
-                return Some(json!({
-                    "error": format!("沙箱未放行工具 {} 的本次调用", meta.name),
-                    "success": false,
-                    "failure_kind": symbio_kernel::capability::failure_kind::PERMISSION_DENIED,
-                }));
-            }
-            if let Some(level) = face
-                .risk_of(facts)
-                .and_then(|name| CapabilityRiskLevel::parse(&name))
-            {
-                tool_risk = level;
-            }
+    let mut threshold = threshold_from_ctx(ctx);
+    let mut mode = ctx.get(MODE).unwrap_or_default();
+    let mut profile_version = 0;
+
+    // 沙箱裁决是一次原子快照读取：不再分别问 permits / risk_of，也不把装配期写进
+    // ctx 的旧 MODE / RISK_LEVEL 与新裁决混用。规则风险只能抬高工具风险，不能调低。
+    if let Some(face) = sandbox_of(ctx.as_ref()) {
+        let decision = face.decide(facts.unwrap_or_default(), &meta.name, args);
+        if let Some(intercept) = decision.intercept {
+            return Some(intercept);
         }
+        if !decision.permitted {
+            let reason = decision
+                .reason
+                .unwrap_or_else(|| "sandbox denied the call".to_string());
+            return Some(json!({
+                "error": format!("沙箱未放行工具 {} 的本次调用：{reason}", meta.name),
+                "success": false,
+                "failure_kind": symbio_kernel::capability::failure_kind::PERMISSION_DENIED,
+            }));
+        }
+        if let Some(level) = decision
+            .risk
+            .as_deref()
+            .and_then(CapabilityRiskLevel::parse)
+        {
+            tool_risk = tool_risk.max(level);
+        }
+        if let Some(level) = decision.risk_threshold.as_deref() {
+            threshold = CapabilityRiskLevel::from_name(level);
+        }
+        if let Some(value) = decision.approval_mode {
+            mode = value;
+        }
+        profile_version = decision.profile_version;
+    } else if ctx.get(SANDBOX_ID).is_some() {
+        return Some(json!({
+            "error": format!("沙箱未放行工具 {} 的本次调用：已选择沙箱但沙箱句柄不可用", meta.name),
+            "success": false,
+            "failure_kind": symbio_kernel::capability::failure_kind::PERMISSION_DENIED,
+        }));
     }
-    let is_approved = args
-        .get("approved")
-        .and_then(|v| v.as_bool())
-        .unwrap_or(false);
-    let threshold = threshold_from_ctx(ctx);
+
+    // 一次性凭据只在此 mandatory pre-execution gate 消费一次。call/tool/args/session/
+    // profile version/expiry 全部由 SDK 原子校验；顶层 args.approved 在绑定比较中被忽略。
+    let call_id = ctx.get(TOOL_CALL_ID).unwrap_or_default();
+    let session_id = ctx.get(SESSION_ID).filter(|value| !value.trim().is_empty());
+    let is_approved = ApprovalGrant::take(
+        ctx.as_ref(),
+        &call_id,
+        &meta.name,
+        args,
+        session_id.as_deref(),
+        profile_version,
+    );
+    // 先覆盖掉任何继承来的旧标记，再只在本轮 grant 消费成功时发布 "true"。
+    // 这样内层执行体不会把上一次调用（或调用方元数据）的字符串当成本轮授权。
+    ctx.set_raw(TRUSTED_APPROVED, Arc::new(is_approved.to_string()));
+
     // 清单按**能力名**（canonical name）记：`meta.name` 就是注册名，线上名只是它
     // 的协议投影（D-170 决策 4）。
     let grant = grants_from_ctx(ctx).ceiling(&meta.name);
@@ -164,7 +225,6 @@ fn approval_gate_inner(
         return None;
     }
 
-    let mode = ctx.get(MODE).unwrap_or_default();
     Some(confirm_prompt_payload(
         &meta.name,
         &meta.description,
@@ -220,7 +280,7 @@ fn confirm_prompt_payload(
 pub struct GatedExecutor {
     meta: CapabilityMeta,
     risk: RiskOf,
-    facts: Option<FactsOf>,
+    facts: Option<FactSource>,
     inner: Arc<dyn PortExecutor>,
 }
 
@@ -246,7 +306,21 @@ impl GatedExecutor {
         Self {
             meta,
             risk,
-            facts: Some(facts),
+            facts: Some(FactSource::Sync(facts)),
+            inner,
+        }
+    }
+
+    pub fn new_with_async_facts(
+        meta: CapabilityMeta,
+        risk: RiskOf,
+        facts: AsyncFactsOf,
+        inner: Arc<dyn PortExecutor>,
+    ) -> Self {
+        Self {
+            meta,
+            risk,
+            facts: Some(FactSource::Async(facts)),
             inner,
         }
     }
@@ -261,13 +335,31 @@ impl PortExecutor for GatedExecutor {
                 "工具端口执行体没有调用方上下文，无法判闸",
             );
         };
-        if let Some(payload) = approval_gate_with_facts(
-            &request,
-            &self.meta,
-            self.risk.as_ref(),
-            self.facts.as_ref(),
-            &input.payload,
-        ) {
+        let intercepted = match &self.facts {
+            Some(FactSource::Sync(facts)) => approval_gate_with_facts(
+                &request,
+                &self.meta,
+                self.risk.as_ref(),
+                Some(facts),
+                &input.payload,
+            ),
+            Some(FactSource::Async(facts)) => match facts(&input.payload, &request).await {
+                Ok(facts) => approval_gate_inner(
+                    &request,
+                    &self.meta,
+                    self.risk.as_ref(),
+                    &input.payload,
+                    Some(&facts),
+                ),
+                Err(error) => Some(json!({
+                    "error": format!("工具意图事实解析失败：{error}"),
+                    "success": false,
+                    "failure_kind": symbio_kernel::capability::failure_kind::PERMISSION_DENIED,
+                })),
+            },
+            None => approval_gate(&request, &self.meta, self.risk.as_ref(), &input.payload),
+        };
+        if let Some(payload) = intercepted {
             // 闸门拦下：停等载荷是普通结果形态（`failure_kind` 在载荷里），
             // `authz` 保持放行——这不是授权拒绝，是「等用户点头」。
             return PortOutcome {

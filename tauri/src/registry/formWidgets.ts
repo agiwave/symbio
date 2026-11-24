@@ -30,7 +30,7 @@
  */
 
 import type { DetailField } from '@/schemas/vdfs'
-import { editJsonText, editTextOf, parseJsonText, parseListValue, parseMapValue } from '@/schemas/vdfs-form'
+import { editJsonText, editTextOf, parseJsonText, parseListValue, parseMapValue, tableRows } from '@/schemas/vdfs-form'
 
 /** widget 名（由后端 `DetailDefinition` 下发；前端不发明新取值） */
 export type FormWidget =
@@ -141,7 +141,7 @@ const WIDGET_SPECS: Record<FormWidget, FormWidgetSpec> = {
   // 表格：对象数组。编辑态与存储态都是行对象数组，列由字段 columns 声明，
   // 渲染器据此画可增删行表格。初始值空表，天然占整行。
   table: {
-    tag: 'table', initial: [], toEdit: identity, fromEdit: identity,
+    tag: 'table', initial: [], toEdit: tableRows, fromEdit: tableRows,
     fullWidth: true, readonly: false,
   },
 }

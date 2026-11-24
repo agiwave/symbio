@@ -58,7 +58,7 @@ use symbio::symbio_plugin_api::events::EVENT_USER_MESSAGE;
 use symbio::symbio_plugin_api::{
     event_bus_resync_of, event_bus_vdfs_change_of, EVENT_BUS_KIND_VDFS,
 };
-use symbio::symbio_sdk::keys::{PATH, SESSION_ID, WORKDIR};
+use symbio::symbio_sdk::keys::{VdfsCaller, PATH, SESSION_ID, VDFS_CALLER, WORKDIR};
 // 读数面板方言：后端下发描述、CLI 只渲染。
 //  这三个名字随返回值流动（C-002：插件侧不深引 core 域目录），与 Tauri 前端
 //  `schemas/reading.ts` 是同一份契约的两半。
@@ -315,6 +315,7 @@ impl SymbioClient {
             }
         }
         let ctx = Arc::new(PluginSimpleRequest::new(None, None));
+        ctx.set(VDFS_CALLER, VdfsCaller::Manager);
         ctx.set(PATH, path.to_string());
         ctx.set(WORKDIR, self.workdir.clone());
         if let Some(sid) = sid {

@@ -6,8 +6,9 @@ use crate::AppState;
 use serde_json::Value;
 use symbio::symbio_kernel::keys::SymbioKey;
 use symbio::symbio_kernel::plugin::{
-    PluginFrame, PluginMessageWire, PluginPayload, PluginPayloadWire,
+    PluginFrame, PluginInvokeRequestExt, PluginMessageWire, PluginPayload, PluginPayloadWire,
 };
+use symbio::symbio_plugin_api::{VdfsCaller, VDFS_CALLER};
 use symbio::symbio_sdk::keys::TRACE_ID;
 use tauri::Emitter;
 use tokio::sync::mpsc;
@@ -96,6 +97,7 @@ pub async fn route_v2(
             request.metadata.as_object(),
         ),
     );
+    context.set(VDFS_CALLER, VdfsCaller::Manager);
 
     let root = state.root.clone();
     let rm = state.route_manager.clone();

@@ -60,6 +60,18 @@ fn a_second_publish_is_rejected_not_silently_overwritten() {
 }
 
 #[test]
+fn default_decision_combines_existing_queries() {
+    let face = DenyAll;
+    let decision = face.decide(&[], "any_tool", &serde_json::json!({}));
+    assert!(!decision.permitted);
+    assert_eq!(
+        decision.intercept,
+        Some(serde_json::json!({"blocked": true}))
+    );
+    assert!(decision.reason.is_some());
+}
+
+#[test]
 fn facts_are_open_strings_with_no_vocabulary_gate() {
     // kind 是开放词表：任何新种类都能进，沙箱按 kind 配规则，SDK 不认识具体值。
     let f = SandboxFact::new("brand_new_kind_from_a_future_tool", "opaque-value");

@@ -732,6 +732,59 @@ describe('useVdfs 草稿上的动作（「导入整包」）：载荷编码 + �
   })
 })
 
+describe('useVdfs 节点动作：成功后自动选中新资源', () => {
+  it('copy 回传新 id ⇒ 刷新后选中新档案（内置档复制后直接进入编辑）', async () => {
+    const original: VdfsItem = {
+      path: '@vfs/sandbox/strict',
+      name: 'strict',
+      title: '严格',
+      kind: 'sandbox',
+      status: 'active',
+      access: 'r',
+      ext: 'form',
+    }
+    const copied: VdfsItem = {
+      path: '@vfs/sandbox/strict-copy',
+      name: 'strict-copy',
+      title: '严格（副本）',
+      kind: 'sandbox',
+      status: 'active',
+      access: 'rw',
+      ext: 'form',
+    }
+    mocks.listVdfs
+      .mockResolvedValueOnce({
+        path: '@vfs/sandbox',
+        node: { ...dirNode(), path: '@vfs/sandbox', name: 'sandbox', title: '沙箱' },
+        items: [original],
+      })
+      .mockResolvedValue({
+        path: '@vfs/sandbox',
+        node: { ...dirNode(), path: '@vfs/sandbox', name: 'sandbox', title: '沙箱' },
+        items: [original, copied],
+      })
+    const { api, wrapper } = mountHost('@vfs/sandbox')
+    await settle()
+    await api.select(original)
+    expect(api.selectedNode.value?.path).toBe(original.path)
+
+    mocks.runVdfsAction.mockResolvedValue({
+      action: 'copy',
+      ok: true,
+      message: '已复制',
+      data: { id: 'strict-copy' },
+    })
+    const ok = await api.runAction('copy')
+    await settle()
+
+    expect(ok).toBe(true)
+    expect(mocks.runVdfsAction).toHaveBeenCalledWith(original.path, 'copy', undefined)
+    expect(api.selectedNode.value?.path).toBe(copied.path)
+    expect(mocks.readVdfs.mock.calls.some(([, path]) => path === copied.path)).toBe(true)
+    wrapper.unmount()
+  })
+})
+
 /**
  * 左栏导航图标（回归）
  *
