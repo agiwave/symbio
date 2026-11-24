@@ -63,7 +63,7 @@
  * 末 N 行印在失败处（`GATE_FAIL_TAIL` 调行数），路径一并给出——失败处的信息量与
  * 文件里的信息量之间，不该隔一次七分钟的重跑。
  *
- * ctx：{ repoRoot, scriptDir, logDir, ci, profile, run(o), log(name, text) }
+ * ctx：{ repoRoot, scriptDir, logDir, ci, write, profile, run(o), log(name, text) }
  *   run(o) 执行命令：输出全文落日志 + 只信退出码；**默认统计式输出**——通过的
  *   任务不往控制台刷输出（阶段尾一行统计、汇总一张阶段表），失败的任务把攒下的
  *   输出随条目名当场印出；`GATE_VERBOSE=1` 恢复逐条实时转发。
@@ -75,8 +75,9 @@
  *   node scripts/gate.mjs --only=id1,id2        只跑指定阶段
  *   node scripts/gate.mjs --preset=<name>       只跑一个命名档位（组合见 _presets.mjs；--list 列出）
  *   node scripts/gate.mjs --skip=id1,id2        跳过指定阶段
- *   node scripts/gate.mjs --ci                  CI 对齐模式（语义由任务模块自行解释）
- *   node scripts/gate.mjs --write               允许阶段把机械修复写回并暂存（`gen.mjs` 用）
+ *   node scripts/gate.mjs --ci                  CI 对齐模式（只读复核；**恒全跑**，不看范围）
+ *   node scripts/gate.mjs --check               本地只读复核：有机械改写就还原并报红
+ *   node scripts/gate.mjs --write               显式声明允许机械修复写回并暂存（本地默认已允许）
  *   node scripts/gate.mjs --profile=<p>         附加构建档位（语义由任务模块自行解释）
  *   node scripts/gate.mjs --base=<ref>          棘轮基准版本（只对 baseline / baseline-scope 阶段有意义）
  *   node scripts/gate.mjs --list                只列出阶段与任务，不执行
@@ -102,19 +103,18 @@
  * 从别处调用会静默地门禁另一个仓库（写它的 target/、在它的日志目录里落一轮、替它 git add）。
  * 判据见下方「仓库身份」一节。
  *
- * ## 判定与执行分开：门禁只判，`gen` 才写
+ * ## 机械工作自动做完，只读复核显式开启
  *
  * 格式化（`cargo fmt`）与事实文件生成（`facts/current`）是**函数**不是判断，
- * 对同一份输入永远给同一个输出。但「执行它」与「判定它」是两件事：
+ * 对同一份输入永远给同一个输出。门禁没有理由因为它们「还没生成」而红：
  *
- * - **判定（默认）**：阶段照常跑修复动作，跑完用内容哈希比对；有改写就**还原**并判红，
- *   提示跑 `node scripts/gen.mjs`。所以「绿」现在等于「工作树没有被门禁改过」。
- * - **执行（`--write`，由 `gen.mjs` 使用）**：改写留在工作区并当场暂存，修复与本次提交
- *   是同一份内容。
+ * - **本地默认（执行）**：机械改写留在工作区并当场暂存，修复与本次提交是同一份内容。
+ * - **本地 `--check`（只读）**：跑完修复动作、用内容哈希比对；有改写就还原并判红。
+ * - **CI / pre-push（`--ci`，隐含只读）**：CI 无法提交，有改写就还原并判红。
  *
- * `--ci` 隐含判定：CI 无法提交，有改写就还原并判红（原先本地「自动修复并暂存」的
- * 形态保留在 `gen.mjs` 这一条显式路径上）。见 `gate.d/_shared.autoWork`（单步）与
- * `autoChain`（有中间态的生成链：只在末态判一次差异）。
+ * 真正的生成失败（工具坏了 / 输入不可解析）在三种模式下都红灯。`--write` 是执行模式的
+ * 显式写法，`gen.mjs` 用它只跑格式化与生成链；它不能覆盖 `--check` / `--ci`。
+ * 见 `gate.d/_shared.autoWork`（单步）与 `autoChain`（有中间态的生成链：只在末态判一次差异）。
  */
 
 import fs from 'node:fs'
@@ -221,8 +221,9 @@ const valOf = (p) => {
 }
 const splitIds = (s) => s.split(',').map((x) => x.trim()).filter(Boolean)
 const CI = hasFlag('--ci')
-/** 允许阶段把机械修复写回并暂存；见头注释「判定与执行分开」。 */
-const WRITE = hasFlag('--write')
+const CHECK = hasFlag('--check')
+/** 本地默认执行机械修复；只有显式只读模式或 CI 才还原并判红。 */
+const WRITE = !CI && !CHECK
 const profile = valOf('--profile=')
 /**
  * 输出粒度开关：`GATE_VERBOSE=1` 恢复「逐条目实时刷输出」的旧行为。
@@ -254,8 +255,9 @@ const USAGE = `用法：node scripts/gate.mjs [选项]
   --only=id1,id2        只跑指定阶段（id 见 --list；拼错会报错，不会静默跑 0 个阶段）
   --preset=<name>       只跑一个命名档位（组合在 gate.d/_presets.mjs；名字由 --list 列出）
   --skip=id1,id2        跳过指定阶段（id 同上）
-  --ci                  CI 对齐模式（语义由各任务模块自行解释；**恒全跑**，不看范围）
-  --write               允许机械修复写回工作区并暂存（只给 scripts/gen.mjs 用）
+  --ci                  CI 对齐模式（只读复核；**恒全跑**，不看范围）
+  --check               本地只读复核：机械改写还原并报红，不改工作区与索引
+  --write               显式声明允许机械修复写回工作区并暂存（本地默认已允许）
   --profile=<p>         附加构建档位（语义由各任务模块自行解释）
   --base=<ref>          棘轮基准版本（只对 baseline / baseline-scope 阶段有意义）；**同时是本轮变更范围的基准**
   --full                强制全跑，不看变更范围（范围不可得时本来就全跑）
@@ -301,7 +303,7 @@ if (hasFlag('--help') || hasFlag('-h')) {
 // `--base=<ref>` 由 `35-baseline.mjs` 与 `36-baseline-scope.mjs` 直接读 `process.argv`
 // （棘轮基准的显式覆盖口，见那两份文件），它不经过本文件的解析，但**是**合法参数，
 // 故一并放行并登记进用法。
-const KNOWN_FLAGS = new Set(['--ci', '--list', '--help', '-h', '--full', '--write'])
+const KNOWN_FLAGS = new Set(['--ci', '--check', '--list', '--help', '-h', '--full', '--write'])
 const KNOWN_PREFIXES = ['--only=', '--preset=', '--skip=', '--profile=', '--base=']
 const unknownArgs = argv.filter(
   (a) => !KNOWN_FLAGS.has(a) && !KNOWN_PREFIXES.some((p) => a.startsWith(p)),
@@ -320,6 +322,11 @@ if (presetRaw !== null && only === null) {
 if (presetRaw !== null && onlyRaw !== null) {
   console.error(red('✗ `--preset=` 与 `--only=` 是两种写法，二选一'))
   console.error(dim('  档位就是常用组合的别名；要自定义组合请直接写 `--only=`。'))
+  process.exit(2)
+}
+if ((CI || CHECK) && hasFlag('--write')) {
+  console.error(red('✗ `--write` 不能与 `--check` / `--ci` 同时使用'))
+  console.error(dim('  本地默认就会自动修复并暂存；只读复核请单独使用 --check 或 --ci。'))
   process.exit(2)
 }
 if (onlyRaw !== null && only.length === 0) {
@@ -817,7 +824,9 @@ console.log(
     `  模式：${
       CI
         ? '--ci（不能提交 ⇒ 自动执行后有差异即报红）'
-        : '本地（自动执行 fmt / 事实文件生成，并把改写当场暂存）'
+        : CHECK
+          ? '--check（本地只读复核 ⇒ 有差异即还原并报红）'
+          : '本地（自动执行 fmt / 事实文件生成，并把改写当场暂存）'
     }${profile ? ` · --profile=${profile}` : ''}`,
   ),
 )

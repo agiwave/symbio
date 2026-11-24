@@ -229,13 +229,12 @@ test('CI：无差异 ⇒ 通过（不误报）', async () => {
   assert.equal(r.ok, true)
 })
 
-// ================= 判定模式（默认，`--write` 未给）：绿 == 树没被改 =================
+// ================= 只读模式（`--check` / `--ci`）：绿 == 树没被改 =================
 //
 // 这是本原语的分界：同一份确定性改写，执行模式把它留下并暂存（修复进提交），
-// 判定模式把它**还原**并报红（指路 `gen.mjs`）。若判定模式不还原，「全绿」就仍然
-// 可能伴随着一个被改写的工作树——审计无法复现，正是拆开两条路的理由。
+// 只读模式把它**还原**并报红。本地默认是执行模式；只有显式 `--check` 与 CI 才走这里。
 
-test('判定模式：局部改写不入索引，也不吞掉人跑之前的未提交改动', async () => {
+test('只读模式：局部改写不入索引，也不吞掉人跑之前的未提交改动', async () => {
   const f = 't9.rs'
   const BEFORE = 'fn i(){ }\n'
   write(f, BEFORE)
@@ -244,12 +243,13 @@ test('判定模式：局部改写不入索引，也不吞掉人跑之前的未�
   const r = await work(worker({ [f]: 'fn i(){}\n' }), false, false)
 
   assert.equal(r.ok, false, '有改写就必须红——否则「绿」不说明树没被改')
-  assert.match(r.note ?? '', /gen\.mjs/, '应指路显式生成命令')
+  assert.match(r.note ?? '', /--check/, '应说明只读模式与默认执行模式的区别')
+  assert.doesNotMatch(r.note ?? '', /gen\.mjs/, '不能再要求人手工重跑生成器')
   assert.equal(read(f), BEFORE, '必须还原到跑之前的内容（不是索引那版，也不是修复版）')
-  assert.equal(isStaged(f), false, '判定模式不得动索引')
+  assert.equal(isStaged(f), false, '只读模式不得动索引')
 })
 
-test('判定模式：修复产生的新文件要删掉（不能把生成物留在未跟踪状态）', async () => {
+test('只读模式：修复产生的新文件要删掉（不能把生成物留在未跟踪状态）', async () => {
   const f = 't10.rs'
   assert.equal(porcelain(f), '', '前置：文件不存在')
 
@@ -301,13 +301,14 @@ test('链：末态有差异 ⇒ 本地暂存末态、CI 报红并还原到跑之
   assert.equal(isStaged(f), true, 'CI 不得动索引')
 })
 
-test('链：判定模式（非 --write）末态有差异 ⇒ 红且还原，不暂存', async () => {
+test('链：只读模式末态有差异 ⇒ 红且还原，不暂存', async () => {
   const f = 'c3.rs'
   assert.equal(read(f), 'clean-three\n', '前置：与 HEAD 一致')
   const r = await chain({ 'step-1': { [f]: '中间态\n' }, 'step-2': { [f]: '末态\n' } }, false, [], false)
 
-  assert.equal(r.ok, false, '判定模式不得把生成物留在工作区')
-  assert.match(r.note ?? '', /gen\.mjs/)
+  assert.equal(r.ok, false, '只读模式不得把生成物留在工作区')
+  assert.match(r.note ?? '', /--check/)
+  assert.doesNotMatch(r.note ?? '', /gen\.mjs/)
   assert.equal(read(f), 'clean-three\n', '应还原到跑之前（= HEAD）的内容')
   assert.equal(isStaged(f), false)
 })

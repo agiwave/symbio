@@ -27,7 +27,8 @@
 #
 # 与 pre-push 的关系：不是重复，是同一判据的两道闸——pre-commit 保证提交诞生时事实即新；
 # pre-push 兜住 `core.hooksPath` 没设的机器（该配置会静默丢失，2026-10-07 实测过），
-# CI 的 docs & facts job 是第三道（都带 `--ci`：只报红不代改）。
+# CI 的 docs & facts job 是第三道。直接跑本地 `gate.mjs` 也会自动生成并暂存；本钩子仍
+# 先跑窄入口 `gen.mjs`，再带 `--ci` 做只读末态复核，不把全量门禁塞进提交点。
 #
 # 已知边界：
 #   - registry-audit / gen-doc-refs 的**校验类判据**（RG-xxx / RF-xxx）也会在此拦下提交。

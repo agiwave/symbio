@@ -736,7 +736,7 @@ function contentHashes(repoRoot, paths) {
 export async function autoWork(ctx, { label, cmd, args = [], cwd }) {
   const before = dirtyPaths(ctx.repoRoot)
   const beforeHash = contentHashes(ctx.repoRoot, before)
-  // 判定模式要在本地还原改写（门禁只判不改），所以总是留一份「跑之前已脏」的快照——
+  // 只读模式要在本地还原改写，所以总是留一份「跑之前已脏」的快照——
   // 干净的路径还原到索引内容即可，不必进快照。
   const snapshot = new Map()
   for (const p of before) {
@@ -765,15 +765,16 @@ export async function autoWork(ctx, { label, cmd, args = [], cwd }) {
 
   const shown = touched.slice(0, 5).join('、') + (touched.length > 5 ? ` 等 ${touched.length} 个` : '')
   if (!ctx.write || ctx.ci) {
-    // 判定模式：把改写还原，红给「跑 gen」。绿 = 树没被改，这是本轮要分开的两件事。
     const back = restoreTouched(ctx, snapshot, touched)
     return {
       ok: false,
       note:
-        `已执行但改写了 ${touched.length} 个文件（${shown}）—— 判定模式不代改` +
+        `已执行但改写了 ${touched.length} 个文件（${shown}）—— 只读模式不代改` +
         (ctx.ci ? '，CI 无法提交' : '') +
         (back ? `，且${back}` : '，已还原') +
-        '；请在本地运行 `node scripts/gen.mjs` 修复并暂存',
+        (ctx.ci
+          ? '；生成物需由本地门禁纳入提交后重跑'
+          : '；本地默认会自动生成并暂存，--check 仅用于只读复核'),
     }
   }
 
@@ -838,8 +839,8 @@ function restoreTouched(ctx, snapshot, touched) {
 export async function autoChain(ctx, { label, steps }) {
   const before = dirtyPaths(ctx.repoRoot)
   const beforeHash = contentHashes(ctx.repoRoot, before)
-  // 快照**总是**留：判定模式要在本地还原（门禁只判不改），而 `--write` 模式在链失败时
-  // 也可能需要还原。只拍「跑之前已脏」的路径——干净的路径还原到索引内容即可。
+  // 快照**总是**留：只读模式要在本地还原，而写模式在链失败时也可能需要还原。
+  // 只拍「跑之前已脏」的路径——干净的路径还原到索引内容即可。
   const snapshot = new Map()
   for (const p of before) {
     try {
@@ -854,8 +855,8 @@ export async function autoChain(ctx, { label, steps }) {
     return [...after].filter((p) => !before.has(p) || beforeHash.get(p) !== afterHash.get(p))
   }
   const restore = () => {
-    // 写模式（本地 `gen`）不还原：那侧的约定是「生成并暂存」。链某一步真失败时把现状
-    // 留给人看，比替他决定该留哪一版更安全。
+    // 写模式（本地默认 / --write）不还原：那侧的约定是「生成并暂存」。链某一步真失败时
+    // 把现状留给人看，比替他决定该留哪一版更安全。
     if (ctx.write && !ctx.ci) return null
     return restoreTouched(ctx, snapshot, touchedNow())
   }
@@ -881,7 +882,6 @@ export async function autoChain(ctx, { label, steps }) {
   if (touched.length === 0) return { ok: true }
   const shown = touched.slice(0, 5).join('、') + (touched.length > 5 ? ` 等 ${touched.length} 个` : '')
   if (!ctx.write || ctx.ci) {
-    // 判定模式：门禁**不代改**。先还原（链跑完树是脏的，不能留给后续步骤），再报红。
     const back = restore()
     return {
       ok: false,
@@ -889,7 +889,9 @@ export async function autoChain(ctx, { label, steps }) {
         `${label} 跑完末态有 ${touched.length} 处差异（${shown}）——生成物没跟上代码` +
         (ctx.ci ? '，CI 无法提交' : '') +
         (back ? `，且${back}` : '，工作区已还原') +
-        '；请在本地运行 `node scripts/gen.mjs` 生成并暂存',
+        (ctx.ci
+          ? '；生成物需由本地门禁纳入提交后重跑'
+          : '；本地默认会自动生成并暂存，--check 仅用于只读复核'),
     }
   }
   const add = spawnSync('git', ['add', '--', ...touched], { cwd: ctx.repoRoot, encoding: 'utf8' })

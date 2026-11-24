@@ -78,22 +78,25 @@ node scripts/gate.mjs --ci # 对齐 CI（cargo test --workspace）
 **MSRV 实编译校验**、事实文件生成。完整输出落 `.workbuddy-ai/gate-logs/`；通过数低于基线
 会报错、高于基线提示更新 `BASELINE`。
 
-**格式化与事实文件由 `gen` 做完；门禁只判。** `cargo fmt` 与 `facts/current` 是确定性的
-机械变换（函数，不是判断），但「执行」与「判定」是两件事：
+**格式化与事实文件由门禁自动做完。** `cargo fmt` 与 `facts/current` 是确定性的
+机械变换（函数，不是判断），本地默认执行后会留下改写并 `git add`，不再提示“漂移了，
+请手工再跑生成器”：
 
 ```bash
-node scripts/gen.mjs # 执行：格式化 + 生成链，改写当场 `git add`
-node scripts/gate.mjs # 判定：全量门禁，有差异即红（不回写、不暂存）
+node scripts/gate.mjs             # 全量：本地自动格式化、生成并暂存，再完成其余检查
+node scripts/gate.mjs --check     # 本地只读复核：有机械改写就还原并报红
+node scripts/gate.mjs --ci        # CI / 推送前只读复核：有改写就还原并报红
+node scripts/gen.mjs              # 窄入口：只格式化 + 生成，不跑其余门禁
 ```
 
-门禁默认**只判**：跑完修复动作、用内容哈希比对，有改写就还原并判红，提示跑 `gen.mjs`。
-所以「全绿」现在等于「工作树没有被门禁改过」；在 CI 里（`--ci`）同理，只是无法提交，
-只能报红。提交点的 `pre-commit` 钩子替你按这两个按钮（先 `gen`、再带 `--ci` 复核），
-所以不会因为「忘了跑」而红。
+真正的生成失败（工具坏了 / 输入不可解析）在三种模式下都红灯。CI 无法把生成物纳入
+正在检查的提交，所以 `--ci` 必须保持只读；`pre-push` 同理，不能让工作区里的新生成物
+制造“提交没带、推送却绿”的假象。`--write` 是执行模式的显式写法（本地默认已执行），
+不能与 `--check` / `--ci` 同时使用。
 
-⚠️ **判定模式下的「只判不改」完全依赖 `ctx.write` 没被置上**（`--write` 只给 `gen.mjs` 用），
-而 `--ci` 同样隐含判定。CI 里凡是跑到 fmt / `facts-write` 的调用**必须**带 `--ci`；
-回归测试 `scripts/gate.d/_shared.test.mjs` 会断言这一点（以及「判定模式必须还原」）。
+⚠️ **只读语义依赖 `ctx.write` 为 false**：它由 `--check` 或 `--ci` 显式打开，不能再把
+“没传 `--write`”当作只读。CI 里凡是跑到 fmt / `facts-write` 的调用**必须**带 `--ci`；
+回归测试 `scripts/gate.d/_shared.test.mjs` 与 `scripts/gate.test.mjs` 会守住这一点。
 
 **失败后不需要为了看日志重跑一次。** 每轮门禁的日志落在
 `.workbuddy-ai/gate-logs/<轮次>/`（`YYYYMMDD-HHMMSS`，同秒再来一轮加 `-2`；只留最近
@@ -185,7 +188,7 @@ git config core.hooksPath scripts/git-hooks # 本机：写提交时即时拦
 |---|---|---|
 | `commit-msg` | 提交信息格式 | 规范判据在 `scripts/check-commit-msg.mjs`，钩子只是入口 |
 | `pre-commit` | 事实文件与登记投影在提交点变旧 | 先跑 `gen.mjs`（生成并**只暂存生成器自己改写的文件**），再跑 `gate.mjs --preset=pre-commit --ci`（末态复核），不违反「提交要秒级」；漂移不攒到推送点再补独立 chore 提交 |
-| `pre-push` | `docs/004-ref/006-当前事实表.md` 漂移 | 事实表由代码提取，漏了重新生成**不报错、只变旧**；它带 `--ci` ⇒ 只判红不代改（修复跑 `gen.mjs`，不在推送点替人暂存）。实测 2.6s（`cargo fmt` 判差异 + 生成链末态 + 两条复核）。`pre-commit` 没装上（`core.hooksPath` 会静默丢失）时它是第二道闸 |
+| `pre-push` | `docs/004-ref/006-当前事实表.md` 漂移 | 事实表由代码提取；本地门禁会自动生成并暂存，但推送点不能改写已诞生的提交，所以带 `--ci` 只读判红并还原。修复后用本地门禁把生成物纳入提交再推送。实测 2.6s（`cargo fmt` 判差异 + 生成链末态 + 两条复核）。`pre-commit` 没装上（`core.hooksPath` 会静默丢失）时它是第二道闸 |
 
 CI 侧另有 `commit-msg-check` job，用 `--range` 把本次引入的提交逐个判一遍
 （判据只有脚本里那一处，两边不重抄）。

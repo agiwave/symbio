@@ -99,8 +99,8 @@ export function emit({ out, content, stamp = true }) {
 /** `--check` 口径下的比对：返回 null = 一致，否则是给 人 看的一句话。 */
 export function driftOf({ out, content }) {
   const existing = readOrNull(out)
-  if (existing === null) return `${out} 不存在——先跑一次 \`node scripts/gens/gen-facts.mjs\``
-  if (stripStamp(existing) !== stripStamp(content)) return `${out} 与代码漂移——重跑 \`node scripts/gens/gen-facts.mjs\``
+  if (existing === null) return `${out} 不存在——本地门禁会自动生成并暂存（CI / --check 只读复核）`
+  if (stripStamp(existing) !== stripStamp(content)) return `${out} 与代码漂移——本地门禁会自动生成并暂存（CI / --check 只读复核）`
   return null
 }
 

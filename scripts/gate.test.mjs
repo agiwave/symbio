@@ -54,6 +54,8 @@ test('★ `--help` 只打印用法并退出 0，不跑任何阶段（否则查�
   assert.match(out, /用法：node scripts\/gate\.mjs/, '应打印用法')
   assert.match(out, /--only=/, '用法应列出主要开关')
   assert.match(out, /--list/, '用法应提到 --list')
+  assert.match(out, /--check/, '用法应登记本地只读复核')
+  assert.match(out, /--write/, '用法应保留执行模式的显式写法')
   // 参数白名单里的每一个都必须在用法里登记（`--base=` 只被 `35-baseline.mjs` 直接读
   // `process.argv`，最容易在改白名单时漏登记——而漏登记的合法参数会变成「未知参数」）。
   assert.match(out, /--base=/, '用法应登记 --base=（它是白名单里的一员）')
@@ -239,6 +241,47 @@ function withStageDir(files) {
   }
 }
 const withDemoStage = () => withStageDir({ [`${DEMO_STAGE}.mjs`]: demoStageSource() })
+
+const MODE_STAGE = 'zz-write-mode-demo'
+const modeStageSource = () => `export default {
+  id: '${MODE_STAGE}',
+  title: '写模式演示（测试注入，勿留）',
+  tasks: [{
+    label: '读取 ctx.write',
+    run: (ctx) => ({ ok: ctx.write, note: ctx.write ? '' : 'ctx.write=false' }),
+  }],
+}
+`
+
+test('★ 本地默认自动执行；--check 与 --ci 才是只读模式', () => {
+  const demo = withStageDir({ [`${MODE_STAGE}.mjs`]: modeStageSource() })
+  try {
+    const local = runGate([`--only=${MODE_STAGE}`], demo.env)
+    assert.equal(local.status, 0, `本地默认应允许机械修复：${stripAnsi(local.stdout + local.stderr)}`)
+
+    const explicit = runGate([`--only=${MODE_STAGE}`, '--write'], demo.env)
+    assert.equal(explicit.status, 0, `--write 应保持显式执行语义：${stripAnsi(explicit.stdout + explicit.stderr)}`)
+
+    for (const flag of ['--check', '--ci']) {
+      const r = runGate([`--only=${MODE_STAGE}`, flag], demo.env)
+      const out = stripAnsi(r.stdout + r.stderr)
+      assert.equal(r.status, 1, `${flag} 应把 ctx.write 置 false：${out}`)
+      assert.match(out, /ctx\.write=false/, `${flag} 下只读阶段必须失败：${out}`)
+    }
+  } finally {
+    demo.dispose()
+  }
+})
+
+test('--write 与 --check / --ci 互斥：只读约束不能被显式执行开关覆盖', () => {
+  for (const flag of ['--check', '--ci']) {
+    const r = runGate([`--only=${MODE_STAGE}`, '--write', flag])
+    const out = stripAnsi(r.stdout + r.stderr)
+    assert.equal(r.status, 2, `冲突参数应拒绝：${out}`)
+    assert.match(out, /不能与/, `应说清冲突：${out}`)
+    assert.doesNotMatch(out, /══ 门禁 ══/, '不得进入主流程')
+  }
+})
 
 test('★ `long: true` 的任务先起：并发池按声明序发任务，长杆排在后面就是白等', () => {
   // 判据 = **执行顺序**，所以把并发度压到 1（`concurrency: 1`）：这样「取任务的下标

@@ -31,7 +31,7 @@
  * 1. 插件**自身**目录（`crates/symbio-plugin-<id>/`）——它当然知道自己的名字。
  * 2. 插件自述文档的**索引行**（`docs/003-design/README.md` 的 README 链接表）——那是
  *    "插件文档在哪"的目录，不是"系统描述插件能力"。
- * 3. 生成事实表（`docs/004-ref/006-当前事实表.md`）——由 `gen.mjs` 从 PLUGIN.yml 投影。
+ * 3. 生成事实表（`docs/004-ref/006-当前事实表.md`）——由本地门禁的生成链从 PLUGIN.yml 投影。
  * 4. 链接期必须点：宿主 crate 的 `Cargo.toml` 依赖、`lib.rs` 的 `use <crate> as _`——
  *    编译期把插件链进二进制，尚无可替代机制。
  * 5. 专门审计该插件的判据及其夹具（`agent-ownership-audit*`、`plugin-entry-audit.test`）——
@@ -99,7 +99,7 @@ function patterns(id) {
  */
 export const FILE_EXEMPTIONS = {
   'docs/003-design/README.md': '插件自述文档的索引表（文档在哪，不是系统描述插件能力）',
-  'docs/004-ref/006-当前事实表.md': 'gen.mjs 从 PLUGIN.yml 投影的生成物',
+  'docs/004-ref/006-当前事实表.md': '本地门禁生成链从 PLUGIN.yml 投影的生成物',
   'docs/004-ref/010-机制强制等级清单.md': 'ME-003 要求执行方指向真实代码锚点（文件路径+符号），必须是具体代码位置',
   // D-525 D 类权威表：表里的 `crates/symbio-plugin-<id>/src/x.rs::symbol` 是其它判据的
   // 判据数据源（capability-ledger-audit 的 EX-006 / doc-symbol-audit 的符号校验），必须
