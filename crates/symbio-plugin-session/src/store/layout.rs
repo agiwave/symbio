@@ -237,7 +237,7 @@ pub(super) fn rebuild_from_wal_dir(dir: &Path) -> Option<Vec<ChatNode>> {
     // 不为一次读取把这个 trait 抬进本文件的顶层导入）。
     use symbio_kernel::store::Store as _;
     let snapshot = store.range(symbio_kernel::event::Seq::new(0));
-    Some(symbio_sdk::projection::rebuild::rebuild(
+    Some(crate::rebuild::rebuild(
         &snapshot,
         &CHAT_VOCAB,
         &MESSAGE_VOCAB,

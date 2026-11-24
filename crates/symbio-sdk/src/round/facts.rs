@@ -54,7 +54,7 @@ pub struct FleetSnapshot {
     pub events: Vec<Event>,
 }
 
-/// 折进消息的元数据键（写侧、重建侧与读侧共用；`projection::rebuild` 需要它们）。
+/// 折进消息的元数据键（写侧、重建侧与读侧共用；session 的 `rebuild` 需要它们）。
 pub const META_SUPPLEMENT: &str = "supplement";
 pub const META_SUPPLEMENT_IDS: &str = "supplement_ids";
 pub const META_SUPPLEMENT_COUNT: &str = "supplement_count";

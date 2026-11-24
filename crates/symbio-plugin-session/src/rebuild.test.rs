@@ -11,19 +11,19 @@
 //! 4. 载荷没记身份的格子**合成 id 必须稳定**（否则每次重开都多一批新节点）。
 
 use super::rebuild;
-use crate::test_fixtures::{
-    CHAT, EVENT_ARTIFACT_ADDED, EVENT_CHAT_ASSISTANT_FALLBACK, EVENT_CHAT_ASSISTANT_FINAL,
-    EVENT_CHAT_ASSISTANT_REPORTED, EVENT_USER_MESSAGE, MESSAGE,
-};
-use crate::{Entity, Event, Verb};
+use crate::declarations::CHAT_VOCAB as CHAT;
+use crate::declarations::MESSAGE_VOCAB as MESSAGE;
+use crate::declarations::{EVENT_CHAT_ASSISTANT_REPORTED, EVENT_MESSAGE_EDITED};
 use symbio_kernel::chat::chat_node::{MessageContent, NodeKind, NodeRole, NodeStatus};
+use symbio_kernel::event::{Entity, Event, Verb};
+use symbio_plugin_api::events;
 
 /// 身份写 `principal`（D-147）：夹具/载荷模仿的是**落库面**，而重建产物同样
 /// 只带主体；`role` 只是反序列化落点，不是写侧的身份来源。
 fn principal_for(role: NodeRole) -> symbio_kernel::chat::principal::Principal {
     use symbio_kernel::chat::principal::Principal;
     match role {
-        NodeRole::User => Principal::from_legacy(crate::keys::PRINCIPAL_USER),
+        NodeRole::User => Principal::from_legacy(symbio_sdk::keys::PRINCIPAL_USER),
         NodeRole::Assistant => Principal::from_legacy("session/main"),
         NodeRole::Tool => Principal::from_legacy("legacy/unknown"),
         NodeRole::System => Principal::from_legacy("system/local"),
@@ -190,7 +190,7 @@ fn frame_event(
 fn user_event(id: &str, text: &str) -> Event {
     frame_event(
         "u-1",
-        EVENT_USER_MESSAGE,
+        events::EVENT_USER_MESSAGE,
         Verb::Opened,
         1_000,
         "user",
@@ -202,7 +202,7 @@ fn user_event(id: &str, text: &str) -> Event {
 fn final_event(payload: serde_json::Value) -> Event {
     frame_event(
         "f-1",
-        EVENT_CHAT_ASSISTANT_FINAL,
+        events::EVENT_CHAT_ASSISTANT_FINAL,
         Verb::Closed,
         2_000,
         "session/main",
@@ -396,7 +396,7 @@ fn fallback_carries_the_failure_reason_onto_the_turn_node() {
         user_event("u-node", "问"),
         Event::pending(
             "fb-1",
-            EVENT_CHAT_ASSISTANT_FALLBACK,
+            events::EVENT_CHAT_ASSISTANT_FALLBACK,
             Entity::Scope,
             Verb::Closed,
             "session/main",
@@ -465,7 +465,7 @@ fn aborted_status_lands_on_the_round_root() {
         user_event("u-node", "慢慢说"),
         Event::pending(
             "af-1",
-            EVENT_CHAT_ASSISTANT_FINAL,
+            events::EVENT_CHAT_ASSISTANT_FINAL,
             Entity::Scope,
             Verb::Closed,
             "session/main",
@@ -537,7 +537,7 @@ fn round_output_rides_the_artifact_cell_and_lands_before_its_tool_card() {
     let artifact = |no: u64, call: &str, path: &str, body: &str, round: _| {
         Event::pending(
             format!("a-1-{no}"),
-            EVENT_ARTIFACT_ADDED,
+            events::EVENT_ARTIFACT_ADDED,
             Entity::Artifact,
             Verb::Asserted,
             "session/main",
@@ -593,7 +593,7 @@ fn artifact_builds_call_and_result_under_the_call() {
         tool_requested(&["T-016"]),
         Event::pending(
             "a-1-0",
-            EVENT_ARTIFACT_ADDED,
+            events::EVENT_ARTIFACT_ADDED,
             Entity::Artifact,
             Verb::Asserted,
             "session/main",
@@ -632,7 +632,7 @@ fn tool_calls_reference_does_not_duplicate_the_card() {
         tool_requested(&["T-016"]),
         Event::pending(
             "a-1-0",
-            EVENT_ARTIFACT_ADDED,
+            events::EVENT_ARTIFACT_ADDED,
             Entity::Artifact,
             Verb::Asserted,
             "session/main",
@@ -687,7 +687,7 @@ fn dispatch_list(no: u64, root: &str, calls: &[(&str, &str)]) -> Event {
 fn prompt_artifact(no: u64, call: &str) -> Event {
     Event::pending(
         format!("a-{no}"),
-        EVENT_ARTIFACT_ADDED,
+        events::EVENT_ARTIFACT_ADDED,
         Entity::Artifact,
         Verb::Asserted,
         "session/main",
@@ -758,7 +758,7 @@ fn an_aggregated_response_alone_does_not_birth_a_card() {
     let events = vec![
         user_event("T1", "帮我确认一件事"),
         model_output_event(
-            crate::event::EVENT_RESPONSE,
+            symbio_kernel::event::EVENT_RESPONSE,
             "response-model-1",
             1_500,
             serde_json::json!({
@@ -1060,7 +1060,7 @@ fn response_answer_lands_as_a_child_at_its_own_position() {
     let events = vec![
         user_event("u-node", "问"),
         model_output_event(
-            crate::event::EVENT_RESPONSE,
+            symbio_kernel::event::EVENT_RESPONSE,
             "response-model-m-1",
             1_500,
             serde_json::json!({
@@ -1089,21 +1089,21 @@ fn response_answer_lands_as_a_child_at_its_own_position() {
 fn denied_speech_keeps_tool_rounds_but_drops_the_answer() {
     let denied = Event::pending(
         "deny-1-speech",
-        crate::test_fixtures::EVENT_MODEL_SPEECH_DENIED,
+        "model.speech.denied",
         Entity::Scope,
         Verb::Asserted,
         "session/peer-b",
     )
     .with_ts(3_000)
     .with_payload(serde_json::json!({
-        "key": EVENT_CHAT_ASSISTANT_FINAL, "kind": "speech", "reason": "denied", "detail": "窄行",
+        "key": events::EVENT_CHAT_ASSISTANT_FINAL, "kind": "speech", "reason": "denied", "detail": "窄行",
         "root_id": "T1",
     }));
     let events = vec![
         user_event("u-node", "委托出去"),
         // 工具轮：有 `calls` ⇒ 中途正文照常产节点。
         model_output_event(
-            crate::event::EVENT_RESPONSE,
+            symbio_kernel::event::EVENT_RESPONSE,
             "response-model-1",
             1_500,
             serde_json::json!({
@@ -1117,7 +1117,7 @@ fn denied_speech_keeps_tool_rounds_but_drops_the_answer() {
         ),
         // 答复轮：无 `calls` ⇒ 被拒后不产节点。
         model_output_event(
-            crate::event::EVENT_RESPONSE,
+            symbio_kernel::event::EVENT_RESPONSE,
             "response-model-2",
             2_000,
             serde_json::json!({
@@ -1156,7 +1156,7 @@ fn text_content_is_plain_text() {
 fn edited_event(msg: symbio_kernel::chat::chat_node::ChatNode) -> Event {
     Event::pending(
         "m-edit-0",
-        crate::test_fixtures::EVENT_MESSAGE_EDITED,
+        EVENT_MESSAGE_EDITED,
         Entity::Message,
         Verb::Asserted,
         "user",
@@ -1170,7 +1170,7 @@ fn edited_event(msg: symbio_kernel::chat::chat_node::ChatNode) -> Event {
 fn removed_event(ids: &[&str]) -> Event {
     Event::pending(
         "m-del-0",
-        crate::test_fixtures::EVENT_MESSAGE_REMOVED,
+        symbio_plugin_api::events::EVENT_MESSAGE_REMOVED,
         Entity::Message,
         Verb::Closed,
         "user",
@@ -1304,7 +1304,7 @@ fn a_malformed_edit_payload_is_skipped() {
         user_event("u-node", "问"),
         Event::pending(
             "m-edit-9",
-            crate::test_fixtures::EVENT_MESSAGE_EDITED,
+            EVENT_MESSAGE_EDITED,
             Entity::Message,
             Verb::Asserted,
             "user",
@@ -1323,7 +1323,7 @@ fn a_malformed_edit_payload_is_skipped() {
 fn snapshot_event(msgs: Vec<symbio_kernel::chat::chat_node::ChatNode>) -> Event {
     Event::pending(
         "snap-0",
-        crate::test_fixtures::EVENT_SESSION_CONSOLIDATED,
+        symbio_plugin_api::events::EVENT_SESSION_CONSOLIDATED,
         Entity::Message,
         Verb::Progressed,
         "session/main",
@@ -1400,7 +1400,7 @@ fn a_snapshot_with_keep_from_preserves_the_uncompressed_suffix() {
     let events = vec![
         frame_event(
             "u-old",
-            EVENT_USER_MESSAGE,
+            events::EVENT_USER_MESSAGE,
             Verb::Opened,
             1_000,
             "user",
@@ -1408,7 +1408,7 @@ fn a_snapshot_with_keep_from_preserves_the_uncompressed_suffix() {
         ),
         frame_event(
             "f-old",
-            EVENT_CHAT_ASSISTANT_FINAL,
+            events::EVENT_CHAT_ASSISTANT_FINAL,
             Verb::Closed,
             1_100,
             "session/main",
@@ -1419,7 +1419,7 @@ fn a_snapshot_with_keep_from_preserves_the_uncompressed_suffix() {
         ),
         frame_event(
             "u-keep",
-            EVENT_USER_MESSAGE,
+            events::EVENT_USER_MESSAGE,
             Verb::Opened,
             1_500,
             "user",
@@ -1427,7 +1427,7 @@ fn a_snapshot_with_keep_from_preserves_the_uncompressed_suffix() {
         ),
         frame_event(
             "f-keep",
-            EVENT_CHAT_ASSISTANT_FINAL,
+            events::EVENT_CHAT_ASSISTANT_FINAL,
             Verb::Closed,
             1_600,
             "session/main",
@@ -1484,7 +1484,7 @@ fn only_the_latest_snapshot_rebases() {
 fn a_malformed_snapshot_payload_is_not_a_snapshot() {
     let broken = Event::pending(
         "snap-x",
-        crate::test_fixtures::EVENT_SESSION_CONSOLIDATED,
+        symbio_plugin_api::events::EVENT_SESSION_CONSOLIDATED,
         Entity::Message,
         Verb::Progressed,
         "session/main",
@@ -1557,7 +1557,7 @@ fn seq_is_renumbered_monotonically_across_the_snapshot_boundary() {
 fn added_event(msgs: Vec<symbio_kernel::chat::chat_node::ChatNode>) -> Event {
     Event::pending(
         "m-add-0",
-        crate::test_fixtures::EVENT_MESSAGE_ADDED,
+        symbio_plugin_api::events::EVENT_MESSAGE_ADDED,
         Entity::Message,
         Verb::Opened,
         "user",
@@ -1634,7 +1634,7 @@ fn a_not_executed_call_is_projected_from_its_failure_fact() {
     let events = vec![
         user_event("u-node", "读文件"),
         model_output_event(
-            crate::event::EVENT_RESPONSE,
+            symbio_kernel::event::EVENT_RESPONSE,
             "response-model-1",
             1_500,
             serde_json::json!({
@@ -1644,7 +1644,7 @@ fn a_not_executed_call_is_projected_from_its_failure_fact() {
             }),
         ),
         tool_fact_event(
-            crate::event::EVENT_REQUEST,
+            symbio_kernel::event::EVENT_REQUEST,
             "c-1",
             serde_json::json!({
                 "port": "tool", "id": "c-1", "attempt": 1,
@@ -1652,7 +1652,7 @@ fn a_not_executed_call_is_projected_from_its_failure_fact() {
             }),
         ),
         tool_fact_event(
-            crate::event::EVENT_FAILED,
+            symbio_kernel::event::EVENT_FAILED,
             "c-1",
             serde_json::json!({
                 "port": "tool", "stamp": { "failure": "tool_call" },
@@ -1698,7 +1698,7 @@ fn an_executed_call_does_not_get_a_projected_placeholder() {
     let events = vec![
         user_event("u-node", "读文件"),
         model_output_event(
-            crate::event::EVENT_RESPONSE,
+            symbio_kernel::event::EVENT_RESPONSE,
             "response-model-1",
             1_500,
             serde_json::json!({
@@ -1708,7 +1708,7 @@ fn an_executed_call_does_not_get_a_projected_placeholder() {
             }),
         ),
         tool_fact_event(
-            crate::event::EVENT_REQUEST,
+            symbio_kernel::event::EVENT_REQUEST,
             "c-1",
             serde_json::json!({
                 "port": "tool", "id": "c-1", "attempt": 1,
@@ -1717,7 +1717,7 @@ fn an_executed_call_does_not_get_a_projected_placeholder() {
         ),
         added_event(vec![child]),
         tool_fact_event(
-            crate::event::EVENT_FAILED,
+            symbio_kernel::event::EVENT_FAILED,
             "c-1",
             serde_json::json!({
                 "port": "tool", "id": "c-1", "attempt": 1, "why": "lease_expired",

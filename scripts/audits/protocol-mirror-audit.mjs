@@ -585,7 +585,7 @@ const META_KEYS = [
   },
   {
     key: 'failure_kind',
-    owner: 'crates/symbio-sdk/src/projection/rebuild.rs',
+    owner: 'crates/symbio-plugin-session/src/rebuild.rs',
     what: '失败类别（重建面从 `artifact.added` 载荷搬进节点 meta，决定可恢复动作）',
   },
   {
@@ -605,7 +605,7 @@ const META_KEYS = [
   },
   {
     key: 'prompt',
-    owner: 'crates/symbio-sdk/src/projection/rebuild.rs',
+    owner: 'crates/symbio-plugin-session/src/rebuild.rs',
     what: '待用户响应的载荷（重建面从 `artifact.added` 载荷复刻到结果节点 meta）',
   },
   {

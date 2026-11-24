@@ -47,5 +47,5 @@ impl: done
 ## 关联
 
 - 债的形状与裁决：`docs/003-design/051-机制形状规格.md`（两行债）、`D-336` / `D-402`
-- 快照的折叠读法：`crates/symbio-sdk/src/projection/rebuild.rs`
+- 快照的折叠读法：`crates/symbio-plugin-session/src/rebuild.rs`
 - 长会话的断点与预算：`docs/003-design/035-长会话与断点恢复.md`

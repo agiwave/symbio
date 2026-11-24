@@ -254,7 +254,7 @@ const ARTIFACT_WRITER_REL = path.join('crates', 'symbio-plugin-tool', 'src', 'po
  * 之后，判据只落在「这段代码读的是产物格」上。
  */
 const ARTIFACT_READ_SITES = [
-  { rel: path.join('crates', 'symbio-sdk', 'src', 'projection', 'rebuild.rs'), fn: 'artifact_nodes' },
+  { rel: path.join('crates', 'symbio-plugin-session', 'src', 'rebuild.rs'), fn: 'artifact_nodes' },
   { rel: path.join('crates', 'symbio-plugin-session', 'src', 'projections', 'changes.rs'), fn: null },
   // `turn_input` 是一个按事实种类分支的大函数：按函数登记会把「消息 / 轮根」那些
   // 别的格也算成产物格。`arm` 把它收窄到产物那条分支。
@@ -296,7 +296,7 @@ const CALLS_WRITER_REL = path.join('crates', 'symbio-plugin-model', 'src', 'port
  * `overflow_notice`），不在这份账上。
  */
 const CALLS_READ_SITES = [
-  { rel: path.join('crates', 'symbio-sdk', 'src', 'projection', 'rebuild.rs'), fn: 'call_tables' },
+  { rel: path.join('crates', 'symbio-plugin-session', 'src', 'rebuild.rs'), fn: 'call_tables' },
   { rel: path.join('crates', 'symbio-plugin-session', 'src', 'transcript', 'live.rs'), fn: 'partners' },
   { rel: path.join('crates', 'symbio-plugin-session', 'src', 'transcript', 'live.rs'), fn: 'remember_request' },
   { rel: path.join('crates', 'symbio-plugin-tool', 'src', 'port.rs'), fn: 'read_requested' },

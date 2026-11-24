@@ -9,7 +9,7 @@
 //!
 //! `session.consolidated`（`message × progressed`）——**已有种类**，声明 owner 是
 //! `crates/symbio-plugin-session/src/declarations.rs:27`。重建面把它当「整段被摘要
-//! 取代」折叠（`symbio_sdk::projection::rebuild`），所以压缩节点在界面上是折叠叶
+//! 取代」折叠（session 的 `rebuild`），所以压缩节点在界面上是折叠叶
 //! （`NodeKind::Notice` + `style_tag = compression`），读侧零改动。
 //!
 //! **已知项**：声明的 owner 与写方分离（session 声明、compact 写）。是否要求写方

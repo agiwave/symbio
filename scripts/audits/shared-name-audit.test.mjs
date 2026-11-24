@@ -72,7 +72,7 @@ const DEFAULT_ARTIFACT = {
     '    fn annotate(&self) -> Vec<(&\'static str, serde_json::Value)> {\n' +
     '        vec![("file_op", serde_json::json!("write"))]\n' +
     '    }\n}\n',
-  'crates/symbio-sdk/src/projection/rebuild.rs':
+  'crates/symbio-plugin-session/src/rebuild.rs':
     'fn artifact_nodes() {\n    let _ = e.payload.get("tool");\n}\n' +
     'fn call_tables() {\n    let _ = call.get("id");\n    let _ = e.payload.get("root_id");\n}\n',
   'crates/symbio-plugin-session/src/projections/changes.rs':
@@ -383,7 +383,7 @@ test('⑱ 行为追加格与装配格重名 ⇒ 红（两个写点争同一格�
 
 test('⑲ calls 读点读了元素账上没有的键 ⇒ 红（wire_id 混进派发清单的读段）', () => {
   const root = fixture({
-    'crates/symbio-sdk/src/projection/rebuild.rs':
+    'crates/symbio-plugin-session/src/rebuild.rs':
       'fn artifact_nodes() {\n    let _ = e.payload.get("tool");\n}\n' +
       'fn call_tables() {\n    let _ = call.get("id");\n    let _ = call.get("wire_id");\n}\n',
   })
@@ -397,7 +397,7 @@ test('⑲ calls 读点读了元素账上没有的键 ⇒ 红（wire_id 混进派
 
 test('⑳ calls 写方把条件格改名 ⇒ 红（读方仍读 node_id，静默读空）', () => {
   const root = fixture({
-    'crates/symbio-sdk/src/projection/rebuild.rs':
+    'crates/symbio-plugin-session/src/rebuild.rs':
       'fn artifact_nodes() {\n    let _ = e.payload.get("tool");\n}\n' +
       'fn call_tables() {\n    let _ = call.get("id");\n    let _ = call.get("node_id");\n}\n',
     'crates/symbio-plugin-model/src/port.rs':
@@ -419,7 +419,7 @@ test('⑳ calls 写方把条件格改名 ⇒ 红（读方仍读 node_id，静默
 
 test('㉑ calls 读段函数不在 ⇒ exit 2（读段改名后判据会恒真）', () => {
   const root = fixture({
-    'crates/symbio-sdk/src/projection/rebuild.rs':
+    'crates/symbio-plugin-session/src/rebuild.rs':
       'fn artifact_nodes() {\n    let _ = e.payload.get("tool");\n}\n',
   })
   try {
@@ -432,7 +432,7 @@ test('㉑ calls 读段函数不在 ⇒ exit 2（读段改名后判据会恒真�
 
 test('㉒ tool_calls 补写段读 wire_id ⇒ 绿（不登记、不并账——D-471 的同形异义边界）', () => {
   const root = fixture({
-    'crates/symbio-sdk/src/projection/rebuild.rs':
+    'crates/symbio-plugin-session/src/rebuild.rs':
       'fn artifact_nodes() {\n    let _ = e.payload.get("tool");\n}\n' +
       'fn call_tables() {\n    let _ = call.get("id");\n    let _ = e.payload.get("root_id");\n}\n' +
       'fn backfill_node_ids() {\n    let _ = call.get("wire_id");\n}\n',

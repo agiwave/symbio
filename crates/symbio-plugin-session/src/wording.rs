@@ -3,6 +3,7 @@
 
 use std::sync::Arc;
 
+use symbio_kernel::chat::chat_node::NodeRole;
 use symbio_kernel::event::Event;
 use symbio_plugin_api::routes::ROUTE_COMPOSE_WORDING;
 use symbio_plugin_api::SESSION_ID;
@@ -11,7 +12,7 @@ use symbio_plugin_api::{
     WordingReply, PATH,
 };
 
-use crate::convergence::dialog_context;
+use crate::declarations::{CHAT_VOCAB, MESSAGE_VOCAB};
 
 /// 经 route 取一次措辞回执；取不到（session_id 缺席 / set_payload 失败 / route
 /// 失败 / 回执解析失败或为 `None`）一律返回 `None`，由调用方收敛成「不落格」。
@@ -29,7 +30,15 @@ pub(crate) async fn compose_wording(
     let request = ComposeRequest {
         session_id: session_id.clone(),
         verdict,
-        context: dialog_context(facts),
+        context: crate::rebuild::rebuild(facts, &CHAT_VOCAB, &MESSAGE_VOCAB)
+            .into_iter()
+            .filter(|node| {
+                matches!(
+                    node.node_role(),
+                    Some(NodeRole::User) | Some(NodeRole::Assistant)
+                )
+            })
+            .collect(),
         snapshot,
     };
     // 跨插件只走 route：子上下文是同一份 ctx 的 fork，父句柄也取自这份 ctx。

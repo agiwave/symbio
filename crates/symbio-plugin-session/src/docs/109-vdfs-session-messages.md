@@ -139,7 +139,7 @@ read(<根>/session/<sid>/message/<mid>)
 | **存储权威号** | 消息列表 | session 存储写入口：`chat_session::write` 的 `max_seq` + `assign_seq`，落在两条路径（`append_messages` / `replace_messages`）上 | 全程有效——前端列表序、VDFS 读口、LLM 上下文三者同源的**只有它** |
 | **快照槽位号**（权威号的显式特例） | 同上 | 压缩调用方显式给出：`context::snapshot_slot_seq` = 保留区首条 seq − 1。不走分配器，但落进**同一条号段** | 使 `[快照, 保留区…]` 本来就单调 ⇒ `assign_seq` 退化为"只补缺号" |
 | **在途号** | 同一列表里「还没落库的那几条」的位置 | 转写 `Transcript::apply` **首次见到节点时**，起点 `InflightSeq::BASE = 1 << 50` | 只在实时面；落库回包交回权威号即作废。**永不落库**——存储边界按号段摘掉（`InflightSeq::occupies`） |
-| **重建号** | 回放事实网格得到的那份列表 | core `projection::rebuild::RebuildSeq`：从 1 连续发、删节点不回收号 | 只在读侧（重建结果），不回写存储；与权威号**可以不同**（D-049 判定「切源后 `seq` 分配」属呈现细节） |
+| **重建号** | 回放事实网格得到的那份列表 | session `rebuild::RebuildSeq`：从 1 连续发、删节点不回收号 | 只在读侧（重建结果），不回写存储；与权威号**可以不同**（D-049 判定「切源后 `seq` 分配」属呈现细节） |
 | **WAL `Seq`** | **事件**的顺序，不是消息的 | core `event::Seq`（newtype），`store/wal.rs` 追加时分配 | 只活在事件层，**从不进 `ChatNode.seq`**；列在这里的唯一理由是它名字里也叫 seq |
 
 四套里只有权威号跨进程稳定。最后一行根本不在同一个字段上，把它列进来正是为了钉住这点

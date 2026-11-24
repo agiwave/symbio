@@ -328,17 +328,14 @@ impl Convergence {
                     // 正文节点全部由 `rebuild` 从事实折出：中止前已流过正文时来自
                     // `failed` 的半截，否则来自刚落格的终答（同 id，合一条）。
                     // 中止不推 `failed:` 节点（那是失败路径，D-044 / D-165）。
-                    let nodes: Vec<cm::ChatNode> = symbio_sdk::projection::rebuild::rebuild(
-                        &fresh_waiting,
-                        &CHAT_VOCAB,
-                        &MESSAGE_VOCAB,
-                    )
-                    .into_iter()
-                    .map(|mut node| {
-                        node.seq = None;
-                        node
-                    })
-                    .collect();
+                    let nodes: Vec<cm::ChatNode> =
+                        crate::rebuild::rebuild(&fresh_waiting, &CHAT_VOCAB, &MESSAGE_VOCAB)
+                            .into_iter()
+                            .map(|mut node| {
+                                node.seq = None;
+                                node
+                            })
+                            .collect();
                     if !nodes.is_empty() {
                         let session = self.open_chat_session(session_id).await?;
                         append_and_publish(
@@ -409,17 +406,14 @@ impl Convergence {
                         }
                     }
                 }
-                let nodes: Vec<cm::ChatNode> = symbio_sdk::projection::rebuild::rebuild(
-                    &waiting_events,
-                    &CHAT_VOCAB,
-                    &MESSAGE_VOCAB,
-                )
-                .into_iter()
-                .map(|mut node| {
-                    node.seq = None;
-                    node
-                })
-                .collect();
+                let nodes: Vec<cm::ChatNode> =
+                    crate::rebuild::rebuild(&waiting_events, &CHAT_VOCAB, &MESSAGE_VOCAB)
+                        .into_iter()
+                        .map(|mut node| {
+                            node.seq = None;
+                            node
+                        })
+                        .collect();
                 let failed_node = cm::ChatNode {
                     id: format!("failed:{}", failed.event_id),
                     msg_type: Some(cm::NodeKind::Body),
@@ -466,17 +460,14 @@ impl Convergence {
             // 卡片节点与终答走同一条折叠 + 发布（读路径与写路径同一份规则）：
             // 本轮所有节点（正文 / 工具调用 / 卡片）一并投影，`apply` 对已存在的
             // 节点幂等跳过。否则实时面只看得到环的协议事实、看不到卡片。
-            let nodes: Vec<cm::ChatNode> = symbio_sdk::projection::rebuild::rebuild(
-                &waiting_events,
-                &CHAT_VOCAB,
-                &MESSAGE_VOCAB,
-            )
-            .into_iter()
-            .map(|mut node| {
-                node.seq = None;
-                node
-            })
-            .collect();
+            let nodes: Vec<cm::ChatNode> =
+                crate::rebuild::rebuild(&waiting_events, &CHAT_VOCAB, &MESSAGE_VOCAB)
+                    .into_iter()
+                    .map(|mut node| {
+                        node.seq = None;
+                        node
+                    })
+                    .collect();
             let projected: Vec<String> = nodes.iter().map(|node| node.id.clone()).collect();
             if !nodes.is_empty() {
                 let session = self.open_chat_session(session_id).await?;
@@ -541,7 +532,7 @@ impl Convergence {
             .cloned()
             .collect();
         let nodes: Vec<cm::ChatNode> =
-            symbio_sdk::projection::rebuild::rebuild(&round_events, &CHAT_VOCAB, &MESSAGE_VOCAB)
+            crate::rebuild::rebuild(&round_events, &CHAT_VOCAB, &MESSAGE_VOCAB)
                 .into_iter()
                 .map(|mut node| {
                     // seq 由存储在临界区内权威分配；折叠给的是「从这份切片起」的局部号。
@@ -617,22 +608,6 @@ fn waits_for_user(events: &[Event]) -> bool {
                         && answer.payload.get("id").and_then(Value::as_str) == Some(call_id)))
         })
     })
-}
-
-/// 对话线：由既有折叠（与实时面同一份规则）折出用户 / 助手文本节点。
-///
-/// **不要在这里重拼「以下是历史」的散文**：那会把同一份事实变成两种形状，且给
-/// 「谁说了什么」再错一次的机会。只留 `user | assistant` 两类——工具卡不属于对话线。
-pub(crate) fn dialog_context(events: &[Event]) -> Vec<cm::ChatNode> {
-    symbio_sdk::projection::rebuild::rebuild(events, &CHAT_VOCAB, &MESSAGE_VOCAB)
-        .into_iter()
-        .filter(|node| {
-            matches!(
-                node.node_role(),
-                Some(cm::NodeRole::User) | Some(cm::NodeRole::Assistant)
-            )
-        })
-        .collect()
 }
 
 #[cfg(test)]

@@ -132,7 +132,7 @@ fn session_node_projects_runtime_state() {
 /// **本用例只钉读方**：骨架与 `meta.context` 都是手工构造的，证明「有数就能排、
 /// 缺数就不出现」；它不覆盖生产写方（模型执行体 → 终答载荷 `context` → 重建）。
 /// 写方的证据在 `symbio-plugin-model::port` 的 `a_final_answer_carries_*` 与
-/// `symbio-sdk::projection::rebuild` 的 `final_payload_context_folds_*`。
+/// `symbio-plugin-session::rebuild` 的 `final_payload_context_folds_*`。
 #[test]
 fn session_node_publishes_the_context_watermark_reading() {
     let mut s = Session::new("abc");

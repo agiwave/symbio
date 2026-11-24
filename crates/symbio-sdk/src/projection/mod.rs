@@ -8,7 +8,6 @@ pub mod branch;
 pub(crate) mod elision;
 pub mod mutations;
 pub mod prompt_fidelity;
-pub mod rebuild;
 pub mod task_vocab;
 pub mod transcript;
 pub mod vocab;

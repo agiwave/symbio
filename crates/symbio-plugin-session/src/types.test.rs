@@ -224,7 +224,7 @@ fn latest_context_watermark_reads_what_the_writer_put_on_the_final_fact() {
         })),
     ];
 
-    let nodes = symbio_sdk::projection::rebuild::rebuild(
+    let nodes = crate::rebuild::rebuild(
         &events,
         &crate::declarations::CHAT_VOCAB,
         &crate::declarations::MESSAGE_VOCAB,
