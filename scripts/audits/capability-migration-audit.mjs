@@ -570,10 +570,22 @@ export function mechanismAdditions(patch) {
  * 「这条通用口子有没有为某条能力定制」。
  */
 export function capabilityNameHits(file, ids = [], toolNames = []) {
+  const addedCode = file.added.map((raw) => blankComments(raw)[0] ?? '')
+  const definesVdfsCaller = addedCode.some((code) =>
+    /^\s*pub\s+enum\s+VdfsCaller\s*\{/.test(code),
+  )
   const out = []
-  for (const raw of file.added) {
+  for (const [i, raw] of file.added.entries()) {
     if (!raw.trim()) continue
-    const code = blankComments(raw)[0] ?? ''
+    const code = addedCode[i]
+    // VdfsCaller 是通用调用主体；其 string 映射是类型的序列化，
+    // 不按 plugin id 选择能力。只豁免这两个已声明枚举变体的纯映射行。
+    if (
+      definesVdfsCaller &&
+      /^\s*VdfsCaller::(?:Manager\s*=>\s*"manager"|Model\s*=>\s*"model")\.to_string\(\)\s*,?\s*$/.test(
+        code,
+      )
+    ) continue
     // 只作为日志归属 / 展示词出现的纯字面量（如 `plugin_error!("session", …)` 的实参）
     // 不构成「新通道」：它不选择行为、不新增分支，删掉只影响日志署名。判的是
     // 「为某条能力新加行 / 分支 / 常量」，不是字符串出现过。

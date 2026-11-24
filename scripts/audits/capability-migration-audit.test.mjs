@@ -32,6 +32,7 @@ import {
   NET_GUARD,
   activeDebtExemption,
   archNetChange,
+  capabilityNameHits,
   classifyCommit,
   crossTreeMoves,
   debtAllowance,
@@ -601,6 +602,53 @@ test('supplementErrors：新增面写死工具名 ⇒ 红', () => {
     { path: CORE, added: ['tool: "local/todo_write".into(),'], removed: [] },
   ])
   assert.match(e, /todo_write/)
+})
+
+test('capabilityNameHits：通用 VdfsCaller 的声明与序列化映射不算能力定制', () => {
+  const file = {
+    path: CORE,
+    added: [
+      'pub enum VdfsCaller {',
+      '    Manager,',
+      '    Model,',
+      '}',
+      'VdfsCaller::Manager => "manager".to_string(),',
+      'VdfsCaller::Model => "model".to_string(),',
+    ],
+  }
+  assert.deepEqual(capabilityNameHits(file, ['model'], ['model']), [])
+})
+
+test('capabilityNameHits：没有枚举声明的同名映射仍判红', () => {
+  const file = { path: CORE, added: ['VdfsCaller::Model => "model".to_string(),'] }
+  assert.equal(capabilityNameHits(file, ['model'], []).length, 1)
+})
+
+test('capabilityNameHits：枚举声明不能掩盖真实能力分支', () => {
+  const file = {
+    path: CORE,
+    added: [
+      'pub enum VdfsCaller { Manager, Model }',
+      'VdfsCaller::Model => "model".to_string(),',
+      'if caller == "model" { run_tool(); }',
+    ],
+  }
+  const hits = capabilityNameHits(file, ['model'], [])
+  assert.equal(hits.length, 1)
+  assert.match(hits[0].line, /run_tool/)
+})
+
+test('capabilityNameHits：通用枚举声明不放行其它插件映射', () => {
+  const file = {
+    path: CORE,
+    added: [
+      'pub enum VdfsCaller { Manager, Model }',
+      'VdfsCaller::Model => "compose".to_string(),',
+    ],
+  }
+  const hits = capabilityNameHits(file, ['compose'], [])
+  assert.equal(hits.length, 1)
+  assert.match(hits[0].line, /compose/)
 })
 
 test('supplementErrors：注释里提到插件 id 与工具名 ⇒ 绿（判的是代码）', () => {
