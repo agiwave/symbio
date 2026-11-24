@@ -3,6 +3,7 @@ plugin_id: session
 plugin_comment: 会话
 plugin_assembly: sub_agent
 plugin_order: 30
+plugin_routes: worker_ready
 # 本插件导出给别的插件命名的跨插件事件名（scripts/facts/events-rs.mjs 读取 →
 # crates/symbio-plugin-api/src/events.rs）。格位仍住在 declarations::EVENTS。
 # `commitment.opened` / `released` / `broken` 三格随委托工具 `agent_run` 迁入

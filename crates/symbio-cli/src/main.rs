@@ -23,6 +23,7 @@ use client::{Frame, SymbioClient};
 use protocol::{MODE_AUTO, OUTCOME_ABORTED};
 use render::Renderer;
 use symbio::symbio_kernel::vdfs::{VDFS_STATUS_FAILED, VDFS_STATUS_WORKING};
+use symbio_server::worker::{run_worker, BuildId, Epoch, WorkerBootstrap, WorkerId};
 
 /// CLI 只做「解析 → 启动 → 发送 → 渲染」，业务全在后端插件树里。
 ///
@@ -55,6 +56,7 @@ async fn main() -> ExitCode {
             return ExitCode::SUCCESS;
         }
         Command::Serve(args) => return server::run(*args).await,
+        Command::Worker(args) => return run_session_worker(*args).await,
         Command::Run(a) => *a,
     };
 
@@ -125,6 +127,42 @@ async fn main() -> ExitCode {
 
     client.shutdown().await;
     exit
+}
+
+async fn run_session_worker(args: args::WorkerArgs) -> ExitCode {
+    let epoch = match Epoch::new(args.epoch) {
+        Some(epoch) => epoch,
+        None => {
+            eprintln!("worker epoch 必须大于 0");
+            return ExitCode::from(2);
+        }
+    };
+    let build = match BuildId::parse(args.build) {
+        Ok(build) => build,
+        Err(error) => {
+            eprintln!("worker build_id 无效: {error}");
+            return ExitCode::from(2);
+        }
+    };
+    let worker = match WorkerId::new(args.session, epoch, build) {
+        Ok(worker) => worker,
+        Err(error) => {
+            eprintln!("worker 身份无效: {error}");
+            return ExitCode::from(2);
+        }
+    };
+    match run_worker(WorkerBootstrap {
+        worker,
+        homedir: args.homedir,
+    })
+    .await
+    {
+        Ok(()) => ExitCode::SUCCESS,
+        Err(error) => {
+            eprintln!("worker 退出: {error}");
+            ExitCode::FAILURE
+        }
+    }
 }
 
 /// 心跳守护模式：常驻宿主插件树里的 `heartbeat` 调度插件。

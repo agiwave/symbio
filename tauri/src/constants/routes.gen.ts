@@ -70,6 +70,7 @@ export const ROUTE_SESSION_CONSUME = 'session/consume'
 export const ROUTE_SESSION_GRANT = 'session/grant'
 export const ROUTE_SESSION_PROJECT = 'session/project'
 export const ROUTE_SESSION_STATS = 'session/stats'
+export const ROUTE_SESSION_WORKER_READY = 'session/worker_ready'
 
 // ==================== skill ====================
 

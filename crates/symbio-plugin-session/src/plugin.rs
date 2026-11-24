@@ -411,6 +411,13 @@ impl Plugin for SessionPlugin {
             // 读数：本会话改过哪些文件（D-169：`artifact.added` 的一条投影，不是新事实族）。
             // 同样是纯计算、零副作用。
             "changes" => return self.handle_changes(ctx).await,
+            // worker 启动闸门：打开并缓存该会话的事实源写句柄，完成 WAL 恢复并持有令牌。
+            // 只有 worker 进程调用；控制面的读数口一律走只读开法。
+            "worker_ready" => {
+                let sid = super::route_guard::require_sid(&ctx, "session/worker_ready")?;
+                let _source = self.fact_source_for(&ctx, &sid).await?;
+                return Ok(PluginPayload::Empty);
+            }
             // 本表只留「不是数据 CRUD」的路由：会话与消息的增删改查**全部**经 VDFS
             // 地址完成（`vdfs/list|read|write|action|delete`）。在路由上再开一条数据面
             // 入口 = 同一能力的第二份实现，两条实现会各自漂移——判据与逐条退役记录见

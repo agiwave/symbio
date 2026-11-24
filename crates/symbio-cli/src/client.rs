@@ -47,18 +47,19 @@ use symbio::routes::{
     ROUTE_EVENT_BUS_SUBSCRIBE, ROUTE_VDFS_ROOT, ROUTE_VDFS_STAT, ROUTE_VDFS_WRITE,
 };
 use symbio::symbio_kernel::chat::chat_node::ChatNode;
+use symbio::symbio_kernel::keys::SymbioKey;
 use symbio::symbio_kernel::plugin::{
-    Plugin, PluginFrame, PluginInvokeRequestExt, PluginPayload, PluginSimpleRequest,
+    Plugin, PluginFrame, PluginInvokeRequestExt, PluginMessageWire, PluginPayload,
+    PluginSimpleRequest,
 };
 use symbio::symbio_kernel::vdfs::{VdfsChange, VdfsNode, VDFS_STATUS_FAILED, VDFS_STATUS_WORKING};
-use symbio::symbio_plugin_api::events::EVENT_USER_MESSAGE;
 use symbio_server::RuntimeHost;
 // D-530：线上契约（解包 / 频道词表）按规则 B 迁入 symbio-contract，
 // 宿主侧经门面取用（导入路径不变，改的是转发源）。
 use symbio::symbio_plugin_api::{
     event_bus_resync_of, event_bus_vdfs_change_of, EVENT_BUS_KIND_VDFS,
 };
-use symbio::symbio_sdk::keys::{VdfsCaller, PATH, SESSION_ID, VDFS_CALLER, WORKDIR};
+use symbio::symbio_sdk::keys::{PATH, SESSION_ID, WORKDIR};
 // 读数面板方言：后端下发描述、CLI 只渲染。
 //  这三个名字随返回值流动（C-002：插件侧不深引 core 域目录），与 Tauri 前端
 //  `schemas/reading.ts` 是同一份契约的两半。
@@ -130,6 +131,7 @@ fn bus_frame_of(frame: PluginFrame) -> Option<Frame> {
 }
 
 pub struct SymbioClient {
+    host: Arc<RuntimeHost>,
     root: Arc<dyn Plugin>,
     /// `vdfs` 频道的下行帧（见 [`Frame`]）
     events: mpsc::UnboundedReceiver<Frame>,
@@ -173,7 +175,7 @@ impl SymbioClient {
         std::fs::create_dir_all(homedir)
             .map_err(|e| format!("创建系统目录失败 {}: {e}", homedir.display()))?;
 
-        let host = RuntimeHost::create().await;
+        let host = Arc::new(RuntimeHost::create().await?);
         let root = host.root();
 
         // **一条**下行通道：事件总线的 `vdfs` 频道（消息 + 会话运行态 + 资源信号）。
@@ -222,6 +224,7 @@ impl SymbioClient {
         let session_id = session.unwrap_or_else(|| gen_id("cli"));
 
         let mut client = Self {
+            host,
             root,
             events,
             session_id,
@@ -289,25 +292,12 @@ impl SymbioClient {
     /// `addr` 是本次调用针对的**节点地址**（仅 `vdfs/*` 有）。留痕带上它是为了让
     /// 「同一个路由上到底做了哪一件事」在 stderr 里可分辨——`vdfs/write` 同时承担
     /// 「写会话 metadata」与「写收件箱」，只有路由名的痕迹会把两者算成一件。
-    async fn route<T: Clone + Send + Sync + 'static>(
+    async fn route<T: serde::Serialize>(
         &self,
         path: &str,
         payload: T,
         sid: Option<&str>,
         addr: Option<&str>,
-    ) -> Result<Value, String> {
-        self.route_with_fact_source(path, payload, sid, addr, None)
-            .await
-    }
-
-    /// 同 [`Self::route`]，但把装配层打开的事实源随上下文下发（`FACT_SOURCE`）。
-    async fn route_with_fact_source<T: Clone + Send + Sync + 'static>(
-        &self,
-        path: &str,
-        payload: T,
-        sid: Option<&str>,
-        addr: Option<&str>,
-        source: Option<Arc<dyn symbio_sdk::plugin::fact_source::FactSource>>,
     ) -> Result<Value, String> {
         if route_log_enabled() {
             match addr {
@@ -315,25 +305,25 @@ impl SymbioClient {
                 None => eprintln!("[route] {path}"),
             }
         }
-        let ctx = Arc::new(PluginSimpleRequest::new(None, None));
-        ctx.set(VDFS_CALLER, VdfsCaller::Manager);
-        ctx.set(PATH, path.to_string());
-        ctx.set(WORKDIR, self.workdir.clone());
+        let payload = serde_json::to_value(payload)
+            .map_err(|error| format!("构造 {path} 载荷失败: {error}"))?;
+        let mut metadata = serde_json::Map::new();
+        metadata.insert(PATH.name().to_string(), json!(path));
+        metadata.insert(WORKDIR.name().to_string(), json!(self.workdir));
         if let Some(sid) = sid {
-            ctx.set(SESSION_ID, sid.to_string());
+            metadata.insert(SESSION_ID.name().to_string(), json!(sid));
         }
-        if let Some(source) = source {
-            ctx.set(symbio_sdk::plugin::fact_source::FACT_SOURCE, source);
-        }
-        ctx.set_payload(payload)
-            .map_err(|e| format!("构造 {path} 载荷失败: {e}"))?;
-
-        let resp = Arc::clone(&self.root)
-            .route(ctx)
+        let reply = self
+            .host
+            .invoke(PluginMessageWire {
+                metadata: Value::Object(metadata),
+                payload,
+            })
             .await
-            .map_err(|e| format!("{path} 调用失败: {e}"))?;
-        resp.get::<Value>()
-            .map_err(|e| format!("{path} 响应解析失败: {e}"))
+            .map_err(|error| format!("{path} 调用失败: {error}"))?;
+        reply
+            .get::<Value>()
+            .map_err(|error| format!("{path} 响应解析失败: {error}"))
     }
 
     /// 把会话元数据写入存储（workdir / provider / mode / risk_level）。
@@ -502,33 +492,8 @@ impl SymbioClient {
             }
         }
 
-        // ── 触发链（装配层只做装配，不写业务事实）──
-        // 1. 收件箱写臂在入队后**自己开轮**（`consume_inbox_turn`）：写返回时
-        //    这条 `user.message` 已落格、写口已踢出驱动；CLI 不再替它调
-        //    `session/consume`（那是会话编排，不是客户端的必答题）。
-        // 2. 这里只**等**写口踢出的驱动空闲（`settled`，不是第二次 drive）；
-        // 3. 终答事实已由环落地，session 自己投影转写（`session/project`）——
-        //    开轮事实的 seq 从事实源取，不再靠 consume 的返回值。
-        let source = symbio::drive::open_fact_source(&self.session_id)
-            .map_err(|e| format!("事实源打开失败: {e}"))?;
-        symbio::drive::settled(&self.session_id).await;
-        let user_seq = source
-            .facts()
-            .into_iter()
-            .rev()
-            .find(|e| e.kind == EVENT_USER_MESSAGE)
-            .and_then(|e| e.seq)
-            .map(|seq| seq.value());
-        if let Some(seq) = user_seq {
-            self.route_with_fact_source(
-                "session/project",
-                json!({ "seq": seq }),
-                Some(&self.session_id),
-                None,
-                Some(source),
-            )
-            .await?;
-        }
+        // 收件箱写臂在 worker 内自行开轮、收轮并投影；CLI 只等事件总线的会话状态收敛，
+        // 不在控制面打开同一会话的 WAL（那会与 worker 的写者令牌冲突）。
 
         // 本轮的业务错误（失败结局的 `error`）。**不预置初值**：循环的每个出口都在
         // 赋值之后 `break`，预置一个 `None` 只会是"赋值了但没人读"的死写。

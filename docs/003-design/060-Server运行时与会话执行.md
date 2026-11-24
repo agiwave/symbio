@@ -49,6 +49,9 @@ WebSocket 保留自身直至响应结束，避免连接自等待。
 一个会话的活动执行体始终是一个独立 worker。`host` 是默认进程落点，不声称隔离；
 `container` 是同一 worker 的隔离落点。VM 后续复用同一启动边界。控制面不得再在 Server
 进程内直接执行会话工具，也不增加第三种与 host / container 并列的 process 模式。
+生产绑定已从 `RuntimeHost` 统一切换：会话作用域请求经 durable inbox 派发到同一二进制的
+隐藏 worker 入口，worker 的 VDFS 事件回传控制面总线；CLI / Tauri / Server 不再各自直调
+会话执行路径。worker 进程不启动心跳调度器。
 
 ### D-538 worker 身份、持久入口与单写者
 
@@ -56,12 +59,15 @@ WebSocket 保留自身直至响应结束，避免连接自等待。
 重载统一 fencing；每个会话只有当前 epoch 能改变状态。worker 在 ready 前取得会话 WAL
 写锁，运行期直接持有该锁，控制面只读。控制面落盘的 durable inbox 是重启后恢复请求的
 唯一入口；会话元数据写操作只能交给 worker owner。心跳仍是控制面单例，不随会话复制。
+inbox 的状态转换与 epoch 登记分别在各自跨进程锁内完成：接受序号持久化且唯一；完成回执
+保留至会话退役，以支持跨重启的请求去重。
 
 ### D-539 子会话经 Supervisor 跨进程汇合
 
 子 Agent 会话同样拥有独立 worker。Supervisor 负责启动、停止、epoch 登记与父子事件 /
 审批路由；父 worker 不直接持有子进程对象。跨进程消息必须携带 session / epoch / build
-身份，旧 epoch 的迟到帧一律丢弃。
+身份，旧 epoch 的迟到帧一律丢弃。父子 worker 的路由与身份校验协议已经落地；子会话的
+生产 spawn 仍待接入，当前子会话由父 worker 执行，D-539 尚未完全兑现。
 
 ### D-540 容器默认拒绝越界能力
 
@@ -75,12 +81,15 @@ capabilities，启用 `no-new-privileges`、seccomp 与 CPU / 内存 / PID 限�
 
 持久 inbox 只保证已接受请求不丢失，不保证工具恰好执行一次。崩溃后未完成的外部动作
 进入待核对状态，由幂等键、外部系统查询或用户确认收口；不得自动重放付款、发布、删除
-等不可逆动作。WAL 恢复与 worker ready 必须先完成，之后才接受新请求。
+等不可逆动作。核对只能写入显式的「确认完成 / 放弃」终态回执，不能把旧认领重新排回
+pending。WAL 恢复与 worker ready 必须先完成，之后才接受新请求。
 
 ### D-542 切换绑定与删除旧执行路径同提交
 
 per-session worker 成为唯一生产执行路径时，切换绑定与删除 Server / CLI / Tauri 的
 进程内会话执行路径必须发生在同一提交。不得保留双实现、双写或靠配置在两套语义间切换。
+顶层会话已完成这一步：切换点在 `RuntimeHost`，CLI 不再直接打开会话 WAL 或调用
+`session/project`。子会话 spawn 与容器落点仍属后续工作，因此整体迁移保持 `partial`。
 本条沿用 D-245 的迁移纪律。
 
 ## 验收边界

@@ -16,6 +16,7 @@ pub const DEFAULT_MODE: &str = crate::protocol::MODE_AUTO;
 pub enum Command {
     Run(Box<Args>),
     Serve(Box<ServeArgs>),
+    Worker(Box<WorkerArgs>),
     Help,
     ServeHelp,
     Version,
@@ -26,6 +27,15 @@ pub struct ServeArgs {
     pub homedir: PathBuf,
     pub config: symbio_server::ServerConfig,
     pub verbose: bool,
+}
+
+/// 会话 worker 的内部启动参数，由 Supervisor 生成，不进入公开帮助。
+#[derive(Debug, Clone)]
+pub struct WorkerArgs {
+    pub homedir: PathBuf,
+    pub session: String,
+    pub epoch: u64,
+    pub build: String,
 }
 
 #[derive(Debug, Clone)]
@@ -143,6 +153,10 @@ pub fn serve_help_text() -> &'static str {
 pub fn parse<I: IntoIterator<Item = String>>(argv: I) -> Result<Command, String> {
     let cwd = std::env::current_dir().map_err(|e| format!("无法获取当前目录: {e}"))?;
     let mut it = argv.into_iter().peekable();
+    if it.peek().is_some_and(|arg| arg == "__worker") {
+        it.next();
+        return parse_worker(it, &cwd);
+    }
     if it.peek().is_some_and(|arg| arg == "serve") {
         it.next();
         return parse_serve(it, &cwd);
@@ -231,6 +245,38 @@ pub fn parse<I: IntoIterator<Item = String>>(argv: I) -> Result<Command, String>
     }
 
     Ok(Command::Run(Box::new(args)))
+}
+
+fn parse_worker<I: IntoIterator<Item = String>>(
+    argv: I,
+    cwd: &std::path::Path,
+) -> Result<Command, String> {
+    let mut worker = WorkerArgs {
+        homedir: std::env::var_os("SYMBIO_HOMEDIR")
+            .map(PathBuf::from)
+            .unwrap_or_else(|| cwd.join(".symbio")),
+        session: String::new(),
+        epoch: 0,
+        build: String::new(),
+    };
+    let mut it = argv.into_iter();
+    while let Some(flag) = it.next() {
+        let value = it
+            .next()
+            .filter(|value| !value.is_empty())
+            .ok_or_else(|| format!("{flag} 缺少取值"))?;
+        match flag.as_str() {
+            "--session" => worker.session = value,
+            "--epoch" => worker.epoch = value.parse().map_err(|_| "epoch 必须是整数")?,
+            "--build" => worker.build = value,
+            "--homedir" => worker.homedir = resolve_path(&value, cwd),
+            other => return Err(format!("未知 worker 参数: {other}")),
+        }
+    }
+    if worker.session.is_empty() || worker.epoch == 0 || worker.build.is_empty() {
+        return Err("worker 缺少 session / epoch / build".to_string());
+    }
+    Ok(Command::Worker(Box::new(worker)))
 }
 
 fn parse_serve<I: IntoIterator<Item = String>>(

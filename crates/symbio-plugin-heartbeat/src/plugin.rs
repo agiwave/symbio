@@ -77,7 +77,11 @@ impl HeartbeatPlugin {
     /// 判定」有两处可调的地方。
     pub fn build(ctx: Arc<dyn PluginInvokeRequest>) -> Arc<dyn Plugin> {
         let plugin = Arc::new(HeartbeatPlugin::new(ctx.parent()));
-        plugin.start_scan();
+        // worker 进程只执行本会话；心跳调度属于控制面单例，重复启动会让每个 worker
+        // 都触发全部署的空闲会话。
+        if std::env::var("SYMBIO_PROCESS_ROLE").as_deref() != Ok("worker") {
+            plugin.start_scan();
+        }
         plugin
     }
 

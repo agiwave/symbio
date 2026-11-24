@@ -68,6 +68,11 @@ pub const ROUTE_HOOK_FIRE: &str = "hook/fire";
 /// model/project_tools — 本轮工具名的协议投影：哪些能见、各自叫什么、谁因碰撞退出（D-469）
 pub const ROUTE_MODEL_PROJECT_TOOLS: &str = "model/project_tools";
 
+// ============ session ============
+
+/// session/worker_ready — worker 启动闸门：打开并缓存该会话的事实源写句柄，完成 WAL 恢复并持有令牌。
+pub const ROUTE_SESSION_WORKER_READY: &str = "session/worker_ready";
+
 // ============ vdfs ============
 
 /// vdfs/list — 经 `VDFS_OPS` 分发（无静态 `match` 臂）

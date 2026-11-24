@@ -26,7 +26,13 @@ pub async fn run(args: ServeArgs) -> ExitCode {
         );
     }
 
-    let host = Arc::new(RuntimeHost::create().await);
+    let host = match RuntimeHost::create().await {
+        Ok(host) => Arc::new(host),
+        Err(error) => {
+            eprintln!("运行时启动失败: {error}");
+            return ExitCode::FAILURE;
+        }
+    };
     let config = args.config;
     let handle = match symbio_server::start(config, Arc::clone(&host)).await {
         Ok(handle) => handle,

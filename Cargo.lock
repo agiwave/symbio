@@ -4192,6 +4192,7 @@ dependencies = [
 name = "symbio-cli"
 version = "0.1.0"
 dependencies = [
+ "serde",
  "serde_json",
  "symbio",
  "symbio-sdk",
@@ -4929,12 +4930,15 @@ dependencies = [
  "dirs",
  "serde",
  "serde_json",
+ "sha2",
  "symbio",
  "symbio-http",
  "tempfile",
  "tokio",
+ "tokio-util",
  "tracing",
  "urlencoding",
+ "windows-sys 0.61.2",
 ]
 
 [[package]]
