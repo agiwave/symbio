@@ -951,8 +951,6 @@ export const LEGACY_TREES = Object.freeze([
     [`crates/symbio-platform/src/sdk/projection/${name}.test.rs`, `crates/symbio-plugin-session/src/projections/${name}.test.rs`],
   ]),
   ['crates/symbio-platform/src/sdk/round/facts.rs', 'crates/symbio-plugin-session/src/projections/facts.rs'],
-  // 任务词汇面：SDK → task（D-565）。旧文件已删除，历史扫描折算到落地宿主。
-  ['crates/symbio-platform/src/sdk/projection/task_vocab.rs', 'crates/symbio-plugin-task/src/decl.rs'],
   // round/node_build.rs 仍是平台转发文件，不能把仍存在的现路径折算走；其旧实现删除与
   // session 新实现新增由 Git 直接识别。只给已删除的同源测试文件留历史别名。
   ['crates/symbio-platform/src/sdk/round/node_build.test.rs', 'crates/symbio-plugin-session/src/projections/node_build.test.rs'],

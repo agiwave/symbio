@@ -642,6 +642,28 @@ function mechanismLineCount(lines) {
   return lines.filter(isMechanismLine).length
 }
 
+/** 从完整源码辨认改动行，避免把多行 `use` 清单的续行误算成机制。 */
+export function mechanismLineCountFromSource(source, changedLines) {
+  const code = blankComments(source).join('\n').replace(
+    /(?:pub(?:\s*\([^)]*\))?\s+)?use\s+[^;]*;/gs,
+    (statement) => statement.replace(/[^\n]/g, ' '),
+  )
+  const pool = new Map()
+  for (const raw of code.split('\n')) {
+    if (!isMechanismLine(raw)) continue
+    pool.set(raw, (pool.get(raw) ?? 0) + 1)
+  }
+  let count = 0
+  for (const raw of changedLines) {
+    const n = pool.get(raw) ?? 0
+    if (n > 0) {
+      pool.set(raw, n - 1)
+      count += 1
+    }
+  }
+  return count
+}
+
 /**
  * 机制面的**净变化**（`D-404` 的口径）：`ARCH_TREES` 内非生成 `.rs` 的机制行，
  * 新增条数 − 删除条数。为正才是变宽；净零是搬迁；净减是收窄。
@@ -840,7 +862,7 @@ export function classifyCommit({ message, patch, net = true }) {
  *
  * 只在 `NET_GUARD` 之后的提交上跑：之前的历史是按旧口径通过的，重判等于要求重写历史。
  */
-export function relocationErrors({ message, patch }) {
+export function relocationErrors({ sha, message, patch }) {
   const errors = []
   const text = String(message ?? '')
   const header = parseRelocationHeader(text)
@@ -895,12 +917,25 @@ export function relocationErrors({ message, patch }) {
   // 红 1（逐对）：`to` 侧新增的**机制行**多于 `from` 侧删掉的机制行 ⇒ 借搬迁加面。
   // 比的是机制行，不是物理行：文件名相同的空白 / 注释段会被 diff 当成未改动，
   // 物理行数天然对不上（那两行不是「搬过去的新面」，是「没动的旧行」）。
+  const sourceLineCount = (file, side) => {
+    if (!sha) return mechanismLineCount(file[side])
+    const revision = side === 'removed' ? `${sha}^` : sha
+    const source = git(['show', `${revision}:${file.path}`])
+    if (source === null) {
+      if (file[side].length === 0) return 0
+      errors.push(
+        `EX-007 读不出 ${revision} 的 \`${file.path}\`，无法核验搬迁机制行（D-404 红 1）`,
+      )
+      return 0
+    }
+    return mechanismLineCountFromSource(source, file[side])
+  }
   for (const pair of header.pairs) {
     if (!pair.from || !pair.to) continue
     const fromFile = patch.find((f) => f.path === pair.from.path)
     const toFile = patch.find((f) => f.path === pair.to.path)
     if (!fromFile || !toFile) continue
-    const grew = mechanismLineCount(toFile.added) - mechanismLineCount(fromFile.removed)
+    const grew = sourceLineCount(toFile, 'added') - sourceLineCount(fromFile, 'removed')
     if (grew > 0) {
       errors.push(
         `EX-007 \`${pair.to.path}\` 比 \`${pair.from.path}\` 多搬了 ${grew} 行机制面源码` +
@@ -1126,7 +1161,14 @@ export function knownDecisions(root) {
 }
 
 
-function patchOf(sha) {
+export function migrationPathspecs(message = '') {
+  const { pairs } = parseRelocationHeader(message)
+  return pairs.flatMap((pair) => [pair.from?.path, pair.to?.path])
+    .filter((p) => typeof p === 'string' && p.length > 0)
+    .map((p) => `:(literal)${p}`)
+}
+
+function patchOf(sha, message = '') {
   const out = git([
     'show',
     '--format=',
@@ -1136,6 +1178,8 @@ function patchOf(sha) {
     // 带上历史旧名：合并前的提交里，机制面的文件还在旧 crate 路径下。
     '--',
     ...legacyPathspecs([...ARCH_TREES, ...CONTROL_TREES]),
+    // 迁移声明可能指向控制面之外的 owner 插件；没有这些路径，git 会在解析前滤掉 to 侧。
+    ...migrationPathspecs(message),
   ])
   return out === null ? null : parsePatch(out)
 }
@@ -1163,7 +1207,7 @@ function judgeCommit({ sha, message, patch, decisions, ids, tools, net = true })
   if (kind === 'migration') {
     const errors = migrationErrors({ sha, message, patch, pluginIds: ids, toolNames: tools, net }).errors
     // 迁移也可能是「净减式搬迁」：三条红线对迁移同样成立（声明 / 行数 / api 转发）。
-    if (net) errors.push(...relocationErrors({ message, patch }).errors)
+    if (net) errors.push(...relocationErrors({ sha, message, patch }).errors)
     return { sha, subject: subjectOf(message), kind, errors }
   }
   if (kind === 'relocation') {
@@ -1171,7 +1215,7 @@ function judgeCommit({ sha, message, patch, decisions, ids, tools, net = true })
       sha,
       subject: subjectOf(message),
       kind,
-      errors: relocationErrors({ message, patch }).errors,
+      errors: relocationErrors({ sha, message, patch }).errors,
     }
   }
   if (kind === 'supplement') {
@@ -1229,7 +1273,7 @@ function main() {
     return 1
   }
   const fixtureMsg = git(['log', '-1', '--format=%B', FIXTURE.sha])
-  const fixturePatch = patchOf(FIXTURE.sha)
+  const fixturePatch = patchOf(FIXTURE.sha, fixtureMsg)
   if (fixtureMsg === null || fixturePatch === null) {
     console.error(red(`✗ capability-migration-audit：夹具提交 ${FIXTURE.sha} 的 diff 读不出`))
     return 1
@@ -1344,7 +1388,7 @@ function main() {
   const ledger = []
   for (const c of commits) {
     if (!touchesAuditedTree(c.files)) continue
-    const patch = patchOf(c.sha)
+    const patch = patchOf(c.sha, c.message)
     if (patch === null) {
       bad.push({ sha: c.sha, subject: subjectOf(c.message), errors: ['读不出本提交的补丁——判据没有输入，宁红不静默'] })
       continue

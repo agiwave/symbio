@@ -40,7 +40,9 @@ import {
   isCapabilitySource,
   isGenerated,
   migrationErrors,
+  migrationPathspecs,
   mechanismAdditions,
+  mechanismLineCountFromSource,
   movedLines,
   parsePatch,
   parseRelocationHeader,
@@ -382,6 +384,34 @@ test('parseRelocationHeader：两侧都写才算完整；缺一侧不算；多�
     { from: { path: 'a/b.test.rs', lines: 9 }, to: { path: 'c/d.test.rs', lines: 9 } },
   ])
   assert.equal(two.complete, true)
+})
+
+test('migrationPathspecs：迁移到控制面之外的 owner 插件时也读取 to 侧', () => {
+  const from = 'crates/symbio-platform/src/sdk/projection/task_vocab.rs'
+  const to = 'crates/symbio-plugin-task/src/decl.rs'
+  const specs = migrationPathspecs(`Migration: D-565\nfrom: ${from} (30)\nto: ${to} (12)`)
+  assert.deepEqual(specs, [`:(literal)${from}`, `:(literal)${to}`])
+  assert.deepEqual(migrationPathspecs('普通提交'), [])
+})
+
+test('mechanismLineCountFromSource：多行 use 清单的续行不算机制', () => {
+  const source = [
+    'use crate::{',
+    '    Entity,',
+    '    EventDecl,',
+    '};',
+    'pub struct TaskVocab {',
+    '    opened: &str,',
+    '}',
+  ].join('\n')
+  assert.equal(
+    mechanismLineCountFromSource(source, ['    Entity,', '    EventDecl,', '};']),
+    0,
+  )
+  assert.equal(
+    mechanismLineCountFromSource(source, ['    Entity,', 'pub struct TaskVocab {', '    opened: &str,', '}']),
+    3,
+  )
 })
 
 test('classifyCommit：净零搬迁是 relocation（不记欠账），净减仍是迁移（抵 1 笔）', () => {
