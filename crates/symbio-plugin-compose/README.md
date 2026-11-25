@@ -11,10 +11,8 @@ impl: done
 
 「首响 / 答话 / 汇报」的措辞——**只输出文本，不做判决**。
 
-判决的产出方见 `crates/symbio-kernel/src/dialog/` 里 `Verdict` 的变体表：`Answered` / `Escalate` 归
-[`../classify/README.md`](../symbio-plugin-classify/README.md "crates/symbio-plugin-classify/README")，`Report` 由 `session` 自己判出。
-本插件**不知道任何一个产出方存在**：它执行上游给出的判决结果，而两条调用边都从
-`session` 出发 —— 插件之间没有边。
+判决的形状见 `crates/symbio-kernel/src/dialog/` 里 `Verdict` 的变体表：`Answered` / `Escalate` / `Report`。
+本插件**不知道任何一个产出方存在**：它只执行上游经端口给出的判决结果，不描述其它能力如何实现或派发。
 
 判决与措辞分开的理由不是「拆得越细越好」，而是编排层要能**执行**判决（收尾 / 进工具
 循环 / 只说一句）——执行一段自由文本只能靠字符串匹配。

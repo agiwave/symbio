@@ -27,16 +27,16 @@ impl: done
 | `local/codebase_search` | 语义化代码检索（向量相似度，不可用时降级正则） |
 | `local/ask_user` | 向用户提出结构化问题（单问题或 1~4 批量，自动补 `Other`）；返回 `failure_kind = needs_interaction` + `prompt` 载荷（**节点由编排层构造**），等回答；自动模式下降级为 `tool_unavailable` 不阻塞 |
 
-> **文件编辑类能力已迁入 VDFS**：`read`/`edit`/`write`/`delete`/`list`/`search` 统一由 `vdfs` 插件以 `vdfs_read` / `vdfs_edit` / `vdfs_write` / `vdfs_delete` / `vdfs_list` / `vdfs_search` 暴露（详见 `../vdfs/README.md`）。物理文件层由此**不在本插件**：它属 `vdfs` 插件的物理层（`../vdfs/physical.rs`），是同一棵地址空间里不经挂载名的那一半。
+> **文件编辑类能力由 VDFS 端口提供**：`read` / `edit` / `write` / `delete` / `list` / `search` 统一走
+> `vdfs_*` 工具；物理文件层不在本插件，本插件只挂一份配置文档（`<根>/local/PLUGIN.yml`）。
 
 ## 机制
 
-- **工具贡献**：启动/遍历时经 `traverse` 把上述工具注册为 Capability，session 的 chat_loop 收集后进入模型工具定义。
-- **文件能力**：**不在本插件**——物理文件层属 `vdfs` 插件（`../vdfs/physical.rs`），读/写/编辑/列举/搜索统一经 `vdfs` 插件分发；`local` 在 VDFS 上只挂一份配置文档（`<根>/local/PLUGIN.yml`）。
+- **工具贡献**：启动/遍历时经 `traverse` 把上述工具注册为 Capability，由宿主收集后进入模型工具定义。
+- **文件能力**：经 VDFS 端口访问，本插件不描述文件层的实现方或分发路径。
 - **工作目录**：从 `ctx` 提取 `WORKDIR`，相对路径以此为基准；拒绝越界访问。
-- **结果回传**：工具结果作为 Tool 消息回给 session；超大结果受 session 侧 L0 守卫（8192 tok）与 1MB 物理上限约束。
+- **结果回传**：工具结果作为 Tool 消息交回；超大结果由注入的结果守卫按上限处理（8192 tok / 1MB）。
 
-## 关联
+## 边界
 
-- 工具收集管线：`crates/symbio-plugin-session/src/capabilities.rs`
-- 压缩守卫：`../session/README.md` 策略③ / `crates/symbio-plugin-session/src/docs/101-context-compression-design.md`
+工具收集与结果守卫都由宿主经端口提供；本插件不描述、不假设其它能力的实现。

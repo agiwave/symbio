@@ -36,5 +36,4 @@ Web 工具集：提供网络请求与检索能力，经 `traverse` 向会话贡�
 
 ## 关联
 
-- 工具收集管线：`crates/symbio-plugin-session/src/capabilities.rs`
-- 压缩守卫：`../session/README.md` 策略③
+- 工具收集管线与结果守卫由宿主经端口提供；本插件只经 `traverse` 交出能力行

@@ -21,8 +21,8 @@ impl: done
 | 事实 | `session.consolidated`（`message × progressed`） | 重建面把它折成折叠叶 |
 | 工具 / 路由 / 配置 | **无** | — |
 
-**为什么必须两行**：执行体归端口提供方。`model.assist` 的执行体不认识
-`session.consolidated`，本包的执行体不调模型；一行做完等于让模型插件写会话世界的事实。
+**为什么必须两行**：执行体归端口提供方。摘要执行体不认识 `session.consolidated`，
+本包的执行体也不生成摘要；一行做完等于让一个端口写另一个端口的事实。
 
 ## 口径
 
@@ -41,11 +41,11 @@ impl: done
 
 ## 已知项
 
-`session.consolidated` 的**声明 owner 是 session、写方是本包**（E-009 / CS-007 待裁）。
+`session.consolidated` 的**声明 owner 由事实规范指定、写方是本包**（E-009 / CS-007 待裁）。
 因此 `PLUGIN.yml` 里没有 `shared_events`：名字不跨插件导出。
 
 ## 关联
 
 - 债的形状与裁决：`docs/003-design/051-机制形状规格.md`（两行债）、`D-336` / `D-402`
-- 快照的折叠读法：`crates/symbio-plugin-session/src/rebuild.rs`
+- 快照的折叠读法由重建端口提供；本插件只声明事实形状与写入口
 - 长会话的断点与预算：`docs/003-design/035-长会话与断点恢复.md`

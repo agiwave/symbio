@@ -13,19 +13,18 @@ impl: done
 间隔、错峰、空闲基线、那条常驻扫描循环，加上这一设置的两个入口（模型侧工具 + 会话选项栏那一行）。
 
 「这次开轮是系统自己发起的」在事实源里的样子（触发 / 自检 / 欲 / 闸门四格）与运行参数的推导
-**不在本插件**：那是会话存储所有者的写窗口纪律，住在
-[`../session/transcript/autonomous.rs`](../symbio-plugin-session/src/transcript/autonomous.rs)，经会话的收件箱写臂进入
+**不在本插件**：本插件只发调度信号，写窗口与落格纪律由持有事实源的能力经端口承担
 （归属裁决 [D-076](README.md "crates/symbio-plugin-heartbeat/README")）。机制的完整语义与实测节奏见
 [`src/docs/113-heartbeat-mechanism.md`](src/docs/113-heartbeat-mechanism.md "DE-113-heartbeat-mechanism")。
 
-## 为什么是一个独立插件，而不是 session 里的一个模块
+## 为什么独立成插件
 
 判据是 [D-077](README.md "crates/symbio-plugin-heartbeat/README") 裁决一的三条，**缺一都不成立**：
 
 | 判据 | 这一片怎么满足 |
 |---|---|
-| **卸载单位** | 启停动词只认**一层插件目录**；拆出独立插件之前，它是 session 里的一个模块，只能随 session 整体启停（唯一的停用对象是 session 整体，而停用它少掉的显然不是心跳一个功能） |
-| **第二个消费单位** | 写标记的一方（本插件）与识别标记的一方（会话写臂）分属两个插件 ⇒ `meta.trigger` 这套词汇才是**共享**词汇，其单点定义住 `symbio_kernel::event` |
+| **卸载单位** | 启停动词只认**一层插件目录**；拆出独立插件之前，它只能随宿主整体启停（唯一的停用对象不是心跳一个功能） |
+| **第二个消费单位** | 写标记的一方（本插件）与识别标记的一方（持有事实源的能力）分属两个单元 ⇒ `meta.trigger` 这套词汇才是**共享**词汇，其单点定义住 `symbio_kernel::event` |
 | **分形** | 本插件在 `ASSEMBLY_SUB_AGENT_PLUGINS` 清单里 ⇒ 逐项进每一棵子树，每个智能体各有一条自己的调度循环——与切片前「每个 `SessionPlugin` 实例各跑一条」数量相等 |
 
 ## 它对世界只说三句话，全部走地址面

@@ -30,4 +30,4 @@ impl: done
 
 ## 关联
 
-- 工具收集管线：`crates/symbio-plugin-session/src/capabilities.rs`
+- 工具收集管线由宿主提供；本插件只经 `traverse` 交出能力行
