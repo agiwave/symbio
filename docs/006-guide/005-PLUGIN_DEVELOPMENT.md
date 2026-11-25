@@ -138,7 +138,7 @@ impl Plugin for MyPlugin {
                 // 裹了审批闸的端口行（执行面）与纯元数据的工具行（目录面）。
                 let tool = MyTool;
                 let meta = tool.meta();
-                symbio_providers::register_tool(visitor.as_ref(), meta, None, Arc::new(tool))
+                symbio_plugin_api::collectors::register_tool(visitor.as_ref(), meta, None, Arc::new(tool))
                     .await;
             }
         }

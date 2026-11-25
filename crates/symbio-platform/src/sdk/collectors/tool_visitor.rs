@@ -1,20 +1,15 @@
 //! 默认能力收集器 —— [`Registry`] 的内存实现
 //!
-//! ## 为什么在 `providers/` 而不是 `symbio-sdk`
-//!
-//! 本类型的**写入者是全体插件**（经 `ctx` 的 `CAPABILITY_VISITOR` 键注册工具 / 模型服务 /
-//! 系统提示词 / VDFS 挂载点），安装它的宿主（session 的 `collect_capabilities`）只是
-//! 其中之一。它不是任何插件的内部物，故按「不存在第二种实现的机制底座直接组合具体类型」
-//! 落在实现层——完整判据见 [`symbio_providers::collectors`] 的模块文档。
+//! 写入者是全体插件；它归 SDK 而非任何具体插件，也不属于服务实现层（D-564）。
 
 use super::approval::{GatedExecutor, RiskOf};
+use crate::kernel::capability::{CapabilityFamily, CapabilityRow, Registry};
+use crate::kernel::plugin::{PluginInvokeRequest, PluginInvokeRequestExt};
+use crate::sdk::capability::port::PortExecutor;
 use async_trait::async_trait;
 use indexmap::IndexMap;
 use std::collections::HashMap;
 use std::sync::Arc;
-use symbio_platform::kernel::capability::{CapabilityFamily, CapabilityRow, Registry};
-use symbio_platform::kernel::plugin::{PluginInvokeRequest, PluginInvokeRequestExt};
-use symbio_plugin_api::PortExecutor;
 use tokio::sync::RwLock;
 
 /// 默认能力管理器：内存注册表实现，一次会话请求一个实例
@@ -44,7 +39,7 @@ impl DefaultToolVisitor {
         let mut families = self.families.write().await;
         match families.get(&family) {
             Some(declared) if declared.is_single() != family.is_single() => {
-                symbio_platform::sdk::plugin_warn!(
+                crate::sdk::plugin_warn!(
                     "core",
                     "能力族 `{}` 的槽位声明冲突：先登记为 {}，本次为 {}（族身份按名字，冲突以先登记为准）",
                     family.name(),
@@ -81,7 +76,7 @@ impl Registry for DefaultToolVisitor {
         // 别的方式表现出来，所以这里留一条告警再覆盖。
         if let Some(old) = rows.get(&name) {
             if old.family() != family {
-                symbio_platform::sdk::plugin_warn!(
+                crate::sdk::plugin_warn!(
                     "core",
                     "能力表键 `{name}` 跨族同名覆盖：`{}` 行被 `{}` 行顶掉（族不参与键，见 Registry::put）",
                     old.family().name(),
@@ -134,7 +129,7 @@ impl Registry for DefaultToolVisitor {
 /// 可以缺席（夹具 / 内部请求），缺席就只写另一半——不造第二份注册事实。
 pub async fn register_tool(
     ctx: &Arc<dyn PluginInvokeRequest>,
-    meta: symbio_platform::kernel::capability::CapabilityMeta,
+    meta: crate::kernel::capability::CapabilityMeta,
     risk: Option<RiskOf>,
     executor: Arc<dyn PortExecutor>,
 ) {
@@ -147,7 +142,7 @@ pub async fn register_tool(
 /// 闸门拿它查沙箱时只认开放 kind 事实，不认识工具名。不声明的工具完全走原路径。
 pub async fn register_tool_with_facts(
     ctx: &Arc<dyn PluginInvokeRequest>,
-    meta: symbio_platform::kernel::capability::CapabilityMeta,
+    meta: crate::kernel::capability::CapabilityMeta,
     risk: Option<RiskOf>,
     facts: Option<super::approval::FactsOf>,
     executor: Arc<dyn PortExecutor>,
@@ -168,7 +163,7 @@ pub async fn register_tool_with_facts(
 
 pub async fn register_tool_with_async_facts(
     ctx: &Arc<dyn PluginInvokeRequest>,
-    meta: symbio_platform::kernel::capability::CapabilityMeta,
+    meta: crate::kernel::capability::CapabilityMeta,
     risk: Option<RiskOf>,
     facts: Option<super::approval::AsyncFactsOf>,
     executor: Arc<dyn PortExecutor>,
@@ -189,7 +184,7 @@ pub async fn register_tool_with_async_facts(
 
 async fn register_gated(
     ctx: &Arc<dyn PluginInvokeRequest>,
-    meta: symbio_platform::kernel::capability::CapabilityMeta,
+    meta: crate::kernel::capability::CapabilityMeta,
     risk: RiskOf,
     facts: Option<super::approval::FactSource>,
     executor: Arc<dyn PortExecutor>,
@@ -206,19 +201,17 @@ async fn register_gated(
         ),
         None => Arc::new(GatedExecutor::new(meta.clone(), risk, executor)),
     };
-    if let Some(bindings) = ctx.get(symbio_platform::sdk::capability::port::PORT_BINDINGS) {
-        let port = symbio_platform::sdk::capability::port::scoped_port_name(ctx, &meta.name);
-        symbio_platform::sdk::capability::port::check_port_name(&port);
+    if let Some(bindings) = ctx.get(crate::sdk::capability::port::PORT_BINDINGS) {
+        let port = crate::sdk::capability::port::scoped_port_name(ctx, &meta.name);
+        crate::sdk::capability::port::check_port_name(&port);
         let errors = bindings.bind(&[port], "tool", Some(gated));
         for error in errors {
-            symbio_platform::sdk::capability::capability_report_error(ctx, "tool", error).await;
+            crate::sdk::capability::capability_report_error(ctx, "tool", error).await;
         }
     }
-    if let Some(visitor) = ctx.get(symbio_platform::sdk::capability::CAPABILITY_VISITOR) {
+    if let Some(visitor) = ctx.get(crate::sdk::capability::CAPABILITY_VISITOR) {
         visitor
-            .put(symbio_platform::kernel::capability::CapabilityRow::tool(
-                meta,
-            ))
+            .put(crate::kernel::capability::CapabilityRow::tool(meta))
             .await;
     }
 }

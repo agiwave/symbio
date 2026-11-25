@@ -1,4 +1,4 @@
-//! `providers/collectors/approval.rs` 的单元测试。
+//! `sdk/collectors/approval.rs` 的单元测试。
 //!
 //! 覆盖审批闸门的两处形状：
 //! 1. **判定 [`approval_gate`]**——风险档与阈值的比较、模型 `approved` 无效、
@@ -8,20 +8,19 @@
 //!    `RESULT_KEY` 交回且**不落内层**；有效 typed grant 放行才透传给内层执行体。
 
 use super::*;
+use crate::kernel::capability::failure_kind;
+use crate::kernel::exec::{ExecAbortSignal, ExecEventSink};
+use crate::kernel::plugin::{PluginInvokeRequestExt, PluginSimpleRequest};
+use crate::sdk::capability::port::{
+    port_result, PortErrorClass, PortExecContext, PortExecutor, PortFactEmit, PortInput,
+    PortOutcome,
+};
+use crate::sdk::capability::ApprovalGrant;
+use crate::sdk::keys::{SESSION_ID, TOOL_CALL_ID};
+use crate::sdk::sandbox::{sandbox_init_slot, sandbox_publish, SandboxDecision, SandboxFace};
 use serde_json::json;
 use std::sync::atomic::{AtomicUsize, Ordering};
 use std::time::Duration;
-use symbio_platform::kernel::capability::failure_kind;
-use symbio_platform::kernel::exec::{ExecAbortSignal, ExecEventSink};
-use symbio_platform::kernel::plugin::{PluginInvokeRequestExt, PluginSimpleRequest};
-use symbio_platform::sdk::sandbox::{
-    sandbox_init_slot, sandbox_publish, SandboxDecision, SandboxFace,
-};
-use symbio_plugin_api::port::PortFactEmit;
-use symbio_plugin_api::{
-    port_result, ApprovalGrant, PortErrorClass, PortExecContext, PortExecutor, PortInput,
-    PortOutcome, SESSION_ID, TOOL_CALL_ID,
-};
 
 /// 最小可判定的执行体桩：固定风险、可选动态覆写、记录是否被真正执行。
 struct StubTool {
@@ -134,7 +133,7 @@ fn ctx_with_sandbox(decision: SandboxDecision) -> (Arc<dyn PluginInvokeRequest>,
 fn explicit_sandbox_selection_without_a_handle_fails_closed() {
     let tool = StubTool::new("read_file", CapabilityRiskLevel::Low);
     let ctx = ctx();
-    ctx.set(symbio_plugin_api::SANDBOX_ID, "strict".to_string());
+    ctx.set(crate::sdk::keys::SANDBOX_ID, "strict".to_string());
     let payload = approval_gate(
         &ctx,
         &tool.meta(),

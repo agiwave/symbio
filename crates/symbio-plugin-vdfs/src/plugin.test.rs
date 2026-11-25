@@ -68,7 +68,7 @@ async fn list_unknown_dir_errors() {
 #[test]
 fn tools_cover_all_ops() {
     let visitor: Arc<dyn symbio_plugin_api::Registry> =
-        Arc::new(symbio_providers::DefaultToolVisitor::new());
+        Arc::new(symbio_plugin_api::collectors::DefaultToolVisitor::new());
     let names: Vec<String> = tools::vdfs_tools(Arc::new(ToolVdfs::new(visitor)))
         .iter()
         .map(|(m, _)| m.name.clone())

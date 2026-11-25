@@ -387,12 +387,12 @@ async fn resource_tree_membership_is_derived_from_providers() {
 // （E-009），停用的动作走注册表的 `set_enabled`（= 前端那个开关背后的同一个动词）。
 
 use std::path::{Path, PathBuf};
+use symbio_plugin_api::collectors::DefaultToolVisitor;
 use symbio_plugin_api::testkit::capability_option_fields;
 use symbio_plugin_api::{
     family, vdfs_context, PluginStopReason, Registry, VdfsContent, VdfsRequest, VdfsResponse,
     OPTION_VISITOR, PLUGIN_FILE, TRAVERSE_AVAILABLE_OPTIONS, TRAVERSE_AVAILABLE_TOOLS,
 };
-use symbio_providers::DefaultToolVisitor;
 
 /// 一次性插件根：判据的来源是磁盘（装配位写在 `PLUGIN.yml`），不能拿内存替身测
 fn guard_root(tag: &str) -> PathBuf {

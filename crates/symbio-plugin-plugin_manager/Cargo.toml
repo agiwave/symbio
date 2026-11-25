@@ -19,7 +19,6 @@ tokio = { workspace = true, features = ["full"] }
 async-trait = { workspace = true }
 
 [dev-dependencies]
-symbio-providers = { path = "../symbio-providers" }
 symbio-plugin-api = { path = "../symbio-plugin-api", features = ["test-fixtures"] }
 tempfile = { workspace = true }
 # 测试用：tokio 时间控制（start_paused / advance）

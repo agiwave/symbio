@@ -221,8 +221,9 @@ impl Plugin for HeartbeatPlugin {
         if path == TRAVERSE_AVAILABLE_TOOLS && ctx.get(CAPABILITY_VISITOR).is_some() {
             let tool = HeartbeatTool::new(Arc::downgrade(&self));
             let meta = tool.meta();
-            let facts: symbio_providers::FactsOf = Arc::new(HeartbeatTool::intent_facts);
-            symbio_providers::register_tool_with_facts(
+            let facts: symbio_plugin_api::collectors::FactsOf =
+                Arc::new(HeartbeatTool::intent_facts);
+            symbio_plugin_api::collectors::register_tool_with_facts(
                 &ctx,
                 meta,
                 None,

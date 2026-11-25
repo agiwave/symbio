@@ -14,7 +14,7 @@ use symbio_platform::sdk::capability::capability_option_fields;
 // 测的是**无父插件时的降级**，不是契约——契约由 `capability/option.rs` 的读协议文档钉住。
 //
 // 选项行本身的两条（排序 / 去重）是表语义，守门人随 4e 迁到
-// `providers/collectors/tool_visitor.test.rs`（全表共用的唯一实现）。
+// `sdk/collectors/tool_visitor.test.rs`（全表共用的唯一实现）。
 
 #[tokio::test]
 async fn collect_without_parent_returns_empty() {

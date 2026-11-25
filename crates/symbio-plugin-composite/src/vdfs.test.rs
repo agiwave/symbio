@@ -11,12 +11,12 @@ use super::*;
 use indexmap::IndexMap;
 use std::path::{Path, PathBuf};
 use std::sync::RwLock;
+use symbio_plugin_api::collectors::DefaultToolVisitor;
 use symbio_plugin_api::testkit::VDFS_KIND_DIR;
 use symbio_plugin_api::{vdfs_context, VdfsItem};
 use symbio_plugin_api::{
     PluginError, PluginInvokeRequest, PluginPayload, PluginSimpleRequest, CAPABILITY_VISITOR,
 };
-use symbio_providers::DefaultToolVisitor;
 
 /// 只暴露一个 `a.txt` 的 provider；目录名 / 顺序 / 隐藏由**假插件的 meta** 决定
 struct LeafProvider;

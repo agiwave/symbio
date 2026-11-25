@@ -171,7 +171,7 @@ impl Host {
         session_id: &str,
         provider: Option<&str>,
     ) -> Result<Gathered, String> {
-        let manager: Arc<dyn Registry> = symbio_providers::new_registry();
+        let manager: Arc<dyn Registry> = symbio_platform::sdk::collectors::new_registry();
         let ctx = base.fork();
         ctx.set(PATH, TRAVERSE_AVAILABLE_TOOLS.to_string());
         ctx.set(SESSION_ID, session_id.to_string());

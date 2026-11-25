@@ -610,7 +610,7 @@ impl Plugin for McpPlugin {
                         let tool = Arc::new(tool);
                         let facts = tool.facts();
                         let meta = tool.meta();
-                        symbio_providers::register_tool_with_facts(
+                        symbio_plugin_api::collectors::register_tool_with_facts(
                             &ctx,
                             meta,
                             None,

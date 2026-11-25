@@ -56,7 +56,7 @@ impl Plugin for GlossaryPlugin {
         if path == TRAVERSE_AVAILABLE_TOOLS && ctx.get(CAPABILITY_VISITOR).is_some() {
             let tool = GlossaryTool;
             let meta = tool.meta();
-            symbio_providers::register_tool(&ctx, meta, None, Arc::new(tool)).await;
+            symbio_plugin_api::collectors::register_tool(&ctx, meta, None, Arc::new(tool)).await;
         }
         Ok(PluginPayload::new(&Vec::<serde_json::Value>::new()))
     }

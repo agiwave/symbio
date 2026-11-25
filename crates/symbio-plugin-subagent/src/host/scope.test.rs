@@ -19,7 +19,7 @@ fn tool_name_uses_protocol_safe_chars() {
     // agent id 允许 `.`（工具名不许，进 function-calling 协议）→ 压成 `_`；
     // `-` 在协议允许集内（`[A-Za-z0-9_-]`），保留以维持可读。
     let v = SubAgentVisitor::new(
-        Arc::new(symbio_providers::DefaultToolVisitor::new()),
+        Arc::new(symbio_plugin_api::collectors::DefaultToolVisitor::new()),
         "com.acme.code-reviewer",
     );
     assert_eq!(
@@ -38,7 +38,7 @@ fn tool_name_uses_protocol_safe_chars() {
 #[test]
 fn seg_keeps_id_readable() {
     let v = SubAgentVisitor::new(
-        Arc::new(symbio_providers::DefaultToolVisitor::new()),
+        Arc::new(symbio_plugin_api::collectors::DefaultToolVisitor::new()),
         "reviewer",
     );
     assert_eq!(v.seg("work"), "agent/reviewer/work");
@@ -138,7 +138,8 @@ async fn label_of(root: &Arc<dyn VdfsProvider>) -> String {
 /// （子树的根只认得子树里的插件）。
 #[tokio::test]
 async fn sub_agent_root_registration_is_discarded() {
-    let inner: Arc<dyn Registry> = Arc::new(symbio_providers::DefaultToolVisitor::new());
+    let inner: Arc<dyn Registry> =
+        Arc::new(symbio_plugin_api::collectors::DefaultToolVisitor::new());
     inner
         .put(CapabilityRow::mount_root(Arc::new(LabeledRoot("系统根"))))
         .await;
@@ -167,7 +168,8 @@ async fn sub_agent_root_registration_is_discarded() {
 /// 插件按 id 就能取到子 Agent 塞进来的实例（`scope.rs` 的文档明写这一条）。
 #[tokio::test]
 async fn sub_agent_model_registration_is_discarded() {
-    let inner: Arc<dyn Registry> = Arc::new(symbio_providers::DefaultToolVisitor::new());
+    let inner: Arc<dyn Registry> =
+        Arc::new(symbio_plugin_api::collectors::DefaultToolVisitor::new());
     inner.put(CapabilityRow::model("sys", true)).await;
 
     let scoped = SubAgentVisitor::new(Arc::clone(&inner), "reviewer");
@@ -213,13 +215,14 @@ fn scoped_ctx(
 /// 与上面两条是一对：缺了它，「代理什么都不转发」也能让那两条通过。
 #[tokio::test]
 async fn sub_agent_multi_slot_registrations_join_parent_with_prefix() {
-    let inner: Arc<dyn Registry> = Arc::new(symbio_providers::DefaultToolVisitor::new());
+    let inner: Arc<dyn Registry> =
+        Arc::new(symbio_plugin_api::collectors::DefaultToolVisitor::new());
     let scoped: Arc<dyn Registry> = Arc::new(SubAgentVisitor::new(Arc::clone(&inner), "reviewer"));
 
     // 注册走生产形状：子树自己的 `register_tool` 读 ctx 上的作用域前缀，工具行进
     // 代理层、端口绑定按前缀名进容器（派发侧按前缀名查得到执行体）。
     let (ctx, bindings) = scoped_ctx(&scoped, "agent_reviewer_");
-    symbio_providers::register_tool(
+    symbio_plugin_api::collectors::register_tool(
         &ctx,
         EchoTool("read_skill").meta(),
         None,
@@ -282,7 +285,8 @@ async fn sub_agent_multi_slot_registrations_join_parent_with_prefix() {
 /// 上一条的写侧丢弃就白做了：**劫持改从读侧发生**。
 #[tokio::test]
 async fn read_side_forwards_to_inner_unchanged() {
-    let inner: Arc<dyn Registry> = Arc::new(symbio_providers::DefaultToolVisitor::new());
+    let inner: Arc<dyn Registry> =
+        Arc::new(symbio_plugin_api::collectors::DefaultToolVisitor::new());
     inner.put(CapabilityRow::model("sys", true)).await;
     inner
         .put(CapabilityRow::mount_root(Arc::new(LabeledRoot("系统根"))))

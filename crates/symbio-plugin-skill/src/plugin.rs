@@ -551,7 +551,8 @@ impl Plugin for SkillPlugin {
             if !skills.is_empty() && ctx.get(symbio_plugin_api::CAPABILITY_VISITOR).is_some() {
                 let tool = SkillExecuteTool::new(skills);
                 let meta = tool.meta();
-                symbio_providers::register_tool(&ctx, meta, None, Arc::new(tool)).await;
+                symbio_plugin_api::collectors::register_tool(&ctx, meta, None, Arc::new(tool))
+                    .await;
             }
         }
         // 本轮配置快照贡献（D-427）：编译开关的真源在本插件的 PLUGIN.yml，

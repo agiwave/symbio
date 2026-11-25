@@ -33,16 +33,16 @@
 //! **不在这里**：它属于 `Plugin::traverse` 的契约，与 `TRAVERSE_AVAILABLE_TOOLS` 同处
 //! `plugin::traverse`——同一份协议的两个端点该住在一起。本域只是那条通道的**产出方之一**。
 //!
-//! 而**收集器实现**落在全表共用的 `DefaultToolVisitor`（`providers/collectors/`）——
+//! 而**收集器实现**落在全表共用的 `DefaultToolVisitor`（`sdk/collectors/`）——
 //! 它的**写入者是全体插件**（在 `traverse` 里注册字段），安装它的宿主只是其中之一，
 //! 故不隶属于任何插件。
 //! **收集管线**（`collect_options` / `collect_capabilities`）只有 session 一个消费方，
 //! 按「依赖方数量」判据（D-023）下沉到 `crates/symbio-plugin-session/src/capabilities.rs`。
 //!
 //! ```text
-//! 在 core：行词汇 + 读协议（本文件）        ← 写入者、读写者都认
-//! 在 providers：全表共用的内存收集器       ← 写入者是全体插件，无宿主归属
-//! 在 session：收集管线（collect_options）   ← 只有宿主认
+//! 在 sdk：行词汇 + 读协议（本文件）        ← 写入者、读写者都认
+//! 在 sdk：全表共用的内存收集器            ← 写入者是全体插件，无宿主归属
+//! 在 session：收集管线（collect_options） ← 只有宿主认
 //! ```
 //!
 //! ## 产物是 `DetailField`，不是自成一体的节点类型

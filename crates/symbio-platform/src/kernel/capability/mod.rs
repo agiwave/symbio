@@ -150,7 +150,7 @@ impl CapabilityRiskLevel {
     /// 判据：宁可多问一次，不因为写错一个词就静默放宽。
     ///
     /// 为什么要有这个方法：会话阈值（`ctx[RISK_LEVEL]`）此前在两处**各写一份**
-    /// 五字 `match`（审批闸门 `providers/collectors/approval.rs` 与 shell 的
+    /// 五字 `match`（审批闸门 `sdk/collectors/approval.rs` 与 shell 的
     /// 参数级风险判定）。加一档 `Critical` 要改两处，漏一处就静默降级成 `Medium`——
     /// 那是**放宽安全约束**的静默失效，不是缺个功能。现在两处都问这里。
     pub fn from_name(name: &str) -> Self {
@@ -174,7 +174,7 @@ impl CapabilityRiskLevel {
     /// 3. `risk ≤ grant` ⇒ 不高于该工具的永久放行上限（`Grant`）。
     ///
     /// 为什么放在类型上、且返回「依据」而不只是布尔：执行闸门
-    /// （`providers/collectors/approval.rs`）与授权级联的记录方（`crates/symbio-plugin-loop`）
+    /// （`sdk/collectors/approval.rs`）与授权级联的记录方（`crates/symbio-plugin-loop`）
     /// 必须用同一份判据；两处各写一遍「或」，放宽安全约束的一侧漏改没有任何东西会
     /// 红。记录方还需要依据本身——不加它，事后无法从日志分辨「这次为什么没问」，
     /// 而三档的全部差别正是这个「为什么」。
@@ -294,7 +294,7 @@ pub trait Registry: Send + Sync + 'static {
     /// 入表一行（**全族的唯一写入入口**）。
     ///
     /// 行是纯数据（`D-440`）：入表不裹闸、不派生——工具的注册收口是
-    /// `providers/collectors` 的 `register_tool`（一次写装配期容器的端口绑定与
+    /// `sdk/collectors` 的 `register_tool`（一次写装配期容器的端口绑定与
     /// 纯数据的工具行两处），审批判定发生在端口执行体的第一段。
     ///
     /// ## 单槽族的**唯一生效**也在这里维持

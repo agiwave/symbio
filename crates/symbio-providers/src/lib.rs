@@ -8,7 +8,6 @@
 //! - `embedding`：`crate::symbio_platform::sdk::embedding::EmbeddingService` 的实现
 //!   （经工厂 `creator_create_object::<dyn EmbeddingService>(...)` 取用）
 //! - `vdfs_service`：**基于 `VdfsProvider` 接口的集中实现**（单文件 / 目录 / 内存）
-//! - `collectors`：`*Visitor` 三个契约的**内存默认实现**（写入者是全体插件）
 //!
 //! 「单文件长期记忆」此前也住在这里，唯一生产消费方 `memory` 插件已按 D-534 把它
 //! 收回自己的私有模块（`symbio-plugin-memory/src/memory_file.rs`），本层不再出口。
@@ -62,17 +61,10 @@
 
 // 实现源码随所有者迁入本 crate 的私有模块；出口仍是原来的 `symbio_providers::`
 // 平铺面，模块路径只保留给需要深引的装配代码。
-pub mod collectors;
 #[cfg(feature = "embedding")]
 pub mod embedding;
 pub mod vdfs_service;
 
-pub use collectors::{
-    approval_gate, new_registry, register_tool, register_tool_with_async_facts,
-    register_tool_with_facts, AsyncFactsOf, FactsOf, RiskOf,
-};
-// `DefaultToolVisitor` 是测试面句柄；生产装配一律经 `new_registry()`。
-pub use collectors::DefaultToolVisitor;
 // `embedding` 实例经 `submit_object_creator!` 注册，调用方只取「为什么不可用」。
 #[cfg(feature = "embedding")]
 pub use embedding::unavailable_reason as embedding_unavailable_reason;

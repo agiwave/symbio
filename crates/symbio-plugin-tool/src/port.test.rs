@@ -480,7 +480,7 @@ async fn ctx_with_tool(
         },
         data,
     };
-    symbio_providers::register_tool(&ctx, tool.meta(), None, Arc::new(tool)).await;
+    symbio_plugin_api::collectors::register_tool(&ctx, tool.meta(), None, Arc::new(tool)).await;
     ctx
 }
 
@@ -574,7 +574,7 @@ async fn dispatch_puts_the_tool_card_node_id_into_the_executor_ctx() {
             ..Default::default()
         },
     };
-    symbio_providers::register_tool(&ctx, tool.meta(), None, Arc::new(tool)).await;
+    symbio_plugin_api::collectors::register_tool(&ctx, tool.meta(), None, Arc::new(tool)).await;
 
     let exec = PortExecContext {
         abort: ExecAbortSignal::new(),
@@ -757,7 +757,8 @@ async fn ctx_with_resume_tool(
         },
         seen: seen.clone(),
     };
-    symbio_providers::register_tool(&ctx, tool.meta.clone(), None, Arc::new(tool)).await;
+    symbio_plugin_api::collectors::register_tool(&ctx, tool.meta.clone(), None, Arc::new(tool))
+        .await;
     (ctx, seen)
 }
 
@@ -1957,7 +1958,7 @@ async fn ctx_with_probes(
     req.set(PORT_BINDINGS, Arc::new(PortBindings::default()));
     let ctx: Arc<dyn PluginInvokeRequest> = Arc::new(req);
     for tool in tools {
-        symbio_providers::register_tool(&ctx, tool.meta(), None, tool).await;
+        symbio_plugin_api::collectors::register_tool(&ctx, tool.meta(), None, tool).await;
     }
     ctx
 }
@@ -2218,7 +2219,7 @@ async fn ctx_with_strict_tool(
         },
         seen,
     };
-    symbio_providers::register_tool(&ctx, tool.meta(), None, Arc::new(tool)).await;
+    symbio_plugin_api::collectors::register_tool(&ctx, tool.meta(), None, Arc::new(tool)).await;
     ctx
 }
 

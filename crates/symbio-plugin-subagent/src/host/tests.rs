@@ -17,6 +17,7 @@ use std::sync::Arc;
 // 只为把全部插件的工厂注册（inventory）链进本测试二进制，见 Cargo.toml 的 dev-dependencies 注。
 use symbio as _;
 
+use symbio_plugin_api::collectors::DefaultToolVisitor;
 use symbio_plugin_api::PLUGIN_ID_SUBAGENT;
 use symbio_plugin_api::{
     capability_prompts, family, CapabilityMeta, Plugin, PluginDir, PluginInvokeRequest,
@@ -24,7 +25,6 @@ use symbio_plugin_api::{
     TRAVERSE_AVAILABLE_TOOLS, VDFS_PARENT_ADDR, WORKDIR, WORKSPACE_VDFS,
 };
 use symbio_plugin_api::{vdfs_context, VdfsProvider};
-use symbio_providers::DefaultToolVisitor;
 
 /// 收集器的工具元数据（`list_capability` 收敛为 `list(kind)`）——
 /// 本文件的断言一律按名字说话，经这个小助手读，免得每个断言点各写一遍展开。

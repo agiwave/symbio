@@ -220,7 +220,7 @@ pub use symbio_platform::sdk::vdfs::host::{
     vdfs_watch_changes,
 };
 pub use symbio_platform::sdk::{
-    impl_config_mount_vdfs, plugin_debug, plugin_error, plugin_info, plugin_warn,
+    collectors, impl_config_mount_vdfs, plugin_debug, plugin_error, plugin_info, plugin_warn,
     submit_object_creator,
 };
 

@@ -19,6 +19,7 @@ dead_code = "warn"
 async-trait = { workspace = true }
 dashmap = { workspace = true }
 dirs = { workspace = true }
+indexmap = { workspace = true }
 inventory = { workspace = true }
 serde = { workspace = true, features = ["derive", "rc"] }
 serde_json = { workspace = true }

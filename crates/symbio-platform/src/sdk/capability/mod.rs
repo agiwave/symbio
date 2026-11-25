@@ -32,7 +32,7 @@ pub use error::{
 // 域内子模块私有，公开面在此显式重导出
 //
 // 注：全表共用的内存收集器（`DefaultToolVisitor`）**不在本域**——
-// 它是契约的默认实现，写入者是全体插件，故住 `crate::kernel::capability::providers::collectors`。
+// 它是契约的默认实现，写入者是全体插件，故住 `crate::sdk::collectors`。
 pub use config_snapshot::{
     capability_announce_config_snapshot, capability_config_snapshot, CONFIG_SNAPSHOT,
 };

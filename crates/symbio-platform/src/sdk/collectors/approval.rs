@@ -24,17 +24,16 @@
 
 use std::sync::Arc;
 
+use crate::kernel::capability::{CapabilityMeta, CapabilityRiskLevel};
+use crate::kernel::plugin::{PluginInvokeRequest, PluginInvokeRequestExt};
+use crate::sdk::capability::port::{
+    AuthzVerdict, PortErrorClass, PortExecContext, PortExecutor, PortInput, PortOutcome, RESULT_KEY,
+};
+use crate::sdk::capability::{ApprovalGrant, ApprovalGrants};
+use crate::sdk::keys::{APPROVAL_GRANTS, MODE, RISK_LEVEL, SANDBOX_ID, SESSION_ID, TOOL_CALL_ID};
+use crate::sdk::sandbox::{sandbox_of, SandboxFact};
 use async_trait::async_trait;
 use serde_json::{json, Value};
-use symbio_platform::kernel::capability::{CapabilityMeta, CapabilityRiskLevel};
-use symbio_platform::kernel::plugin::{PluginInvokeRequest, PluginInvokeRequestExt};
-use symbio_platform::sdk::capability::ApprovalGrants;
-use symbio_platform::sdk::keys::{APPROVAL_GRANTS, MODE, RISK_LEVEL};
-use symbio_platform::sdk::sandbox::{sandbox_of, SandboxFact};
-use symbio_plugin_api::{
-    ApprovalGrant, AuthzVerdict, PortErrorClass, PortExecContext, PortExecutor, PortInput,
-    PortOutcome, RESULT_KEY, SANDBOX_ID, SESSION_ID, TOOL_CALL_ID,
-};
 
 /// collectors 在一次性授权凭据消费成功后写给内层执行体的可信标记。
 ///
@@ -115,7 +114,7 @@ pub fn grants_from_ctx(ctx: &Arc<dyn PluginInvokeRequest>) -> ApprovalGrants {
 /// - `risk(args) ≤ grant`（该工具有永久放行上限，且本次风险不超过它）。
 ///
 /// 模型参数 `args.approved` 永远不是授权。沙箱存在时只调用一次
-/// [`symbio_platform::sdk::sandbox::SandboxFace::decide`]，
+/// [`crate::sdk::sandbox::SandboxFace::decide`]，
 /// 许可、拦截、风险下限、审批模式与阈值都取自同一份快照。
 ///
 /// 需要审批时，`mode=auto` ⇒ `PERMISSION_DENIED` 友好错误（无人值守，不产卡），
@@ -173,7 +172,7 @@ fn approval_gate_inner(
             return Some(json!({
                 "error": format!("沙箱未放行工具 {} 的本次调用：{reason}", meta.name),
                 "success": false,
-                "failure_kind": symbio_platform::kernel::capability::failure_kind::PERMISSION_DENIED,
+                "failure_kind": crate::kernel::capability::failure_kind::PERMISSION_DENIED,
             }));
         }
         if let Some(level) = decision
@@ -194,7 +193,7 @@ fn approval_gate_inner(
         return Some(json!({
             "error": format!("沙箱未放行工具 {} 的本次调用：已选择沙箱但沙箱句柄不可用", meta.name),
             "success": false,
-            "failure_kind": symbio_platform::kernel::capability::failure_kind::PERMISSION_DENIED,
+            "failure_kind": crate::kernel::capability::failure_kind::PERMISSION_DENIED,
         }));
     }
 
@@ -254,13 +253,13 @@ fn confirm_prompt_payload(
                 tool_name, risk_str
             ),
             "success": false,
-            "failure_kind": symbio_platform::kernel::capability::failure_kind::PERMISSION_DENIED,
+            "failure_kind": crate::kernel::capability::failure_kind::PERMISSION_DENIED,
         });
     }
     json!({
         "content": format!("需要确认：{tool_description}"),
         "success": false,
-        "failure_kind": symbio_platform::kernel::capability::failure_kind::NEEDS_APPROVAL,
+        "failure_kind": crate::kernel::capability::failure_kind::NEEDS_APPROVAL,
         "prompt": {
             "kind": "confirm",
             "tool_name": tool_name,
@@ -354,7 +353,7 @@ impl PortExecutor for GatedExecutor {
                 Err(error) => Some(json!({
                     "error": format!("工具意图事实解析失败：{error}"),
                     "success": false,
-                    "failure_kind": symbio_platform::kernel::capability::failure_kind::PERMISSION_DENIED,
+                    "failure_kind": crate::kernel::capability::failure_kind::PERMISSION_DENIED,
                 })),
             },
             None => approval_gate(&request, &self.meta, self.risk.as_ref(), &input.payload),

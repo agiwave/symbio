@@ -11,6 +11,7 @@ use super::{
 use async_trait::async_trait;
 use serde_json::{json, Value};
 use std::sync::{Arc, Weak};
+use symbio_plugin_api::collectors::{FactsOf, RiskOf};
 use symbio_plugin_api::PLUGIN_ID_LOCAL;
 use symbio_plugin_api::{
     plugin_dir_from_ctx, CapabilityMeta, CapabilityRiskLevel, Plugin, PluginConfigFile, PluginDir,
@@ -18,7 +19,6 @@ use symbio_plugin_api::{
     PluginPayload, PortExecutor,
 };
 use symbio_plugin_api::{DetailDefinition, DetailField, DetailOption};
-use symbio_providers::{FactsOf, RiskOf};
 use tokio::sync::RwLock;
 
 // ==================== 配置文档（`<根>/local/PLUGIN.yml`） ====================
@@ -168,7 +168,7 @@ impl LocalPlugin {
         let shell = Arc::new(ShellTool::new(Arc::clone(&security), shell_timeout));
         let content_search = Arc::new(ContentSearchTool::new(Arc::clone(&security)));
         // 下面两个**不持策略**（与 `ask_user` 同类的「没有可判的路径」）：审批闸门由
-        // 收口点 `DefaultToolVisitor::put` 统一加壳（见 `providers/collectors/approval.rs`），
+        // 收口点 `DefaultToolVisitor::put` 统一加壳（见 `sdk/collectors/approval.rs`），
         // 理由见各自结构体文档。
         let todo_write = Arc::new(TodoWriteTool);
         let codebase_search = Arc::new(CodebaseSearchTool);
@@ -332,7 +332,7 @@ impl Plugin for LocalPlugin {
             // 纯数据的工具行。shell 的动态风险闭包与事实提取器随条目交上去，
             // 静态档工具传 `None`（判定回落 `meta.effective_risk()`）。
             for entry in self.tool_impls.iter() {
-                symbio_providers::register_tool_with_facts(
+                symbio_plugin_api::collectors::register_tool_with_facts(
                     &ctx,
                     entry.meta.clone(),
                     entry.risk.clone(),

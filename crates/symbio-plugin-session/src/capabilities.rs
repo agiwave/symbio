@@ -46,11 +46,11 @@ use symbio_platform::kernel::plugin::{
     Plugin, PluginError, PluginInvokeRequest, PluginInvokeRequestExt,
 };
 use symbio_platform::sdk::capability::{capability_init_error_bucket, CAPABILITY_ERRORS};
+use symbio_plugin_api::collectors::new_registry;
 use symbio_plugin_api::AgentScope;
 use symbio_plugin_api::OPTION_VISITOR;
 use symbio_plugin_api::{AGENT_ID, PATH};
 use symbio_plugin_api::{TRAVERSE_AVAILABLE_OPTIONS, TRAVERSE_AVAILABLE_TOOLS};
-use symbio_providers::new_registry;
 
 /// 向所有插件广播"贡献工具"，返回装配好的能力管理器。
 ///
@@ -183,7 +183,7 @@ pub(crate) fn require_agent_scope(
 // 故两者同处本文件，不因历史路径而分居。
 //
 // 收集器**实现**（`DefaultToolVisitor`，全表共用）不在这里——它的写入者是全体插件，
-// 不隶属于任何宿主，故住 `symbio_providers::collectors`（见该模块文档的判据）。
+// 不隶属于任何宿主，故住 `symbio_plugin_api::collectors`（见该模块文档的判据）。
 
 /// 向所有插件广播「贡献选项」，返回装配好的选项收集器。
 ///
@@ -203,7 +203,7 @@ pub async fn collect_options(
 ) -> Arc<dyn Registry> {
     // 4e：选项与能力同表——收集器就是全表共用的 `DefaultToolVisitor`，
     // 选项行（`CapabilityRow::option`）与工具行同一 `put` / `list`，只是通道独立。
-    // 实例按收集 pass 新建（状态不跨请求），构造点收在 `providers::new_registry`。
+    // 实例按收集 pass 新建（状态不跨请求），构造点收在 `collectors::new_registry`。
     let visitor: Arc<dyn Registry> = new_registry();
 
     let Some(parent) = parent else {

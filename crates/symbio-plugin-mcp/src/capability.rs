@@ -12,18 +12,18 @@
 //! ## 生命周期
 //!
 //! - 创建：每次 `traverse` 时构造
-//! - 销毁：随 `tool_visitor`（通常是 `providers::DefaultToolVisitor`）一起被丢弃
+//! - 销毁：随 `tool_visitor`（通常是 `collectors::DefaultToolVisitor`）一起被丢弃
 //! - **不持有**任何 stdio 进程 / http 连接（按需 lazy 加载）
 
 use crate::schemas::mcp_config::McpServerConfig;
 use async_trait::async_trait;
 use serde_json::Value;
 use std::sync::Arc;
+use symbio_plugin_api::collectors::FactsOf;
 use symbio_plugin_api::{
     missing_caller, port_result, CapabilityCategory, CapabilityMeta, ExecEnv, PluginError,
     PluginInvokeRequest, PortExecContext, PortExecutor, PortInput, PortOutcome, SandboxFact,
 };
-use symbio_providers::FactsOf;
 
 use super::manager::McpManager;
 use super::types::{McpTool, McpToolCallResponse};

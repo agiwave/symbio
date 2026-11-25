@@ -227,7 +227,10 @@ export const WHITELIST_BASELINE = 0
 // 快照裁决；`ApprovalGrant` 让 tool 审批恢复与 collectors 执行闸门交换一次性凭据；
 // `VdfsCaller` / `VDFS_CALLER` 让宿主管理入口与模型执行链交换进程内可信主体。
 // 四条均不含工具清单 / 策略 / 业务字段，消费方跨至少两个插件。
-export const SDK_BASELINE = 117
+// 117 → 118（`D-564`）：默认收集器整组从服务实现层迁入 sdk，门面只新增 `collectors`
+// 一个模块级转发；交换条件是五个插件删除 providers 依赖、providers 删除门面依赖，
+// 内部生产边净减 6。实现符号仍住在平台，不在根出口逐条铺开。
+export const SDK_BASELINE = 118
 
 /**
  * 契约臂基线：**只许降**（`D-486`）。`symbio-contract` 是插件 ABI 的纯形状层，
@@ -297,6 +300,7 @@ export const GRAMMAR_BASELINE = 111
 // D-420 后 `chat_node` / `principal` 改由语法臂从内核转出：同两个名字换来源，条数不变。
 // 14 → 13（`D-443`）：`fact_source` 模块级转发随登记面五条一并退场（session 走豁免
 // 直取 sdk 本体）。
+// D-564 的 `collectors` 由现有计件归入 SDK 臂，模块级转发读数仍为 13。
 export const MODULE_REEXPORT_BASELINE = 13
 
 /** 门面白名单所在的文件与块的起止标记。 */

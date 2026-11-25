@@ -35,8 +35,8 @@
 //! ## 谁住在这里
 //!
 //! 与 `CapabilityMeta` 同域同理：全部收集通道（工具 / 模型服务 / 提示词 /
-//! 挂载 / 选项）共用同一张表，契约是**跨插件**的，故类型在 core；表的默认实现
-//! （`DefaultToolVisitor`）在 `providers/collectors`，策略行在 loop 插件的
+//! 挂载 / 选项）共用同一张表，契约是**跨插件**的，故类型在 kernel；表的默认实现
+//! （`DefaultToolVisitor`）在 `sdk/collectors`，策略行在 loop 插件的
 //! `loop_rows`——三处各住各的，见 DE-025 §3。
 
 use super::family;

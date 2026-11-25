@@ -88,7 +88,7 @@ use symbio_plugin_api::{
     VDFS_PARAM_WITH_HIDDEN, VDFS_PLUGINS_FIELD, VDFS_PLUGIN_NAME_FIELD, VDFS_PLUGIN_PROVIDER_FIELD,
 };
 
-use symbio_providers::new_registry;
+use symbio_plugin_api::collectors::new_registry;
 
 /// 容器的 VDFS（包含子目录列表的 provider，见模块文档）
 pub struct CompositeVdfs {

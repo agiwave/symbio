@@ -8,8 +8,8 @@
 //!
 //! ## 为什么住能力域
 //!
-//! 它的键是能力名、值的能力风险档，读侧是审批闸门（`providers/collectors`）与授权
-//! 级联的记录方（`crates/symbio-plugin-loop`）——两处隔着插件墙，只有 core 共同可见。
+//! 它的键是能力名、值的能力风险档，读侧是审批闸门（`sdk/collectors`）与授权
+//! 级联的记录方（`crates/symbio-plugin-loop`）——两处隔着插件墙，只有平台共同可见。
 
 use super::CapabilityRiskLevel;
 use crate::kernel::plugin::PluginInvokeRequest;

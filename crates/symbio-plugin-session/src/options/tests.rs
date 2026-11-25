@@ -119,10 +119,10 @@ async fn session_contributes_option_fields_to_the_visitor() {
     use symbio_platform::kernel::capability::Registry;
     use symbio_platform::kernel::plugin::PluginSimpleRequest;
     use symbio_platform::sdk::capability::capability_option_fields;
+    use symbio_plugin_api::collectors::DefaultToolVisitor;
     use symbio_plugin_api::OPTION_VISITOR;
     use symbio_plugin_api::PATH;
     use symbio_plugin_api::TRAVERSE_AVAILABLE_OPTIONS;
-    use symbio_providers::DefaultToolVisitor;
 
     let p = Arc::new(plugin());
     let ctx = Arc::new(PluginSimpleRequest::new(None, None)).fork();

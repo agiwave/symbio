@@ -7,10 +7,10 @@ use super::*;
 use async_trait::async_trait;
 use serde_json::json;
 use std::sync::Mutex;
+use symbio_plugin_api::collectors::DefaultToolVisitor;
 use symbio_plugin_api::AgentScope;
 use symbio_plugin_api::{CapabilityRow, PluginInvokeRequestExt, PluginSimpleRequest, WORKDIR};
 use symbio_plugin_api::{VdfsAccess, VdfsContext, VdfsProvider, VdfsResponse};
-use symbio_providers::DefaultToolVisitor;
 
 /// 记录收到地址的虚拟层替身（各操作全部直通，便于断言门面转出来的内部口径）
 struct Rec {

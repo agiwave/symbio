@@ -11,8 +11,8 @@
 
 use super::*;
 use std::path::Path;
+use symbio_plugin_api::collectors::DefaultToolVisitor;
 use symbio_plugin_api::{capability_prompts, PluginInvokeRequestExt, Registry, VDFS_PARENT_ADDR};
-use symbio_providers::DefaultToolVisitor;
 use tempfile::TempDir;
 
 /// 构造带能力收集器的上下文；三个目录分别注入三个作用域 provider（D-515），

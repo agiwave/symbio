@@ -6,11 +6,12 @@ use super::{
     http_request::HttpRequestTool, web_fetch::WebFetchTool, web_search::upstream_url,
     web_search::WebSearchTool,
 };
-// 审批闸门住在能力注册收口点（`providers/collectors/approval.rs`）；本插件只交声明，
+// 审批闸门住在能力注册收口点（`sdk/collectors/approval.rs`）；本插件只交声明，
 // 不再有第二条路径去判闸（D-466）——`http_request` 声明 `High` 而「风险只是宣传语」
 // 的第二个洞随 `route` 执行分支一起消失。
 use async_trait::async_trait;
 use std::sync::{Arc, Weak};
+use symbio_plugin_api::collectors::FactsOf;
 use symbio_plugin_api::PLUGIN_ID_WEB;
 use symbio_plugin_api::{
     plugin_dir_from_ctx, CapabilityMeta, Plugin, PluginConfigFile, PluginDir, PluginError,
@@ -18,7 +19,6 @@ use symbio_plugin_api::{
     PortExecutor,
 };
 use symbio_plugin_api::{DetailDefinition, DetailField};
-use symbio_providers::FactsOf;
 use tokio::sync::RwLock;
 
 // ==================== 配置文档（`<根>/web/PLUGIN.yml`） ====================
@@ -244,7 +244,7 @@ impl Plugin for WebPlugin {
             // 注册收口点（`register_tool`）一次写两处：裹闸的端口绑定 + 纯数据的
             // 工具行。本插件全部工具都是静态档（`risk = None`）。
             for entry in self.tool_impls.iter() {
-                symbio_providers::register_tool_with_facts(
+                symbio_plugin_api::collectors::register_tool_with_facts(
                     &ctx,
                     entry.meta.clone(),
                     None,

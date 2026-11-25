@@ -484,7 +484,7 @@ impl Plugin for SessionPlugin {
                 self.parent.clone(),
             );
             let agent_run_router = self.parent.clone();
-            let agent_run_facts: symbio_providers::AsyncFactsOf =
+            let agent_run_facts: symbio_plugin_api::collectors::AsyncFactsOf =
                 Arc::new(move |args: &Value, ctx: &Arc<dyn PluginInvokeRequest>| {
                     let args = args.clone();
                     let ctx = ctx.clone();
@@ -498,7 +498,7 @@ impl Plugin for SessionPlugin {
                         .await
                     })
                 });
-            symbio_providers::register_tool_with_async_facts(
+            symbio_plugin_api::collectors::register_tool_with_async_facts(
                 &ctx,
                 agent_run.meta(),
                 None,

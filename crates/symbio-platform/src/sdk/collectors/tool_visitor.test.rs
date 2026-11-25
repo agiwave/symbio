@@ -1,16 +1,16 @@
-//! `providers/collectors/tool_visitor.rs` 的单元测试。
+//! `sdk/collectors/tool_visitor.rs` 的单元测试。
 //!
 //! 与实现**同级**分文件（约定：`X.rs` + `X.test.rs`）。
 //! 这三条原在旧 core 的 `capability/tools` 用例，随默认收集器一起迁出。
 
 use super::*;
 
-use symbio_platform::kernel::capability::{family, CapabilityMeta, CapabilityRow};
-use symbio_platform::kernel::present::DetailField;
-use symbio_platform::kernel::vdfs::{
+use crate::kernel::capability::{family, CapabilityMeta, CapabilityRow};
+use crate::kernel::present::DetailField;
+use crate::kernel::vdfs::{
     VdfsContent, VdfsContext, VdfsError, VdfsProvider, VdfsRequest, VdfsResponse, VdfsResult,
 };
-use symbio_platform::sdk::capability::{
+use crate::sdk::capability::{
     capability_configurables, capability_option_fields, capability_prompts, capability_vdfs_root,
 };
 
@@ -362,9 +362,9 @@ async fn option_fields_dedupe_by_key_keeping_first_slot() {
 /// 按条目名（目录名）去重、后写者胜、列表保注册顺序。
 #[tokio::test]
 async fn configurable_declaration_keeps_order_and_overwrites_same_name() {
-    use symbio_platform::kernel::present::DetailDefinition;
-    use symbio_platform::sdk::capability::capability_entry_of;
-    use symbio_platform::sdk::plugin::{PluginConfigFile, PluginDir};
+    use crate::kernel::present::DetailDefinition;
+    use crate::sdk::capability::capability_entry_of;
+    use crate::sdk::plugin::{PluginConfigFile, PluginDir};
     fn config(dir_name: &str, title: &str) -> PluginConfigFile {
         PluginConfigFile::new(
             PluginDir::at(std::env::temp_dir(), dir_name),

@@ -330,11 +330,11 @@ async fn unknown_subcommand_is_not_found() {
 /// 上面的 0 才不是「收集器根本没接上」的同义反复。
 #[tokio::test]
 async fn traverse_registers_no_tool_rows() {
+    use symbio_plugin_api::collectors::DefaultToolVisitor;
     use symbio_plugin_api::{
         capability_configurables, family, PluginInvokeRequestExt, Registry, CAPABILITY_VISITOR,
         CONFIGURABLE_VISITOR,
     };
-    use symbio_providers::DefaultToolVisitor;
 
     let tools: Arc<dyn Registry> = Arc::new(DefaultToolVisitor::new());
     let configurables: Arc<dyn Registry> = Arc::new(DefaultToolVisitor::new());
@@ -370,10 +370,10 @@ async fn traverse_registers_no_tool_rows() {
 /// （它跨挂载点、推不出来，见 `capability_entry_of` 的说明）。
 #[tokio::test]
 async fn traverse_announces_its_own_config() {
+    use symbio_plugin_api::collectors::DefaultToolVisitor;
     use symbio_plugin_api::{
         capability_configurables, PluginInvokeRequestExt, Registry, CONFIGURABLE_VISITOR,
     };
-    use symbio_providers::DefaultToolVisitor;
 
     let visitor: Arc<dyn Registry> = Arc::new(DefaultToolVisitor::new());
     let req = PluginSimpleRequest::new(None, None);

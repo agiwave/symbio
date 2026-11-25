@@ -127,7 +127,7 @@ impl Plugin for VdfsPlugin {
             // 路径事实提取器（D-531）：VDFS 工具族的参数统一叫 `path`，工具自己
             // 知道这是路径、翻成开放 kind 事实；沙箱按用户配的目录黑白名单裁决。
             // 沙箱不认识工具名，闸门不认识目录配置——两边只经 `vdfs_path` 对接。
-            let path_facts: symbio_providers::FactsOf = Arc::new(
+            let path_facts: symbio_plugin_api::collectors::FactsOf = Arc::new(
                 |args: &serde_json::Value,
                  ctx: &std::sync::Arc<dyn symbio_plugin_api::PluginInvokeRequest>| {
                     match args.get("path").and_then(|v| v.as_str()) {
@@ -142,7 +142,7 @@ impl Plugin for VdfsPlugin {
                 },
             );
             for (meta, executor) in tools::vdfs_tools(provider) {
-                symbio_providers::register_tool_with_facts(
+                symbio_plugin_api::collectors::register_tool_with_facts(
                     &ctx,
                     meta,
                     None,

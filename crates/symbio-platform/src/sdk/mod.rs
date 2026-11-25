@@ -53,6 +53,7 @@ pub mod actors;
 pub mod agent;
 pub mod authz;
 pub mod capability;
+pub mod collectors;
 // 门面走 `symbio_platform::sdk::{port,address}::…`：短路径，避免长前缀把每个 `pub use`
 // 折成两行、把 plugin-api 的自有实现行数棘轮（FA-001）顶红。
 pub use capability::port;

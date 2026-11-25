@@ -14,10 +14,10 @@
 
 use super::*;
 use std::sync::Arc;
+use symbio_plugin_api::collectors::DefaultToolVisitor;
 use symbio_plugin_api::{
     ExecEnv, PluginInvokeRequest, PluginInvokeRequestExt, PluginSimpleRequest, WORKDIR,
 };
-use symbio_providers::DefaultToolVisitor;
 
 fn empty_provider() -> Arc<ToolVdfs> {
     Arc::new(ToolVdfs::new(Arc::new(DefaultToolVisitor::new())))
