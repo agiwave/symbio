@@ -58,6 +58,7 @@ import path from 'node:path'
 import { fileURLToPath } from 'node:url'
 import { red, green, yellow, dim } from '../color.mjs'
 import { backfillShas, loadBackfill } from '../core-change-backfill.mjs'
+import { collectDeclarations } from '../core-change-declarations.mjs'
 import {
   gitOut, GIT_LOG_PRETTY, requiresRange, resolveRange, parseGitLogRecords,
 } from '../gate.d/_shared.mjs'
@@ -427,11 +428,33 @@ function main() {
     return 0
   }
 
+  // 后继补签（D-551）：同一批未推送提交里，后一笔用 `Core-Change-For:` 为前一笔补署名。
+  // `--last` 只判最后一笔，但签名指向的是整批里的前一笔，故按整批范围验形状。
+  let declarationCommits = commits
+  if (argv.includes('--last')) {
+    const fullRange = resolveRange([], git)
+    const fullLog = fullRange
+      ? git(['log', '--no-merges', '--reverse', `--pretty=format:${GIT_LOG_PRETTY}`, fullRange])
+      : null
+    if (fullLog === null) {
+      console.error(red('✗ arch-change-audit：读不出后继补签所需的整批提交范围'))
+      return 1
+    }
+    declarationCommits = parseGitLogRecords(fullLog)
+  }
+  const signed = collectDeclarations(declarationCommits, knownDecisions(), repoRoot)
+  if (signed.errors.length) {
+    for (const error of signed.errors) console.error(red(`✗ 后继补签：${error}`))
+    return 1
+  }
+  const DECLARED = signed.declarations
+
   const subjects = subjectsOf(commits)
   const bad = []
   let coreTouching = 0
   let skipped = 0
   let backfilled = 0
+  let declared = 0
   let narrowed = 0
   for (const { sha, message, files: rawFiles } of commits) {
     if (BASELINE_SHAS.has(sha.slice(0, 8))) {
@@ -462,13 +485,17 @@ function main() {
     }
     if (inDirs(files.filter(isProductionSource), ARCH_DIRS)) coreTouching += 1
     const r = judge(sha, files, message)
-    if (r.errors.length) bad.push(r)
+    if (r.errors.length && DECLARED.has(sha.slice(0, 8))) {
+      declared += 1
+    } else if (r.errors.length) {
+      bad.push(r)
+    }
   }
 
   if (bad.length === 0) {
     console.log(
       green(
-        `✓ arch-change-audit：${commits.length} 个提交（追溯豁免 ${skipped}，其中补记表 ${backfilled}）` +
+        `✓ arch-change-audit：${commits.length} 个提交（追溯豁免 ${skipped}，其中补记表 ${backfilled}，后继补签 ${declared}）` +
           `里 ${coreTouching} 个触及 core/kernel，全部留了理由（另有 ${narrowed} 个只是收窄 / 改注释，无需理由）`,
       ),
     )

@@ -109,6 +109,7 @@ import { blankComments } from '../rust-scan.mjs'
 import { toolFacts } from '../facts/_capability.mjs'
 import { pluginIds } from '../facts/_plugin-yml.mjs'
 import { backfillShas, loadBackfill } from '../core-change-backfill.mjs'
+import { collectDeclarations } from '../core-change-declarations.mjs'
 // 红 3 的前提是「扩展插件真在用这条门面路径」：消费方的唯一口径归 HS-003，这里借用它，
 // 不另写一份「谁在用 `symbio_plugin_api::X`」的扫描（D-416）。
 import { CONTROL_PLANE, collectConsumers } from './plugin-surface-audit.mjs'
@@ -1249,6 +1250,29 @@ function main() {
   const forward = new Set(forwardOut.split('\n').filter(Boolean))
   const commits = parseGitLogRecords(log).filter((c) => forward.has(c.sha))
 
+  // 后继补签（D-551）：后继提交可为同批前一笔缺的补件决策号签名；签名形状先判。
+  // `--last` 只判最后一笔，签名却指向整批里的前一笔，故按整批范围验形状。
+  let declarationCommits = commits
+  if (argv.includes('--last')) {
+    const fullRange = resolveRange([], git)
+    const fullLog = fullRange
+      ? git(['log', '--no-merges', '--reverse', `--pretty=format:${GIT_LOG_PRETTY}`, fullRange])
+      : null
+    if (fullLog === null) {
+      console.error(red('✗ capability-migration-audit：读不出后继补签所需的整批提交范围'))
+      return 1
+    }
+    declarationCommits = parseGitLogRecords(fullLog)
+  }
+  const declaredSignatures = collectDeclarations(declarationCommits, decisions, repoRoot)
+  if (declaredSignatures.errors.length) {
+    for (const error of declaredSignatures.errors) {
+      console.error(red(`✗ 后继补签：${error}`))
+    }
+    return 1
+  }
+  const DECLARED = declaredSignatures.declarations
+
   // 口径分界（D-404）：`NET_GUARD` 之后的提交才按「净变化」判；之前的按旧口径（逐树新增）。
   const netOut = git(['rev-list', `${NET_GUARD.sha}..HEAD`])
   if (netOut === null) {
@@ -1282,6 +1306,7 @@ function main() {
   let migrations = 0
   let relocations = 0
   let supplements = 0
+  let declarationUses = 0
   /** 逐笔账：欠账明细要能点到具体提交（`D-403`），不能只印总数。 */
   const ledger = []
   for (const c of commits) {
@@ -1307,6 +1332,10 @@ function main() {
     if (r.kind) ledger.push({ sha: r.sha.slice(0, 8), subject: r.subject, kind: r.kind })
     if (r.errors.length && GRANDFATHERED.has(r.sha.slice(0, 8))) continue
     if (r.errors.length && BACKFILLED_EX.has(r.sha.slice(0, 8))) continue
+    if (r.errors.length && DECLARED.has(r.sha.slice(0, 8))) {
+      declarationUses += 1
+      continue
+    }
     if (r.errors.length) bad.push(r)
   }
   if (bad.length) {
@@ -1317,7 +1346,7 @@ function main() {
   console.log(
     green(
       `✓ capability-migration-audit：夹具 ${FIXTURE.sha}（补件）` +
-        `+ 判据起点 ${BEFORE_GUARD.sha} 之后 ${migrations} 个迁移批次 / ${relocations} 个净零搬迁 / ${supplements} 个补件，全部只搬运`,
+        `+ 判据起点 ${BEFORE_GUARD.sha} 之后 ${migrations} 个迁移批次 / ${relocations} 个净零搬迁 / ${supplements} 个补件 / ${declarationUses} 个后继补签，全部只搬运`,
     ),
   )
 

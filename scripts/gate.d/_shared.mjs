@@ -93,7 +93,11 @@ export const BASELINE = {
   //   缺席放行 / 白名单裁决 / 仅拦显式配置工具 / 多事实全过 / 配置构造注册表 / traverse 发布句柄。
   //   SDK 侧沙箱四测（缺席降级 / 发布可见 / 二次发布拒绝 / 开放事实词表）此前已在 2313 内计入。
   //   非侵蚀：纯新增判据，覆盖横切句柄的发布—消费闭环。
-  ciRustTestsTotal: 2577,
+  // baseline-allow ciRustTestsTotal: 2577 → 2599（+22，D-550）——容器落点与凭证出口新增
+  //   22 条判据：broker 7（fencing / 取消 / 凭证注入 / 输入与配置拒绝 / 错误不外泄 / 头过滤）、
+  //   shim 6（target / 分片 / 背压 / 端到端 / 截断 / 断连取消）、container 9（镜像与摘要、
+  //   workdir 与凭证、UID 权限、安全上限、投影脱敏与符号链接、目标路由）。非侵蚀：全是新增用例。
+  ciRustTestsTotal: 2599,
   cliRustTests: 23,
   tauriRustTests: 5,
   // doc-link-allow D-010: 下一行是退役文件的历史叙述（已把这两个文件删掉），不是入链

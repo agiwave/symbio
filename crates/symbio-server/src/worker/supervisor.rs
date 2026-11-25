@@ -24,6 +24,8 @@ use tokio::sync::{mpsc, oneshot, Mutex, RwLock as AsyncRwLock};
 use tokio_util::sync::CancellationToken;
 use tracing::{debug, info, warn};
 
+use super::broker::BrokerRegistry;
+use super::container::{self, BrokerTarget, WorkerConfig, WorkerMode};
 use super::epoch::EpochRegistry;
 use super::id::validate_session_id;
 use super::protocol::{read_line, write_line, WorkerLine, CONTROL_CHANNEL_CAPACITY};
@@ -138,6 +140,7 @@ struct SubagentStart {
 struct SupervisorInner {
     homedir: RwLock<PathBuf>,
     build_id: BuildId,
+    config: WorkerConfig,
     workers: Mutex<HashMap<String, Arc<WorkerState>>>,
     subagents: Mutex<HashMap<RequestId, SubagentStart>>,
     subagent_lifecycle: Mutex<CancellationToken>,
@@ -153,10 +156,12 @@ pub struct WorkerSupervisor {
 
 impl WorkerSupervisor {
     pub fn new(homedir: PathBuf) -> Result<Self, WorkerError> {
+        let config = WorkerConfig::from_env()?;
         Ok(Self {
             inner: Arc::new(SupervisorInner {
                 homedir: RwLock::new(homedir),
                 build_id: build_id()?,
+                config,
                 workers: Mutex::new(HashMap::new()),
                 subagents: Mutex::new(HashMap::new()),
                 subagent_lifecycle: Mutex::new(CancellationToken::new()),
@@ -806,31 +811,57 @@ async fn spawn_worker(
     map_key: &str,
     session_dir: PathBuf,
 ) -> Result<Arc<WorkerState>, String> {
-    let executable = std::env::current_exe().map_err(|e| e.to_string())?;
     let homedir = inner
         .homedir
         .read()
         .unwrap_or_else(|poisoned| poisoned.into_inner())
         .clone();
-    let mut command = Command::new(executable);
-    command
-        .arg("__worker")
-        .arg("--session")
-        .arg(worker.session_id())
-        .arg("--session-dir")
-        .arg(&session_dir)
-        .arg("--epoch")
-        .arg(worker.epoch().value().to_string())
-        .arg("--build")
-        .arg(worker.build_id().as_str())
-        .arg("--homedir")
-        .arg(&homedir)
-        .env("SYMBIO_PROCESS_ROLE", "worker")
-        .stdin(std::process::Stdio::piped())
-        .stdout(std::process::Stdio::piped())
-        .stderr(std::process::Stdio::inherit())
-        .kill_on_drop(true);
-    let mut child = command.spawn().map_err(|e| e.to_string())?;
+    let (mut child, container_runtime, container_cleanup, targets, broker_token) =
+        if inner.config.mode == WorkerMode::Container {
+            let mut launch = container::prepare_container(
+                &inner.config,
+                worker.build_id(),
+                worker,
+                &homedir,
+                &session_dir,
+            )
+            .await
+            .map_err(|e| e.to_string())?;
+            let cleanup = Some((inner.config.clone(), launch.name.clone()));
+            let token = launch.token.clone();
+            let targets = launch.targets.clone();
+            let child = launch.spawn().await?;
+            let runtime = launch.runtime;
+            (child, Some(runtime), cleanup, targets, token)
+        } else {
+            let executable = std::env::current_exe().map_err(|e| e.to_string())?;
+            let mut command = Command::new(executable);
+            command.env_clear();
+            for key in ["PATH", "SystemRoot", "WINDIR", "TEMP", "TMP"] {
+                if let Some(value) = std::env::var_os(key) {
+                    command.env(key, value);
+                }
+            }
+            command
+                .arg("__worker")
+                .arg("--session")
+                .arg(worker.session_id())
+                .arg("--session-dir")
+                .arg(&session_dir)
+                .arg("--epoch")
+                .arg(worker.epoch().value().to_string())
+                .arg("--build")
+                .arg(worker.build_id().as_str())
+                .arg("--homedir")
+                .arg(&homedir)
+                .env("SYMBIO_PROCESS_ROLE", "worker")
+                .stdin(std::process::Stdio::piped())
+                .stdout(std::process::Stdio::piped())
+                .stderr(std::process::Stdio::inherit())
+                .kill_on_drop(true);
+            let child = command.spawn().map_err(|e| e.to_string())?;
+            (child, None, None, HashMap::new(), String::new())
+        };
     let child_id = child.id();
     let stdin = child.stdin.take().ok_or("worker stdin 不可用")?;
     let stdout = child.stdout.take().ok_or("worker stdout 不可用")?;
@@ -854,6 +885,8 @@ async fn spawn_worker(
 
     let writer_worker = worker.clone();
     let writer_stop = stop.clone();
+    let brokers = BrokerRegistry::new();
+    let (broker_tx, mut broker_rx) = mpsc::channel::<WorkerLine>(CONTROL_CHANNEL_CAPACITY);
     tokio::spawn(async move {
         let mut stdin = stdin;
         let mut outgoing = outgoing;
@@ -863,6 +896,15 @@ async fn spawn_worker(
                 out = outgoing.recv() => match out {
                     Some(out) => out,
                     None => break,
+                },
+                frame = broker_rx.recv() => {
+                    let Some(line) = frame else { break };
+                    if let Err(error) = write_line(&mut stdin, &line).await {
+                        warn!(%error, "worker broker stdin 写入失败");
+                        writer_stop.cancel();
+                        break;
+                    }
+                    continue;
                 },
             };
             let line = match out {
@@ -888,17 +930,24 @@ async fn spawn_worker(
         }
     });
 
-    let reader_state = Arc::clone(&state);
     let reader_stop = stop.clone();
     let reader = WorkerReader {
         inner: Arc::clone(inner),
         map_key: map_key.to_string(),
         expected: worker.clone(),
         done: state.done.clone(),
+        state: state.clone(),
+        child,
+        stdout,
+        ready: ready_tx,
+        targets,
+        broker_token,
+        broker_tx,
+        brokers,
+        container_cleanup,
+        container_runtime,
     };
-    tokio::spawn(async move {
-        read_worker(child, stdout, reader_state, ready_tx, reader_stop, reader).await;
-    });
+    tokio::spawn(async move { read_worker(reader, reader_stop).await });
 
     let ready = tokio::time::timeout(WORKER_READY_TIMEOUT, ready_rx).await;
     let error = match ready {
@@ -934,21 +983,34 @@ struct WorkerReader {
     map_key: String,
     expected: WorkerId,
     done: CancellationToken,
+    state: Arc<WorkerState>,
+    child: Child,
+    stdout: tokio::process::ChildStdout,
+    ready: oneshot::Sender<Result<(), String>>,
+    targets: HashMap<String, BrokerTarget>,
+    broker_token: String,
+    broker_tx: mpsc::Sender<WorkerLine>,
+    brokers: BrokerRegistry,
+    container_cleanup: Option<(WorkerConfig, String)>,
+    container_runtime: Option<tempfile::TempDir>,
 }
 
-async fn read_worker(
-    mut child: Child,
-    stdout: tokio::process::ChildStdout,
-    state: Arc<WorkerState>,
-    ready: oneshot::Sender<Result<(), String>>,
-    stop: CancellationToken,
-    reader: WorkerReader,
-) {
+async fn read_worker(reader: WorkerReader, stop: CancellationToken) {
     let WorkerReader {
         inner,
         map_key,
         expected,
         done,
+        state,
+        mut child,
+        stdout,
+        ready,
+        targets,
+        broker_token,
+        broker_tx,
+        brokers,
+        container_cleanup,
+        container_runtime,
     } = reader;
     let mut ready = Some(ready);
     let mut reader = BufReader::new(stdout);
@@ -1053,6 +1115,19 @@ async fn read_worker(
                             }
                         });
                     }
+                    WorkerLine::BrokerOpen { .. } | WorkerLine::BrokerCancel { .. } => {
+                        if let Err(error) = brokers.handle(
+                            frame,
+                            &expected,
+                            &targets,
+                            broker_tx.clone(),
+                            inner.config.max_broker_streams,
+                            &broker_token,
+                        ).await {
+                            failed = Some(error);
+                            break;
+                        }
+                    }
                     WorkerLine::CancelSubagent { id, worker } => {
                         let result = match worker.validate(&expected) {
                             Ok(()) => cancel_subagent(&inner, &expected, &id).await,
@@ -1066,7 +1141,11 @@ async fn read_worker(
                     WorkerLine::Request { .. }
                     | WorkerLine::SubagentStarted { .. }
                     | WorkerLine::DeliverEvent { .. }
-                    | WorkerLine::Shutdown { .. } => {
+                    | WorkerLine::Shutdown { .. }
+                    | WorkerLine::BrokerHead { .. }
+                    | WorkerLine::BrokerData { .. }
+                    | WorkerLine::BrokerEnd { .. }
+                    | WorkerLine::BrokerError { .. } => {
                         failed = Some("worker 发出方向错误的帧".to_string());
                         break;
                     }
@@ -1090,9 +1169,17 @@ async fn read_worker(
     }
     drop(workers);
     stop.cancel();
+    brokers.stop().await;
+    drop(broker_tx);
     if let Err(error) = child.kill().await {
         warn!(%error, "停止 worker 进程失败");
     }
+    if let Some((config, name)) = container_cleanup {
+        if let Err(error) = container::remove_container(&config, &name).await {
+            warn!(%error, container = %name, "清理容器失败，可能仍有挂载与 WAL 锁");
+        }
+    }
+    drop(container_runtime);
     info!(worker = %expected, "worker 已退出");
     done.cancel();
 }

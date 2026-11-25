@@ -46,6 +46,40 @@ pub enum WorkerLine {
     Shutdown {
         worker: WorkerId,
     },
+    BrokerOpen {
+        worker: WorkerId,
+        stream: u64,
+        target: String,
+        method: String,
+        path: String,
+        headers: Vec<(String, String)>,
+        body: String,
+    },
+    BrokerHead {
+        worker: WorkerId,
+        stream: u64,
+        status: u16,
+        headers: Vec<(String, String)>,
+    },
+    BrokerData {
+        worker: WorkerId,
+        stream: u64,
+        offset: u64,
+        data: String,
+    },
+    BrokerEnd {
+        worker: WorkerId,
+        stream: u64,
+    },
+    BrokerError {
+        worker: WorkerId,
+        stream: u64,
+        message: String,
+    },
+    BrokerCancel {
+        worker: WorkerId,
+        stream: u64,
+    },
 }
 
 pub async fn read_line<R>(reader: &mut R) -> Result<Option<String>, WorkerError>

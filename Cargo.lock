@@ -4927,9 +4927,12 @@ name = "symbio-server"
 version = "0.1.14"
 dependencies = [
  "async-trait",
+ "base64 0.22.1",
  "dirs",
+ "reqwest 0.13.5",
  "serde",
  "serde_json",
+ "serde_yaml_ng",
  "sha2",
  "symbio",
  "symbio-http",
@@ -4937,7 +4940,9 @@ dependencies = [
  "tokio",
  "tokio-util",
  "tracing",
+ "url",
  "urlencoding",
+ "uuid",
  "windows-sys 0.61.2",
 ]
 

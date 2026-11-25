@@ -184,6 +184,35 @@ homedir 切换与会话工作目录选择必须落在同一个连接目标上。
 「已忙但无信号」。终态 VDFS 帧必须先于落闲与唤醒送达，后继轮次才能保证在旧 Finished
 之后发布 Working；直接开轮与恢复续跑共用同一占轮路径，不得绕开信号登记。
 
+### D-550 容器 worker 使用同路径投影与 stdio 凭证代理
+
+容器落点由宿主进程环境 `SYMBIO_WORKER_MODE=container` 显式选择，不读会话或模型可控
+metadata。镜像必须固定为 `repository@sha256:<64 hex>`，且镜像 OS 必须与宿主一致；Docker
+不可用、镜像摘要或构建标签不匹配、安全参数不受支持、挂载目标无效时启动失败，绝不回退 host。
+容器仍执行同一 `__worker` 与 durable inbox 协议，宿主绝对路径原样保留：只读运行时投影挂到
+原 homedir，实际会话目录与显式 workdir 分别挂到原绝对路径，从而不改变 WAL、inbox、workdir
+与子会话寻址语义。投影按运行时白名单复制技能与插件配置，排除会话、模型/MCP 原配置、
+符号链接、宿主凭证目录及无关文件；配置键按归一化后的名字识别 credential（含 camelCase），
+子 Agent 目录递归投影，其模型与 HTTP MCP 使用
+`/subagent/<agent>/model/<id>` 与 `/subagent/<agent>/mcp/<id>` 的独立 broker 路由。模型与
+HTTP MCP 只保留 broker 地址，stdio MCP 和没有受控出口的 gateway / telegram / web 插件
+明确停用。显式 workdir 不得覆盖 homedir、会话树或模型/MCP 目录，其目录树内也不得出现
+凭证文件或目录（含 `.env`、私钥与证书）；容器 UID/GID 取会话所有者，会话与 workdir 必须
+由当前非 root 用户所有且可写。
+rootless Docker 的 UID 映射与该契约不同，fail closed；Docker 检查与清理有超时，清理失败
+必须显式告警。broker 错误不向 worker 暴露真实上游 URL；响应头后的断流必须让 HTTP 客户端
+观察到传输失败，不得补正常 EOF。客户端断开会取消上游，慢头部、慢请求体与慢响应写入均有
+时限，不让未认证连接无限占用 broker 流；单流分片积压只终止该流，不结束整个 worker。
+
+模型与 HTTP MCP 的真实 URL、凭证只留在 Supervisor 的启动快照。worker 内 loopback shim
+使用每 worker 随机令牌校验访问，把 HTTP 请求转成受 epoch fencing 的 stdio broker 流；响应头
+与正文分片转发，SSE 不整缓冲。
+Supervisor 只接受启动投影登记过的精确目标，剥离 worker 提供的凭证头，再由宿主可信配置覆盖，
+并过滤逐跳响应头与 `Location` / `Content-Location`（避免预签名 URL 出容器）；重定向不得把
+凭证带到其他 origin。流关闭、取消、epoch 替换和 EOF 都取消
+上游请求。该代理只提供受控网络出口，不授予工具、审批或沙箱策略权限，也不声称 Docker 本身
+提供容器、网络或进程隔离。
+
 ## 验收边界
 
 - Server 与 Gateway 共用传输实现，但调用者身份、公开面与路由策略不共享。

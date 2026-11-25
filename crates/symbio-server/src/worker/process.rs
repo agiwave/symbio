@@ -26,6 +26,8 @@ use tokio::task::JoinSet;
 use tokio_util::sync::CancellationToken;
 use tracing::{error, warn};
 
+use super::broker_shim;
+use super::container::MAX_BROKER_STREAMS;
 use super::epoch::EpochRegistry;
 use super::protocol::{read_line, write_line, WorkerLine, EVENT_CHANNEL_CAPACITY};
 use super::{
@@ -312,6 +314,32 @@ pub async fn run_worker(bootstrap: WorkerBootstrap) -> Result<(), String> {
         }
     });
     let event_rx = worker_events(&root, &worker).await?;
+    let broker = if std::env::var_os("SYMBIO_BROKER_TOKEN").is_some() {
+        let token = std::env::var("SYMBIO_BROKER_TOKEN").map_err(|e| e.to_string())?;
+        if token.len() < 32 || token.chars().any(char::is_whitespace) {
+            return Err("broker 令牌必须是至少 32 字符且无空白的随机值".to_string());
+        }
+        let streams = std::env::var("SYMBIO_BROKER_STREAMS")
+            .map_err(|_| "broker 模式缺少 SYMBIO_BROKER_STREAMS".to_string())?
+            .parse::<usize>()
+            .map_err(|_| "SYMBIO_BROKER_STREAMS 必须是整数".to_string())?;
+        if streams == 0 || streams > MAX_BROKER_STREAMS {
+            return Err(format!(
+                "SYMBIO_BROKER_STREAMS 必须在 1..={MAX_BROKER_STREAMS}"
+            ));
+        }
+        let listener = broker_shim::bind().await?;
+        let client = broker_shim::BrokerClient::new(worker.clone(), out_tx.clone(), token);
+        let stop = CancellationToken::new();
+        let task_client = client.clone();
+        let task_stop = stop.clone();
+        let server = tokio::spawn(async move {
+            broker_shim::serve(task_client, listener, streams, task_stop).await
+        });
+        Some((client, stop, server))
+    } else {
+        None
+    };
     let stop_events = CancellationToken::new();
     let event_tx = (*out_tx).clone();
     let event_stop = stop_events.clone();
@@ -408,17 +436,35 @@ pub async fn run_worker(bootstrap: WorkerBootstrap) -> Result<(), String> {
                 break;
             }
             WorkerLine::DeliverEvent { frame } => EventBus::try_publish_frame(frame),
+            WorkerLine::BrokerHead { .. }
+            | WorkerLine::BrokerData { .. }
+            | WorkerLine::BrokerEnd { .. }
+            | WorkerLine::BrokerError { .. } => {
+                let Some((client, _, _)) = &broker else {
+                    return Err("未启用 broker".to_string());
+                };
+                client.receive(line).await?;
+            }
             WorkerLine::Ready { .. }
             | WorkerLine::Response { .. }
             | WorkerLine::Event { .. }
             | WorkerLine::StartSubagent { .. }
-            | WorkerLine::CancelSubagent { .. } => {
+            | WorkerLine::CancelSubagent { .. }
+            | WorkerLine::BrokerOpen { .. }
+            | WorkerLine::BrokerCancel { .. } => {
                 return Err("worker 收到方向错误的帧".to_string());
             }
         }
     }
 
     launcher.fail_all("worker 已停止");
+    if let Some((client, stop, server)) = broker {
+        client.cancel_all().await;
+        stop.cancel();
+        if let Err(error) = server.await {
+            warn!(%error, "worker broker 任务异常退出");
+        }
+    }
     stop_events.cancel();
     while let Some(result) = tasks.join_next().await {
         if let Err(error) = result {

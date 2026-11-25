@@ -44,5 +44,33 @@ symbio-cli serve --bind 127.0.0.1 --port 9231 --homedir <系统根> --frontend-d
 `GET /api/v1/host/directories?path=<Server 路径>`；两者都要求鉴权，且只返回目录信息。
 
 一会话一 worker 的生产绑定已落到 `RuntimeHost`：会话作用域请求经 durable inbox 派发到
-独立 worker 进程，worker 的事件回传控制面总线。独立进程不宣称隔离；容器落点与子会话
-spawn 尚未完成，目标拓扑见 [DE-060](../../docs/003-design/060-Server运行时与会话执行.md)。
+独立 worker 进程，顶层与子会话使用同一 Supervisor，worker 的事件回传控制面总线。独立
+进程与容器落点都不宣称隔离；授权、审批、审计与事实语义不随落点改变，目标拓扑见
+[DE-060](../../docs/003-design/060-Server运行时与会话执行.md)。
+
+## 容器 worker
+
+宿主以 `SYMBIO_WORKER_MODE=container` 显式选择容器落点，配置项见
+[RE-001](../../docs/004-ref/001-CONFIGURATION.md)。镜像必须固定到 registry manifest digest，
+且镜像内的 `symbio` 与宿主 `symbio-cli` 二进制逐字节相同：
+
+```sh
+cargo build --release -p symbio-cli
+mkdir -p ../../dist
+cp ../../target/release/symbio-cli ../../dist/symbio
+build_id=$(sha256sum ../../target/release/symbio-cli | cut -d' ' -f1)
+docker build --build-arg SYMBIO_BUILD_ID="$build_id" -f ../../Dockerfile -t <registry>/symbio-worker:<tag> ../..
+docker push <registry>/symbio-worker:<tag>
+docker image inspect --format '{{index .RepoDigests 0}}' <registry>/symbio-worker:<tag>
+```
+
+将最后输出的 `repository@sha256:...` 设为 `SYMBIO_WORKER_IMAGE`。镜像 OS 必须与宿主一致；
+Windows 宿主或 Linux Docker Desktop 混用会在启动前失败。`Dockerfile` 只封装已构建的宿主
+二进制，不在镜像内重新编译，从而保留 build-id 校验的意义。容器使用会话所属非 root
+UID/GID；会话与 workdir 必须由当前用户所有且可写，rootless Docker 因 UID 映射不同而失败。
+workdir 树内不得含凭证目录，Docker 检查与清理超过 15 秒即失败并告警。
+
+容器以 `network none` 启动，模型与 HTTP MCP 请求由 worker 的 `127.0.0.1:18791` shim 转为
+受 epoch fencing 的 stdio broker 流；Supervisor 仅访问启动投影登记的目标，剥离 worker
+提供的凭证头并注入宿主可信配置。SSE 分片转发，不整缓冲；取消、EOF、停机和 epoch 替换都会
+取消上游请求。该机制只提供受控凭证出口，不授予工具、审批或沙箱策略权限。

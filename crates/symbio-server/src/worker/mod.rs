@@ -1,3 +1,6 @@
+mod broker;
+mod broker_shim;
+mod container;
 mod entry;
 mod epoch;
 mod id;
@@ -261,5 +264,5 @@ pub(super) fn now_ms() -> u64 {
 }
 
 #[cfg(test)]
-#[path = "tests.rs"]
+#[path = "mod.test.rs"]
 mod tests;

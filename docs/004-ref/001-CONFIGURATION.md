@@ -52,6 +52,32 @@ work:
 `plugins:`（插件挂载表）、`embedding:`、`logging:` 段。插件挂载由**扫描插件目录**
 决定（容器不内置任何清单），嵌入服务与日志级别由代码默认值 / 环境变量决定。
 
+### Worker 落点与容器资源
+
+以下变量只由启动 worker 的宿主进程读取；会话 metadata 与模型可控字段不能选择落点。
+默认 `SYMBIO_WORKER_MODE=host`。容器模式缺少 Docker、摘要镜像、构建标签、挂载或安全参数时
+直接失败，不回退 host。
+
+| 环境变量 | 默认值 | 含义 |
+|---|---|---|
+| `SYMBIO_WORKER_MODE` | `host` | `host` / `container` |
+| `SYMBIO_WORKER_IMAGE` | 无 | 容器模式必填，形状为 `repository@sha256:<64 hex>`；镜像 OS 与宿主一致，`symbio.build-id` 必须等于宿主可执行文件 SHA-256 |
+| `SYMBIO_DOCKER` | `docker` | 只接受 `docker` |
+| `SYMBIO_WORKER_CPU` | `2` | CPU 上限，`(0, 256]` |
+| `SYMBIO_WORKER_MEMORY` | `2g` | 内存与 swap 上限，正数加 `k` / `m` / `g` |
+| `SYMBIO_WORKER_PIDS` | `128` | 正整数 PID 上限 |
+| `SYMBIO_WORKER_TMPFS` | `64m` | `/tmp` tmpfs 容量，正数加 `k` / `m` / `g` |
+| `SYMBIO_BROKER_MAX_STREAMS` | `32` | 单 worker 凭证代理并发流上限，`1..=256` |
+
+容器使用 `network none`、只读根文件系统、非 root 用户、全 capability 丢弃、
+`no-new-privileges`、Docker 默认 seccomp 与上述资源上限。 homedir 只挂载脱敏运行时投影；
+实际会话目录和会话明确选择的 workdir 分别按原绝对路径挂载。workdir 不得覆盖 homedir、
+会话树、模型/MCP 目录，且其目录树内不得出现凭证文件或目录（如 `.env`、私钥与证书）。容器 UID/GID 取会话所有者，会话与
+workdir 必须由当前非 root 用户所有并可写；rootless Docker 的 UID 映射与该契约不同，直接失败。
+Docker 检查和容器清理均有 15 秒上限，清理失败会留下明确告警，不假装容器已删除。模型与
+HTTP MCP 仅经 worker 内回环 shim 和宿主 broker 出口；stdio MCP 及没有受控出口的
+`gateway` / `telegram` / `web` 插件在投影中明确停用。
+
 ---
 
 ## 资源与数据的落盘位置
