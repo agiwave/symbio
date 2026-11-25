@@ -487,19 +487,12 @@ fn verdict_flow_folds_into_a_revocable_grants_overlay() {
 // 本节的三条判据都是**守门**（`invariants`），不是读数。
 
 use crate::sdk::invariants::{acyclic_deps, rework_bounded};
-use crate::sdk::projection::task_vocab::TaskVocab;
 
-/// 任务族五格的**夹具拼写**（DE-024 D-206）：名字与格位都在 owner 插件
-/// （`crates/symbio-plugin-task` 的 `EventDecl` + 清单 `shared_events`），core 与内核都不认识它们。
-/// core 的夹具因此自己写一遍这一族的拼写，交给落格的辅助函数——与 `REWORK_VOCAB` 同一形状：
-/// 词汇是数据。
-const TASK: TaskVocab<'static> = TaskVocab {
-    opened: "task.opened",
-    progressed: "task.progress",
-    held: "task.held",
-    terminal: "task.asserted",
-    lease: "task.assigned",
-};
+/// 任务族的事件名字面量夹具：owner 在 `crates/symbio-plugin-task`，平台测试只声明
+/// 本节实际使用的三格，不依赖插件类型（D-565）。
+const TASK_OPENED: &str = "task.opened";
+const TASK_PROGRESSED: &str = "task.progress";
+const TASK_TERMINAL: &str = "task.asserted";
 
 /// `memory.encoded`：名字与格位都在 owner 插件（`crates/symbio-plugin-loop` 的 `EventDecl` + 清单
 /// `shared_events`，DE-024 D-204），core 不认识它。core 的夹具因此自己写这条字面量——
@@ -523,7 +516,7 @@ fn open_task(store: &EventStore, id: &str, depends_on: &[&str], actor: &str) {
         .append(
             Event::pending(
                 format!("o-{id}"),
-                TASK.opened,
+                TASK_OPENED,
                 Entity::Task,
                 Verb::Opened,
                 actor,
@@ -541,7 +534,7 @@ fn assert_task(store: &EventStore, id: &str, actor: &str) {
         .append(
             Event::pending(
                 format!("done-{id}"),
-                TASK.terminal,
+                TASK_TERMINAL,
                 Entity::Task,
                 Verb::Asserted,
                 actor,
@@ -645,7 +638,7 @@ fn n_step_chain_terminates_within_rework_bound() {
             .append(
                 Event::pending(
                     format!("p-{i}"),
-                    TASK.progressed,
+                    TASK_PROGRESSED,
                     Entity::Task,
                     Verb::Progressed,
                     "session/main",

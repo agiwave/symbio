@@ -207,7 +207,6 @@ pub use symbio_platform::sdk::plugin::{
     PLUGIN_KEY_NAME, PLUGIN_KEY_PROVIDER, PLUGIN_KEY_REQUIRED, PLUGIN_KEY_VERSION,
     TRAVERSE_AVAILABLE_OPTIONS, TRAVERSE_AVAILABLE_TOOLS,
 };
-pub use symbio_platform::sdk::projection::task_vocab::TaskVocab;
 pub use symbio_platform::sdk::projection::vocab::CommitmentVocab;
 pub const TASK_CAP: usize = 1;
 pub use symbio_platform::sdk::round::node_build;

@@ -443,6 +443,10 @@ export function parsePatch(text) {
   return files
 }
 
+function relocationLineKey(raw) {
+  return `platform-self:${String(raw).trim().replace(/\bsymbio_platform::/g, 'crate::')}`
+}
+
 /**
  * 搬家行（D-279 的教训）：本提交里**整份文件被删掉**的那些行。
  *
@@ -451,6 +455,10 @@ export function parsePatch(text) {
  * 判成新通道：`pub const SKILL_TAG: &str = "skill";` 从 core 搬进 sdk，行一个字没变，
  * 面也一分没宽，却要按「为 `skill` 定制」处理。判据要判的是「面变宽了没有」，不是
  * 「这一行有没有出现在新增侧」——所以同一行若来自本次提交删掉的文件，它是搬家。
+ *
+ * 从其它 crate 迁入平台 SDK 时，`symbio_platform::…` 改写成 `crate::…`；只在
+ * 「平台外的删除侧含 symbio_platform」时登记等价 key，避免把自引用改写误判成
+ * 新通道（D-564）。平台内或门面的 `crate::…` 指向自己，不能借此配对。
  *
  * 为什么限定「文件被删掉」，而不是「提交里出现过同样的删除行」：后者会把「从 `loop`
  * 删掉一条定制分支、同一行加进 `sdk`」也算搬家，而那是 D-247 反向拆分要拦的形态
@@ -461,9 +469,13 @@ export function movedLines(patch) {
   for (const file of patch) {
     if (!file.deleted) continue
     for (const raw of file.removed) {
-      const key = raw.trim()
-      if (!key) continue
-      out.set(key, (out.get(key) ?? 0) + 1)
+      const exact = raw.trim()
+      if (!exact) continue
+      out.set(exact, (out.get(exact) ?? 0) + 1)
+      if (!inTrees(file.path, CORE_TREES) && exact.includes('symbio_platform::')) {
+        const key = relocationLineKey(exact)
+        if (key !== exact) out.set(key, (out.get(key) ?? 0) + 1)
+      }
     }
   }
   return out
@@ -1055,9 +1067,12 @@ export function supplementErrors({
     if (!inTrees(file.path, ARCH_TREES) || !isCapabilitySource(file.path)) continue
     for (const hit of capabilityNameHits(file, ids, toolNames)) {
       // 搬家行不是新通道（`movedLines`）：同一条已删除文件里的行，按搬家消耗掉。
-      const n = movedLeft.get(hit.line) ?? 0
+      const exact = hit.line.trim()
+      const relocated = inTrees(file.path, CORE_TREES) ? relocationLineKey(exact) : null
+      const key = relocated && movedLeft.has(relocated) ? relocated : exact
+      const n = movedLeft.get(key) ?? 0
       if (n > 0) {
-        movedLeft.set(hit.line, n - 1)
+        movedLeft.set(key, n - 1)
         continue
       }
       offenders.push(hit)

@@ -15,7 +15,7 @@ use serde_json::{json, Value};
 use symbio_plugin_api::events::EVENT_SESSION_CONFIG;
 use symbio_plugin_api::reports::{ReportCtx, ReportDecl};
 use symbio_plugin_api::{
-    Entity, EventDecl, FactRole, PluginDeclarations, TaskVocab, Verb, ViewDecl, PRINCIPAL_SCHEDULER,
+    Entity, EventDecl, FactRole, PluginDeclarations, Verb, ViewDecl, PRINCIPAL_SCHEDULER,
 };
 // 跨插件共享的三条走清单生成物（`PLUGIN.yml` 的 `shared_events` → `events.rs`）。
 // `pub(crate) use` 是**转手**不是复制：本插件的写方 / 读方从 `crate::decl` 取名字，
@@ -46,9 +46,17 @@ pub(crate) const EVENT_TASK_ASSIGNED: &str = "task.assigned";
 /// 取这一格，不抄名字（DE-024 D-203）。
 pub(crate) const EVENT_TASK_REWORK_CREATED: &str = "task.rework_created";
 
-/// 本插件交出**任务族**的拼写（DE-024 D-206）：字段是它们在算法里的角色——终态与租约同落
-/// `Task × Asserted`，所以按格子命不出这五个名字。就绪集折叠读的正是这张表，同包直接引用，
-/// 不必再走构造期形参（DE-045 `D-289`）。
+/// 任务族五格在本包内的词汇面；终态与租约同落 `Task × Asserted`，按算法角色命名。
+pub(crate) struct TaskVocab<'a> {
+    pub(crate) opened: &'a str,
+    pub(crate) progressed: &'a str,
+    pub(crate) held: &'a str,
+    pub(crate) terminal: &'a str,
+    pub(crate) lease: &'a str,
+}
+
+/// 本插件交出**任务族**的拼写（DE-024 D-206）：就绪集折叠同包直接引用，不再走
+/// 跨 crate 的构造期形参（DE-045 `D-289`）。
 pub(crate) const TASK_VOCAB: TaskVocab<'static> = TaskVocab {
     opened: EVENT_TASK_OPENED,
     progressed: EVENT_TASK_PROGRESS,

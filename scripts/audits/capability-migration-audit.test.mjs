@@ -688,6 +688,112 @@ test('supplementErrors：搬家行不算补件定制（D-279）', () => {
   assert.deepEqual(supp('feat: 搬迁\n\nCore-Change: D-219', [{ path: CORE, added: [line], removed: [] }], { moved }), [])
 })
 
+test('supplementErrors：迁入平台后的 crate 自引用改写仍算搬家（D-564）', () => {
+  const moved = movedLines(
+    patchOf([
+      {
+        path: 'crates/symbio-providers/src/collectors/tool_visitor.rs',
+        deleted: true,
+        removed: ['symbio_platform::sdk::capability::capability_report_error(ctx, "tool", error).await;'],
+      },
+    ]),
+  )
+  assert.deepEqual(
+    supplementErrors({
+      sha: 'x',
+      message: 'refactor: 收集器归位\n\nCore-Change: D-219',
+      patch: patchOf([
+        { path: CORE, added: ['crate::sdk::capability::capability_report_error(ctx, "tool", error).await;'], removed: [] },
+      ]),
+      decisions,
+      pluginIds: ['tool'],
+      moved,
+    }).errors,
+    [],
+  )
+})
+
+test('supplementErrors：未整文件删除的同类改写仍是新增定制', () => {
+  const moved = movedLines(
+    patchOf([
+      {
+        path: 'crates/symbio-providers/src/collectors/tool_visitor.rs',
+        added: [],
+        removed: ['symbio_platform::sdk::capability::capability_report_error(ctx, "tool", error).await;'],
+      },
+    ]),
+  )
+  const [e] = supplementErrors({
+    sha: 'x',
+    message: 'refactor: 收集器归位\n\nCore-Change: D-219',
+    patch: patchOf([
+      { path: CORE, added: ['crate::sdk::capability::capability_report_error(ctx, "tool", error).await;'], removed: [] },
+    ]),
+    decisions,
+    pluginIds: ['tool'],
+    moved,
+  }).errors
+  assert.match(e, /不是通用的/)
+})
+
+test('supplementErrors：平台自引用改写按同一 key 只抵一次（D-564）', () => {
+  const moved = movedLines(
+    patchOf([
+      {
+        path: 'crates/symbio-providers/src/collectors/tool_visitor.rs',
+        deleted: true,
+        removed: ['symbio_platform::sdk::capability::capability_report_error(ctx, "tool", error).await;'],
+      },
+    ]),
+  )
+  const errors = supplementErrors({
+    sha: 'x',
+    message: 'refactor: 收集器归位\n\nCore-Change: D-219',
+    patch: patchOf([
+      {
+        path: CORE,
+        added: [
+          'crate::sdk::capability::capability_report_error(ctx, "tool", error).await;',
+          'symbio_platform::sdk::capability::capability_report_error(ctx, "tool", error).await;',
+        ],
+        removed: [],
+      },
+    ]),
+    decisions,
+    pluginIds: ['tool'],
+    moved,
+  }).errors
+  assert.equal(errors.length, 1)
+  assert.match(errors[0], /不是通用的/)
+})
+
+test('supplementErrors：门面删除侧的 crate 自引用不与平台新增行配对（D-564）', () => {
+  const moved = movedLines(
+    patchOf([
+      {
+        path: 'crates/symbio-plugin-api/src/lib.rs',
+        deleted: true,
+        removed: ['crate::sdk::capability::capability_report_error(ctx, "tool", error).await;'],
+      },
+    ]),
+  )
+  const [e] = supplementErrors({
+    sha: 'x',
+    message: 'refactor: 收集器归位\n\nCore-Change: D-219',
+    patch: patchOf([
+      {
+        path: CORE,
+        added: ['symbio_platform::sdk::capability::capability_report_error(ctx, "tool", error).await;'],
+        removed: [],
+      },
+    ]),
+    decisions,
+    pluginIds: ['tool'],
+    moved,
+  }).errors
+  assert.match(e, /不是通用的/)
+})
+
 test('supplementErrors：搬家豁免只抵一次（同一行新增两处仍红）', () => {
   const line = 'pub const NOTES_TAG: &str = "notes";'
   const moved = movedLines(

@@ -230,7 +230,9 @@ export const WHITELIST_BASELINE = 0
 // 117 → 118（`D-564`）：默认收集器整组从服务实现层迁入 sdk，门面只新增 `collectors`
 // 一个模块级转发；交换条件是五个插件删除 providers 依赖、providers 删除门面依赖，
 // 内部生产边净减 6。实现符号仍住在平台，不在根出口逐条铺开。
-export const SDK_BASELINE = 118
+// 118 → 117（`D-565`）：`TaskVocab` 的唯一生产消费方是 task，类型与常量归位插件，
+// 删除 SDK 文件与门面转出；模块级转发保持 13，门面生产行数 1272 → 1271。
+export const SDK_BASELINE = 117
 
 /**
  * 契约臂基线：**只许降**（`D-486`）。`symbio-contract` 是插件 ABI 的纯形状层，

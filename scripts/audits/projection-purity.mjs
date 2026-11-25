@@ -24,8 +24,8 @@
  *
  * ## PP-004 的口径边界（写清楚，免得把绿灯当成证明）
  *
- * 它数的是**core 这一侧的投影面**，不是「core 有多少 `.rs`」：`vocab.rs` / `task_vocab.rs`
- * 是折叠的**参数表**（不产 `Projection`），`mod.rs` 是框架本身——它们长宽都不判。
+ * 它数的是**core 这一侧的投影面**，不是「core 有多少 `.rs`」：`vocab.rs` 是共享参数表，
+ * `mod.rs` 是目录入口——它们长宽都不判。任务词汇面已随唯一消费方归 task（D-565）。
  * D-561 后两格已收平为 0 / 0：会话转写、分支、变更、汇报与造树实现归 session，
  * core 不再持有 `Projection::new` 构造器。owner 的折叠仍由 PP-001 / 002 / 003 覆盖。
  * `readyset` 在 `D-289` 随 owner 搬进 `crates/symbio-plugin-task` 后是声明视图的

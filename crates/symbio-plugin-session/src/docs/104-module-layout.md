@@ -117,10 +117,10 @@ impl: done
 | 落点 | 装什么 | 取用方 |
 |---|---|---|
 | `symbio_platform::sdk::projection::vocab` | `ChatVocab` / `MessageVocab` / `CommitmentVocab` 与 `ChatSlot` 派生 | actors、session、门面及投影实现 |
-| `symbio_platform::sdk::projection::task_vocab` | 任务族五个名字的 `TaskVocab` 形状 | task 与 session |
 | `symbio_platform::sdk::round::node_build` | 内核规则 `result_node_id` 的既有转发路径 | `symbio-plugin-local` 经门面 |
 | `crate::projections` | 转写、分支、变更、省略、汇报记录、节点构造及测试期保真度判据 | 本插件生产代码与测试 |
 
+任务词汇面 `TaskVocab` 随唯一生产消费方归 `symbio-plugin-task::decl`（D-565），不再是会话共享词表。
 任务声明、派发机制与行为登记分别归 loop owner 和平台 SDK；它们不属于会话投影。
 `prompt_fidelity` 没有生产消费方，只在测试构建中存在。
 
