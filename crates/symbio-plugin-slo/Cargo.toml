@@ -18,4 +18,4 @@ serde_json = { workspace = true }
 async-trait = { workspace = true }
 
 [dev-dependencies]
-symbio-testkit = { path = "../symbio-testkit" }
+symbio-plugin-api = { path = "../symbio-plugin-api", features = ["test-fixtures"] }

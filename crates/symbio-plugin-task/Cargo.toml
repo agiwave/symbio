@@ -26,4 +26,4 @@ tracing = { workspace = true }
 
 [dev-dependencies]
 # 测试替身（`trivial_actor_spec`）：只在单测里用，故以 dev 形态进来。
-symbio-testkit = { path = "../symbio-testkit" }
+symbio-plugin-api = { path = "../symbio-plugin-api", features = ["test-fixtures"] }

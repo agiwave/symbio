@@ -21,4 +21,4 @@ async-trait = { workspace = true }
 tracing = { workspace = true }
 
 [dev-dependencies]
-symbio-testkit = { path = "../symbio-testkit" }
+symbio-plugin-api = { path = "../symbio-plugin-api", features = ["test-fixtures"] }

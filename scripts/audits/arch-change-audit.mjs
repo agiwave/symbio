@@ -73,8 +73,8 @@ const argv = process.argv.slice(2)
 
 /** 内核 / 契约层：改动这两处必须在提交里解释 */
 const ARCH_DIRS = ['crates/symbio-platform/src/sdk/', 'crates/symbio-platform/src/kernel/', 'crates/symbio-platform/src/contract/']
-/** 「扩能力」的证据：动到任何插件 / provider / 测试设施 */
-const EXT_DIRS = ['crates/symbio-plugin-', 'crates/symbio-provider', 'crates/symbio-testkit/']
+/** 「扩能力」的证据：动到任何插件 / provider / 测试设施；旧 testkit 路径只用于历史提交分类。 */
+const EXT_DIRS = ['crates/symbio-plugin-', 'crates/symbio-provider', 'crates/symbio-testkit/'] // dead-path-allow: 旧路径只用于历史提交分类
 
 /** `Core-Change: D-195` / `Core-Change: D-195 理由…` / `Core-Change: 纯注释整理` */
 const TRAILER_RE = /^\s*Core-Change[:：]\s*(.+)$/m

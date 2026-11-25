@@ -12,9 +12,9 @@ use symbio_plugin_api::port::{
     PortExecContext, PortFact, PortFactEmit, PortFactReader, PortFactWriter, PortInput,
     PortProvider,
 };
+use symbio_plugin_api::testkit::EventStore;
+use symbio_plugin_api::testkit::{Seq, Store};
 use symbio_plugin_api::{Entity, Event, ExecAbortSignal, ExecEventSink, Verb, PRINCIPAL_USER};
-use symbio_testkit::EventStore;
-use symbio_testkit::{Seq, Store};
 
 use super::MemoryPort;
 

@@ -51,6 +51,8 @@ pub mod routes;
 pub mod termination;
 pub mod vocab;
 
+#[cfg(any(test, feature = "test-fixtures"))]
+pub mod testkit;
 // 已搬到 `symbio_sdk` 的端口模块不再各留一份转发文件（`D-408` / `D-412` / `D-413`）：
 // 模块名在根上一行转出，插件照旧写 `symbio_plugin_api::rows::…`。`text` 的实现住在
 // `symbio_platform::sdk::text::tokenizer`，沿用它原来的门面名转出（`D-404`）。

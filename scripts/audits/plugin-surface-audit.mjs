@@ -186,7 +186,7 @@ export const WHITELIST_BASELINE = 0
 // 没变，所以这是一个**净减**，不是搬臂。
 // 138 → 131（`D-443`）：按「谁在用」压缩——`fact_source` 登记面五条的唯一插件消费方
 // 是控制面 session（owner），按 D-253 / D-428 分档走 session 的 sdk 豁免（冻结账，D-499）直取本体，
-// 不占扩展层门面计件；测试面消费不再续命（通道归 `symbio-testkit`）。
+// 不占扩展层门面计件；测试面消费不再续命（通道归 `plugin-api::testkit` feature）。
 // 133 → 132（2026-11-12 同步）：`D-469` 把协议命名的规则收进模型插件时，sdk 的副本与
 // 门面的转出行同批删除，实测臂已降到 132 而基线没跟（守卫的 △ 提示）；基线跟着降，
 // 账本只许降（`D-269` 同一把尺子）。
@@ -267,7 +267,7 @@ export const CONTRACT_BASELINE = 31
 // 语法臂「只许不涨」，下调是账本跟着实测走。
 // 116 → 108（`D-443`）：`Builder` / `EVENT_RETRY` / `EventStore` / `Store` /
 // `VDFS_KIND_DIR` / `Seq` 六条零生产消费方（全部消费方是插件测试面）——测试通道归
-// `symbio-testkit`，门面不再为测试夹具背书；`EVENT_RETRY` 控制面 loop 改取内核本体。
+// `plugin-api::testkit`，门面不再为测试夹具背书；`EVENT_RETRY` 控制面 loop 改取内核本体。
 // 108 → 109（`D-513`）：实测已为 109，基线同批收平；不是放宽，账本只许降，
 // 基线跟着实测走。新增的一条要有决策号，本批记在 D-513。
 // 109 → 110（`D-532`）：`DetailColumn` 经 sdk 的 `present` 整模块转出到 plugin-api 门面——插件要声明 `DetailField.columns` 就必须能在自己 crate 里构造列定义，而门面是插件唯一可依赖的机制层（E-009 插件互不可见）。同名的 kernel 共享语法换的是门面可见性，不是新增可写路径；通用表格列契约见 DE-059 / D-532。
@@ -757,7 +757,7 @@ export function run(root) {
   // 控制面 loop / session 也是插件、也经门面拿宿主面——它们的生产消费同样证明一条
   // 出口不是空转；旧口径把它们排除，等于让「只被控制面用」的活条目永远过不了这关，
   // 反过来又逼着控制面去挖 E-009 不允许的 sdk 直连。测试面不计（与 C-003 同尺）：
-  // 只被测试用的条目是空转，通道归 `symbio-testkit`（E-009 ⑥ 的测试设施公共出口）。
+  // 只被测试用的条目是空转，通道归 `plugin-api::testkit`（E-009 ⑥ 的测试设施公共出口）。
   const used = collectConsumers(root, plugins)
   // 两臂都判：语法臂不计债，但同样不许有空转条目——它也是门面对插件的承诺。
   for (const s of [...wl, ...gram, ...contract, ...sdk]) {

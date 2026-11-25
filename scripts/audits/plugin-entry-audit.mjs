@@ -1096,8 +1096,8 @@ for (const abs of codeFiles) {
 // Rust 的 extern prelude 只含**直接**依赖，所以「mcp 不声明 web、却经 deploy 拿到 web 的类型」
 // 在正常情况下做不到——但 `pub use` 是一条合法的转发链：`mcp → deploy → web`。mcp 的清单
 // 里一条兄弟依赖都没有（①绿）、源码里也没有 `symbio_plugin_web`（②绿），而它已经持有了
-// web 的类型。这不是假想：`symbio-testkit` 正要成为「测试设施的公共出口」，一旦有人为了
-// 方便在那里 `pub use` 一个插件的类型，全部 22 个插件的 dev 依赖都会连带看见它。
+// web 的类型。这不是假想：门面的 testkit feature 一旦转发插件类型，全部插件测试
+// 都会连带看见它。
 //
 // 唯一例外是装配方 `crates/symbio`：它存在的理由就是聚合全部插件——`inventory` 的注册表
 // 要求这些 crate 被链接进来，`pub use` 是链接的载体。`symbio-cli` 是宿主客户端，同样不在
@@ -1226,11 +1226,6 @@ const LOOP_ALLOWED_EXTERNAL_ROOTS = new Set([
   // 显式列名而不是「凡 symbio_ 开头都放行」：那样会让新出现的 `symbio-plugin-xxx`
   // 悄悄落进族内。
   'symbio_platform',
-  // 测试设施（`[dev-dependencies]`，生产构建看不见）：`trivial_actor_spec` 与
-  // `StubLlmAdapter` 原住旧 core 的常开出口，拆 crate 后 `cfg(test)` 对下游
-  // 不生效，故搬 `symbio-testkit`。它**不含任何插件实现**，也不携带会话状态——
-  // 与 `symbio_providers` 的测试豁免同档，不是族外实现面。
-  'symbio_testkit',
   'serde',
   'serde_json',
   'async_trait',

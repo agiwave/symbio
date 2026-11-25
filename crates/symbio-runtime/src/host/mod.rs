@@ -8,8 +8,8 @@
 //!
 //! **宿主运行时也在这里**：驱动入口（`HostDrive` / 每会话重入位 / 按根绑定表）住在
 //! [`drive`]，主部署驱动入口的装配登记住在 [`entry`]——状态与登记随宿主同一个 crate。
-//! 装配根 `symbio` 只回答「链接了哪些插件、根怎么构造」，不再依赖本 crate
-//! （否则成环：本 crate 要向它要根插件）。
+//! 装配根 `symbio` 依赖本 crate，并在组合边界注入根工厂；本 crate 不认识具体插件，
+//! 也不反向依赖装配根（RB-001）。
 
 use std::collections::{HashMap, HashSet};
 use std::path::PathBuf;

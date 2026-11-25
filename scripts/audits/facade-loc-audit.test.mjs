@@ -215,6 +215,35 @@ test('测试代码不计：*.test.rs 再长也不进读数', () => {
   }
 })
 
+test('测试设施不计：cfg(test) / test-fixtures 门控的 testkit 目录不进读数（D-563）', () => {
+  const files = cleanFiles()
+  files[`${SRC}/lib.rs`] = '#[cfg(any(test, feature = "test-fixtures"))]\npub mod testkit;\n'
+  files[`${SRC}/testkit/mod.rs`] = `mod stubs;\n${rustLines(4_999)}`
+  files[`${SRC}/testkit/stubs.rs`] = rustLines(5_000)
+  const box = sandbox(files)
+  try {
+    const { status, out } = run(box.root)
+    assert.equal(status, 0, out)
+    assert.match(out, /生产合计 18 行/)
+  } finally {
+    box.cleanup()
+  }
+})
+
+test('生产声明不计豁免：无条件公开的 testkit 模块仍进入读数（D-563）', () => {
+  const files = cleanFiles()
+  files[`${SRC}/lib.rs`] = 'pub mod testkit;\n'
+  files[`${SRC}/testkit/mod.rs`] = rustLines(5)
+  const box = sandbox(files)
+  try {
+    const { status, out } = run(box.root)
+    assert.equal(status, 1, out)
+    assert.match(out, /FA-001.*合计.*实测 24 行 \/ 基线 18 行（超 6 行）/)
+  } finally {
+    box.cleanup()
+  }
+})
+
 test('清单镜像不计：描述符声明的生成物再长也不进读数（D-470）', () => {
   const files = cleanFiles()
   files['scripts/facts/mirror.mjs'] = "const OUT_REL = 'crates/symbio-plugin-api/src/routes.rs'\n"

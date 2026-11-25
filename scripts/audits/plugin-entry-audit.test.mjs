@@ -831,11 +831,6 @@ test('E-009 不误报：`include!` / `#[path]` 指向本 crate 内的文件', ()
 
 // 中转站：Rust 的 extern prelude 只含直接依赖，所以「没声明依赖却拿到类型」本不该发生，
 // 但 `pub use` 是一条合法转发链（mcp → deploy → web）。这条用例守的就是它。
-auditCase('E-009 命中：非插件 crate 转发插件类型（`symbio-testkit` 的 `pub use`）', () => audit({
-    ...CLEAN,
-    'crates/symbio-testkit/src/lib.rs': 'pub use symbio_plugin_session::SessionPlugin;\n',
-  }), 1, [/E-009\s+crates\/symbio-testkit\/src\/lib\.rs:1/])
-
 auditCase('E-009 命中：`symbio-plugin-api` 也不得转发插件（它被全部插件依赖，最坏形态）', () => audit({
     ...CLEAN,
     'crates/symbio-plugin-api/src/lib.rs': 'pub use symbio_plugin_session::SessionPlugin;\n',

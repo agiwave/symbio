@@ -116,6 +116,18 @@ test('extractSymbols 认 async / const / unsafe / extern 形态，不认 pub(cra
   assert.deepEqual(names, ['a', 'b', 'c', 'd'])
 })
 
+test('extractSymbols 不认测试专用 cfg 下的公开函数（D-563）', () => {
+  const text = [
+    '#[cfg(test)]',
+    'pub fn test_only() {}',
+    '#[cfg(any(test, feature = "test-fixtures"))]',
+    'pub fn fixture_only() {}',
+    'pub fn production() {}',
+  ].join('\n')
+  const names = extractSymbols(text, 'x.rs').map((s) => s.symbol)
+  assert.deepEqual(names, ['production'])
+})
+
 // ── AD-001 / AD-002 ────────────────────────────────────────────────
 
 test('AD-001：新出现的零调用符号即红', () => {

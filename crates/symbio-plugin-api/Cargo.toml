@@ -34,6 +34,11 @@ tracing = { workspace = true }
 # 声明表的链接期收集：与 core 的 `submit_object_creator!` 同一条机制。
 inventory = { workspace = true }
 
+[features]
+default = []
+# 下游测试夹具经显式 feature 开启；默认生产构建不编译 testkit 模块。
+test-fixtures = []
+
 [dev-dependencies]
 tempfile = { workspace = true }
 # 测试用：tokio 时间控制（start_paused / advance）

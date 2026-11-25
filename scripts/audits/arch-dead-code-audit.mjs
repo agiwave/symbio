@@ -74,7 +74,7 @@ import fs from 'node:fs'
 import path from 'node:path'
 import { fileURLToPath } from 'node:url'
 import { green, red, dim } from '../color.mjs'
-import { walk, isTestFile } from '../fs-walk.mjs'
+import { walk, isTestFile, isTestOnlyCfg } from '../fs-walk.mjs'
 import { blankComments, blankTestModules } from '../rust-scan.mjs'
 import { hasDecisionAnchor } from '../decision-anchors.mjs'
 import { gitRaw } from '../gate.d/_shared.mjs'
@@ -150,10 +150,22 @@ export function callCorpus(text) {
 /** 从一份源码提取 `pub fn` 声明（带行号）。 */
 export function extractSymbols(text, rel) {
   const out = []
+  const sourceLines = text.split('\n')
   const lines = blankSource(text).split('\n')
   for (let i = 0; i < lines.length; i++) {
     const m = FN_DECL_RE.exec(lines[i])
-    if (m) out.push({ symbol: m[1], path: rel, line: i + 1 })
+    if (!m) continue
+    let testOnly = false
+    for (let j = i - 1; j >= 0; j--) {
+      const line = sourceLines[j].trim()
+      if (!line || line.startsWith('//')) continue
+      if (!line.startsWith('#[')) break
+      if (isTestOnlyCfg(line)) {
+        testOnly = true
+        break
+      }
+    }
+    if (!testOnly) out.push({ symbol: m[1], path: rel, line: i + 1 })
   }
   return out
 }

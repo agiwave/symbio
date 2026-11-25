@@ -25,11 +25,11 @@ use super::{
     OWNER, REPUTATION_LEDGER, VIEWS,
 };
 use symbio_plugin_api::ring::{Decl, Pattern};
+use symbio_plugin_api::testkit::EVENT_RETRY;
 use symbio_plugin_api::{
     Entity, Event, EventDecl, PluginDeclarations, Verb, EVENT_FAILED, EVENT_REQUEST,
     EVENT_RESPONSE, EVENT_SENT,
 };
-use symbio_testkit::EVENT_RETRY;
 
 /// `loop` 拥有的三条承诺格（本二进制不链接它 ⇒ 夹具补格位）。
 ///
@@ -354,7 +354,8 @@ fn the_view_is_declared_over_the_three_commitment_cells() {
 /// `t75` 钉。
 #[test]
 fn the_ledger_is_sealed_under_this_owner() {
-    let frozen = symbio_testkit::sealed_declarations().expect("测试进程的装配表应能冻结");
+    let frozen =
+        symbio_plugin_api::testkit::sealed_declarations().expect("测试进程的装配表应能冻结");
     assert!(frozen.view(REPUTATION_LEDGER).is_some());
     assert_eq!(frozen.view_owner(REPUTATION_LEDGER), Some(OWNER));
     // 读的三条承诺格在本二进制里是**断言格读法**（有 `EventDecl`、无 `FactDecl`）：

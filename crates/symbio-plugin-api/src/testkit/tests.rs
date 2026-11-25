@@ -1,12 +1,4 @@
 //! 五类扩展夹具的断言：每一类都只经 `PluginDeclarations` / 机制类型接入。
-//!
-//! 判据不是「代码好看」，而是「**内核零 diff**」：这些名字（`fixture.*`）只出现在
-//! 本文件与内核的声明类型里——内核不认识它们，`seal` 只做形状检查。
-//!
-//! 本文件只到**声明面**（`declare` → `seal` → 冻结表里查得到）。写闸那一半必须
-//! 有真实的 append / 读回，故端到端夹具住在拥有写门的 `symbio-plugin-session`
-//! （`injected_declarations_are_the_grid_the_gate_reads`）：那里同时钉正反两向——
-//! 表上放行并读回、表上但自述挪格被拒、不在表上被拒（DE-024 D-200）。
 
 use serde_json::{json, Value};
 
@@ -32,10 +24,6 @@ fn pattern(source: &'static str) -> Pattern {
     }
 }
 
-/// 一行「归宿」：某个事实被子句读到即算有归宿（判据 7）。
-///
-/// `owes` 与 `until` 同源同键 ⇒ 一笔债都开不出来 ⇒ 不需要执行体（`D-306` 裁决一：
-/// 行不再声明自己归谁，谁执行由 `owes` 与行注册表派生）。
 fn cover(source: &'static str) -> Decl {
     let exits: &'static [Pattern] = Box::leak(Box::new([pattern(source)]));
     Decl {
@@ -48,8 +36,6 @@ fn cover(source: &'static str) -> Decl {
     }
 }
 
-/// 一条**会开账**的策略行（`owes` 与 `until` 不同源 ⇒ 必须有人跑）：装载期会按
-/// 行注册表判它有没有执行体。
 fn strategy_row(fact: &'static str) -> Decl {
     let exit: &'static [Pattern] = Box::leak(Box::new([pattern(EVENT_SENT)]));
     Decl {
@@ -62,7 +48,6 @@ fn strategy_row(fact: &'static str) -> Decl {
     }
 }
 
-/// 归宿行：协议五格 + 夹具自己的事实（装载期判据 7：每个事实名都要有归宿）。
 fn rows(sources: &[&'static str]) -> &'static [Decl] {
     let mut all: Vec<&'static str> = vec![
         EVENT_REQUEST,
@@ -73,8 +58,7 @@ fn rows(sources: &[&'static str]) -> &'static [Decl] {
     ];
     all.extend_from_slice(sources);
     let out: Vec<Decl> = all.iter().map(|s| cover(s)).collect();
-    let leaked: &'static mut [Decl] = Box::leak(out.into_boxed_slice());
-    leaked
+    Box::leak(out.into_boxed_slice())
 }
 
 fn fact(name: &'static str) -> FactDecl {
@@ -87,7 +71,6 @@ fn fact(name: &'static str) -> FactDecl {
     }
 }
 
-/// 声明切片要 `'static`（装载期持有），测试里用泄漏给它一个稳定地址。
 fn facts(names: &[&'static str]) -> &'static [FactDecl] {
     Box::leak(
         names
@@ -98,8 +81,6 @@ fn facts(names: &[&'static str]) -> &'static [FactDecl] {
     )
 }
 
-/// 夹具事件行：声明一个事实就得给它一个格位（`seal` 的 `FactWithoutEvent`）。
-/// 格位取什么不影响本文件的判据——它只证明「名字 + 格位」经声明口接入。
 fn events(names: &[&'static str]) -> &'static [EventDecl] {
     Box::leak(
         names
@@ -110,15 +91,12 @@ fn events(names: &[&'static str]) -> &'static [EventDecl] {
     )
 }
 
-/// 视图求值函数：只拿事实切片与时间戳（F2 的纯净形状）。
 fn eval_ids(events: &[Event], _now: i64) -> Value {
     json!(events
         .iter()
         .map(|e| e.event_id.clone())
         .collect::<Vec<_>>())
 }
-
-// ── 1. 事实 ──────────────────────────────────────────────────────────
 
 #[test]
 fn fact_extension_is_owner_local() {
@@ -138,8 +116,6 @@ fn fact_extension_is_owner_local() {
     assert!(frozen.fact(FIXTURE_FACT).is_some());
     assert_eq!(frozen.facts().len(), 6, "协议五格 + 夹具一格");
 }
-
-// ── 2. 视图 ──────────────────────────────────────────────────────────
 
 #[test]
 fn view_extension_is_owner_local() {
@@ -174,8 +150,6 @@ fn view_extension_is_owner_local() {
     assert_eq!((view.eval)(&[], 0), json!([]));
 }
 
-// ── 3. 策略（一行 + 一个执行体）──────────────────────────────────────
-
 #[test]
 fn strategy_extension_is_owner_local() {
     let mut b = Builder::new();
@@ -198,8 +172,6 @@ fn strategy_extension_is_owner_local() {
             },
         },
     );
-    // 派发端只交两样数据：行表与行实现表。「谁执行」由后者派生（`D-306` 裁决一）——
-    // 行上没有「我归谁」这一栏可写。
     let row_writes: &'static [(&'static str, &'static [&'static str])] =
         Box::leak(vec![("fixture.new-row", &[FIXTURE_FACT][..])].into_boxed_slice());
     let frozen = b
@@ -211,8 +183,6 @@ fn strategy_extension_is_owner_local() {
         "行表里有这一行，执行体由注册表回答"
     );
 }
-
-// ── 4. 插件（一次 declare = 一个 owner 的全部声明）───────────────────
 
 #[test]
 fn plugin_extension_is_owner_local() {
@@ -246,21 +216,17 @@ fn plugin_extension_is_owner_local() {
         .seal(&[])
         .expect("两个 owner 各自交表即可共装，内核不登记插件名");
     assert!(frozen.fact(A_FACT).is_some());
-    assert!(frozen.fact(B_FACT).is_some());
     assert_eq!(frozen.facts().len(), 7, "协议五格 + 两个 owner 各一格");
     assert_eq!(
         frozen.fact_owner(A_FACT),
         Some("fixture/owner_a"),
-        "owner 清单逐条记下交表方，而不是把两个 owner 混成一个"
+        "owner 清单逐条记下交表方，不把两个 owner 混成一个"
     );
     assert_eq!(frozen.fact_owner(B_FACT), Some("fixture/owner_b"));
 }
 
-// ── 5. 共享类型（插件本地族 + 开放载荷 + 机制构造器）────────────────
-
 #[test]
 fn shared_type_extension_is_owner_local() {
-    /// 夹具自己的「共享类型」：定义在插件侧，内核不认识。
     struct FixtureShared {
         label: &'static str,
     }
@@ -284,7 +250,6 @@ fn shared_type_extension_is_owner_local() {
         "载荷按具体类型取回是声明方与消费方的私有约定，表不参与校验"
     );
 
-    // 投影同理：视图类型与实现在插件侧，内核只出机制构造器。
     let projection = Projection::new(|events: &[Event], _now| events.len());
     assert_eq!(projection.read_all(&[]).value, 0);
 }

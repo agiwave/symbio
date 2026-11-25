@@ -38,7 +38,8 @@ export function* walk(dir) {
 
 /**
  * 测试文件（命名约定见 `test-layout-audit.mjs`：`X.test.rs` 与 `tests.rs`），
- * 外加**只在测试构建里存在的模块**（`#[cfg(test)] mod test_support;`）。
+ * 外加**只在测试构建里存在的模块**（`#[cfg(test)] mod test_support;`，以及
+ * `#[cfg(any(test, feature = "test-fixtures"))] pub mod testkit;`）。
  *
  * **测试不是架构消费方**——这条判据只有这一处实现，多个审计共用。
  */
@@ -47,39 +48,64 @@ export function isTestFile(file) {
   return isCfgTestOnlyModule(file)
 }
 
-const PARENT_MODULE_CACHE = new Map()
+const TEST_ONLY_CFGS = new Set([
+  '#[cfg(test)]',
+  '#[cfg(any(test, feature = "test-fixtures"))]',
+])
+
+export function isTestOnlyCfg(line) {
+  return TEST_ONLY_CFGS.has(line.trim())
+}
+
+const MODULE_DECL_CACHE = new Map()
+
+function moduleDeclaration(file) {
+  const abs = path.resolve(file)
+  if (MODULE_DECL_CACHE.has(abs)) return MODULE_DECL_CACHE.get(abs)
+  const fileStem = path.basename(abs, '.rs')
+  const isModFile = fileStem === 'mod'
+  const stem = isModFile ? path.basename(path.dirname(abs)) : fileStem
+  const result = { found: false, testOnly: false, parent: null }
+  if (stem !== 'lib') {
+    const dir = isModFile ? path.dirname(path.dirname(abs)) : path.dirname(abs)
+    const parent = [path.join(dir, 'mod.rs'), `${dir}.rs`, path.join(dir, 'lib.rs')]
+      .find((candidate) => fs.existsSync(candidate))
+    if (parent) {
+      result.parent = parent
+      const lines = fs.readFileSync(parent, 'utf8').split('\n')
+      const decl = new RegExp(`^\\s*(?:pub(?:\\([^)]*\\))?\\s+)?mod\\s+${stem}\\s*;`)
+      for (let i = 0; i < lines.length; i++) {
+        if (!decl.test(lines[i])) continue
+        result.found = true
+        for (let j = i - 1; j >= 0 && j >= i - 4; j--) {
+          const line = lines[j].trim()
+          if (!line || line.startsWith('//')) continue
+          result.testOnly = isTestOnlyCfg(line)
+          break
+        }
+        break
+      }
+    }
+  }
+  MODULE_DECL_CACHE.set(abs, result)
+  return result
+}
 
 /**
  * `#[cfg(test)] mod test_support;` 这类模块：文件名不是 `.test.rs`，但它**不参与
  * 生产构建**。旧口径只看文件名，于是把其中的类型读成生产消费方。
  *
- * 判据取自声明方：同名 `mod` 声明紧前（允许空行与单行注释）必须是 `#[cfg(test)]`。
+ * 判据取自声明方，并沿父模块上溯：目录模块与其中文件的测试属性继承自祖先声明。
  */
 function isCfgTestOnlyModule(file) {
-  const stem = path.basename(file, '.rs')
-  const dir = path.dirname(file)
-  let parentText = PARENT_MODULE_CACHE.get(dir)
-  if (parentText === undefined) {
-    parentText = null
-    for (const candidate of [path.join(dir, 'mod.rs'), `${dir}.rs`]) {
-      try {
-        parentText = fs.readFileSync(candidate, 'utf8')
-        break
-      } catch {}
-    }
-    PARENT_MODULE_CACHE.set(dir, parentText)
-  }
-  if (!parentText) return false
-  const lines = parentText.split('\n')
-  const decl = new RegExp(`^\\s*(?:pub(?:\\([^)]*\\))?\\s+)?mod\\s+${stem}\\s*;`)
-  for (let i = 0; i < lines.length; i++) {
-    if (!decl.test(lines[i])) continue
-    for (let j = i - 1; j >= 0 && j >= i - 4; j--) {
-      const line = lines[j].trim()
-      if (!line || line.startsWith('//')) continue
-      return line === '#[cfg(test)]'
-    }
-    return false
+  let current = path.resolve(file)
+  const seen = new Set()
+  while (!seen.has(current)) {
+    seen.add(current)
+    const declaration = moduleDeclaration(current)
+    if (!declaration.found) return false
+    if (declaration.testOnly) return true
+    current = declaration.parent
   }
   return false
 }

@@ -119,7 +119,7 @@ test('决策号允许三位以上（D-1000 不该被当成没写）', () => {
   assert.deepEqual(r.errors, [])
 })
 
-test('provider / testkit 也算「扩能力」侧的证据', () => {
+test('provider / 历史 testkit 路径也算「扩能力」侧的证据', () => {
   for (const f of ['crates/symbio-providers/src/vdfs_service/mod.rs', 'crates/symbio-testkit/src/lib.rs']) {
     const r = judge(SHA, [CORE, f], msg('\nCore-Change: 随手改\n'))
     assert.equal(r.errors.length, 1, f)

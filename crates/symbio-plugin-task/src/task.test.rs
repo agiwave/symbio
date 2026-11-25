@@ -10,17 +10,17 @@ use symbio_plugin_api::effects::{
     BeforeDecision, BeforeReadings, BeforeRequest, EffectEnv, EffectInput, ToolBehavior,
 };
 use symbio_plugin_api::settle::{Contributor, SettleFace, Settling};
+use symbio_plugin_api::testkit::fact_source::draft_into_event;
+use symbio_plugin_api::testkit::{check_all, EventStore, Seq, Store, PRINCIPAL_MAIN};
 use symbio_plugin_api::PRINCIPAL_SCHEDULER;
 use symbio_plugin_api::{actor_can_assign_work, Entity, Event, EventDecl, Pattern, Scope, Verb};
-use symbio_testkit::fact_source::draft_into_event;
-use symbio_testkit::{check_all, EventStore, Seq, Store, PRINCIPAL_MAIN};
 
 use crate::decl::{
     EVENT_TASK_ASSERTED, EVENT_TASK_ASSIGNED, EVENT_TASK_OPENED, EVENT_TASK_PROGRESS,
     EVENT_TASK_READY, EVENT_TASK_REWORK_CREATED,
 };
 use crate::readyset::{ready_all, ready_view};
-use symbio_testkit::trivial_actor_spec;
+use symbio_plugin_api::testkit::trivial_actor_spec;
 
 /// 判据的词汇面：本 crate 的声明表（`submit_declarations!`）链接进来即生效。
 ///
@@ -99,7 +99,7 @@ fn write_all(store: &EventStore, round: u64, decls: &[Decl]) {
                 symbio_plugin_api::events::EVENT_USER_MESSAGE,
                 Entity::Scope,
                 Verb::Opened,
-                symbio_testkit::PRINCIPAL_MAIN,
+                symbio_plugin_api::testkit::PRINCIPAL_MAIN,
             ))
             .expect("根事件入格")
             .value(),
@@ -119,7 +119,7 @@ fn write_all(store: &EventStore, round: u64, decls: &[Decl]) {
     let env = EffectEnv {
         anchor: &stem,
         user_seq: anchor,
-        principal: symbio_testkit::PRINCIPAL_MAIN,
+        principal: symbio_plugin_api::testkit::PRINCIPAL_MAIN,
         source: symbio_plugin_api::PRINCIPAL_USER,
         snapshot: &snapshot,
         applied: &[],
@@ -463,7 +463,7 @@ fn a_ready_task_survives_the_snapshot_boundary() {
                 "session.consolidated",
                 Entity::Message,
                 Verb::Progressed,
-                symbio_testkit::PRINCIPAL_MAIN,
+                symbio_plugin_api::testkit::PRINCIPAL_MAIN,
             )
             .with_payload(serde_json::json!({
                 // 载荷是**合法**的快照（一份真的 `ChatNode` 列表）：不合法的话
@@ -664,7 +664,7 @@ fn apply_effects(
         let env = EffectEnv {
             anchor: &stem,
             user_seq: anchor,
-            principal: symbio_testkit::PRINCIPAL_MAIN,
+            principal: symbio_plugin_api::testkit::PRINCIPAL_MAIN,
             source: symbio_plugin_api::PRINCIPAL_USER,
             snapshot: &snapshot,
             applied: &applied,
@@ -687,7 +687,7 @@ fn seed_anchor(store: &EventStore) -> u64 {
             symbio_plugin_api::events::EVENT_USER_MESSAGE,
             Entity::Scope,
             Verb::Opened,
-            symbio_testkit::PRINCIPAL_MAIN,
+            symbio_plugin_api::testkit::PRINCIPAL_MAIN,
         ))
         .expect("根事件入格")
         .value()
@@ -1036,7 +1036,7 @@ fn a_second_declaration_of_the_same_task_event_is_rejected() {
             rows: &[],
         }
     }
-    let mut b = symbio_testkit::Builder::new();
+    let mut b = symbio_plugin_api::testkit::Builder::new();
     b.declare("crates/symbio-plugin-task", decls());
     // 旧实现没删干净的样子：同一个名字在第二个 owner 下再声明一次。
     b.declare("crates/symbio-plugin-loop", decls());

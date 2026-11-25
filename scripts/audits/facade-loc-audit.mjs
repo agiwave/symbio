@@ -36,9 +36,9 @@
  *
  * ## 统计口径（这条比脚本本身重要）
  *
- * 数的是**生产文件的行数**：`*.test.rs` / `tests.rs` 及 `#[cfg(test)] mod x;` 声明的
+ * 数的是**生产文件的行数**：`*.test.rs` / `tests.rs` 及测试专用 cfg 声明的
  * 测试模块整体不计（`isTestFile` 是唯一实现），文件内的空行与注释照算——
- * 契约面的文档注释也是读者要读的那部分。
+ * 契约面的文档注释也是读者要读的那部分。根上的 `testkit` 测试声明本身也不计（D-563）。
  *
  * **清单镜像不计行数**（`D-470`）：`events.rs` / `routes.rs` 是各插件 `PLUGIN.yml` 清单的
  * 投影，由 `scripts/facts/` 的描述符重新生成——它们不是「手写进契约面的实现」。把它们
@@ -83,7 +83,14 @@ const CRATE_DIR = 'crates/symbio-plugin-api/src'
 /** 物理行数：`\n` 分隔，末尾换行不算多一行。 */
 export function physicalLines(text) {
   const norm = text.replace(/\r\n/g, '\n')
+  if (!norm) return 0
   return norm.split('\n').length - (norm.endsWith('\n') ? 1 : 0)
+}
+
+const TESTKIT_DECL_RE = /^#\[cfg\(any\(test, feature = "test-fixtures"\)\)\]\npub mod testkit;\n?/m
+
+export function productionLines(text) {
+  return physicalLines(text.replace(TESTKIT_DECL_RE, ''))
 }
 
 /**
@@ -102,7 +109,7 @@ export function scanCrate(root = ROOT) {
     const rel = path.relative(dir, abs).split(path.sep).join('/')
     files.push({
       path: rel,
-      lines: physicalLines(fs.readFileSync(abs, 'utf8')),
+      lines: productionLines(fs.readFileSync(abs, 'utf8')),
       generated: generated.has(`${CRATE_DIR}/${rel}`),
     })
   }
