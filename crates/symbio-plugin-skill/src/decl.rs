@@ -73,7 +73,7 @@ pub(crate) const SKILL_CALIBRATION: &str = "skill.calibration";
 ///
 /// 读者是会话统计的 `compiled_skills` 顶层键（报表登记见下，`D-489`）。数的口径与
 /// 写方同源：数的是本能力写下的编码事实，`SKILL_TAG` 单点在本文件（`D-258`）——
-/// 此前 `symbio_sdk::actors` 里还挂着一份读侧词汇、由读方（session 的 stats）抄去数，
+/// 此前 `symbio_platform::sdk::actors` 里还挂着一份读侧词汇、由读方（session 的 stats）抄去数，
 /// 机制面上有一条只有 skill 认识的常量；随本条退场，读数不再由读方抄第二份标签。
 pub(crate) const SKILL_COMPILED: &str = "skill.compiled";
 

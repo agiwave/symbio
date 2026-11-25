@@ -1,7 +1,7 @@
 //! 终止写方的谓词三态（D-367）：非 `NoDebt` 不落 / 有终答才落 / 同 `root_id` 只落一次。
 //! `reason` 原样取终答那一格；终答缺 `reason` 时宁可不落，也不编一个值盖上 I3 缺口。
 
-use symbio_kernel::event::{Entity, Verb};
+use symbio_platform::kernel::event::{Entity, Verb};
 use symbio_plugin_api::drive::{DriveFact, DriveKey};
 use symbio_plugin_api::termination::{TerminationView, TerminationWriter};
 

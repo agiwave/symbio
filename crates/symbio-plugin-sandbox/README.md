@@ -19,7 +19,7 @@ impl: partial
 |---|---|---|
 | ctx 句柄 | `Arc<dyn SandboxFace>`，经收集期发布进共享槽 | 编排层拦截、工具许可查询 |
 
-接口的形状定义在 `symbio_sdk::sandbox`，门面转出为 `symbio_plugin_api::SandboxFace`。
+接口的形状定义在 `symbio_platform::sdk::sandbox`，门面转出为 `symbio_plugin_api::SandboxFace`。
 SDK 与门面**不含任何工具名、op 常量、黑白名单配置项**——那些全是本插件的内部数据。
 
 ## 两个维度，一个句柄

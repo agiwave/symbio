@@ -1,17 +1,17 @@
 use std::process::ExitCode;
 use std::sync::Arc;
 
-use symbio_server::RuntimeHost;
+use symbio_runtime::RuntimeHost;
 
 use crate::args::ServeArgs;
 
 pub async fn run(args: ServeArgs) -> ExitCode {
     let log_level = if args.verbose {
-        symbio::symbio_sdk::logger::LOG_LEVEL_DEBUG
+        symbio_platform::sdk::logger::LOG_LEVEL_DEBUG
     } else {
-        symbio::symbio_sdk::logger::LOG_LEVEL_INFO
+        symbio_platform::sdk::logger::LOG_LEVEL_INFO
     };
-    symbio::symbio_sdk::logger::logger_set_min_level(log_level);
+    symbio_platform::sdk::logger::logger_set_min_level(log_level);
 
     if let Err(error) = std::fs::create_dir_all(&args.homedir) {
         eprintln!("创建系统目录失败 {}: {error}", args.homedir.display());
@@ -33,7 +33,7 @@ pub async fn run(args: ServeArgs) -> ExitCode {
         }
     };
     let config = args.config;
-    let handle = match symbio_server::start(config, Arc::clone(&host)).await {
+    let handle = match symbio_runtime::start(config, Arc::clone(&host)).await {
         Ok(handle) => handle,
         Err(error) => {
             eprintln!("Server 启动失败: {error}");
@@ -48,7 +48,7 @@ pub async fn run(args: ServeArgs) -> ExitCode {
     if wait_for_shutdown_signal().await.is_err() {
         eprintln!("无法监听退出信号，Server 将继续运行");
     }
-    symbio_server::stop(handle).await;
+    symbio_runtime::stop(handle).await;
     if let Err(error) = host.shutdown().await {
         eprintln!("RuntimeHost 停止失败: {error}");
         return ExitCode::FAILURE;

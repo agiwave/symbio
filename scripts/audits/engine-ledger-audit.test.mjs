@@ -25,7 +25,7 @@ const script = fileURLToPath(new URL('./engine-ledger-audit.mjs', import.meta.ur
 const LOOP_SRC = 'crates/symbio-plugin-loop/src'
 const TABLE = 'crates/symbio-plugin-loop/src/ring/table.rs'
 const ENGINE = 'crates/symbio-plugin-loop/src/ring/engine.rs'
-const DRIVE = 'crates/symbio/src/drive.rs'
+const DRIVE = 'crates/symbio-runtime/src/host/entry.rs'
 const TURN = 'crates/symbio-plugin-session/src/plugin/round.rs'
 
 /** 与基线等量的干净夹具：0 行 / 1 通道 / 0 处全量读。 */
@@ -120,7 +120,7 @@ test('EL-002：多一个 Mutex 字段 ⇒ 红', () => {
 
 test('EL-003：多一处全量读 ⇒ 红（两种写法都算）', () => {
   const files = cleanFiles()
-  files[DRIVE] += 'fn h() { let _ = facts.range(symbio_sdk::Seq::new(0)); }\n'
+  files[DRIVE] += 'fn h() { let _ = facts.range(symbio_platform::sdk::Seq::new(0)); }\n'
   const box = sandbox(files)
   try {
     const r = run(box.root)

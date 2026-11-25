@@ -103,6 +103,7 @@ function run({
         `TOOLS_ROOT=${path.join(root, 'tools')}`,
         `SDK_ROOT=${path.join(root, 'sdk')}`,
         `KERNEL_ROOT=${path.join(root, 'kernel')}`,
+        `CONTRACT_ROOT=${path.join(root, 'sdk')}`,
         `LOOP_ROOT=${path.join(root, 'loop')}`,
         `DOCS_ROOT=${path.join(root, 'docs')}`,
         `SC006_BASELINE=${baselineFile}`,

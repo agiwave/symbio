@@ -43,10 +43,9 @@ created: 2026-07-20
 ```
 symbio/
 ├── crates/ # Rust 全 workspace（根 Cargo.toml 的 members；cargo 命令在仓库根跑）
-│ ├── symbio-kernel/ # 封闭语法：事件 / 视图 / Store / 投影构造器
-│ ├── symbio-sdk/ # 宿主机制与策略：配置 IO / 事件总线 / 授权
+│ ├── symbio-platform/ # 平台：kernel 语法 / contract ABI / sdk 机制 / deploy 装配常量
 │ ├── symbio-plugin-api/ # 扩展层门面：插件唯一的宿主依赖
-│ ├── symbio-host/ # 宿主运行时：port 行 / 每会话驱动
+│ ├── symbio-runtime/ # 运行时：传输与会话执行 + host（port 行 / 每会话驱动）
 │ ├── symbio-plugin-*/ # 业务插件（各含 README.md）
 │ ├── symbio-provider-*/ # 基础设施（嵌入、文件存储）
 │ ├── symbio/ # 装配 crate：根插件装配入口
@@ -323,13 +322,13 @@ mod tests;
 ## 5. 插件开发流程
 
 新增一个业务插件的最短路径（**加插件 = 建 crate 目录 + 写 `PLUGIN.yml` + 实现声明**，
-装配方与 `symbio-kernel` / `symbio-sdk` 零改动）：
+装配方与 `symbio-platform` 平台四臂零改动）：
 
 1. 建 crate：`crates/symbio-plugin-<name>/`，内含
  `Cargo.toml`（`name = "symbio-plugin-<name>"`，内部依赖走 `path`，外部版本一律 `{ workspace = true }`）、
  `PLUGIN.yml`（`plugin_id` **必须等于目录名**；`plugin_assembly: sub_agent` + 整数 `plugin_order`，或 `none`）、
  `src/lib.rs` 与 `src/plugin.rs`。根清单的 `members = ["crates/*", …]` 会自动收进，不用改 `Cargo.toml`。
-2. 装配行由生成器投影：`crates/symbio-deploy/src/lib.rs` 的 `PLUGIN_ID_*` 与装配清单来自各插件
+2. 装配行由生成器投影：`crates/symbio-platform/src/deploy/mod.rs` 的 `PLUGIN_ID_*` 与装配清单来自各插件
  `PLUGIN.yml`；`crates/symbio/Cargo.toml` 的依赖行与 `crates/symbio/src/lib.rs` 的 `pub use` 行
  来自目录投影（`scripts/facts/plugin-links-*.mjs`）。**两侧都不手改**，门禁自动重生成。
 3. 实现 [`Plugin`](docs/003-design/005-协议规范.md "DE-005-协议规范") trait 的 `route` 与 `traverse`；在文件末尾用

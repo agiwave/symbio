@@ -124,8 +124,8 @@ const ROOT = rootArg
 const PRINT_BASELINE = argv.includes('--print-baseline')
 
 /** 事件名字表（协议名的唯一 owner）与事实声明表 */
-const EVENT_REL = 'crates/symbio-kernel/src/event/mod.rs'
-const DECL_REL = 'crates/symbio-kernel/src/decl/mod.rs'
+const EVENT_REL = 'crates/symbio-platform/src/kernel/event/mod.rs'
+const DECL_REL = 'crates/symbio-platform/src/kernel/decl/mod.rs'
 /** 基线（判据面之一，见文件头「基线在哪」） */
 const BASELINE_REL = 'scripts/baselines/port-surface.json'
 /** 重试条文所在（PTS-006 的唯一输入：§3.3 重放收敛） */
@@ -430,7 +430,7 @@ for (const expr of portUnresolved) {
 }
 
 const baseline = readBaseline()
-const solverRel = baseline?.solver?.file ?? 'crates/symbio-kernel/src/decl/ring.rs'
+const solverRel = baseline?.solver?.file ?? 'crates/symbio-platform/src/kernel/decl/ring.rs'
 const solverText = readText(solverRel)
 
 /**
@@ -745,7 +745,7 @@ if (retrySection !== null && !/retry\(attempt\+1\)/.test(retrySection)) {
  *     与其余各格一样**宁红不静默**。
  */
 const PTS7_ROOTS = [
-  'crates/symbio-sdk/src',
+  'crates/symbio-platform/src/sdk',
   'crates/symbio-plugin-api/src',
   'crates/symbio-plugin-session/src',
 ]

@@ -12,11 +12,11 @@
 
 use super::*;
 use std::sync::Mutex;
-use symbio_kernel::chat::chat_node::{MessageContent, NodeKind, NodeRole, NodeStatus};
+use symbio_platform::kernel::chat::chat_node::{MessageContent, NodeKind, NodeRole, NodeStatus};
 
 /// 身份写 `principal`（D-147）：夹具模仿的是**投递/落库面**的消息，`role` 只是读侧残留格。
-fn principal_for(role: NodeRole) -> symbio_kernel::chat::principal::Principal {
-    use symbio_kernel::chat::principal::Principal;
+fn principal_for(role: NodeRole) -> symbio_platform::kernel::chat::principal::Principal {
+    use symbio_platform::kernel::chat::principal::Principal;
     match role {
         NodeRole::User => Principal::from_legacy(symbio_plugin_api::PRINCIPAL_USER),
         NodeRole::Assistant => Principal::from_legacy("session/main"),
@@ -585,10 +585,10 @@ fn session_state_flushes_pending_delta_first() {
 fn session_state_change_lands_on_the_session_leaf() {
     let (mut tr, seen) = transcript();
     tr.apply(text_msg("a", NodeStatus::Completed, "你好"));
-    let node = symbio_kernel::vdfs::VdfsNode::file(
+    let node = symbio_platform::kernel::vdfs::VdfsNode::file(
         "s1",
         "会话",
-        symbio_kernel::vdfs::VdfsAccess::READ_WRITE,
+        symbio_platform::kernel::vdfs::VdfsAccess::READ_WRITE,
     );
     tr.emit_session_state(Some(node));
 

@@ -36,10 +36,10 @@
 //!
 //! [D-169]: ../../../../../docs/003-design/001-核心架构.md "DE-001-核心架构"
 
-use symbio_kernel::event::Event;
-use symbio_kernel::projection::Projection;
+use symbio_platform::kernel::event::Event;
+use symbio_platform::kernel::projection::Projection;
+use symbio_platform::sdk::projection::vocab::MessageVocab;
 use symbio_plugin_api::effects::FileOp;
-use symbio_sdk::projection::vocab::MessageVocab;
 
 use std::collections::HashMap;
 
@@ -146,7 +146,7 @@ fn inside_workdir(raw: &str) -> Option<String> {
     if segments.is_empty() {
         return None;
     }
-    if symbio_sdk::vdfs::address::declared_addr_root() == Some(segments[0]) {
+    if symbio_platform::sdk::vdfs::address::declared_addr_root() == Some(segments[0]) {
         return None;
     }
     Some(segments.join("/"))

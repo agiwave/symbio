@@ -21,8 +21,11 @@ import { presetIds } from './_presets.mjs'
 import {
   autoChain,
   autoWork,
+  canonicalPath,
   codeTextOf,
   cargoTestRatchet,
+  inTrees,
+  legacyPathspecs,
   BASELINE,
   BASELINE_GRACE,
   baselineErosion,
@@ -32,7 +35,6 @@ import {
   parseBaselineCells,
   ratchetVerdict,
   stringLiteralsOf,
-  sdkSymbolsIn,
   gensDeclOf,
   stateDeclOf,
 } from './_shared.mjs'
@@ -1015,41 +1017,9 @@ test('55-verify：rustc 必须先**串行预热**再进并发批（否则撞 rus
   assert.match(block, /cmd:\s*'rustc'/, '预热项不是在调 rustc —— 上面几条钉的前提变了')
 })
 
-// ================= 取法：一段 Rust 文本里「经某个 crate」的符号 =================
-//
-// E-009（用了的必须在账上）与 SR-001（账上的必须真被用）必须用**同一份**取法，否则账本
-// 可以同时多出虚账、又留下冻结的洞而两边都绿（D-454）。所以这族用例钉的是取法本身：
-// 只认路径、不认名字；只认符号、不认方法名。
-
-test('sdkSymbolsIn：`use` 树只取叶子，不看前缀模块名', () => {
-  const used = sdkSymbolsIn('use symbio_sdk::chat::chat_node::{SEG_MESSAGES, ChatNodePresentationExt};')
-  assert.deepEqual([...used].sort(), ['ChatNodePresentationExt', 'SEG_MESSAGES'])
-})
-
-test('sdkSymbolsIn：名字来自别的 crate 时零命中（这是 14 条虚账的形态）', () => {
-  const src =
-    'use symbio_kernel::chat::chat_node::{ChatNode, NodeRole}; fn f(n: ChatNode) -> NodeRole { n.role }'
-  assert.equal(sdkSymbolsIn(src).size, 0, 'kernel 的词汇记在 sdk 账上就是记错了 crate')
-})
-
-test('sdkSymbolsIn：表达式位置的 `Type::method()` 记类型、不记方法名', () => {
-  const src = [
-    'fn a(dir: &str) { symbio_sdk::plugin::PluginDir::at(dir, "session"); }',
-    'fn b() -> u64 { symbio_sdk::llm::round::llm_short_id() }',
-  ].join('\n')
-  const used = sdkSymbolsIn(src)
-  assert.ok(used.has('PluginDir'), `方法名不是被依赖的东西：${[...used]}`)
-  assert.ok(!used.has('at'), `方法名不是被依赖的东西：${[...used]}`)
-  assert.ok(used.has('llm_short_id'), `模块里的自由函数照旧算符号：${[...used]}`)
-})
-
-test('sdkSymbolsIn：`as` 别名只认左侧', () => {
-  assert.deepEqual([...sdkSymbolsIn('use symbio_sdk::clock::ClockNow as Now;')], ['ClockNow'])
-})
-
 // ================= 限期豁免的日期语义（D-492） =================
 //
-// `expires` 是**失效日**：当天仍有效，次日起失效。三处判据（E-009 / SRA-003 / EX-007）
+// `expires` 是**失效日**：当天仍有效，次日起失效。用到它的判据（EX-007 等）
 // 共用这一个原语；边界差一天是这里最容易悄悄回归的东西，所以两天各钉一条。
 
 test('exemptionActive：失效日当天仍有效（含当天，不是零点即过期）', () => {
@@ -1097,4 +1067,42 @@ test('stateDeclOf：错误闭集（duplicate / unknown / bad-shape / empty-arg /
   // 有裁决号没理由、或裁决号本身不对，都是「退役没署名」
   assert.equal(stateDeclOf('// @state retired: D-123\n').error, 'retired-needs-decision')
   assert.equal(stateDeclOf('// @state retired: 理由\n').error, 'retired-needs-decision')
+})
+
+// ================= 历史路径别名（平台合并 / 运行时合并之后读历史） =================
+//
+// 合并前提交里的路径永远是旧的：`canonicalPath` 把它们折算回现在的树。最危险的是
+// **差一截**——`src/` 被折成 `<臂>/src/`、`lib.rs` 没折成 `mod.rs`——折算不报错，
+// 只是树匹配全部落空，判据对历史静默失明。
+
+test('canonicalPath：四个平台臂的 lib.rs → mod.rs，src/ 下的文件不多出一层 src', () => {
+  for (const part of ['kernel', 'sdk', 'contract', 'deploy']) {
+    assert.equal(canonicalPath(`crates/symbio-${part}/src/lib.rs`), `crates/symbio-platform/src/${part}/mod.rs`)
+    assert.equal(canonicalPath(`crates/symbio-${part}/src/a/b.rs`), `crates/symbio-platform/src/${part}/a/b.rs`)
+    assert.ok(inTrees(`crates/symbio-${part}/src/a/b.rs`, [`crates/symbio-platform/src/${part}`]), part)
+  }
+})
+
+test('canonicalPath：host / server / drive 的旧路径折到运行时', () => {
+  assert.equal(canonicalPath('crates/symbio-host/src/lib.rs'), 'crates/symbio-runtime/src/host/mod.rs')
+  assert.equal(canonicalPath('crates/symbio-host/src/drive.rs'), 'crates/symbio-runtime/src/host/drive.rs')
+  assert.equal(canonicalPath('crates/symbio-server/src/lib.rs'), 'crates/symbio-runtime/src/lib.rs')
+  assert.equal(canonicalPath('crates/symbio-server/src/main.rs'), 'crates/symbio-runtime/src/main.rs')
+  assert.equal(canonicalPath('crates/symbio/src/drive.rs'), 'crates/symbio-runtime/src/host/entry.rs')
+  assert.equal(canonicalPath('crates/symbio/src/drive.test.rs'), 'crates/symbio-runtime/src/host/entry.test.rs')
+})
+
+test('canonicalPath：现路径与无关路径原样返回（装配方 crates/symbio 不受 drive 别名影响）', () => {
+  assert.equal(canonicalPath('crates/symbio/src/lib.rs'), 'crates/symbio/src/lib.rs')
+  assert.equal(canonicalPath('crates/symbio-runtime/src/host/drive.rs'), 'crates/symbio-runtime/src/host/drive.rs')
+  assert.equal(canonicalPath('docs/003-design/018-模块架构.md'), 'docs/003-design/018-模块架构.md')
+  assert.equal(canonicalPath('crates/symbio-plugin-sdkx/src/a.rs'), 'crates/symbio-plugin-sdkx/src/a.rs')
+})
+
+test('legacyPathspecs：当前树名与它的历史旧名都在，pathspec 在 git 侧才滤得中', () => {
+  const specs = legacyPathspecs(['crates/symbio-runtime/src/host'])
+  assert.ok(specs.includes('crates/symbio-runtime/src/host'))
+  assert.ok(specs.includes('crates/symbio-host'), '旧 crate 目录')
+  assert.ok(specs.includes('crates/symbio/src/drive.rs'), 'drive 从装配方搬来')
+  assert.ok(!specs.includes('crates/symbio'), '不许放宽成整个装配方')
 })

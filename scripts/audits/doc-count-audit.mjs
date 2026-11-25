@@ -65,7 +65,7 @@ const rootArg = process.argv.find((a) => a.startsWith('--root='))
 const REPO_ROOT = rootArg ? path.resolve(rootArg.slice(7)) : path.resolve(scriptDir, '..', '..')
 
 const SKIP_DIRS = new Set(['node_modules', 'target', '.git', 'tmp', '.workbuddy-ai', '.symbio', 'archive'])
-const INVARIANTS_REL = path.join('crates', 'symbio-sdk', 'src', 'invariants', 'mod.rs')
+const INVARIANTS_REL = path.join('crates', 'symbio-platform', 'src', 'sdk', 'invariants', 'mod.rs')
 const FACTS_REL = path.join('docs', '003-design', 'verify', 'facts', 'mod.rs')
 
 /** 中文数字 → 数值（本仓文档里的计数一律用汉字，量词是 条 / 项 / 个 / 处 / 格）。 */
@@ -141,7 +141,7 @@ function verifyProgramCount(root) {
  *  格子数同时是**可观测指标**：门禁每次通过都把 `实体 × 动词 = 格（已填）` 打出来，
  *  「网格在膨胀」这件事因此可被趋势读出，而不是靠谁去数表。 */
 function eventGridParity(root) {
-  const enumsRel = path.join(root, 'crates', 'symbio-kernel', 'src', 'event', 'mod.rs')
+  const enumsRel = path.join(root, 'crates', 'symbio-platform', 'src', 'kernel', 'event', 'mod.rs')
   const planRel = path.join(root, 'docs', '003-design', '001-核心架构.md')
   if (!fs.existsSync(enumsRel) || !fs.existsSync(planRel)) return null
   const src = fs.readFileSync(enumsRel, 'utf8')
@@ -281,7 +281,7 @@ if (checkAll == null || facts == null || verifyPrograms == null) {
 // 网格两侧的来源在**夹具根**里本就不存在（它们要真实的 core 源码与计划文档）。
 // 因此这里不 exit 2，而是**出声跳过**——静默跳过才是这类守卫最安静的死法。
 if (grid == null) {
-  console.log(`[WARN] DC-005 跳过：读不出事件网格两侧的来源（${path.join('symbio_kernel','src','event','mod.rs')} 或 DE-001 §6 表）`)
+  console.log(`[WARN] DC-005 跳过：读不出事件网格两侧的来源（${path.join('symbio-platform','src','kernel','event','mod.rs')} 或 DE-001 §6 表）`)
 }
 const docs = activeDocs(REPO_ROOT)
 const comments = activeComments(REPO_ROOT)

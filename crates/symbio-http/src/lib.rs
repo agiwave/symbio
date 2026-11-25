@@ -8,7 +8,7 @@ use serde::Serialize;
 use std::collections::HashMap;
 use std::sync::{Arc, RwLock};
 
-pub use symbio_kernel::plugin::PluginPayloadWire;
+pub use symbio_platform::kernel::plugin::PluginPayloadWire;
 use symbio_plugin_api::{PluginChannel, PluginMessageWire, PluginPayload};
 
 mod server;

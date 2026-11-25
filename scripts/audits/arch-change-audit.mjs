@@ -6,7 +6,7 @@
  *
  * | 编号 | 规则 | 它拦的是哪一种回潮 |
  * |---|---|---|
- * | CC-001 | 提交**新增了** `crates/symbio-sdk/**` / `crates/symbio-kernel/**` / `crates/symbio-contract/**` 的生产 `.rs` 代码行，提交信息里没有 `Core-Change:` 段 | 内核 / 契约层被当成「顺手改一下」的地方：没有一行文字解释「为什么非动它不可」，就没有人能复核。纯测试断言（`.test.rs` / `tests/`）、纯注释、**纯收窄**（只删不增）都不改公开面与语义，不在判定面内 |
+ * | CC-001 | 提交**新增了** `crates/symbio-platform/src/sdk/**` / `crates/symbio-platform/src/kernel/**` / `crates/symbio-platform/src/contract/**` 的生产 `.rs` 代码行，提交信息里没有 `Core-Change:` 段 | 内核 / 契约层被当成「顺手改一下」的地方：没有一行文字解释「为什么非动它不可」，就没有人能复核。纯测试断言（`.test.rs` / `tests/`）、纯注释、**纯收窄**（只删不增）都不改公开面与语义，不在判定面内 |
  * | CC-002 | 同一提交**既动插件又动 core/kernel**，而 `Core-Change:` 的值不是 `D-NNN` | 横向扩充能力的提交悄悄扩大了内核面——正是 DE-023 §2 第 1 条（扩展局部性）要拦的形态 |
  *
  * ## 为什么用提交信息，而不是再写一个静态审计
@@ -29,8 +29,8 @@
  * ## 判据的语料来自 git 自己
  *
  * 不维护「哪些路径算 core」的清单：一次 `git log --no-merges --raw` 给出真实改动文件，
- * 目录常量只有三条（`crates/symbio-sdk/` / `crates/symbio-kernel/` /
- * `crates/symbio-contract/`），与 `arch-shape-audit` 的 `core-kernel-files:` 标记同源。
+ * 目录常量只有三条（`crates/symbio-platform/src/sdk/` / `crates/symbio-platform/src/kernel/` /
+ * `crates/symbio-platform/src/contract/`），与 `arch-shape-audit` 的 `core-kernel-files:` 标记同源。
  * D-486 五层规划把契约层立为冻结 ABI 层——它的改动同样需要 `Core-Change:` 段。
  *
  * ## 判据退役随架构裁决走（流程纪律，不是本脚本的机械判定）
@@ -72,7 +72,7 @@ const repoRoot = path.resolve(scriptDir, '..', '..')
 const argv = process.argv.slice(2)
 
 /** 内核 / 契约层：改动这两处必须在提交里解释 */
-const ARCH_DIRS = ['crates/symbio-sdk/', 'crates/symbio-kernel/', 'crates/symbio-contract/']
+const ARCH_DIRS = ['crates/symbio-platform/src/sdk/', 'crates/symbio-platform/src/kernel/', 'crates/symbio-platform/src/contract/']
 /** 「扩能力」的证据：动到任何插件 / provider / 测试设施 */
 const EXT_DIRS = ['crates/symbio-plugin-', 'crates/symbio-provider', 'crates/symbio-testkit/']
 
@@ -110,7 +110,7 @@ const BASELINE = [
     beforeGuard: false,
     decision: 'D-336（跨插件模型往返：共享载荷住 SDK 词汇层）',
     why:
-      '该提交是用户手工收尾的死码删除批（`D-336` 尾款）：`crates/symbio-sdk/src/turn/facts.rs` 只是删掉' +
+      '该提交是用户手工收尾的死码删除批（`D-336` 尾款）：`crates/symbio-platform/src/sdk/turn/facts.rs` 只是删掉' +
       '`DrainedSupplement`（最后一个引用随同步抽干口一起消失），属 narrowing，没有扩能力；' +
       '提交信息只写了批次号与绿点，缺独立 `Core-Change:` 行。该提交已由用户核对收下，' +
       '按「不追改历史」处理；删除本身的边界就是 D-336 的迁移尾款。',

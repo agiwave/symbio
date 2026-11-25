@@ -46,7 +46,7 @@
     {
       "date": "2026-11-16",
       "faces": "F1.prod",
-      "reason": "`D-502`/B4：`symbio-sdk/src/turn/` 目录整目录搬成 `round/`，`pub mod turn` → `pub mod round`，全仓 14 行 `use symbio_sdk::turn::…` / `crate::turn::…` 路径同步（node_build / facts / 各插件消费方）。`D-259` 留在 EX-008 的那条路径段豁免随之失去对象，extension-vocab-audit 的 EXEMPTIONS 1 → 0；protocol-mirror-audit 的 `meta.turn_root` owner 路径同步改指 `round/node_build.rs`；005/037/104 等文档锚点同批迁移。F1 生产面 38 → 23 为**实测收窄**；目标 0 不变。余下 23 处见 D-502 裁决三~五（wire 事件名 / meta.turn_root 键 / serde alias / session.close-turn）。"
+      "reason": "`D-502`/B4：`symbio-sdk/src/turn/` 目录整目录搬成 `round/`，`pub mod turn` → `pub mod round`，全仓 14 行 `use symbio_platform::sdk::turn::…` / `crate::turn::…` 路径同步（node_build / facts / 各插件消费方）。`D-259` 留在 EX-008 的那条路径段豁免随之失去对象，extension-vocab-audit 的 EXEMPTIONS 1 → 0；protocol-mirror-audit 的 `meta.turn_root` owner 路径同步改指 `round/node_build.rs`；005/037/104 等文档锚点同批迁移。F1 生产面 38 → 23 为**实测收窄**；目标 0 不变。余下 23 处见 D-502 裁决三~五（wire 事件名 / meta.turn_root 键 / serde alias / session.close-turn）。"
     },
     {
       "date": "2026-11-16",

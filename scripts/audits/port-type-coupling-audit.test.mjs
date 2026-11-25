@@ -4,7 +4,7 @@
  * 判据面（PTC-001/002，见 D-447 ② 与 2026-11-11 team-lead 边界修正）：
  *  - PTC-001：三个通用端口契约文件不得出现 `PromptMessage`（含 `Vec<PromptMessage>`）；
  *  - PTC-002：四个通用端口契约文件不得出现 `needs_wording_generation`；
- *    **不扫整个 `crates/symbio-sdk/src/`**——`sdk/dialog` 的 `Verdict::needs_wording_generation`
+ *    **不扫整个 `crates/symbio-platform/src/sdk/`**——`sdk/dialog` 的 `Verdict::needs_wording_generation`
  *    是会话域判定（消费方 compose / session），本轮不迁出（行为闭包迁移，报告标未闭合），
  *    故在扫描面外。收窄的是判据边界，不是放宽形状判据。
  *
@@ -32,12 +32,12 @@ import { fileURLToPath } from 'node:url'
 
 const script = fileURLToPath(new URL('./port-type-coupling-audit.mjs', import.meta.url))
 
-const PORT_RS = 'crates/symbio-sdk/src/capability/port.rs'
+const PORT_RS = 'crates/symbio-platform/src/sdk/capability/port.rs'
 const DRIVE_RS = 'crates/symbio-plugin-api/src/drive.rs'
 const FACTS_RS = 'crates/symbio-plugin-loop/src/ring/facts.rs'
 const API_PORT_RS = 'crates/symbio-plugin-api/src/port.rs'
-const SDK_DIALOG = 'crates/symbio-sdk/src/dialog/mod.rs'
-const SDK_LIB = 'crates/symbio-sdk/src/lib.rs'
+const SDK_DIALOG = 'crates/symbio-platform/src/sdk/dialog/mod.rs'
+const SDK_LIB = 'crates/symbio-platform/src/sdk/mod.rs'
 
 /** PTC-001 扫描面：三个通用端口契约文件。 */
 const PTC001_FILES = [PORT_RS, DRIVE_RS, FACTS_RS]
@@ -183,7 +183,7 @@ test('PTC-002 边界：sdk/dialog 里出现 needs_wording_generation 不算违�
     '}',
     '',
   ].join('\n')
-  files['crates/symbio-sdk/src/dialog/mod.test.rs'] =
+  files['crates/symbio-platform/src/sdk/dialog/mod.test.rs'] =
     '#[test]\nfn t() { assert!(Verdict::Report.needs_wording_generation()); }\n'
   const box = sandbox(files)
   try {

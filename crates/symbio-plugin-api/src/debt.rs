@@ -7,7 +7,7 @@
 use std::sync::Arc;
 
 use serde_json::Value;
-use symbio_kernel::capability::{CapabilityFamily, CapabilityRow};
+use symbio_platform::kernel::capability::{CapabilityFamily, CapabilityRow};
 
 pub use crate::drive::Unless;
 
@@ -168,8 +168,8 @@ pub fn session_recall_id(user_fact_id: &str) -> String {
 }
 
 /// 语义章契约住在 `symbio-sdk`（宿主机制层）；这里只转出给插件作者。
-pub use symbio_sdk::debt_scope::NoOpenScope;
-pub use symbio_sdk::port_stamp::{
+pub use symbio_platform::sdk::debt_scope::NoOpenScope;
+pub use symbio_platform::sdk::port_stamp::{
     FailureProjection, ReplyRole, STAMP_FAILURE, STAMP_KEY, STAMP_ROLE, STAMP_SPEND, STAMP_USAGE,
 };
 

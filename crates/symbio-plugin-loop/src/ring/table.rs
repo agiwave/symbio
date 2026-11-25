@@ -4,8 +4,8 @@ use std::sync::Arc;
 
 use crate::ring::facts::{DebtKey, FactView};
 use serde_json::Value;
-use symbio_kernel::decl::Frozen;
-use symbio_kernel::event::Event;
+use symbio_platform::kernel::decl::Frozen;
+use symbio_platform::kernel::event::Event;
 use symbio_plugin_api::debt::{FailureProjection, ReplyRole};
 use symbio_plugin_api::drive::Unless;
 

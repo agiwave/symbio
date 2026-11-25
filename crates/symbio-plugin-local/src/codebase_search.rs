@@ -82,7 +82,7 @@ const SOURCE_EXTS: &[&str] = &[
 /// 不纳入索引。
 ///
 /// 阈值 5000 来自本仓的实测空档：最大的正常源码是 VDFS 纯接口（原单文件
-/// 1640 行，现拆在 `crates/symbio-kernel/src/vdfs/` 下），而 `tokenizer.json` 是 21,277 行、
+/// 1640 行，现拆在 `crates/symbio-platform/src/kernel/vdfs/` 下），而 `tokenizer.json` 是 21,277 行、
 /// `package-lock.json` 是 7,249 行——两者之间
 /// 隔着数量级，5000 行能干净地把"人写的代码"和"工具吐的数据"分开。
 ///

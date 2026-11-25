@@ -23,18 +23,18 @@ pub use stubs::trivial_actor_spec;
 // E-009 ⑥ 认定的**测试设施公共出口**——它不含任何插件实现、不携带会话状态，
 // `pub use symbio_plugin_*`（插件类型）仍被 E-009 ⑥ 判红，这里转出的只有
 // `symbio-kernel` / `symbio-sdk` 的宿主机制名。每一条都对应至少一个插件测试夹具。
-pub use symbio_kernel::decl::Builder;
-pub use symbio_kernel::event::EVENT_RETRY;
-pub use symbio_kernel::store::{EventStore, Store};
-pub use symbio_kernel::vdfs::VDFS_KIND_DIR;
-pub use symbio_kernel::Seq;
+pub use symbio_platform::kernel::decl::Builder;
+pub use symbio_platform::kernel::event::EVENT_RETRY;
+pub use symbio_platform::kernel::store::{EventStore, Store};
+pub use symbio_platform::kernel::vdfs::VDFS_KIND_DIR;
+pub use symbio_platform::kernel::Seq;
+pub use symbio_platform::sdk::capability::{capability_entry_of, capability_option_fields};
+pub use symbio_platform::sdk::declarations::sealed_declarations;
+pub use symbio_platform::sdk::invariants::check_all;
+pub use symbio_platform::sdk::keys::PRINCIPAL_MAIN;
+pub use symbio_platform::sdk::plugin::fact_source;
+pub use symbio_platform::sdk::projection::prompt_fidelity;
 pub use symbio_plugin_api::EVENT_BUS_RESYNC_MARKER_TYPE; // D-530：线上契约经门面转出（契约层）
-pub use symbio_sdk::capability::{capability_entry_of, capability_option_fields};
-pub use symbio_sdk::declarations::sealed_declarations;
-pub use symbio_sdk::invariants::check_all;
-pub use symbio_sdk::keys::PRINCIPAL_MAIN;
-pub use symbio_sdk::plugin::fact_source;
-pub use symbio_sdk::projection::prompt_fidelity;
 
 #[cfg(test)]
 #[path = "lib.test.rs"]

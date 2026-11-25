@@ -23,8 +23,8 @@
 //! `port.model` 的执行体，`sdk::adapters` 也随之整块退场——桩就再没有对象可替：模型
 //! 调用的闭环由 e2e 的 `mock-llm` 承接，桩再造一份「假模型」只会让测试以为自己在验接线。
 
-use symbio_kernel::actors::{ActorSpec, Pattern, Scope};
-use symbio_sdk::authz::production_matrix;
+use symbio_platform::kernel::actors::{ActorSpec, Pattern, Scope};
+use symbio_platform::sdk::authz::production_matrix;
 
 /// 平凡值主体（[DE-031 §4](../../../docs/003-design/031-最小闭环.md "DE-031-最小闭环")）：
 /// 全规则驱动、预算放宽、单主体——平凡值下系统完整运行。

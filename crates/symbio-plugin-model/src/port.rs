@@ -203,7 +203,7 @@ fn round_input(
         .collect();
 
     // 被重试 / 切换换下的支：那些轮根下的产出不进请求包（转写里照留，切回去还在）。
-    // 「哪一支是活的」是事实层判断，折法住在 `symbio_kernel::event::branch`（DE-051
+    // 「哪一支是活的」是事实层判断，折法住在 `symbio_platform::kernel::event::branch`（DE-051
     // D-362）：投影、请求包裁支、这里读的是同一个函数。「还在不在」的证据与转写投影
     // 同源（`message.removed`），两处对同一份历史因此得出同一组隐藏支。
     let removed = removed_ids(events, EVENT_MESSAGE_REMOVED);

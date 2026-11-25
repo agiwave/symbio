@@ -3,8 +3,8 @@
 
 use std::sync::Arc;
 
-use symbio_kernel::chat::chat_node::NodeRole;
-use symbio_kernel::event::Event;
+use symbio_platform::kernel::chat::chat_node::NodeRole;
+use symbio_platform::kernel::event::Event;
 use symbio_plugin_api::routes::ROUTE_COMPOSE_WORDING;
 use symbio_plugin_api::SESSION_ID;
 use symbio_plugin_api::{

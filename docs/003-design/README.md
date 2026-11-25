@@ -289,7 +289,7 @@ board.columns: [impl]
 | [`crates/symbio-plugin-ui_prefs/README`](../../crates/symbio-plugin-ui_prefs/README.md) | UI_prefs 插件（界面偏好） | 与代码一致 |
 | [`crates/symbio-plugin-vdfs/README`](../../crates/symbio-plugin-vdfs/README.md) | VDFS 插件 | 与代码一致 |
 | [`crates/symbio-plugin-web/README`](../../crates/symbio-plugin-web/README.md) | Web 插件 | 与代码一致 |
-| [`crates/symbio-server/README`](../../crates/symbio-server/README.md) | Server 与共享运行时 | 部分落地 |
+| [`crates/symbio-runtime/README`](../../crates/symbio-runtime/README.md) | Server 与共享运行时 | 部分落地 |
 | [`scripts/README`](../../scripts/README.md) | ''`scripts/` —— 脚本目录的布局与机制'' | 与代码一致 |
 | [`scripts/facts/README`](../../scripts/facts/README.md) | ''`scripts/facts/` —— 事实生成器目录'' | 与代码一致 |
 | [`tauri/README`](../../tauri/README.md) | Tauri 前端 | 与代码一致 |

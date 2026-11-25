@@ -53,10 +53,10 @@ const PLUGIN_CRATE_PREFIX = "symbio-plugin-";
 // 9f49d454 只有用法没有定义，6 处字面量静默上盘——执行方是 facts.test.mjs）。
 // fromDir = 本文件的产物目录（`docs/ref`）。
 const refLink = createRefLink(ROOT, "docs/ref");
-// 插件工厂 id 的 owner 是装配方（`crates/symbio-deploy/src/lib.rs`，由每个插件目录的
+// 插件工厂 id 的 owner 是装配方（`crates/symbio-platform/src/deploy/mod.rs`，由每个插件目录的
 // `PLUGIN.yml` 生成）——它们描述的是「哪个插件」，不是「哪个键」，也不属于内核机制
 // （见 `assembly.rs` 模块文档）。
-const IDS_FILE = path.join(ROOT, "crates", "symbio-deploy", "src", "lib.rs");
+const IDS_FILE = path.join(ROOT, "crates", "symbio-platform", "src", "deploy", "mod.rs");
 /**
  * 输出位置：**`docs/004-ref/` 下的一份编号参考文档**。
  *
@@ -195,7 +195,7 @@ function analyzePlugin(crateDirName, ids) {
 function scopeRows() {
   return [
     sharedScopeRow(ROOT, "crates", [".rs"]),
-    sharedScopeRow(ROOT, "crates/symbio-kernel/src", [".rs"]),
+    sharedScopeRow(ROOT, "crates/symbio-platform/src/kernel", [".rs"]),
     sharedScopeRow(ROOT, "crates/symbio-cli/src", [".rs"]),
     sharedScopeRow(ROOT, "tauri/src-tauri/src", [".rs"]),
     sharedScopeRow(ROOT, "tauri/src", [".ts", ".vue"]),

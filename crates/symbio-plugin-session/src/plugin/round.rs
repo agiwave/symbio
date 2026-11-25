@@ -15,9 +15,13 @@ use crate::convergence::SessionStateChange;
 use crate::route_guard::require_sid;
 use crate::transcript::publish::append_and_publish;
 use crate::transcript::supplements::merge_supplements;
-use symbio_kernel::capability::Registry;
-use symbio_kernel::event::{Entity, Event, Verb};
-use symbio_kernel::LatencyTier;
+use symbio_platform::kernel::capability::Registry;
+use symbio_platform::kernel::event::{Entity, Event, Verb};
+use symbio_platform::kernel::LatencyTier;
+use symbio_platform::sdk::authz::PRINCIPAL_MAIN;
+use symbio_platform::sdk::drive::DriveEntry;
+use symbio_platform::sdk::plugin::fact_source::FactSource;
+use symbio_platform::sdk::round::facts::FleetSnapshot;
 use symbio_plugin_api::capability_take_errors;
 use symbio_plugin_api::debt::{session_config_id, session_recall_id};
 use symbio_plugin_api::events::{
@@ -27,10 +31,6 @@ use symbio_plugin_api::retrieval::{retrieve_all, RetrievalRequest};
 use symbio_plugin_api::FactDraft;
 use symbio_plugin_api::PRINCIPAL_USER;
 use symbio_plugin_api::SESSION_ID;
-use symbio_sdk::authz::PRINCIPAL_MAIN;
-use symbio_sdk::drive::DriveEntry;
-use symbio_sdk::plugin::fact_source::FactSource;
-use symbio_sdk::round::facts::FleetSnapshot;
 
 pub(crate) struct PreparedExecutionContext {
     pub(crate) manager: Arc<dyn Registry>,
@@ -91,9 +91,9 @@ fn restore_execution_context(
 ///
 /// 控制面不解析任何名字形状，也不认识前缀规则；判定与写入顺序无关（集合，不是遍历序）。
 fn dedup_declared_twins(
-    metas: Vec<symbio_kernel::capability::CapabilityMeta>,
+    metas: Vec<symbio_platform::kernel::capability::CapabilityMeta>,
     twins: &[(String, String)],
-) -> Vec<symbio_kernel::capability::CapabilityMeta> {
+) -> Vec<symbio_platform::kernel::capability::CapabilityMeta> {
     let names: std::collections::HashSet<&str> =
         metas.iter().map(|meta| meta.name.as_str()).collect();
     let dropped: std::collections::HashSet<&str> = twins
@@ -117,9 +117,9 @@ fn dedup_declared_twins(
 ///   侧的知识，会话不认识 `_` 替换，也不替碰撞做「优先匹配」——碰撞整组退出由投影
 ///   回答，会话只按回答过滤。
 fn candidate_tools(
-    metas: Vec<symbio_kernel::capability::CapabilityMeta>,
+    metas: Vec<symbio_platform::kernel::capability::CapabilityMeta>,
     bound: &std::collections::HashSet<String>,
-) -> Vec<symbio_kernel::capability::CapabilityMeta> {
+) -> Vec<symbio_platform::kernel::capability::CapabilityMeta> {
     metas
         .into_iter()
         .filter(|meta| bound.contains(&meta.name))
@@ -554,7 +554,7 @@ impl SessionPlugin {
                 .filter(|prompt| !prompt.trim().is_empty())
                 .collect::<Vec<_>>()
                 .join("\n\n");
-            let twins = symbio_sdk::capability::capability_scope_twins(&*manager).await;
+            let twins = symbio_platform::sdk::capability::capability_scope_twins(&*manager).await;
             // 有效绑定 = 装配期收集到的端口名（D-445 ③ / D-468）：描述与执行两视图由
             // **同一次收集**得出，不维护第二份注册事实。冲突键不在 `bound()` 里——
             // 它们已在收集期落进错误桶（上面那句 `capability_errors` 会读到）。
@@ -568,7 +568,7 @@ impl SessionPlugin {
             let candidates = candidate_tools(
                 dedup_declared_twins(
                     manager
-                        .list(symbio_kernel::capability::family::TOOL)
+                        .list(symbio_platform::kernel::capability::family::TOOL)
                         .await
                         .into_iter()
                         .map(|row| row.meta())
@@ -679,8 +679,9 @@ impl SessionPlugin {
                     json!(cfg.progress_max_attempts),
                 );
             }
-            config_payload
-                .extend(symbio_sdk::capability::capability_config_snapshot(&*manager).await);
+            config_payload.extend(
+                symbio_platform::sdk::capability::capability_config_snapshot(&*manager).await,
+            );
             let config_draft = FactDraft {
                 key: session_config_id(&item.id),
                 kind: EVENT_SESSION_CONFIG.to_string(),
@@ -1005,10 +1006,10 @@ fn recall_visible_slice(snapshots: Vec<FleetSnapshot>, viewer: &str) -> Vec<Even
 /// 本会话自己的内容恒可见；别的会话的 `shared` / `public` 走 core 的读侧闸
 /// （`content_visible`，与 `stats` 同一份判据）。缺省（无 `vis_scope`）= 私有。
 fn memory_visible(e: &Event, own: bool, viewer: &str) -> bool {
-    use symbio_sdk::governance::VisScope;
+    use symbio_platform::sdk::governance::VisScope;
     match VisScope::of_event(e) {
         VisScope::ThreadPrivate => own,
-        s => own || symbio_sdk::authz::content_visible(s, viewer),
+        s => own || symbio_platform::sdk::authz::content_visible(s, viewer),
     }
 }
 

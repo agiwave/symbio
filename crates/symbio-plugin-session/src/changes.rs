@@ -37,11 +37,11 @@ use std::sync::Arc;
 
 use serde::Serialize;
 
-use symbio_kernel::event::Event;
-use symbio_kernel::plugin::{
+use symbio_platform::kernel::event::Event;
+use symbio_platform::kernel::plugin::{
     PluginError, PluginInvokeRequest, PluginInvokeResponse, PluginPayload,
 };
-use symbio_sdk::authz::content_visible;
+use symbio_platform::sdk::authz::content_visible;
 
 use crate::projections::changes::workdir_changes;
 use symbio_plugin_api::effects::FileOp;

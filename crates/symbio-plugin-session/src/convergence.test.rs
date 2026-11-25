@@ -12,8 +12,8 @@ use crate::plugin::{OUTCOME_COMPLETED, OUTCOME_FAILED};
 use crate::types::Session;
 use std::sync::atomic::Ordering;
 use std::sync::{Arc, Mutex as StdMutex};
+use symbio_platform::sdk::vdfs::host::VdfsChangeSubscriptions;
 use symbio_plugin_api::PluginDir;
-use symbio_sdk::vdfs::host::VdfsChangeSubscriptions;
 use tokio::sync::{oneshot, Notify};
 use tokio::task::JoinSet;
 /// 造一条已入库的事件（只给 `waits_for_user` 用：kind / payload / seq）。
@@ -26,7 +26,7 @@ fn at(seq: u64, kind: &str, payload: serde_json::Value) -> Event {
         "session/main",
     );
     event.payload = payload;
-    event.seq = Some(symbio_kernel::event::Seq::new(seq));
+    event.seq = Some(symbio_platform::kernel::event::Seq::new(seq));
     event
 }
 

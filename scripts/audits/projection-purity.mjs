@@ -17,7 +17,7 @@
  *
  * ## 判定面：折叠搬到哪儿，判据跟到哪儿
  *
- * PP-001 / PP-002 / PP-003 扫的是**所有折叠根**：`crates/symbio-sdk/src/projection/`
+ * PP-001 / PP-002 / PP-003 扫的是**所有折叠根**：`crates/symbio-platform/src/sdk/projection/`
  * 加上每个 crate 的 `src/projections/`（D-221 把只被一个 owner 读的折叠交还 owner 之后，
  * 判据不能跟着目录一起留下——否则「迁出 core」顺部就变成「逃出纯净性判定」）。
  * PP-004 只判 **core 那一根**：它是横向扩展的棘轮，不是「仓库里一共有几条折叠」。
@@ -72,7 +72,7 @@ const ROOT = rootArg
   ? path.resolve(rootArg.slice('--root='.length))
   : path.resolve(scriptDir, '..', '..')
 
-const PROJ_REL = 'crates/symbio-sdk/src/projection'
+const PROJ_REL = 'crates/symbio-platform/src/sdk/projection'
 const PROJ_DIR = path.join(ROOT, PROJ_REL)
 
 const IMPURITY_TOKENS = [

@@ -23,9 +23,9 @@ import { expectAudit, onStderr } from '../audit-assert.mjs'
 const script = fileURLToPath(new URL('./port-surface-audit.mjs', import.meta.url))
 const repoRoot = path.resolve(path.dirname(fileURLToPath(import.meta.url)), '..', '..')
 
-const EVENT_REL = 'crates/symbio-kernel/src/event/mod.rs'
-const DECL_REL = 'crates/symbio-kernel/src/decl/mod.rs'
-const SOLVER_REL = 'crates/symbio-kernel/src/decl/ring.rs'
+const EVENT_REL = 'crates/symbio-platform/src/kernel/event/mod.rs'
+const DECL_REL = 'crates/symbio-platform/src/kernel/decl/mod.rs'
+const SOLVER_REL = 'crates/symbio-platform/src/kernel/decl/ring.rs'
 const BASELINE_REL = 'scripts/baselines/port-surface.json'
 /** 端口表所在文件（脚本按「含 `PortDecl {` 的 .rs」扫取值名单，路径本身不钉死） */
 const PORTS_REL = 'crates/symbio-plugin-loop/src/loop_rows.rs'
@@ -95,7 +95,7 @@ const PORTS_SRC = `pub(crate) static PORTS: &[PortDecl] = &[
  */
 /** PTS-007 扫描的三个读侧树（与脚本里的 `PTS7_ROOTS` 同一份口径） */
 const READ_SIDE_ROOTS = [
-  'crates/symbio-sdk/src',
+  'crates/symbio-platform/src/sdk',
   'crates/symbio-plugin-api/src',
   'crates/symbio-plugin-session/src',
 ]
@@ -562,9 +562,9 @@ test('PTS-007 读侧出现 `if port == "model"` ⇒ 红（退化用例）', () =
 test('PTS-007 读侧用端口常量比较（`port == PORT_TOOL`）⇒ 红', () => {
   const root = fixture()
   try {
-    fs.mkdirSync(path.join(root, 'crates/symbio-sdk/src/projection'), { recursive: true })
+    fs.mkdirSync(path.join(root, 'crates/symbio-platform/src/sdk/projection'), { recursive: true })
     fs.writeFileSync(
-      path.join(root, 'crates/symbio-sdk/src/projection/bad.rs'),
+      path.join(root, 'crates/symbio-platform/src/sdk/projection/bad.rs'),
       'pub(crate) fn pick(port: &str) -> bool {\n    port == PORT_TOOL\n}\n',
       'utf8',
     )
@@ -579,9 +579,9 @@ test('PTS-007 盖章比较（`stamp.role == Some("reader")`）不判 ⇒ 绿', (
   // 夹具的 `READ_SIDE_SRC` 就是这一条；单独再写一遍，免得它被别处的注入掩盖。
   const root = fixture()
   try {
-    fs.mkdirSync(path.join(root, 'crates/symbio-sdk/src/projection'), { recursive: true })
+    fs.mkdirSync(path.join(root, 'crates/symbio-platform/src/sdk/projection'), { recursive: true })
     fs.writeFileSync(
-      path.join(root, 'crates/symbio-sdk/src/projection/stamp.rs'),
+      path.join(root, 'crates/symbio-platform/src/sdk/projection/stamp.rs'),
       'pub(crate) fn is_reader(payload: &serde_json::Value) -> bool {\n    payload.get("stamp").and_then(|s| s.get("role")).and_then(serde_json::Value::as_str) == Some("reader")\n}\n',
       'utf8',
     )

@@ -26,9 +26,9 @@ use super::config::SessionConfig;
 use super::store::SessionStore;
 use std::collections::HashSet;
 use std::sync::Arc;
-use symbio_kernel::chat::chat_node as cm;
-use symbio_kernel::chat::chat_node::{ChatNode, NodeRole};
-use symbio_kernel::plugin::PluginError;
+use symbio_platform::kernel::chat::chat_node as cm;
+use symbio_platform::kernel::chat::chat_node::{ChatNode, NodeRole};
+use symbio_platform::kernel::plugin::PluginError;
 use symbio_plugin_api::clock_now_ms;
 use tokio::sync::RwLock;
 
@@ -82,7 +82,7 @@ impl PersistentChatSession {
 }
 
 /// 委派链上的**父主体**——三段取值（子 `metadata.parent_session_id` → 父
-/// `metadata.agent_id` → [`symbio_sdk::authz::principal_of`]）的**唯一实现**。
+/// `metadata.agent_id` → [`symbio_platform::sdk::authz::principal_of`]）的**唯一实现**。
 ///
 /// [`PersistentChatSession::delegating_principal`] 是运行期读面；会话**创建**时
 /// （`commands::session_upsert`）也要用同一份判据登记主体行，两处

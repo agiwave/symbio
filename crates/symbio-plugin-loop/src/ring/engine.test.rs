@@ -5,10 +5,12 @@ use serde_json::{json, Value};
 use std::collections::HashMap;
 use std::sync::atomic::{AtomicBool, Ordering};
 use std::sync::{Arc, Mutex};
-use symbio_kernel::decl::ring::{Decl, Pattern};
-use symbio_kernel::decl::{ActorDecl, Builder, FactDecl, Frozen, PluginDeclarations, ViewDecl};
-use symbio_kernel::event::{Entity, Event as KernelEvent, EventDecl, Verb};
-use symbio_kernel::LatencyTier;
+use symbio_platform::kernel::decl::ring::{Decl, Pattern};
+use symbio_platform::kernel::decl::{
+    ActorDecl, Builder, FactDecl, Frozen, PluginDeclarations, ViewDecl,
+};
+use symbio_platform::kernel::event::{Entity, Event as KernelEvent, EventDecl, Verb};
+use symbio_platform::kernel::LatencyTier;
 use symbio_plugin_api::debt::{FailureProjection, ReplyRole};
 use symbio_plugin_api::drive::DRIVE_SENT;
 use symbio_plugin_api::effects::FactDraft;
@@ -1738,11 +1740,11 @@ fn cover_row(fact: &'static str) -> Decl {
 /// 一份「视图为源头、`cost` 很小」的冻结表：事实条数可以超过视图声明。
 fn declaration_world(cost: u32) -> Arc<Frozen> {
     let mut rows: Vec<Decl> = [
-        symbio_kernel::event::EVENT_REQUEST,
-        symbio_kernel::event::EVENT_SENT,
-        symbio_kernel::event::EVENT_RESPONSE,
-        symbio_kernel::event::EVENT_FAILED,
-        symbio_kernel::event::EVENT_RETRY,
+        symbio_platform::kernel::event::EVENT_REQUEST,
+        symbio_platform::kernel::event::EVENT_SENT,
+        symbio_platform::kernel::event::EVENT_RESPONSE,
+        symbio_platform::kernel::event::EVENT_FAILED,
+        symbio_platform::kernel::event::EVENT_RETRY,
     ]
     .into_iter()
     .map(cover_row)

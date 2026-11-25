@@ -11,7 +11,7 @@
 //! ## 判定走生产内核
 //!
 //! I1 的判定（seq 单调无跳号）**不是本文件实现的**——
-//! 生产侧 [`symbio_sdk::invariants`](../../../crates/symbio-sdk/src/invariants/mod.rs)
+//! 生产侧 [`symbio_platform::sdk::invariants`](../../../crates/symbio-platform/src/sdk/invariants/mod.rs)
 //! 把算法层抽成了 std-only 内核（`invariants/kernel.rs`），本程序 `#[path]` 包含
 //! **同一个文件**：改内核任何一处（比如把「无跳号」放宽），下面的反向用例必须
 //! 同时红。此前本文件自己实现了一遍 seq 检查——生产改判据、这里仍全绿的
@@ -46,7 +46,7 @@
 // 共处一处」的全部含义。kernel 是 std-only（理由见它的文件头）；本程序只用它
 // 四个内核里的一个，`allow(dead_code)` 只在 verify 侧生效（生产 crate 全用）。
 #[allow(dead_code)]
-#[path = "../../../crates/symbio-sdk/src/invariants/kernel.rs"]
+#[path = "../../../crates/symbio-platform/src/sdk/invariants/kernel.rs"]
 mod kernel;
 
 use kernel::seq_monotonic_core;

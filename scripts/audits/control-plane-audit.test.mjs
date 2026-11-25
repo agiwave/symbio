@@ -43,8 +43,8 @@ const ENGINE = `${LOOP}/ring/engine.rs`
 const VOCAB = `${LOOP}/vocab.rs`
 const PORT_VOCAB = 'crates/symbio-plugin-api/src/vocab.rs'
 const EVENTS = 'crates/symbio-plugin-api/src/events.rs'
-const KERNEL = 'crates/symbio-kernel/src/lib.rs'
-const SDK = 'crates/symbio-sdk/src/lib.rs'
+const KERNEL = 'crates/symbio-platform/src/kernel/mod.rs'
+const SDK = 'crates/symbio-platform/src/sdk/mod.rs'
 
 
 function writeTree(root, files) {
@@ -125,7 +125,7 @@ fn expire(ctx: &dyn DriveCtx, scope: u64) -> bool {
 }
 `
 
-const VOCAB_SRC = `use symbio_kernel::event::{Entity, EventDecl, Verb};
+const VOCAB_SRC = `use symbio_platform::kernel::event::{Entity, EventDecl, Verb};
 
 pub(crate) const EVENTS: &[EventDecl] = &[
     EventDecl::new("user.message", (Entity::Scope, Verb::Opened)),
@@ -173,7 +173,7 @@ test('注释里的世界域名不算代码（CP-004 读剥注释后的文本）'
 
 test('test_fixtures.rs 是测试支持文件，不算生产机制层（CP-004 不判）', () => {
   const files = cleanTree()
-  files['crates/symbio-sdk/src/test_fixtures.rs'] = 'pub const N: &str = "user.message";\n'
+  files['crates/symbio-platform/src/sdk/test_fixtures.rs'] = 'pub const N: &str = "user.message";\n'
   const r = audit(files)
   assert.equal(r.status, 0, r.stdout + r.stderr)
 })
@@ -331,20 +331,20 @@ test('机制面文件读不出 ⇒ 退 2（范围读不出，不是红）', () =
 
 test('CP-009：另一 crate 的 loop 里调 drive(...) ⇒ 红', () => {
   const files = cleanTree()
-  files['crates/symbio-sdk/src/job.rs'] = 'pub fn advance() {\n    loop {\n        crate::drive(0);\n    }\n}\n'
+  files['crates/symbio-platform/src/sdk/job.rs'] = 'pub fn advance() {\n    loop {\n        crate::drive(0);\n    }\n}\n'
   assertRed(audit(files), 'CP-009')
 })
 
 test('CP-009：for 遍历里调 drive(...) ⇒ 红（第二推进循环不只长得像 loop）', () => {
   const files = cleanTree()
-  files['crates/symbio-sdk/src/job.rs'] =
+  files['crates/symbio-platform/src/sdk/job.rs'] =
     'pub fn advance(items: &[u8]) {\n    for item in items {\n        let _ = drive(*item);\n    }\n}\n'
   assertRed(audit(files), 'CP-009')
 })
 
 test('CP-009：循环里没有推进调用 ⇒ 仍绿（不判「有没有循环」）', () => {
   const files = cleanTree()
-  files['crates/symbio-sdk/src/job.rs'] =
+  files['crates/symbio-platform/src/sdk/job.rs'] =
     'pub fn sum(items: &[u8]) -> u8 {\n    let mut n = 0;\n    for item in items {\n        n += *item;\n    }\n    n\n}\n'
   const r = audit(files)
   expectAudit(r, 0, [/CP-009 第二推进循环 0/])

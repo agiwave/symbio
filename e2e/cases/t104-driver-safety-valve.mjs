@@ -3,11 +3,11 @@ import './_selfrun.mjs';
 //
 // 两条安全阀（`Exhausted` / `Stalled`）原先只有 `eprintln!` 一个出口：CLI 的 stderr
 // 就是调用面的读数，但 Tauri / gateway 这类没有控制台的宿主读不到。出口落成一条
-// 机制事实 `driver.stalled`（`crates/symbio/src/drive.rs`），会话投影再把它折成
+// 机制事实 `driver.stalled`（`crates/symbio-runtime/src/host/entry.rs`），会话投影再把它折成
 // `outcome = "failed"`（`symbio-plugin-session` 的 `runtime`）。
 //
 // 正向（停摆必须落格）由 Rust 用例钉住，且能在 CI 里判红：
-// - `crates/symbio/src/drive.test.rs`：两条出口各落一条、正常出口一条不落；
+// - `crates/symbio-runtime/src/host/entry.test.rs`：两条出口各落一条、正常出口一条不落；
 // - `crates/symbio-plugin-session/src/runtime.test.rs`：事实 → `failed` + 文案。
 //
 // ## 为什么正向不放在 e2e 里

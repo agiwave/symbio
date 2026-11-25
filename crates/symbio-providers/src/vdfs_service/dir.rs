@@ -18,12 +18,14 @@
 use super::entry;
 use async_trait::async_trait;
 use std::path::PathBuf;
-use symbio_kernel::vdfs::{
+use symbio_platform::kernel::vdfs::{
     vdfs_has_parent_segment, VdfsAccess, VdfsActionResult, VdfsContent, VdfsContext, VdfsError,
     VdfsNode, VdfsProvider, VdfsRequest, VdfsResponse, VdfsResult, VdfsWriteResponse,
     VDFS_ACTION_EXPORT,
 };
-use symbio_sdk::vdfs::host::{vdfs_notify_change, vdfs_unwatch_changes, vdfs_watch_changes};
+use symbio_platform::sdk::vdfs::host::{
+    vdfs_notify_change, vdfs_unwatch_changes, vdfs_watch_changes,
+};
 
 /// 列目录上限（与物理层同一口径，避免超大目录打爆响应）
 const MAX_LIST_ENTRIES: usize = 2000;
@@ -143,7 +145,10 @@ impl DirVdfs {
         match entry::remove_entry(&self.base, id).await {
             Ok(()) => {}
             Err(VdfsError::NotFound(_)) => {
-                symbio_sdk::plugin_warn!(&self.kind, "磁盘上已无条目 {id} 目录，仅清理内存");
+                symbio_platform::sdk::plugin_warn!(
+                    &self.kind,
+                    "磁盘上已无条目 {id} 目录，仅清理内存"
+                );
             }
             Err(e) => return Err(e),
         }
@@ -390,7 +395,7 @@ impl VdfsProvider for DirVdfs {
                 // 原语**的语义：目录型条目没有「一份内容」可言，写字节就是解包。
                 // 对外的**入口形态**只有详情页的 `import` 动作
                 // （`VDFS_ACTION_IMPORT`）——它把包字节按 `VdfsUnpack` 装好再交给
-                // provider，见 `symbio_kernel::vdfs` 的「节点动作」一节。
+                // provider，见 `symbio_platform::kernel::vdfs` 的「节点动作」一节。
                 if content.binary {
                     let (id, _) = entry::split_rel(path)
                         .ok_or_else(|| VdfsError::invalid("整包只能导入到挂载根下的条目地址"))?;

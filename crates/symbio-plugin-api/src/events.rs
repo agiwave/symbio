@@ -24,7 +24,7 @@
 //! 常量名去掉 `EVENT_` 前缀后必须**逐字等于**值的大写形式（`.` → `_`）：
 //! `memory.encoded` → `EVENT_MEMORY_ENCODED`。由 CS-007 检查。
 
-use symbio_kernel::event::{Entity, EventDecl, FactRole, Verb};
+use symbio_platform::kernel::event::{Entity, EventDecl, FactRole, Verb};
 
 // ============ artifact ============
 

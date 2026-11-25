@@ -24,7 +24,7 @@ const END = "// <<< plugin-links:end";
 const NOTE =
   "// 以下链接行由 `scripts/facts/plugin-links-rs.mjs` 从 `crates/symbio-plugin-<id>/` 目录投影，" +
   "请勿手改；漏一行的后果是那个插件的 inventory 注册项被链接器丢掉（不报错，只少功能）。" +
-  "链接是私有的（`use … as _`），宿主门面的出口在上半段显式写（D-417）。";
+  "链接是私有的（`use … as _`）；装配方不重导出契约，宿主侧出口直接依赖平台与门面（D-417 / D-556）。";
 
 /** 纯函数：目录清单 + 现有文件 → 新文件内容。导出给回归测试（测试不写盘）。 */
 export function renderInto(text, links) {

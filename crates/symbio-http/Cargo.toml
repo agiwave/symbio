@@ -13,7 +13,7 @@ unused_variables = "warn"
 dead_code = "warn"
 
 [dependencies]
-symbio-kernel = { path = "../symbio-kernel" }
+symbio-platform = { path = "../symbio-platform" }
 symbio-plugin-api = { path = "../symbio-plugin-api" }
 async-trait = { workspace = true }
 base64 = { workspace = true }

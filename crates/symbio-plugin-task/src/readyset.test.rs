@@ -5,7 +5,7 @@
 //! 依赖闭合才算就绪、链式推进一次一笔、挂起排除与恢复（含 as-of 重放）、活租约排除与到期即回、
 //! 返工开新节点不复活旧节点、容量随切片里的配置事实走而折叠本体无界、同一切片永远同一个集合（N1）。
 //!
-//! 这些判据搬出前住在 `crates/symbio-sdk/src/actors/mod.test.rs` 的「彩排：任务树与返工」
+//! 这些判据搬出前住在 `crates/symbio-platform/src/sdk/actors/mod.test.rs` 的「彩排：任务树与返工」
 //! 一节（as-of 那一半在 `crates/symbio-plugin-session/src/transcript/inbox.test.rs`）。
 //! `D-289` 把折叠搬到 owner 包，判据跟着走——**改的是住在哪个 crate，不是算式**：
 //! 用例里的事件形状与搬出前逐条同构（开格带 `depends_on`、终态带溯源、租约带 `until_ms`）。

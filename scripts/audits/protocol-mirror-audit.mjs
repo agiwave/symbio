@@ -105,23 +105,23 @@ const BAD = '✗'
 
 // D-188 C2b：VDFS 全族、`ChatNode` 与呈现读数随语法住 `symbio-kernel` crate，
 // 这里的后端真源路径跟着搬（前端镜像不变）。
-const VDFS_WORDS_RS = 'crates/symbio-kernel/src/vdfs/words.rs'
-const VDFS_ACCESS_RS = 'crates/symbio-kernel/src/vdfs/access.rs'
-const VDFS_NODE_RS = 'crates/symbio-kernel/src/vdfs/node.rs'
-const VDFS_CONTENT_RS = 'crates/symbio-kernel/src/vdfs/content.rs'
-const VDFS_ERROR_RS = 'crates/symbio-kernel/src/vdfs/error.rs'
-const VDFS_REQUEST_RS = 'crates/symbio-kernel/src/vdfs/request.rs'
-const VDFS_CHANGE_RS = 'crates/symbio-kernel/src/vdfs/change.rs'
+const VDFS_WORDS_RS = 'crates/symbio-platform/src/kernel/vdfs/words.rs'
+const VDFS_ACCESS_RS = 'crates/symbio-platform/src/kernel/vdfs/access.rs'
+const VDFS_NODE_RS = 'crates/symbio-platform/src/kernel/vdfs/node.rs'
+const VDFS_CONTENT_RS = 'crates/symbio-platform/src/kernel/vdfs/content.rs'
+const VDFS_ERROR_RS = 'crates/symbio-platform/src/kernel/vdfs/error.rs'
+const VDFS_REQUEST_RS = 'crates/symbio-platform/src/kernel/vdfs/request.rs'
+const VDFS_CHANGE_RS = 'crates/symbio-platform/src/kernel/vdfs/change.rs'
 const VDFS_PROTOCOL_RS = 'crates/symbio-plugin-vdfs/src/protocol.rs'
 const VDFS_TS = 'tauri/src/schemas/vdfs.ts'
 
-const CHAT_NODE_RS = 'crates/symbio-kernel/src/chat/chat_node.rs'
+const CHAT_NODE_RS = 'crates/symbio-platform/src/kernel/chat/chat_node.rs'
 const CHAT_NODE_TS = 'tauri/src/schemas/chat_node.ts'
-const DETAIL_RS = 'crates/symbio-kernel/src/present/detail.rs'
+const DETAIL_RS = 'crates/symbio-platform/src/kernel/present/detail.rs'
 const FORM_TS = 'tauri/src/schemas/vdfs-form.ts'
-const RISK_LEVEL_RS = 'crates/symbio-kernel/src/capability/mod.rs'
+const RISK_LEVEL_RS = 'crates/symbio-platform/src/kernel/capability/mod.rs'
 const SESSION_META_TS = 'tauri/src/schemas/session_meta.ts'
-const READING_RS = 'crates/symbio-kernel/src/present/reading.rs'
+const READING_RS = 'crates/symbio-platform/src/kernel/present/reading.rs'
 const READING_TS = 'tauri/src/schemas/reading.ts'
 // home 控制面四条臂：后端一份 `schemas.rs`（四个模块），前端一份 `schemas/home.ts`
 // （四个同名 namespace）。见 [D-112] 决策 2。
@@ -131,7 +131,7 @@ const HOME_TS = 'tauri/src/schemas/home.ts'
 // 线路层信封：后端 `transport.rs` 是唯一真源，前端 `services/plugin.ts` 是手写副本。
 // 四个类型里只有容器字段名（`metadata` / `payload`）能被 D 组的正则读出来；
 // 两个 `enum` 的**变体集合**由前端运行期的帧白名单（`ProtocolEnforcer`）兜底。
-const TRANSPORT_RS = 'crates/symbio-kernel/src/plugin/transport.rs'
+const TRANSPORT_RS = 'crates/symbio-platform/src/kernel/plugin/transport.rs'
 const PLUGIN_TS = 'tauri/src/services/plugin.ts'
 
 /** 后端常量源：自动发现其中 `VDFS_*` 前缀的 `&str` 常量 */
@@ -206,12 +206,12 @@ const ALIASES = [
   {
     // D-530：event_bus 线上契约按规则 B 迁入 symbio-contract（sdk 侧只留投递机制面）。
     ts: 'VDFS_EVENT_KIND',
-    rust: { file: 'crates/symbio-contract/src/event_bus.rs', name: 'EVENT_BUS_KIND_VDFS' },
+    rust: { file: 'crates/symbio-platform/src/contract/event_bus.rs', name: 'EVENT_BUS_KIND_VDFS' },
     what: 'VDFS 变更的总线频道名',
   },
   {
     ts: 'VDFS_BUS_RESYNC',
-    rust: { file: 'crates/symbio-contract/src/event_bus.rs', name: 'EVENT_BUS_RESYNC_MARKER_TYPE' },
+    rust: { file: 'crates/symbio-platform/src/contract/event_bus.rs', name: 'EVENT_BUS_RESYNC_MARKER_TYPE' },
     what: '总线背压指令：通道曾满，消费端请重读作用域（不是一条变更）',
   },
   {
@@ -236,7 +236,7 @@ const ALIASES = [
   },
   {
     ts: 'VDFS_EXT_MODEL',
-    rust: { file: 'crates/symbio-deploy/src/lib.rs', name: 'PLUGIN_ID_MODEL' },
+    rust: { file: 'crates/symbio-platform/src/deploy/mod.rs', name: 'PLUGIN_ID_MODEL' },
     what: '「模型」类别的挂载点自述（首启引导据此认出「模型配在哪」）',
   },
 ]
@@ -578,14 +578,14 @@ const META_KEYS = [
   {
     // 重试留下的「并存几支 + 一个选中态」在节点上的投影（D-173 口径 1）。
     key: 'branch',
-    owner: 'crates/symbio-sdk/src/projection/branch.rs',
+    owner: 'crates/symbio-platform/src/sdk/projection/branch.rs',
     what: '分支标注 {group, candidates, index, total, selected}：这一支在组里的位置与「此刻读哪一支」',
   },
   {
     // `flat` 档升根的节点没有 `parent_id`，子树同一性靠它补上（D-173「子树同一性只有一份实现」）。
     // D-502/B6：写口由 turn_root 改成 scope_root（未发布产品，无存量需兼容，旧键直接删除）。
     key: 'scope_root',
-    owner: 'crates/symbio-sdk/src/round/node_build.rs',
+    owner: 'crates/symbio-platform/src/sdk/round/node_build.rs',
     what: '本轮升根节点的作用域根锚：子树口径 = `parent_id` ∪ 本键，两侧各写一份必漂',
   },
   {
@@ -605,12 +605,12 @@ const META_KEYS = [
   },
   {
     key: 'recoverable',
-    owner: 'crates/symbio-sdk/src/chat/chat_node.rs',
+    owner: 'crates/symbio-platform/src/sdk/chat/chat_node.rs',
     what: '该失败可由用户就地重试',
   },
   {
     key: 'tool_name',
-    owner: 'crates/symbio-kernel/src/chat/chat_node.rs',
+    owner: 'crates/symbio-platform/src/kernel/chat/chat_node.rs',
     what: '工具名（顶层 name 退役后的唯一住处）',
   },
   {

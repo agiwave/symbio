@@ -12,10 +12,11 @@ name = "symbio-cli"
 path = "src/main.rs"
 
 [dependencies]
-symbio-sdk = { path = "../symbio-sdk" }
+symbio-platform = { path = "../symbio-platform" }
+symbio-plugin-api = { path = "../symbio-plugin-api" }
 # 核心库：进程内直连同一套分形插件树；serve 模式经共享 RuntimeHost 提供 HTTP/WS。
 symbio = { path = "../symbio" }
-symbio-server = { path = "../symbio-server" }
+symbio-runtime = { path = "../symbio-runtime" }
 # 版本与 features 刻意与 ../symbio/Cargo.toml 完全一致：
 # 同一份 tokio 单元 → 复用仓库根 target/ 里已编译好的 rlib，避免重复编译。
 tokio = { workspace = true, features = ["full"] }

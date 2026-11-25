@@ -94,7 +94,7 @@ function runOn(root) {
 test('① 干净夹具通过', () => {
   const root = fixture({
     'symbio-plugin-fix': {},
-    'symbio-plugin-api': { rs: 'pub use symbio_sdk::{Event, Plugin};\n' },
+    'symbio-plugin-api': { rs: 'pub use symbio_platform::sdk::{Event, Plugin};\n' },
   })
   try {
     const r = runOn(root)
@@ -106,12 +106,12 @@ test('① 干净夹具通过', () => {
 
 test('② 源码直取 core ⇒ 红', () => {
   const root = fixture({
-    'symbio-plugin-fix': { rs: 'use symbio_sdk::Event;\npub fn f(_: Event) {}\n' },
-    'symbio-plugin-api': { rs: 'pub use symbio_sdk::{Event};\n' },
+    'symbio-plugin-fix': { rs: 'use symbio_platform::sdk::Event;\npub fn f(_: Event) {}\n' },
+    'symbio-plugin-api': { rs: 'pub use symbio_platform::sdk::{Event};\n' },
   })
   try {
     const r = runOn(root)
-    expectAudit(r, 1, [/symbio_sdk::/, /HS-001/])
+    expectAudit(r, 1, [/symbio_platform::sdk::/, /HS-001/])
   } finally {
     rmTree(root)
   }
@@ -120,13 +120,13 @@ test('② 源码直取 core ⇒ 红', () => {
 test('②b 源码直取 kernel ⇒ 红（D-418：语法也走门面）', () => {
   const root = fixture({
     'symbio-plugin-fix': {
-      rs: 'use symbio_kernel::event::ClosureReason;\npub fn f(_: ClosureReason) {}\n',
+      rs: 'use symbio_platform::kernel::event::ClosureReason;\npub fn f(_: ClosureReason) {}\n',
     },
-    'symbio-plugin-api': { rs: 'pub use symbio_sdk::{Event};\n' },
+    'symbio-plugin-api': { rs: 'pub use symbio_platform::sdk::{Event};\n' },
   })
   try {
     const r = runOn(root)
-    expectAudit(r, 1, [/symbio_kernel::/, /HS-001/])
+    expectAudit(r, 1, [/symbio_platform::kernel::/, /HS-001/])
   } finally {
     rmTree(root)
   }
@@ -135,11 +135,11 @@ test('②b 源码直取 kernel ⇒ 红（D-418：语法也走门面）', () => {
 test('②c 控制面源码直取 kernel ⇒ 绿（源码前缀豁免）', () => {
   const root = fixture({
     'symbio-plugin-loop': {
-      rs: 'use symbio_kernel::event::ClosureReason;\npub fn f(_: ClosureReason) {}\n',
+      rs: 'use symbio_platform::kernel::event::ClosureReason;\npub fn f(_: ClosureReason) {}\n',
       manifest: CLEAN_MANIFEST.replace('symbio-plugin-fix', 'symbio-plugin-loop'),
     },
     'symbio-plugin-fix': {},
-    'symbio-plugin-api': { rs: 'pub use symbio_sdk::{Event};\n' },
+    'symbio-plugin-api': { rs: 'pub use symbio_platform::sdk::{Event};\n' },
   })
   try {
     const r = runOn(root)
@@ -152,9 +152,9 @@ test('②c 控制面源码直取 kernel ⇒ 绿（源码前缀豁免）', () => 
 test('③ 只在注释里提 core ⇒ 绿（判代码不判措辞）', () => {
   const root = fixture({
     'symbio-plugin-fix': {
-      rs: '//! 见 `symbio_sdk::vdfs::address` 的改写规则。\n/// 同上：symbio_kernel::actors。\nuse symbio_plugin_api::Event;\n',
+      rs: '//! 见 `symbio_platform::sdk::vdfs::address` 的改写规则。\n/// 同上：symbio_platform::kernel::actors。\nuse symbio_plugin_api::Event;\n',
     },
-    'symbio-plugin-api': { rs: 'pub use symbio_sdk::{Event};\n' },
+    'symbio-plugin-api': { rs: 'pub use symbio_platform::sdk::{Event};\n' },
   })
   try {
     const r = runOn(root)
@@ -167,12 +167,12 @@ test('③ 只在注释里提 core ⇒ 绿（判代码不判措辞）', () => {
 test('④ 控制面插件源码直取 sdk ⇒ 绿（源码前缀豁免；manifest 归 E-009）', () => {
   const root = fixture({
     'symbio-plugin-loop': {
-      rs: 'use symbio_sdk::Event;\npub fn f(_: Event) {}\n',
+      rs: 'use symbio_platform::sdk::Event;\npub fn f(_: Event) {}\n',
       manifest: CLEAN_MANIFEST.replace('symbio-plugin-fix', 'symbio-plugin-loop'),
     },
     // 门面里那条 `Event` 必须有扩展层消费方，否则 HS-003 反过来判它空转
     'symbio-plugin-fix': {},
-    'symbio-plugin-api': { rs: 'pub use symbio_sdk::{Event};\n' },
+    'symbio-plugin-api': { rs: 'pub use symbio_platform::sdk::{Event};\n' },
   })
   try {
     const r = runOn(root)
@@ -187,7 +187,7 @@ test('⑦ 白名单超基线 ⇒ 红（HS-002 只许降）', () => {
   const many = Array.from({ length: WHITELIST_BASELINE + 5 }, (_, i) => `S${i}`)
   const root = fixture({
     'symbio-plugin-fix': {},
-    'symbio-plugin-api': { rs: `pub use symbio_sdk::{\n    ${many.join(', ')},\n};\n` },
+    'symbio-plugin-api': { rs: `pub use symbio_platform::sdk::{\n    ${many.join(', ')},\n};\n` },
   })
   try {
     const r = runOn(root)
@@ -207,7 +207,7 @@ test('⑦b SDK 臂超基线 ⇒ 红（D-269：机制面同进棘轮）', () => {
         ' pub fn ev(e: symbio_plugin_api::Event) { let _ = e; }',
     },
     'symbio-plugin-api': {
-      rs: `pub use symbio_sdk::{ ${many.join(', ')} };`,
+      rs: `pub use symbio_platform::sdk::{ ${many.join(', ')} };`,
     },
   })
   try {
@@ -228,7 +228,7 @@ test('⑦c SDK 臂恰好等于基线 ⇒ 绿（棘轮不动就没事）', () => 
         ' pub fn ev(e: symbio_plugin_api::Event) { let _ = e; }',
     },
     'symbio-plugin-api': {
-      rs: `pub use symbio_sdk::{ ${many.join(', ')} };`,
+      rs: `pub use symbio_platform::sdk::{ ${many.join(', ')} };`,
     },
   })
   try {
@@ -242,7 +242,7 @@ test('⑦c SDK 臂恰好等于基线 ⇒ 绿（棘轮不动就没事）', () => 
 test('⑨ 白名单里的空转条目 ⇒ 红（HS-003）', () => {
   const root = fixture({
     'symbio-plugin-fix': {},
-    'symbio-plugin-api': { rs: 'pub use symbio_sdk::{Event, Ghost};\n' },
+    'symbio-plugin-api': { rs: 'pub use symbio_platform::sdk::{Event, Ghost};\n' },
   })
   try {
     const r = runOn(root)
@@ -256,7 +256,7 @@ test('⑨b `X as _` 算消费方（HS-003 认 `as` 前的门面符号）', () =>
   const root = fixture({
     // 把 trait 带进作用域只为调方法——既不写别名，消费的也是 `Event` 本身。
     'symbio-plugin-fix': { rs: 'use symbio_plugin_api::{Event as _};\npub fn f() {}\n' },
-    'symbio-plugin-api': { rs: 'pub use symbio_sdk::{Event};\n' },
+    'symbio-plugin-api': { rs: 'pub use symbio_platform::sdk::{Event};\n' },
   })
   try {
     const r = runOn(root)
@@ -276,7 +276,7 @@ test('⑧ 范围读不出 ⇒ exit 2', () => {
 test('⑩ 胶水层把嵌入臂设为默认 ⇒ 红（HS-004）', () => {
   const root = fixture({
     'symbio-plugin-fix': {},
-    'symbio-plugin-api': { rs: 'pub use symbio_sdk::{Event, Plugin};\n' },
+    'symbio-plugin-api': { rs: 'pub use symbio_platform::sdk::{Event, Plugin};\n' },
     'symbio-providers': { manifest: PROVIDERS_OK.replace('default = []', 'default = ["embedding"]') },
   })
   try {
@@ -290,7 +290,7 @@ test('⑩ 胶水层把嵌入臂设为默认 ⇒ 红（HS-004）', () => {
 test('⑪ 嵌入臂不是 optional ⇒ 红（HS-004）', () => {
   const root = fixture({
     'symbio-plugin-fix': {},
-    'symbio-plugin-api': { rs: 'pub use symbio_sdk::{Event, Plugin};\n' },
+    'symbio-plugin-api': { rs: 'pub use symbio_platform::sdk::{Event, Plugin};\n' },
     'symbio-providers': { manifest: PROVIDERS_OK.replace(', optional = true', '') },
   })
   try {
@@ -304,7 +304,7 @@ test('⑪ 嵌入臂不是 optional ⇒ 红（HS-004）', () => {
 test('⑫ 嵌入臂默认关闭 ⇒ 绿（HS-004 的正例）', () => {
   const root = fixture({
     'symbio-plugin-fix': {},
-    'symbio-plugin-api': { rs: 'pub use symbio_sdk::{Event, Plugin};\n' },
+    'symbio-plugin-api': { rs: 'pub use symbio_platform::sdk::{Event, Plugin};\n' },
     'symbio-providers': { manifest: PROVIDERS_OK },
   })
   try {
@@ -319,7 +319,7 @@ test('⑬ 门面 manifest 依赖旧 core 的 crate 名 ⇒ 红（HS-005，D-276�
   const root = fixture({
     'symbio-plugin-fix': {},
     'symbio-plugin-api': {
-      rs: 'pub use symbio_sdk::{Event, Plugin};\n',
+      rs: 'pub use symbio_platform::sdk::{Event, Plugin};\n',
       manifest: CLEAN_MANIFEST + `${RETIRED_CORE_CRATE} = { path = "../${RETIRED_CORE_CRATE}" }\n`,
     },
   })
@@ -336,7 +336,7 @@ test('⑬b HS-005 退化：活跃源码里 `use symbio_core::…` ⇒ 红（守�
   // 而真仓库里同样写的 `use` 谁也拦不住。因此必须从**活跃 crate 的源码**这一面注入。
   const root = fixture({
     'symbio-plugin-fix': { rs: `use ${RETIRED_CORE_MODULE}::Event;\npub fn f(_: Event) {}\n` },
-    'symbio-plugin-api': { rs: 'pub use symbio_sdk::{Event, Plugin};\n' },
+    'symbio-plugin-api': { rs: 'pub use symbio_platform::sdk::{Event, Plugin};\n' },
   })
   try {
     const r = runOn(root)
@@ -353,7 +353,7 @@ test('⑬c HS-005 退化：两种字面拼写各写一次 ⇒ 各自红', () => 
       'symbio-plugin-fix': {
         manifest: CLEAN_MANIFEST + `${spelling} = "0.1"\n`,
       },
-      'symbio-plugin-api': { rs: 'pub use symbio_sdk::{Event, Plugin};\n' },
+      'symbio-plugin-api': { rs: 'pub use symbio_platform::sdk::{Event, Plugin};\n' },
     })
     try {
       const r = runOn(root)
@@ -373,11 +373,11 @@ test('⑭ 门面模块级转发超过基线 ⇒ 红（HS-006，D-278）', () => 
       rs: mods.map((m) => `pub fn u_${m}() { symbio_plugin_api::${m}::x(); }`).join('\n'),
     },
     'symbio-plugin-api': {
-      rs: mods.map((m) => `pub use symbio_sdk::ns::${m};`).join('\n') + '\n',
+      rs: mods.map((m) => `pub use symbio_platform::sdk::ns::${m};`).join('\n') + '\n',
     },
   })
   // 造出真模块文件：判据看文件不看名字
-  const nsDir = path.join(root, 'crates', 'symbio-sdk', 'src', 'ns')
+  const nsDir = path.join(root, 'crates', 'symbio-platform', 'src', 'sdk', 'ns')
   fs.mkdirSync(nsDir, { recursive: true })
   for (const m of mods) fs.writeFileSync(path.join(nsDir, m + '.rs'), 'pub fn x() {}\n')
   try {
@@ -393,10 +393,10 @@ test('manifest 依赖边不在本脚本判（owner 是 E-009）', () => {
     'symbio-plugin-fix': {
       manifest: CLEAN_MANIFEST.replace(
         'symbio-plugin-api = { path = "../symbio-plugin-api" }',
-        'symbio-plugin-api = { path = "../symbio-plugin-api" }\nsymbio-sdk = { path = "../symbio-sdk" }',
+        'symbio-plugin-api = { path = "../symbio-plugin-api" }\nsymbio-platform = { path = "../symbio-platform" }',
       ),
     },
-    'symbio-plugin-api': { rs: 'pub use symbio_sdk::{Event};\n' },
+    'symbio-plugin-api': { rs: 'pub use symbio_platform::sdk::{Event};\n' },
   })
   try {
     const r = runOn(root)
@@ -422,7 +422,7 @@ test('readWhitelist 只认机制臂那一个块锚点', () => {
   // ② 只有 SDK 臂 ⇒ 机制臂归零，返回空清单而不是把 SDK 臂顶上来（D-276 / D-279）。
   //    这正是踩过的坑：块锚点被「顺手改成 symbio_sdk」，114 条 SDK 臂当场被当机制臂审。
   const sdkOnly = fixture({
-    'symbio-plugin-api': { rs: 'pub use symbio_sdk::{\n    PluginDir,\n};\n' },
+    'symbio-plugin-api': { rs: 'pub use symbio_platform::sdk::{\n    PluginDir,\n};\n' },
   })
   try {
     assert.deepEqual(readWhitelist(sdkOnly), [])
@@ -443,9 +443,9 @@ test('readGrammar 收齐多个 kernel 分块，且 `as` 取别名', () => {
   const root = fixture({
     'symbio-plugin-api': {
       rs:
-        'pub use symbio_kernel::{\n    Event,\n    Seq,\n};\n' +
-        'pub use symbio_kernel::vdfs::{\n    VdfsError,\n    unavailable_reason as vdfs_unavailable_reason,\n};\n' +
-        'pub use symbio_sdk::{\n    PluginDir,\n};\n',
+        'pub use symbio_platform::kernel::{\n    Event,\n    Seq,\n};\n' +
+        'pub use symbio_platform::kernel::vdfs::{\n    VdfsError,\n    unavailable_reason as vdfs_unavailable_reason,\n};\n' +
+        'pub use symbio_platform::sdk::{\n    PluginDir,\n};\n',
     },
   })
   try {
@@ -465,7 +465,7 @@ test('⑮ 机制臂块回到门面 ⇒ 红（HS-002）：判据靠来源分区�
   const root = fixture({
     'symbio-plugin-fix': { rs: 'use symbio_plugin_api::Event;\npub fn f(_: Event) {}\n' },
     'symbio-plugin-api': {
-      rs: `pub use symbio_sdk::{Event};\npub use ${RETIRED_CORE_MODULE}::{LegacyThing};\n`,
+      rs: `pub use symbio_platform::sdk::{Event};\npub use ${RETIRED_CORE_MODULE}::{LegacyThing};\n`,
     },
   })
   try {

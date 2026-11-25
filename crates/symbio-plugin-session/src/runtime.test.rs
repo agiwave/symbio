@@ -2,7 +2,7 @@
 
 use super::*;
 use serde_json::json;
-use symbio_kernel::event::{Entity, Verb};
+use symbio_platform::kernel::event::{Entity, Verb};
 
 /// 一条生命周期事件（`round` 分桶与投影无关，取 1）。
 fn ev(kind: &str, verb: Verb, payload: serde_json::Value) -> Event {

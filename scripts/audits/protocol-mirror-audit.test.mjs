@@ -36,15 +36,15 @@ import { auditCase, expectAudit } from '../audit-assert.mjs'
 
 const script = fileURLToPath(new URL('./protocol-mirror-audit.mjs', import.meta.url))
 
-const CHAT_RS = 'crates/symbio-kernel/src/chat/chat_node.rs'
+const CHAT_RS = 'crates/symbio-platform/src/kernel/chat/chat_node.rs'
 const CHAT_TS = 'tauri/src/schemas/chat_node.ts'
-const DETAIL_RS = 'crates/symbio-kernel/src/present/detail.rs'
+const DETAIL_RS = 'crates/symbio-platform/src/kernel/present/detail.rs'
 const FORM_TS = 'tauri/src/schemas/vdfs-form.ts'
-const RISK_LEVEL_RS = 'crates/symbio-kernel/src/capability/mod.rs'
+const RISK_LEVEL_RS = 'crates/symbio-platform/src/kernel/capability/mod.rs'
 const SESSION_META_TS = 'tauri/src/schemas/session_meta.ts'
-const READING_RS = 'crates/symbio-kernel/src/present/reading.rs'
+const READING_RS = 'crates/symbio-platform/src/kernel/present/reading.rs'
 const READING_TS = 'tauri/src/schemas/reading.ts'
-const TRANSPORT_RS = 'crates/symbio-kernel/src/plugin/transport.rs'
+const TRANSPORT_RS = 'crates/symbio-platform/src/kernel/plugin/transport.rs'
 const PLUGIN_TS = 'tauri/src/services/plugin.ts'
 
 /** 后端结构体（最小形态）：`pub struct X { pub a: String, }` */
@@ -173,19 +173,19 @@ const VDFS_WORDS_RS_SRC = [
  * 夹具按真实文件路径分发。
  */
 const VDFS_TYPES_RS = {
-  'crates/symbio-kernel/src/vdfs/access.rs': [rsStruct('VdfsAccess', 'read', 'write')].join('\n'),
-  'crates/symbio-kernel/src/vdfs/node.rs': [
+  'crates/symbio-platform/src/kernel/vdfs/access.rs': [rsStruct('VdfsAccess', 'read', 'write')].join('\n'),
+  'crates/symbio-platform/src/kernel/vdfs/node.rs': [
     rsStruct('VdfsNode', 'path', 'name'),
     rsStruct('VdfsItem', 'path'),
     rsStruct('VdfsNewType', 'ext', 'title'),
   ].join('\n'),
-  'crates/symbio-kernel/src/vdfs/content.rs': [rsStruct('VdfsContent', 'path', 'text')].join('\n'),
-  'crates/symbio-kernel/src/vdfs/error.rs': [
+  'crates/symbio-platform/src/kernel/vdfs/content.rs': [rsStruct('VdfsContent', 'path', 'text')].join('\n'),
+  'crates/symbio-platform/src/kernel/vdfs/error.rs': [
     rsStruct('VdfsFieldError', 'field', 'message'),
     rsStruct('VdfsValidationError', 'message', 'fields'),
   ].join('\n'),
-  'crates/symbio-kernel/src/vdfs/request.rs': [rsStruct('VdfsWriteResponse', 'path', 'created')].join('\n'),
-  'crates/symbio-kernel/src/vdfs/change.rs': [rsStruct('VdfsChange', 'path', 'change')].join('\n'),
+  'crates/symbio-platform/src/kernel/vdfs/request.rs': [rsStruct('VdfsWriteResponse', 'path', 'created')].join('\n'),
+  'crates/symbio-platform/src/kernel/vdfs/change.rs': [rsStruct('VdfsChange', 'path', 'change')].join('\n'),
 }
 
 /** 前端 vdfs.ts：只放后端有对应协议词 / 字段的——多放一个就命中「未登记」检查 */
@@ -468,12 +468,12 @@ const HOME_TS_SRC = [
 
 /** 全部一致且不含禁用常量时的最小仓库（相对仓库根的路径 → 内容） */
 const BASE = {
-  'crates/symbio-kernel/src/vdfs/words.rs': VDFS_WORDS_RS_SRC,
+  'crates/symbio-platform/src/kernel/vdfs/words.rs': VDFS_WORDS_RS_SRC,
   ...VDFS_TYPES_RS,
   'crates/symbio-plugin-vdfs/src/protocol.rs': PROTOCOL_RS_SRC,
   'crates/symbio-plugin-api/src/routes.rs': ROUTE_RS_SRC,
   // E 组：这条跨栈导航头指向真实存在的 `tauri/src/schemas/vdfs.ts`
-  'crates/symbio-contract/src/event_bus.rs':
+  'crates/symbio-platform/src/contract/event_bus.rs':
     '// Corresponding Frontend: tauri/src/schemas/vdfs.ts\npub const EVENT_BUS_KIND_VDFS: &str = "vdfs";\n',
   'tauri/src/schemas/vdfs.ts': VDFS_TS_SRC,
   [CHAT_RS]: CHAT_RS_SRC,
@@ -542,7 +542,7 @@ test('真实仓库当前状态通过（防本守卫在真仓库上误报）', ()
 
 test('后端改了转写列表的 kind、前端没跟 → 变红', () => {
   const r = mirror({
-    'crates/symbio-kernel/src/vdfs/words.rs': [
+    'crates/symbio-platform/src/kernel/vdfs/words.rs': [
       'pub const VDFS_KIND_MESSAGES: &str = "transcript";',
       'pub const VDFS_EXT_SESSION: &str = "session";',
       'pub const VDFS_EXT_MESSAGE: &str = "message";',
@@ -555,7 +555,7 @@ test('后端改了转写列表的 kind、前端没跟 → 变红', () => {
 
 test('后端改了会话 ext、前端没跟 → 变红', () => {
   const r = mirror({
-    'crates/symbio-kernel/src/vdfs/words.rs': [
+    'crates/symbio-platform/src/kernel/vdfs/words.rs': [
       'pub const VDFS_KIND_MESSAGES: &str = "messages";',
       'pub const VDFS_EXT_SESSION: &str = "conversation";',
       'pub const VDFS_EXT_MESSAGE: &str = "message";',
@@ -606,7 +606,7 @@ test('前端把常量改成别名（不再是第二份真相）→ 不红', () =
 })
 
 test('后端常量源文件被删 → 变红（不是静默跳过）', () => {
-  const r = mirror({ 'crates/symbio-kernel/src/vdfs/words.rs': null })
+  const r = mirror({ 'crates/symbio-platform/src/kernel/vdfs/words.rs': null })
   assert.equal(r.status, 1)
   assert.match(r.stdout, /后端常量源不存在/)
 })
@@ -752,7 +752,7 @@ test('词表数组被改名 → 变红（不是静默跳过）', () => {
 
 // ==================== D 组：结构体字段 ====================
 
-const VDFS_NODE_RS = 'crates/symbio-kernel/src/vdfs/node.rs'
+const VDFS_NODE_RS = 'crates/symbio-platform/src/kernel/vdfs/node.rs'
 
 auditCase('线路层信封的容器字段改名、前端没跟 → 变红（信封不再只有指针守着）', () => mirror({
     [TRANSPORT_RS]: rsStruct('PluginMessageWire', 'headers', 'payload'),
@@ -963,7 +963,7 @@ test('详情方言取值原语：后端改了 `DETAIL_PICK_*` 的取值 → 变�
 
 test('跨栈导航头指向不存在的文件 → 变红（前端改名后这条头就悬空了）', () => {
   const r = mirror({
-    'crates/symbio-contract/src/event_bus.rs':
+    'crates/symbio-platform/src/contract/event_bus.rs':
       '// Corresponding Frontend: tauri/src/protocols/chat_input.ts\npub const EVENT_BUS_KIND_VDFS: &str = "vdfs";\n',
   })
   assert.equal(r.status, 1)
@@ -972,7 +972,7 @@ test('跨栈导航头指向不存在的文件 → 变红（前端改名后这条
 
 test('跨栈导航头指向真实文件 → 不红（两个方向都判）', () => {
   const r = mirror()
-  expectAudit(r, 0, [/✓ 后端 crates\/symbio-contract\/src\/event_bus\.rs:1 → tauri\/src\/schemas\/vdfs\.ts/])
+  expectAudit(r, 0, [/✓ 后端 crates\/symbio-platform\/src\/contract\/event_bus\.rs:1 → tauri\/src\/schemas\/vdfs\.ts/])
   // 反方向：前端 `Corresponding Backend` 同样有守卫（此前它是免检的）
   assert.match(
     r.stdout,
@@ -984,7 +984,7 @@ test('前端 Corresponding Backend 悬空 → 变红（只守后端一侧时这�
   const r = mirror({
     [HOME_TS]: HOME_TS_SRC.replace(
       '// Corresponding Backend: crates/symbio-plugin-home/src/schemas.rs',
-      '// Corresponding Backend: crates/symbio-sdk/src/schemas/home_reload.rs',
+      '// Corresponding Backend: crates/symbio-platform/src/sdk/schemas/home_reload.rs',
     ),
   })
   assert.equal(r.status, 1)
@@ -992,7 +992,7 @@ test('前端 Corresponding Backend 悬空 → 变红（只守后端一侧时这�
 })
 
 auditCase('没有任何跨栈导航头 → 不红（没写不违规，写了假指针才违规）', () => mirror({
-    'crates/symbio-contract/src/event_bus.rs': 'pub const EVENT_BUS_KIND_VDFS: &str = "vdfs";\n',
+    'crates/symbio-platform/src/contract/event_bus.rs': 'pub const EVENT_BUS_KIND_VDFS: &str = "vdfs";\n',
     [HOME_SCHEMAS_RS]: HOME_SCHEMAS_RS_SRC.replace(
       /^(\s*)\/\/! Corresponding Frontend: .*$\n/gm,
       '',

@@ -5,7 +5,7 @@
 use super::*;
 
 use std::path::Path;
-use symbio_kernel::vdfs::VdfsContent;
+use symbio_platform::kernel::vdfs::VdfsContent;
 
 fn store_in(base: &Path) -> SingleFileVdfs {
     SingleFileVdfs::at(base, "model", "provider.json").with_label("模型")

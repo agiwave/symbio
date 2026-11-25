@@ -20,7 +20,7 @@
  * 只管架构 crate 的形状。于是「一个不存在的 crate」可以被引用任意多次而全绿。
  *
  * 样例最贵的两处：`docs/006-guide/005-PLUGIN_DEVELOPMENT.md` 让插件作者写
- * 照抄编译不过；而 `crates/symbio-sdk/src/lib.rs` 的头注释还在 
+ * 照抄编译不过；而 `crates/symbio-platform/src/sdk/mod.rs` 的头注释还在
  * 描述「core 保留控制面运行时」，那是这个 crate 自己的门面说明。
  *
  * ## 为什么不点名某个已删的 crate

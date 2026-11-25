@@ -1,4 +1,4 @@
-// Corresponding Backend: crates/symbio-kernel/src/plugin/transport.rs
+// Corresponding Backend: crates/symbio-platform/src/kernel/plugin/transport.rs
 /**
  * Symbio 插件通讯内核：统一消息模型 + 出站传输选择（native IPC / HTTP / gateway）。
  * 

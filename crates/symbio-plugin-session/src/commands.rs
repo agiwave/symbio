@@ -34,11 +34,13 @@ use super::paths::session_id_from_new_path;
 use super::plugin::SessionPlugin;
 use super::types::Session;
 use serde_json::{json, Value};
-use symbio_kernel::chat::chat_node as cm;
-use symbio_kernel::plugin::PluginError;
+use symbio_platform::kernel::chat::chat_node as cm;
+use symbio_platform::kernel::plugin::PluginError;
 use symbio_plugin_api::clock_now_ms;
 
-use symbio_kernel::vdfs::{VdfsContent, VdfsError, VdfsResponse, VdfsResult, VdfsWriteResponse};
+use symbio_platform::kernel::vdfs::{
+    VdfsContent, VdfsError, VdfsResponse, VdfsResult, VdfsWriteResponse,
+};
 use symbio_plugin_api::vdfs_from_plugin_error;
 impl SessionPlugin {
     // ==================== 会话本体：新建 / 覆盖 ====================
@@ -97,7 +99,7 @@ impl SessionPlugin {
         //   「新建会话」——它只说建在哪个目录，不说叫什么。
         if existing.is_none() && content.create {
             // 名字是不是**本插件生成的**——决定回执里要不要交回它
-            // （见 [`symbio_kernel::vdfs::request::VdfsWriteResponse::name`]）。
+            // （见 [`symbio_platform::kernel::vdfs::request::VdfsWriteResponse::name`]）。
             let anonymous = named.is_none();
             let id = match named {
                 Some(id) => id,
@@ -178,7 +180,7 @@ impl SessionPlugin {
             self.bind_session_identity(&session).await;
         }
         // 资源变更（标题 / metadata）走粗粒度信号：消费方重拉清单收敛。
-        // 不带节点视图，见 `symbio_sdk::vdfs::host::vdfs_notify_change`。
+        // 不带节点视图，见 `symbio_platform::sdk::vdfs::host::vdfs_notify_change`。
         self.notify_change(&id);
         Ok(VdfsResponse::Write(VdfsWriteResponse {
             name: None,
@@ -198,7 +200,7 @@ impl SessionPlugin {
     /// 带连字符），既难读也难抄。
     ///
     /// 项目早已有一致的短 id 约定，这里只是不再例外：
-    /// - `symbio_sdk::turn::llm_short_id()`（消息节点 id）
+    /// - `symbio_platform::sdk::turn::llm_short_id()`（消息节点 id）
     /// - `vdfs_service::entry::auto_id()`（无名字新建的条目 id，`<kind>-<8位>`）
     ///
     /// 后端**没有任何地方** `Uuid::parse_str` 会话 id（已全仓核对），因此改格式安全；
@@ -335,7 +337,7 @@ impl SessionPlugin {
         // 与「重启后从 WAL 重建」差一个 `status` 字段。这不是视图差异，是**事实
         // 与视图不一致**：`status` 一旦缺失，重建就再也补不回来（事实源里没有它）。
         // 统一口径：规范化后的那条同时进事实与帧，重建与实时读读的是同一条。
-        let updated = symbio_sdk::llm::round::llm_message_frame(&existing.clone());
+        let updated = symbio_platform::sdk::llm::round::llm_message_frame(&existing.clone());
         // **顺序反转**（[D-054] 决策 2）：变更经唯一写入口 `apply` 落——事实先落、
         // 列表随后折叠写入。旧形态是「先写缓存、再补一条事实」，事实是事后补的，
         // 所以它天然是可选项；收进 `apply` 之后「改了列表却没落事实」表达不出来。
@@ -421,10 +423,10 @@ impl SessionPlugin {
         actor: &str,
     ) -> Result<(), PluginError> {
         use crate::declarations::EVENT_SCOPE_BRANCH_SELECTED;
-        use symbio_kernel::event::{Entity, Verb};
+        use symbio_platform::kernel::event::{Entity, Verb};
+        use symbio_platform::sdk::projection::branch::{branch_candidates, branch_selected};
         use symbio_plugin_api::events::EVENT_SCOPE_BRANCH;
         use symbio_plugin_api::FactDraft;
-        use symbio_sdk::projection::branch::{branch_candidates, branch_selected};
         let chat_session = self.open_chat_session(session_id).await?;
         let messages = chat_session.get_messages().await?;
         let target = messages
@@ -504,7 +506,7 @@ impl SessionPlugin {
         let frames: Vec<cm::ChatNode> = candidates
             .iter()
             .filter_map(|c| stamped.iter().find(|m| m.id == *c))
-            .map(symbio_sdk::llm::round::llm_message_frame)
+            .map(symbio_platform::sdk::llm::round::llm_message_frame)
             .collect();
         self.active_mgr
             .transcript_apply_all(session_id, frames)
@@ -525,7 +527,7 @@ impl SessionPlugin {
         mid: &str,
         actor: &str,
     ) -> Result<cm::ChatNode, PluginError> {
-        use symbio_kernel::event::{Entity, Verb};
+        use symbio_platform::kernel::event::{Entity, Verb};
         use symbio_plugin_api::events::EVENT_SCOPE_BRANCH;
         use symbio_plugin_api::FactDraft;
 
@@ -588,7 +590,7 @@ impl SessionPlugin {
         message.status = None;
         message.error = None;
         if let Some(meta) = message.meta.as_mut().and_then(Value::as_object_mut) {
-            meta.remove(symbio_sdk::projection::branch::META_BRANCH);
+            meta.remove(symbio_platform::sdk::projection::branch::META_BRANCH);
         }
         Ok(message)
     }
@@ -612,8 +614,10 @@ impl SessionPlugin {
             return;
         };
         match super::chat_session::delegating_principal_in(&store, session).await {
-            Some(parent) => symbio_sdk::authz::bind_inheriting(&session.id, &principal, &parent),
-            None => symbio_sdk::authz::bind_root(&session.id, &principal),
+            Some(parent) => {
+                symbio_platform::sdk::authz::bind_inheriting(&session.id, &principal, &parent)
+            }
+            None => symbio_platform::sdk::authz::bind_root(&session.id, &principal),
         }
     }
 
@@ -655,9 +659,13 @@ impl SessionPlugin {
                 let parent_principal = symbio_plugin_api::principal_of(
                     parent.metadata.get("agent_id").and_then(Value::as_str),
                 );
-                symbio_sdk::authz::bind_inheriting(&session.id, &principal, &parent_principal);
+                symbio_platform::sdk::authz::bind_inheriting(
+                    &session.id,
+                    &principal,
+                    &parent_principal,
+                );
             } else {
-                symbio_sdk::authz::bind_root(&session.id, &principal);
+                symbio_platform::sdk::authz::bind_root(&session.id, &principal);
             }
             parent = Some(session);
         }
@@ -693,7 +701,7 @@ impl SessionPlugin {
 
     /// 删除会话的统一内部实现（abort 活跃任务 → 清活跃条目 → 存储删除）。
     ///
-    /// 唯一入口是 [`symbio_kernel::vdfs::provider::VdfsProvider::dispatch`] 的两条 `Delete` 分支（会话本体
+    /// 唯一入口是 [`symbio_platform::kernel::vdfs::provider::VdfsProvider::dispatch`] 的两条 `Delete` 分支（会话本体
     /// 与 `sub_session_at` 的子会话），两者语义相同，共用这一份实现。
     ///
     /// ## 为什么没有第二条删除路径
@@ -726,9 +734,9 @@ impl SessionPlugin {
         let store = self.get_store().await?;
         store.delete_session(session_id).await?;
         // 登记行随会话同寿：删除成功后才回收（删除失败时会话仍在，行也该仍在）。
-        symbio_sdk::authz::unbind_session(session_id);
+        symbio_platform::sdk::authz::unbind_session(session_id);
         for id in descendants {
-            symbio_sdk::authz::unbind_session(&id);
+            symbio_platform::sdk::authz::unbind_session(&id);
         }
 
         // VDFS 实时链路（provider 侧变更广播 → watch 的 sink → 总线 kind="vdfs"）：

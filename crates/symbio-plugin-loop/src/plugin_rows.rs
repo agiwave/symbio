@@ -19,8 +19,8 @@
 use std::sync::Arc;
 
 use serde_json::{json, Value};
-use symbio_kernel::decl::ring::Debt;
-use symbio_kernel::event::{Entity, Event, Verb};
+use symbio_platform::kernel::decl::ring::Debt;
+use symbio_platform::kernel::event::{Entity, Event, Verb};
 use symbio_plugin_api::drive::DriveFact;
 use symbio_plugin_api::port::{
     PortErrorClass, PortExecContext, PortExecutor, PortInput, PortOutcome,
@@ -119,7 +119,7 @@ fn reply_of<'a>(events: &'a [Event], ask: &str) -> Option<RowReply<'a>> {
         {
             continue;
         }
-        if symbio_kernel::event::ring_parts(&event.event_id, &event.kind)
+        if symbio_platform::kernel::event::ring_parts(&event.event_id, &event.kind)
             .map(|(_, id, _)| id)
             .as_deref()
             != Some(ask)

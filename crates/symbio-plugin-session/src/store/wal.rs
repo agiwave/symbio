@@ -71,10 +71,10 @@ use std::path::{Path, PathBuf};
 use std::sync::{Arc, RwLock};
 
 use crate::paths;
-use symbio_kernel::decl::Frozen;
-use symbio_kernel::event::{Event, EventDecl, EventEnvelope as _, Seq};
-use symbio_kernel::store::{AppendError, Store, StoreInvariant};
-use symbio_sdk::invariants::provenance_violation;
+use symbio_platform::kernel::decl::Frozen;
+use symbio_platform::kernel::event::{Event, EventDecl, EventEnvelope as _, Seq};
+use symbio_platform::kernel::store::{AppendError, Store, StoreInvariant};
+use symbio_platform::sdk::invariants::provenance_violation;
 
 /// 判据的**词汇面**：认识某个名字的那张表说了算（DE-024 D-203）。
 ///
@@ -97,7 +97,7 @@ impl<'a> Vocab<'a> {
     fn of(declarations: Option<&'a Frozen>) -> Self {
         Vocab {
             instance: declarations.map(Frozen::events),
-            process: symbio_sdk::declarations::declared_vocab(),
+            process: symbio_platform::sdk::declarations::declared_vocab(),
         }
     }
 
@@ -124,7 +124,10 @@ impl<'a> Vocab<'a> {
     fn cell(
         &self,
         kind: &str,
-    ) -> Option<(symbio_kernel::event::Entity, symbio_kernel::event::Verb)> {
+    ) -> Option<(
+        symbio_platform::kernel::event::Entity,
+        symbio_platform::kernel::event::Verb,
+    )> {
         self.table_for(kind)
             .and_then(|table| table.iter().find(|e| e.name == kind))
             .map(|e| e.cell)
@@ -582,7 +585,7 @@ impl WalStore {
 }
 
 impl Store for WalStore {
-    type Event = symbio_kernel::event::Event;
+    type Event = symbio_platform::kernel::event::Event;
 
     fn append(&self, mut event: Self::Event) -> Result<Seq, AppendError> {
         let vocab = Vocab::of(self.declarations.as_deref());
@@ -664,7 +667,7 @@ impl Store for WalStore {
     }
 }
 
-/// 便捷别名：持久化事实源（信封恒为 [`symbio_kernel::event::Event`]）。
+/// 便捷别名：持久化事实源（信封恒为 [`symbio_platform::kernel::event::Event`]）。
 pub type EventWalStore = WalStore;
 
 #[cfg(test)]

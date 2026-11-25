@@ -16,10 +16,10 @@ use dashmap::DashMap;
 use serde_json::json;
 use std::path::{Path, PathBuf};
 use std::sync::Arc;
-use symbio_kernel::plugin::PluginError;
-use symbio_kernel::vdfs::VdfsChange;
-use symbio_kernel::vdfs::{VdfsAccess, VdfsNode};
-use symbio_sdk::vdfs::host::VdfsChangeSubscriptions;
+use symbio_platform::kernel::plugin::PluginError;
+use symbio_platform::kernel::vdfs::VdfsChange;
+use symbio_platform::kernel::vdfs::{VdfsAccess, VdfsNode};
+use symbio_platform::sdk::vdfs::host::VdfsChangeSubscriptions;
 
 use self::fs_watcher::FsWatcher;
 use super::types::Session;
@@ -57,11 +57,11 @@ pub const TITLE_WORKDIR: &str = "工作目录";
 /// **路径段一律 ASCII，中文只出现在 `title` 上**：地址要能安全地进 URL、命令行、
 /// 日志与文件名，不受编码 / 输入法影响。段名与展示名的配对因此与段本身同处——
 /// 新增一类集合不必在两处同步改字符串。
-pub fn sub_sessions_dir_node() -> symbio_kernel::vdfs::VdfsNode {
-    let mut n = symbio_kernel::vdfs::VdfsNode::dir(
+pub fn sub_sessions_dir_node() -> symbio_platform::kernel::vdfs::VdfsNode {
+    let mut n = symbio_platform::kernel::vdfs::VdfsNode::dir(
         SEG_SUB_SESSIONS,
         TITLE_SUB_SESSIONS,
-        symbio_kernel::vdfs::VdfsAccess::LIST,
+        symbio_platform::kernel::vdfs::VdfsAccess::LIST,
     );
     n.kind = KIND_SUB_SESSIONS.to_string();
     n
@@ -73,11 +73,11 @@ pub fn sub_sessions_dir_node() -> symbio_kernel::vdfs::VdfsNode {
 /// 中栏以**目录树**呈现（而非扁平列表），树形递归走机制级 `vdfs/tree`——它只下钻
 /// 声明了 `t` 位的目录（见 `docs/003-design/009-VDFS规范.md`）。缺 `t` 时 `vdfs/tree`
 /// 只返回第一层，子目录永远打不开。`w` 不给：目录的写由具体文件节点承载。
-pub fn workdir_dir_node() -> symbio_kernel::vdfs::VdfsNode {
-    let mut n = symbio_kernel::vdfs::VdfsNode::dir(
+pub fn workdir_dir_node() -> symbio_platform::kernel::vdfs::VdfsNode {
+    let mut n = symbio_platform::kernel::vdfs::VdfsNode::dir(
         SEG_WORKDIR,
         TITLE_WORKDIR,
-        symbio_kernel::vdfs::VdfsAccess::LIST_TRAVERSE,
+        symbio_platform::kernel::vdfs::VdfsAccess::LIST_TRAVERSE,
     );
     n.kind = KIND_WORKDIR.to_string();
     n

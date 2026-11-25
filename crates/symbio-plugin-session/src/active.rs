@@ -1,10 +1,10 @@
 use serde_json::Value;
 use std::collections::{HashMap, VecDeque};
 use std::sync::Arc;
-use symbio_kernel::chat::chat_node as cm;
-use symbio_kernel::exec::ExecAbortSignal;
-use symbio_sdk::chat::session_chat;
-use symbio_sdk::vdfs::host::VdfsChangeSubscriptions;
+use symbio_platform::kernel::chat::chat_node as cm;
+use symbio_platform::kernel::exec::ExecAbortSignal;
+use symbio_platform::sdk::chat::session_chat;
+use symbio_platform::sdk::vdfs::host::VdfsChangeSubscriptions;
 use tokio::sync::{Mutex, Notify, RwLock};
 
 use super::plugin::SessionRuntime;

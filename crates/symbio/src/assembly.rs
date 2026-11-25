@@ -10,7 +10,7 @@
 //! 本来「够格」留在 core（各有多个消费方）。但那条判据回答的是「两个互不相认的插件
 //! 要不要共享一处**机制**」；这里要共享的不是机制，而是**宿主决定接哪些插件**。
 //! 装配是宿主的事：插件清单、启停状态、出厂 id 与装配结果归装配方持有，容器只经
-//! [`symbio_sdk::keys::REQUIRED_PLUGINS`] 接收结果（见 `crates/symbio-plugin-composite` 的 README）。
+//! [`symbio_platform::sdk::keys::REQUIRED_PLUGINS`] 接收结果（见 `crates/symbio-plugin-composite` 的 README）。
 //! 因此加一个插件不再需要改架构 crate——这是「加插件不改内核」的判据。
 //!
 //! ## 消费方
@@ -38,14 +38,14 @@
 //! ## 清单是生成的（DE-023 D-181）
 //!
 //! 下面五组常量由 `scripts/facts/assembly.mjs` 从各插件目录的 `PLUGIN.yml` 生成到
-//! `crates/symbio-deploy/src/lib.rs`，本模块只是它的门面（`pub use symbio_deploy::*;`）。
+//! `crates/symbio-platform/src/deploy/mod.rs`，本模块只是它的门面（`pub use symbio_platform::deploy::*;`）。
 //! 要加一个插件：建 crate、写 `PLUGIN.yml`、加代码——`assembly.rs` 与 `symbio-kernel` / `symbio-sdk` 都
 //! 不需要改；手改生成区会被 `gen-facts --check` 判红。
 //!
 //! ## 子 Agent 子树清单的事实与边界
 //!
 //! 子 Agent 是一棵 composite 插件树（与系统 Agent 同构，agent-directory-spec §1.1），
-//! 构造时经 ctx 键 [`symbio_sdk::keys::REQUIRED_PLUGINS`] 告知容器「必须挂哪些插件」。
+//! 构造时经 ctx 键 [`symbio_platform::sdk::keys::REQUIRED_PLUGINS`] 告知容器「必须挂哪些插件」。
 //! 注入的是**核心集**（[`ASSEMBLY_CORE_PLUGINS`]），系统树那份（`crates/symbio-plugin-home` 的
 //! `SYSTEM_PLUGINS`）直接别名到它，因此不存在需要手工同步的第二份字面量。可选插件
 //! （[`ASSEMBLY_OPTIONAL_PLUGINS`]）不进这张清单——它们不默认补目录，只在插件市场里
@@ -105,7 +105,7 @@
 //! - **路由地址不在这里**：`<插件目录名>/<子路径>` 是调用路径而非对象身份，
 //!   见 `crate::routes`。
 
-pub use symbio_deploy::*;
+pub use symbio_platform::deploy::*;
 
 // 注：`SYSTEM_LEVEL_PROVIDERS`（「系统级插件不参与容器扫描」）不在这里——它只被
 // `crates/symbio-plugin-composite` 一个模块消费，按 D-023 的依赖方判据已下沉到该模块。

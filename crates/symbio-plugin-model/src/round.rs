@@ -3,7 +3,7 @@
 //!
 //! ## 为什么在本插件，而不在 `symbio-sdk`（`D-439`）
 //!
-//! `D-438` 把这五个类型下沉到了 `symbio_sdk::llm`，理由是「**两侧**共用：model 产、
+//! `D-438` 把这五个类型下沉到了 `symbio_platform::sdk::llm`，理由是「**两侧**共用：model 产、
 //! loop / session 销」。那条理由来自 `port.model` **之前**的形状——那时会话侧直接持有
 //! `RoundOutput`（`is_reasoning_only` / `effective_text` / `into_messages` 三个读方法
 //! 甚至以 `impl RoundOutput` 的形式住在 loop 的 `message_build.rs`）。
@@ -20,7 +20,7 @@
 //! 于是它不属于「跨插件词汇」，而属于**本插件的私有形状**：端口那一侧交给环的是
 //! 事实（JSON），不是 Rust 类型。按 `D-023` 的依赖方数量判据，一个插件独有的形状
 //! 就该住在那个插件里——架构层只留**请求**词汇（`PromptMessage` 由 `classify` 构造、
-//! `tool` 分发、`model` 消费，三处跨插件，仍在 `symbio_sdk::llm`）。
+//! `tool` 分发、`model` 消费，三处跨插件，仍在 `symbio_platform::sdk::llm`）。
 //!
 //! ## 键名是契约，类型不是
 //!

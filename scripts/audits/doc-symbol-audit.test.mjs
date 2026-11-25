@@ -51,11 +51,11 @@ const TS = {
   'tauri/src/constants/pages.ts': 'export const VDFS_PAGE_SIZE = 50\n',
 }
 
-auditCase('失效指认变红：文档指认源码里不存在的符号（exit 1）', () => audit({ ...RS, 'README.md': '桶名见 `symbio_sdk::GONE_FN`。\n' }), 1, [/D-005 README\.md:1/, /GONE_FN/])
+auditCase('失效指认变红：文档指认源码里不存在的符号（exit 1）', () => audit({ ...RS, 'README.md': '桶名见 `symbio_platform::sdk::GONE_FN`。\n' }), 1, [/D-005 README\.md:1/, /GONE_FN/])
 
 auditCase('整词边界：`register_option` 不因 `register_option_field` 存在而放行（exit 1）', () => audit({ ...RS, 'README.md': '接口 `OptionVisitor::register_option`。\n' }), 1, [/register_option`/])
 
-auditCase('有效指认通过（exit 0）', () => audit({ ...RS, 'README.md': '桶名见 `symbio_sdk::PLUGIN_PAYLOAD_KEY`。\n' }), 0, [/doc-symbol-audit 通过/])
+auditCase('有效指认通过（exit 0）', () => audit({ ...RS, 'README.md': '桶名见 `symbio_platform::sdk::PLUGIN_PAYLOAD_KEY`。\n' }), 0, [/doc-symbol-audit 通过/])
 
 // ── 决策段与现行正文同一条判据（`D-483`：冻结表已撤下）──────────────────
 // 决策段此前整段跳过（悬空锚点是盲区），后来按登记表冻结（表是第二个豁免面）。
@@ -174,7 +174,7 @@ test('历史行豁免：台账的「判为删除」说的就是这名字不在�
 test('docs/archive/ 整目录排除：归档是历史快照（exit 0）', () => {
   const r = audit({
     ...RS,
-    'docs/archive/old-plan.md': '当时叫 `symbio_sdk::GONE_FN`。\n',
+    'docs/archive/old-plan.md': '当时叫 `symbio_platform::sdk::GONE_FN`。\n',
     'README.md': '正常文档。\n',
   })
   assert.equal(r.status, 0, r.stdout)
@@ -182,7 +182,7 @@ test('docs/archive/ 整目录排除：归档是历史快照（exit 0）', () => 
 
 auditCase('排除只认整目录：docs/archive.md 这类同名前缀文件仍受查（exit 1）', () => audit({
     ...RS,
-    'docs/archive.md': '指认 `symbio_sdk::GONE_FN`。\n',
+    'docs/archive.md': '指认 `symbio_platform::sdk::GONE_FN`。\n',
     'README.md': '正常文档。\n',
   }), 1, [/docs\/archive\.md:1/])
 
@@ -333,10 +333,10 @@ const PARAMS = {
 
 /** 三个实现文件 + 一个读侧函数文件（§2 的对象） */
 const PROJ_RS = {
-  'crates/symbio-sdk/src/projection/readyset.rs': '//! readyset\n',
-  'crates/symbio-sdk/src/projection/turnstate.rs': '//! turnstate\n',
-  'crates/symbio-sdk/src/projection/conation.rs': '//! conation\n',
-  'crates/symbio-sdk/src/projection/span.rs': '//! span 读数口\n',
+  'crates/symbio-platform/src/sdk/projection/readyset.rs': '//! readyset\n',
+  'crates/symbio-platform/src/sdk/projection/turnstate.rs': '//! turnstate\n',
+  'crates/symbio-platform/src/sdk/projection/conation.rs': '//! conation\n',
+  'crates/symbio-platform/src/sdk/projection/span.rs': '//! span 读数口\n',
 }
 
 /** 映射表：`v` 覆盖 §1 的行，`m` 覆盖 §2 的行 */
@@ -388,7 +388,7 @@ auditCase('D-014 承接方指向不存在的文件 ⇒ 红（exit 1）', () => a
 
 test('D-014 目录里多了未归类模块 ⇒ 红（悄悄多一个投影）', () => {
   const files = fixture()
-  files['crates/symbio-sdk/src/projection/legend.rs'] = '//! 未登记的新视图\n'
+  files['crates/symbio-platform/src/sdk/projection/legend.rs'] = '//! 未登记的新视图\n'
   const r = audit(files)
   expectAudit(r, 1, [/D-014 .*`projection\/legend\.rs` 没有归属/])
 })

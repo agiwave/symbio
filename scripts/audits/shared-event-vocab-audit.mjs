@@ -60,7 +60,7 @@ const notes = []
  * 文件的形状活着。
  */
 function kernelNames(root) {
-  const dir = path.join(root, 'crates', 'symbio-kernel', 'src', 'event')
+  const dir = path.join(root, 'crates', 'symbio-platform', 'src', 'kernel', 'event')
   const read = (name) => {
     const abs = path.join(dir, name)
     if (!fs.existsSync(abs)) throw new Error(`范围读不出：缺少 ${path.relative(root, abs)}`)

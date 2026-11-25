@@ -1,16 +1,18 @@
 //! Symbio 初始化模块
 
 use std::sync::Arc;
-use symbio_deploy::PLUGIN_ID_HOME;
-use symbio_kernel::plugin::Plugin;
-use symbio_sdk::creator::creator_create_object;
+use symbio_platform::deploy::PLUGIN_ID_HOME;
+use symbio_platform::kernel::plugin::Plugin;
+use symbio_platform::sdk::creator::creator_create_object;
 
 pub fn initialize() {
-    symbio_sdk::logger::logger_init();
+    symbio_platform::sdk::logger::logger_init();
 }
 
 pub async fn create_root_plugin() -> Arc<dyn Plugin> {
-    let context = Arc::new(symbio_kernel::plugin::PluginSimpleRequest::new(None, None));
+    let context = Arc::new(symbio_platform::kernel::plugin::PluginSimpleRequest::new(
+        None, None,
+    ));
 
     creator_create_object::<dyn Plugin>(PLUGIN_ID_HOME, context).expect(
         "home plugin creator not found. Make sure 'home' is registered via submit_object_creator!",

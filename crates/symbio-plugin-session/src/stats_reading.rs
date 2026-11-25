@@ -19,12 +19,14 @@
 //! （`D-281`）。同一份事实长出两套口径，读数与投影就会静默漂移，而两边都自称是 SLO。
 
 use crate::declarations::COMMITMENT_VOCAB;
-use symbio_kernel::chat::chat_node as cm;
-use symbio_kernel::event::Event;
-use symbio_kernel::present::{ReadingBar, ReadingPanel, ReadingRow, ReadingSection, ReadingTone};
+use symbio_platform::kernel::chat::chat_node as cm;
+use symbio_platform::kernel::event::Event;
+use symbio_platform::kernel::present::{
+    ReadingBar, ReadingPanel, ReadingRow, ReadingSection, ReadingTone,
+};
+use symbio_platform::sdk::chat::chat_node::ChatNodePresentationExt;
+use symbio_platform::sdk::governance::VisScope;
 use symbio_plugin_api::reports::ReportCtx;
-use symbio_sdk::chat::chat_node::ChatNodePresentationExt;
-use symbio_sdk::governance::VisScope;
 
 use super::stats::{SessionStats, TierRow};
 
@@ -49,10 +51,10 @@ pub(super) struct ViewerRequest {
 ///
 /// 缺省（没有任何记忆事件 / 存量事件没有这个字段）= `thread_private`（C10）——
 /// 与旧接线逐字一致，存量事实源不因这次接线改变读数。
-pub(super) fn content_scope_of(snapshot: &[symbio_kernel::event::Event]) -> VisScope {
+pub(super) fn content_scope_of(snapshot: &[symbio_platform::kernel::event::Event]) -> VisScope {
     let mut widest = VisScope::ThreadPrivate;
     for e in snapshot {
-        if e.entity != symbio_kernel::event::Entity::Memory {
+        if e.entity != symbio_platform::kernel::event::Entity::Memory {
             continue;
         }
         // 取值口径在 core（`VisScope::of_event`：缺字段 / 认不出 = 最窄，C10）；
@@ -64,11 +66,11 @@ pub(super) fn content_scope_of(snapshot: &[symbio_kernel::event::Event]) -> VisS
 
 /// 承诺列：立约记录 + 三个计数 + 违约率。
 ///
-/// 记录本身由 core 翻译（[`symbio_sdk::actors::commitment_records`]——配对规则在写侧
+/// 记录本身由 core 翻译（[`symbio_platform::sdk::actors::commitment_records`]——配对规则在写侧
 /// 那一族里，本处不另发明一套）；这里只做**取数与排版**，与 `slo_report` /
 /// `reputation` 各列同一纪律。率的分母判据（已了结数）写在列定义里，不重复第二遍。
 pub(super) fn commitments_reading(snapshot: &[Event]) -> serde_json::Value {
-    let items = symbio_sdk::actors::commitment_records(snapshot, &COMMITMENT_VOCAB);
+    let items = symbio_platform::sdk::actors::commitment_records(snapshot, &COMMITMENT_VOCAB);
     let kept = items.iter().filter(|r| r.state == "kept").count();
     let broken = items.iter().filter(|r| r.state == "broken").count();
     let settled = kept + broken;
@@ -299,7 +301,7 @@ fn view_entry(owner: &str, name: &str, snapshot: &[Event]) -> serde_json::Value 
 /// 一格缺席：原因词（稳定拼写）+ 人话细节。两者都要——前者给分支，后者给定位。
 fn view_unavailable(
     owner: &str,
-    why: &symbio_sdk::plugin::views::ViewUnavailable,
+    why: &symbio_platform::sdk::plugin::views::ViewUnavailable,
 ) -> serde_json::Value {
     serde_json::json!({
         "owner": owner,

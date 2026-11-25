@@ -909,124 +909,71 @@ export async function autoChain(ctx, { label, steps }) {
   return { ok: true, note: `自动生成 ${touched.length} 个文件（已暂存）` }
 }
 
-// ── Rust 源码 → 某个 crate 前缀下的符号集合 ─────────────────────────────
+// ── 历史路径别名：读 git 历史的判据从这里把旧路径折算回现在的树 ─────────────
 //
-// 两处判据在量**同一件事**的两面：E-009（`plugin-entry-audit`：用了的必须在账上）与
-// SR-001（`session-retire-audit`：账上的必须真被用）。它们必须用**同一份**取法——
-// 一边按「名字出现」、一边按「路径命中」的话，账本可以同时多出虚账、又留下冻结的洞，
-// 而两边都绿（D-454 就是这么发现的：13 条 kernel 词汇挂在 sdk 账上）。
+// 平台合并（kernel / sdk / contract / deploy → `symbio-platform`，D-556）与运行时合并
+// （server + host → `symbio-runtime`，D-557）之后，**历史提交里的路径永远是旧的**。按当前
+// 树名去匹配历史提交的文件清单，合并前的每一个提交都会落出判定面——判据对历史静默失明，
+// 而它自己不红。
 //
-// 所以取法只在这里写一次。**改这里就是改两处判据**。
+// 别名只在这里写一次；读历史的审计匹配树之前先过 `canonicalPath`。它**只用于历史**：
+// 当前工作树里的文件不该再有旧路径，现行文档与源码写旧路径由 `dead-path-audit` 判红
+// （所以旧名在这里是拼出来的，不写成它能认的整段字面量）。
+
+/** 旧 crate 根：`crates/symbio-<名>/`（名是变量，见上）。 */
+const oldCrate = (name) => `crates/symbio-${name}/`
 
 /**
- * `A::B::C` 的末段；`as` 别名只认左侧。
+ * 旧路径前缀 → 现路径前缀。**长的优先**（`…/src/lib.rs` 先于 `…/src/`，后者又先于
+ * crate 根）；文件级别名带尾斜杠，由 `canonicalPath` 的整段相等分支认。
  */
-function crateLeafOf(pathText) {
-  const beforeAs = pathText.split(/\bas\b/)[0]
-  const ids = [...beforeAs.matchAll(/[A-Za-z_][A-Za-z0-9_]*/g)]
-    .map((m) => m[0])
-    .filter((w) => w !== 'self' && w !== 'super' && w !== 'crate')
-  return ids.length ? ids[ids.length - 1] : null
+export const LEGACY_TREES = Object.freeze([
+  // 平台四臂：`crates/symbio-<臂>/src/<x>` → `crates/symbio-platform/src/<臂>/<x>`
+  ...['kernel', 'sdk', 'contract', 'deploy'].flatMap((part) => [
+    [`${oldCrate(part)}src/lib.rs/`, `crates/symbio-platform/src/${part}/mod.rs/`],
+    [`${oldCrate(part)}src/`, `crates/symbio-platform/src/${part}/`],
+    [oldCrate(part), `crates/symbio-platform/src/${part}/`],
+  ]),
+  // 运行时：host 并入 `src/host/`，server 的文件直接落在 crate 根
+  [`${oldCrate('host')}src/lib.rs/`, 'crates/symbio-runtime/src/host/mod.rs/'],
+  [`${oldCrate('host')}src/`, 'crates/symbio-runtime/src/host/'],
+  [oldCrate('host'), 'crates/symbio-runtime/src/host/'],
+  [`${oldCrate('server')}src/lib.rs/`, 'crates/symbio-runtime/src/lib.rs/'],
+  [oldCrate('server'), 'crates/symbio-runtime/'],
+  // 部署驱动入口：从装配方 `symbio` 搬进 host
+  ['crates/symbio/src/drive.rs/', 'crates/symbio-runtime/src/host/entry.rs/'],
+  ['crates/symbio/src/drive.test.rs/', 'crates/symbio-runtime/src/host/entry.test.rs/'],
+])
+
+/** 把一条路径折算到现在的树：命中旧前缀就换（最长的旧前缀优先），否则原样返回。 */
+export function canonicalPath(p) {
+  let best = null
+  for (const pair of LEGACY_TREES) {
+    if (p === pair[0].slice(0, -1)) return pair[1].slice(0, -1)
+    if (p.startsWith(pair[0]) && (!best || pair[0].length > best[0].length)) best = pair
+  }
+  return best ? best[1] + p.slice(best[0].length) : p
+}
+/** `p` 是否落在 `trees` 里任一棵树之下（历史路径先折算）。 */
+export function inTrees(p, trees) {
+  const c = canonicalPath(p)
+  return trees.some((t) => c.startsWith(`${t}/`))
 }
 
-/** 顶层逗号切分（花括号内的逗号不切）。 */
-function crateSplitTop(text) {
-  const parts = []
-  let depth = 0
-  let cur = ''
-  for (const ch of text) {
-    if (ch === '{') depth++
-    else if (ch === '}') depth--
-    if (ch === ',' && depth === 0) {
-      parts.push(cur)
-      cur = ''
-      continue
+/**
+ * 给 `git … -- <pathspec…>` 用的路径清单：当前树名 + 它们在历史里的旧名。
+ *
+ * pathspec 过滤发生在 git 那一侧，`canonicalPath` 够不着——只传当前树名的话，
+ * 合并前的提交在 git 层就被滤空，后面的折算函数拿到的是一份空补丁。
+ */
+export function legacyPathspecs(trees) {
+  const out = [...trees]
+  for (const t of trees) {
+    for (const [from, to] of LEGACY_TREES) {
+      if (`${t}/`.startsWith(to) || to.startsWith(`${t}/`)) out.push(from.slice(0, -1))
     }
-    cur += ch
   }
-  if (cur.trim()) parts.push(cur)
-  return parts
-}
-
-/** 展开一个 `use` 树（前缀之后的部分）里的叶子符号。 */
-function crateUseLeaves(tree, out) {
-  const open = tree.indexOf('{')
-  if (open >= 0) {
-    let depth = 0
-    let end = -1
-    for (let i = open; i < tree.length; i++) {
-      if (tree[i] === '{') depth++
-      else if (tree[i] === '}') {
-        depth--
-        if (depth === 0) {
-          end = i
-          break
-        }
-      }
-    }
-    if (end < 0) return
-    for (const part of crateSplitTop(tree.slice(open + 1, end))) crateUseLeaves(part, out)
-    return
-  }
-  if (tree.includes('*')) {
-    out.add('*')
-    return
-  }
-  const leaf = crateLeafOf(tree)
-  if (leaf) out.add(leaf)
-}
-
-/**
- * 一段（**已剥注释的**）Rust 文本里经 `crate::` 取用的符号集合。
- *
- * 两种形态分开取：
- * - `use crate::…::{a, b::C};` → 花括号里的**叶子**（含跨行 use 树）；
- * - 表达式 / 类型位置的 `crate::a::b::C` → 路径末段。
- * 后者必须先把 `use` 语句抹掉，否则 `use` 树的花括号会被误当成结构体字面量的字段。
- *
- * ⚠️ 只认路径，不认名字：源码里出现 `ChatNode` 不代表它来自这个 crate——它可能来自
- * `symbio_kernel`。按名字算就是把别人的词汇记在这个 crate 的账上（D-454）。
- */
-export function symbolsInCrate(text, crate) {
-  const prefix = `${crate}::`
-  const out = new Set()
-  for (const m of text.matchAll(/\buse\s+([^;]+);/g)) {
-    const idx = m[1].indexOf(prefix)
-    if (idx < 0) continue
-    crateUseLeaves(m[1].slice(idx + prefix.length), out)
-  }
-  const stripped = text.replace(/\buse\s+[^;]+;/g, (s) => ' '.repeat(s.length))
-  for (const m of stripped.matchAll(new RegExp('\\b' + crate + '::', 'g'))) {
-    const tail = stripped.slice(m.index + m[0].length, m.index + m[0].length + 240)
-    const path = /^\s*([A-Za-z_][A-Za-z0-9_]*(?:::\s*[A-Za-z_][A-Za-z0-9_]*)*)/.exec(tail)
-    if (!path) continue
-    const leaf = crateLeafOf(methodOwnerPath(path[1], tail.slice(path[0].length)))
-    if (leaf) out.add(leaf)
-  }
-  return out
-}
-
-/**
- * `symbio_sdk::clock::ClockNow::now()` 里**符号是类型**、不是方法名。
- *
- * 只在「末段紧跟 `(`」且「末段小写、前一段大写」时把末段摘掉——这是 Rust 的命名约定，
- * 不是猜：`…::round::llm_short_id()`（模块里的自由函数，前一段小写）照旧算 `llm_short_id`，
- * `…::ClockNow::now()`（关联方法）算 `ClockNow`。不摘的话，账上会凭空多出一条 `now`，
- * 而它既不在这条 crate 的账上、也不是被依赖的东西——判据会为一条方法名报红。
- */
-function methodOwnerPath(pathText, after) {
-  if (!/^\s*\(/.test(after)) return pathText
-  const segs = pathText.split('::').map((s) => s.trim())
-  if (segs.length < 2) return pathText
-  const last = segs[segs.length - 1]
-  const prev = segs[segs.length - 2]
-  if (!/^[a-z_]/.test(last) || !/^[A-Z]/.test(prev)) return pathText
-  return segs.slice(0, -1).join('::')
-}
-
-/** `symbolsInCrate(text, 'symbio_sdk')` —— E-009 / SR-001 共用的那一条边。 */
-export function sdkSymbolsIn(text) {
-  return symbolsInCrate(text, 'symbio_sdk')
+  return [...new Set(out)]
 }
 
 // ── `@gate` 声明：门禁的「目录即清单」 ─────────────────────────────────────

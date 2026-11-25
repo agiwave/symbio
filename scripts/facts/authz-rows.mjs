@@ -1,5 +1,5 @@
 /**
- * 事实 · `crates/symbio-sdk/src/authz/rows.gen.rs` —— 本机授权表的**行**
+ * 事实 · `crates/symbio-platform/src/sdk/authz/rows.gen.rs` —— 本机授权表的**行**
  *
  * ## 它替掉了什么
  *
@@ -31,7 +31,7 @@ import fs from "node:fs";
 import path from "node:path";
 import { pluginIds, readPluginManifest, pluginManifestRel } from "./_plugin-yml.mjs";
 
-const OUT_REL = "crates/symbio-sdk/src/authz/rows.gen.rs";
+const OUT_REL = "crates/symbio-platform/src/sdk/authz/rows.gen.rs";
 // `PRINCIPAL_*` 常量横跨两处，生成器两处都读、合并成一张表再核对：
 //
 // - `symbio-sdk` 的 `keys` 域：机制层要用的主体名（`session/main` / `person/local` /
@@ -44,11 +44,11 @@ const OUT_REL = "crates/symbio-sdk/src/authz/rows.gen.rs";
 // 两处合并之后**仍然只有一个值表**：同一个主体 id 出现在两个文件里由下面的
 // `prior` 分支当场抛错（一个主体只能有一个名字）。
 const AUTHZ_MOD_RELS = [
-  "crates/symbio-sdk/src/keys/mod.rs",
-  "crates/symbio-sdk/src/authz/mod.rs",
+  "crates/symbio-platform/src/sdk/keys/mod.rs",
+  "crates/symbio-platform/src/sdk/authz/mod.rs",
 ];
 const AUTHZ_MOD_REL = AUTHZ_MOD_RELS[0];
-const GOVERNANCE_REL = "crates/symbio-sdk/src/governance/mod.rs";
+const GOVERNANCE_REL = "crates/symbio-platform/src/sdk/governance/mod.rs";
 
 /** 清单键前缀：`principal_main: session/main|reply+…|thread_private`。 */
 const KEY_PREFIX = "principal_";
@@ -73,7 +73,7 @@ const HEADER = `//! 本机主体清单：\`(主体, 能力名, 可见域)\` —�
 //! **窄行是唯一入口**（D-099）：未登记的主体在表里没有行 ⇒ 每个谓词为假，
 //! 「忘配窄行」的后果是一条**会被看见的拒绝**，不是一次静默超权。
 //!
-//! 名字与理由住在 \`PRINCIPAL_*\` 常量上（\`symbio_sdk::keys\` 与 \`authz/mod.rs\` 两处，写着每行为什么这么窄）；
+//! 名字与理由住在 \`PRINCIPAL_*\` 常量上（\`symbio_platform::sdk::keys\` 与 \`authz/mod.rs\` 两处，写着每行为什么这么窄）；
 //! 生成器双向核对两者：常量集合 ≠ 清单集合即抛错。`;
 
 /** 从 `governance/mod.rs` 的 `Capability` 声明里抽拼写——闭集的唯一出处。 */

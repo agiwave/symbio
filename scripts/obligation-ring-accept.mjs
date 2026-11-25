@@ -26,7 +26,7 @@
  * 静默判绿**——判据自己的两种最坏失效（假红 + 假绿）同时出现。
  *
  * 现行协议事实的身份在 **`event_id`**：`ring:{port}:{id}:{attempt}:{kind}[:{shard}]`
- * （`crates/symbio-host/src/lib.rs:594-607` 的 `ring_event_id`，解析口径同
+ * （`crates/symbio-runtime/src/host/mod.rs:594-607` 的 `ring_event_id`，解析口径同
  * `:641-673` 的 `ring_key_of`：`id` 自身可含 `:`，从右往左定界）。由此：
  *
  * - **端口是行名 / 端口名**（`plugin_row` / `model.assist` / `model` / `tool` / …），
@@ -104,7 +104,7 @@
  * 对账，不是拦截面本身：
  *
  * 1. **装配期（唯一入口）**：端口集是本次装配新建的 `PortBindings`
- *    （`crates/symbio-sdk/src/capability/port.rs`），只有插件经 `register_ports` /
+ *    （`crates/symbio-platform/src/sdk/capability/port.rs`），只有插件经 `register_ports` /
  *    `register_tool` 登记过的端口才有执行体，host `gather` 折 `snapshot()` 成交执行体表。
  *    没人登记的名字在装配结果里根本不存在；同名两绑定 / 无执行体由 `bind` 落错误，
  *    `snapshot()` 任一冲突**整份** `Err` ⇒ 装配失败（`DE-056 D-468`）。
@@ -149,7 +149,7 @@ import { green, red, dim } from './color.mjs'
 const PROTOCOL = new Set(['request', 'sent', 'response', 'failed'])
 /** 终态：一次往返的两种结局。 */
 const TERMINAL = new Set(['response', 'failed'])
-/** 协议事实的入库身份前缀（`crates/symbio-host/src/lib.rs:591`）。 */
+/** 协议事实的入库身份前缀（`crates/symbio-runtime/src/host/mod.rs:591`）。 */
 const RING = 'ring:'
 
 /**
@@ -348,7 +348,7 @@ function readSessionEvents(walFile) {
  *
  * 形状 `ring:{port}:{id}:{attempt}:{kind}[:{shard}]`，`id` 自身可含 `:` ⇒ 从右定界：
  * 最右可能是分片号，往左依次是种类与尝试号，剩下的中段整体是 `id`。这是
- * `crates/symbio-host/src/lib.rs:641-673`（`ring_key_of`）的同一口径；两侧若漂移，
+ * `crates/symbio-runtime/src/host/mod.rs:641-673`（`ring_key_of`）的同一口径；两侧若漂移，
  * J6 的「缺 ring 身份」会把它判出来。
  */
 function ringKey(e) {

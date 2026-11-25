@@ -1,6 +1,6 @@
 //! 执行期出口的**生产实现**：把模型 / 工具的流式帧写回本会话转写。
 //!
-//! 内核出口（[`symbio_kernel::exec::ExecEventSink`]）只约定「一条消息帧」与
+//! 内核出口（[`symbio_platform::kernel::exec::ExecEventSink`]）只约定「一条消息帧」与
 //! 「转写唯一写入点」的抽象；本文件把那个抽象接到 [`ActiveSessionManager`]——
 //! 与会话编排、压缩发射器用的是同一张名册、同一条 `Transcript::apply` 路径，
 //! 因此实时面（`vdfs/watch`）不需要第二条代码路径。
@@ -10,8 +10,8 @@
 
 use std::sync::Arc;
 
-use symbio_kernel::chat::chat_node as cm;
-use symbio_kernel::exec::ExecTranscriptWriter;
+use symbio_platform::kernel::chat::chat_node as cm;
+use symbio_platform::kernel::exec::ExecTranscriptWriter;
 
 use crate::active::ActiveSessionManager;
 

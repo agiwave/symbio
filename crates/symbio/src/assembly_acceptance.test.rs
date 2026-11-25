@@ -13,13 +13,13 @@
 
 use std::sync::Arc;
 
+use symbio_platform::sdk::declarations::{sealed_declarations, DeclarationsDecl};
 use symbio_plugin_api::inventory;
 use symbio_plugin_api::rows::PORT_ACTOR;
 use symbio_plugin_api::{
     creator_create_object, creator_ids, Plugin, PluginDir, PluginInvokeRequest,
     PluginInvokeRequestExt, PluginSimpleRequest, EVENT_REQUEST, PLUGIN_DIR,
 };
-use symbio_sdk::declarations::{sealed_declarations, DeclarationsDecl};
 
 #[tokio::test]
 async fn every_assembled_package_can_be_constructed() {
@@ -28,7 +28,7 @@ async fn every_assembled_package_can_be_constructed() {
     let _ = crate::assembly::PLUGIN_ID_HOME;
 
     let linked: Vec<&'static str> = creator_ids::<dyn Plugin>();
-    for id in symbio_deploy::ASSEMBLY_SUB_AGENT_PLUGINS {
+    for id in symbio_platform::deploy::ASSEMBLY_SUB_AGENT_PLUGINS {
         assert!(
             linked.contains(id),
             "装配表里的 `{id}` 没有注册工厂（`submit_object_creator!` 漏了？）"

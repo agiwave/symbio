@@ -45,4 +45,4 @@ pub const SEG_INBOX: &str = "inbox";
 pub const COND_CAP_TEST_CONNECTION: &str = "cap.test_connection";
 
 /// 派活能力名（治理层 `Capability::AssignWork` 的书写形态）。
-pub const CAP_ASSIGN_WORK: &str = symbio_sdk::authz::CAP_ASSIGN_WORK;
+pub const CAP_ASSIGN_WORK: &str = symbio_platform::sdk::authz::CAP_ASSIGN_WORK;

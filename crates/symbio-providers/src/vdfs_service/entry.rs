@@ -21,7 +21,7 @@ use std::collections::HashMap;
 use std::path::{Component, Path, PathBuf};
 use std::sync::{Arc, OnceLock};
 use std::time::{SystemTime, UNIX_EPOCH};
-use symbio_kernel::vdfs::{VdfsAccess, VdfsError, VdfsNode, VdfsResult};
+use symbio_platform::kernel::vdfs::{VdfsAccess, VdfsError, VdfsNode, VdfsResult};
 use tokio::io::AsyncWriteExt as _;
 use tokio::sync::{Mutex, OwnedMutexGuard};
 

@@ -578,9 +578,9 @@ function evidenceAlternates(base) {
   // 就会让写对的事实锚点被读成「指不到」——而报错落在读者眼里，原因却在解析器。
   // D-258 之后 `symbio-sdk` 也是被引用的事实所在地，故与 core / kernel / deploy 并列。
   const CRATE_DIRS = {
-    'symbio_sdk/': 'crates/symbio-sdk/src/',
-    'symbio_kernel/': 'crates/symbio-kernel/src/',
-    'symbio_deploy/': 'crates/symbio-deploy/src/',
+    'symbio_sdk/': 'crates/symbio-platform/src/sdk/',
+    'symbio_kernel/': 'crates/symbio-platform/src/kernel/',
+    'symbio_deploy/': 'crates/symbio-platform/src/deploy/',
   }
   for (const [pfx, dir] of Object.entries(CRATE_DIRS)) {
     if (base.startsWith(pfx)) out.add(`${dir}${base.slice(pfx.length)}`)

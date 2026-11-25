@@ -1,0 +1,253 @@
+//! SymbioKey —— 类型安全的**上下文键**
+//!
+//! ## 键与值同住
+//!
+//! 一个键有两半：**类型**（`PathKey`，实现 [`SymbioKey`]）与**实例**（`PATH`，
+//! `ctx.get(&PATH)` 的凭据）。两半的放置规则是**同一条**：跟着值类型走——
+//! 值类型属某个域，键就住那个域。已按此迁出的三批：
+//!
+//! | 键 | 值类型 | 现住 |
+//! |---|---|---|
+//! | `EVENT_SINK` / `ABORT_SIGNAL` | `ExecEventSink` / `ExecAbortSignal` | `crate::kernel::exec` |
+//! | `PLUGIN_DIR` · `PLUGIN_PARENT`（原 `PARENT`） | `PluginDir` · `Option<Weak<dyn Plugin>>` | `crate::sdk::plugin` |
+//! | `CAPABILITY_VISITOR` / `OPTION_VISITOR` / `CONFIGURABLE_VISITOR` · `CAPABILITY_ERRORS` | `Arc<dyn Registry>` · 带 `CapabilityError` 的桶 | `crate::sdk::capability` |
+//!
+//! 本域自此只留**值类型为通用词汇**（`String` / `Value` / `Vec<String>`）的键——
+//! 那些键没有「原生域」可回，机制（[`SymbioKey`] trait）是它们唯一的家。
+//! 先例：`TURN_DISPATCH`（值类型 `TurnDispatch`）本就住 `turn` 域。
+//! 判据见 D-095。
+//!
+//! ## 命名：两种形态，互不重叠
+//!
+//! | 形态 | 写成 | 例 |
+//! |---|---|---|
+//! | 键**类型**（`SymbioKey` 的实现） | `…Key`（**后缀**） | `PathKey` · `ConfigKey` |
+//! | 键**实例**（该类型的唯一实例） | **裸名** | `PATH` · `ID` · `CONFIG` |
+//!
+//! 后缀与裸名不是「风格不统一」，而是**有判别力**的一条规则：类型名带 `Key` 后缀
+//! ⇒ 归属本域一眼可辨；实例名不加前缀 ⇒ `ctx.get(&PATH)` 不会读成「键的键」
+//! （`ctx.get(&KEY_PATH)` 才是那个坏形态）。
+//!
+//! 新增时照上表选形态：先定类型（`XxxKey`），再给实例（裸名，直接描述语义）。
+//! **但先问一句「值类型住哪」**——答案不是「没有域」，就把它连同键一起放过去。
+//!
+//! ## 不在本域的东西
+//!
+//! 本域**只收上下文键**。跨进程 / 跨文件的字面量按「它描述什么」归各自的域——
+//! 插件 id 归装配方（`crates/symbio-platform/src/deploy/mod.rs`），路由地址归 `crate::sdk::routes`，
+//! 遍历端点归 `plugin::traverse`，
+//! 嵌入服务 id 归 `embedding::ids`，信封载荷键归 `plugin`。判据见 D-095。
+
+// 机制 trait 是内核词汇：本模块只借来定义键类型（`impl SymbioKey`），**不转出**
+// ——内核符号只保留 `crate::kernel::keys::SymbioKey` 一条路径（DE-018 的 D-419）。
+use crate::kernel::keys::SymbioKey;
+
+macro_rules! define_string_key {
+    // 带承认标记的形态（`dead-code-audit` R-002）：lint 属性**由宏转发**到生成的结构体与
+    // 常量上——调用点的属性进不到 `macro_rules!` 的生成项（rustc 报 `unused attribute`，
+    // 且死码照旧）。理由仍写在调用点同行，扫描器只认源码里的字面属性行。
+    (#[$attr:meta] $struct_name:ident, $const_name:ident, $key_name:expr) => {
+        #[$attr]
+        pub struct $struct_name;
+        impl SymbioKey for $struct_name {
+            type Value = String;
+            fn name(&self) -> &'static str {
+                $key_name
+            }
+            fn parse(&self, s: &str) -> Option<Self::Value> {
+                Some(s.to_string())
+            }
+            fn format(&self, v: &Self::Value) -> String {
+                v.clone()
+            }
+        }
+        #[$attr]
+        pub const $const_name: $struct_name = $struct_name;
+    };
+    ($struct_name:ident, $const_name:ident, $key_name:expr) => {
+        pub struct $struct_name;
+        impl SymbioKey for $struct_name {
+            type Value = String;
+            fn name(&self) -> &'static str {
+                $key_name
+            }
+            fn parse(&self, s: &str) -> Option<Self::Value> {
+                Some(s.to_string())
+            }
+            fn format(&self, v: &Self::Value) -> String {
+                v.clone()
+            }
+        }
+        pub const $const_name: $struct_name = $struct_name;
+    };
+}
+
+// 作用域 VDFS provider 键（D-515）：值是进程内 trait object，无字符串 / JSON 形态，
+// 与 `PLUGIN_PARENT` 同一纪律（`WIRE = false`）。三个键把「目录字符串」换成
+// 「绑定作用域根的虚拟文件系统视图」——插件只经 `VdfsProvider::dispatch` 读写，
+// 不再各自 `Path::join` 物理路径；存储后端因此可替换（磁盘 / 内存 / 网络）。
+// `None` = 作用域不存在（没选工作区 / 无会话），是正常降级而非故障。
+macro_rules! define_vdfs_key {
+    ($struct_name:ident, $const_name:ident, $key_name:expr) => {
+        pub struct $struct_name;
+        impl SymbioKey for $struct_name {
+            type Value = Option<crate::kernel::vdfs::DynVdfsProvider>;
+            const WIRE: bool = false;
+            fn name(&self) -> &'static str {
+                $key_name
+            }
+            fn parse(&self, _s: &str) -> Option<Self::Value> {
+                None
+            }
+            fn format(&self, _v: &Self::Value) -> String {
+                "vdfs_provider".to_string()
+            }
+        }
+        pub const $const_name: $struct_name = $struct_name;
+    };
+}
+
+define_string_key!(PathKey, PATH, "path");
+define_string_key!(WorkdirKey, WORKDIR, "workdir");
+define_string_key!(AgentIdKey, AGENT_ID, "agent_id");
+define_string_key!(SessionIdKey, SESSION_ID, "session_id");
+// 会话级插件数据目录（D-513）：由会话插件按自己的唯一存储布局解析，宿主随本轮基础
+// 上下文统一递给插件。能力插件只读这个目录存取自己的会话数据（记忆文件是首例），
+// **不得**拿它拼事实源路径或重新打开 WAL（D-084 / FB-002）。
+define_string_key!(SessionDirKey, SESSION_DIR, "session_dir");
+// 三个作用域存储视图（D-515）：分别对应 agent_dir / work_dir / session_dir。
+// 它们取代 WORKDIR / SESSION_DIR 在插件侧的消费面；后两者仍是对外协议键
+// （metadata / CLI / 前端头），只是插件不再拿它们拼物理路径。
+define_vdfs_key!(AgentVdfsKey, AGENT_VDFS, "agent_vdfs_provider");
+define_vdfs_key!(WorkspaceVdfsKey, WORKSPACE_VDFS, "workspace_vdfs_provider");
+define_vdfs_key!(SessionVdfsKey, SESSION_VDFS, "session_vdfs_provider");
+
+/// VDFS 调用主体。只有宿主入口能写入，模型经元数据提供的同名字符串不会通过类型检查。
+#[derive(Debug, Clone, Copy, PartialEq, Eq)]
+pub enum VdfsCaller {
+    Manager,
+    Model,
+}
+
+pub struct VdfsCallerKey;
+impl SymbioKey for VdfsCallerKey {
+    type Value = VdfsCaller;
+    const WIRE: bool = false;
+    fn name(&self) -> &'static str {
+        "vdfs_caller"
+    }
+    fn parse(&self, _s: &str) -> Option<Self::Value> {
+        None
+    }
+    fn format(&self, v: &Self::Value) -> String {
+        match v {
+            VdfsCaller::Manager => "manager".to_string(),
+            VdfsCaller::Model => "model".to_string(),
+        }
+    }
+}
+pub const VDFS_CALLER: VdfsCallerKey = VdfsCallerKey;
+// 入站请求的**来源主体**（DE-001 §12.2 跨体承诺的「向谁宣告」）：调用方经请求
+// `metadata.source_principal` 声明「这条消息是谁发的」（完整主体名，如
+// `agent:main`）；网关 `build_ctx` 把 metadata 落进 ctx，会话插件的收件箱入队口
+// 取走它随条目寄存，轮末 `record_derived` 用它做 `commitment.*` 的 `to`。
+// 缺省（同机直呼 / 心跳等无来源声明的路径）⇒ 本机用户——与接线前写死的常量
+// 逐字一致（D-067：`to` 从调用点常量变成数据）。
+define_string_key!(SourcePrincipalKey, SOURCE_PRINCIPAL, "source_principal");
+// 请求链路 id：同一条链上的多次请求共用它，把跨插件的日志串回一条线。
+// 线上形态 = 请求 `metadata.trace_id`，因此读它的地方就是读 metadata 的地方
+// （壳层 `route_v2`、网关 `dispatch_once`）。
+define_string_key!(TraceIdKey, TRACE_ID, "trace_id");
+// 当前父地址：本插件在地址空间中挂载点的绝对地址。与 `WORKDIR` / `SESSION_ID`
+// 同类的**上下文数据**：父插件把请求转发给子插件时（route / traverse）改写它，
+// 子插件在少数需要协议级绝对地址的场合读它拼接（见 `crate::sdk::vdfs::address`）。
+// 缺省（顶层请求 / 无 vdfs 装配）为空。
+define_string_key!(VdfsParentAddrKey, VDFS_PARENT_ADDR, "vdfs_parent_addr");
+define_string_key!(ToolCallIdKey, TOOL_CALL_ID, "tool_call_id");
+// 工具卡在转写里的**节点地址**：流式累积器在首个增量分配、会话内唯一
+// （`symbio-plugin-model/src/tool_accumulator.rs`——provider 的 wire id
+// `TOOL_CALL_ID` 跨轮可被网关复用，不是节点的地址；卡的 id 格与 `meta.tool_call_id`
+// 是两个值）。转写树的挂靠锚（子会话转播、工具卡子节点）一律用本键。
+define_string_key!(ToolNodeIdKey, TOOL_NODE_ID, "tool_node_id");
+// 会话运行模式：auto（无人值守，失败不弹交互）| interactive（人在环，失败可交互，但 confirm/ask_user 仍不弹框）
+define_string_key!(ModeKey, MODE, "mode");
+// 会话选定的 Model Provider ID（与 agent_id 同级别：随 chat_send 传输 + session.metadata 持久化）
+define_string_key!(ProviderIdKey, PROVIDER_ID, "provider_id");
+// 会话执行风险等级阈值：low / medium / high（与 agent_id 同级别：随 chat_send 传输 + session.metadata 持久化）
+define_string_key!(RiskLevelKey, RISK_LEVEL, "risk_level");
+// 跨会话工具授权清单（JSON：能力名 → 允许的最高风险档）：与会话阈值同一份配置解析点
+// 落进 ctx，审批闸门与授权级联都读它（D-170）。
+define_string_key!(ApprovalGrantsKey, APPROVAL_GRANTS, "approval_grants");
+// 会话选中的沙箱档案 id（裁决 B / D-531）：取代原会话级 MODE / RISK_LEVEL 选项——
+// 用户只在会话里选一个沙箱，审批阈值与模式由沙箱引擎按这个 id 从自己的配置表里解析。
+// 与 provider_id 同为「会话选择」，随 chat 请求 / metadata 走 req>metadata>默认 回退链。
+define_string_key!(SandboxIdKey, SANDBOX_ID, "sandbox_id");
+
+// 常用业务属性 Key
+define_string_key!(IdKey, ID, "id");
+define_string_key!(NameKey, NAME, "name");
+// dead-code-allow R-002: 键常量表（N-001 裸名规则）·协议契约键先于接线（004-PROTOCOLS.md 字段表）（消费方=004-PROTOCOLS.md 字段表 + 三方规范键清单）
+define_string_key!(
+    #[allow(dead_code)]
+    KindKey,
+    KIND,
+    "kind"
+);
+define_string_key!(ContentKey, CONTENT, "content");
+// dead-code-allow R-002: 键常量表（N-001 裸名规则）·协议契约键先于接线（004-PROTOCOLS.md 字段表）（消费方=004-PROTOCOLS.md 字段表 + 三方规范键清单）
+define_string_key!(
+    #[allow(dead_code)]
+    DescriptionKey,
+    DESCRIPTION,
+    "description"
+);
+
+// 注：插件域的两个键不在本域——`PLUGIN_DIR`（值类型 `PluginDir`）随值搬去
+// `crate::sdk::plugin::dir`；`PARENT` 改名 `PLUGIN_PARENT`（值类型
+// `Option<Weak<dyn Plugin>>`）随值搬去 `crate::sdk::plugin`。判据同 D-095 根因一。
+// `CONFIG` 与 trait 同行（契约面），已在 `crate::kernel::keys`。
+
+/// 必需插件清单 Key —— **构造者**告诉容器「哪些插件即使没有目录也要补出来」
+///
+/// 容器是通用容器（可以嵌套另一个容器），因此它**不内置**任何插件清单：
+/// 清单是构造者的策略，经本键随构造一起传入。缺省（未传）= 空清单 = 纯扫描。
+pub struct RequiredPluginsKey;
+impl SymbioKey for RequiredPluginsKey {
+    type Value = Vec<String>;
+    fn name(&self) -> &'static str {
+        "required_plugins"
+    }
+    fn parse(&self, s: &str) -> Option<Self::Value> {
+        // 逗号分隔（与其它字符串键在请求头等字符串载体中的表示一致）
+        Some(
+            s.split(',')
+                .map(str::trim)
+                .filter(|p| !p.is_empty())
+                .map(str::to_string)
+                .collect(),
+        )
+    }
+    fn format(&self, v: &Self::Value) -> String {
+        v.join(",")
+    }
+}
+pub const REQUIRED_PLUGINS: RequiredPluginsKey = RequiredPluginsKey;
+
+// 注：插件**装配策略**常量（子树清单、不可停用清单）不在本域——它们不是上下文键，
+// 也不在 core：它们是装配方的数据，见 `crate::sdk::assembly`。
+
+// 注：capability 域的四条通道键不在本域——三条收集通道
+// （`CAPABILITY_VISITOR` / `OPTION_VISITOR` / `CONFIGURABLE_VISITOR`）随值类型
+// `Arc<dyn Registry>` 搬去 `crate::sdk::capability::collect`；错误桶键
+// `CAPABILITY_ERRORS`（值类型带 `CapabilityError`）搬去 `crate::sdk::capability::error`。
+// 判据同 D-095 根因一：键与值同住，`keys` 只留机制与通用词汇键。
+
+// ==================== 主体名 ====================
+// 判定用的主体名与实际写入的主体名各写一份字符串会漂，故只在这里定义一次（与上面的协议键
+// 同族：都是「宿主方言的字符串」）。`authz` 的授权表与 `chat` 的缺省主体都从这里取。
+/// 主会话主体。
+pub const PRINCIPAL_MAIN: &str = "session/main";
+/// 用户主体。
+pub const PRINCIPAL_USER: &str = "person/local";
+/// 调度器主体。
+pub const PRINCIPAL_SCHEDULER: &str = "scheduler/main";

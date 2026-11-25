@@ -12,9 +12,9 @@ impl: done
 纯接口 + 统一文件系统 + 容器拓扑。
 范围：Symbio 全部「资源与数据访问」能力（前端 + 大语言模型）
 关联：
-`crates/symbio-kernel/src/vdfs/`（**纯接口，权威定义：`VdfsProvider` trait
+`crates/symbio-platform/src/kernel/vdfs/`（**纯接口，权威定义：`VdfsProvider` trait
 + 域类型 + 路径工具**）、
-`crates/symbio-sdk/src/vdfs/host.rs`（symbio 桥：上下文注入 + 错误翻译）、
+`crates/symbio-platform/src/sdk/vdfs/host.rs`（symbio 桥：上下文注入 + 错误翻译）、
 `crates/symbio-plugin-vdfs/src/protocol.rs`（线路信封：`vdfs/*` 请求响应 + 协议路径）、
 `crates/symbio-plugin-vdfs/src/fs.rs`（**统一文件系统 `UnifiedFs`：`<根>` / 物理地址分流**）、
 `crates/symbio-plugin-vdfs/src/host.rs`（**访问层：拆信封 + 翻译操作 + 树遍历 + 事件投递**）、
@@ -90,11 +90,11 @@ VDFS 的核心是**一个包含全部资源操作的接口**——`VdfsProvider`
 **语法层只暴露纯 object-safe trait**，协议适配与线路形状留在插件内部。
 
 ```
-crates/symbio-kernel/src/vdfs/*.rs ← centerpiece：VdfsProvider trait
+crates/symbio-platform/src/kernel/vdfs/*.rs ← centerpiece：VdfsProvider trait
  + 域类型（VdfsNode / VdfsContent / VdfsAccess /
  VdfsWriteResponse / VdfsError / VdfsChange）
  + VdfsContext + 路径工具 + 回填
-crates/symbio-sdk/src/vdfs/host.rs ← 宿主桥：上下文注入 + 错误翻译
+crates/symbio-platform/src/sdk/vdfs/host.rs ← 宿主桥：上下文注入 + 错误翻译
 crates/symbio-plugin-vdfs/src/protocol.rs ← 线路信封：vdfs/* 请求响应 + 协议路径常量
  + VDFS_OPS（变更事件与 provider 侧 VdfsChange 同形）
 crates/symbio-plugin-vdfs/src/fs.rs ← UnifiedFs：地址分流 + 口径映射 + 根守卫
@@ -135,7 +135,7 @@ trait 上收拢全部操作（列 / 读 / 写 / 删 / 建 / 移 / 订阅），�
 
 实现方（如 `plugin_manager` 插件）是**插件**而非宿主本身，它需要两件宿主能力：
 从 `VdfsContext` 取回宿主句柄、把下游 `PluginError` 翻回 `VdfsError`。
-这两件事放在 `symbio_sdk::vdfs::host`（桥层），使实现方**只依赖内核 + 机制层**，
+这两件事放在 `symbio_platform::sdk::vdfs::host`（桥层），使实现方**只依赖内核 + 机制层**，
 不去依赖 `crates/symbio-plugin-vdfs`——否则插件之间就产生了横向依赖。访问层（`dispatch`）
 不是实现方需要的，因此留在 vdfs 插件内部。
 
@@ -243,7 +243,7 @@ src/main.rs 同上            ├─▶ 物理层（磁盘真实文件）
 | `name` | 父内唯一标识（路径段） |
 | `title` / `description` | 展示标题 / 语义说明（缺省 `title` = `name`） |
 | `kind` | **场景标签**（自由取值；构造器缺省给 `dir` / `file`，场景可覆盖）；机制不据此判定 |
-| `status` | `active` / `working` / `disabled` / `failed` / `unknown`；缺省 `active`，**空串 = 显式声明「无运行态」**（`VDFS_STATUS_NONE`，列表不画状态点）。词表权威处是 `symbio_kernel::vdfs` 的 `VDFS_STATUS_*` <!-- vocab:VDFS_STATUS_ --> |
+| `status` | `active` / `working` / `disabled` / `failed` / `unknown`；缺省 `active`，**空串 = 显式声明「无运行态」**（`VDFS_STATUS_NONE`，列表不画状态点）。词表权威处是 `symbio_platform::kernel::vdfs` 的 `VDFS_STATUS_*` <!-- vocab:VDFS_STATUS_ --> |
 | `access` | 访问位（§4），**机制唯一的能力依据** |
 | `ext` | 呈现扩展名——**前端据此选择详情页面**（§7） |
 | `size` / `updated_at` / `children` / `binary` | 元数据 |
@@ -404,7 +404,7 @@ size updated_at children binary hidden schema new_type attributes
  [Composite 插件](../../crates/symbio-plugin-composite/README.md "crates/symbio-plugin-composite/README")）。
 - **副作用留在插件**：写完配置之后还要做什么（如网关重建监听）在插件自己的
  `write` 里做——`PluginConfigFile::apply` 返回后再执行，机制不引入回调抽象。
-- **实现只写一次**：`symbio_sdk::plugin::dir` 的 `PluginDir`（目录 + 配置读写，
+- **实现只写一次**：`symbio_platform::sdk::plugin::dir` 的 `PluginDir`（目录 + 配置读写，
  含遗留字段清理）与 `PluginConfigFile`（节点形状 + 定义校验 + 落盘）——
  **值 + 一组函数**，不是 trait：没有注册表、没有回调。
 - **凭据在配置里**：配置文件与其它节点一样受访问位约束（`r`），即**可读**。
@@ -469,7 +469,7 @@ core 不暴露**）；操作闭集见 [当前事实表](../004-ref/006-当前事
 **移动不在协议里**：`VdfsRequest` 只收**操作载荷**，地址一律走 `path` 参数——载荷里
 没有第二个地址字段。跨虚拟挂载树的「移动」本质是 `copy + delete`，不是核心原语，
 故整条链（`vdfs/move` / `vdfs_move` 工具 / 前端重命名入口）都不提供；要用移动由
-**外层组合**（理由见 `symbio_kernel::vdfs::request` 的「没有 `Move`」一节）。
+**外层组合**（理由见 `symbio_platform::kernel::vdfs::request` 的「没有 `Move`」一节）。
 
 错误经 `VdfsError` 表达，桥层翻译为宿主错误（symbio → `PluginError`）。
 `VdfsError::Invalid(VdfsValidationError)` 的结构化字段级错误序列化为 JSON 置于
@@ -756,18 +756,18 @@ composite；登记本身不改变 composite 的任何行为与代码（见 §2.5
 
 重写三个文件即可：
 
-- `crates/symbio-sdk/src/vdfs/host.rs`（桥：装上下文、翻错误）；
+- `crates/symbio-platform/src/sdk/vdfs/host.rs`（桥：装上下文、翻错误）；
 - `crates/symbio-plugin-vdfs/src/host.rs` + `fs.rs`（访问层与门面：拆信封、地址分流、树遍历、
  事件投递——`UnifiedFs` 只依赖纯接口，可原样带走）；
 - 容器的注册接线（子插件收集方式随宿主插件机制而变）。
 
-`crates/symbio-kernel/src/vdfs/`（纯接口）与 `crates/symbio-plugin-vdfs/src/protocol.rs`（线路信封）
+`crates/symbio-platform/src/kernel/vdfs/`（纯接口）与 `crates/symbio-plugin-vdfs/src/protocol.rs`（线路信封）
 **原样复用**——前者零宿主依赖，后者只依赖前者。
 
 ## 12. 一致性要求
 
 - 任何新的资源访问功能 **不得** 绕开 `vdfs/*` 新造私有协议。
-- `crates/symbio-kernel/src/vdfs/` **不得**引入 `crate::` 依赖；线路类型（请求 / 响应信封、
+- `crates/symbio-platform/src/kernel/vdfs/` **不得**引入 `crate::` 依赖；线路类型（请求 / 响应信封、
  `VDFS_OPS`）**不得**上浮到内核；宿主专有类型与状态一律经 `VdfsContext` 注入。
 - provider **不得**提供或假设自己的位置（trait 上无 `mount` / `category` / root
  概念），只接收自身子树内的相对路径。

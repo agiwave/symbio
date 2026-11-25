@@ -13,6 +13,8 @@
  * |---|---|---|
  * | FB-001 | 生产 Rust 源码里 `EventWalStore::open` / `open_readonly` 只许出现在 `crates/symbio-plugin-session/src/store/` | 引擎写点绕过 `SessionStore::facts` 自己开档（第二个 `head`、第二把令牌） |
  * | FB-002 | D-084 §4 的能力文件清单里，`session_dir` / `V2_WAL_FILE` / `open_readonly` / `EventWalStore::open` 零命中 | 能力面重新长出「拼路径再读」的知识 |
+ * | FB-003 | `submit_fact_source_opener!` 的登记点**恰好 1 处**（生产源码；0 家与 ≥2 家都红） | 开面是单槽（`inventory::iter().next()`）：第二家是静默死码，零家让读面硬错（D-458） |
+ * | FB-004 | `AddrRootDecl(` 的声明点**至多 1 处**（0 家绿 + 提示） | 地址根同为单槽：第二家静默（D-459）；零家是「构建里没有 vdfs 插件」的既定降级 |
  *
  * ## 为什么判生产文件而不是全仓
  *
@@ -39,7 +41,7 @@
 
 // 判据码命名空间（登记表 docs/004-ref/GATE_CODES.md 由这些行生成，判据见 gate-codes-audit.mjs）
 // @ns FB 事实轨边界
-// @codes FB-001 FB-002
+// @codes FB-001 FB-002 FB-003 FB-004
 // @gate guard
 
 import fs from 'node:fs'
@@ -92,7 +94,11 @@ const OPEN_TOKENS = ['EventWalStore::open(', 'EventWalStore::open_readonly(']
 /** 能力面不得有的存储知识。 */
 const CAPABILITY_TOKENS = ['session_dir', 'V2_WAL_FILE', 'open_readonly', 'EventWalStore::open']
 
+/** 事实源开面**唯一**的合法登记点（D-458）。搬到别处不红，但要提示核对 D-451 边三。 */
+const OPENER_HOME = 'crates/symbio-plugin-session/src/store/fact_source.rs'
+
 const errors = []
+const notes = []
 const fail = (m) => errors.push(m)
 
 const relPosix = (abs) => path.relative(ROOT, abs).split(path.sep).join('/')
@@ -116,11 +122,11 @@ function scanTokens(rel, lines, tokens, code, why) {
 
 // ── FB-001：生产侧开档只在存储层 ───────────────────────────────────────
 const src = path.join(ROOT, SRC_DIR)
-const production = [...walk(src)]
+const allProduction = [...walk(src)]
   .filter((abs) => abs.endsWith('.rs'))
   .filter((abs) => !isTestFile(abs))
-  .filter((abs) => !relPosix(abs).startsWith(STORE_DIR))
   .sort()
+const production = allProduction.filter((abs) => !relPosix(abs).startsWith(STORE_DIR))
 
 for (const abs of production) {
   const rel = relPosix(abs)
@@ -151,7 +157,51 @@ for (const rel of CAPABILITY_FILES) {
   )
 }
 
+// ── FB-003 / FB-004：两处单槽登记 ─────────────────────────────────────
+// `declared_fact_source_opener()` 与 `declared_addr_root()` 都只取 `inventory::iter().next()`，
+// 没有去重、没有按域分派。多登记一家，谁生效由链接顺序决定——编译器不报、运行期不报。
+// 判的是去注释后的生产源码（全部生产文件，含存储层；测试夹具不算登记）。
+const productionLines = allProduction.map((abs) => ({
+  rel: relPosix(abs),
+  lines: readBlanked(relPosix(abs)) ?? [],
+}))
+const at = (sites) => sites.map((s) => `${s.rel}:${s.line}`).join(' · ')
+const sitesOf = (pred) =>
+  productionLines.flatMap((f) =>
+    f.lines.flatMap((text, i) => (pred(text) ? [{ rel: f.rel, line: i + 1 }] : [])),
+  )
+
+const openerSites = sitesOf((text) => text.includes('submit_fact_source_opener!'))
+if (openerSites.length !== 1) {
+  const where = openerSites.length > 0 ? `（${at(openerSites)}）` : ''
+  fail(
+    `FB-003 ${openerSites.length === 0 ? '事实源开面零登记' : `事实源开面是**单槽**，却登记了 ${openerSites.length} 家`}${where}——` +
+      (openerSites.length === 0
+        ? '`declared_fact_source_opener()` 恒 `None`，读面会硬错；这不是「存储边收窄完成」，是没有人开面了（D-458）'
+        : '只取迭代到的第一个，其余是**静默死码**（谁生效由链接顺序决定）；先把重复处置设计出来，再登记第二个（D-458）'),
+  )
+} else if (openerSites[0].rel !== OPENER_HOME) {
+  notes.push(
+    `FB-003 事实源开面登记点已不在 session（${at(openerSites)}）——存储换 owner 真的动过，请核对 D-451 边三的读数与寄存区补落点`,
+  )
+}
+
+// `pub struct AddrRootDecl(…)` 的定义行按 `pub struct` 排除；0 家是既定降级（D-459）。
+const addrRootSites = sitesOf((text) => /\bAddrRootDecl\s*\(/.test(text) && !/\bpub\s+struct\b/.test(text))
+if (addrRootSites.length > 1) {
+  fail(
+    `FB-004 地址根是**单槽**，却声明了 ${addrRootSites.length} 家（${at(addrRootSites)}）——` +
+      '只取迭代到的第一个，其余是**静默死码**；接管地址面前必须先把处置设计出来（D-459）',
+  )
+} else if (addrRootSites.length === 0) {
+  notes.push(
+    'FB-004 地址根零声明——`declared_addr_root()` 恒 `None`，虚拟地址面整体降级为相对地址；' +
+      '没有 vdfs 插件的构建里是合法降级，但若本次动了地址面，请确认不是把它删掉了（D-459）',
+  )
+}
+
 // ── 输出 ───────────────────────────────────────────────────────────────
+for (const n of notes) console.log(dim(`  · ${n}`))
 if (errors.length > 0) {
   for (const e of errors) console.log(red('[ERROR]'), e)
   console.log(dim(`\n共 ${errors.length} 处违规（判据见 docs/003-design/001-核心架构.md §4）`))
@@ -162,6 +212,7 @@ console.log(
   green('[OK]   '),
   dim(
     `FB-001 生产开档点 0 处越界（扫 ${production.length} 文件）；` +
-      `FB-002 能力文件 ${CAPABILITY_FILES.length} 个零存储知识`,
+      `FB-002 能力文件 ${CAPABILITY_FILES.length} 个零存储知识；` +
+      `FB-003 开面登记 ${openerSites.length} 家；FB-004 地址根声明 ${addrRootSites.length} 家`,
   ),
 )

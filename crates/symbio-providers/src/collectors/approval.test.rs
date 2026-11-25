@@ -11,15 +11,17 @@ use super::*;
 use serde_json::json;
 use std::sync::atomic::{AtomicUsize, Ordering};
 use std::time::Duration;
-use symbio_kernel::capability::failure_kind;
-use symbio_kernel::exec::{ExecAbortSignal, ExecEventSink};
-use symbio_kernel::plugin::{PluginInvokeRequestExt, PluginSimpleRequest};
+use symbio_platform::kernel::capability::failure_kind;
+use symbio_platform::kernel::exec::{ExecAbortSignal, ExecEventSink};
+use symbio_platform::kernel::plugin::{PluginInvokeRequestExt, PluginSimpleRequest};
+use symbio_platform::sdk::sandbox::{
+    sandbox_init_slot, sandbox_publish, SandboxDecision, SandboxFace,
+};
 use symbio_plugin_api::port::PortFactEmit;
 use symbio_plugin_api::{
     port_result, ApprovalGrant, PortErrorClass, PortExecContext, PortExecutor, PortInput,
     PortOutcome, SESSION_ID, TOOL_CALL_ID,
 };
-use symbio_sdk::sandbox::{sandbox_init_slot, sandbox_publish, SandboxDecision, SandboxFace};
 
 /// 最小可判定的执行体桩：固定风险、可选动态覆写、记录是否被真正执行。
 struct StubTool {

@@ -259,8 +259,8 @@ function guessScope() {
     } else if (f.startsWith('crates/symbio-cli/')) s = 'cli'
     else if (
       f.startsWith('crates/symbio/') ||
-      f.startsWith('crates/symbio-sdk/') ||
-      f.startsWith('crates/symbio-kernel/')
+      f.startsWith('crates/symbio-platform/src/sdk/') ||
+      f.startsWith('crates/symbio-platform/src/kernel/')
     ) {
       s = 'core'
     } else if (f.startsWith('tauri/')) s = 'ui'

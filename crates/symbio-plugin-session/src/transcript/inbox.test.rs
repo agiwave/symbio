@@ -8,11 +8,11 @@
 
 use super::*;
 use crate::plugin::SessionConfig;
-use symbio_sdk::chat::session_chat;
+use symbio_platform::sdk::chat::session_chat;
 
 /// 身份写 `principal`（D-147）：夹具模仿的是**落库面**的消息，`role` 只是读侧残留格。
-fn principal_for(role: cm::NodeRole) -> symbio_kernel::chat::principal::Principal {
-    use symbio_kernel::chat::principal::Principal;
+fn principal_for(role: cm::NodeRole) -> symbio_platform::kernel::chat::principal::Principal {
+    use symbio_platform::kernel::chat::principal::Principal;
     match role {
         cm::NodeRole::User => Principal::from_legacy(symbio_plugin_api::PRINCIPAL_USER),
         cm::NodeRole::Assistant => Principal::from_legacy("session/main"),
@@ -274,7 +274,9 @@ fn watch_inbox_paths(p: &SessionPlugin) -> Arc<std::sync::Mutex<Vec<String>>> {
     let sink = seen.clone();
     p.change_subs.watch(
         "",
-        Arc::new(move |c: symbio_kernel::vdfs::VdfsChange| sink.lock().unwrap().push(c.path)),
+        Arc::new(move |c: symbio_platform::kernel::vdfs::VdfsChange| {
+            sink.lock().unwrap().push(c.path)
+        }),
     );
     seen
 }

@@ -17,7 +17,7 @@ created: 2026-09-07
 | **容器插件** | 包含子插件，按目录名分发 | `home`, `composite` |
 | **叶子插件** | 执行业务逻辑 | `agent`, `model`, `local` |
 
-两者实现**完全相同**的 `Plugin` trait（`crates/symbio-kernel/src/plugin/mod.rs`）：
+两者实现**完全相同**的 `Plugin` trait（`crates/symbio-platform/src/kernel/plugin/mod.rs`）：
 容器与叶子的差别只在 `route` 里是否把路径转发给子插件。
 
 ---
@@ -41,7 +41,7 @@ rust-version = "1.91"
 
 [dependencies]
 # **只依赖门面**：`symbio-plugin-api` 已经转出语法（kernel）、ABI 形状（contract）与
-# 机制（sdk）三臂，装配常量也经它转出（`symbio-deploy` 的 `PLUGIN_ID_*`）。直接写
+# 机制（sdk）三臂，装配常量也经它转出（平台 `deploy` 臂的 `PLUGIN_ID_*`）。直接写
 # kernel / contract / sdk / deploy 四行会被 `plugin-surface-audit`（HS-001）判红——
 # 那不是风格问题，它决定「插件依赖几个架构模块」由边界决定还是由某段代码顺手写了哪个前缀决定。
 symbio-plugin-api = { path = "../symbio-plugin-api" }
@@ -64,7 +64,7 @@ plugin_assembly: sub_agent # 进标准插件树；或 none（不进）
 plugin_order: 300 # sub_agent 必填，整数，决定挂载顺序
 ```
 
-**加插件 = 建目录 + 写 `PLUGIN.yml` + 写代码。** `symbio-deploy` 的 `PLUGIN_ID_*` 与装配清单、
+**加插件 = 建目录 + 写 `PLUGIN.yml` + 写代码。** 平台 `deploy` 臂的 `PLUGIN_ID_*` 与装配清单、
 `symbio` 的依赖行与 `pub use` 行都由生成器从目录投影（门禁自动重生成），**两侧都不手改**；
 手改生成区会被 `gen-facts --check` 判红。
 
@@ -230,7 +230,7 @@ impl MyTool {
 **不需要在任何地方登记**：容器扫描自己的目录（= 系统根，其下一层目录即一个插件），
 逐目录读 `PLUGIN.yml`，`plugin_provider` 指向已注册的工厂（`creator_has`）即实例化，
 并把该目录经 ctx 键 `PLUGIN_DIR` 告知插件。标准树挂哪些插件由各插件 `PLUGIN.yml` 的
-`plugin_assembly: sub_agent` 决定——生成器把它投影进 `symbio_deploy::ASSEMBLY_SUB_AGENT_PLUGINS`
+`plugin_assembly: sub_agent` 决定——生成器把它投影进 `symbio_platform::deploy::ASSEMBLY_SUB_AGENT_PLUGINS`
 （`home` 的 `SYSTEM_PLUGINS` 只是这份清单的别名，没有第二处要同步）。
 
 > ⚠️ **插件不要推导自己的目录。** 目录一律用 `PLUGIN_DIR` 给的 `PluginDir`
@@ -258,7 +258,7 @@ plugin_author: me # 作者
 构造，不是不存在）。`meta` 的另一半（`order` / `icon` / `hidden` / `root_access`）
 是**挂载点呈现**，只在运行期读，不投影——没有挂载点就没有这些属性。
 
-> 配置读写走门面的 `PluginDir` + `PluginConfigFile`（实现住在 `symbio-sdk` 的 `plugin::dir`）：插件持有自己的
+> 配置读写走门面的 `PluginDir` + `PluginConfigFile`（实现住在平台 `sdk` 臂的 `plugin::dir`）：插件持有自己的
 > `PluginConfigFile`，读 / 写**自己**的 `PLUGIN.yml`（`PluginConfigFile::apply` = 校验 → 落内存 →
 > 落自己的文件 → 广播）。对外地址自动是 `<根>/my_plugin/PLUGIN.yml`，无需写任何路由。
 > 要出现在设置页，只需在 `traverse` 里 `capability_announce_configurable(&ctx, &self.config_file)`——
@@ -343,7 +343,7 @@ impl Plugin for MyContainer {
 ## 流式会话实现
 
 ```rust
-use symbio_kernel::exec::PluginChannel;
+use symbio_platform::kernel::exec::PluginChannel;
 
 async fn route(
     self: Arc<Self>,
@@ -401,7 +401,7 @@ export async function greet(name: string) {
 ```rust
 // crates/symbio-plugin-my_plugin/src/plugin.test.rs
 use super::*;
-use symbio_kernel::plugin::PluginSimpleRequest;
+use symbio_platform::kernel::plugin::PluginSimpleRequest;
 
 #[tokio::test]
 async fn greet_returns_message() {

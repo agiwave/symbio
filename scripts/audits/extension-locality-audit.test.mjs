@@ -81,22 +81,22 @@ test('isMigrationBatch：正文声明 Migration: 的提交是迁移批次（EX-0
 test('TREES：七棵是并集且含契约树、plugin-api 与 host（D-372 口径 + D-486）', () => {
   // D-486：契约树加入活跃区（第七棵），仍是受保护树判据 + 契约的并集口径。
   assert.deepEqual(TREES, [
-    'crates/symbio-sdk',
-    'crates/symbio-kernel',
-    'crates/symbio-contract',
+    'crates/symbio-platform/src/sdk',
+    'crates/symbio-platform/src/kernel',
+    'crates/symbio-platform/src/contract',
     'crates/symbio-plugin-api',
     'crates/symbio-plugin-loop',
     'crates/symbio-plugin-session',
-    'crates/symbio-host',
+    'crates/symbio-runtime/src/host',
   ])
   assert.deepEqual(TREES, PROTECTED_TREES)
 })
 
 test('受保护树与机制面是两件事：host 只进并集，不进 ARCH / CONTROL（D-372 的并集口径）', () => {
-  assert.deepEqual(HOST_TREES, ['crates/symbio-host'])
-  assert.ok(TREES.includes('crates/symbio-host'))
-  assert.ok(!ARCH_TREES.includes('crates/symbio-host'))
-  assert.ok(!CONTROL_TREES.includes('crates/symbio-host'))
+  assert.deepEqual(HOST_TREES, ['crates/symbio-runtime/src/host'])
+  assert.ok(TREES.includes('crates/symbio-runtime/src/host'))
+  assert.ok(!ARCH_TREES.includes('crates/symbio-runtime/src/host'))
+  assert.ok(!CONTROL_TREES.includes('crates/symbio-runtime/src/host'))
   assert.deepEqual(TREES, [...ARCH_TREES, ...CONTROL_TREES, ...HOST_TREES])
 })
 
@@ -133,8 +133,8 @@ test('fingerprints：plugin-api 的手写文件改动会动指纹（生成物不
 
 test('fingerprints：与输入顺序无关', () => {
   const entries = [
-    f('crates/symbio-sdk/src/a.rs', '111'),
-    f('crates/symbio-kernel/src/b.rs', '222'),
+    f('crates/symbio-platform/src/sdk/a.rs', '111'),
+    f('crates/symbio-platform/src/kernel/b.rs', '222'),
     f('crates/symbio-plugin-loop/src/c.rs', '333'),
   ]
   assert.deepEqual(fingerprints(entries), fingerprints([...entries].reverse()))
@@ -142,39 +142,39 @@ test('fingerprints：与输入顺序无关', () => {
 
 test('fingerprints：已存在的 *.gen.rs 随清单改，不动指纹', () => {
   const before = [
-    f('crates/symbio-sdk/src/authz/rows.gen.rs', 'old'),
-    f('crates/symbio-sdk/src/authz/mod.rs', 'same'),
+    f('crates/symbio-platform/src/sdk/authz/rows.gen.rs', 'old'),
+    f('crates/symbio-platform/src/sdk/authz/mod.rs', 'same'),
   ]
   const after = [
-    f('crates/symbio-sdk/src/authz/rows.gen.rs', 'new'),
-    f('crates/symbio-sdk/src/authz/mod.rs', 'same'),
+    f('crates/symbio-platform/src/sdk/authz/rows.gen.rs', 'new'),
+    f('crates/symbio-platform/src/sdk/authz/mod.rs', 'same'),
   ]
   const parent = paths(before)
-  assert.equal(fingerprints(before, parent)['crates/symbio-sdk'], fingerprints(after, parent)['crates/symbio-sdk'])
+  assert.equal(fingerprints(before, parent)['crates/symbio-platform/src/sdk'], fingerprints(after, parent)['crates/symbio-platform/src/sdk'])
 })
 
 test('fingerprints：新出现的 *.gen.rs 不是生成物镜像，会动指纹', () => {
-  const before = [f('crates/symbio-sdk/src/domain.rs', 'same')]
+  const before = [f('crates/symbio-platform/src/sdk/domain.rs', 'same')]
   const after = [
-    f('crates/symbio-sdk/src/domain.rs', 'same'),
-    f('crates/symbio-sdk/src/agent_helpers.gen.rs', 'fresh'),
+    f('crates/symbio-platform/src/sdk/domain.rs', 'same'),
+    f('crates/symbio-platform/src/sdk/agent_helpers.gen.rs', 'fresh'),
   ]
   const parent = paths(before)
-  assert.notEqual(fingerprints(before, parent)['crates/symbio-sdk'], fingerprints(after, parent)['crates/symbio-sdk'])
+  assert.notEqual(fingerprints(before, parent)['crates/symbio-platform/src/sdk'], fingerprints(after, parent)['crates/symbio-platform/src/sdk'])
 })
 
 test('fingerprints：一棵树的改动不串到另一棵', () => {
   const before = [
-    f('crates/symbio-sdk/src/a.rs', '1'),
+    f('crates/symbio-platform/src/sdk/a.rs', '1'),
     f('crates/symbio-plugin-loop/src/b.rs', '2'),
   ]
   const after = [
-    f('crates/symbio-sdk/src/a.rs', '9'),
+    f('crates/symbio-platform/src/sdk/a.rs', '9'),
     f('crates/symbio-plugin-loop/src/b.rs', '2'),
   ]
   const b = fingerprints(before, paths(before))
   const a = fingerprints(after, paths(before))
-  assert.notEqual(a['crates/symbio-sdk'], b['crates/symbio-sdk'])
+  assert.notEqual(a['crates/symbio-platform/src/sdk'], b['crates/symbio-platform/src/sdk'])
   assert.equal(a['crates/symbio-plugin-loop'], b['crates/symbio-plugin-loop'])
 })
 
@@ -200,19 +200,19 @@ test('judgeNewCapability：新增能力包夹带 loop 分支 ⇒ 红且点名 lo
 
 test('judgeNewCapability：新增能力包夹带 host 分支 ⇒ 红且点名 host（D-372 的并集口径 / EX-002）', () => {
   const before = Object.fromEntries(TREES.map((t) => [t, 'h']))
-  const after = { ...before, 'crates/symbio-host': 'changed' }
+  const after = { ...before, 'crates/symbio-runtime/src/host': 'changed' }
   const r = judgeNewCapability({ sha: 'x', added: ['crates/symbio-plugin-new/PLUGIN.yml'], before, after })
   assert.equal(r.errors.length, 1)
   assert.match(r.errors[0], /EX-002/)
-  assert.match(r.errors[0], /crates\/symbio-host/)
+  assert.match(r.errors[0], /crates\/symbio-runtime\/src\/host/)
 })
 
 test('judgeNewCapability：新增能力包改 SDK ⇒ 红（core 已并入 SDK，D-279）', () => {
   const before = Object.fromEntries(TREES.map((t) => [t, 'h']))
-  const after = { ...before, 'crates/symbio-sdk': 'changed' }
+  const after = { ...before, 'crates/symbio-platform/src/sdk': 'changed' }
   const r = judgeNewCapability({ sha: 'x', added: ['crates/symbio-plugin-new/PLUGIN.yml'], before, after })
   assert.equal(r.errors.length, 1)
-  assert.match(r.errors[0], /crates\/symbio-sdk/)
+  assert.match(r.errors[0], /crates\/symbio-platform\/src\/sdk/)
 })
 
 test('judgeNewCapability：指纹读不出 ⇒ 红（判据没有输入）', () => {

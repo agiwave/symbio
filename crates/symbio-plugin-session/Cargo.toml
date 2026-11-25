@@ -13,8 +13,7 @@ unused_variables = "warn"
 dead_code = "warn"
 
 [dependencies]
-symbio-kernel = { path = "../symbio-kernel" }
-symbio-sdk = { path = "../symbio-sdk" }
+symbio-platform = { path = "../symbio-platform" }
 symbio-plugin-api = { path = "../symbio-plugin-api" }
 symbio-providers = { path = "../symbio-providers" }
 # `rc` feature：`PluginFrame::Data` 的载荷是 `Arc<Value>`（见 transport.rs 的说明），

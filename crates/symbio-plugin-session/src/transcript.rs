@@ -45,9 +45,9 @@ use indexmap::IndexMap;
 use std::collections::HashMap;
 use std::sync::Arc;
 use std::time::{Duration, Instant};
-use symbio_kernel::chat::chat_node as cm;
-use symbio_kernel::vdfs::VdfsChange;
-use symbio_sdk::vdfs::host::VdfsChangeSubscriptions;
+use symbio_platform::kernel::chat::chat_node as cm;
+use symbio_platform::kernel::vdfs::VdfsChange;
+use symbio_platform::sdk::vdfs::host::VdfsChangeSubscriptions;
 use {
     symbio_plugin_api::plugin_debug, symbio_plugin_api::plugin_error,
     symbio_plugin_api::plugin_info,
@@ -564,7 +564,7 @@ impl Transcript {
     /// 它是本轮**更早**的正文，而本条变更说的是「这一轮结束了」。顺序反了，
     /// 前端会先收敛为已空闲、再补上一截正文（`sessionNodeSync` 在
     /// `working → 非 working` 迁移时就会清掉活动角标，节点却还在长）。
-    pub fn emit_session_state(&mut self, node: Option<symbio_kernel::vdfs::VdfsNode>) {
+    pub fn emit_session_state(&mut self, node: Option<symbio_platform::kernel::vdfs::VdfsNode>) {
         self.frame_no += 1;
         self.flush_pending();
         match &node {

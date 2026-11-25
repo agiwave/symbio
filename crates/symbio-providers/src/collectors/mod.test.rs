@@ -6,9 +6,11 @@
 //! 编译不报错、行为只在某个读点少一行时才露出来。
 
 use super::*;
-use symbio_kernel::capability::{family, CapabilityMeta, CapabilityRow};
-use symbio_kernel::plugin::{PluginInvokeRequest, PluginInvokeRequestExt, PluginSimpleRequest};
-use symbio_sdk::capability::{CAPABILITY_VISITOR, CONFIGURABLE_VISITOR, OPTION_VISITOR};
+use symbio_platform::kernel::capability::{family, CapabilityMeta, CapabilityRow};
+use symbio_platform::kernel::plugin::{
+    PluginInvokeRequest, PluginInvokeRequestExt, PluginSimpleRequest,
+};
+use symbio_platform::sdk::capability::{CAPABILITY_VISITOR, CONFIGURABLE_VISITOR, OPTION_VISITOR};
 
 /// 只为「跨键可见」准备的一行：测试只看它进没进表（行是纯数据，`D-440` ③）。
 fn marker_row(name: &str) -> CapabilityRow {

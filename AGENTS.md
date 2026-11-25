@@ -50,7 +50,7 @@
 **收窄不需要批准，变宽需要论证**（机制的决策见 [[DE-001-核心架构|`docs/003-design/001-核心架构.md`]]）。
 门面一侧的对应判据是 `plugin-surface-audit` 的 HS-002 / HS-006（三臂只许不涨，`DE-023 D-278`）；
 `SYMBIO CORE` 这个**名字**如今不指向「最重要的模块」——它只剩淘汰裁决与 `SKILL_TAG`
-（`DE-023 D-276`），机制层在 `symbio-sdk`，语法在 `symbio-kernel`。
+（`DE-023 D-276`），机制层在平台 `sdk` 臂，语法在 `kernel` 臂。
 
 ## 文档即登记：状态只写在文档自己的 front-matter
 

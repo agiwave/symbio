@@ -16,13 +16,15 @@
 use async_trait::async_trait;
 use std::collections::BTreeMap;
 use std::sync::{Arc, RwLock};
-use symbio_kernel::plugin::error::{lock_read, lock_write};
-use symbio_kernel::vdfs::{
+use symbio_platform::kernel::plugin::error::{lock_read, lock_write};
+use symbio_platform::kernel::vdfs::{
     VdfsAccess, VdfsContent, VdfsContext, VdfsError, VdfsNode, VdfsProvider, VdfsRequest,
     VdfsResponse, VdfsResult, VdfsWriteResponse,
 };
-use symbio_sdk::clock::clock_now_ms;
-use symbio_sdk::vdfs::host::{vdfs_notify_change, vdfs_unwatch_changes, vdfs_watch_changes};
+use symbio_platform::sdk::clock::clock_now_ms;
+use symbio_platform::sdk::vdfs::host::{
+    vdfs_notify_change, vdfs_unwatch_changes, vdfs_watch_changes,
+};
 
 /// 一条内存条目
 #[derive(Debug, Clone)]

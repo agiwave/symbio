@@ -14,13 +14,13 @@ use super::*;
 /// 判定点钉死之后，效果由 T30（e2e）在真实落盘上验。
 #[test]
 fn attributed_fills_by_role_and_never_overwrites() {
-    use symbio_kernel::chat::principal::Principal;
+    use symbio_platform::kernel::chat::principal::Principal;
     let base = |role| cm::ChatNode {
         id: uuid::Uuid::new_v4().to_string(),
         role,
         ..Default::default()
     };
-    let main = symbio_sdk::authz::PRINCIPAL_MAIN;
+    let main = symbio_platform::sdk::authz::PRINCIPAL_MAIN;
     // 判据看的是 **id 层**（`<ns>/<name>` 可路由地址）——kind 由 `from_legacy` 依 namespace
     // 派生，测试不重复这条规则。
     let of = |m: cm::ChatNode| attributed(m, main).principal.map(|p| p.id);

@@ -104,7 +104,7 @@ function cleanTree() {
     'crates/symbio-plugin-c/Cargo.toml': '[package]\nname = "symbio-plugin-c"\n',
     'crates/symbio-plugin-a/src/lib.rs': 'pub const A: &str = "a";\n',
     'crates/symbio-plugin-c/src/lib.rs': 'pub const B: &str = "b";\n',
-    'crates/symbio-deploy/src/lib.rs': DEPLOY_TEXT,
+    'crates/symbio-platform/src/deploy/mod.rs': DEPLOY_TEXT,
   }
 }
 

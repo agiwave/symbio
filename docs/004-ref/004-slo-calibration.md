@@ -18,7 +18,7 @@ deps: [DE-016-工程落地与验证]
 | 设施 | 位置 | 说明 |
 |---|---|---|
 | 执行体实测耗时 | `crates/symbio-plugin-model/src/port.rs` | `ModelExecutor` 落 `response{port=model}` 时写 `cost_ms`（`started.elapsed()`，覆盖解载荷到收束整段）。一次往返一个读数，不经中间层转发 |
-| `cost_ms` 读侧 | `crates/symbio-sdk/src/projection` | 逐轮读数进 final 的 `cost_ms`，`cost.ledger` 按主体累加 |
+| `cost_ms` 读侧 | `crates/symbio-platform/src/sdk/projection` | 逐轮读数进 final 的 `cost_ms`，`cost.ledger` 按主体累加 |
 | `cost_ms` 入事件 | final 事件字段 | 调用方把实测值写到 `chat.assistant.final` 的 `cost_ms` |
 | `cost.ledger` | `crates/symbio-plugin-cost/src/decl.rs` | 按主体累计——**熔断判据「已耗多少」从此读实测值**（接上真实来源） |
 
@@ -95,7 +95,7 @@ deps: [DE-016-工程落地与验证]
 DE-016 §8.2 第三列（兜底率上限 <1%/3%/5%/5%）的**测量口径**落地：
 
 - **`slo.fallback` 视图**：turn 档位 = `turn.dispatch` 载荷 `tier`
- （`crates/symbio-kernel/src/adapters.rs::LatencyTier::name`，`D-282` 是档位的唯一来源）
+ （`crates/symbio-platform/src/kernel/adapters.rs::LatencyTier::name`，`D-282` 是档位的唯一来源）
  ——「装配进哪一档」是数据，写进事实源；
  兜底 = `chat.assistant.fallback`（`turn × closed`）按 turn 号归档；
 - **缺失/未知档位进 `unspecified` 桶**——可观测，不静默归类；

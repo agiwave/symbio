@@ -224,3 +224,16 @@ test('基线缺失 ⇒ 红（不许把「读不出」当成「无存量」）', 
     box.cleanup()
   }
 })
+
+test('F3 搬到运行时的驱动入口仍在扫描面内（漏掉就会静默从 11 变 9）', () => {
+  const files = cleanFiles()
+  files['crates/symbio-runtime/src/host/entry.rs'] = 'fn row() {\n    let _ = turn: 0;\n}\n'
+  const box = sandbox(files)
+  try {
+    const r = run(box.root)
+    assert.equal(r.status, 1, r.out)
+    assert.match(r.out, /F3/, r.out)
+  } finally {
+    box.cleanup()
+  }
+})

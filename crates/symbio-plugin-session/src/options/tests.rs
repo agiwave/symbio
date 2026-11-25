@@ -9,9 +9,9 @@
 
 use super::*;
 // `traverse` 是 `Plugin` 的 trait 方法，需 trait 在作用域内才可解析
-use symbio_kernel::plugin::Plugin;
+use symbio_platform::kernel::plugin::Plugin;
 // `ctx.set(...)` 来自 `PluginInvokeRequestExt`
-use symbio_kernel::plugin::PluginInvokeRequestExt;
+use symbio_platform::kernel::plugin::PluginInvokeRequestExt;
 // 未装配容器时没有 PLUGIN_DIR，配置文件落盘目标指个临时目录
 use crate::test_dir;
 use std::collections::BTreeSet;
@@ -116,13 +116,13 @@ async fn option_definition_without_container_degrades_to_empty() {
 /// 一项，而不会有任何编译错误。安全选项（沙箱）由 sandbox 插件走同一广播贡献。
 #[tokio::test]
 async fn session_contributes_option_fields_to_the_visitor() {
-    use symbio_kernel::capability::Registry;
-    use symbio_kernel::plugin::PluginSimpleRequest;
+    use symbio_platform::kernel::capability::Registry;
+    use symbio_platform::kernel::plugin::PluginSimpleRequest;
+    use symbio_platform::sdk::capability::capability_option_fields;
     use symbio_plugin_api::OPTION_VISITOR;
     use symbio_plugin_api::PATH;
     use symbio_plugin_api::TRAVERSE_AVAILABLE_OPTIONS;
     use symbio_providers::DefaultToolVisitor;
-    use symbio_sdk::capability::capability_option_fields;
 
     let p = Arc::new(plugin());
     let ctx = Arc::new(PluginSimpleRequest::new(None, None)).fork();

@@ -16,7 +16,7 @@ import { auditCase, expectAudit } from '../audit-assert.mjs'
 //                                          D-191 后一插件一 crate）
 //   <root>/<owner 插件>/README.md  成员资格判词 + 兄弟插件指路
 //   <root>/<owner 插件>/src/host/*.rs  职责表 + 归属表副本 + 真实模块文件
-//   <root>/crates/symbio-deploy/src/lib.rs     装配清单（生成物，判据读它）
+//   <root>/crates/symbio-platform/src/deploy/mod.rs     装配清单（生成物，判据读它）
 const script = fileURLToPath(new URL('./agent-ownership-audit.mjs', import.meta.url))
 
 const BASE_README = [
@@ -75,9 +75,9 @@ function audit({ readme, modRs, pluginRs, assembly, extraHost = {}, extraPluginD
     for (const [name, src] of Object.entries(extraHost)) {
       fs.writeFileSync(path.join(agentHost, name), src)
     }
-    const assemblyDir = path.join(root, 'crates/symbio-deploy/src')
+    const assemblyDir = path.join(root, 'crates/symbio-platform/src/deploy')
     fs.mkdirSync(assemblyDir, { recursive: true })
-    fs.writeFileSync(path.join(assemblyDir, 'lib.rs'), assembly ?? BASE_ASSEMBLY)
+    fs.writeFileSync(path.join(assemblyDir, 'mod.rs'), assembly ?? BASE_ASSEMBLY)
 
     const result = spawnSync(process.execPath, [script, `--root=${root}`], {
       cwd: root,

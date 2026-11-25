@@ -2,7 +2,7 @@
 //!
 //! ## 为什么在插件里，而不是 core
 //!
-//! 它不住在宿主内核的 `chat` 模块（`crates/symbio-kernel/src/chat/`），不与那里的
+//! 它不住在宿主内核的 `chat` 模块（`crates/symbio-platform/src/kernel/chat/`），不与那里的
 //! `session_chat` / `chat_node` 并列。但两者性质不同：
 //!
 //! - **协议 schema**（那两个）是**跨插件契约**——agent / local / model 都按同一份
@@ -21,8 +21,8 @@
 //! 未知键仍被静默忽略。存量配置文件**无需迁移**。
 
 use serde::{Deserialize, Serialize};
-use symbio_kernel::chat::chat_node::{ChatNode, NodeRole};
-use symbio_sdk::capability::ApprovalGrants;
+use symbio_platform::kernel::chat::chat_node::{ChatNode, NodeRole};
+use symbio_platform::sdk::capability::ApprovalGrants;
 
 #[derive(Debug, Clone, Copy, PartialEq, Eq, serde::Serialize)]
 pub enum PresentationTree {

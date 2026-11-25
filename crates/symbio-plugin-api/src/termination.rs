@@ -15,7 +15,7 @@
 use std::fmt;
 use std::sync::Arc;
 
-use symbio_kernel::capability::{CapabilityFamily, CapabilityRow};
+use symbio_platform::kernel::capability::{CapabilityFamily, CapabilityRow};
 
 use crate::drive::DriveFact;
 use crate::FactDraft;

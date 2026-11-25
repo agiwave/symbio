@@ -37,7 +37,7 @@ const KERNEL_GRID = `pub const CELLS: &[EventDecl] = &[
 /** owner 插件：清单登记 + 自家 `EventDecl` + 四档角色各有人住（CS-011 的干净面）。 */
 const OWNER = {
   'crates/symbio-plugin-loop/PLUGIN.yml': 'id: loop\nshared_events: memory.encoded\n',
-  'crates/symbio-plugin-loop/src/control_decl.rs': `use symbio_sdk::{Entity, EventDecl, FactRole, Verb};
+  'crates/symbio-plugin-loop/src/control_decl.rs': `use symbio_platform::sdk::{Entity, EventDecl, FactRole, Verb};
 pub const EVENTS: &[EventDecl] = &[
     EventDecl::new("memory.encoded", (Entity::Memory, Verb::Opened)),
 ];
@@ -72,8 +72,8 @@ function audit(files) {
 }
 
 const clean = (extra = {}) => ({
-  'crates/symbio-kernel/src/event/mod.rs': KERNEL_MOD,
-  'crates/symbio-kernel/src/event/grid.rs': KERNEL_GRID,
+  'crates/symbio-platform/src/kernel/event/mod.rs': KERNEL_MOD,
+  'crates/symbio-platform/src/kernel/event/grid.rs': KERNEL_GRID,
   ...OWNER,
   ...CONSUMER,
   ...extra,
@@ -91,7 +91,7 @@ test('② 除 owner 外没人引用 ⇒ 红：共享表不许收单消费方的�
 test('③ 内核 `event/mod.rs` 还挂同名常量 ⇒ 红：登记口只能有一个', () => {
   const r = audit(
     clean({
-      'crates/symbio-kernel/src/event/mod.rs': `${KERNEL_MOD}pub const EVENT_MEMORY_ENCODED: &str = "memory.encoded";\n`,
+      'crates/symbio-platform/src/kernel/event/mod.rs': `${KERNEL_MOD}pub const EVENT_MEMORY_ENCODED: &str = "memory.encoded";\n`,
     }),
   )
   assert.equal(r.status, 1)
@@ -102,7 +102,7 @@ test('③ 内核 `event/mod.rs` 还挂同名常量 ⇒ 红：登记口只能有�
 test('③ 内核 `CELLS` 还挂同名行 ⇒ 红（常量删了、行没删是同一件事的两半）', () => {
   const r = audit(
     clean({
-      'crates/symbio-kernel/src/event/grid.rs': `${KERNEL_GRID}    EventDecl::new("memory.encoded", (Entity::Memory, Verb::Opened)),\n`,
+      'crates/symbio-platform/src/kernel/event/grid.rs': `${KERNEL_GRID}    EventDecl::new("memory.encoded", (Entity::Memory, Verb::Opened)),\n`,
     }),
   )
   assert.equal(r.status, 1)
@@ -122,8 +122,8 @@ test('④ 一条名字两个 owner ⇒ 非 0：owner 唯一是这条正道的前
   const r = audit(
     clean({
       'crates/symbio-plugin-session/PLUGIN.yml': 'id: session\nshared_events: memory.encoded\n',
-      'crates/symbio-plugin-session/src/stats.rs': `pub const EVENTS: &[symbio_sdk::EventDecl] = &[
-    symbio_sdk::EventDecl::new("memory.encoded", (symbio_sdk::Entity::Memory, symbio_sdk::Verb::Opened)),
+      'crates/symbio-plugin-session/src/stats.rs': `pub const EVENTS: &[symbio_platform::sdk::EventDecl] = &[
+    symbio_platform::sdk::EventDecl::new("memory.encoded", (symbio_platform::sdk::Entity::Memory, symbio_platform::sdk::Verb::Opened)),
 ];
 `,
     }),
@@ -134,7 +134,7 @@ test('④ 一条名字两个 owner ⇒ 非 0：owner 唯一是这条正道的前
 
 auditCase('⑤ 内核表上的多消费方存量：只报数，不判红', () => audit(
     clean({
-      'crates/symbio-kernel/src/event/mod.rs': `${KERNEL_MOD}pub const EVENT_TASK_HELD: &str = "task.held";\n`,
+      'crates/symbio-platform/src/kernel/event/mod.rs': `${KERNEL_MOD}pub const EVENT_TASK_HELD: &str = "task.held";\n`,
       'crates/symbio-plugin-loop/src/hold.rs': 'pub const K: &str = "task.held";\n',
       'crates/symbio-plugin-session/src/hold.rs': 'pub const K: &str = "task.held";\n',
     }),
@@ -144,7 +144,7 @@ auditCase('⑥ CS-011：干净夹具四档都有人住 ⇒ 绿', () => audit(cle
 
 auditCase('⑥ CS-011：删掉一档角色 ⇒ 红（判据读角色，缺席只让守卫变哑）', () => audit(
     clean({
-      'crates/symbio-plugin-loop/src/control_decl.rs': `use symbio_sdk::{Entity, EventDecl, FactRole, Verb};
+      'crates/symbio-plugin-loop/src/control_decl.rs': `use symbio_platform::sdk::{Entity, EventDecl, FactRole, Verb};
 pub const EVENTS: &[EventDecl] = &[
     EventDecl::new("memory.encoded", (Entity::Memory, Verb::Opened)),
 ];
@@ -159,12 +159,12 @@ pub const ROLES: &[FactRole] = &[
 
 auditCase('⑥ CS-011：角色只写在 `.test.rs` 里不算居住 ⇒ 红', () => audit(
     clean({
-      'crates/symbio-plugin-loop/src/control_decl.rs': `use symbio_sdk::{Entity, EventDecl, Verb};
+      'crates/symbio-plugin-loop/src/control_decl.rs': `use symbio_platform::sdk::{Entity, EventDecl, Verb};
 pub const EVENTS: &[EventDecl] = &[
     EventDecl::new("memory.encoded", (Entity::Memory, Verb::Opened)),
 ];
 `,
-      'crates/symbio-plugin-loop/src/control_decl.test.rs': `use symbio_sdk::{FactRole};
+      'crates/symbio-plugin-loop/src/control_decl.test.rs': `use symbio_platform::sdk::{FactRole};
 pub const ROLES: &[FactRole] = &[
     FactRole::FinalizesScope,
     FactRole::StopsScope,

@@ -16,7 +16,7 @@ import { fileURLToPath } from 'node:url'
 import assembly from './assembly.mjs'
 
 const REPO = path.resolve(path.dirname(fileURLToPath(import.meta.url)), '..', '..')
-const GEN_FILE = path.join(REPO, 'crates', 'symbio-deploy', 'src', 'lib.rs')
+const GEN_FILE = path.join(REPO, 'crates', 'symbio-platform', 'src', 'deploy', 'mod.rs')
 
 /**
  * 一棵只有两个插件目录的临时仓库。

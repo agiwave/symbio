@@ -38,11 +38,13 @@
 
 use super::super::active::{ActiveSessionState, InboxItem};
 use std::sync::Arc;
-use symbio_kernel::chat::chat_node as cm;
-use symbio_sdk::vdfs::host::VdfsChangeSubscriptions;
+use symbio_platform::kernel::chat::chat_node as cm;
+use symbio_platform::sdk::vdfs::host::VdfsChangeSubscriptions;
 
 /// 合并标记的三个键名（唯一真源在 core 词汇表；重建侧与 loop 侧也读它们）。
-pub use symbio_sdk::round::facts::{META_SUPPLEMENT, META_SUPPLEMENT_COUNT, META_SUPPLEMENT_IDS};
+pub use symbio_platform::sdk::round::facts::{
+    META_SUPPLEMENT, META_SUPPLEMENT_COUNT, META_SUPPLEMENT_IDS,
+};
 
 /// 合并 n 条补充时正文之间的连接符。
 ///
@@ -67,9 +69,11 @@ fn merge_many(items: &[InboxItem]) -> cm::ChatNode {
         // （`useChatConnection.ts`：后端沿用调用方给的 id，前端按 id 合并）。
         id: items[0].id.clone(),
         parent_id: None,
-        principal: Some(symbio_kernel::chat::principal::Principal::from_legacy(
-            symbio_plugin_api::PRINCIPAL_USER,
-        )),
+        principal: Some(
+            symbio_platform::kernel::chat::principal::Principal::from_legacy(
+                symbio_plugin_api::PRINCIPAL_USER,
+            ),
+        ),
         msg_type: Some(cm::NodeKind::Body),
         content: Some(merge_content(items)),
         status: Some(cm::NodeStatus::Completed),

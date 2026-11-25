@@ -253,7 +253,7 @@ async fn an_empty_summary_is_a_failure_too() {
 async fn pre_compact_is_fired_by_the_executor_without_changing_the_outcome() {
     use std::sync::Weak;
 
-    use symbio_kernel::plugin::{
+    use symbio_platform::kernel::plugin::{
         Plugin, PluginError, PluginInvokeRequest, PluginInvokeResponse, PluginMeta, PluginPayload,
         PluginSimpleRequest,
     };

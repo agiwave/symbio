@@ -5,8 +5,8 @@
 //! 已覆盖折叠细节，本文件不重复。
 
 use super::*;
-use symbio_kernel::chat::chat_node::{NodeKind, NodeStatus, CHAT_STYLE_TAG_RUN};
-use symbio_kernel::event::{Entity, Verb, EVENT_FAILED, EVENT_REQUEST, EVENT_RESPONSE};
+use symbio_platform::kernel::chat::chat_node::{NodeKind, NodeStatus, CHAT_STYLE_TAG_RUN};
+use symbio_platform::kernel::event::{Entity, Verb, EVENT_FAILED, EVENT_REQUEST, EVENT_RESPONSE};
 use symbio_plugin_api::events::{
     EVENT_ARTIFACT_ADDED, EVENT_CHAT_ASSISTANT_FINAL, EVENT_SCOPE_DISPATCH, EVENT_TOOL_REQUESTED,
 };

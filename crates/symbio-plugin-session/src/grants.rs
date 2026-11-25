@@ -21,11 +21,11 @@
 use super::plugin::SessionPlugin;
 use serde::Deserialize;
 use std::sync::Arc;
-use symbio_kernel::capability::CapabilityRiskLevel;
-use symbio_kernel::plugin::{
+use symbio_platform::kernel::capability::CapabilityRiskLevel;
+use symbio_platform::kernel::plugin::{
     PluginError, PluginInvokeRequest, PluginInvokeRequestExt, PluginInvokeResponse, PluginPayload,
 };
-use symbio_kernel::vdfs::VdfsContent;
+use symbio_platform::kernel::vdfs::VdfsContent;
 
 #[derive(Clone, Deserialize)]
 struct GrantRequest {

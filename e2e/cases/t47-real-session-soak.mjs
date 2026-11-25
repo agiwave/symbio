@@ -403,14 +403,14 @@ export default defineCase(
       // 行为判成故障。换成三条能对账的：
       //   a) **换基的痕迹在**：快照落格且重建可读（证据 ③）——对话网格只承载还能逐句
       //      对账的后缀，快照摘要节点是 `Notice`、不进网格（转写投影的规则见
-      //      `symbio-sdk/src/projection/mutations.rs` 的 `snapshot_entries`）；
+      //      `crates/symbio-platform/src/sdk/projection/mutations.rs` 的 `snapshot_entries`）；
       //   b) **换基只吃前缀**：网格里剩下的发言是轮次序列的一段**连续后缀**——中间少一句
       //      就是真丢（后缀之外的那些在快照里，无从逐句核对，那是压缩的语义而不是缺陷）；
       //   c) **一句不多**：每个 marker 至多出现一次。换基边界的两条来源（快照载荷与
       //      紧随其后的轮次格）对同一个节点身份各产一行，投影里就会多一条重复发言。
       //      这一条只在真的压过压缩、且压过之后还有轮次时才有靶子，是 ④ 里唯一
       //      「不跑够轮次就看不见」的判据（边界去重见
-      //      `symbio-sdk/src/projection/transcript.rs` 的 `superseded`）。
+      //      `crates/symbio-platform/src/sdk/projection/transcript.rs` 的 `superseded`）。
       const gridEntries = stats.transcript?.entries ?? [];
       assert(gridEntries.length > 0, '转写列应读出内容（对话面读侧）');
       const userGrid = gridEntries.filter((e) => e.role === 'user').map((e) => e.text ?? '');

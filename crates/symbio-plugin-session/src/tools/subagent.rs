@@ -54,6 +54,7 @@ use super::behavior::{ASSIGN_WORK, DELEGATION_PROMISE};
 use serde_json::{json, Value};
 use std::collections::{HashMap, HashSet};
 use std::sync::Arc;
+use symbio_platform::sdk::keys::SOURCE_PRINCIPAL;
 use symbio_plugin_api::chat_node::{
     ChatNode, MessageContent, NodeKind, NodeRole, NodeStatus, ResumeAction, ResumeRequest,
 };
@@ -76,7 +77,6 @@ use symbio_plugin_api::{
     VdfsContent, VdfsListResponse, VdfsNode, VdfsProvider, VdfsRequest, VDFS_STATUS_WORKING,
 };
 use symbio_plugin_api::{PLUGIN_ID_SESSION, PLUGIN_ID_SUBAGENT};
-use symbio_sdk::keys::SOURCE_PRINCIPAL;
 
 // ── 本工具的身份约定（续跑参数经**载荷**回传，由 tool_executor 落到 meta.prompt）──
 /// 工具名。**两处必须同源**：`CapabilityMeta.name`（LLM 看到的短名）与待审批载荷

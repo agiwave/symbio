@@ -33,16 +33,16 @@ use super::transcript::publish::append_and_publish;
 use super::types::SessionSummary;
 use serde_json::Value;
 use std::sync::Arc;
-use symbio_kernel::chat::chat_node as cm;
-use symbio_kernel::event::{Entity, Event, Verb};
-use symbio_kernel::plugin::PluginError;
+use symbio_platform::kernel::chat::chat_node as cm;
+use symbio_platform::kernel::event::{Entity, Event, Verb};
+use symbio_platform::kernel::plugin::PluginError;
+use symbio_platform::sdk::authz::PRINCIPAL_MAIN;
+use symbio_platform::sdk::plugin::fact_source::FactSource;
 use symbio_plugin_api::events::{
     EVENT_ARTIFACT_ADDED, EVENT_AUTHZ_GRANTED, EVENT_CHAT_ASSISTANT_FALLBACK,
     EVENT_CHAT_ASSISTANT_FINAL, EVENT_USER_ANSWER, EVENT_USER_MESSAGE,
 };
 use symbio_plugin_api::FactDraft;
-use symbio_sdk::authz::PRINCIPAL_MAIN;
-use symbio_sdk::plugin::fact_source::FactSource;
 
 /// 会话运行态的一次变化。
 ///
@@ -234,7 +234,7 @@ impl Convergence {
         session_id: &str,
         user_seq: u64,
         source: &dyn FactSource,
-        drive: Option<&Arc<dyn symbio_sdk::drive::DriveEntry>>,
+        drive: Option<&Arc<dyn symbio_platform::sdk::drive::DriveEntry>>,
         opening_error: Option<String>,
     ) -> Result<bool, PluginError> {
         if let Some(entry) = drive {
@@ -263,7 +263,7 @@ impl Convergence {
         session_id: &str,
         user_seq: u64,
         source: &dyn FactSource,
-        drive: Option<&Arc<dyn symbio_sdk::drive::DriveEntry>>,
+        drive: Option<&Arc<dyn symbio_platform::sdk::drive::DriveEntry>>,
     ) -> Result<bool, PluginError> {
         let events = source.range(0);
         let user = events

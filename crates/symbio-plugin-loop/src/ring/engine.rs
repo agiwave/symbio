@@ -8,7 +8,7 @@ use std::sync::{Arc, Mutex};
 
 use futures::future::join_all;
 use serde_json::{json, Value};
-use symbio_kernel::decl::ring::owed;
+use symbio_platform::kernel::decl::ring::owed;
 use symbio_plugin_api::debt::{
     FailureProjection, STAMP_FAILURE, STAMP_KEY, STAMP_ROLE, STAMP_SPEND, STAMP_USAGE,
 };
@@ -941,7 +941,7 @@ fn failure_payload(facts: &[Value], row: &DebtRow, class: PortErrorClass, why: &
 /// 正文，重放不再逐字节相同。快照在 `drive` 里取一次，克隆句柄分给整批。
 struct SnapshotReader {
     facts: Vec<PortFact>,
-    events: Vec<symbio_kernel::event::Event>,
+    events: Vec<symbio_platform::kernel::event::Event>,
 }
 
 impl SnapshotReader {
@@ -958,7 +958,7 @@ impl PortFactReader for SnapshotReader {
         self.facts.clone()
     }
 
-    fn events(&self) -> Vec<symbio_kernel::event::Event> {
+    fn events(&self) -> Vec<symbio_platform::kernel::event::Event> {
         self.events.clone()
     }
 }

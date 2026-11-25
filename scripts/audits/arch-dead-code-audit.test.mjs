@@ -35,13 +35,13 @@ function fixture({ sdk = 'pub fn target() {}\n', caller = '', testCaller = '', b
     fs.mkdirSync(path.dirname(abs), { recursive: true })
     fs.writeFileSync(abs, text)
   }
-  w('crates/symbio-sdk/src/lib.rs', sdk)
-  w('crates/symbio-kernel/src/lib.rs', 'pub fn k() {}\n')
+  w('crates/symbio-platform/src/sdk/mod.rs', sdk)
+  w('crates/symbio-platform/src/kernel/mod.rs', 'pub fn k() {}\n')
   w('crates/symbio-plugin-api/src/lib.rs', 'pub fn a() {}\n')
-  w('crates/symbio-contract/src/lib.rs', 'pub fn contract_marker() {}\nfn uses_marker() {\n    contract_marker()\n}\n')
+  w('crates/symbio-platform/src/contract/mod.rs', 'pub fn contract_marker() {}\nfn uses_marker() {\n    contract_marker()\n}\n')
   w('docs/003-design/018-模块架构.md', '# 模块架构\n')
   if (caller) w('crates/consumer/src/lib.rs', caller)
-  if (testCaller) w('crates/symbio-sdk/src/lib.test.rs', testCaller)
+  if (testCaller) w('crates/symbio-platform/src/sdk/lib.test.rs', testCaller)
   for (let i = 0; i < filler; i++) w(`crates/filler/src/f${i}.rs`, `pub fn f${i}() {}\n`)
   if (baseline) {
     w(
@@ -62,11 +62,11 @@ function run(root, extra = []) {
 const goodBaseline = [
   {
     symbol: 'target',
-    path: 'crates/symbio-sdk/src/lib.rs',
+    path: 'crates/symbio-platform/src/sdk/mod.rs',
     why: '契约实现',
     evidence: 'docs/003-design/018-模块架构.md',
   },
-  { symbol: 'k', path: 'crates/symbio-kernel/src/lib.rs', why: '契约实现', evidence: 'docs/003-design/018-模块架构.md' },
+  { symbol: 'k', path: 'crates/symbio-platform/src/kernel/mod.rs', why: '契约实现', evidence: 'docs/003-design/018-模块架构.md' },
   { symbol: 'a', path: 'crates/symbio-plugin-api/src/lib.rs', why: '契约实现', evidence: 'docs/003-design/018-模块架构.md' },
 ]
 const kAndA = goodBaseline.slice(1)
@@ -81,24 +81,24 @@ test('调用只出现在测试文件 ⇒ 仍算零生产调用', () => {
 })
 
 test('use / pub use 行不算调用（转出不是调用）', () => {
-  const root = fixture({ caller: 'pub use symbio_sdk::target;\n', baseline: kAndA })
+  const root = fixture({ caller: 'pub use symbio_platform::sdk::target;\n', baseline: kAndA })
   const r = run(root)
   expectAudit(r, 1, [/AD-001.*target/])
 })
 
 test('跨 crate 的普通调用算生产调用', () => {
-  const root = fixture({ caller: 'pub fn boot() { symbio_sdk::target(); }\n', baseline: kAndA })
+  const root = fixture({ caller: 'pub fn boot() { symbio_platform::sdk::target(); }\n', baseline: kAndA })
   const r = run(root)
   assert.equal(r.status, 0, r.stdout + r.stderr)
 })
 
 test('同名多定义不判（名字级计数分不清是哪一处）', () => {
   const symbols = [
-    { symbol: 'new', path: 'crates/symbio-sdk/src/lib.rs', line: 1 },
-    { symbol: 'new', path: 'crates/symbio-kernel/src/lib.rs', line: 1 },
+    { symbol: 'new', path: 'crates/symbio-platform/src/sdk/mod.rs', line: 1 },
+    { symbol: 'new', path: 'crates/symbio-platform/src/kernel/mod.rs', line: 1 },
   ]
   const corpus = new Map([
-    ['crates/symbio-sdk/src/lib.rs', callCorpus('impl A { pub fn new() {} }\npub fn target() { new(); }\n')],
+    ['crates/symbio-platform/src/sdk/mod.rs', callCorpus('impl A { pub fn new() {} }\npub fn target() { new(); }\n')],
   ])
   const dead = zeroCallSymbols(symbols, corpus)
   assert.deepEqual(dead, [], '两处同名 new 不得判零调用')
@@ -126,7 +126,7 @@ test('AD-001：新出现的零调用符号即红', () => {
 })
 
 test('AD-002：基线有而源码已删 / 已接线 ⇒ 红，逼同批下调基线', () => {
-  const root = fixture({ caller: 'pub fn boot() { symbio_sdk::target(); }\n', baseline: goodBaseline })
+  const root = fixture({ caller: 'pub fn boot() { symbio_platform::sdk::target(); }\n', baseline: goodBaseline })
   const r = run(root)
   assert.equal(r.status, 1)
   assert.match(r.stdout, /AD-002.*target/, '基线留余量必须同批下调')
@@ -139,8 +139,8 @@ test('基线逐条对账通过 ⇒ 绿', () => {
   const baseline = JSON.parse(fs.readFileSync(path.join(root, 'scripts/baselines/arch-dead-code.json'), 'utf8'))
   const errors = judge(
     [
-      { symbol: 'target', path: 'crates/symbio-sdk/src/lib.rs', line: 1 },
-      { symbol: 'k', path: 'crates/symbio-kernel/src/lib.rs', line: 1 },
+      { symbol: 'target', path: 'crates/symbio-platform/src/sdk/mod.rs', line: 1 },
+      { symbol: 'k', path: 'crates/symbio-platform/src/kernel/mod.rs', line: 1 },
       { symbol: 'a', path: 'crates/symbio-plugin-api/src/lib.rs', line: 1 },
     ],
     baseline,
@@ -152,7 +152,7 @@ test('基线逐条对账通过 ⇒ 绿', () => {
 // ── AD-003：为什么 + 证据可打开 ────────────────────────────────────
 
 test('AD-003：why 为空 ⇒ 红', () => {
-  const root = fixture({ baseline: [{ symbol: 'target', path: 'crates/symbio-sdk/src/lib.rs', why: '  ', evidence: 'D-404' }] })
+  const root = fixture({ baseline: [{ symbol: 'target', path: 'crates/symbio-platform/src/sdk/mod.rs', why: '  ', evidence: 'D-404' }] })
   const r = run(root)
   assert.equal(r.status, 1)
   assert.match(r.stdout, /AD-003.*why/)
@@ -161,21 +161,21 @@ test('AD-003：why 为空 ⇒ 红', () => {
 test('AD-003：evidence 指向不存在的决策 / 路径 ⇒ 红', () => {
   const root = fixture({
     baseline: [
-      { symbol: 'target', path: 'crates/symbio-sdk/src/lib.rs', why: '契约', evidence: 'D-999' },
+      { symbol: 'target', path: 'crates/symbio-platform/src/sdk/mod.rs', why: '契约', evidence: 'D-999' },
     ],
   })
   assert.match(run(root).stdout, /AD-003.*D-999/)
 
   const root2 = fixture({
     baseline: [
-      { symbol: 'target', path: 'crates/symbio-sdk/src/lib.rs', why: '契约', evidence: 'docs/nope.md' },
+      { symbol: 'target', path: 'crates/symbio-platform/src/sdk/mod.rs', why: '契约', evidence: 'docs/nope.md' },
     ],
   })
   assert.match(run(root2).stdout, /AD-003.*docs\/nope\.md/)
 })
 
 test('AD-003：缺 path / 重复登记 ⇒ 红', () => {
-  const row = { symbol: 'target', path: 'crates/symbio-sdk/src/lib.rs', why: '契约', evidence: 'docs/003-design/018-模块架构.md' }
+  const row = { symbol: 'target', path: 'crates/symbio-platform/src/sdk/mod.rs', why: '契约', evidence: 'docs/003-design/018-模块架构.md' }
   const root = fixture({
     baseline: [{ symbol: 'target', why: '契约', evidence: 'docs/003-design/018-模块架构.md' }, row, { ...row }],
   })
@@ -188,13 +188,13 @@ test('AD-003：缺 path / 重复登记 ⇒ 红', () => {
 
 test('AD-004：架构树缺失 / 语料过少 ⇒ 退出码 2', () => {
   const root = fixture({ filler: 0 })
-  fs.rmSync(path.join(root, 'crates/symbio-kernel'), { recursive: true, force: true })
+  fs.rmSync(path.join(root, 'crates/symbio-platform/src/kernel'), { recursive: true, force: true })
   const r = run(root)
   expectAudit(r, 2, [/AD-004/])
 })
 
 test('AD-004：基线缺失 ⇒ 退出码 2（不按「零违规」通过）', () => {
-  const root = fixture({ caller: 'pub fn boot() { symbio_sdk::target(); }\n' })
+  const root = fixture({ caller: 'pub fn boot() { symbio_platform::sdk::target(); }\n' })
   assert.equal(run(root).status, 2)
 })
 
@@ -206,7 +206,7 @@ test('surfaceErrors 对空扫描面报 AD-004', () => {
 // ── 历史回放：判据能指出「从哪一刻开始零调用」 ──────────────────────
 
 test('--at：同一条提交前后，符号从「有调用」变成「零调用」', () => {
-  const root = fixture({ caller: 'pub fn boot() { symbio_sdk::target(); }\n' })
+  const root = fixture({ caller: 'pub fn boot() { symbio_platform::sdk::target(); }\n' })
   const git = (...args) =>
     spawnSync('git', args, { cwd: root, encoding: 'utf8' })
   git('init')

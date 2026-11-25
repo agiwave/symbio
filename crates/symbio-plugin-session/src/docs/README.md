@@ -35,7 +35,7 @@ impl: done
 | [DE-107-session-options](107-session-options.md "DE-107-session-options") | 现行规范 | 会话选项 = 会话配置表单：同一份 `DetailDefinition` 的两种渲染形态（选项栏 / 详情页），三条通路（`node.schema` / `attributes.metadata` / `vdfs/write`），收集走统一 `Registry`（选项行）|
 
 > **主循环旧设计的去向**（原 DE-102「会话核心循环」已退场，实现随环收口删除）：债的挑选与偿还住
-> `crates/symbio-plugin-loop/src/ring/engine.rs`（驱动在 `crates/symbio/src/drive.rs`），一轮的装配与
+> `crates/symbio-plugin-loop/src/ring/engine.rs`（驱动在 `crates/symbio-runtime/src/host/entry.rs`），一轮的装配与
 > 收尾住 `plugin/round.rs`，轮的身份是事实源打开时绑定的会话身份（`D-317`），节点状态见 [DE-105](105-node-state-streaming.md "DE-105-node-state-streaming")，
 > 模块拆分见 [DE-104](104-module-layout.md "DE-104-module-layout")。历史在 `git log`。
 

@@ -109,7 +109,7 @@ Server 与 CLI 共用同一个二进制和 `RuntimeHost`，通过 HTTP/WS 提供
 产物。目录选择读取的是 Server 文件系统；非回环监听必须提供 `--token`。默认只允许
 同源访问；确需跨源时同时提供 `--allowed-origin https://console.example` 与 `--token`，
 Origin 必须精确匹配且不能使用通配符。接入与生命周期边界见
-[crates/symbio-server/README](../../symbio-server/README.md)，完整 Server 选项用 `symbio-cli serve --help` 查看。
+[crates/symbio-runtime/README](../../symbio-runtime/README.md)，完整 Server 选项用 `symbio-cli serve --help` 查看。
 
 终端模式判定顺序：`--heartbeat` → `-m`/位置参数 → `--repl` → stdin 非终端则走管道 → 否则 REPL。
 

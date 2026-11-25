@@ -46,8 +46,8 @@ const DEFAULT_API_EVENTS =
 
 /** 机制层三 crate：判据要求它们都在（SV-001 ③ 的扫描范围）。 */
 const DEFAULT_CORE = {
-  'crates/symbio-sdk/src/lib.rs': '',
-  'crates/symbio-kernel/src/lib.rs': '',
+  'crates/symbio-platform/src/sdk/mod.rs': '',
+  'crates/symbio-platform/src/kernel/mod.rs': '',
   'crates/symbio/src/lib.rs': '',
 }
 
@@ -188,11 +188,11 @@ test('⑤ 测试文件里的重复 ⇒ 绿（测试不是生产消费方）', ()
 test('⑦ 机制层手写词汇层事件名 ⇒ 红（SV-001 ③）', () => {
   const root = fixture({
     'crates/symbio-plugin-a/src/lib.rs': 'pub fn a() {}\n',
-    'crates/symbio-sdk/src/foo.rs': 'pub const WRITE: &str = "vdfs/write";\n',
+    'crates/symbio-platform/src/sdk/foo.rs': 'pub const WRITE: &str = "vdfs/write";\n',
   })
   try {
     const r = runOn(root)
-    expectAudit(r, 1, [/SV-001/, /vdfs\/write/, /symbio-sdk/])
+    expectAudit(r, 1, [/SV-001/, /vdfs\/write/, /symbio-platform/])
   } finally {
     rmTree(root)
   }
@@ -201,7 +201,7 @@ test('⑦ 机制层手写词汇层事件名 ⇒ 红（SV-001 ③）', () => {
 test('⑧ 带生成标记的 test_fixtures.rs ⇒ 绿（单源投影不是第二份定义）', () => {
   const root = fixture({
     'crates/symbio-plugin-a/src/lib.rs': 'pub fn a() {}\n',
-    'crates/symbio-sdk/src/test_fixtures.rs':
+    'crates/symbio-platform/src/sdk/test_fixtures.rs':
       '//! core 用例事件拼写 —— **由 `scripts/facts/test-fixtures-rs.mjs` 生成，请勿手改**。\n\n' +
       'pub const EVENT_VDFS_WRITE: &str = "vdfs/write";\n',
   })
@@ -216,7 +216,7 @@ test('⑧ 带生成标记的 test_fixtures.rs ⇒ 绿（单源投影不是第二
 test('⑬ 手抄 test_fixtures.rs（无生成标记）⇒ 红（正是本判据要拦的第二份定义）', () => {
   const root = fixture({
     'crates/symbio-plugin-a/src/lib.rs': 'pub fn a() {}\n',
-    'crates/symbio-sdk/src/test_fixtures.rs': 'pub const EVENT_VDFS_WRITE: &str = "vdfs/write";\n',
+    'crates/symbio-platform/src/sdk/test_fixtures.rs': 'pub const EVENT_VDFS_WRITE: &str = "vdfs/write";\n',
   })
   try {
     const r = runOn(root)

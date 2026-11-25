@@ -10,8 +10,8 @@
 //! 事实 / 视图不在本插件的控制面，因此大多不在这里——除本插件自己的收束格
 //! `session.settled` / `session.terminated`，以及随 `chat.*` 词汇移交的对话面两条。
 
-use symbio_kernel::decl::{FactDecl, PluginDeclarations};
-use symbio_kernel::event::{Entity, EventDecl, FactRole, Verb};
+use symbio_platform::kernel::decl::{FactDecl, PluginDeclarations};
+use symbio_platform::kernel::event::{Entity, EventDecl, FactRole, Verb};
 use symbio_plugin_api::ring::{Decl, Pattern};
 
 /// 定时触发：没有用户消息时的自主行为起点。落在 `system × opened`。
@@ -264,8 +264,8 @@ pub(crate) const FACTS: &[FactDecl] = &[
 ///
 /// 按**面**切开，每张表的大小就是那个折叠算法真正的依赖：`commitment_records` 只认承诺
 /// 四条，`changes` 只认产物一条。交一张 20 字段的合并表会把耦合面说宽（DE-024 D-206）。
-pub(crate) const CHAT_VOCAB: symbio_sdk::projection::vocab::ChatVocab =
-    symbio_sdk::projection::vocab::ChatVocab {
+pub(crate) const CHAT_VOCAB: symbio_platform::sdk::projection::vocab::ChatVocab =
+    symbio_platform::sdk::projection::vocab::ChatVocab {
         user_message: symbio_plugin_api::events::EVENT_USER_MESSAGE,
         branch: symbio_plugin_api::events::EVENT_SCOPE_BRANCH,
         branch_selected: EVENT_SCOPE_BRANCH_SELECTED,
@@ -280,8 +280,8 @@ pub(crate) const CHAT_VOCAB: symbio_sdk::projection::vocab::ChatVocab =
 /// 消息变更面（6 条）：本插件是这六条里四条的 owner（`message.*` 与
 /// `session.consolidated`），`artifact.added` 的 owner 是 `crates/symbio-plugin-tool`，
 /// `tool.requested` 的 owner 是 `crates/symbio-plugin-model`。
-pub(crate) const MESSAGE_VOCAB: symbio_sdk::projection::vocab::MessageVocab =
-    symbio_sdk::projection::vocab::MessageVocab {
+pub(crate) const MESSAGE_VOCAB: symbio_platform::sdk::projection::vocab::MessageVocab =
+    symbio_platform::sdk::projection::vocab::MessageVocab {
         tool_requested: symbio_plugin_api::events::EVENT_TOOL_REQUESTED,
         artifact_added: symbio_plugin_api::events::EVENT_ARTIFACT_ADDED,
         message_added: symbio_plugin_api::events::EVENT_MESSAGE_ADDED,

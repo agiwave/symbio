@@ -1,7 +1,7 @@
 //! 会话地址面的**路由、订阅与共享读值**。
 //!
 //! 职责：
-//! - [`symbio_kernel::vdfs::provider::VdfsProvider::dispatch`] 是唯一入口：**先按 `path` 定位资源域，
+//! - [`symbio_platform::kernel::vdfs::provider::VdfsProvider::dispatch`] 是唯一入口：**先按 `path` 定位资源域，
 //!   再按 `req` 执行操作**——每个域各有一个 `*_at` 方法，dispatch 只做路由，不碰任何域内
 //!   读写。「这个地址归哪个域」的问题只在这一处有答案；域内怎么读写在各自的文件里：
 //!   目录面 [`vdfs_catalog`]、转写面 [`vdfs_messages`]、收件箱面 [`vdfs_inbox`]
@@ -15,8 +15,8 @@
 
 use super::*;
 use crate::stats_reading::present_message;
-use symbio_kernel::chat::chat_node as cm;
-use symbio_kernel::vdfs::{
+use symbio_platform::kernel::chat::chat_node as cm;
+use symbio_platform::kernel::vdfs::{
     VdfsChangeSink, VdfsContext, VdfsError, VdfsNode, VdfsProvider, VdfsRequest, VdfsResponse,
     VdfsResult,
 };

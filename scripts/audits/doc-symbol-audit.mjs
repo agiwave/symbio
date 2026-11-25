@@ -382,7 +382,7 @@ function auditRosterAnchors () {
  * 往目录里塞一个未归类模块 ⇒ 各自变红。
  */
 const PARAMS_MD = 'docs/003-design/001-核心架构.md'
-const PROJ_DIR = 'crates/symbio-sdk/src/projection'
+const PROJ_DIR = 'crates/symbio-platform/src/sdk/projection'
 const MAP_MD = 'docs/004-ref/009-投影映射.md'
 
 /** 反引号 token 提取（表格单元格里可能套着 `**` 粗体） */

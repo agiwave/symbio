@@ -8,6 +8,8 @@ lists: [agent-dir-fields=owner]
 impl: partial
 ---
 
+<!-- dead-path-history: 下文 `### D-NNN` 决策节按裁决当时的路径书写——D-556（平台合并）/ D-557（运行时合并）之前 kernel / sdk / contract / deploy / server / host 是各自独立的 crate；现行分工以 002-架构总览 为准 -->
+
 # Agent 目录规范
 
 > 协议标识：`agent-dir/v2`。Agent 在系统中的位置与装配形态见

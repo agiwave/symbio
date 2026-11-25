@@ -6,7 +6,7 @@
  *
  * | 码 | 判据 | 范围 |
  * |---|---|---|
- * | PTC-001 | 通用端口契约 / 驱动 / 环事实三个文件不得出现 `PromptMessage`（`Vec<PromptMessage>` 由同一条命中） | `crates/symbio-sdk/src/capability/port.rs`、`crates/symbio-plugin-api/src/drive.rs`、`crates/symbio-plugin-loop/src/ring/facts.rs` |
+ * | PTC-001 | 通用端口契约 / 驱动 / 环事实三个文件不得出现 `PromptMessage`（`Vec<PromptMessage>` 由同一条命中） | `crates/symbio-platform/src/sdk/capability/port.rs`、`crates/symbio-plugin-api/src/drive.rs`、`crates/symbio-plugin-loop/src/ring/facts.rs` |
  * | PTC-002 | 通用端口契约四个文件不得出现 `needs_wording_generation` | 上述三个 + `crates/symbio-plugin-api/src/port.rs` |
  *
  * 违规**逐条点名 `文件:行号`**。退出码：0 = 无耦合；1 = 有耦合，或判据没有输入。
@@ -21,7 +21,7 @@
  *
  * ## PTC-002 的边界与未闭合项（2026-11-11 team-lead 修正）
  *
- * PTC-002 **不扫整个 `crates/symbio-sdk/src/`**，只扫上面四个通用端口契约文件；与
+ * PTC-002 **不扫整个 `crates/symbio-platform/src/sdk/`**，只扫上面四个通用端口契约文件；与
  * PTC-001 共用同一份常量表（前三个），第 4 个 `port.rs` 只进措辞判定面。`sdk/dialog`
  * 里 `Verdict::needs_wording_generation` 是**会话域判定**（消费方是 compose / session
  * 两个插件），把它迁出需要改成「模型插件落事实、控制面读事实」，属于**行为闭包迁移**，
@@ -67,7 +67,7 @@ const ROOT = rootArg ? path.resolve(rootArg.slice('--root='.length)) : path.reso
 
 /** PTC-001：通用端口契约 / 驱动 / 环事实三个具名文件（相对 ROOT）。 */
 const PORT_CONTRACT_FILES = [
-  'crates/symbio-sdk/src/capability/port.rs',
+  'crates/symbio-platform/src/sdk/capability/port.rs',
   'crates/symbio-plugin-api/src/drive.rs',
   'crates/symbio-plugin-loop/src/ring/facts.rs',
 ]

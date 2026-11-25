@@ -16,16 +16,16 @@
  *
  * | 编号 | 判什么 | 红了怎么办 |
  * |---|---|---|
- * | HS-001 | 非控制面插件的源码（注释外）出现 `symbio_sdk::` / `symbio_deploy::` / `symbio_kernel::` | 从门面取那个符号；门面里没有 ⇒ 说明它还不该给插件看，先论证再加白名单 |
+ * | HS-001 | 非控制面插件的源码（注释外）出现 `symbio_platform::` | 从门面取那个符号；门面里没有 ⇒ 说明它还不该给插件看，先论证再加白名单 |
  * | HS-002 | 门面白名单条数超过基线（只许降） | 加一条要配一条决策理由，并同步上调基线 |
  * | HS-003 | 门面白名单里有符号在**扩展层插件代码里零引用** | 删掉它——白名单的每一条都要报得出消费方（与 C-003 同一把尺子）；报不出的就是空转条目 |
  * | HS-004 | 插件胶水层 `symbio-providers` 把**嵌入臂**设成默认开启（`default = ["embedding"]` 或依赖不是 `optional`） | 那一条 `default = []` 是有意的：`ort` / `tokenizers` 带来 55 个传递依赖（168 → 113），而插件侧只有 `local` 一个消费者。要开就在宿主与需要它的插件那里显式开（D-254） |
- * | HS-005 | 门面 manifest **或任一活跃 crate 的源码 / manifest** 里出现旧 core 名（两种拼写） | 旧 core 已整棵并入 `symbio-sdk`（D-279）；门面只依赖 kernel + contract + sdk + deploy（D-486 五层规划），活跃区不再把已删名写成引用。要一条控制面符号，先论证它属于扩展面还是该换成宿主调用口（D-276） |
+ * | HS-005 | 门面 manifest **或任一活跃 crate 的源码 / manifest** 里出现旧 core 名（两种拼写） | 旧 core 已整棵并入平台（D-279）；门面对宿主侧只依赖 `symbio-platform` 一条（D-486 五层规划），活跃区不再把已删名写成引用。要一条控制面符号，先论证它属于扩展面还是该换成宿主调用口（D-276） |
  * | HS-006 | 语法臂条数 > 基线，或模块级转发条数 > 基线 | 两格都「只许不涨」：语法臂不计债但计件；模块转发一行换 N 条，要显式（D-278） |
  *
- * `symbio_kernel::` 前缀对扩展层插件同样不放行（D-418）：DE-002 说扩展层插件的**唯一**
+ * `symbio_platform::kernel::` 前缀对扩展层插件同样不放行（D-418）：DE-002 说扩展层插件的**唯一**
  * 宿主依赖是 `symbio-plugin-api`，而语法臂本来就把扩展层要用的共享类型转出去了。放行
- * 源码前缀等于绕开门面的计件与消费方核对——插件随手写一条 `symbio_kernel::…` 即可，
+ * 源码前缀等于绕开门面的计件与消费方核对——插件随手写一条 `symbio_platform::kernel::…` 即可，
  * 既不进门面棘轮、也不需要论证。控制面（`loop` / `session`）仍豁免这一档。
  *
  * ## 为什么按插件身份分档，而不是一刀切
@@ -37,7 +37,7 @@
  *
  * ## 失效形态
  *
- * ① **剥注释写漏** ⇒ 文档里那句「见 `symbio_sdk::vdfs::address`」被判红，天天误报的
+ * ① **剥注释写漏** ⇒ 文档里那句「见 `symbio_platform::sdk::vdfs::address`」被判红，天天误报的
  * 守卫最后只会被豁免喂死（复用 `extension-vocab-audit` 的 `stripRustCode`，只认代码）；
  * ② **控制面名单写成通配**（`symbio-plugin-*`）⇒ 判据变成空转，谁都能进来；
  * ③ **白名单基线写成大数** ⇒ 只进不出，机制退化成装饰。三者各由回归测试钉住。
@@ -68,30 +68,49 @@ import { walkFiles } from '../fs-walk.mjs'
 export const CONTROL_PLANE = ['symbio-plugin-api', 'symbio-plugin-loop', 'symbio-plugin-session']
 
 /**
- * 源码里不得出现的四个前缀：`symbio_sdk::` / `symbio_deploy::`（应用侧门面）、
- * `symbio_kernel::`（共享语法）与 `symbio_contract::`（插件 ABI 契约层，D-486）。
+ * 源码里不得出现的平台前缀：`symbio_platform::`。
  *
- * kernel 也在其中（D-418）：扩展层插件的唯一宿主依赖是 `symbio-plugin-api`，语法臂
- * 已经把扩展层要用的共享类型转了出去。直接写 `symbio_kernel::` 会绕开门面的计件与
- * 消费方核对——那正是本判据要守的通道。契约臂同理（D-486 规则 E：插件协议不变，
- * 门面是唯一的取用口——契约层将来怎么搬迁，插件代码一行不改）。控制面
- * （`loop` / `session`）按身份豁免。
+ * 平台是一个 crate（`symbio-platform`），语法 / 机制 / ABI 形状 / 部署常量是它的四个
+ * 子模块（`kernel` / `sdk` / `contract` / `deploy`）。扩展层插件的唯一宿主依赖是
+ * `symbio-plugin-api`，四臂已经把扩展层要用的东西逐条转了出去。直接写
+ * `symbio_platform::…` 会绕开门面的计件与消费方核对——那正是本判据要守的通道
+ * （D-253 / D-418 / D-486）。控制面（`loop` / `session`）按身份豁免。
  *
  * manifest 依赖边不在这里判——它只有 E-009 一个 owner。
  */
-export const FORBIDDEN_PREFIXES = [
-  'symbio_sdk::',
-  'symbio_deploy::',
-  'symbio_kernel::',
-  'symbio_contract::',
-]
+export const FORBIDDEN_PREFIXES = ['symbio_platform::']
+
+/**
+ * 四臂在门面源码里的路径前缀。四臂按**子模块**分（不是按 crate），这里把它们折回四个
+ * 臂名——下面各读法因此不必区分「来源是 crate 还是子模块」，臂名也仍是判据码里的叫法。
+ */
+export const ARM_PREFIXES = {
+  'symbio_platform::kernel': 'symbio_kernel',
+  'symbio_platform::contract': 'symbio_contract',
+  'symbio_platform::sdk': 'symbio_sdk',
+  'symbio_platform::deploy': 'symbio_deploy',
+}
+
+/**
+ * 读门面源码，并把平台四臂的路径前缀折成臂名（`symbio_platform::sdk::x` → 合并前的臂内路径写法）。
+ * 门面文件不存在 ⇒ `null`（判据的输入不在，不许亮绿灯）。
+ */
+export function readFacade(root) {
+  const p = path.join(root, FACADE)
+  if (!fs.existsSync(p)) return null
+  let src = fs.readFileSync(p, 'utf8')
+  for (const [prefix, arm] of Object.entries(ARM_PREFIXES)) {
+    src = src.replaceAll(`${prefix}::`, `${arm}::`)
+  }
+  return src
+}
 
 /**
  * 机制臂条数基线：**只降不升**（HS-002）。实测低于它时打提示要求同步下调。
  *
- * 只数机制臂。门面按来源分四臂（D-255 / D-258 / D-486）：语法臂来自 `symbio-kernel`
+ * 只数机制臂。门面按来源分四臂（D-255 / D-258 / D-486）：语法臂来自平台的 `kernel` 子模块
  * （直接依赖 6 个，插件取共享类型不增加任何机制面）、契约臂来自 `symbio-contract`
- * （纯形状 ABI，零状态零 IO，同样不计债）、SDK 臂来自 `symbio-sdk`（机制实现，但不认
+ * （纯形状 ABI，零状态零 IO，同样不计债）、SDK 臂来自 `sdk` 子模块（机制实现，但不认
  * 容器概念，同样不计债）、机制臂曾来自旧 core（每条都要控制面支撑）。
  * 把前两臂计进基线，会让「欠账还剩多少」被两个与债无关的数字稀释——248 听起来离 0
  * 很远，133 才是真实的待还量。
@@ -235,8 +254,8 @@ export const CONTRACT_BASELINE = 31
 // 需要 `PromptToolCall` 这一值类型；插件不得直依赖 `symbio_kernel`（HS-001），只能经
 // 门面转出。消费方是 `symbio-plugin-model` 的执行体。
 // 138 → 137（`D-339`）：`OWNER_PRINCIPAL` 在扩展层零消费（唯一引用方 session 属控制面），
-// 按 HS-003 从门面删除；控制面改从 `symbio_kernel::event` 取，棘轮随实测下调。
-// 137 → 139（`D-418`）：HS-001 对扩展层禁用 `symbio_kernel::` 之后，model 执行体原先
+// 按 HS-003 从门面删除；控制面改从 `symbio_platform::kernel::event` 取，棘轮随实测下调。
+// 137 → 139（`D-418`）：HS-001 对扩展层禁用 `symbio_platform::kernel::` 之后，model 执行体原先
 // 直取的三条语法（`event::branch::{removed_ids, unselected_roots}`、`ClosureReason`）
 // 必须经门面转出——它们本来就是内核共享类型，只是此前有一条旁路没被计件。此前实测
 // 136（基线 137 留了一格余量），加三条后按实测收平到 139。
@@ -270,7 +289,7 @@ export const GRAMMAR_BASELINE = 111
 // 6 → 13（D-413）：同一次「壳文件收掉」把 7 个模块名与改名转出的 `text` 抬到根上。
 // 它们此前各自在壳里以 `pub use …::*;` 放出一整个命名空间——那正是本判据要显式化的
 // 形状（D-278），只是壳文件让读数漏掉了。一行换 N 条的账现在记在门面上，条目一个不少。
-// D-415 复查时补上**单段模块转出**（`pub use symbio_sdk::events;`）这一形态：它同样
+// D-415 复查时补上**单段模块转出**（`pub use symbio_platform::sdk::events;`）这一形态：它同样
 // 一行放出一整个命名空间，此前不在 `collect` 的匹配里。补完后实测仍是 13——`events`
 // 按 CS-008 / CP-004 留在门面，没有换成 `pub use`。
 // 13 → 14（D-416）：`reports` 模块随登记面整块搬进 sdk，一行放出报表的全部类型与读口；
@@ -346,7 +365,7 @@ export const RETIRED_CORE_MODULE = `symbio${'_'}core`
 /** 语法臂：可能有多块（按 kernel 子模块分组），因此按正则全量取。 */
 const GRAMMAR_RE = /pub use symbio_kernel(?:::[A-Za-z0-9_:]+)?::\{([^}]*)\}/g
 /**
- * 单名一行的写法（`pub use symbio_kernel::view::Budget;` / `pub use symbio_sdk::clock::clock_now_ms;`）。
+ * 单名一行的写法（`pub use symbio_platform::kernel::view::Budget;` / `pub use symbio_platform::sdk::clock::clock_now_ms;`）。
  *
  * 花括号组与单名一行是同一张名单的两种排版，**判据必须两种都读到**：
  * 只认花括号组时，一条单名重导出让 HS-003 的「每条都要报得出消费方」整条绕过去——
@@ -363,7 +382,7 @@ const SDK_SINGLE_RE = /pub use symbio_sdk(?:::[A-Za-z0-9_]+)*::([A-Za-z0-9_]+);/
 const CONTRACT_RE = /pub use symbio_contract(?:::[A-Za-z0-9_:]+)?::\{([^}]*)\}/g
 const CONTRACT_SINGLE_RE = /pub use symbio_contract(?:::[A-Za-z0-9_]+)*::([A-Za-z0-9_]+);/g
 /**
- * 带改名的转发（`pub use symbio_sdk::text::tokenizer as text;`）。
+ * 带改名的转发（`pub use symbio_platform::sdk::text::tokenizer as text;`）。
  *
  * 四臂的另外两条正则都要求 `;` 紧跟在名字后，改名写法读不到——而插件看到的正是
  * **别名**。读不到它，这一行既不进棘轮、也逃过 HS-003（一条完全不可审的出口）。
@@ -372,18 +391,18 @@ const CONTRACT_SINGLE_RE = /pub use symbio_contract(?:::[A-Za-z0-9_]+)*::([A-Za-
 const AS_ALIAS_RE =
   /pub use\s+(symbio_kernel|symbio_contract|symbio_sdk|symbio_deploy)((?:::[A-Za-z0-9_]+)*)::([A-Za-z0-9_]+)\s+as\s+([A-Za-z0-9_]+)\s*;/g
 
-/** 来源 crate 的源码根（判「这条转发放出的是不是一个模块」）。 */
+/** 各臂的源码根（相对 `crates/`；四臂同住平台 crate 的四个子目录）。 */
 const CRATE_SRC = {
-  symbio_kernel: 'symbio-kernel',
-  symbio_contract: 'symbio-contract',
-  symbio_sdk: 'symbio-sdk',
+  symbio_kernel: path.join('symbio-platform', 'src', 'kernel'),
+  symbio_contract: path.join('symbio-platform', 'src', 'contract'),
+  symbio_sdk: path.join('symbio-platform', 'src', 'sdk'),
 }
 
-/** `pub use <crate>::<segs>::<name>` 指向的是不是一个真实模块（按文件判，不按名字猜）。 */
+/** `pub use <臂>::<segs>::<name>` 指向的是不是一个真实模块（按文件判，不按名字猜）。 */
 function isModuleItem(root, crate, segs, name) {
   const dir = CRATE_SRC[crate]
   if (!dir) return false
-  const base = path.join(root, 'crates', dir, 'src', ...segs)
+  const base = path.join(root, 'crates', dir, ...segs)
   return fs.existsSync(path.join(base, name + '.rs')) || fs.existsSync(path.join(base, name, 'mod.rs'))
 }
 
@@ -391,7 +410,7 @@ function isModuleItem(root, crate, segs, name) {
  * 门面在根上转出的**模块名**（含改名后的别名）。
  *
  * 这些名字是「本 crate 内的转手」：`pub use rows::{RowHandler, …};` 的 `rows` 已由
- * 根上一行 `pub use symbio_sdk::plugin::rows;` 从机制臂转来，第二条只是把同一个
+ * 根上一行 `pub use symbio_platform::sdk::plugin::rows;` 从机制臂转来，第二条只是把同一个
  * 来源的符号再摊到根上——它不是「四臂之外的来源」，不该按白名单条目计。判据按
  * **来源**分区，所以别名必须跟随它的来处（`D-413`）。
  */
@@ -425,16 +444,15 @@ function splitSymbols(body) {
 }
 
 /**
- * 门面按来源 crate 分区读数。
+ * 门面按来源臂分区读数。
  *
  * 返回 `{ counts, other }`：`counts` 是每个来源 crate 的语句数（日志里显示，让「0 条机制臂」
  * 是一次**读数**而不是一次沉默），`other` 是除四臂之外那些语句放出的符号名。
  * 读不到任何 `pub use …::` ⇒ `null`（判据的输入不在，不许亮绿灯，D-280）。
  */
 export function readFacadeArms(root) {
-  const p = path.join(root, FACADE)
-  if (!fs.existsSync(p)) return null
-  const src = fs.readFileSync(p, 'utf8')
+  const src = readFacade(root)
+  if (src === null) return null
   // 门面自己的模块（`pub use context::{…}` 这类）不是「来源」，是同一 crate 内的转手。
   // 按**文件是否存在**判，而不是按名字清单：新加一个本模块的转发不必回改这里。
   const ownDir = path.join(root, 'crates', 'symbio-plugin-api', 'src')
@@ -483,9 +501,8 @@ export function readWhitelist(root) {
 
 /** 读出门面语法臂的符号清单（`symbio_kernel` 各分块的并集）。 */
 export function readGrammar(root) {
-  const p = path.join(root, FACADE)
-  if (!fs.existsSync(p)) return null
-  const src = fs.readFileSync(p, 'utf8')
+  const src = readFacade(root)
+  if (src === null) return null
   const out = []
   for (const m of src.matchAll(GRAMMAR_RE)) out.push(...splitSymbols(m[1]))
   for (const m of src.matchAll(GRAMMAR_SINGLE_RE)) out.push(m[1])
@@ -495,9 +512,8 @@ export function readGrammar(root) {
 
 /** 读出门面契约臂的符号清单（`symbio_contract` 各分块的并集，D-486）。 */
 export function readContractArm(root) {
-  const p = path.join(root, FACADE)
-  if (!fs.existsSync(p)) return null
-  const src = fs.readFileSync(p, 'utf8')
+  const src = readFacade(root)
+  if (src === null) return null
   const out = []
   for (const m of src.matchAll(CONTRACT_RE)) out.push(...splitSymbols(m[1]))
   for (const m of src.matchAll(CONTRACT_SINGLE_RE)) out.push(m[1])
@@ -506,9 +522,8 @@ export function readContractArm(root) {
 
 /** 读出门面 SDK 臂的符号清单（`symbio_sdk` 各分块的并集）。 */
 export function readSdkArm(root) {
-  const p = path.join(root, FACADE)
-  if (!fs.existsSync(p)) return null
-  const src = fs.readFileSync(p, 'utf8')
+  const src = readFacade(root)
+  if (src === null) return null
   const out = []
   for (const m of src.matchAll(SDK_RE)) out.push(...splitSymbols(m[1]))
   for (const m of src.matchAll(SDK_SINGLE_RE)) out.push(m[1])
@@ -593,10 +608,10 @@ export function collectConsumers(root, pluginNames) {
 export function collectModuleReexports(root) {
   const out = new Set()
   const crates = {
-    symbio_kernel: path.join(root, 'crates', 'symbio-kernel', 'src'),
-    symbio_sdk: path.join(root, 'crates', 'symbio-sdk', 'src'),
+    symbio_kernel: path.join(root, 'crates', 'symbio-platform', 'src', 'kernel'),
+    symbio_sdk: path.join(root, 'crates', 'symbio-platform', 'src', 'sdk'),
   }
-  const src = fs.readFileSync(path.join(root, FACADE), 'utf8')
+  const src = readFacade(root)
   const isMod = (base, segs, name) => {
     const dir = path.join(base, ...segs)
     return fs.existsSync(path.join(dir, name + '.rs')) || fs.existsSync(path.join(dir, name, 'mod.rs'))
@@ -611,7 +626,7 @@ export function collectModuleReexports(root) {
     const segs = m[2].split('::')
     if (isMod(base, segs, m[3])) out.add(m[3])
   }
-  // 单段转出（`pub use symbio_sdk::events;`）同样一行放出一整个命名空间：不给它留
+  // 单段转出（`pub use symbio_platform::sdk::events;`）同样一行放出一整个命名空间：不给它留
   // 不计数的一格，否则「换个写法」就能绕过本判据（D-415）。
   for (const m of src.matchAll(/pub use (symbio_kernel|symbio_sdk)::([A-Za-z0-9_]+);/g)) {
     if (isMod(crates[m[1]], [], m[2])) out.add(m[2])
@@ -675,11 +690,13 @@ export function run(root) {
       for (const [idx, line] of lines.entries()) {
         for (const pfx of FORBIDDEN_PREFIXES) {
           if (!line.includes(pfx)) continue
+          // 报出这一行命中的**具体**子模块（`symbio_platform::sdk::`），读日志的人不必自己去对。
+          const specific = /symbio_platform::(?:kernel|sdk|contract|deploy)::/.exec(line)
           errors.push(
-            `${path.relative(root, f).split(path.sep).join('/')}:${idx + 1}  \`${pfx}\`——` +
+            `${path.relative(root, f).split(path.sep).join('/')}:${idx + 1}  \`${specific?.[0] ?? pfx}\`——` +
               '扩展层插件源码只经 `symbio_plugin_api::…` 取宿主面（HS-001 / D-418）：' +
-              '`symbio-sdk` / `symbio-deploy` 是应用侧门面，插件依赖它们等于「插件 → 应用」反向耦合；' +
-              '`symbio_kernel` 的共享语法由门面的语法臂转出，绕开它等于绕开门面的计件与消费方核对',
+              '`symbio_platform::` 是平台 crate（语法 / 机制 / ABI 形状 / 部署常量），扩展层插件依赖它等于绕开门面直接认宿主；' +
+              '扩展层要的共享类型由门面的四臂转出，绕开它等于绕开门面的计件与消费方核对',
           )
         }
       }
@@ -786,7 +803,7 @@ export function run(root) {
   if (retiredCoreHits.length) {
     errors.push(
       `活跃区仍有已退役的旧 core 名：${[...new Set(retiredCoreHits)].join(' / ')}——HS-005 (D-276/D-279)：` +
-        '旧 core 整棵并入 `symbio-sdk`；源码里的 `use` 改成 `symbio_sdk::…` / `symbio_kernel::…`，' +
+        '旧 core 已整棵并入平台（`symbio-platform` 的 `sdk` 子模块）；源码里的 `use` 改成 `symbio_platform::sdk::…` / `symbio_platform::kernel::…`，' +
         'manifest 里的依赖键整条删掉。同一条判据也挡门面重新依赖实现层',
     )
   }
@@ -796,7 +813,8 @@ export function run(root) {
     if (dependenciesHas(toml, RETIRED_CORE_CRATE)) {
       errors.push(
         `crates/symbio-plugin-api/Cargo.toml  [dependencies] 里有 \`${RETIRED_CORE_CRATE}\`——HS-005 (D-276)：` +
-          '门面只依赖 kernel + contract + sdk + deploy；要一条控制面符号，先论证它属于扩展面还是该换成宿主调用口',
+          '门面对宿主侧只依赖 `symbio-platform` 一条（语法 / 机制 / ABI 形状 / 部署常量都在它里面）；' +
+          '要一条控制面符号，先论证它属于扩展面还是该换成宿主调用口',
       )
     }
   }
@@ -831,7 +849,7 @@ export function run(root) {
   console.log(
     green(
       `✓ HS-001 扩展层零直接依赖：${scannedPlugins} 个非控制面插件的 ${scannedFiles} 个源文件` +
-        `没有 \`symbio_sdk::\` / \`symbio_deploy::\` / \`symbio_kernel::\` 前缀（控制面 ${CONTROL_PLANE.length} 个源码前缀豁免：` +
+        `没有 \`symbio_platform::sdk::\` / \`symbio_platform::deploy::\` / \`symbio_platform::kernel::\` 前缀（控制面 ${CONTROL_PLANE.length} 个源码前缀豁免：` +
         `${CONTROL_PLANE.join(' / ')}；manifest 依赖边归 E-009，控制面不豁免）· HS-002 机制臂 ${n} 条（基线 ${WHITELIST_BASELINE}，` +
         `读数来自 ${arms.read} 条 \`pub use\` 语句：` +
         `${FACADE_ARMS.map((c) => `${c} ${arms.counts[c] ?? 0}`).join(' · ')}）` +

@@ -31,7 +31,7 @@
  *   `session` 的删除行必须非零，且新增行不得带能力名（为某条能力新加一行，意味着
  *   两份实现可以同时生效；绑定切换用的通用胶水不算）。`两份实现同时生效` 的**装配期**
  *   另一半归 `seal` 的 `Gap::Duplicate{Name,Event,Fact,View,Actor,Port}`
- *   （`crates/symbio-kernel/src/decl/ring.rs`）：同名声明在装载期红，
+ *   （`crates/symbio-platform/src/kernel/decl/ring.rs`）：同名声明在装载期红，
  *   不在这里按名字再判一遍（SC-006 的教训：同一形状两个 owner）。
  * - **EX-007（D-247）**：夹带、定制、反向拆分三条失败形态——机制面**零新增**是「反向拆分」
  *   与「夹带」的机械面（`D-283`：删除行不算夹带，旧实现住在机制面的那一批要靠它搬）；
@@ -104,7 +104,7 @@ import fs from 'node:fs'
 import path from 'node:path'
 import { fileURLToPath } from 'node:url'
 import { green, red, yellow, dim } from '../color.mjs'
-import { BASELINE, exemptionActive } from '../gate.d/_shared.mjs'
+import { BASELINE, canonicalPath, exemptionActive, inTrees, legacyPathspecs } from '../gate.d/_shared.mjs'
 import { blankComments } from '../rust-scan.mjs'
 import { toolFacts } from '../facts/_capability.mjs'
 import { pluginIds } from '../facts/_plugin-yml.mjs'
@@ -126,9 +126,9 @@ const argv = process.argv.slice(2)
 /** 机制面：迁移批次只许在这里收窄、不许变宽的树（`D-283`；补件才改它）。
  *  契约树随 `D-486` 加入——新 crate 不是棘轮盲区。 */
 export const ARCH_TREES = [
-  'crates/symbio-sdk',
-  'crates/symbio-kernel',
-  'crates/symbio-contract',
+  'crates/symbio-platform/src/sdk',
+  'crates/symbio-platform/src/kernel',
+  'crates/symbio-platform/src/contract',
   'crates/symbio-plugin-api',
 ]
 
@@ -140,7 +140,7 @@ export const ARCH_TREES = [
  * 会让「通用契约随实现演进」变成每次都要挂决策号的填表。机制面变宽的判据仍在
  * `arch-shape-audit` / `plugin-entry-audit` 从结果面判。
  */
-export const CORE_TREES = ['crates/symbio-sdk', 'crates/symbio-kernel']
+export const CORE_TREES = ['crates/symbio-platform/src/sdk', 'crates/symbio-platform/src/kernel']
 
 /** 控制面：迁移批次只许在这里删旧实现。 */
 export const CONTROL_TREES = ['crates/symbio-plugin-loop', 'crates/symbio-plugin-session']
@@ -152,7 +152,7 @@ const PLUGIN_API_TREES = ['crates/symbio-plugin-api']
  * 宿主运行时：驱动族唯一 runner 的持有者。它受保护但**不属**迁移批次的机制面
  * （`D-372` 的并集口径）：只进 `PROTECTED_TREES` 的并集，不进 `ARCH_TREES` / `CONTROL_TREES`。
  */
-export const HOST_TREES = ['crates/symbio-host']
+export const HOST_TREES = ['crates/symbio-runtime/src/host']
 
 /**
  * **受保护目录的唯一一份**：`EX-002`（新增能力只改自己目录）判的就是受保护树的
@@ -393,10 +393,6 @@ export function isCapabilitySource(p) {
 /** 生成物：后缀一类的 `*.gen.rs`，加上描述符声明的输出（`events.rs` / `routes.rs` 等）。 */
 export function isGenerated(p, generated = GENERATED) {
   return GENERATED_RE.test(p) || generated.has(p) || isRetiredGenerated(p)
-}
-
-function inTrees(p, trees) {
-  return trees.some((t) => p.startsWith(`${t}/`))
 }
 
 /**
@@ -685,9 +681,17 @@ export function parseRelocationHeader(message) {
   }
 }
 
-/** 路径所属的树（crate 根）；不在 `crates/` 下则返回路径本身。 */
+/**
+ * 路径所属的树；不在 `crates/` 下则返回路径本身。
+ *
+ * 树是**机制面里能互相搬东西的最小单位**：平台合并（D-556）之前是 crate 根，之后平台的
+ * 四臂同住一个 crate，树取到臂——否则 `kernel → sdk` 搬一块实现会被读成「同树内删了
+ * 又加」，EX-004 的搬迁证据就少一类。历史路径先折算（合并前的提交写的是旧 crate 根）。
+ */
 function treeOf(filePath) {
-  const m = String(filePath).match(/^crates\/[^/]+/)
+  const m = String(canonicalPath(filePath)).match(
+    /^crates\/symbio-platform\/src\/[^/]+|^crates\/[^/]+/,
+  )
   return m ? m[0] : String(filePath)
 }
 
@@ -1114,9 +1118,9 @@ function patchOf(sha) {
     '--unified=0',
     '--no-renames',
     sha,
+    // 带上历史旧名：合并前的提交里，机制面的文件还在旧 crate 路径下。
     '--',
-    ...ARCH_TREES,
-    ...CONTROL_TREES,
+    ...legacyPathspecs([...ARCH_TREES, ...CONTROL_TREES]),
   ])
   return out === null ? null : parsePatch(out)
 }
@@ -1304,7 +1308,7 @@ function main() {
    * 这张表**只增不减地老去**：新提交不许进来，进来就等于「我不打算守这条」。
    *
    * 为什么 `movedLines` 接不住这两条：那是**复制式**搬迁——原文件没有消失，而是被改成
-   * 一行转发（`pub use symbio_sdk::<域>::*;`）。diff 里它既不是删除、也不是同一行搬家，
+   * 一行转发（`pub use symbio_platform::sdk::<域>::*;`）。diff 里它既不是删除、也不是同一行搬家，
    * 所以 sdk 侧看起来是全新的面。D-279 那种「整份文件搬走」由 `movedLines` 接住，
    * 这一种只能靠名单——两种形状的区别就是「旧文件还在不在」。
    *

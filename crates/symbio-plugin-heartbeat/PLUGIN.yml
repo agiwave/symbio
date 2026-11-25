@@ -6,6 +6,6 @@ plugin_order: 50
 # 高阶能力：市场可选、不默认装配（scripts/facts/assembly.mjs → ASSEMBLY_OPTIONAL_PLUGINS）
 plugin_optional: true
 # 本插件产出的**触发方式**（scripts/facts/trigger-kinds.mjs 读取 →
-# crates/symbio-kernel/src/event/trigger_kinds.gen.rs）。写体 `meta.trigger.kind`
+# crates/symbio-platform/src/kernel/event/trigger_kinds.gen.rs）。写体 `meta.trigger.kind`
 # 只认登记过的取值，拼错在写臂当场拒（不静默降级成一条普通用户消息）。
 trigger_kinds: scheduled

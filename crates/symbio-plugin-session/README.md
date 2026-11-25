@@ -150,7 +150,7 @@ session:
 * **Rust 实现策略**：
  * **节点树只交全树 (`crates/symbio-plugin-session/src/chat_session/read.rs`)**：
  * 读路径只回答「存储里有什么」——`get_messages` 按单调 `seq` 排序后交**完整节点树**（含呈现树投影 `flatten_whole_tree`），不再做 User 轮次窗口对齐；`get_context_messages` / `sliding_window` 的加载层截取已随 B2 退场（D-318）。
- * **请求投影 (`crates/symbio-sdk/src/projection/transcript.rs`)**：
+ * **请求投影 (`crates/symbio-platform/src/sdk/projection/transcript.rs`)**：
  * 「哪些历史进请求」由事实网格的投影回答：`transcript` 折叠变更格、压缩快照、分支与区间省略，产出 `TranscriptView`；会话层不持有第二份截取逻辑。
 
  * **语义合并（已随 B2 退场，D-318）**：

@@ -30,9 +30,9 @@ import { auditCase, expectAudit, onStderr } from '../audit-assert.mjs'
 const script = fileURLToPath(new URL('./arch-shape-audit.mjs', import.meta.url))
 
 
-const CORE_MOD = 'crates/symbio-sdk/src/lib.rs'
-const ALPHA = 'crates/symbio-sdk/src/alpha/mod.rs'
-const KERNEL = 'crates/symbio-sdk/src/kernel.rs'
+const CORE_MOD = 'crates/symbio-platform/src/sdk/mod.rs'
+const ALPHA = 'crates/symbio-platform/src/sdk/alpha/mod.rs'
+const KERNEL = 'crates/symbio-platform/src/sdk/kernel.rs'
 /** 一个成员、无默认体的最小夹具 */
 const ONE = 'pub trait Store {\n    fn one(&self) -> u32;\n}\n'
 
@@ -70,7 +70,7 @@ test('形状等于基线 ⇒ 通过', () => {
 
 test('多一个 pub trait（新增接缝）⇒ CS-001 变红', () => {
   const r = audit(
-    core(ONE, { 'crates/symbio-sdk/src/beta/mod.rs': 'pub trait Registry {\n    fn b(&self);\n}\n' }),
+    core(ONE, { 'crates/symbio-platform/src/sdk/beta/mod.rs': 'pub trait Registry {\n    fn b(&self);\n}\n' }),
     { baseline: '1:1:0' },
   )
   assert.equal(r.status, 1, '接缝变多必须红')
@@ -127,7 +127,7 @@ test('反向：测试里的 trait 不算形状（`#[cfg(test)]` 模块与 `*.tes
     core(
       ONE +
         '\n#[cfg(test)]\nmod tests {\n    pub trait Fake {\n        fn a(&self);\n        fn b(&self);\n    }\n}\n',
-      { 'crates/symbio-sdk/src/alpha/inline.test.rs': 'pub trait Ghost {\n    fn x(&self);\n    fn y(&self);\n}\n' },
+      { 'crates/symbio-platform/src/sdk/alpha/inline.test.rs': 'pub trait Ghost {\n    fn x(&self);\n    fn y(&self);\n}\n' },
     ),
     { baseline: '1:1:0' },
   )
@@ -141,7 +141,7 @@ test('内核文件集：标记之外的同名 trait 不占形状（CS-001 只量
     {
       [CORE_MOD]: 'mod alpha;\nmod beta;\nmod kernel;\n',
       [ALPHA]: ONE,
-      'crates/symbio-sdk/src/beta/mod.rs': 'pub trait Registry {\n    fn b(&self);\n}\n',
+      'crates/symbio-platform/src/sdk/beta/mod.rs': 'pub trait Registry {\n    fn b(&self);\n}\n',
       [KERNEL]: '// core-kernel-files: alpha/mod.rs\n',
     },
     { baseline: '1:1:0' },
@@ -176,7 +176,7 @@ const nounFiles = (alphaSrc, extra = {}) => ({
   [CORE_MOD]: 'mod alpha;\nmod kernel;\n',
   [ALPHA]: alphaSrc,
   [KERNEL]: '// core-kernel-files: alpha/mod.rs\n',
-  'crates/symbio-sdk/src/plugin/mod.rs': '',
+  'crates/symbio-platform/src/sdk/plugin/mod.rs': '',
   'crates/symbio-plugin-tool/src/.keep': '',
   'docs/003-design/047-义务环判据与归属推导.md': '# DE-047\n\n### D-303 夹具决策\n\n理由。\n',
   ...extra,
@@ -224,7 +224,7 @@ test('CS-004：登记写在内核文件集之外 ⇒ 红（判据面之外没有
   const r = audit(
     nounFiles(FIVE_TRAITS, {
       [CORE_MOD]: 'mod alpha;\nmod gamma;\nmod kernel;\n',
-      'crates/symbio-sdk/src/gamma/mod.rs': 'pub const G: &str = "tool";\n' + NOUN_ALLOW_OK,
+      'crates/symbio-platform/src/sdk/gamma/mod.rs': 'pub const G: &str = "tool";\n' + NOUN_ALLOW_OK,
     }),
     { baseline: '5:5:0', turnState: '1' },
   )
@@ -253,9 +253,9 @@ test('CS-004 只量内核文件集：域文件里的插件 id 字面量不判红
   const files = {
     [CORE_MOD]: 'mod alpha;\nmod gamma;\nmod kernel;\n',
     [ALPHA]: five,
-    'crates/symbio-sdk/src/gamma/mod.rs': 'pub const G: &str = "session";\n',
+    'crates/symbio-platform/src/sdk/gamma/mod.rs': 'pub const G: &str = "session";\n',
     [KERNEL]: '// core-kernel-files: alpha/mod.rs\n',
-    'crates/symbio-sdk/src/plugin/mod.rs': '',
+    'crates/symbio-platform/src/sdk/plugin/mod.rs': '',
     'crates/symbio-plugin-session/src/.keep': '',
   }
   const ok = audit(files, { baseline: '5:5:0' })
@@ -320,14 +320,14 @@ test('放宽一个不存在的格 ⇒ CS-002 变红（拼错的键名不能当�
 const DATA_TWO = 'pub struct Point {\n    pub x: u8,\n    pub y: u8,\n}\n\npub enum Axis {\n    X,\n    Y,\n}\n'
 
 test('数据面等于基线 ⇒ 通过', () => {
-  const r = audit(core(ONE, { 'crates/symbio-sdk/src/beta/mod.rs': DATA_TWO }), { data: '2:2' })
+  const r = audit(core(ONE, { 'crates/symbio-platform/src/sdk/beta/mod.rs': DATA_TWO }), { data: '2:2' })
   assert.equal(r.status, 0, r.stderr + r.stdout)
 })
 
 test('多一个枚举变体（封闭取值面变宽）⇒ CS-009 变红', () => {
   const r = audit(
     core(ONE, {
-      'crates/symbio-sdk/src/beta/mod.rs': DATA_TWO.replace('    Y,\n', '    Y,\n    Z,\n'),
+      'crates/symbio-platform/src/sdk/beta/mod.rs': DATA_TWO.replace('    Y,\n', '    Y,\n    Z,\n'),
     }),
     { data: '2:2' },
   )
@@ -340,7 +340,7 @@ test('多一个枚举变体（封闭取值面变宽）⇒ CS-009 变红', () => 
 test('多一个结构体字段（公共数据面变宽）⇒ 只有 structFields 格变红', () => {
   const r = audit(
     core(ONE, {
-      'crates/symbio-sdk/src/beta/mod.rs': DATA_TWO.replace('    pub y: u8,\n', '    pub y: u8,\n    pub z: u8,\n'),
+      'crates/symbio-platform/src/sdk/beta/mod.rs': DATA_TWO.replace('    pub y: u8,\n', '    pub y: u8,\n    pub z: u8,\n'),
     }),
     { data: '2:2' },
   )
@@ -354,20 +354,20 @@ test('反向：泛型实参 / 函数指针 / 属性里的逗号不算字段分�
   // 只会多数，但多数会把余量白送出去，等于放宽。
   const src =
     'pub struct Wide {\n    pub a: BTreeMap<u8, u8>,\n    pub b: fn(u8, u8) -> u8,\n    pub c: [u8; 2],\n}\n'
-  const r = audit(core(ONE, { 'crates/symbio-sdk/src/beta/mod.rs': src }), { data: '3:0' })
+  const r = audit(core(ONE, { 'crates/symbio-platform/src/sdk/beta/mod.rs': src }), { data: '3:0' })
   assert.equal(r.status, 0, r.stderr + r.stdout)
 })
 
 test('反向：tuple struct 的位置字段计入，`pub(crate)` 与测试模块不计', () => {
   const src =
     'pub struct Pair(u8, u8);\n\npub(crate) struct Hidden {\n    a: u8,\n    b: u8,\n}\n\n#[cfg(test)]\nmod t {\n    pub struct Fake {\n        a: u8,\n    }\n}\n'
-  const r = audit(core(ONE, { 'crates/symbio-sdk/src/beta/mod.rs': src }), { data: '2:0' })
+  const r = audit(core(ONE, { 'crates/symbio-platform/src/sdk/beta/mod.rs': src }), { data: '2:0' })
   assert.equal(r.status, 0, r.stderr + r.stdout)
 })
 
 test('CS-009 的放宽同样要挂能打开的决策（`core-shape-allow enumVariants`）', () => {
   const bumped = DATA_TWO.replace('    Y,\n', '    Y,\n    Z,\n')
-  const withoutDecision = audit(core(ONE, { 'crates/symbio-sdk/src/beta/mod.rs': bumped }), {
+  const withoutDecision = audit(core(ONE, { 'crates/symbio-platform/src/sdk/beta/mod.rs': bumped }), {
     data: '2:3',
   })
   // 没有放宽注释时不该红：数字与基线一致。放宽注释只在「改数字」时才需要解释。
@@ -375,7 +375,7 @@ test('CS-009 的放宽同样要挂能打开的决策（`core-shape-allow enumVar
 
   const waived = audit(
     core(ONE, {
-      'crates/symbio-sdk/src/beta/mod.rs': bumped,
+      'crates/symbio-platform/src/sdk/beta/mod.rs': bumped,
       'scripts/audits/arch-shape-audit.mjs': '// core-shape-allow enumVariants: D-209 领域扩展位的理由\n',
       'docs/003-design/025-能力包与扩展面.md': '# DE-025\n\n### D-209 领域轴用一个扩展位\n\n理由。\n',
     }),
@@ -386,7 +386,7 @@ test('CS-009 的放宽同样要挂能打开的决策（`core-shape-allow enumVar
 
   const dangling = audit(
     core(ONE, {
-      'crates/symbio-sdk/src/beta/mod.rs': bumped,
+      'crates/symbio-platform/src/sdk/beta/mod.rs': bumped,
       'scripts/audits/arch-shape-audit.mjs': '// core-shape-allow enumVariants: D-999 指向不存在的决策\n',
     }),
     { data: '2:3' },
@@ -411,8 +411,8 @@ test('env 覆盖少给一格 ⇒ 红（那一格的判据不能凭空消失）',
 
 // ==================== CS-005 事件词汇棘轮 ====================
 
-const EVENT_MOD = 'crates/symbio-kernel/src/event/mod.rs'
-const GRID = 'crates/symbio-kernel/src/event/grid.rs'
+const EVENT_MOD = 'crates/symbio-platform/src/kernel/event/mod.rs'
+const GRID = 'crates/symbio-platform/src/kernel/event/grid.rs'
 
 /**
  * 内核事件名表的最小夹具：协议五格照真仓写法，业务行由参数给。
@@ -463,7 +463,7 @@ test('CS-005：CELLS 新增一条业务行 ⇒ 红（写闸不再需要改这张
 })
 
 test('CS-005：grid.rs 已退役 ⇒ cellsRows 0 是目标态，不判「判据输入缺一半」', () => {
-  const onlyEvents = { [EVENT_MOD]: vocab()['crates/symbio-kernel/src/event/mod.rs'] }
+  const onlyEvents = { [EVENT_MOD]: vocab()['crates/symbio-platform/src/kernel/event/mod.rs'] }
   const r = audit(core(ONE, onlyEvents), { baseline: '1:1:0', vocab: '1:0' })
   expectAudit(r, 0, [/cellsRows 0\/0/])
 })
@@ -474,8 +474,8 @@ auditCase('CS-005：收到基线下方 ⇒ 通过并提示同步数字', () => a
 
 // ==================== CS-008 core 生产代码零事件名字面量 ====================
 
-const FIXTURES = 'crates/symbio-sdk/src/test_fixtures.rs'
-const CORE_DELTA = 'crates/symbio-sdk/src/delta/mod.rs'
+const FIXTURES = 'crates/symbio-platform/src/sdk/test_fixtures.rs'
+const CORE_DELTA = 'crates/symbio-platform/src/sdk/delta/mod.rs'
 
 /**
  * CS-008 的输入：内核事件表（含 `Entity` 闭集）+ 一条业务名，**不带** `grid.rs`
@@ -523,7 +523,7 @@ test('CS-008：首段不在 `Entity` 闭集里的点分串 ⇒ 不红（闸靠�
 
 const ALPHA_CRATE = 'crates/symbio-plugin-alpha/src/lib.rs'
 const BETA_CRATE = 'crates/symbio-plugin-beta/src/lib.rs'
-const CORE_BETA = 'crates/symbio-sdk/src/beta/mod.rs'
+const CORE_BETA = 'crates/symbio-platform/src/sdk/beta/mod.rs'
 
 auditCase('CS-006：只有一个插件消费、core 已不读 ⇒ 红（这条名字该随 owner 的 EventDecl 走）', () => audit(
     core(ONE, { ...vocab(), [ALPHA_CRATE]: 'pub fn k() { let _ = EVENT_A; }\n' }),
@@ -553,7 +553,7 @@ test('CS-006：core 里 `pub use` 转手一个名字不算读者 ⇒ 红（出�
     core(ONE, {
       ...vocab(),
       [CORE_MOD]: 'mod alpha;\npub use crate::event::EVENT_A;\n',
-      [ALPHA_CRATE]: 'pub use symbio_kernel::EVENT_A;\n',
+      [ALPHA_CRATE]: 'pub use symbio_platform::kernel::EVENT_A;\n',
     }),
     { baseline: '1:1:0', vocab: '1:1' },
   )
@@ -607,7 +607,7 @@ test('CS-010：同名子串（不带引号）与注释里的名字 ⇒ 不红（
 })
 
 auditCase('CS-010 只量内核文件集：域文件里的业务名字面量不判红', () => audit(
-    bizFiles(ONE, { 'crates/symbio-sdk/src/beta/mod.rs': 'pub const N: &str = "session/main";\n' }),
+    bizFiles(ONE, { 'crates/symbio-platform/src/sdk/beta/mod.rs': 'pub const N: &str = "session/main";\n' }),
     { baseline: '1:1:0' },
   ), 0, [/CS-010.*14 个|CS-010.*1 个 owner/])
 

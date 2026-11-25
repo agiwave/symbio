@@ -9,7 +9,7 @@
 //! 这边回答「这个域对这个请求给出什么值」——值一律转发既有会话能力，不新造协议。
 
 use super::*;
-use symbio_kernel::vdfs::{
+use symbio_platform::kernel::vdfs::{
     VdfsAccess, VdfsActionResult, VdfsContent, VdfsContext, VdfsError, VdfsNewType, VdfsNode,
     VdfsRequest, VdfsResponse, VdfsResult, VdfsWriteResponse, VDFS_ACTION_ABORT,
 };

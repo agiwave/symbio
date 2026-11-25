@@ -6,11 +6,15 @@
 
 use super::*;
 use std::sync::Arc;
-use symbio_kernel::capability::{family, CapabilityFamily, CapabilityRow, Registry};
-use symbio_kernel::plugin::{PluginInvokeRequest, PluginInvokeRequestExt, PluginSimpleRequest};
-use symbio_sdk::capability::capability_take_errors;
-use symbio_sdk::capability::port::{register_ports, PortBindings, PORT_BINDINGS, PORT_SCOPE};
-use symbio_sdk::capability::CAPABILITY_VISITOR;
+use symbio_platform::kernel::capability::{family, CapabilityFamily, CapabilityRow, Registry};
+use symbio_platform::kernel::plugin::{
+    PluginInvokeRequest, PluginInvokeRequestExt, PluginSimpleRequest,
+};
+use symbio_platform::sdk::capability::capability_take_errors;
+use symbio_platform::sdk::capability::port::{
+    register_ports, PortBindings, PORT_BINDINGS, PORT_SCOPE,
+};
+use symbio_platform::sdk::capability::CAPABILITY_VISITOR;
 
 const ONLY_MODEL: &[&str] = &["model"];
 const ONLY_TOOL: &[&str] = &["tool"];

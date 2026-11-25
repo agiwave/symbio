@@ -101,9 +101,9 @@ export const BASELINE_REL = 'scripts/baselines/arch-dead-code.json'
  * 数据面，**没进本扫描面**——契约层的零调用 `pub fn` 因此是 AD-001…004 的盲区。
  */
 export const ARCH_TREES = [
-  'crates/symbio-sdk',
-  'crates/symbio-kernel',
-  'crates/symbio-contract',
+  'crates/symbio-platform/src/sdk',
+  'crates/symbio-platform/src/kernel',
+  'crates/symbio-platform/src/contract',
   'crates/symbio-plugin-api',
 ]
 

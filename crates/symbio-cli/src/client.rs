@@ -43,22 +43,22 @@ use std::time::{Duration, SystemTime, UNIX_EPOCH};
 use serde_json::{json, Value};
 use tokio::sync::mpsc;
 
-use symbio::routes::{ROUTE_VDFS_ROOT, ROUTE_VDFS_STAT, ROUTE_VDFS_WRITE};
-use symbio::symbio_kernel::chat::chat_node::ChatNode;
-use symbio::symbio_kernel::keys::SymbioKey;
-use symbio::symbio_kernel::plugin::{PluginFrame, PluginMessageWire};
-use symbio::symbio_kernel::vdfs::{VdfsChange, VdfsNode, VDFS_STATUS_FAILED, VDFS_STATUS_WORKING};
-use symbio_server::RuntimeHost;
+use symbio_platform::kernel::chat::chat_node::ChatNode;
+use symbio_platform::kernel::keys::SymbioKey;
+use symbio_platform::kernel::plugin::{PluginFrame, PluginMessageWire};
+use symbio_platform::kernel::vdfs::{
+    VdfsChange, VdfsNode, VDFS_STATUS_FAILED, VDFS_STATUS_WORKING,
+};
+use symbio_plugin_api::routes::{ROUTE_VDFS_ROOT, ROUTE_VDFS_STAT, ROUTE_VDFS_WRITE};
+use symbio_runtime::RuntimeHost;
 // D-530：线上契约（解包 / 频道词表）按规则 B 迁入 symbio-contract，
 // 宿主侧经门面取用（导入路径不变，改的是转发源）。
-use symbio::symbio_plugin_api::{
-    event_bus_resync_of, event_bus_vdfs_change_of, EVENT_BUS_KIND_VDFS,
-};
-use symbio::symbio_sdk::keys::{PATH, SESSION_ID, WORKDIR};
+use symbio_platform::sdk::keys::{PATH, SESSION_ID, WORKDIR};
+use symbio_plugin_api::{event_bus_resync_of, event_bus_vdfs_change_of, EVENT_BUS_KIND_VDFS};
 // 读数面板方言：后端下发描述、CLI 只渲染。
 //  这三个名字随返回值流动（C-002：插件侧不深引 core 域目录），与 Tauri 前端
 //  `schemas/reading.ts` 是同一份契约的两半。
-use symbio::symbio_kernel::present::{ReadingPanel, ReadingTone};
+use symbio_platform::kernel::present::{ReadingPanel, ReadingTone};
 
 use crate::render::Renderer;
 
@@ -559,7 +559,7 @@ impl SymbioClient {
     ///
     /// | 无载荷的来源 | 回读的结果 |
     /// |---|---|
-    /// | 资源信号（标题 / metadata / 创建，见 `symbio_sdk::vdfs::host::vdfs_notify_change`） | 会话还在，`status` 没变 ⇒ 空转 |
+    /// | 资源信号（标题 / metadata / 创建，见 `symbio_platform::sdk::vdfs::host::vdfs_notify_change`） | 会话还在，`status` 没变 ⇒ 空转 |
     /// | `emit_session_state` 取不到视图（**唯一原因**：会话已不在） | `stat` 同样 `NotFound` ⇒ 仍然丢弃 |
     ///
     /// 也就是说：那次回读**永远改变不了结论**，却是一笔真实请求——实测每会话一次
@@ -681,7 +681,7 @@ impl SymbioClient {
     /// ## 本方法是**渲染器**，不是统计器
     ///
     /// 它只做三件事：调 `session/stats`、取响应里的 `panel` 描述（
-    /// `symbio_kernel::present::ReadingPanel`——与 Tauri 前端的 `ReadingPanel` 组件吃的是
+    /// `symbio_platform::kernel::present::ReadingPanel`——与 Tauri 前端的 `ReadingPanel` 组件吃的是
     /// **同一份**）、按终端排版打出来。**没有任何一个数的含义在这里**：标签、
     /// 单位、精度、语气全由后端排好。
     ///

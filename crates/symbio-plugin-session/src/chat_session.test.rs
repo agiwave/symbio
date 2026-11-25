@@ -12,12 +12,12 @@ use super::PersistentChatSession;
 use crate::store::EventWalStore;
 use std::path::{Path, PathBuf};
 use std::sync::Arc;
-use symbio_kernel::chat::chat_node::{ChatNode, MessageContent, NodeKind, NodeRole};
+use symbio_platform::kernel::chat::chat_node::{ChatNode, MessageContent, NodeKind, NodeRole};
 use tokio::sync::RwLock;
 
 /// 身份写 `principal`（D-147）：夹具模仿的是**落库面**的消息，`role` 只是读侧残留格。
-fn principal_for(role: NodeRole) -> symbio_kernel::chat::principal::Principal {
-    use symbio_kernel::chat::principal::Principal;
+fn principal_for(role: NodeRole) -> symbio_platform::kernel::chat::principal::Principal {
+    use symbio_platform::kernel::chat::principal::Principal;
     match role {
         NodeRole::User => Principal::from_legacy(symbio_plugin_api::PRINCIPAL_USER),
         NodeRole::Assistant => Principal::from_legacy("session/main"),
@@ -811,7 +811,7 @@ fn durable_layer_rejects_stream_delta() {
 
 // ==================== 序号分配（`max_seq` / `assign_seq`）====================
 //
-// 自 `crates/symbio-kernel/src/chat/chat_node.rs` 的测试模块迁入：`seq` **字段**是跨栈
+// 自 `crates/symbio-platform/src/kernel/chat/chat_node.rs` 的测试模块迁入：`seq` **字段**是跨栈
 // schema（留 core），而「怎么补号」是会话存储的实现策略（随 `assign_seq` 迁到这里）。
 //
 // 前置条件（见 `assign_seq` 文档）：无号项只出现在**开头**或**末尾**。下面每条用例的
@@ -907,8 +907,8 @@ fn assign_seq_places_trailing_run_after_last_existing() {
 // ── `apply`：唯一写入口（D-054 决策 2 + 3）──────────────
 
 use super::super::paths::V2_WAL_FILE;
-use symbio_kernel::event::{Event, Seq};
-use symbio_kernel::store::Store;
+use symbio_platform::kernel::event::{Event, Seq};
+use symbio_platform::kernel::store::Store;
 
 /// 只读读回事实源里的全部事件（与 `resume.test.rs::events_of` 同款）。
 fn events_of(dir: &std::path::Path) -> Vec<Event> {
@@ -930,8 +930,8 @@ fn seed_fact(dir: &std::path::Path) {
         Event::pending(
             "u-seed",
             symbio_plugin_api::events::EVENT_USER_MESSAGE,
-            symbio_kernel::event::Entity::Scope,
-            symbio_kernel::event::Verb::Opened,
+            symbio_platform::kernel::event::Entity::Scope,
+            symbio_platform::kernel::event::Verb::Opened,
             "user",
         )
         .with_payload(serde_json::json!({ "text": "第一问", "id": "u-seed" })),

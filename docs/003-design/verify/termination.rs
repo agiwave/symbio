@@ -7,7 +7,7 @@
 //! ## 判定走生产内核
 //!
 //! 前提 2 / 3 的判定**不是本文件实现的**——生产侧
-//! [`symbio_sdk::invariants`](../../../crates/symbio-sdk/src/invariants/mod.rs)
+//! [`symbio_platform::sdk::invariants`](../../../crates/symbio-platform/src/sdk/invariants/mod.rs)
 //! 的 `acyclic_deps` / `rework_bounded` 把算法层抽成了 std-only 内核
 //! （`invariants/kernel.rs`，`dep_graph_core` / `rework_core`），本程序 `#[path]`
 //! 包含**同一个文件**。此前本文件自己又写了一遍 Kahn——生产改环检测、这里
@@ -23,7 +23,7 @@
 // `#[path]` 指向仓库里的**生产文件**；本程序只用它四个内核里的两个，
 // `allow(dead_code)` 只在 verify 侧生效（生产 crate 全用）。
 #[allow(dead_code)]
-#[path = "../../../crates/symbio-sdk/src/invariants/kernel.rs"]
+#[path = "../../../crates/symbio-platform/src/sdk/invariants/kernel.rs"]
 mod kernel;
 
 use kernel::{dep_graph_core, rework_core, seq_monotonic_core};

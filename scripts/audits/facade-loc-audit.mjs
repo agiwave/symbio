@@ -30,7 +30,7 @@
  * | 字段 | 要求 |
  * |---|---|
  * | `lines` | 必须是 **0**（退役 = 这一层不再承载任何实现行） |
- * | `retired` | 非空字符串，写新家（`crates/symbio-sdk/src/plugin/<mod>.rs`） |
+ * | `retired` | 非空字符串，写新家（`crates/symbio-platform/src/sdk/plugin/<mod>.rs`） |
  * | 文件 | `CRATE_DIR` 下**必须不存在**（存在 ⇒ 退役没做完或又长回来了） |
  * | `adr` | 照旧：能打开的 `### D-NNN` |
  *

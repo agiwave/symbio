@@ -24,7 +24,7 @@ pub enum Command {
 #[derive(Debug, Clone)]
 pub struct ServeArgs {
     pub homedir: PathBuf,
-    pub config: symbio_server::ServerConfig,
+    pub config: symbio_runtime::ServerConfig,
     pub verbose: bool,
 }
 
@@ -237,7 +237,7 @@ fn parse_serve<I: IntoIterator<Item = String>>(
     argv: I,
     cwd: &std::path::Path,
 ) -> Result<Command, String> {
-    let mut config = symbio_server::ServerConfig::default();
+    let mut config = symbio_runtime::ServerConfig::default();
     config.bind = std::env::var("SYMBIO_SERVER_BIND").unwrap_or(config.bind);
     config.token = std::env::var("SYMBIO_SERVER_TOKEN").unwrap_or(config.token);
     config.allowed_origin = std::env::var("SYMBIO_SERVER_ALLOWED_ORIGIN").ok();

@@ -18,8 +18,8 @@
 
 use super::*;
 use crate::stats_reading::present_message;
-use symbio_kernel::chat::chat_node as cm;
-use symbio_kernel::vdfs::{
+use symbio_platform::kernel::chat::chat_node as cm;
+use symbio_platform::kernel::vdfs::{
     VdfsAccess, VdfsContent, VdfsContext, VdfsError, VdfsNode, VdfsResult, VDFS_STATUS_ACTIVE,
     VDFS_STATUS_FAILED, VDFS_STATUS_WORKING,
 };
@@ -338,7 +338,7 @@ fn cursor_id(before: &str) -> Option<&str> {
 // 并行的「容器页」路由。
 
 // 转写路径段 [`SEG_MESSAGES`] 与节点逆投影 [`message_of_node`] 已上移到
-// `symbio_kernel::chat::chat_node`——它们描述的是**跨插件契约**
+// `symbio_platform::kernel::chat::chat_node`——它们描述的是**跨插件契约**
 // （agent 的子会话转播桥也要用），不是本插件的私事。本模块继续按原名使用。
 use symbio_plugin_api::SEG_MESSAGES;
 
@@ -436,9 +436,11 @@ pub(crate) fn parse_inbox_message(raw: &str) -> VdfsResult<cm::ChatNode> {
     let body = raw.trim();
     if !body.starts_with('{') {
         return Ok(cm::ChatNode {
-            principal: Some(symbio_kernel::chat::principal::Principal::from_legacy(
-                symbio_plugin_api::PRINCIPAL_USER,
-            )),
+            principal: Some(
+                symbio_platform::kernel::chat::principal::Principal::from_legacy(
+                    symbio_plugin_api::PRINCIPAL_USER,
+                ),
+            ),
             msg_type: Some(cm::NodeKind::Body),
             content: Some(cm::MessageContent::Text(raw.to_string())),
             status: Some(cm::NodeStatus::Completed),
@@ -467,9 +469,11 @@ pub(crate) fn parse_inbox_message(raw: &str) -> VdfsResult<cm::ChatNode> {
     // 身份缺省是 `person/local`（写体没标身份 = 这是一条用户发言）；写体里带
     // `principal` 或存量 `role` 的，按它自己声明的形状走。
     if message.principal.is_none() && message.legacy_role().is_none() {
-        message.principal = Some(symbio_kernel::chat::principal::Principal::from_legacy(
-            symbio_plugin_api::PRINCIPAL_USER,
-        ));
+        message.principal = Some(
+            symbio_platform::kernel::chat::principal::Principal::from_legacy(
+                symbio_plugin_api::PRINCIPAL_USER,
+            ),
+        );
     }
     message.msg_type.get_or_insert(cm::NodeKind::Body);
     message.status = Some(cm::NodeStatus::Completed);
@@ -495,7 +499,7 @@ pub(crate) fn parse_inbox_message(raw: &str) -> VdfsResult<cm::ChatNode> {
 ///
 /// ## 认哪些 kind 由**产出方**说了算（DE-025 D-211）
 ///
-/// 登记表是 `symbio_kernel::event::EVENT_TRIGGER_KINDS`（各插件 `PLUGIN.yml` 的 `trigger_kinds:`
+/// 登记表是 `symbio_platform::kernel::event::EVENT_TRIGGER_KINDS`（各插件 `PLUGIN.yml` 的 `trigger_kinds:`
 /// 的投影）。本函数只判**成员资格**：加一种触发方式 = 产出方在自己目录里加一行，
 /// 这条写臂不动。反过来，把这里写成「等值于某一个 kind」就是把别人的部署事实
 /// 抄进 session——每加一种触发方式都要改会话插件。
@@ -503,15 +507,15 @@ pub(crate) fn trigger_declaration(message: &cm::ChatNode) -> VdfsResult<Option<i
     let Some(trigger) = message
         .meta
         .as_ref()
-        .and_then(|m| m.get(symbio_kernel::event::EVENT_TRIGGER_META_KEY))
+        .and_then(|m| m.get(symbio_platform::kernel::event::EVENT_TRIGGER_META_KEY))
     else {
         return Ok(None);
     };
     let kind = trigger.get("kind").and_then(Value::as_str).unwrap_or("");
-    if !symbio_kernel::event::EVENT_TRIGGER_KINDS.contains(&kind) {
+    if !symbio_platform::kernel::event::EVENT_TRIGGER_KINDS.contains(&kind) {
         return Err(VdfsError::invalid(format!(
             "不认识的触发声明 kind：{kind:?}（登记过的：{:?}）",
-            symbio_kernel::event::EVENT_TRIGGER_KINDS
+            symbio_platform::kernel::event::EVENT_TRIGGER_KINDS
         )));
     }
     Ok(Some(
@@ -835,7 +839,7 @@ pub(crate) fn session_content(
     // 存储里的节点列表是增量追加的缓存——旧节点在分支事实落格之前就已入库，只有
     // 从事实重折才会带标注。叶子读是前端与 CLI 的共同出口，投影必须在这里补齐，
     // 否则「同一次读里新支有标注、旧支没有」。
-    events: &[symbio_kernel::event::Event],
+    events: &[symbio_platform::kernel::event::Event],
     // 对账用：会话 id。**与本函数的呈现逻辑无关**——它由调用方
     // （`vdfs_provider` 的两个 Read 分支）在同一个作用域里做过对账后传入，
     // 仅为让"两处是同一份数据的两个地址、对账口径只有一份"这件事在签名上可见。
@@ -850,7 +854,7 @@ pub(crate) fn session_content(
     let mut messages = ordered(overlay_live(session.messages.clone(), live));
     // 分支标注由事实折出（`projection::branch` 的节点树出口，与 `rebuild` 末尾
     // 同一个函数）：存储缓存只保证了「节点还在」，标注必须每次读时重算。
-    symbio_sdk::projection::branch::stamp_branches(
+    symbio_platform::sdk::projection::branch::stamp_branches(
         &mut messages,
         events,
         &crate::declarations::CHAT_VOCAB,

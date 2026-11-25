@@ -29,11 +29,11 @@ import { expectAudit } from '../audit-assert.mjs'
 const script = fileURLToPath(new URL('./dead-path-audit.mjs', import.meta.url))
 
 
-/** 造一个最小仓库：`crates/symbio-kernel` + 若干给定文件（相对路径 → 内容）。 */
+/** 造一个最小仓库：`crates/symbio-platform/src/kernel` + 若干给定文件（相对路径 → 内容）。 */
 function fixture(files = {}) {
   const root = fs.mkdtempSync(path.join(os.tmpdir(), 'dead-path-'))
   const base = {
-    'crates/symbio-kernel/src/lib.rs': 'pub fn k() {}\n',
+    'crates/symbio-platform/src/kernel/mod.rs': 'pub fn k() {}\n',
     'crates/symbio-plugin-api/src/lib.rs': 'pub fn api() {}\n',
   }
   for (const [rel, body] of Object.entries({ ...base, ...files })) {
@@ -50,8 +50,8 @@ function runOn(root) {
 
 test('① 干净夹具通过', () => {
   const root = fixture({
-    'crates/symbio-sdk/src/lib.rs': '//! 见 `symbio_kernel::event::Event`。\n',
-    'docs/006-guide/x.md': '用 `symbio_sdk::event_bus` 与 `crates/symbio-sdk/src/plugin/dir.rs`。\n',
+    'crates/symbio-platform/src/sdk/mod.rs': '//! 见 `symbio_platform::kernel::event::Event`。\n',
+    'docs/006-guide/x.md': '用 `symbio_platform::sdk::event_bus` 与 `crates/symbio-platform/src/sdk/plugin/dir.rs`。\n',
   })
   try {
     const r = runOn(root)
@@ -62,7 +62,7 @@ test('① 干净夹具通过', () => {
 })
 
 test('② 代码里引用不存在的 crate ⇒ 红（DR-001）', () => {
-  const root = fixture({ 'crates/symbio-sdk/src/lib.rs': '//! 见 `symbio_gone::Thing`。\n' })
+  const root = fixture({ 'crates/symbio-platform/src/sdk/mod.rs': '//! 见 `symbio_gone::Thing`。\n' })
   try {
     const r = runOn(root)
     expectAudit(r, 1, [/symbio_gone/, /DR-001/])
@@ -82,7 +82,7 @@ test('③ 文档里只有文件路径指向不存在的 crate ⇒ 红（同一�
 })
 
 test('④ 拼错真实 crate 名 ⇒ 红（判据问「打不打得开」，不问「是不是删掉的」）', () => {
-  const root = fixture({ 'crates/symbio-sdk/src/lib.rs': '//! 见 `symbio_kernal::event`。\n' })
+  const root = fixture({ 'crates/symbio-platform/src/sdk/mod.rs': '//! 见 `symbio_kernal::event`。\n' })
   try {
     const r = runOn(root)
     expectAudit(r, 1, [/symbio_kernal/])

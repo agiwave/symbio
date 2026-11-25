@@ -1,5 +1,5 @@
 use super::*;
-use symbio_kernel::vdfs::{VdfsContext, VdfsRequest, VdfsResponse};
+use symbio_platform::kernel::vdfs::{VdfsContext, VdfsRequest, VdfsResponse};
 
 fn vctx() -> VdfsContext {
     VdfsContext::new(std::sync::Arc::new(()) as std::sync::Arc<dyn std::any::Any + Send + Sync>)
@@ -155,18 +155,18 @@ async fn binary_files_roundtrip_as_base64() {
 /// 开轮注入不得覆盖上层已重挂的 agent 作用域（T15：子空间会话要读自己的 AGENTS.md）
 #[tokio::test]
 async fn round_injection_keeps_the_existing_agent_scope() {
-    use symbio_kernel::plugin::{PluginInvokeRequestExt, PluginSimpleRequest};
-    use symbio_sdk::keys::{AGENT_VDFS, SESSION_VDFS, WORKSPACE_VDFS};
+    use symbio_platform::kernel::plugin::{PluginInvokeRequestExt, PluginSimpleRequest};
+    use symbio_platform::sdk::keys::{AGENT_VDFS, SESSION_VDFS, WORKSPACE_VDFS};
 
     let agent_dir = tempfile::tempdir().unwrap();
     let work_dir = tempfile::tempdir().unwrap();
     let session_dir = tempfile::tempdir().unwrap();
     std::fs::write(agent_dir.path().join("AGENTS.md"), "评审子智能体").unwrap();
 
-    let ctx: std::sync::Arc<dyn symbio_sdk::plugin::PluginInvokeRequest> =
+    let ctx: std::sync::Arc<dyn symbio_platform::sdk::plugin::PluginInvokeRequest> =
         std::sync::Arc::new(PluginSimpleRequest::new(None, None));
     // 模拟 owner 插件在子树 ctx 上按 AgentScope.root 重挂的那一份
-    let sub_scoped: symbio_kernel::vdfs::DynVdfsProvider =
+    let sub_scoped: symbio_platform::kernel::vdfs::DynVdfsProvider =
         std::sync::Arc::new(ScopeDirVdfs::at(agent_dir.path().to_path_buf()));
     ctx.set(AGENT_VDFS, Some(sub_scoped));
 

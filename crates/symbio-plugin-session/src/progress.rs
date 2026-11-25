@@ -42,6 +42,7 @@ use std::sync::Arc;
 
 use serde_json::{json, Value};
 
+use symbio_platform::sdk::round::facts::ReportDraft;
 use symbio_plugin_api::debt::{session_config_id, DebtFacts, DebtSource, DebtSpec, DriveRequest};
 use symbio_plugin_api::events::{
     EVENT_CHAT_ASSISTANT_FINAL, EVENT_SESSION_CONFIG, EVENT_TOOL_REQUESTED, EVENT_USER_MESSAGE,
@@ -50,7 +51,6 @@ use symbio_plugin_api::rows::{RowHandler, RowRequest, RowStep, PLUGIN_ROW};
 use symbio_plugin_api::{
     Entity, ExecEventSink, FactDraft, PluginInvokeRequest, RunSnapshot, Verb, Verdict,
 };
-use symbio_sdk::round::facts::ReportDraft;
 
 use crate::config::{
     default_progress_enabled, default_progress_interval_ms, default_progress_lease_ms,
@@ -145,9 +145,7 @@ async fn progress_step(req: &RowRequest<'_>, ctx: Option<Arc<dyn PluginInvokeReq
         tool_rounds: rounds,
         quiet_ms,
     }
-    .to_message(&symbio_kernel::chat::principal::Principal::from_legacy(
-        req.principal,
-    ));
+    .to_message(&symbio_platform::kernel::chat::principal::Principal::from_legacy(req.principal));
     node.id = format!("report:{boundary}");
     ExecEventSink::of(ctx.as_ref()).emit(node).await;
     RowStep::Facts(vec![FactDraft {

@@ -1,5 +1,5 @@
 /**
- * 事实 · `crates/symbio-kernel/src/event/trigger_kinds.gen.rs` —— **触发方式的登记表**
+ * 事实 · `crates/symbio-platform/src/kernel/event/trigger_kinds.gen.rs` —— **触发方式的登记表**
  *
  * ## 它替掉了什么
  *
@@ -22,7 +22,7 @@ import fs from "node:fs";
 import path from "node:path";
 import { pluginIds, readPluginManifest, pluginManifestRel } from "./_plugin-yml.mjs";
 
-const OUT_REL = "crates/symbio-kernel/src/event/trigger_kinds.gen.rs";
+const OUT_REL = "crates/symbio-platform/src/kernel/event/trigger_kinds.gen.rs";
 
 const HEADER = `//! 触发方式的登记表 —— **由 \`scripts/facts/trigger-kinds.mjs\` 生成，请勿手改**。
 //!

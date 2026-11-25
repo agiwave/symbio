@@ -12,11 +12,13 @@
 use super::entry;
 use async_trait::async_trait;
 use std::path::{Path, PathBuf};
-use symbio_kernel::vdfs::{
+use symbio_platform::kernel::vdfs::{
     VdfsAccess, VdfsActionResult, VdfsContent, VdfsContext, VdfsError, VdfsNode, VdfsProvider,
     VdfsRequest, VdfsResponse, VdfsResult, VdfsWriteResponse, VDFS_ACTION_EXPORT,
 };
-use symbio_sdk::vdfs::host::{vdfs_notify_change, vdfs_unwatch_changes, vdfs_watch_changes};
+use symbio_platform::sdk::vdfs::host::{
+    vdfs_notify_change, vdfs_unwatch_changes, vdfs_watch_changes,
+};
 
 struct ImportGuard {
     root: PathBuf,
@@ -200,7 +202,10 @@ impl SingleFileVdfs {
         match entry::remove_entry_locked(&self.base, id).await {
             Ok(()) => {}
             Err(VdfsError::NotFound(_)) => {
-                symbio_sdk::plugin_warn!(&self.kind, "磁盘上已无条目 {id} 目录，仅清理内存");
+                symbio_platform::sdk::plugin_warn!(
+                    &self.kind,
+                    "磁盘上已无条目 {id} 目录，仅清理内存"
+                );
             }
             Err(e) => return Err(e),
         }

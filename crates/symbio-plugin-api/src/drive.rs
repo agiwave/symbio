@@ -12,7 +12,7 @@ use std::fmt;
 use std::sync::Arc;
 
 use serde_json::Value;
-use symbio_kernel::capability::{CapabilityFamily, CapabilityRow};
+use symbio_platform::kernel::capability::{CapabilityFamily, CapabilityRow};
 
 use crate::port::{PortExecHandles, PortExecutor, PortFactEmit, PortFactReader, PortReply};
 
@@ -176,7 +176,7 @@ pub struct DriveRow {
 
 /// 驱动安全阀出口的**机制事实名**（`Exhausted` / `Stalled` 共用一种形状）。
 ///
-/// 写方是驱动入口（宿主装配层，`crates/symbio/src/drive.rs::drain`）：两条出口在
+/// 写方是驱动入口（宿主装配层，`crates/symbio-runtime/src/host/entry.rs::drain`）：两条出口在
 /// CLI 上有 stderr，但在没有控制台的宿主（Tauri / gateway）里没有读者。把出口落成
 /// 事实后，非 CLI 宿主经 VDFS 订阅面直接可见（`D-393`）。
 ///

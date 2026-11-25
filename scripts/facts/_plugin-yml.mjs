@@ -22,13 +22,13 @@
  *
  * | 键 | 生成物 |
  * |---|---|
- * | `plugin_id` / `plugin_assembly` / `plugin_order` / `plugin_undisablable` | `crates/symbio-deploy/src/lib.rs` |
+ * | `plugin_id` / `plugin_assembly` / `plugin_order` / `plugin_undisablable` | `crates/symbio-platform/src/deploy/mod.rs` |
  * | `plugin_routes` | `crates/symbio-plugin-api/src/routes.rs` |
  * | `shared_events` | `crates/symbio-plugin-api/src/events.rs` |
  * | `shared_event_ports` | `crates/symbio-plugin-api/src/events.rs`（`port_of_fact`） |
- * | `principal_<slug>` | `crates/symbio-sdk/src/authz/rows.gen.rs` |
- * | `tool_namespace` | `crates/symbio-kernel/src/chat/tool_namespaces.gen.rs` |
- * | `trigger_kinds` | `crates/symbio-kernel/src/event/trigger_kinds.gen.rs` |
+ * | `principal_<slug>` | `crates/symbio-platform/src/sdk/authz/rows.gen.rs` |
+ * | `tool_namespace` | `crates/symbio-platform/src/kernel/chat/tool_namespaces.gen.rs` |
+ * | `trigger_kinds` | `crates/symbio-platform/src/kernel/event/trigger_kinds.gen.rs` |
  * | （目录名本身） | `crates/symbio/Cargo.toml` 与 `crates/symbio/src/lib.rs` 的标记块 |
  */
 // @gate lib

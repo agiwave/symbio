@@ -6,7 +6,7 @@
       "path": "effects.rs",
       "lines": 0,
       "adr": "D-413",
-      "retired": "crates/symbio-sdk/src/plugin/effects.rs"
+      "retired": "crates/symbio-platform/src/sdk/plugin/effects.rs"
     },
     {
       "path": "declarations.rs",
@@ -27,25 +27,25 @@
       "path": "text.rs",
       "lines": 0,
       "adr": "D-413",
-      "retired": "crates/symbio-sdk/src/text/tokenizer.rs"
+      "retired": "crates/symbio-platform/src/sdk/text/tokenizer.rs"
     },
     {
       "path": "context.rs",
       "lines": 0,
       "adr": "D-413",
-      "retired": "crates/symbio-sdk/src/plugin/context.rs"
+      "retired": "crates/symbio-platform/src/sdk/plugin/context.rs"
     },
     {
       "path": "reports.rs",
       "lines": 0,
       "adr": "D-416",
-      "retired": "crates/symbio-sdk/src/plugin/reports.rs"
+      "retired": "crates/symbio-platform/src/sdk/plugin/reports.rs"
     },
     {
       "path": "views.rs",
       "lines": 0,
       "adr": "D-416",
-      "retired": "crates/symbio-sdk/src/plugin/views.rs"
+      "retired": "crates/symbio-platform/src/sdk/plugin/views.rs"
     }
   ],
   "total": {

@@ -1,0 +1,43 @@
+[package]
+name = "symbio-platform"
+version = "0.1.14"
+description = "Symbio platform: closed syntax (kernel), host mechanisms (sdk), plugin ABI shapes (contract) and deploy facts (deploy)"
+authors = ["Symbio Team"]
+license = "MIT"
+edition = "2021"
+rust-version = "1.91"
+
+[lints.rust]
+unused_imports = "warn"
+unused_variables = "warn"
+dead_code = "warn"
+
+# 平台是插件编译图的最底层：**零工作区内依赖**。
+# 出现第一条 `symbio-*` 依赖就说明有实现面混进了平台——平台只提供语法与公共机制，
+# 不认识任何具体插件、provider 或运行时（装配根与宿主才认识）。
+[dependencies]
+async-trait = { workspace = true }
+dashmap = { workspace = true }
+dirs = { workspace = true }
+inventory = { workspace = true }
+serde = { workspace = true, features = ["derive", "rc"] }
+serde_json = { workspace = true }
+serde_yaml_ng = { workspace = true }
+shellexpand = { workspace = true }
+thiserror = { workspace = true }
+time = { workspace = true, features = ["serde", "formatting", "parsing", "macros"] }
+tokio = { workspace = true, features = ["sync", "time"] }
+tokio-util = { workspace = true, features = ["rt"] }
+tracing = { workspace = true }
+tracing-subscriber = { workspace = true, features = ["env-filter"] }
+uuid = { workspace = true, features = ["v4"] }
+
+[dev-dependencies]
+tempfile = { workspace = true }
+# 测试用：tokio 时间控制（start_paused / advance）与 `#[tokio::test]`。
+tokio = { workspace = true, features = ["full", "macros", "rt", "test-util"] }
+
+[features]
+# 只给下游 crate 的测试用：让 `sdk::test_fixtures` 在非 cfg(test) 的构建里也可见。
+# 生产构建不开它——拼写来自各 owner 的清单生成物，不来自这里。
+test-fixtures = []

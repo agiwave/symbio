@@ -3,13 +3,13 @@
 //! ## 夹具为什么按**章**而不按端口名给数
 //!
 //! 两本账认的是债行盖的章（`stamp.usage` / `stamp.spend`），不是端口名字面量
-//! （`symbio_sdk::port_stamp` 的原文：读侧只认章与载荷）。夹具因此显式给章——
+//! （`symbio_platform::sdk::port_stamp` 的原文：读侧只认章与载荷）。夹具因此显式给章——
 //! 按 `port == "model"` 推章会把「账认端口」这条错误口径写进用例，
 //! 而生产里真正决定「进不进这本账」的是写那条债行的插件声明。
 
 use super::{eval_spend, eval_tokens};
 use serde_json::json;
-use symbio_kernel::event::{Entity, Event, Verb};
+use symbio_platform::kernel::event::{Entity, Event, Verb};
 
 /// 一条收束应答。`stamps` 是要盖的章（`usage` / `spend`），空 = 不盖。
 fn response(

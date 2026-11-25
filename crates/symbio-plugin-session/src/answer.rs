@@ -35,7 +35,8 @@ use std::sync::Arc;
 
 use serde_json::{json, Value};
 
-use symbio_kernel::event::{ClosureReason, Entity, Event, Verb};
+use symbio_platform::kernel::event::{ClosureReason, Entity, Event, Verb};
+use symbio_platform::sdk::authz::PRINCIPAL_MAIN;
 use symbio_plugin_api::debt::{session_config_id, DebtFacts, DebtSource, DebtSpec, DriveRequest};
 use symbio_plugin_api::events::{
     EVENT_CHAT_ASSISTANT_FINAL, EVENT_SESSION_CONFIG, EVENT_USER_MESSAGE,
@@ -45,7 +46,6 @@ use symbio_plugin_api::AssistReply;
 use symbio_plugin_api::{
     FactDraft, PluginInvokeRequest, RunSnapshot, Verdict, WordingReply, EVENT_RESPONSE,
 };
-use symbio_sdk::authz::PRINCIPAL_MAIN;
 
 use crate::declarations::OWNER;
 use crate::wording::compose_wording;

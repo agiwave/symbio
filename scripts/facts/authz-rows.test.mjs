@@ -48,13 +48,13 @@ function fixtureRepo({ plugins, consts = AUTHZ_CONSTS, sdkConsts = '', governanc
     fs.mkdirSync(dir, { recursive: true });
     fs.writeFileSync(path.join(dir, "PLUGIN.yml"), yml);
   }
-  const gov = path.join(root, "crates", "symbio-sdk", "src", "governance");
+  const gov = path.join(root, "crates", "symbio-platform", "src", "sdk", "governance");
   fs.mkdirSync(gov, { recursive: true });
   fs.writeFileSync(path.join(gov, "mod.rs"), governance);
-  const authz = path.join(root, "crates", "symbio-sdk", "src", "authz");
+  const authz = path.join(root, "crates", "symbio-platform", "src", "sdk", "authz");
   fs.mkdirSync(authz, { recursive: true });
   fs.writeFileSync(path.join(authz, "mod.rs"), consts);
-  const keys = path.join(root, "crates", "symbio-sdk", "src", "keys");
+  const keys = path.join(root, "crates", "symbio-platform", "src", "sdk", "keys");
   fs.mkdirSync(keys, { recursive: true });
   fs.writeFileSync(path.join(keys, "mod.rs"), sdkConsts);
   return root;
@@ -99,7 +99,7 @@ test("可见域不认识 ⇒ 抛错", () => {
 test("常量与行对不上（两个方向）都抛错", () => {
   // 多一行：清单声明了主体，`mod.rs` 没有对应常量。
   withRepo({ plugins: { session: OK_PLUGIN } }, (root) => {
-    fs.writeFileSync(path.join(root, "crates/symbio-sdk/src/authz/mod.rs"), "");
+    fs.writeFileSync(path.join(root, "crates/symbio-platform/src/sdk/authz/mod.rs"), "");
     assert.throws(() => collectPrincipals(root), /一条 `PRINCIPAL_\*` 常量都没读到/);
   });
 

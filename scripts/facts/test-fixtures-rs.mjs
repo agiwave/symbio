@@ -4,7 +4,7 @@
  * ## 为什么要有这一份
  *
  * `symbio-sdk` 在 `symbio-plugin-api` 的下层（api 依赖 sdk），core 的用例因此不能
- * 直接 import `symbio_plugin_api::events`。此前 `crates/symbio-sdk/src/test_fixtures.rs`
+ * 直接 import `symbio_plugin_api::events`。此前 `crates/symbio-platform/src/sdk/test_fixtures.rs`
  * 把这批事件名**手抄**了一遍：值一改就要改两处，而 SV-001 只扫插件 crate，看不见
  * 这一层（D-392）。
  *
@@ -23,7 +23,7 @@
 // @gate lib
 import { pluginDeclarationFaces } from './events-rs.mjs'
 
-const OUT = 'crates/symbio-sdk/src/test_fixtures.rs'
+const OUT = 'crates/symbio-platform/src/sdk/test_fixtures.rs'
 
 /**
  * 夹具的**消费面**：core 用例实际构造 / 断言的那些事件名。
@@ -151,9 +151,9 @@ export function render({ root }) {
     '//! `&[EventDecl]`——它们问「这条名字扮演什么角色」，答案必须来自一张声明表。这张表由',
     '//! 生成器按 owner 声明逐条投影；协议五格仍取内核常量（它们是语法闭集的一部分）。',
     '',
-    'use crate::event::{EVENT_FAILED, EVENT_REQUEST, EVENT_RESPONSE, EVENT_RETRY, EVENT_SENT};',
-    'use crate::projection::vocab::{ChatVocab, CommitmentVocab, MessageVocab};',
-    'use crate::{Entity, EventDecl, FactRole, Verb};',
+    'use crate::kernel::event::{EVENT_FAILED, EVENT_REQUEST, EVENT_RESPONSE, EVENT_RETRY, EVENT_SENT};',
+    'use crate::kernel::{Entity, EventDecl, FactRole, Verb};',
+    'use crate::sdk::projection::vocab::{ChatVocab, CommitmentVocab, MessageVocab};',
     '',
   ]
 

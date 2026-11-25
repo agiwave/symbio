@@ -5,10 +5,10 @@
 use super::*;
 use crate::plugin::SessionConfig;
 use std::sync::Arc;
-use symbio_kernel::event::{Entity, Event, Verb};
+use symbio_platform::kernel::event::{Entity, Event, Verb};
+use symbio_platform::sdk::invariants::check_all;
 use symbio_plugin_api::events::{EVENT_SESSION_CONFIG, EVENT_USER_MESSAGE};
 use symbio_plugin_api::vocab;
-use symbio_sdk::invariants::check_all;
 
 // 这一段钉的不是"触发器会不会开跑一轮"（那要真模型，归 e2e），而是**触发先落事实**
 // 这条链子：`system.triggered` 必须存在且溯源指向更早的格子、健康自检紧随其后、
@@ -148,9 +148,11 @@ async fn autonomous_request_does_not_override_session_sandbox_metadata() {
     let sid = "s-sandbox";
     seed_one_fact(&p, sid);
     let message = cm::ChatNode {
-        principal: Some(symbio_kernel::chat::principal::Principal::from_legacy(
-            symbio_plugin_api::PRINCIPAL_AUTONOMOUS,
-        )),
+        principal: Some(
+            symbio_platform::kernel::chat::principal::Principal::from_legacy(
+                symbio_plugin_api::PRINCIPAL_AUTONOMOUS,
+            ),
+        ),
         msg_type: Some(cm::NodeKind::Body),
         content: Some(cm::MessageContent::Text("检查待办".into())),
         ..Default::default()
@@ -245,8 +247,8 @@ async fn no_fact_source_or_a_live_writer_both_block_the_trigger() {
 // ==================== 发起者与预算的单元验收（D-189） ====================
 use crate::declarations::EVENT_SYSTEM_TRIGGERED;
 use crate::store::EventWalStore;
-use symbio_kernel::store::EventStore;
-use symbio_kernel::Seq;
+use symbio_platform::kernel::store::EventStore;
+use symbio_platform::kernel::Seq;
 use symbio_plugin_api::events::EVENT_SCOPE_DISPATCH;
 use symbio_plugin_api::PRINCIPAL_AUTONOMOUS;
 use symbio_plugin_api::PRINCIPAL_USER;

@@ -4,10 +4,10 @@
 
 use crate::AppState;
 use serde_json::Value;
-use symbio::symbio_kernel::keys::SymbioKey;
-use symbio::symbio_kernel::plugin::{PluginFrame, PluginMessageWire, PluginPayload};
-use symbio::symbio_sdk::keys::TRACE_ID;
 use symbio_http::PluginPayloadWire;
+use symbio_platform::kernel::keys::SymbioKey;
+use symbio_platform::kernel::plugin::{PluginFrame, PluginMessageWire, PluginPayload};
+use symbio_platform::sdk::keys::TRACE_ID;
 use tauri::Emitter;
 use tokio::sync::mpsc;
 use tokio_util::sync::CancellationToken;
@@ -47,7 +47,7 @@ where
 }
 
 // 线路层消息容器（PluginMessageWire / PluginPayloadWire）统一定义于
-// `symbio_kernel::plugin::transport`，与 HTTP/WebSocket 网关入站共用同一份线上格式，
+// `symbio_platform::kernel::plugin::transport`，与 HTTP/WebSocket 网关入站共用同一份线上格式，
 // 壳层不再重复定义（避免双份漂移）。
 
 #[tauri::command]

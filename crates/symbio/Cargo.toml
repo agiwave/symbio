@@ -13,12 +13,8 @@ unused_variables = "warn"
 dead_code = "warn"
 
 [dependencies]
-symbio-sdk = { path = "../symbio-sdk" }
-symbio-kernel = { path = "../symbio-kernel" }
+symbio-platform = { path = "../symbio-platform" }
 symbio-plugin-api = { path = "../symbio-plugin-api" }
-symbio-deploy = { path = "../symbio-deploy" }
-# 驱动入口：把「某 scope 有新事实」交给义务环（`symbio-host` 只做环的装配与支持面）。
-symbio-host = { path = "../symbio-host" }
 # 主机装配必须带嵌入臂：语义检索的实现经 `submit_object_creator!` 注册在这里，关掉就等于关掉那条能力（D-254）。
 symbio-providers = { path = "../symbio-providers", features = ["embedding"] }
 # >>> plugin-links:begin
@@ -63,7 +59,7 @@ inventory = { workspace = true }
 [dev-dependencies]
 tempfile = { workspace = true }
 # 测试用：tokio 时间控制（start_paused / advance）与 `#[tokio::test]`；
-# 生产依赖里没有 tokio —— 唤醒句柄与等待体随 `KickState` 住在 `symbio-host`（D-400）。
+# 生产依赖里没有 tokio —— 唤醒句柄与等待体随 `KickState` 住在运行时 `symbio_runtime::host`（D-400）。
 tokio = { workspace = true, features = ["test-util", "macros", "rt", "time"] }
 # 测试夹具的载荷构造（假根的 `PluginPayload` / 事实草稿）。
 serde_json = { workspace = true }

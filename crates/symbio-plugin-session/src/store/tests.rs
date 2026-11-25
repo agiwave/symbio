@@ -146,8 +146,8 @@ async fn nested_descendants_follow_the_actual_parent_and_cascade_on_delete() {
 /// 这是召回读方（`recall_snapshots`）的范围裁决，不是漏扫——改范围先改裁决。
 #[test]
 fn recall_snapshots_scans_one_level_deliberately() {
-    use symbio_kernel::event::{Entity, Event, Verb};
-    use symbio_kernel::store::Store as _;
+    use symbio_platform::kernel::event::{Entity, Event, Verb};
+    use symbio_platform::kernel::store::Store as _;
 
     let tmp = TempDir::new().unwrap();
     let store = SessionStore::new(tmp.path().to_path_buf());
@@ -272,8 +272,8 @@ async fn save_leaves_no_temp_file_behind() {
 
 /// 造一条用户文本消息（标题 / 摘要推导的输入）
 fn text_msg(role_is_user: bool, text: &str) -> ChatNode {
-    use symbio_kernel::chat::chat_node::MessageContent;
-    use symbio_kernel::chat::principal::Principal;
+    use symbio_platform::kernel::chat::chat_node::MessageContent;
+    use symbio_platform::kernel::chat::principal::Principal;
     ChatNode {
         id: format!("m{}", text.len()),
         principal: Some(Principal::from_legacy(if role_is_user {
@@ -288,8 +288,13 @@ fn text_msg(role_is_user: bool, text: &str) -> ChatNode {
 
 /// 用户格事件（载荷带节点 id；与 `rebuild.test.rs::user_event` 同形——那边是投影
 /// 判据、这边是存储判据，两处构造一致才能判到同一件事）
-fn user_event(eid: &str, node_id: &str, text: &str, _turn: u64) -> symbio_kernel::event::Event {
-    use symbio_kernel::event::{Entity, Event, Verb};
+fn user_event(
+    eid: &str,
+    node_id: &str,
+    text: &str,
+    _turn: u64,
+) -> symbio_platform::kernel::event::Event {
+    use symbio_platform::kernel::event::{Entity, Event, Verb};
     use symbio_plugin_api::events::EVENT_USER_MESSAGE;
     Event::pending(eid, EVENT_USER_MESSAGE, Entity::Scope, Verb::Opened, "user")
         .with_ts(1_000)
@@ -345,7 +350,7 @@ async fn wal_is_the_source_messages_json_is_ignored() {
     std::fs::create_dir_all(&dir).unwrap();
     {
         let wal = crate::store::EventWalStore::open(dir.join(crate::paths::V2_WAL_FILE)).unwrap();
-        use symbio_kernel::store::Store as _;
+        use symbio_platform::kernel::store::Store as _;
         wal.append(user_event("e1", "n1", "第一问", 1)).unwrap();
         wal.append(user_event("e2", "n2", "第二问", 2)).unwrap();
     }
@@ -679,8 +684,8 @@ fn a_session_without_metadata_still_reads_its_events() {
 /// 盘上格式是跨进程契约，故测试按字面写那份 JSON，不借私有构造。
 #[tokio::test]
 async fn drain_parked_lands_parked_edits_through_the_opening_window() {
-    use symbio_kernel::event::Seq;
-    use symbio_kernel::store::Store as _;
+    use symbio_platform::kernel::event::Seq;
+    use symbio_platform::kernel::store::Store as _;
 
     let tmp = TempDir::new().unwrap();
     let store = SessionStore::new(tmp.path().to_path_buf());
@@ -737,8 +742,8 @@ async fn drain_parked_lands_parked_edits_through_the_opening_window() {
 /// `user.message` 当场收到 `NotTheWriter`。
 #[test]
 fn control_plane_snapshot_does_not_steal_the_writer_lock() {
-    use symbio_kernel::event::Seq;
-    use symbio_kernel::store::Store as _;
+    use symbio_platform::kernel::event::Seq;
+    use symbio_platform::kernel::store::Store as _;
 
     let tmp = TempDir::new().unwrap();
     let store = SessionStore::new(tmp.path().to_path_buf());
@@ -789,7 +794,7 @@ async fn an_unopenable_fact_source_is_an_error_not_none() {
 /// **事实源根本打不开**——不许带病降到共享词汇面，让进程看起来起来了。
 #[test]
 fn seal_gaps_are_a_load_error_not_a_degraded_store() {
-    use symbio_kernel::decl::ring::Gap;
+    use symbio_platform::kernel::decl::ring::Gap;
 
     let tmp = TempDir::new().unwrap();
     let wal = tmp.path().join(paths::V2_WAL_FILE);

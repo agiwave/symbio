@@ -92,17 +92,20 @@ const DEFAULT_SESSION = path.join('crates', 'symbio-plugin-session', 'src')
 const DEFAULT_PROTOCOLS = path.join('crates', 'symbio-plugin-model', 'src', 'protocols')
 
 /**
- * SC-006 的扫描根：**能力不该逼架构认识自己的名字**的四棵树。
+ * SC-006 的扫描根：**能力不该逼架构认识自己的名字**的树（平台四臂 + 控制面两插件）。
  *
- * 为什么是这四棵：`glossary` 夹具（EX-001）证明新增能力包只改自己与生成物；反过来，
+ * 为什么是这几棵：`glossary` 夹具（EX-001）证明新增能力包只改自己与生成物；反过来，
  * 工具名一旦落到这四棵的任何一处，就说明某条通用链路开始认识某个具体能力。
  * 测试文件不在内（它本来就该按名造工具）。
  */
 const MSG_ROOTS = [
-  // 架构层现在是两棵：内核（封闭语法）与 sdk（宿主机制与策略）。D-279 之前这里还有
-  // 一棵 core，它是 sdk 搬迁后的残余——工具名落进残余不再说明任何事情。
-  ['sdk', path.join('crates', 'symbio-sdk', 'src')],
-  ['kernel', path.join('crates', 'symbio-kernel', 'src')],
+  // 架构层是平台的中性三臂（`symbio-platform`：sdk 宿主机制与策略 / kernel 封闭语法 /
+  // contract 形状）。deploy 臂是装配常量（`PLUGIN_ID_*` / `ROUTE_*`），它按职责就认识
+  // 插件身份，不在内。D-279 之前这里还有一棵 core，它是 sdk 搬迁后的残余——工具名
+  // 落进残余不再说明任何事情。
+  ['sdk', path.join('crates', 'symbio-platform', 'src', 'sdk')],
+  ['kernel', path.join('crates', 'symbio-platform', 'src', 'kernel')],
+  ['contract', path.join('crates', 'symbio-platform', 'src', 'contract')],
   ['loop', path.join('crates', 'symbio-plugin-loop', 'src')],
   ['session', path.join('crates', 'symbio-plugin-session', 'src')],
 ]

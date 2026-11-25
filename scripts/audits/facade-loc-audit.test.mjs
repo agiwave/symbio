@@ -153,7 +153,7 @@ test('退役条目：文件已删、lines 钉 0 ⇒ 通过（等效收紧，不�
     path: 'effects.rs',
     lines: 0,
     adr: 'D-399',
-    retired: 'crates/symbio-sdk/src/plugin/effects.rs',
+    retired: 'crates/symbio-platform/src/sdk/plugin/effects.rs',
   }
   baseline.total = { lines: 8, adr: 'D-399' }
   const box = sandbox(files, baseline)
@@ -172,7 +172,7 @@ test('退役条目：文件又出现 ⇒ 红（退役没做完或实现长回来
     path: 'effects.rs',
     lines: 0,
     adr: 'D-399',
-    retired: 'crates/symbio-sdk/src/plugin/effects.rs',
+    retired: 'crates/symbio-platform/src/sdk/plugin/effects.rs',
   }
   const box = sandbox(cleanFiles(), baseline)
   try {

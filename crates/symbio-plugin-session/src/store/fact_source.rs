@@ -8,14 +8,14 @@
 use std::path::{Path, PathBuf};
 use std::sync::{Arc, OnceLock, RwLock, Weak};
 
-use symbio_kernel::event::{Event, Seq};
-use symbio_kernel::exec::{ExecAbortSignal, ExecEventSink};
-use symbio_kernel::store::Store;
+use symbio_platform::kernel::event::{Event, Seq};
+use symbio_platform::kernel::exec::{ExecAbortSignal, ExecEventSink};
+use symbio_platform::kernel::store::Store;
+use symbio_platform::sdk::drive::{DriveEntry, DriveTarget};
+use symbio_platform::sdk::plugin::fact_source::{FactSource, FactSourceOpener};
 use symbio_plugin_api::events::EVENT_ARTIFACT_ADDED;
 use symbio_plugin_api::FactDraft;
 use symbio_plugin_api::Principal;
-use symbio_sdk::drive::{DriveEntry, DriveTarget};
-use symbio_sdk::plugin::fact_source::{FactSource, FactSourceOpener};
 
 use super::layout::SessionParams;
 use super::wal::WalStore;
@@ -184,11 +184,11 @@ impl FactSource for SessionFactSource {
         // 本会话主体（`session/main` / `session/arbiter` / `session/worker` 由此得到）。
         // 载体缺失（metadata 读不到）就显式失败——不回落主体；载体在而值为空是
         // 「会话确实没有绑定智能体」，其主体定义就是 `session/main`。
-        let actor = if actor == symbio_kernel::event::OWNER_PRINCIPAL {
+        let actor = if actor == symbio_platform::kernel::event::OWNER_PRINCIPAL {
             let Some(agent_id) = self.agent_id.as_deref() else {
                 return Err(format!(
                     "事实归属为 `{}`，但会话主体不可用（metadata 取不到 agent_id；拒绝回落主体）",
-                    symbio_kernel::event::OWNER_PRINCIPAL
+                    symbio_platform::kernel::event::OWNER_PRINCIPAL
                 ));
             };
             symbio_plugin_api::principal_of(Some(agent_id.trim()))
@@ -196,7 +196,7 @@ impl FactSource for SessionFactSource {
             actor
         };
         let kind = draft.kind.clone();
-        let mut event = symbio_sdk::plugin::fact_source::draft_into_event(actor, draft);
+        let mut event = symbio_platform::sdk::plugin::fact_source::draft_into_event(actor, draft);
         // 时刻属于信封，落格时由事实源兜底；这里先写同一时刻，落格后的投影就能用
         // 手上这一份（含 `event_id`，`seq` 在 append 后补），不必回读全史——
         // `Store::range` 要拼接归档段，长会话下每次都是全量克隆。
@@ -338,4 +338,4 @@ impl FactSourceOpener for SessionFactOpener {
 
 static SESSION_FACT_OPENER: SessionFactOpener = SessionFactOpener;
 
-symbio_sdk::submit_fact_source_opener!(SESSION_FACT_OPENER);
+symbio_platform::sdk::submit_fact_source_opener!(SESSION_FACT_OPENER);

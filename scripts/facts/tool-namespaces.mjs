@@ -1,5 +1,5 @@
 /**
- * 事实 · `crates/symbio-kernel/src/chat/tool_namespaces.gen.rs` —— **工具主体的命名空间集合**
+ * 事实 · `crates/symbio-platform/src/kernel/chat/tool_namespaces.gen.rs` —— **工具主体的命名空间集合**
  *
  * ## 它替掉了什么
  *
@@ -28,7 +28,7 @@ import fs from "node:fs";
 import path from "node:path";
 import { pluginIds, readPluginManifest, pluginManifestRel } from "./_plugin-yml.mjs";
 
-const OUT_REL = "crates/symbio-kernel/src/chat/tool_namespaces.gen.rs";
+const OUT_REL = "crates/symbio-platform/src/kernel/chat/tool_namespaces.gen.rs";
 
 const HEADER = `//! 工具主体的命名空间集合 —— **由 \`scripts/facts/tool-namespaces.mjs\` 生成，请勿手改**。
 //!

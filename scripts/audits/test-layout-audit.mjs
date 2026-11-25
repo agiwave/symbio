@@ -61,7 +61,7 @@ const RATCHETS = {
   // 2026-09-24：存量内联测试已全部拆成独立的 *.test.rs（prod 文件 0 内联测试函数），
   // 故基线压到 0——此后**任何**新建/往源码里加测试函数都会红（见文件头「判据」说明）。
   'crates': { files: 0, tests: 0 },
-  'crates/symbio-kernel/src': { files: 0, tests: 0 },
+  'crates/symbio-platform/src/kernel': { files: 0, tests: 0 },
   'crates/symbio-cli/src': { files: 0, tests: 0 },
   'tauri/src-tauri/src': { files: 0, tests: 0 },
 }
@@ -70,7 +70,7 @@ const DEFAULT_RATCHET = { files: 0, tests: 0 }
 /** `ROOT=` 给了就只审那一个；否则审全部 Rust crate（cli / tauri 此前完全没被覆盖） */
 const ROOTS = rootArg
   ? [rootArg.slice(5)]
-  : ['crates', 'crates/symbio-kernel/src', 'crates/symbio-cli/src', 'tauri/src-tauri/src']
+  : ['crates', 'crates/symbio-platform/src/kernel', 'crates/symbio-cli/src', 'tauri/src-tauri/src']
 const STRICT = process.argv.includes('--strict')
 
 /**

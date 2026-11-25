@@ -23,8 +23,8 @@ import {
 } from './arch-change-audit.mjs'
 
 const SHA = 'deadbeefdeadbeefdeadbeefdeadbeefdeadbeef'
-const CORE = 'crates/symbio-sdk/src/lib.rs'
-const KERNEL = 'crates/symbio-kernel/src/event/mod.rs'
+const CORE = 'crates/symbio-platform/src/sdk/mod.rs'
+const KERNEL = 'crates/symbio-platform/src/kernel/event/mod.rs'
 const PLUGIN = 'crates/symbio-plugin-web/src/plugin.rs'
 
 /** 一条合规的提交信息（标题 + 门禁段），用来隔离出「trailer 有无」这一件事 */
@@ -54,14 +54,14 @@ test('CC-001 触发：动 kernel 同样算 core', () => {
 test('CC-001 不触发：只改了 core 的清单 / README（没有 `.rs`）', () => {
   const r = judge(
     SHA,
-    ['crates/symbio-sdk/Cargo.toml', 'crates/symbio-sdk/README.md'],
+    ['crates/symbio-platform/src/sdk/Cargo.toml', 'crates/symbio-platform/src/sdk/README.md'],
     msg(),
   )
   assert.deepEqual(r.errors, [])
 })
 
 test('CC-001 触发：清单与源码同批改动，仍按源码算', () => {
-  const r = judge(SHA, ['crates/symbio-sdk/Cargo.toml', CORE], msg())
+  const r = judge(SHA, ['crates/symbio-platform/src/sdk/Cargo.toml', CORE], msg())
   assert.equal(r.errors.length, 1)
   assert.match(r.errors[0], /^CC-001/)
 })
@@ -69,12 +69,12 @@ test('CC-001 触发：清单与源码同批改动，仍按源码算', () => {
 // 口径边界：只判**生产**源码。纯测试断言改的是契约的证词，不是契约本身——
 // 为一条夹具改名要求架构理由，会让这条判据退化成填表（与清单 / README 同一条理由）。
 test('CC-001 不触发：只改了 core 的测试文件（纯测试断言不要求架构理由）', () => {
-  const r = judge(SHA, ['crates/symbio-sdk/src/vocab.test.rs'], msg())
+  const r = judge(SHA, ['crates/symbio-platform/src/sdk/vocab.test.rs'], msg())
   assert.deepEqual(r.errors, [])
 })
 
 test('CC-001 不触发：`tests/` 目录下的用例同样不算内核语义', () => {
-  const r = judge(SHA, ['crates/symbio-kernel/tests/decl.rs'], msg())
+  const r = judge(SHA, ['crates/symbio-platform/src/kernel/tests/decl.rs'], msg())
   assert.deepEqual(r.errors, [])
 })
 
@@ -83,12 +83,12 @@ test('CC-001 不触发：`tests/` 目录下的用例同样不算内核语义', (
 // `tests.rs` 会让一次「把测试标题从『会话设置』改成『会话』」的夹具维护
 // 被误判成内核语义改动，逼人给纯测试维护编造 `Core-Change:`。
 test('CC-001 不触发：`src/**/tests.rs` 模块同样是纯测试', () => {
-  const r = judge(SHA, ['crates/symbio-kernel/src/vdfs/tests.rs'], msg())
+  const r = judge(SHA, ['crates/symbio-platform/src/kernel/vdfs/tests.rs'], msg())
   assert.deepEqual(r.errors, [])
 })
 
 test('CC-001 仍触发：同批既改测试又改生产源码（测试不豁免生产面的理由）', () => {
-  const r = judge(SHA, ['crates/symbio-sdk/src/vocab.test.rs', CORE], msg())
+  const r = judge(SHA, ['crates/symbio-platform/src/sdk/vocab.test.rs', CORE], msg())
   assert.equal(r.errors.length, 1)
   assert.match(r.errors[0], /^CC-001/)
 })
@@ -142,9 +142,9 @@ test('reason 里只写「D-」不算：必须是完整决策号形态', () => {
  */
 test('改动性质：只删代码行 ⇒ narrowing（收窄不要求理由）', () => {
   const patch = [
-    'diff --git a/crates/symbio-sdk/src/authz/mod.rs b/crates/symbio-sdk/src/authz/mod.rs',
-    '--- a/crates/symbio-sdk/src/authz/mod.rs',
-    '+++ b/crates/symbio-sdk/src/authz/mod.rs',
+    'diff --git a/crates/symbio-platform/src/sdk/authz/mod.rs b/crates/symbio-platform/src/sdk/authz/mod.rs',
+    '--- a/crates/symbio-platform/src/sdk/authz/mod.rs',
+    '+++ b/crates/symbio-platform/src/sdk/authz/mod.rs',
     '@@ -242,9 +242,0 @@',
     '-/// **外部执行**能力名——熔断闸门的授权判据。',
     '-pub const CAP_EXTERNAL_EXECUTION: &str = Capability::ProduceArtifact.name();',
@@ -183,14 +183,14 @@ test('判定面与豁免面同源：core 里的测试文件不参与 diff 性质
   assert.deepEqual(
     coreVerdictFiles([
       CORE,
-      'crates/symbio-sdk/src/authz/mod.test.rs',
-      'crates/symbio-sdk/tests/integration.rs',
+      'crates/symbio-platform/src/sdk/authz/mod.test.rs',
+      'crates/symbio-platform/src/sdk/tests/integration.rs',
       PLUGIN,
     ]),
     [CORE],
   )
   // core 下只有测试文件 ⇒ 没有需要在 diff 上判性质的输入，提交整体照常不看 `Core-Change:`。
-  assert.deepEqual(coreVerdictFiles(['crates/symbio-sdk/src/authz/mod.test.rs']), [])
+  assert.deepEqual(coreVerdictFiles(['crates/symbio-platform/src/sdk/authz/mod.test.rs']), [])
 })
 
 // ---------------------------------------------------------------- 解析层（喂料）
@@ -277,7 +277,7 @@ test('解析→判定：历史样本（动 kernel、正文无 trailer）判 CC-0
     '门禁：node scripts/gate.mjs 161/162 通过、e2e 86/86。\n\n' +
     '结论落 SP-033 §3（TC-3）。'
   const files = [
-    'crates/symbio-kernel/src/decl/ring.rs',
+    'crates/symbio-platform/src/kernel/decl/ring.rs',
     'crates/symbio-plugin-loop/src/tool_dispatch.rs',
     'docs/003-design/015-义务环.md',
   ]

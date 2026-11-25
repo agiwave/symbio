@@ -18,12 +18,12 @@
 use std::collections::BTreeMap;
 
 use serde_json::Value;
-use symbio_kernel::event::{Entity, Verb};
-use symbio_kernel::store::AppendError;
+use symbio_platform::kernel::event::{Entity, Verb};
+use symbio_platform::kernel::store::AppendError;
 
 use super::*;
-use symbio_kernel::decl::ring::Gap;
-use symbio_kernel::decl::Frozen;
+use symbio_platform::kernel::decl::ring::Gap;
+use symbio_platform::kernel::decl::Frozen;
 
 /// 打开事实源并挂装配期冻结表。
 ///
@@ -218,12 +218,15 @@ impl SessionStore {
     pub(crate) fn fact_source_bound(
         &self,
         session_id: &str,
-        drive: Option<Arc<dyn symbio_sdk::drive::DriveEntry>>,
-        sink: symbio_kernel::exec::ExecEventSink,
+        drive: Option<Arc<dyn symbio_platform::sdk::drive::DriveEntry>>,
+        sink: symbio_platform::kernel::exec::ExecEventSink,
         supplements: Option<crate::transcript::supplements::SupplementDrain>,
-        abort_signal: Arc<std::sync::RwLock<Option<symbio_kernel::exec::ExecAbortSignal>>>,
+        abort_signal: Arc<
+            std::sync::RwLock<Option<symbio_platform::kernel::exec::ExecAbortSignal>>,
+        >,
         port_bindings: Option<Arc<symbio_plugin_api::port::PortBindings>>,
-    ) -> Result<Option<Arc<dyn symbio_sdk::plugin::fact_source::FactSource>>, String> {
+    ) -> Result<Option<Arc<dyn symbio_platform::sdk::plugin::fact_source::FactSource>>, String>
+    {
         // 会话目录不存在 = 没跑过 = **没有事实源**（缺省态，不是失败）。
         // 只读面（`session/changes` 等）必须能回答「这个会话还没有 WAL」，
         // 不能把「还没开幕」报成取不到主体。

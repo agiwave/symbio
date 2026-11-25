@@ -11,7 +11,7 @@ impl: done
 
 「首响 / 答话 / 汇报」的措辞——**只输出文本，不做判决**。
 
-判决的形状见 `crates/symbio-kernel/src/dialog/` 里 `Verdict` 的变体表：`Answered` / `Escalate` / `Report`。
+判决的形状见 `crates/symbio-platform/src/kernel/dialog/` 里 `Verdict` 的变体表：`Answered` / `Escalate` / `Report`。
 本插件**不知道任何一个产出方存在**：它只执行上游经端口给出的判决结果，不描述其它能力如何实现或派发。
 
 判决与措辞分开的理由不是「拆得越细越好」，而是编排层要能**执行**判决（收尾 / 进工具
@@ -25,7 +25,7 @@ impl: done
 ## 契约
 
 入参 `ComposeRequest`，出参是 `String`（一段面向用户的文本），定义在
-[`symbio_sdk::dialog`](../symbio-contract/src/dialog.rs) ——
+[`symbio_platform::sdk::dialog`](../symbio-platform/src/contract/dialog.rs) ——
 契约跨插件（`session` 生产，本插件消费），故落在 core（D-023）。
 
 出参是文本而非枚举，与 `classify` 正好相反：**判决是给编排层执行的，措辞是给人看的。**
@@ -72,7 +72,7 @@ compose(verdict)
 **兜底随变体而不同**：`Answered` 的兜底是「好的。」（口吻是"能直接答"），`Escalate`
 的兜底是「好，我来处理。」（本轮**会**干活）。用同一句会让用户以为要干活而本轮已经收尾。
 
-**理由码不定义在本插件里**：词表是 内核 `dialog` 模块（`crates/symbio-kernel/src/dialog/`）的 `REASON_*`（`Verdict::reason`
+**理由码不定义在本插件里**：词表是 内核 `dialog` 模块（`crates/symbio-platform/src/kernel/dialog/`）的 `REASON_*`（`Verdict::reason`
 的取值），生产方 `classify` 与本插件都从那里取同一批常量，**没有可漂的第二处**。
 本插件因此只有一件事要保证：表里没有的码走通用模板兜底（**降级而不失效**），
 以及 `from_context` 在表里**没有**行。
@@ -119,7 +119,7 @@ owner）。取不到（写错 / 该条目已禁用）⇒ **落回会话选定值
 且首响紧跟用户消息，进了请求包会让线上出现连续两条 `assistant`（部分协议直接 400）。
 
 `Report` 的理由码由 **`session` 自己产**（判决 `Report` 也由它判出，见
-`Verdict` 的变体表（`crates/symbio-kernel/src/dialog/`））——本插件按判决分派、不看这个码，所以它
+`Verdict` 的变体表（`crates/symbio-platform/src/kernel/dialog/`））——本插件按判决分派、不看这个码，所以它
 不在共享词表里，也不需要在表里占一行。
 
 ## 机制

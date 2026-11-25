@@ -52,5 +52,5 @@ impl: done
 
 ## 关联
 
-- 提示词族的读写协议：`crates/symbio-sdk/src/capability/prompt.rs`
+- 提示词族的读写协议：`crates/symbio-platform/src/sdk/capability/prompt.rs`
 - 逐行处置账（#47）：`docs/003-design/026-能力拆分与影响类.md` §2.3

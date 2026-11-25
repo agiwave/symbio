@@ -16,7 +16,7 @@
  *
  * ## 为什么扫 `test_fixtures.rs`，又跳过生成物
  *
- * `crates/symbio-sdk/src/test_fixtures.rs` 是 core 用例唯一的事件拼写面。它若手抄
+ * `crates/symbio-platform/src/sdk/test_fixtures.rs` 是 core 用例唯一的事件拼写面。它若手抄
  * 词汇层的名字，正是本判据要拦的第二份定义；所以这个文件名**不按「测试文件」排除**。
  * 但它（以及任何事实生成物）由生成器投影、首行带「生成，请勿手改」标记——带标记的
  * 文件整体跳过：**同一份 owner 声明生成两处产物**是允许的，手抄副本不是（D-392）。
@@ -534,7 +534,7 @@ function payloadKeyErrors(root) {
 }
 
 /** 机制层 crate：它们不许自己写词汇层的事件名，只能 import / 由生成器投影（D-392）。 */
-const CORE_CRATES = ['symbio-sdk', 'symbio-kernel', 'symbio']
+const CORE_CRATES = ['symbio-platform', 'symbio']
 
 function auditCrates(root) {
   const crates = path.join(root, 'crates')
@@ -670,7 +670,7 @@ for (const [value, per] of [...constHomes.entries()].sort((a, b) => a[0].localeC
   )
 }
 
-// ③ 机制层（`symbio-sdk` / `symbio-kernel` / `symbio`）不许自己写词汇层已有的事件名。
+// ③ 机制层（平台 `symbio-platform` 四臂 / 装配方 `symbio`）不许自己写词汇层已有的事件名。
 //   合法形态只有 import 同一常量，或由生成器从同源投影一份（带「生成」标记的整份跳过）。
 for (const [value, per] of [...coreLiteralHomes.entries()].sort((a, b) => a[0].localeCompare(b[0]))) {
   const home = vocab.names.get(value)

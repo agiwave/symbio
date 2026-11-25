@@ -5,7 +5,7 @@
 
 use super::*;
 
-use symbio_sdk::capability::capability_option_fields;
+use symbio_platform::sdk::capability::capability_option_fields;
 
 // ==================== 选项收集管线（宿主侧） ====================
 //
@@ -18,8 +18,9 @@ use symbio_sdk::capability::capability_option_fields;
 
 #[tokio::test]
 async fn collect_without_parent_returns_empty() {
-    let ctx: Arc<dyn PluginInvokeRequest> =
-        Arc::new(symbio_kernel::plugin::PluginSimpleRequest::new(None, None));
+    let ctx: Arc<dyn PluginInvokeRequest> = Arc::new(
+        symbio_platform::kernel::plugin::PluginSimpleRequest::new(None, None),
+    );
     let v = collect_options(None, &ctx).await;
     assert!(capability_option_fields(&*v).await.is_empty());
 }
@@ -137,8 +138,8 @@ impl symbio_plugin_api::port::PortProvider for FixturePort {
 
 #[async_trait::async_trait]
 impl Plugin for DuplicatePortParent {
-    fn meta(&self) -> symbio_kernel::plugin::PluginMeta {
-        symbio_kernel::plugin::PluginMeta::new("duplicate-port", "duplicate-port")
+    fn meta(&self) -> symbio_platform::kernel::plugin::PluginMeta {
+        symbio_platform::kernel::plugin::PluginMeta::new("duplicate-port", "duplicate-port")
     }
 
     async fn route(
@@ -174,8 +175,9 @@ impl Plugin for DuplicatePortParent {
 /// 无人读——判重退化为「照常跑」。
 #[tokio::test]
 async fn collection_preserves_request_scoped_host_ports() {
-    let ctx: Arc<dyn PluginInvokeRequest> =
-        Arc::new(symbio_kernel::plugin::PluginSimpleRequest::new(None, None));
+    let ctx: Arc<dyn PluginInvokeRequest> = Arc::new(
+        symbio_platform::kernel::plugin::PluginSimpleRequest::new(None, None),
+    );
     let host_bindings = Arc::new(symbio_plugin_api::port::PortBindings::default());
     assert!(host_bindings
         .bind(
@@ -210,8 +212,9 @@ async fn collection_preserves_request_scoped_host_ports() {
 
 #[tokio::test]
 async fn duplicate_port_providers_are_reported_through_the_collection_ctx() {
-    let ctx: Arc<dyn PluginInvokeRequest> =
-        Arc::new(symbio_kernel::plugin::PluginSimpleRequest::new(None, None));
+    let ctx: Arc<dyn PluginInvokeRequest> = Arc::new(
+        symbio_platform::kernel::plugin::PluginSimpleRequest::new(None, None),
+    );
     let parent: Arc<dyn Plugin> = Arc::new(DuplicatePortParent);
     collect_capabilities(Some(&parent), &ctx, None).await;
 

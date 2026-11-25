@@ -82,6 +82,7 @@ import { fileURLToPath } from 'node:url'
 import { spawnSync } from 'node:child_process'
 import { red, green, dim } from '../color.mjs'
 import { hasDecisionAnchor } from '../decision-anchors.mjs'
+import { canonicalPath } from '../gate.d/_shared.mjs'
 
 const argv = process.argv.slice(2)
 const rootArg = argv.find((a) => a.startsWith('--root='))
@@ -96,6 +97,15 @@ const CP_REL = 'scripts/baselines/control-plane.json'
 
 /** 元数据键不参与键集对账。 */
 const META = new Set(['note', 'baseline-allow'])
+
+/**
+ * 账本里的路径按 D-559 的历史别名折算后再比：合并基里的旧 crate 路径与现在的新路径
+ * 指的是同一格。只折算路径片段，不动符号名与散文；不折算就会把「搬家」误判成
+ * 「清掉 32 格旧债 + 新增 32 格新债」（实测 64 项假红）。
+ */
+function normPaths(s) {
+  return String(s).replace(/crates\/symbio-(?:kernel|sdk|contract|deploy|host|server)[^\s|→,)\]]*/g, (p) => canonicalPath(p))
+}
 
 let errors = 0
 function report(code, where, message) {
@@ -141,7 +151,7 @@ function allowRecords(obj) {
       malformed.push(`${item}（决策 ${m[4]} 不存在）`)
       continue
     }
-    records.push({ from: m[1], to: m[2], reason: m[3], adr: m[4], raw: String(item), used: false })
+    records.push({ from: normPaths(m[1]), to: normPaths(m[2]), reason: m[3], adr: m[4], raw: String(item), used: false })
   }
   return { records, malformed }
 }
@@ -352,7 +362,7 @@ function identityOf(item, i) {
     const parts = ['name', 'symbol', 'path', 'key', 'id']
       .map((k) => item[k])
       .filter((v) => typeof v === 'string' && v.trim())
-      .map((v) => v.trim())
+      .map((v) => normPaths(v.trim()))
     if (parts.length) return parts.join('|')
   }
   return String(i)

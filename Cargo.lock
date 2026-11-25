@@ -4145,9 +4145,7 @@ dependencies = [
  "async-trait",
  "inventory",
  "serde_json",
- "symbio-deploy",
- "symbio-host",
- "symbio-kernel",
+ "symbio-platform",
  "symbio-plugin-api",
  "symbio-plugin-classify",
  "symbio-plugin-compact",
@@ -4183,7 +4181,6 @@ dependencies = [
  "symbio-plugin-vdfs",
  "symbio-plugin-web",
  "symbio-providers",
- "symbio-sdk",
  "tempfile",
  "tokio",
 ]
@@ -4195,42 +4192,10 @@ dependencies = [
  "serde",
  "serde_json",
  "symbio",
- "symbio-sdk",
- "symbio-server",
- "tokio",
-]
-
-[[package]]
-name = "symbio-contract"
-version = "0.1.14"
-dependencies = [
- "serde",
- "serde_json",
- "symbio-kernel",
-]
-
-[[package]]
-name = "symbio-deploy"
-version = "0.1.14"
-dependencies = [
- "tempfile",
- "tokio",
-]
-
-[[package]]
-name = "symbio-host"
-version = "0.1.0"
-dependencies = [
- "async-trait",
- "serde_json",
- "symbio-deploy",
- "symbio-kernel",
+ "symbio-platform",
  "symbio-plugin-api",
- "symbio-plugin-loop",
- "symbio-providers",
- "symbio-sdk",
+ "symbio-runtime",
  "tokio",
- "tracing",
 ]
 
 [[package]]
@@ -4241,7 +4206,7 @@ dependencies = [
  "base64 0.22.1",
  "serde",
  "serde_json",
- "symbio-kernel",
+ "symbio-platform",
  "symbio-plugin-api",
  "tempfile",
  "tokio",
@@ -4250,15 +4215,25 @@ dependencies = [
 ]
 
 [[package]]
-name = "symbio-kernel"
+name = "symbio-platform"
 version = "0.1.14"
 dependencies = [
  "async-trait",
+ "dashmap",
+ "dirs",
+ "inventory",
  "serde",
  "serde_json",
+ "serde_yaml_ng",
+ "shellexpand",
+ "tempfile",
  "thiserror 2.0.21",
+ "time",
  "tokio",
  "tokio-util",
+ "tracing",
+ "tracing-subscriber",
+ "uuid",
 ]
 
 [[package]]
@@ -4269,10 +4244,7 @@ dependencies = [
  "inventory",
  "serde",
  "serde_json",
- "symbio-contract",
- "symbio-deploy",
- "symbio-kernel",
- "symbio-sdk",
+ "symbio-platform",
  "tempfile",
  "tokio",
  "tracing",
@@ -4298,7 +4270,7 @@ version = "0.1.14"
 dependencies = [
  "async-trait",
  "serde_json",
- "symbio-kernel",
+ "symbio-platform",
  "symbio-plugin-api",
  "tokio",
 ]
@@ -4327,9 +4299,9 @@ dependencies = [
  "inventory",
  "serde_json",
  "symbio",
+ "symbio-platform",
  "symbio-plugin-api",
  "symbio-providers",
- "symbio-sdk",
  "symbio-testkit",
  "tempfile",
  "time",
@@ -4504,7 +4476,7 @@ dependencies = [
  "notify",
  "serde",
  "serde_json",
- "symbio-kernel",
+ "symbio-platform",
  "symbio-plugin-api",
  "symbio-testkit",
  "tempfile",
@@ -4563,10 +4535,9 @@ dependencies = [
  "reqwest-eventsource",
  "serde",
  "serde_json",
- "symbio-kernel",
+ "symbio-platform",
  "symbio-plugin-api",
  "symbio-providers",
- "symbio-sdk",
  "symbio-testkit",
  "tempfile",
  "time",
@@ -4639,10 +4610,9 @@ dependencies = [
  "notify",
  "serde",
  "serde_json",
- "symbio-kernel",
+ "symbio-platform",
  "symbio-plugin-api",
  "symbio-providers",
- "symbio-sdk",
  "symbio-testkit",
  "tempfile",
  "time",
@@ -4832,9 +4802,8 @@ dependencies = [
  "regex",
  "serde",
  "serde_json",
- "symbio-kernel",
+ "symbio-platform",
  "symbio-plugin-api",
- "symbio-sdk",
  "tempfile",
  "time",
  "tokenizers",
@@ -4845,34 +4814,13 @@ dependencies = [
 ]
 
 [[package]]
-name = "symbio-sdk"
-version = "0.1.14"
-dependencies = [
- "async-trait",
- "dashmap",
- "dirs",
- "inventory",
- "serde",
- "serde_json",
- "serde_yaml_ng",
- "shellexpand",
- "symbio-kernel",
- "tempfile",
- "thiserror 2.0.21",
- "time",
- "tokio",
- "tracing",
- "tracing-subscriber",
- "uuid",
-]
-
-[[package]]
-name = "symbio-server"
+name = "symbio-runtime"
 version = "0.1.14"
 dependencies = [
  "async-trait",
  "base64 0.22.1",
  "dirs",
+ "inventory",
  "reqwest 0.13.5",
  "serde",
  "serde_json",
@@ -4880,6 +4828,10 @@ dependencies = [
  "sha2",
  "symbio",
  "symbio-http",
+ "symbio-platform",
+ "symbio-plugin-api",
+ "symbio-plugin-loop",
+ "symbio-providers",
  "tempfile",
  "tokio",
  "tokio-util",
@@ -4899,7 +4851,8 @@ dependencies = [
  "serde_json",
  "symbio",
  "symbio-http",
- "symbio-server",
+ "symbio-platform",
+ "symbio-runtime",
  "tauri",
  "tauri-build",
  "tauri-plugin-dialog",
@@ -4915,9 +4868,8 @@ name = "symbio-testkit"
 version = "0.1.14"
 dependencies = [
  "serde_json",
- "symbio-kernel",
+ "symbio-platform",
  "symbio-plugin-api",
- "symbio-sdk",
  "tempfile",
  "time",
  "tokio",

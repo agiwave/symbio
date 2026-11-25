@@ -67,10 +67,10 @@ use ort::session::{Session, SessionInputValue};
 use ort::value::Tensor;
 use std::sync::{Arc, Mutex, OnceLock};
 use std::time::{Duration, Instant};
-use symbio_kernel::plugin::PluginInvokeRequest;
-use symbio_sdk::embedding::EmbeddingError;
-use symbio_sdk::embedding::EmbeddingService;
-use symbio_sdk::embedding::{EMBEDDING_LOCAL, EMBEDDING_NOOP};
+use symbio_platform::kernel::plugin::PluginInvokeRequest;
+use symbio_platform::sdk::embedding::EmbeddingError;
+use symbio_platform::sdk::embedding::EmbeddingService;
+use symbio_platform::sdk::embedding::{EMBEDDING_LOCAL, EMBEDDING_NOOP};
 
 const MODEL_BYTES: &[u8] = include_bytes!("model.onnx");
 const TOKENIZER_BYTES: &[u8] = include_bytes!("tokenizer.json");
@@ -385,8 +385,8 @@ fn build_noop(_ctx: Arc<dyn PluginInvokeRequest>) -> Arc<dyn EmbeddingService> {
     Arc::new(NoopEmbeddingService)
 }
 
-symbio_sdk::submit_object_creator!(EMBEDDING_LOCAL, build_local, dyn EmbeddingService);
-symbio_sdk::submit_object_creator!(EMBEDDING_NOOP, build_noop, dyn EmbeddingService);
+symbio_platform::sdk::submit_object_creator!(EMBEDDING_LOCAL, build_local, dyn EmbeddingService);
+symbio_platform::sdk::submit_object_creator!(EMBEDDING_NOOP, build_noop, dyn EmbeddingService);
 
 #[cfg(test)]
 #[path = "local.test.rs"]

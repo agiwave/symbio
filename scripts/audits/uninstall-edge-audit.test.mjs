@@ -69,8 +69,8 @@ function makeTree(extra = {}) {
   write('crates/symbio-plugin-locked/PLUGIN.yml', 'plugin_id: locked\nplugin_undisablable: true\n')
   write('crates/symbio-plugin-locked/Cargo.toml', '[package]\nname = "symbio-plugin-locked"\n')
   write('crates/symbio-plugin-locked/src/lib.rs', 'pub fn c() {}\n')
-  write('crates/symbio-kernel/src/lib.rs', 'pub fn k() {}\n')
-  write('crates/symbio-kernel/Cargo.toml', '[package]\nname = "symbio-kernel"\n')
+  write('crates/symbio-platform/src/kernel/mod.rs', 'pub fn k() {}\n')
+  write('crates/symbio-platform/Cargo.toml', '[package]\nname = "symbio-platform"\n')
   write('crates/symbio/src/lib.rs', HOST_LIB)
   write('crates/symbio/Cargo.toml', HOST_CARGO)
   for (const [rel, text] of Object.entries(extra)) write(rel, text)
@@ -129,11 +129,11 @@ test('blankStrings：字符串内容置空，转义与引号结构保住', () =>
 // ── Rust 代码边 ───────────────────────────────────────────────────────────
 
 test('rustEdges：别的 crate 写 `use` ⇒ 红并点名目标', () => {
-  withTree({ 'crates/symbio-kernel/src/lib.rs': 'use symbio_plugin_alpha::thing;\n' }, (root) => {
+  withTree({ 'crates/symbio-platform/src/kernel/mod.rs': 'use symbio_plugin_alpha::thing;\n' }, (root) => {
     const { hits } = rustEdges({ root, targets: disablablePlugins(root).targets })
     assert.equal(hits.length, 1)
     assert.equal(hits[0].target, 'alpha')
-    assert.match(hits[0].where, /symbio-kernel\/src\/lib\.rs:1/)
+    assert.match(hits[0].where, /symbio-platform\/src\/kernel\/mod\.rs:1/)
   })
 })
 
@@ -151,7 +151,7 @@ test('rustEdges：自己的 crate 引用自己 ⇒ 不算边', () => {
 })
 
 test('rustEdges：测试代码也算（卸载后 cargo test 编译不过）', () => {
-  withTree({ 'crates/symbio-kernel/src/x.test.rs': '#[test] fn t() { symbio_plugin_alpha::f(); }\n' }, (root) => {
+  withTree({ 'crates/symbio-platform/src/kernel/x.test.rs': '#[test] fn t() { symbio_plugin_alpha::f(); }\n' }, (root) => {
     assert.equal(rustEdges({ root, targets: disablablePlugins(root).targets }).hits.length, 1)
   })
 })
@@ -159,7 +159,7 @@ test('rustEdges：测试代码也算（卸载后 cargo test 编译不过）', ()
 test('rustEdges：注释与字符串里的名字都不算边', () => {
   withTree(
     {
-      'crates/symbio-kernel/src/lib.rs': [
+      'crates/symbio-platform/src/kernel/mod.rs': [
         '// use symbio_plugin_alpha::thing;',
         '/* 别引 symbio_plugin_alpha */',
         'const NAME: &str = "symbio_plugin_alpha";',
@@ -179,13 +179,13 @@ test('rustEdges：生成的链接块不算手写边', () => {
 })
 
 test('rustEdges：引用了不可停用的插件 ⇒ 不判', () => {
-  withTree({ 'crates/symbio-kernel/src/lib.rs': 'use symbio_plugin_locked::x;\n' }, (root) => {
+  withTree({ 'crates/symbio-platform/src/kernel/mod.rs': 'use symbio_plugin_locked::x;\n' }, (root) => {
     assert.deepEqual(rustEdges({ root, targets: disablablePlugins(root).targets }).hits, [])
   })
 })
 
 test('rustEdges：名字只作前缀不误伤（symbio_plugin_alpha_extra 不等于 alpha）', () => {
-  withTree({ 'crates/symbio-kernel/src/lib.rs': 'use symbio_plugin_alpha_extra::x;\n' }, (root) => {
+  withTree({ 'crates/symbio-platform/src/kernel/mod.rs': 'use symbio_plugin_alpha_extra::x;\n' }, (root) => {
     assert.deepEqual(rustEdges({ root, targets: disablablePlugins(root).targets }).hits, [])
   })
 })
@@ -194,7 +194,7 @@ test('rustEdges：名字只作前缀不误伤（symbio_plugin_alpha_extra 不等
 
 test('manifestEdges：别的 crate 写依赖 ⇒ 红', () => {
   withTree(
-    { 'crates/symbio-kernel/Cargo.toml': '[package]\nname = "symbio-kernel"\n\n[dependencies]\nsymbio-plugin-alpha = { path = "../symbio-plugin-alpha" }\n' },
+    { 'crates/symbio-platform/Cargo.toml': '[package]\nname = "symbio-platform"\n\n[dependencies]\nsymbio-plugin-alpha = { path = "../symbio-plugin-alpha" }\n' },
     (root) => {
       const { hits } = manifestEdges({ root, targets: disablablePlugins(root).targets })
       assert.equal(hits.length, 1)
@@ -206,9 +206,9 @@ test('manifestEdges：别的 crate 写依赖 ⇒ 红', () => {
 test('manifestEdges：表头形态与改名依赖都算边', () => {
   withTree(
     {
-      'crates/symbio-kernel/Cargo.toml': [
+      'crates/symbio-platform/Cargo.toml': [
         '[package]',
-        'name = "symbio-kernel"',
+        'name = "symbio-platform"',
         '[dev-dependencies.symbio-plugin-alpha]',
         'path = "../symbio-plugin-alpha"',
         '[dependencies]',
@@ -232,13 +232,13 @@ test('manifestEdges：自清单的 `name =` 不是边', () => {
 // 它是 `plugin-links` 块的测试版：只做链接（`as _`）、不引用符号。普通 dev 依赖
 // 仍然算边——卸载后 `cargo test` 编译不过，正是这条判据要拦的东西。
 
-const DEV_DEP = '[package]\nname = "symbio-kernel"\n\n[dev-dependencies]\nsymbio-plugin-alpha = { path = "../symbio-plugin-alpha" }\n'
+const DEV_DEP = '[package]\nname = "symbio-platform"\n\n[dev-dependencies]\nsymbio-plugin-alpha = { path = "../symbio-plugin-alpha" }\n'
 
 test('dev-dep + 测试代码里的链接行 ⇒ 源码与清单两侧都不算边', () => {
   withTree(
     {
-      'crates/symbio-kernel/Cargo.toml': DEV_DEP,
-      'crates/symbio-kernel/src/tests.rs': 'use symbio_plugin_alpha as _;\n#[test]\nfn t() {}\n',
+      'crates/symbio-platform/Cargo.toml': DEV_DEP,
+      'crates/symbio-platform/src/kernel/tests.rs': 'use symbio_plugin_alpha as _;\n#[test]\nfn t() {}\n',
     },
     (root) => {
       const targets = disablablePlugins(root).targets
@@ -252,8 +252,8 @@ test('dev-dep + 测试代码里的链接行 ⇒ 源码与清单两侧都不算�
 test('dev-dep 但测试代码只取符号 ⇒ 仍红（普通 dev 依赖不是链接）', () => {
   withTree(
     {
-      'crates/symbio-kernel/Cargo.toml': DEV_DEP,
-      'crates/symbio-kernel/src/tests.rs': 'use symbio_plugin_alpha::a;\n#[test]\nfn t() { a(); }\n',
+      'crates/symbio-platform/Cargo.toml': DEV_DEP,
+      'crates/symbio-platform/src/kernel/tests.rs': 'use symbio_plugin_alpha::a;\n#[test]\nfn t() { a(); }\n',
     },
     (root) => {
       const hits = manifestEdges({ root, targets: disablablePlugins(root).targets }).hits
@@ -267,8 +267,8 @@ test('dev-dep 但测试代码只取符号 ⇒ 仍红（普通 dev 依赖不是�
 test('dev-dep 但链接行写在生产源码 ⇒ 仍红（生产面必须为 0）', () => {
   withTree(
     {
-      'crates/symbio-kernel/Cargo.toml': DEV_DEP,
-      'crates/symbio-kernel/src/lib.rs': 'use symbio_plugin_alpha as _;\n',
+      'crates/symbio-platform/Cargo.toml': DEV_DEP,
+      'crates/symbio-platform/src/kernel/mod.rs': 'use symbio_plugin_alpha as _;\n',
     },
     (root) => {
       assert.equal(rustEdges({ root, targets: disablablePlugins(root).targets }).hits.length, 1)
@@ -279,8 +279,8 @@ test('dev-dep 但链接行写在生产源码 ⇒ 仍红（生产面必须为 0�
 test('生产依赖 + 测试里的链接行 ⇒ 仍红（链接形态不放宽依赖段）', () => {
   withTree(
     {
-      'crates/symbio-kernel/Cargo.toml': DEV_DEP.replace('[dev-dependencies]', '[dependencies]'),
-      'crates/symbio-kernel/src/tests.rs': 'use symbio_plugin_alpha as _;\n#[test]\nfn t() {}\n',
+      'crates/symbio-platform/Cargo.toml': DEV_DEP.replace('[dev-dependencies]', '[dependencies]'),
+      'crates/symbio-platform/src/kernel/tests.rs': 'use symbio_plugin_alpha as _;\n#[test]\nfn t() {}\n',
     },
     (root) => {
       assert.equal(manifestEdges({ root, targets: disablablePlugins(root).targets }).hits.length, 1)
@@ -291,9 +291,9 @@ test('生产依赖 + 测试里的链接行 ⇒ 仍红（链接形态不放宽依
 test('manifestEdges：注释掉的依赖与生成块都不算边', () => {
   withTree(
     {
-      'crates/symbio-kernel/Cargo.toml': [
+      'crates/symbio-platform/Cargo.toml': [
         '[package]',
-        'name = "symbio-kernel"',
+        'name = "symbio-platform"',
         '# symbio-plugin-alpha = { path = "../symbio-plugin-alpha" }',
         '# >>> plugin-links:begin',
         'symbio-plugin-beta = { path = "../symbio-plugin-beta" }',
@@ -335,11 +335,11 @@ test('judge：干净假仓 ⇒ 零违规，统计读得出', () => {
 })
 
 test('judge：注入一条边 ⇒ 红并点名文件与目标', () => {
-  withTree({ 'crates/symbio-kernel/src/lib.rs': 'use symbio_plugin_alpha::x;\n' }, (root) => {
+  withTree({ 'crates/symbio-platform/src/kernel/mod.rs': 'use symbio_plugin_alpha::x;\n' }, (root) => {
     const [e] = edgeMessages(root)
     assert.match(e, /EX-004/)
     assert.match(e, /alpha/)
-    assert.match(e, /symbio-kernel/)
+    assert.match(e, /symbio-platform/)
   })
 })
 

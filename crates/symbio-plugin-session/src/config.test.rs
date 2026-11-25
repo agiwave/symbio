@@ -15,8 +15,8 @@
 //! 记忆闸门已随 D-513 归 `memory` 插件，由那里的 `config.test.rs` 钉住。
 
 use super::*;
-use symbio_kernel::chat::chat_node::{NodeKind, CHAT_STYLE_TAG_RUN, CHAT_STYLE_TAG_TOOL};
-use symbio_kernel::chat::principal::{Principal, PrincipalKind};
+use symbio_platform::kernel::chat::chat_node::{NodeKind, CHAT_STYLE_TAG_RUN, CHAT_STYLE_TAG_TOOL};
+use symbio_platform::kernel::chat::principal::{Principal, PrincipalKind};
 fn marked_scope_root(node: &ChatNode) -> Option<&str> {
     node.meta
         .as_ref()

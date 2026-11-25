@@ -24,11 +24,11 @@
 use super::super::active::InboxItem;
 use super::super::plugin::SessionPlugin;
 use crate::declarations::{EVENT_SYSTEM_HEALTH, EVENT_SYSTEM_TRIGGERED};
-use symbio_kernel::chat::chat_node as cm;
-use symbio_kernel::event::Event;
-use symbio_kernel::store::Store;
+use symbio_platform::kernel::chat::chat_node as cm;
+use symbio_platform::kernel::event::Event;
+use symbio_platform::kernel::store::Store;
+use symbio_platform::sdk::chat::session_chat;
 use symbio_plugin_api::PRINCIPAL_AUTONOMOUS;
-use symbio_sdk::chat::session_chat;
 
 impl SessionPlugin {
     /// 为一次自主触发**开一轮**：先落事实，落成了才带着服务端推导的运行参数入队。
@@ -247,13 +247,13 @@ impl AutonomousInitiator {
         Event::pending(
             format!("sys-{source_seq}"),
             EVENT_SYSTEM_TRIGGERED,
-            symbio_kernel::event::Entity::System,
-            symbio_kernel::event::Verb::Opened,
+            symbio_platform::kernel::event::Entity::System,
+            symbio_platform::kernel::event::Verb::Opened,
             PRINCIPAL_AUTONOMOUS,
         )
         .with_produced_by(source_seq)
         .with_payload(serde_json::json!({
-            "kind": symbio_kernel::event::EVENT_TRIGGER_KIND_SCHEDULED
+            "kind": symbio_platform::kernel::event::EVENT_TRIGGER_KIND_SCHEDULED
         }))
     }
 
@@ -262,8 +262,8 @@ impl AutonomousInitiator {
         Event::pending(
             format!("want-{source_seq}"),
             symbio_plugin_api::events::EVENT_CONATION_EXPRESSED,
-            symbio_kernel::event::Entity::Conation,
-            symbio_kernel::event::Verb::Opened,
+            symbio_platform::kernel::event::Entity::Conation,
+            symbio_platform::kernel::event::Verb::Opened,
             PRINCIPAL_AUTONOMOUS,
         )
         .with_produced_by(source_seq)
@@ -282,8 +282,8 @@ impl AutonomousInitiator {
         Event::pending(
             format!("health-{source_seq}"),
             EVENT_SYSTEM_HEALTH,
-            symbio_kernel::event::Entity::System,
-            symbio_kernel::event::Verb::Progressed,
+            symbio_platform::kernel::event::Entity::System,
+            symbio_platform::kernel::event::Verb::Progressed,
             PRINCIPAL_AUTONOMOUS,
         )
         .with_produced_by(source_seq)

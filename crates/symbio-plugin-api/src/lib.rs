@@ -36,7 +36,7 @@
 //! HS-005 门面 manifest 四条 / HS-006 语法臂与模块级转发只许不涨）。
 //!
 //! 插件不得依赖宿主 crate（`symbio`）——那会形成「插件 ← 宿主 ← 插件」的环。
-//! 声明表的收集与冻结在 `symbio_sdk::declarations` 里；词汇读法（冻结表缺席时回落
+//! 声明表的收集与冻结在 `symbio_platform::sdk::declarations` 里；词汇读法（冻结表缺席时回落
 //! 清单生成物）随 `events.rs` 留在本 crate——内核与 sdk 的生产代码零事件名字面量
 //! （CS-008 / CP-004），回落表不能搬走。收集在链接期发生，因此插件之间仍然零依赖
 //! （DE-024 D-198）。
@@ -53,10 +53,10 @@ pub mod vocab;
 
 // 已搬到 `symbio_sdk` 的端口模块不再各留一份转发文件（`D-408` / `D-412` / `D-413`）：
 // 模块名在根上一行转出，插件照旧写 `symbio_plugin_api::rows::…`。`text` 的实现住在
-// `symbio_sdk::text::tokenizer`，沿用它原来的门面名转出（`D-404`）。
-pub use symbio_sdk::plugin::reports;
-pub use symbio_sdk::plugin::{behaviors, context, effects, retrieval, rows, settle};
-pub use symbio_sdk::text::tokenizer as text;
+// `symbio_platform::sdk::text::tokenizer`，沿用它原来的门面名转出（`D-404`）。
+pub use symbio_platform::sdk::plugin::reports;
+pub use symbio_platform::sdk::plugin::{behaviors, context, effects, retrieval, rows, settle};
+pub use symbio_platform::sdk::text::tokenizer as text;
 
 pub use context::{
     fit_sections, providers as context_providers, sections as context_sections, Cadence,
@@ -67,17 +67,17 @@ pub use declarations::{declared_event_cell, vocab};
 // `sealed_declarations` 的插件消费方全是控制面（loop 驱动器取冻结表；session 经
 // 2026-11-12 的取字同源批改走本门面）——loop 没有 sdk 直连通道（E-009 只另许 kernel），
 // 门面是 loop 的唯一合法取径（D-443）。
-pub use symbio_sdk::declarations::sealed_declarations;
+pub use symbio_platform::sdk::declarations::sealed_declarations;
 // 驱动入口整块归 sdk（D-413），门面只留扩展层要的装配根登记。驱动句柄与解析口只有控制面
 // session 用（按影响类运行、不在门面约束面内），直接从 sdk 取——留这里是零消费方空转条目（HS-003）。
 pub use effects::{
     apply as apply_effects, apply_before, BeforeDecision, BeforeReadings, BeforeRefusal,
     BeforeRequest, EffectCall, EffectEnv, EffectInput, FactDraft, FileOp, ToolBehavior,
 };
-pub use symbio_sdk::drive::publish_deployment_root;
+pub use symbio_platform::sdk::drive::publish_deployment_root;
 // fact_source 登记面不上门面（D-443）：唯一消费方是控制面 session（owner），按 D-253 / D-428
 // 走 sdk 豁免直取本体；`Principal` 留下（扩展层在用）。
-pub use symbio_sdk::plugin::fact_source::Principal;
+pub use symbio_platform::sdk::plugin::fact_source::Principal;
 // 宏用 `$crate::inventory` 展开（卫生），与 `symbio_sdk` 的 `submit_object_creator!` 同形。
 pub use inventory;
 // 提交宏随各自的注册表整块搬进 sdk（D-408 / D-412 / D-413）；门面在根上转出，
@@ -89,13 +89,13 @@ pub use port::{
 };
 pub use rows::{RowHandler, RowRequest, PLUGIN_ROW};
 pub use settle::{Contribution, Contributor, SettleFace, Settling};
-pub use symbio_sdk::submit_behavior;
-pub use symbio_sdk::submit_context_provider;
-pub use symbio_sdk::submit_contributor;
-pub use symbio_sdk::submit_declarations;
-pub use symbio_sdk::submit_reports;
-pub use symbio_sdk::submit_retriever;
-pub use symbio_sdk::submit_row;
+pub use symbio_platform::sdk::submit_behavior;
+pub use symbio_platform::sdk::submit_context_provider;
+pub use symbio_platform::sdk::submit_contributor;
+pub use symbio_platform::sdk::submit_declarations;
+pub use symbio_platform::sdk::submit_reports;
+pub use symbio_platform::sdk::submit_retriever;
+pub use symbio_platform::sdk::submit_row;
 
 // ==================== 扩展层宿主面 ====================
 // 本块是**扩展层插件唯一需要认识的宿主入口**：能力包与结构件插件只写
@@ -104,7 +104,7 @@ pub use symbio_sdk::submit_row;
 // 出现那三个前缀即判红。
 //
 // **白名单而不是通配**：白名单里每一条都能报出一个真实消费方（与 C-003 同一把尺子），
-// 新增条目要过棘轮（HS-002）。通配（`pub use symbio_sdk::*`）会让「插件能看见什么」
+// 新增条目要过棘轮（HS-002）。通配（`pub use symbio_platform::sdk::*`）会让「插件能看见什么」
 // 重新变成不可审的隐式集合——那正是本块要消除的东西。
 //
 // **控制面不在此列**：`loop` / `session` 按 DE-026 的影响类运行，本来就认识宿主的容器
@@ -113,44 +113,44 @@ pub use symbio_sdk::submit_row;
 //
 // 装配常量走 `symbio-deploy`（零内部依赖的生成物——插件 id 与装配位是部署契约，
 // 不是某一条能力包的私事）。
-pub use symbio_deploy::*;
+pub use symbio_platform::deploy::*;
 
 // ---- 语法臂：`symbio-kernel` 的封闭语法 ----
 // 这一臂**不计债**：它是内核本来就有的共享类型（事件 / 视图 / 声明容器 / 能力元数据），
 // `symbio-kernel` 的直接依赖只有 6 个，插件经它取语法不增加任何机制面。按来源分臂之后，
 // 「一条符号属于语法还是机制」在门面上直接可读，HS-002 的棘轮只压机制臂，目标才是可判的
 // 0（D-255）。
-pub use symbio_contract::dialog::{
+pub use symbio_platform::contract::dialog::{
     ComposeRequest, DecideOutcome, DecideRequest, DecisionPlan, ParseVerdictRequest, RunSnapshot,
     Verdict, WordingReply, REASON_ACK, REASON_CLARIFY, REASON_EMPTY, REASON_FROM_CONTEXT,
     REASON_GREETING, REASON_NEEDS_WORK, REASON_REFUSE, REASON_THANKS, REASON_UNCLASSIFIED,
 };
-pub use symbio_kernel::capability::{
+pub use symbio_platform::kernel::capability::{
     family, CapabilityCategory, CapabilityFamily, CapabilityMeta, CapabilityRiskLevel,
     CapabilityRow, Registry,
 };
-pub use symbio_kernel::chat::{chat_node, principal};
-pub use symbio_kernel::decl::{ring, FactDecl, PluginDeclarations, ViewDecl};
-pub use symbio_kernel::event::branch::{removed_ids, unselected_roots};
-pub use symbio_kernel::event::{
+pub use symbio_platform::kernel::chat::{chat_node, principal};
+pub use symbio_platform::kernel::decl::{ring, FactDecl, PluginDeclarations, ViewDecl};
+pub use symbio_platform::kernel::event::branch::{removed_ids, unselected_roots};
+pub use symbio_platform::kernel::event::{
     event_output_text_node_id, ClosureReason, EVENT_FAILED, EVENT_REQUEST, EVENT_RESPONSE,
     EVENT_SENT, EVENT_TRIGGER_KIND_SCHEDULED, EVENT_TRIGGER_META_KEY,
 };
-pub use symbio_kernel::exec::{
+pub use symbio_platform::kernel::exec::{
     ExecAbortSignal, ExecEnv, ExecEventSink, ExecTranscriptWriter, ABORT_SIGNAL, EVENT_SINK,
 };
-pub use symbio_kernel::keys::SymbioKey;
-pub use symbio_kernel::plugin::error::{lock_read, lock_write};
-pub use symbio_kernel::plugin::{
+pub use symbio_platform::kernel::keys::SymbioKey;
+pub use symbio_platform::kernel::plugin::error::{lock_read, lock_write};
+pub use symbio_platform::kernel::plugin::{
     Plugin, PluginChannel, PluginError, PluginFrame, PluginInvokeRequest, PluginInvokeRequestExt,
     PluginInvokeResponse, PluginMessageWire, PluginMeta, PluginPayload, PluginSimpleRequest,
     PluginStopReason, SimpleResponse, SuccessResponse,
 };
-pub use symbio_kernel::present::{
+pub use symbio_platform::kernel::present::{
     DetailAction, DetailBadge, DetailColumn, DetailCondition, DetailDefinition, DetailField,
     DetailOption, DetailPreset, DetailPresetSpec, DetailSection,
 };
-pub use symbio_kernel::vdfs::{
+pub use symbio_platform::kernel::vdfs::{
     vdfs_derive_ext, vdfs_has_parent_segment, vdfs_normalize_path, vdfs_path_within,
     vdfs_resolve_path, DynVdfsProvider, VdfsAccess, VdfsActionResult, VdfsChange, VdfsChangeSink,
     VdfsContent, VdfsContext, VdfsError, VdfsItem, VdfsListResponse, VdfsNewType, VdfsNode,
@@ -162,62 +162,62 @@ pub use symbio_kernel::vdfs::{
     VDFS_STATUS_DISABLED, VDFS_STATUS_FAILED, VDFS_STATUS_NONE, VDFS_STATUS_UNKNOWN,
     VDFS_STATUS_WORKING,
 };
-pub use symbio_kernel::{
+pub use symbio_platform::kernel::{
     ActorSpec, Entity, Event, EventDecl, FactRole, LatencyTier, Pattern, Scope, Verb,
 };
 // 一次往返的**产物**五个名字不转出（`D-439` 退回 model 插件）：跨侧共享的是事实键名。
-pub use symbio_contract::llm::{PromptMessage, PromptToolCall};
+pub use symbio_platform::contract::llm::{PromptMessage, PromptToolCall};
 // 一次性问答载荷与转写地址段（D-486）：纯形状 + 字面量，session / compact / model 三插件共享。
-pub use symbio_contract::chat::{AssistReply, AssistRequest, SEG_MESSAGES};
-pub use symbio_contract::merge_kernel::truncate_chars;
-pub use symbio_contract::text::{text_floor_char_boundary, text_truncate_bytes};
+pub use symbio_platform::contract::chat::{AssistReply, AssistRequest, SEG_MESSAGES};
+pub use symbio_platform::contract::merge_kernel::truncate_chars;
+pub use symbio_platform::contract::text::{text_floor_char_boundary, text_truncate_bytes};
 // ---- SDK 臂：`symbio-sdk` 的宿主机制（不依赖 core，D-258） ----
 // 这一臂的每一条都只碰内核词汇与自己的表——配置 IO、事件总线的订阅表、VDFS 地址装配、
 // 对象构造器的链接期登记、日志与协议键。它们与「插件要用一条机制」是同一件事，
 // 与「插件要认识整个宿主」被绑成同一件事。SDK 把这条绑定切开：这一臂只依赖内核。
 #[rustfmt::skip] // D-530：锁定转出块排布，净零搬迁的机械行口径与 D-404 对齐
-pub use symbio_contract::event_bus::{
+pub use symbio_platform::contract::event_bus::{
     event_bus_build_envelope, event_bus_resync_of, event_bus_vdfs_change_of, EVENT_BUS_KIND_SYSTEM,
     EVENT_BUS_KIND_VDFS, EVENT_BUS_RESYNC_MARKER_TYPE,
 };
-pub use symbio_kernel::capability::failure_kind;
-pub use symbio_sdk::agent::{agent_perms_of, AgentPermissions, AgentScope, AGENT_PERMS};
-pub use symbio_sdk::capability::{
+pub use symbio_platform::kernel::capability::failure_kind;
+pub use symbio_platform::sdk::agent::{agent_perms_of, AgentPermissions, AgentScope, AGENT_PERMS};
+pub use symbio_platform::sdk::capability::{
     capability_announce_config_snapshot, capability_announce_configurable,
     capability_configurables, capability_prompts, capability_report_error, capability_take_errors,
     capability_vdfs_root, ApprovalGrant, CAPABILITY_VISITOR, CONFIGURABLE_VISITOR, OPTION_VISITOR,
     SCOPE_TWIN,
 };
-pub use symbio_sdk::chat::chat_node::message_of_node;
-pub use symbio_sdk::clock::clock_now_ms;
-pub use symbio_sdk::creator::{creator_create_object, creator_has, creator_ids};
-pub use symbio_sdk::embedding::{EmbeddingService, EMBEDDING_LOCAL};
-pub use symbio_sdk::event_bus::{EventBus, EventBusPublisher, EVENT_BUS_SINK};
-pub use symbio_sdk::keys::{
+pub use symbio_platform::sdk::chat::chat_node::message_of_node;
+pub use symbio_platform::sdk::clock::clock_now_ms;
+pub use symbio_platform::sdk::creator::{creator_create_object, creator_has, creator_ids};
+pub use symbio_platform::sdk::embedding::{EmbeddingService, EMBEDDING_LOCAL};
+pub use symbio_platform::sdk::event_bus::{EventBus, EventBusPublisher, EVENT_BUS_SINK};
+pub use symbio_platform::sdk::keys::{
     VdfsCaller, AGENT_ID, AGENT_VDFS, MODE, PATH, PRINCIPAL_SCHEDULER, PRINCIPAL_USER, PROVIDER_ID,
     REQUIRED_PLUGINS, RISK_LEVEL, SANDBOX_ID, SESSION_DIR, SESSION_ID, SESSION_VDFS, TOOL_CALL_ID,
     TOOL_NODE_ID, TRACE_ID, VDFS_CALLER, VDFS_PARENT_ADDR, WORKDIR, WORKSPACE_VDFS,
 };
-pub use symbio_sdk::llm::round::{llm_emit_message, llm_removed_frame, llm_short_id};
-pub use symbio_sdk::plugin::{
+pub use symbio_platform::sdk::llm::round::{llm_emit_message, llm_removed_frame, llm_short_id};
+pub use symbio_platform::sdk::plugin::{
     plugin_dir_from_ctx, plugin_expand_tilde_path, PluginConfigFile, PluginConfigMount, PluginDir,
     PluginEntry, PLUGIN_DIR, PLUGIN_FILE, PLUGIN_KEY_CAN_DISABLE, PLUGIN_KEY_ENABLED,
     PLUGIN_KEY_NAME, PLUGIN_KEY_PROVIDER, PLUGIN_KEY_REQUIRED, PLUGIN_KEY_VERSION,
     TRAVERSE_AVAILABLE_OPTIONS, TRAVERSE_AVAILABLE_TOOLS,
 };
-pub use symbio_sdk::projection::task_vocab::TaskVocab;
-pub use symbio_sdk::projection::vocab::CommitmentVocab;
+pub use symbio_platform::sdk::projection::task_vocab::TaskVocab;
+pub use symbio_platform::sdk::projection::vocab::CommitmentVocab;
 pub const TASK_CAP: usize = 1;
-pub use symbio_sdk::round::node_build;
+pub use symbio_platform::sdk::round::node_build;
 // D-531 沙箱横切句柄：发布方与消费方共用机制形状与 ctx 键，不含工具名、策略或配置项。
 #[rustfmt::skip] // D-531：锁定转出块排布，压缩陈旧注释抵消新增行（同 D-530 口径）
-pub use symbio_sdk::sandbox::{sandbox_init_slot, sandbox_of, sandbox_publish, SandboxDecision, SandboxFace, SandboxFact, SANDBOX};
-pub use symbio_sdk::vdfs::address::{absolute_addr, descend_addr, join_addr, AddrRootDecl};
-pub use symbio_sdk::vdfs::host::{
+pub use symbio_platform::sdk::sandbox::{sandbox_init_slot, sandbox_of, sandbox_publish, SandboxDecision, SandboxFace, SandboxFact, SANDBOX};
+pub use symbio_platform::sdk::address::{absolute_addr, descend_addr, join_addr, AddrRootDecl};
+pub use symbio_platform::sdk::vdfs::host::{
     vdfs_context, vdfs_from_plugin_error, vdfs_host_ctx, vdfs_notify_change, vdfs_unwatch_changes,
     vdfs_watch_changes,
 };
-pub use symbio_sdk::{
+pub use symbio_platform::sdk::{
     impl_config_mount_vdfs, plugin_debug, plugin_error, plugin_info, plugin_warn,
     submit_object_creator,
 };
@@ -229,7 +229,7 @@ pub use symbio_sdk::{
 // `actor_can_assign_work` / `commitment_events` 只读 `ActorSpec` 与事件流——没有一条认识
 // 轮次、幕或判决。与 SDK 臂同源同一把尺（HS-002）**并入 SDK 基线**；HS-005 随之成立
 // （门面 manifest 现为只许四条，D-486）。
-pub use symbio_sdk::actors::{actor_can_assign_work, commitment_events};
-pub use symbio_sdk::authz::{
+pub use symbio_platform::sdk::actors::{actor_can_assign_work, commitment_events};
+pub use symbio_platform::sdk::authz::{
     principal_of, production_matrix, CAP_ASSERT_VERIFICATION, CAP_DEFINE_WORK, PRINCIPAL_AUTONOMOUS,
 };

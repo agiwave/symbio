@@ -1,7 +1,7 @@
 //! 整包（zip）导入 / 导出——目录型资源的「一个地址、一整个条目」通道
 //!
 //! **导出与导入是一对逆向的节点动作**（`action: "export"` / `action: "import"`，
-//! 见 `crates/symbio-kernel/src/vdfs` 的动作一节），两者都不新增操作，因此打包 /
+//! 见 `crates/symbio-platform/src/kernel/vdfs` 的动作一节），两者都不新增操作，因此打包 /
 //! 解包也不该是第二条协议，而是本层的一组工具 + 一对载荷形状
 //! （出向 [`VdfsPack`] / 入向 [`VdfsUnpack`]）。
 //!
@@ -90,7 +90,7 @@ impl std::fmt::Display for PackError {
 
 impl std::error::Error for PackError {}
 
-impl From<PackError> for symbio_kernel::vdfs::VdfsError {
+impl From<PackError> for symbio_platform::kernel::vdfs::VdfsError {
     fn from(e: PackError) -> Self {
         Self::Internal(e.0)
     }

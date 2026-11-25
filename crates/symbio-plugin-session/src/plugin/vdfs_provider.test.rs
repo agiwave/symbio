@@ -3,17 +3,17 @@
 //! 与实现**同级**分文件（约定：`X.rs` + `X.test.rs`）：测试跟着被测试的实现走。
 
 use super::*;
-use symbio_kernel::vdfs::{
+use symbio_platform::kernel::vdfs::{
     VdfsActionResult, VdfsChangeSink, VdfsContent, VdfsContext, VdfsError, VdfsRequest,
     VDFS_ACTION_EXPAND_SKELETON, VDFS_ACTION_SWITCH_BRANCH, VDFS_ACTION_TRUNCATE, VDFS_EXT_FORM,
     VDFS_STATUS_ACTIVE,
 };
 // dispatch 是 VdfsProvider 的唯一入口（测试经文件尾的 LIST/STAT/… 请求常量调用）
-use symbio_kernel::vdfs::VdfsProvider;
+use symbio_platform::kernel::vdfs::VdfsProvider;
 // 地址构造辅助：只被本测试用，故不经 `plugin.rs` 的共享面转出（那里会让
 // `unused_imports` 误报——它看不见「仅经 glob 链使用」的再导出）。
 use crate::plugin::nodes::{message_dir_path, message_path};
-use symbio_kernel::vdfs::VdfsChange;
+use symbio_platform::kernel::vdfs::VdfsChange;
 // 每例独占存储根；guard 在插件之后释放，失败时也会清理。
 fn fixture() -> (tempfile::TempDir, SessionPlugin) {
     let dir = tempfile::tempdir().unwrap();
@@ -71,7 +71,7 @@ async fn worker_restores_undeployed_root_identity() {
     p.restore_session_identity(&session.id).await.unwrap();
 
     assert!(symbio_plugin_api::production_matrix().can_reply(&principal));
-    symbio_sdk::authz::unbind_session(&session.id);
+    symbio_platform::sdk::authz::unbind_session(&session.id);
 }
 
 #[tokio::test]
@@ -91,8 +91,8 @@ async fn worker_restores_delegation_intersection_without_reply() {
     let child_principal = symbio_plugin_api::principal_of(Some("worker-auth-child-reviewer"));
     assert!(matrix.can_write_name(&child_principal, symbio_plugin_api::CAP_ASSERT_VERIFICATION));
     assert!(!matrix.can_reply(&child_principal));
-    symbio_sdk::authz::unbind_session(&parent.id);
-    symbio_sdk::authz::unbind_session(&child.id);
+    symbio_platform::sdk::authz::unbind_session(&parent.id);
+    symbio_platform::sdk::authz::unbind_session(&child.id);
 }
 
 #[tokio::test]
@@ -184,7 +184,7 @@ async fn resume_after_worker_restart_republishes_source_and_agent_scope() {
         state.inner.read().await.last_outcome.as_deref(),
         Some("completed")
     );
-    symbio_sdk::authz::unbind_session(&id);
+    symbio_platform::sdk::authz::unbind_session(&id);
 }
 
 #[tokio::test]
@@ -226,7 +226,7 @@ async fn resume_after_worker_restart_fails_closed_without_agent_scope() {
         state.inner.read().await.last_outcome.as_deref(),
         Some("failed")
     );
-    symbio_sdk::authz::unbind_session(&id);
+    symbio_platform::sdk::authz::unbind_session(&id);
 }
 
 #[tokio::test]
@@ -286,16 +286,19 @@ fn vctx() -> VdfsContext {
 /// 带**宿主请求**的上下文：`switch_branch` 的 actor 取自请求主体（写事实要知道是谁写的），
 /// 所以这一条动作不能走 [`vctx`] 那个空上下文。
 fn host_vctx() -> VdfsContext {
-    let req: std::sync::Arc<dyn symbio_kernel::plugin::PluginInvokeRequest> =
-        std::sync::Arc::new(symbio_kernel::plugin::PluginSimpleRequest::new(None, None));
+    let req: std::sync::Arc<dyn symbio_platform::kernel::plugin::PluginInvokeRequest> =
+        std::sync::Arc::new(symbio_platform::kernel::plugin::PluginSimpleRequest::new(
+            None, None,
+        ));
     symbio_plugin_api::vdfs_context(&req)
 }
 
 fn resume_vctx(source_principal: &str) -> VdfsContext {
-    let req: std::sync::Arc<dyn PluginInvokeRequest> =
-        std::sync::Arc::new(symbio_kernel::plugin::PluginSimpleRequest::new(None, None));
+    let req: std::sync::Arc<dyn PluginInvokeRequest> = std::sync::Arc::new(
+        symbio_platform::kernel::plugin::PluginSimpleRequest::new(None, None),
+    );
     req.set(
-        symbio_sdk::keys::SOURCE_PRINCIPAL,
+        symbio_platform::sdk::keys::SOURCE_PRINCIPAL,
         source_principal.to_string(),
     );
     symbio_plugin_api::vdfs_context(&req)
@@ -985,9 +988,11 @@ async fn seed_messages(p: &SessionPlugin, id: &str, texts: &[&str]) {
         .enumerate()
         .map(|(i, t)| cm::ChatNode {
             id: format!("m{i}"),
-            principal: Some(symbio_kernel::chat::principal::Principal::from_legacy(
-                symbio_plugin_api::PRINCIPAL_USER,
-            )),
+            principal: Some(
+                symbio_platform::kernel::chat::principal::Principal::from_legacy(
+                    symbio_plugin_api::PRINCIPAL_USER,
+                ),
+            ),
             msg_type: Some(cm::NodeKind::Body),
             content: Some(cm::MessageContent::Text((*t).to_string())),
             seq: Some(i as i64),
@@ -1007,7 +1012,7 @@ async fn seed_nodes(p: &SessionPlugin, id: &str, nodes: Vec<cm::ChatNode>) {
         panic!("会话目录未建出（save_session 应已创建）");
     };
     {
-        use symbio_kernel::store::Store as _;
+        use symbio_platform::kernel::store::Store as _;
         let payload = match serde_json::to_value(&nodes) {
             Ok(v) => v,
             Err(e) => panic!("序列化种子消息失败：{e}"),
@@ -1015,12 +1020,12 @@ async fn seed_nodes(p: &SessionPlugin, id: &str, nodes: Vec<cm::ChatNode>) {
         let wal = dir.join(crate::paths::V2_WAL_FILE);
         let fs = crate::store::EventWalStore::open(&wal).expect("打开事实源失败");
         fs.append(
-            symbio_kernel::event::Event::pending(
+            symbio_platform::kernel::event::Event::pending(
                 "m-add-0",
                 symbio_plugin_api::events::EVENT_MESSAGE_ADDED,
-                symbio_kernel::event::Entity::Message,
+                symbio_platform::kernel::event::Entity::Message,
                 // `turn = 0`：种子是裸数据，不属于任何一轮（与 message_events::append 同约定）。
-                symbio_kernel::event::Verb::Opened,
+                symbio_platform::kernel::event::Verb::Opened,
                 symbio_plugin_api::PRINCIPAL_USER,
             )
             .with_payload(serde_json::json!({ "messages": payload })),
@@ -1031,8 +1036,8 @@ async fn seed_nodes(p: &SessionPlugin, id: &str, nodes: Vec<cm::ChatNode>) {
 
 /// 种一条带 wire id 的工具卡；恢复动作认的是 wire id，不是节点地址。
 async fn seed_resumable_tool(p: &SessionPlugin, id: &str) {
-    use symbio_kernel::event::{Entity, Event, Verb};
-    use symbio_kernel::store::Store as _;
+    use symbio_platform::kernel::event::{Entity, Event, Verb};
+    use symbio_platform::kernel::store::Store as _;
 
     seed_messages(p, id, &["请确认这次调用"]).await;
     let dir = p
@@ -1062,7 +1067,7 @@ async fn seed_resumable_tool(p: &SessionPlugin, id: &str) {
                 symbio_plugin_api::events::EVENT_TOOL_REQUESTED,
                 Entity::Scope,
                 Verb::Asserted,
-                symbio_sdk::authz::PRINCIPAL_MAIN,
+                symbio_platform::sdk::authz::PRINCIPAL_MAIN,
             )
             .with_payload(json!({
                 "root_id": "T1",
@@ -1077,7 +1082,7 @@ async fn seed_resumable_tool(p: &SessionPlugin, id: &str) {
             symbio_plugin_api::events::EVENT_ARTIFACT_ADDED,
             Entity::Artifact,
             Verb::Asserted,
-            symbio_sdk::authz::PRINCIPAL_MAIN,
+            symbio_platform::sdk::authz::PRINCIPAL_MAIN,
         )
         .with_payload(json!({
             "tool": "shell",
@@ -1130,8 +1135,8 @@ fn watch_changes(p: &SessionPlugin) -> std::sync::Arc<std::sync::Mutex<Vec<VdfsC
 /// 本文件只需要它的**结果**——事实源上有并列的两支。溯源锚取切片末尾那条的 seq
 /// （I2：断言类事件必须带一个存在且不超前的锚）。
 async fn seed_branch_fact(p: &SessionPlugin, id: &str, of: &str, into: &str) {
-    use symbio_kernel::event::{Entity, Seq, Verb};
-    use symbio_kernel::store::Store as _;
+    use symbio_platform::kernel::event::{Entity, Seq, Verb};
+    use symbio_platform::kernel::store::Store as _;
     use symbio_plugin_api::events::EVENT_SCOPE_BRANCH;
     let dir = p
         .get_store()
@@ -1147,7 +1152,7 @@ async fn seed_branch_fact(p: &SessionPlugin, id: &str, of: &str, into: &str) {
         .and_then(|e| e.seq)
         .expect("种分支格前事实源已非空");
     fs.append(
-        symbio_kernel::event::Event::pending(
+        symbio_platform::kernel::event::Event::pending(
             format!("branch-{into}"),
             EVENT_SCOPE_BRANCH,
             Entity::Scope,
@@ -1162,8 +1167,8 @@ async fn seed_branch_fact(p: &SessionPlugin, id: &str, of: &str, into: &str) {
 
 /// 事实源里出现过哪些事件 kind（分支切换的判据是「多了一条什么、没多出一条什么」）。
 async fn fact_kinds(p: &SessionPlugin, id: &str) -> Vec<String> {
-    use symbio_kernel::event::Seq;
-    use symbio_kernel::store::Store as _;
+    use symbio_platform::kernel::event::Seq;
+    use symbio_platform::kernel::store::Store as _;
     let dir = p
         .get_store()
         .await
@@ -1205,7 +1210,7 @@ async fn switch_branch(
 async fn switch_branch_changes_the_reading_not_the_facts() {
     use crate::declarations::EVENT_MESSAGE_REMOVED;
     use crate::declarations::EVENT_SCOPE_BRANCH_SELECTED;
-    use symbio_sdk::projection::branch::branch_selected;
+    use symbio_platform::sdk::projection::branch::branch_selected;
     let (_dir, p) = fixture();
     let id = unique_id("branch-switch");
     // m0 = 问，m1 = 第一次答，m2 = 重试的那一支
@@ -1238,7 +1243,7 @@ async fn switch_branch_changes_the_reading_not_the_facts() {
     assert!(!branch_selected(m2), "另一支降成候选");
 
     // 模型读侧（同一问题在请求包里只能有一个答复）归 sdk 的投影
-    // （`symbio_sdk::projection::transcript` 的分支用例）；本插件只出存储视图。
+    // （`symbio_platform::sdk::projection::transcript` 的分支用例）；本插件只出存储视图。
 
     // 事实：只多一条选择格。**没有** `message.removed`——换读法不毁事实。
     let kinds = fact_kinds(&p, &id).await;

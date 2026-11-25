@@ -5,8 +5,8 @@
  * ## 它治的病
  *
  * 「加一个能力要不要动架构」只有一个可判的答案：**七棵树的目录指纹不变**（`D-486` 契约树加入后）——
- * `crates/symbio-sdk` / `crates/symbio-kernel` / `crates/symbio-plugin-api` /
- * `crates/symbio-plugin-loop` / `crates/symbio-plugin-session` / `crates/symbio-host`
+ * `crates/symbio-platform/src/sdk` / `crates/symbio-platform/src/kernel` / `crates/symbio-plugin-api` /
+ * `crates/symbio-plugin-loop` / `crates/symbio-plugin-session` / `crates/symbio-runtime/src/host`
  * 是能力**不该**碰的架构面。七棵是**并集**
  * （`capability-migration-audit.PROTECTED_TREES`，D-372）：任何一套旧口径
  * 里出现过的树都算，少一棵就留一条「加能力时顺手改这里」的路。判据读指纹，不读

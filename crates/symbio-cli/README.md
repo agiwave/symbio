@@ -70,7 +70,7 @@ printf '第一轮\n/provider\n/exit\n' | ../../target/debug/symbio-cli.exe --rep
 ```
 
 Server 默认只允许同源访问；跨源部署必须同时提供 `--token` 和精确的
-`--allowed-origin <Origin>`，边界见 [crates/symbio-server/README](../symbio-server/README.md)。
+`--allowed-origin <Origin>`，边界见 [crates/symbio-runtime/README](../symbio-runtime/README.md)。
 
 产物：`../../target/debug/symbio-cli.exe`（相对 `crates/symbio-cli/`；仓库根看就是 `target/debug/…`）。
 

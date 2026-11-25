@@ -10,7 +10,7 @@
 
 use super::workdir_changes;
 use crate::declarations::MESSAGE_VOCAB as MESSAGE;
-use symbio_kernel::event::{Entity, Event, Verb};
+use symbio_platform::kernel::event::{Entity, Event, Verb};
 use symbio_plugin_api::effects::FileOp;
 use symbio_plugin_api::events::EVENT_ARTIFACT_ADDED;
 
@@ -241,7 +241,8 @@ fn paths_outside_the_workdir_are_skipped() {
         .map(|(i, p)| ok(&format!("a-{i}"), "write", serde_json::json!({"path": p})))
         .collect();
     // 虚拟根的名字由 vdfs 插件声明，测试**问声明**而不是写死拼法。
-    let root = symbio_sdk::vdfs::address::declared_addr_root().expect("vdfs 插件应已声明根名");
+    let root =
+        symbio_platform::sdk::vdfs::address::declared_addr_root().expect("vdfs 插件应已声明根名");
     events.push(ok(
         "a-virtual",
         "write",
@@ -298,7 +299,11 @@ fn future_events_are_skipped() {
     let mut e = ok("a-0", "write", serde_json::json!({"path": "t.txt"}));
     e = e.with_ts(100);
     assert!(workdir_changes(MESSAGE)
-        .apply(&[e.clone()], 50, symbio_kernel::view::Budget::generous())
+        .apply(
+            &[e.clone()],
+            50,
+            symbio_platform::kernel::view::Budget::generous()
+        )
         .value
         .is_empty());
     assert_eq!(fold(&[e]), vec![("t.txt".into(), FileOp::Write, 1)]);

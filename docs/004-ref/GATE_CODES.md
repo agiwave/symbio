@@ -36,7 +36,7 @@ lists: [gate-codes=owner]
 | **EOL** | 行尾（工作树 / 入库 / 声明三面一致） | `scripts/audits/eol-audit.mjs` | EOL-001–003 | `EOL-004` |
 | **EX** | 能力全面拆分（名册处置与迁移边界） | `scripts/audits/capability-ledger-audit.mjs` · `scripts/audits/capability-migration-audit.mjs` · `scripts/audits/extension-locality-audit.mjs` · `scripts/audits/extension-vocab-audit.mjs` · `scripts/audits/uninstall-edge-audit.mjs` | EX-002–004、EX-006–008 | `EX-009` |
 | **FA** | 门面（plugin-api）自有实现行数棘轮 | `scripts/audits/facade-loc-audit.mjs` | FA-001–004 | `FA-005` |
-| **FB** | 事实轨边界 | `scripts/audits/facts-boundary-audit.mjs` | FB-001–002 | `FB-003` |
+| **FB** | 事实轨边界 | `scripts/audits/facts-boundary-audit.mjs` | FB-001–004 | `FB-005` |
 | **GC** | 判据码命名空间本身 | `scripts/audits/gate-codes-audit.mjs` | GC-001–006 | `GC-007` |
 | **GW** | 门禁接线（脚本自声明与门禁执行的对账） | `scripts/audits/gate-wiring-audit.mjs` | GW-001–009 | `GW-010` |
 | **HS** | 扩展层插件宿主面 | `scripts/audits/plugin-surface-audit.mjs` | HS-001–006 | `HS-007` |
@@ -62,13 +62,12 @@ lists: [gate-codes=owner]
 | **SD** | 会话死码台账（B 类能力待接入） | `scripts/audits/session-dead-code-audit.mjs` | SD-001–002 | `SD-003` |
 | **SPC** | 规范执行方覆盖 | `scripts/audits/spec-coverage-audit.mjs` | SPC-001–003 | `SPC-004` |
 | **SR** | 归宿行（开不出账的行）条数棘轮 | `scripts/audits/sink-row-audit.mjs` | SR-001–004 | `SR-005` |
-| **SRA** | 控制面 session 退役线的进度尺（豁免账 / 单槽登记） | `scripts/audits/session-retire-audit.mjs` | SRA-001–005 | `SRA-006` |
 | **SV** | 共享词汇 | `scripts/audits/shared-name-audit.mjs` | SV-001、SV-003–004 | `SV-005` |
 | **SX** | SLO 出口表 vs session/stats 读数列（用户可见出口） | `scripts/audits/slo-exit-audit.mjs` | SX-001–004 | `SX-005` |
 | **TD** | 工具自声明行为位（声明面基线对账） | `scripts/audits/tool-decls-audit.mjs` | TD-001–002 | `TD-003` |
 | **TR** | turn 词根冻结（废弃概念的存量棘轮） | `scripts/audits/turn-root-audit.mjs` | TR-001–004 | `TR-005` |
 | **UX** | 前端可用性（原生弹窗 / 可访问名称 / 图片替代文本） | `scripts/audits/frontend-ux-audit.mjs` | UX-001–004 | `UX-005` |
-| **V** | 分域形状 | `scripts/audits/domain-vocab-audit.mjs` | V-001–002 | `V-003` |
+| **V** | 分域形状 | `scripts/audits/domain-vocab-audit.mjs` | V-001–003 | `V-004` |
 
 ## 2. 逐码归属
 
@@ -169,6 +168,8 @@ lists: [gate-codes=owner]
 | **FA-004** | `scripts/audits/facade-loc-audit.mjs` |
 | **FB-001** | `scripts/audits/facts-boundary-audit.mjs` |
 | **FB-002** | `scripts/audits/facts-boundary-audit.mjs` |
+| **FB-003** | `scripts/audits/facts-boundary-audit.mjs` |
+| **FB-004** | `scripts/audits/facts-boundary-audit.mjs` |
 | **GC-001** | `scripts/audits/gate-codes-audit.mjs` |
 | **GC-002** | `scripts/audits/gate-codes-audit.mjs` |
 | **GC-003** | `scripts/audits/gate-codes-audit.mjs` |
@@ -311,11 +312,6 @@ lists: [gate-codes=owner]
 | **SR-002** | `scripts/audits/sink-row-audit.mjs` |
 | **SR-003** | `scripts/audits/sink-row-audit.mjs` |
 | **SR-004** | `scripts/audits/sink-row-audit.mjs` |
-| **SRA-001** | `scripts/audits/session-retire-audit.mjs` |
-| **SRA-002** | `scripts/audits/session-retire-audit.mjs` |
-| **SRA-003** | `scripts/audits/session-retire-audit.mjs` |
-| **SRA-004** | `scripts/audits/session-retire-audit.mjs` |
-| **SRA-005** | `scripts/audits/session-retire-audit.mjs` |
 | **SV-001** | `scripts/audits/shared-name-audit.mjs` |
 | **SV-003** | `scripts/audits/shared-name-audit.mjs` |
 | **SV-004** | `scripts/audits/shared-name-audit.mjs` |
@@ -335,3 +331,4 @@ lists: [gate-codes=owner]
 | **UX-004** | `scripts/audits/frontend-ux-audit.mjs` |
 | **V-001** | `scripts/audits/domain-vocab-audit.mjs` |
 | **V-002** | `scripts/audits/domain-vocab-audit.mjs` |
+| **V-003** | `scripts/audits/domain-vocab-audit.mjs` |

@@ -24,10 +24,10 @@
 //!
 //! 读数的**数字**归能力包自己的用例与 e2e——真实装配里跑的是 owner 那一份。
 
-use symbio_kernel::adapters::LatencyTier;
-use symbio_kernel::decl::ring::{Decl, Pattern};
-use symbio_kernel::decl::{ActorDecl, PluginDeclarations};
-use symbio_kernel::event::{
+use symbio_platform::kernel::adapters::LatencyTier;
+use symbio_platform::kernel::decl::ring::{Decl, Pattern};
+use symbio_platform::kernel::decl::{ActorDecl, PluginDeclarations};
+use symbio_platform::kernel::event::{
     Entity, EventDecl, Verb, EVENT_FAILED, EVENT_REQUEST, EVENT_RESPONSE, EVENT_RETRY, EVENT_SENT,
 };
 
@@ -108,15 +108,15 @@ fn owned_events_resolve_through_the_process_assembly() {
     assert_eq!(
         frozen.event_cell(EVENT_SYSTEM_TRIGGERED),
         Some((
-            symbio_kernel::event::Entity::System,
-            symbio_kernel::event::Verb::Opened
+            symbio_platform::kernel::event::Entity::System,
+            symbio_platform::kernel::event::Verb::Opened
         ))
     );
     assert_eq!(
         frozen.event_cell(EVENT_SYSTEM_HEALTH),
         Some((
-            symbio_kernel::event::Entity::System,
-            symbio_kernel::event::Verb::Progressed
+            symbio_platform::kernel::event::Entity::System,
+            symbio_platform::kernel::event::Verb::Progressed
         ))
     );
     assert_eq!(

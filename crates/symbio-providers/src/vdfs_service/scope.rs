@@ -20,7 +20,7 @@
 use async_trait::async_trait;
 use base64::Engine as _;
 use std::path::{Path, PathBuf};
-use symbio_kernel::vdfs::{
+use symbio_platform::kernel::vdfs::{
     vdfs_has_parent_segment, VdfsAccess, VdfsContent, VdfsContext, VdfsError, VdfsNode,
     VdfsProvider, VdfsRequest, VdfsResponse, VdfsResult, VdfsWriteResponse,
 };
@@ -65,7 +65,7 @@ impl ScopeDirVdfs {
     fn resolve(&self, path: &str) -> VdfsResult<PathBuf> {
         if vdfs_has_parent_segment(path) {
             return Err(VdfsError::Invalid(
-                symbio_kernel::vdfs::VdfsValidationError::new(format!(
+                symbio_platform::kernel::vdfs::VdfsValidationError::new(format!(
                     "作用域地址不允许父段：`{path}`"
                 )),
             ));
@@ -106,7 +106,7 @@ impl ScopeDirVdfs {
         if let Ok(meta) = tokio::fs::symlink_metadata(target).await {
             if meta.file_type().is_symlink() {
                 return Err(VdfsError::Invalid(
-                    symbio_kernel::vdfs::VdfsValidationError::new(format!(
+                    symbio_platform::kernel::vdfs::VdfsValidationError::new(format!(
                         "拒绝写入符号链接：{}",
                         target.display()
                     )),
@@ -163,7 +163,7 @@ impl ScopeDirVdfs {
         if self.kind.is_empty() {
             return;
         }
-        symbio_sdk::vdfs::host::vdfs_notify_change(&self.kind, path);
+        symbio_platform::sdk::vdfs::host::vdfs_notify_change(&self.kind, path);
     }
 }
 
@@ -275,9 +275,11 @@ impl VdfsProvider for ScopeDirVdfs {
                     (None, Some(b)) => base64::engine::general_purpose::STANDARD
                         .decode(b)
                         .map_err(|e| {
-                            VdfsError::Invalid(symbio_kernel::vdfs::VdfsValidationError::new(
-                                format!("b64 解码失败：{e}"),
-                            ))
+                            VdfsError::Invalid(
+                                symbio_platform::kernel::vdfs::VdfsValidationError::new(format!(
+                                    "b64 解码失败：{e}"
+                                )),
+                            )
                         })?,
                     (None, None) => {
                         return Err(VdfsError::invalid("写入需要 text 或 b64 之一"));
@@ -342,14 +344,14 @@ impl VdfsProvider for ScopeDirVdfs {
 /// 所有注入点（宿主 drive / gather、session 开轮收集）都走这一个函数，
 /// 避免各自拼 provider 形态而漂移。
 pub fn attach_scope_providers(
-    ctx: &dyn symbio_sdk::plugin::PluginInvokeRequest,
+    ctx: &dyn symbio_platform::sdk::plugin::PluginInvokeRequest,
     agent_dir: Option<&Path>,
     work_dir: Option<&Path>,
     session_dir: Option<&Path>,
 ) {
-    use symbio_kernel::plugin::PluginInvokeRequestExt;
-    use symbio_kernel::vdfs::DynVdfsProvider;
-    use symbio_sdk::keys::{AGENT_VDFS, SESSION_VDFS, WORKSPACE_VDFS};
+    use symbio_platform::kernel::plugin::PluginInvokeRequestExt;
+    use symbio_platform::kernel::vdfs::DynVdfsProvider;
+    use symbio_platform::sdk::keys::{AGENT_VDFS, SESSION_VDFS, WORKSPACE_VDFS};
 
     let mk = |dir: Option<&Path>| -> Option<DynVdfsProvider> {
         dir.map(|p| std::sync::Arc::new(ScopeDirVdfs::at(p.to_path_buf())) as DynVdfsProvider)
@@ -372,13 +374,13 @@ pub fn attach_scope_providers(
 /// 顶层会话（ctx 由宿主注入，未下钻）的 `AGENT_VDFS` 本来就是 `agent_home_root()`，
 /// 保留它同样正确。因此这里不碰 agent 作用域，把主动权留给上层插件。
 pub fn attach_round_providers(
-    ctx: &dyn symbio_sdk::plugin::PluginInvokeRequest,
+    ctx: &dyn symbio_platform::sdk::plugin::PluginInvokeRequest,
     work_dir: Option<&Path>,
     session_dir: Option<&Path>,
 ) {
-    use symbio_kernel::plugin::PluginInvokeRequestExt;
-    use symbio_kernel::vdfs::DynVdfsProvider;
-    use symbio_sdk::keys::{SESSION_VDFS, WORKSPACE_VDFS};
+    use symbio_platform::kernel::plugin::PluginInvokeRequestExt;
+    use symbio_platform::kernel::vdfs::DynVdfsProvider;
+    use symbio_platform::sdk::keys::{SESSION_VDFS, WORKSPACE_VDFS};
 
     let mk = |dir: Option<&Path>| -> Option<DynVdfsProvider> {
         dir.map(|p| std::sync::Arc::new(ScopeDirVdfs::at(p.to_path_buf())) as DynVdfsProvider)

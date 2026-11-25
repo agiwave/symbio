@@ -22,8 +22,8 @@ use args::Command;
 use client::{Frame, SymbioClient};
 use protocol::{MODE_AUTO, OUTCOME_ABORTED};
 use render::Renderer;
-use symbio::symbio_kernel::vdfs::{VDFS_STATUS_FAILED, VDFS_STATUS_WORKING};
-use symbio_server::worker::run_worker_command;
+use symbio_platform::kernel::vdfs::{VDFS_STATUS_FAILED, VDFS_STATUS_WORKING};
+use symbio_runtime::worker::run_worker_command;
 
 /// CLI 只做「解析 → 启动 → 发送 → 渲染」，业务全在后端插件树里。
 ///
@@ -70,13 +70,13 @@ async fn main() -> ExitCode {
     let log_level = std::env::var("SYMBIO_LOG")
         .ok()
         .as_deref()
-        .and_then(symbio::symbio_sdk::logger::logger_parse_level)
+        .and_then(symbio_platform::sdk::logger::logger_parse_level)
         .unwrap_or(if args.verbose {
-            symbio::symbio_sdk::logger::LOG_LEVEL_DEBUG
+            symbio_platform::sdk::logger::LOG_LEVEL_DEBUG
         } else {
-            symbio::symbio_sdk::logger::LOG_LEVEL_INFO
+            symbio_platform::sdk::logger::LOG_LEVEL_INFO
         });
-    symbio::symbio_sdk::logger::logger_set_min_level(log_level);
+    symbio_platform::sdk::logger::logger_set_min_level(log_level);
 
     // 系统目录下没有任何模型条目时给出明确提示：此时插件树会退回内置默认值，
     // 通常表现为「没有任何可用 Provider」，属于最常见的一次性配置问题。

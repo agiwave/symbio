@@ -8,13 +8,15 @@ use crate::plugin::SessionConfig;
 use crate::types::Session;
 use std::sync::atomic::{AtomicUsize, Ordering};
 use std::sync::{Arc, OnceLock};
-use symbio_kernel::capability::CapabilityMeta;
-use symbio_kernel::chat::chat_node::{ChatNode, MessageContent};
-use symbio_kernel::plugin::{
+use symbio_platform::kernel::capability::CapabilityMeta;
+use symbio_platform::kernel::chat::chat_node::{ChatNode, MessageContent};
+use symbio_platform::kernel::plugin::{
     Plugin, PluginInvokeRequest, PluginInvokeResponse, PluginMeta, PluginPayload,
     PluginSimpleRequest,
 };
-use symbio_kernel::store::Store as KernelStore;
+use symbio_platform::kernel::store::Store as KernelStore;
+use symbio_platform::sdk::chat::session_chat;
+use symbio_platform::sdk::plugin::fact_source::FactSource as _;
 use symbio_plugin_api::port::{
     scoped_port_name, PortBindings, PortExecContext, PortExecutor, PortInput, PortOutcome,
     PORT_BINDINGS,
@@ -23,8 +25,6 @@ use symbio_plugin_api::{
     sandbox_publish, AgentScope, PluginDir, PluginInvokeRequestExt, SandboxFace, SandboxFact,
     AGENT_ID, AGENT_PERMS, CAPABILITY_VISITOR, SANDBOX,
 };
-use symbio_sdk::chat::session_chat;
-use symbio_sdk::plugin::fact_source::FactSource as _;
 
 fn meta(name: &str) -> CapabilityMeta {
     CapabilityMeta {
@@ -138,9 +138,9 @@ fn orphan_description_row_is_not_exposed() {
 // ── 轮级执行上下文与失败回滚（D-547 / D-549） ───────────────────────────
 
 struct SelectiveFailureSource {
-    inner: symbio_kernel::store::MemoryStore<symbio_kernel::event::Event>,
+    inner: symbio_platform::kernel::store::MemoryStore<symbio_platform::kernel::event::Event>,
     fail_key: String,
-    concurrent: symbio_kernel::store::MemoryStore<symbio_kernel::event::Event>,
+    concurrent: symbio_platform::kernel::store::MemoryStore<symbio_platform::kernel::event::Event>,
 }
 
 impl SelectiveFailureSource {
@@ -154,18 +154,18 @@ impl SelectiveFailureSource {
 }
 
 #[async_trait::async_trait]
-impl symbio_sdk::plugin::fact_source::FactSource for SelectiveFailureSource {
+impl symbio_platform::sdk::plugin::fact_source::FactSource for SelectiveFailureSource {
     fn append(&self, actor: String, draft: symbio_plugin_api::FactDraft) -> Result<u64, String> {
         if draft.key == self.fail_key {
             KernelStore::append(
                 &self.concurrent,
-                symbio_sdk::plugin::fact_source::draft_into_event(
+                symbio_platform::sdk::plugin::fact_source::draft_into_event(
                     actor,
                     symbio_plugin_api::FactDraft {
                         key: "concurrent-writer".into(),
                         kind: "test.concurrent".into(),
-                        entity: symbio_kernel::event::Entity::Scope,
-                        verb: symbio_kernel::event::Verb::Asserted,
+                        entity: symbio_platform::kernel::event::Entity::Scope,
+                        verb: symbio_platform::kernel::event::Verb::Asserted,
                         payload: serde_json::json!({}),
                         produced_by: None,
                     },
@@ -176,18 +176,21 @@ impl symbio_sdk::plugin::fact_source::FactSource for SelectiveFailureSource {
         }
         KernelStore::append(
             &self.inner,
-            symbio_sdk::plugin::fact_source::draft_into_event(actor, draft),
+            symbio_platform::sdk::plugin::fact_source::draft_into_event(actor, draft),
         )
         .map(|seq| seq.value())
         .map_err(|error| format!("{error:?}"))
     }
 
-    fn facts(&self) -> Vec<symbio_kernel::event::Event> {
-        KernelStore::range(&self.inner, symbio_kernel::event::Seq::new(0))
+    fn facts(&self) -> Vec<symbio_platform::kernel::event::Event> {
+        KernelStore::range(&self.inner, symbio_platform::kernel::event::Seq::new(0))
     }
 
-    fn range(&self, from_seq: u64) -> Vec<symbio_kernel::event::Event> {
-        KernelStore::range(&self.inner, symbio_kernel::event::Seq::new(from_seq))
+    fn range(&self, from_seq: u64) -> Vec<symbio_platform::kernel::event::Event> {
+        KernelStore::range(
+            &self.inner,
+            symbio_platform::kernel::event::Seq::new(from_seq),
+        )
     }
 
     fn head(&self) -> u64 {
@@ -233,7 +236,7 @@ impl Plugin for RoundCollectingParent {
         self: Arc<Self>,
         _ctx: Arc<dyn PluginInvokeRequest>,
     ) -> PluginInvokeResponse<PluginPayload> {
-        Err(symbio_kernel::plugin::PluginError::NotFound(
+        Err(symbio_platform::kernel::plugin::PluginError::NotFound(
             "round-context-test".into(),
         ))
     }

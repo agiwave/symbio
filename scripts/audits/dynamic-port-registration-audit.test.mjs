@@ -26,8 +26,8 @@ import { fileURLToPath } from 'node:url'
 
 const script = fileURLToPath(new URL('./dynamic-port-registration-audit.mjs', import.meta.url))
 
-const PORT_RS = 'crates/symbio-sdk/src/capability/port.rs'
-const HOST_LIB = 'crates/symbio-host/src/lib.rs'
+const PORT_RS = 'crates/symbio-platform/src/sdk/capability/port.rs'
+const HOST_LIB = 'crates/symbio-runtime/src/host/mod.rs'
 const TOOL_PORT = 'crates/symbio-plugin-tool/src/port.rs'
 const TURN_RS = 'crates/symbio-plugin-session/src/plugin/round.rs'
 const TOOL_PORT_TEST = 'crates/symbio-plugin-tool/src/port.test.rs'
@@ -134,7 +134,7 @@ test('DPR-002：host 折执行体表出现裸 executors.insert( ⇒ 红（已有
     const r = run(box.root)
     assert.equal(r.status, 1, r.out)
     assert.match(r.out, /DPR-002/)
-    assert.match(r.out, /lib\.rs:\d+/)
+    assert.match(r.out, /host\/mod\.rs:\d+/)
     assert.match(r.out, /executors\.insert\(/)
   } finally {
     box.cleanup()

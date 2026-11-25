@@ -6,13 +6,13 @@
 //! 转写是事实源的渲染；把两者混在一处，最先被碰坏的是「停了还在不在」这条判据。
 
 use super::*;
-use symbio_kernel::vdfs::{
+use symbio_platform::kernel::vdfs::{
     VdfsActionResult, VdfsContent, VdfsContext, VdfsError, VdfsNode, VdfsRequest, VdfsResponse,
     VdfsResult, VdfsWriteResponse, VDFS_ACTION_ABORT, VDFS_ACTION_CLEAR,
 };
+use symbio_platform::sdk::plugin::fact_source::FACT_SOURCE;
 use symbio_plugin_api::vdfs_host_ctx;
 use symbio_plugin_api::SESSION_ID;
-use symbio_sdk::plugin::fact_source::FACT_SOURCE;
 
 impl SessionPlugin {
     /// 收件箱（`<id>/inbox[/iid]`）：**待消费**的用户消息。
@@ -141,7 +141,7 @@ impl SessionPlugin {
                         // 轮末 `commitment.*` 的 `to` 据它取值，缺省保持本机用户。
                         let source_principal = vdfs_host_ctx(ctx)
                             .ok()
-                            .and_then(|h| h.get(symbio_sdk::keys::SOURCE_PRINCIPAL))
+                            .and_then(|h| h.get(symbio_platform::sdk::keys::SOURCE_PRINCIPAL))
                             .filter(|s| !s.trim().is_empty());
                         self.enqueue_inbox(
                             id,

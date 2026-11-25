@@ -33,10 +33,10 @@
 use std::collections::HashMap;
 
 use crate::rebuild::rebuild;
-use symbio_kernel::chat::chat_node as cm;
-use symbio_kernel::chat::principal::Principal;
-use symbio_kernel::event::{Event, Seq};
-use symbio_kernel::store::Store;
+use symbio_platform::kernel::chat::chat_node as cm;
+use symbio_platform::kernel::chat::principal::Principal;
+use symbio_platform::kernel::event::{Event, Seq};
+use symbio_platform::kernel::store::Store;
 use symbio_plugin_api::debt::{ReplyRole, STAMP_KEY, STAMP_ROLE};
 
 use super::super::store::EventWalStore;

@@ -63,7 +63,7 @@ const ROOT = rootArg
  * 不该被系统层点名的插件 id（crate 名 = symbio-plugin-<id>）。
  *
  * - `subagent`：历史改名牵动 117 个文件的主角（见本文件头注释）。
- * - 其余**可选插件**（`crates/symbio-deploy/src/lib.rs` 的 `ASSEMBLY_OPTIONAL_PLUGINS`）
+ * - 其余**可选插件**（`crates/symbio-platform/src/deploy/mod.rs` 的 `ASSEMBLY_OPTIONAL_PLUGINS`）
  *   按「清理完毕一个、纳入一个」分批加入：能力由插件各自的自述文档描述，名字不应
  *   出现在系统文档或其它插件目录——否则「可选能力」被写成「系统必备」，删装一个
  *   插件就要同步一堆与机制无关的措辞（与 subagent 改名同病，见 D-522 / PI-001）。

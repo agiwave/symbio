@@ -1,5 +1,5 @@
 /**
- * 事实 · `crates/symbio-deploy/src/lib.rs` —— 编译期装配清单
+ * 事实 · `crates/symbio-platform/src/deploy/mod.rs` —— 编译期装配清单
  *
  * ## 它替掉了什么
  *
@@ -46,7 +46,7 @@ import { fileURLToPath } from "node:url";
 import { pluginIds, pluginManifestRel, readPluginManifest } from "./_plugin-yml.mjs";
 
 const ROOT = path.resolve(path.dirname(fileURLToPath(import.meta.url)), "..", "..");
-const OUT_REL = "crates/symbio-deploy/src/lib.rs";
+const OUT_REL = "crates/symbio-platform/src/deploy/mod.rs";
 
 const WAIVER =
   "// dead-code-allow R-003: 插件 id / 装配清单是部署契约面，未用常量仍须存在（owner: scripts/facts/assembly.mjs 生成，每个插件目录的 PLUGIN.yml 是唯一声明处）";

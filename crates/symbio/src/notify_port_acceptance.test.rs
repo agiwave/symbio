@@ -10,13 +10,13 @@
 //!
 //! 本文件不改 loop 的任何文件——零改动接入的证明见提交的 `git diff --stat`。
 
-use symbio_kernel::decl::ring::owed;
-use symbio_kernel::decl::Frozen;
-use symbio_kernel::event::{Event, EVENT_REQUEST};
-use symbio_kernel::{Entity, Verb};
+use symbio_platform::kernel::decl::ring::owed;
+use symbio_platform::kernel::decl::Frozen;
+use symbio_platform::kernel::event::{Event, EVENT_REQUEST};
+use symbio_platform::kernel::{Entity, Verb};
+use symbio_platform::sdk::declarations::sealed_declarations;
 use symbio_plugin_api::rows::PORT_ACTOR;
 use symbio_plugin_api::EVENT_SENT;
-use symbio_sdk::declarations::sealed_declarations;
 
 const NOTIFY: &str = "notify";
 

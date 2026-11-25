@@ -6,7 +6,7 @@
  * ## 它守的是什么
  *
  * `Plugin` trait 无默认体的方法只有三个：`meta` / `route` / `traverse`
- * （`crates/symbio-kernel/src/plugin/mod.rs`）。
+ * （`crates/symbio-platform/src/kernel/plugin/mod.rs`）。
  * 后两个是全仓**仅有的两条**跨插件寻址通道，而它们的地址是**字符串**——
  * 字符串不会因为改名而编译失败，只会静默地指向一个不存在的地方。
  *
@@ -33,14 +33,14 @@
  * | E-006 | **权威清单**（`003-ROUTES.md` / `CURRENT.md` / 插件 README）里的路径前缀必须合法 | `hooks/fire` 只出现在文档里，只扫代码的守卫会完整地漏掉它 |
  * | E-007 | 插件不得按**强引用**持有兄弟插件实例（`Arc<dyn Plugin>` 字段）  | 跨插件调用必须经 `ctx.parent()` 走容器；按值持有会绕过地址分发、并在插件重建后钉住旧实例（`telegram` 的 `llm_plugin` 就是这么烂掉的） |
  * | E-008 | 文档里标了 `<!-- vocab:PREFIX_ -->` 的**词表行**必须与代码常量逐字一致 | 闭集的第二份真相常驻文档：`013-vdfs.md` 的 status 行曾一直写 `error`，而代码早已改名为 `failed`——漂移会从文档**流回**代码 |
- * | E-009 | 插件依赖边闭集：**`[dependencies]` 的 `symbio-*` 按身份分档——扩展层只许 `plugin-api` / `providers`（+ 第三方），控制面另许 `kernel`**；兄弟插件、`symbio` 宿主门面（只许 dev）、`include!`/`#[path]` 跨 crate、源码 `symbio_plugin_<兄弟>` 一律禁，**测试代码同样判**；例外只有一条**冻结豁免**（`scripts/exemptions/plugin-session-sdk.json`：crate / 依赖精确匹配、`symbols` 符号级冻结；删除承诺看 `expires` 到点即红，保留承诺看 `reviewed` 已复核） | 「插件之间互不可见」是架构公理，但它的**载体换过一次而判据没跟**。拆 crate 前兄弟插件是同 crate 的私有模块，`crate::plugins::web` 编得过（Rust 私有可见性包含"定义模块的后代"），旧实现判的就是这个形态。拆 crate（D-191）后兄弟插件是独立 crate，该路径**不可能存在**——约束由 cargo 的依赖图物理给出，但它的物理位置也搬到了 `Cargo.toml`：现在能让插件互可见的唯一动作是加一行依赖，而旧实现从不读清单 ⇒ 本条**静默空转**（全仓 4 处 `crate::plugins` 全是注释），绿灯是假的。现判六条通路：清单闭集（含 `alias = { package }` 改名与 `.workspace = true` 继承两种绕法；`symbio-sdk` / `symbio-deploy` 是应用侧门面，插件依赖它就是「插件→应用」反向耦合，控制面插件不豁免；扩展层直连 `symbio-kernel` 同样红——共享语法走门面的语法臂，`D-418`）· 源码裸 `symbio_plugin_<x>` · 旧路径兜底 · `symbio` 宿主门面（`pub use` 全部插件，只许 dev）· `include!`/`#[path]`（不需要依赖也能搬源码）· `symbio-providers` 的三条准入条件（自身不依赖插件 / 不含端口名 / 不含业务事实名）。唯一例外是 `plugin-session` 的 `symbio-sdk` 冻结豁免（session 退役时同批删除）：对象、日期口径（删除承诺 `expires` / 保留承诺 `reviewed`）、符号集都是**数据**，过期 / 扩散 / 新增用法三者任一即红。测试也判：让它对仓内可见去喂一条测试，隔离已经先被拆掉了一个模块 |
- * | E-013 | `crates/symbio-plugin-loop/src/**` 的 import 根 ⊆ 闭族（core 端口 / 通用库 / 自身 `super` / owner 声明表 / owner 自己的折叠），**测试同样判** | 驱动器片跨墙只准用 [D-083 §4](../../docs/003-design/001-核心架构.md "D-083") 的闭族通货：宿主机制面 `symbio_sdk::` + 封闭语法 `symbio_kernel::` + 通用库 + crate 根日志/工厂宏 + 本插件自己的模块根。它一旦 import 会话模块（或任何兄弟插件），切片就退回「搬家」：卸载 loop 时编译面仍钉着会话内部类型。E-009 已拦兄弟插件的全部依赖通路（清单 / 源码 / 宿主门面），但拦不住 `crate::providers` / 第三方 crate 这类**族外根**；本条把闭族写成枚举白名单，族外新增必须先回到 D-083 §4 论证「它代表哪条事实，或哪个方向的世界端口」 |
- * | E-011 | 纯配置挂载点插件不得手写 `impl VdfsProvider`                    | 「挂载根 = 一份配置文档」的插件（`CONFIG_MOUNT_PLUGINS`）四臂 dispatch 骨架逐字相同，机制侧已提供唯一实现（`symbio_sdk::PluginConfigMount` 的泛型 blanket impl）。手写一份 = 把同一段语义复制出去：四份副本改一条错误文案要改四处，新增插件「记得抄对每条分支」是纯人肉负担。本条与行数棘轮互补——棘轮在**事后**度量规模，本条在**事前**禁止把已收口的语义再摊开 |
+ * | E-009 | 插件依赖边闭集：**`[dependencies]` 的 `symbio-*` 按身份分档——扩展层只许 `plugin-api` / `providers` / `http`（+ 第三方），控制面（`loop` / `session`）另许平台 `symbio-platform`**；兄弟插件、`symbio` 宿主门面（只许 dev）、`include!`/`#[path]` 跨 crate、源码 `symbio_plugin_<兄弟>` 一律禁，**测试代码同样判**；没有例外 | 「插件之间互不可见」是架构公理，但它的**载体换过一次而判据没跟**。拆 crate 前兄弟插件是同 crate 的私有模块，`crate::plugins::web` 编得过；拆 crate（D-191）后能让插件互可见的唯一动作是加一行依赖，而旧实现从不读清单 ⇒ 本条曾**静默空转**。现判六条通路：清单闭集（含 `alias = { package }` 改名与 `.workspace = true` 继承两种绕法；扩展层直连 `symbio-platform` 同样红——共享语法走门面的语法臂，`D-418`）· 源码裸 `symbio_plugin_<x>` · 旧路径兜底 · `symbio` 宿主门面（`pub use` 全部插件，只许 dev）· `include!`/`#[path]`（不需要依赖也能搬源码）· `symbio-providers` 的三条准入条件（自身不依赖插件 / 不含端口名 / 不含业务事实名）。控制面直连平台的符号量**不记账**（D-558：原 `plugin-session-sdk` 冻结账与 `session-retire-audit` 一并退役，其两条单槽登记绊线改住 `facts-boundary-audit` 的 FB-003 / FB-004） |
+ * | E-013 | `crates/symbio-plugin-loop/src/**` 的 import 根 ⊆ 闭族（core 端口 / 通用库 / 自身 `super` / owner 声明表 / owner 自己的折叠），**测试同样判** | 驱动器片跨墙只准用 [D-083 §4](../../docs/003-design/001-核心架构.md "D-083") 的闭族通货：宿主机制面 `symbio_platform::sdk::` + 封闭语法 `symbio_platform::kernel::` + 通用库 + crate 根日志/工厂宏 + 本插件自己的模块根。它一旦 import 会话模块（或任何兄弟插件），切片就退回「搬家」：卸载 loop 时编译面仍钉着会话内部类型。E-009 已拦兄弟插件的全部依赖通路（清单 / 源码 / 宿主门面），但拦不住 `crate::providers` / 第三方 crate 这类**族外根**；本条把闭族写成枚举白名单，族外新增必须先回到 D-083 §4 论证「它代表哪条事实，或哪个方向的世界端口」 |
+ * | E-011 | 纯配置挂载点插件不得手写 `impl VdfsProvider`                    | 「挂载根 = 一份配置文档」的插件（`CONFIG_MOUNT_PLUGINS`）四臂 dispatch 骨架逐字相同，机制侧已提供唯一实现（`symbio_platform::sdk::PluginConfigMount` 的泛型 blanket impl）。手写一份 = 把同一段语义复制出去：四份副本改一条错误文案要改四处，新增插件「记得抄对每条分支」是纯人肉负担。本条与行数棘轮互补——棘轮在**事后**度量规模，本条在**事前**禁止把已收口的语义再摊开 |
  * | E-012 | `ROUTE_*` 常量：**名**去掉前缀后逐字等于**值**的大写，且**值**必须是真实分发目标 | 名字与值分叉 ⇒ 照名字拼出的地址不存在；值不在 `route()` 的臂也不在 `VDFS_OPS` ⇒ 登记的是一条没人能到达的地址（`AGENT_CHAT` 就是这个形态）。E-005 判「引用」不判「定义」，这两条此前无守卫，而 `route.rs` 的文档还声称有 |
  * | E-015 | 每份插件 crate 必须有 `README.md`（能力包的自述页） | 它不是一个「可有可无的文档」：`docs/004-ref/006-当前事实表.md` 的插件表有一列直接渲染「有 / **缺**」，而那一列长期挂着六个 `缺` 且没有任何判据会红——手册页缺失是**读者**的失败，不是作者的失败，所以它只能靠机制拦。README 还承载 E-006（路由权威清单）与 AO-005（兄弟插件地址）两处判据的输入面 |
  * | E-014 | 真插件 crate 的**导出根**（`src/lib.rs`）不得有 `pub` 项 | E-009 拦得住「已经依赖」，拦不住「随时可以依赖」：只要 `lib.rs` 还留着一个能用的 `pub` 类型，兄弟插件就有绕过注册机制的直接通路。注册入口是 crate 根的 `submit_object_creator!` 宏，不是 `pub` 项，所以白名单为空；内层私有模块的 `pub fn` 不可达，不算导出 |
  *
- * （原 E-010「消费方不得深引 `symbio_sdk::<域>::`」已迁至
+ * （原 E-010「消费方不得深引 `symbio_platform::sdk::<域>::`」已迁至
  * [`core-export-audit.mjs`](core-export-audit.mjs) 的 **C-002** 并退役：深引是
  * **内核出口**的事，不是插件门面的事；两处各判一遍就是两个 owner，域清单与豁免通道
  * 必然分叉。C-002 是它的全量版——域目录动态取自 core、额外拦裸 `use …::core::<域>;`。）
@@ -92,7 +92,6 @@ import path from 'node:path'
 import { fileURLToPath } from 'node:url'
 import { red, yellow, green, dim } from '../color.mjs'
 import { blankComments, blankTestModules } from '../rust-scan.mjs'
-import { exemptionActive, sdkSymbolsIn } from '../gate.d/_shared.mjs'
 // 「什么算一条路由臂」「哪些地址能被分发」由 route-facts 单一持有：本脚本与
 // `facts/current` / `facts/routes-ts` 读的是同一份实现（两份判据各写一遍正则，
 // 就会有一份开始漏掉复合臂而另一份不报）。
@@ -276,7 +275,7 @@ const crateDirOf = (id) => path.join(PLUGINS_DIR, PLUGIN_CRATE_PREFIX + id)
 /**
  * 纯配置挂载点插件（挂载根下只有一份 `PLUGIN.yml`）——E-011 的适用范围。
  *
- * 这些插件应当实现 `symbio_sdk::PluginConfigMount`（四臂 dispatch 由机制侧提供），
+ * 这些插件应当实现 `symbio_platform::sdk::PluginConfigMount`（四臂 dispatch 由机制侧提供），
  * 而不是各自手写 `impl VdfsProvider`。**名单即「哪些插件的挂载根确实只有一份配置」
  * 的事实表**：新插件两者之一必居其一——要么加进本名单并实现 `PluginConfigMount`，
  * 要么它有资源条（条目 CRUD / 动态子节点），那就不属于这里。
@@ -370,17 +369,17 @@ if (pluginDirs === null) {
 }
 const dirNames = new Set(pluginDirs.map((p) => p.dirName))
 
-// 常量表：先收全仓（装配方 `crates/symbio-deploy/src/lib.rs` 的 `PLUGIN_ID_*`、`routes.rs` 的 `ROUTE_*`、
+// 常量表：先收全仓（装配方 `crates/symbio-platform/src/deploy/mod.rs` 的 `PLUGIN_ID_*`、`routes.rs` 的 `ROUTE_*`、
 // 前端 `constants/routes.gen.ts` 的生成常量）
 //
 // `tauri/src-tauri/src` 也在列：它是第三个独立 cargo workspace，且**整棵插件树
 // 被编译进壳**——它引用内核的方式必须和 `symbio/src` 同一套规则（此前它不在任何
 // 扫描范围内，见 `gate.d/10-backend.mjs`）。
-// `crates/symbio-kernel/src` 同样在列：D-188 之后词表常量（`VDFS_STATUS_*` 等）与协议
+// `crates/symbio-platform/src/kernel` 同样在列：D-188 之后词表常量（`VDFS_STATUS_*` 等）与协议
 // 契约住那个 crate，漏掉它会让「文档词表 == 代码词表」判成「代码里没有这套词」。
 const CODE_ROOTS = [
   'crates',
-  'crates/symbio-kernel/src',
+  'crates/symbio-platform/src/kernel',
   'crates/symbio-cli/src',
   'tauri/src',
   'tauri/src-tauri/src',
@@ -566,7 +565,7 @@ for (const abs of codeFiles) {
     const isConstDef = isRust && CONST_DEF_RE.test(line)
 
     // E-003：调用侧不得写字面量 PATH（绝对地址必须来自 crate::routes 常量）
-    if (isRust && /\.set\(\s*(?:crate::symbio_sdk::)?PATH\s*,\s*"/.test(line)) {
+    if (isRust && /\.set\(\s*(?:crate::symbio_platform::sdk::)?PATH\s*,\s*"/.test(line)) {
       if (!exempted(raw, i, 'E-003')) {
         report(
           'E-003',
@@ -614,12 +613,12 @@ for (const abs of codeFiles) {
     }
 
     // E-010 已退役：内核出口的深引检查迁至 `core-export-audit.mjs` 的 **C-002**
-    // （域目录动态取自 core、额外拦裸 `use …::symbio_sdk::<域>;`）。深引是内核出口
+    // （域目录动态取自 core、额外拦裸 `use …::symbio_platform::sdk::<域>;`）。深引是内核出口
     // 的事，不是插件门面的事——两处各判一遍必然分叉出两套域清单与豁免通道。
 
     // E-011：纯配置挂载点插件不得手写 `dispatch`
     //
-    // 「挂载根 = 一份配置文档」的插件（见 `symbio_sdk::PluginConfigMount`）四臂
+    // 「挂载根 = 一份配置文档」的插件（见 `symbio_platform::sdk::PluginConfigMount`）四臂
     // dispatch 骨架逐字相同，机制侧已提供**唯一**实现（泛型 blanket impl）。手写
     // 一份就是把同一段语义复制出去——四份副本改一条错误文案要改四处，且新增插件
     // 「记得抄对每条分支」是纯人肉负担。
@@ -639,7 +638,7 @@ for (const abs of codeFiles) {
           rel(abs),
           i + 1,
           '`impl VdfsProvider` —— 纯配置挂载点插件应实现 `PluginConfigMount`，' +
-            '四臂 dispatch 由机制侧提供（见 `symbio_sdk::PluginConfigMount`）',
+            '四臂 dispatch 由机制侧提供（见 `symbio_platform::sdk::PluginConfigMount`）',
         )
       }
     }
@@ -796,18 +795,19 @@ function pluginIdOfDir(dir) {
  *   `symbio-providers`（外部世界连接原语库）与 `symbio-http`（通用入站线路设施）
  *   这两类不认插件或应用装配的第三方等价库。共享语法由门面的语法臂
  *   转出，manifest 直连 kernel 等于绕开门面的计件与消费方核对。
- * - 控制面（`loop` / `session`，DE-026 的影响类）另许 `symbio-kernel`：它们按轮的
- *   顺序运行、直接读事件流，源码前缀也按同一身份豁免（HS-001）。
+ * - 控制面（`loop` / `session`，DE-026 的影响类）另许 `symbio-platform`：它们按轮的
+ *   顺序运行、直接读事件流，源码前缀也按同一身份豁免（HS-001）。平台是一个 crate
+ *   （语法 / 机制 / ABI 形状 / 部署常量四个子模块），Cargo 边上分不出「只连语法不连机制」；
+ *   控制面用平台的哪一部分，由 loop / session 各自的源码级判据管（E-013 / SRA 已退役）。
  *
- * 其余一律不在白名单：`symbio-sdk` / `symbio-deploy` 是**应用侧门面**，插件依赖它们
- * 等于「插件 → 应用」反向耦合；兄弟插件只能经容器路由；`symbio` 宿主门面只许 dev（④）。
+ * 其余一律不在白名单：兄弟插件只能经容器路由；`symbio` 装配根只许 dev（④）。
  *
  * `symbio-providers` 是**带条件的白名单**：它进白名单的前提是「不是第二个共享层」，
  * 三条条件由下面的 providers 条件块实际检查，不是写在注释里就算数。
  */
 const CONTROL_PLANE_IDS = new Set(['loop', 'session'])
 const PLUGIN_DEP_WHITELIST = new Set(['symbio-plugin-api', 'symbio-providers', 'symbio-http'])
-const CONTROL_PLANE_DEP_WHITELIST = new Set([...PLUGIN_DEP_WHITELIST, 'symbio-kernel'])
+const CONTROL_PLANE_DEP_WHITELIST = new Set([...PLUGIN_DEP_WHITELIST, 'symbio-platform'])
 function depWhitelistFor(id) {
   return CONTROL_PLANE_IDS.has(id) ? CONTROL_PLANE_DEP_WHITELIST : PLUGIN_DEP_WHITELIST
 }
@@ -823,153 +823,6 @@ function depNameOf(code) {
   const m = /^\s*([A-Za-z0-9_.-]+)\s*(?:\.[A-Za-z0-9_-]+\s*)?=/.exec(code)
   return m ? m[1] : null
 }
-
-// ── E-009 限期豁免：`symbio-plugin-session` 的 `symbio-sdk` ────────────────
-//
-// 裁决：session 是**待退役控制面**（D-253 的第三件：控制面不入扩展门面），把 SDK 的那一半搬进
-// `plugin-api` 等于让契约层长成一个大 SDK，且要靠调宽 HS-002 才绿——那是为了让门
-// 变绿而改门。故这一条边走**限期豁免**：不是白名单条目，也不是 WARNING，
-// 灯只有绿和红。三重条件全部是**数据**，缺一不可：
-//
-//   ① 对象只有一个：`crate` / `dependency` 精确匹配。写成别的 crate 不生效且判红
-//      （豁免不能扩散到 `loop` 或任何扩展插件）；
-//   ② 日期是数据：删除承诺的 `expires`（YYYY-MM-DD）到点即红；保留承诺的 `reviewed`
-//      必须是已发生的复核日（D-499），且不得再带 `expires`；
-//   ③ 用法冻结：`symbols` 是**符号级**白名单，既有符号放行，未见过的 `symbio_sdk::…`
-//      符号即红（新增一条导入 / 调用都抓得住）。
-//
-// 另外判「空头豁免」：数据指向的 crate 必须存在，且它的 `[dependencies]` 里确有这条
-// 依赖。豁免一旦悬空，删掉它才对——留着只会让下一个人以为这里有理由。
-// session 退役时，**同批删除** `scripts/exemptions/plugin-session-sdk.json`。
-const SDK_EXEMPTION_PATH = 'scripts/exemptions/plugin-session-sdk.json'
-const SDK_EXEMPTION_CRATE = 'symbio-plugin-session'
-const SDK_EXEMPTION_DEP = 'symbio-sdk'
-
-/** 本地日期（Asia/Shanghai 的日历日）；日期是数据，比较是字符串比较，不做时区推演。 */
-function todayIso() {
-  const d = new Date()
-  const p = (n) => String(n).padStart(2, '0')
-  return `${d.getFullYear()}-${p(d.getMonth() + 1)}-${p(d.getDate())}`
-}
-
-/**
- * 读限期豁免并逐条校验；任何一条不成立都判红并返回 null（此时这条依赖不再被放行）。
- * 返回值 `{ data, allowed }` 只在**全部条件成立**时出现。
- */
-function loadSdkExemption() {
-  const abs = path.join(repoRoot, SDK_EXEMPTION_PATH)
-  if (!fs.existsSync(abs)) return null
-  const fail = (msg) => {
-    report('E-009', 'error', SDK_EXEMPTION_PATH, 0, msg)
-    return null
-  }
-  let data
-  try {
-    data = JSON.parse(fs.readFileSync(abs, 'utf8'))
-  } catch (e) {
-    return fail(`限期豁免数据不可解析（${e.message}）——日期与符号集必须是数据，不是注释`)
-  }
-
-  // ① 对象只有一个，写成别的 crate 即扩散
-  if (data.crate !== SDK_EXEMPTION_CRATE) {
-    return fail(
-      `限期豁免只能针对 \`${SDK_EXEMPTION_CRATE}\`（数据里写的是 \`${data.crate}\`）——` +
-        `豁免不得扩散到 \`loop\` 或任何扩展插件`,
-    )
-  }
-  if (data.dependency !== SDK_EXEMPTION_DEP) {
-    return fail(
-      `限期豁免只覆盖 \`${SDK_EXEMPTION_DEP}\` 这一条依赖（数据里写的是 \`${data.dependency}\`）`,
-    )
-  }
-
-  // ② 日期是数据：删除承诺过期即红；保留承诺记 `reviewed`，不按日期续期
-  const freeze =
-    typeof data.retire === 'string' &&
-    /保留|冻结/.test(data.retire) &&
-    /D-\d{3}/.test(data.retire)
-  if (freeze) {
-    if (!/^\d{4}-\d{2}-\d{2}$/.test(data.reviewed ?? '')) {
-      return fail(
-        `冻结豁免缺少可比较的 \`reviewed\`（YYYY-MM-DD）——复核日必须是一次已发生的裁决日期`,
-      )
-    }
-    if (String(data.reviewed) > todayIso()) {
-      return fail(`冻结豁免的 \`reviewed\`（${data.reviewed}）不能是将来日期——它记录的是已经做过的裁决`)
-    }
-  } else {
-    if (!/^\d{4}-\d{2}-\d{2}$/.test(data.expires ?? '')) {
-      return fail(
-        `限期豁免缺少可比较的 \`expires\`（YYYY-MM-DD）——到点必须能直接判红，不靠人记得`,
-      )
-    }
-    if (!exemptionActive({ expires: data.expires, today: todayIso() })) {
-      return fail(
-        `限期豁免已过期（expires=${data.expires}，今天 ${todayIso()}）——` +
-          `失效日是最后一天；到期未续即红（续期须新决策），session 退役时同批删除本豁免（D-253）`,
-      )
-    }
-  }
-
-  // ③ 符号集必须是非空的显式名单（空集合 = 没有冻结）
-  if (
-    !Array.isArray(data.symbols) ||
-    data.symbols.length === 0 ||
-    data.symbols.some((s) => typeof s !== 'string' || !s.trim())
-  ) {
-    return fail('限期豁免的 `symbols` 必须是非空的符号名数组——空集合等于没有冻结 sdk 用法')
-  }
-
-  // 空头豁免：指向的 crate 必须存在，且清单里确有这条依赖
-  const mf = path.join(PLUGINS_DIR, data.crate, 'Cargo.toml')
-  if (!fs.existsSync(mf)) {
-    return fail(`限期豁免指向的 crate \`${data.crate}\` 不存在——豁免必须挂在实处`)
-  }
-  const mfLines = fs.readFileSync(mf, 'utf8').split(/\r?\n/)
-  let section = ''
-  let hasDep = false
-  for (const line of mfLines) {
-    const sec = line.match(/^\s*\[([^\]]+)\]/)
-    if (sec) {
-      section = sec[1].trim()
-      continue
-    }
-    const code = line.replace(/(^|\s)#.*$/, '$1')
-    if (section === 'dependencies' && depNameOf(code) === data.dependency) hasDep = true
-  }
-  if (!hasDep) {
-    return fail(
-      `限期豁免是空头：\`${data.crate}\` 的 [dependencies] 里没有 \`${data.dependency}\`——` +
-        `依赖清掉之后豁免必须同批删除`,
-    )
-  }
-
-  // ③ 符号级冻结：既有符号放行，新出现的符号即红
-  const allowed = new Set(data.symbols)
-  const srcDir = path.join(PLUGINS_DIR, data.crate, 'src')
-  for (const f of walk(srcDir, (p) => p.endsWith('.rs'))) {
-    const code = blankComments(fs.readFileSync(f, 'utf8')).join('\n')
-    const linesOf = code.split('\n')
-    for (const sym of sdkSymbolsIn(code)) {
-      if (allowed.has(sym)) continue
-      const pattern =
-        sym === '*' ? /symbio_sdk::\s*\*/ : new RegExp(`\\b${sym.replace(/[.*+?^${}()|[\]\\]/g, '\\$&')}\\b`)
-      const ln = linesOf.findIndex((l) => pattern.test(l)) + 1
-      report(
-        'E-009',
-        'error',
-        rel(f),
-        ln,
-        `\`${data.crate}\` 新增了 \`symbio_sdk\` 用法 \`${sym}\`——` +
-          `限期豁免只冻结既有符号集（${SDK_EXEMPTION_PATH}）；新增 sdk 用法必须先回到 ` +
-          `D-253 论证，或等 session 退役时同批删除本豁免`,
-      )
-    }
-  }
-  return { data, allowed }
-}
-
-const sdkExemption = loadSdkExemption()
 
 // ① + ④：Cargo.toml 层——依赖边真正的住处
 {
@@ -1006,23 +859,11 @@ const sdkExemption = loadSdkExemption()
         /^symbio(-|$)/.test(dep) &&
         dep !== 'symbio'
       ) {
-        // 限期豁免只放行**这一个 crate 的这一条依赖**（`sdkExemption` 为 null 时什么都不放行：
-        // 过期、对象写错、空头——任何一种失败都让这一条回到红）。
-        const sdkDepExempt =
-          sdkExemption !== null &&
-          dep === SDK_EXEMPTION_DEP &&
-          `${PLUGIN_CRATE_PREFIX}${id}` === sdkExemption.data.crate
-        if (
-          !depWhitelistFor(id).has(dep) &&
-          !sdkDepExempt &&
-          !exempted(raw, i, 'E-009')
-        ) {
+        if (!depWhitelistFor(id).has(dep) && !exempted(raw, i, 'E-009')) {
           const why =
-            dep === 'symbio-sdk' || dep === 'symbio-deploy'
-              ? `\`${dep}\` 是应用侧门面 —— 插件依赖它等于「插件 → 应用」反向耦合`
-              : dep === 'symbio-kernel'
-                ? `\`${dep}\` 只许控制面（\`loop\` / \`session\`）直连 —— 扩展层插件的共享语法经门面的语法臂取，直连等于绕开门面的计件与消费方核对`
-                : /^symbio-plugin-/.test(dep)
+            dep === 'symbio-platform'
+              ? `\`${dep}\` 是平台 crate（语法 / 机制 / ABI 形状 / 部署常量），只许控制面（\`loop\` / \`session\`）直连 —— 扩展层插件经门面的四臂取，直连等于绕开门面的计件与消费方核对`
+              : /^symbio-plugin-/.test(dep)
                   ? `\`${dep}\` 是兄弟插件 —— 跨插件调用只能经容器路由（\`ctx.parent()\` → \`parent.route(ctx)\`）+ 地址常量`
                   : `\`${dep}\` 不在插件依赖白名单`
           report(
@@ -1031,7 +872,7 @@ const sdkExemption = loadSdkExemption()
             rel(abs),
             i + 1,
             `${why}。扩展层插件 [dependencies] 的 \`symbio-*\` 只许 \`symbio-plugin-api\` / ` +
-              `\`symbio-providers\`（+ 第三方）；控制面另许 \`symbio-kernel\``,
+              `\`symbio-providers\`（+ 第三方）；控制面另许 \`symbio-platform\``,
           )
         }
       }
@@ -1053,7 +894,7 @@ const sdkExemption = loadSdkExemption()
             i + 1,
             `\`symbio-plugin-${other}\` —— 插件不得声明兄弟插件依赖（[${section || '?'}]）；` +
               `跨插件调用只能经容器路由（\`ctx.parent()\` → \`parent.route(ctx)\`）+ 地址常量，` +
-              `载荷走 \`PluginFrame\` / \`Value\`；确需共享类型则上移 \`symbio-kernel\` 的共享语法（D-196）`,
+              `载荷走 \`PluginFrame\` / \`Value\`；确需共享类型则上移平台 \`kernel\` 子模块的共享语法（D-196）`,
           )
         }
       }
@@ -1364,7 +1205,7 @@ const LOOP_ALLOWED_CRATE_ROOTS = new Set([
 const LOOP_ALLOWED_EXTERNAL_ROOTS = new Set([
   // ── crate 化（D-191）把三个「crate 内根」变成了三个**外部 crate**：闭族的成员没变，
   //    只是写法从 `crate::<旧 core>` / `crate::assembly` / `crate::routes` 变成
-  //    `use symbio_sdk::…` / `use symbio_deploy::…` / `use symbio_plugin_api::…`。
+  //    `use symbio_platform::sdk::…` / `use symbio_platform::deploy::…` / `use symbio_plugin_api::…`。
   //    这里逐个对应列出，而不是「凡 symbio_ 开头都放行」——前缀白名单会让「新增一个
   //    `symbio-plugin-xxx` 依赖」悄悄落在族内，那正是本条要拦的形态。
   //
@@ -1372,7 +1213,6 @@ const LOOP_ALLOWED_EXTERNAL_ROOTS = new Set([
   //    删掉那个 crate 之后，它连写都写不出来：白名单里留一条永远不会被命中的名字，
   //    不拦任何东西，只把闭族显得比实际宽（D-280）。故直接删条目，而不是留着「以防
   //    万一」——真回来时旧 crate 名会在 HS-001 / HS-005 上先红。
-  'symbio_deploy', // 装配方的部署身份表（原 `crate::assembly`）
   'symbio_plugin_api', // 跨插件地址常量与钩子助手（原 `crate::routes` / `crate::hooks`）
   // 仅测试豁免：`symbio_providers` 是「被多个插件模块公用」的实现层，测试拿它当
   // 工具清单的默认收集器，不携带会话状态（原 `crate::providers` 的同一条豁免）。
@@ -1381,17 +1221,11 @@ const LOOP_ALLOWED_EXTERNAL_ROOTS = new Set([
   'core',
   'alloc',
   'tokio',
-  // 封闭语法 crate（D-188 / D-189）：`symbio_kernel` 只装 `ActorSpec` / `Pattern` /
-  // `Scope` 这类跨墙语法与签名类型，没有任何插件实现，也不反向依赖宿主——它是
-  // 「内核只装语法、插件声明词汇」的那半边，与共享机制层同档而非族外实现面。
-  'symbio_kernel',
-  // 宿主机制面（D-272 收入）：`symbio_sdk` 只装插件可用的宿主机制（adapters / chat /
-  // turn::dispatch / projection 这类签名与机制），不认容器概念、不反向依赖宿主。
-  // 过去 loop 经 core 根转发拿到同一批符号（`use symbio_sdk::X`，X 实际住在 sdk）；
-  // D-272 撤掉根转发、消费方按真实归属直写后，这批 import 显形成 `symbio_sdk::…`。
-  // 闭族的成员没有变——变了的是写法——与 `symbio_kernel` 同档列出，而不是「凡 symbio_
-  // 开头都放行」：那样会让新出现的 `symbio-plugin-xxx` 悄悄落进族内。
-  'symbio_sdk',
+  // 平台 crate（语法 `kernel` / 机制 `sdk` / ABI 形状 `contract` / 部署常量 `deploy` 四个
+  // 子模块）：只装跨墙语法、签名类型与插件可用的宿主机制，不认容器概念、不反向依赖宿主。
+  // 显式列名而不是「凡 symbio_ 开头都放行」：那样会让新出现的 `symbio-plugin-xxx`
+  // 悄悄落进族内。
+  'symbio_platform',
   // 测试设施（`[dev-dependencies]`，生产构建看不见）：`trivial_actor_spec` 与
   // `StubLlmAdapter` 原住旧 core 的常开出口，拆 crate 后 `cfg(test)` 对下游
   // 不生效，故搬 `symbio-testkit`。它**不含任何插件实现**，也不携带会话状态——
@@ -1439,7 +1273,7 @@ if (fs.existsSync(LOOP_DIR)) {
       flag(
         lineAt(m.index),
         root,
-        `\`crate::${root}\` 不在驱动器闭族内 —— loop 只准经 \`symbio_sdk::\` ` +
+        `\`crate::${root}\` 不在驱动器闭族内 —— loop 只准经 \`symbio_platform::sdk::\` ` +
           `（D-083 §4）与 crate 根日志/工厂宏引用仓内实现`,
       )
     }
@@ -1452,7 +1286,7 @@ if (fs.existsSync(LOOP_DIR)) {
         flag(
           lineIdx,
           root,
-          `\`crate::${root}\` 不在驱动器闭族内 —— loop 只准经 \`symbio_sdk::\` ` +
+          `\`crate::${root}\` 不在驱动器闭族内 —— loop 只准经 \`symbio_platform::sdk::\` ` +
             `（D-083 §4）与 crate 根日志/工厂宏引用仓内实现`,
         )
       }
@@ -1753,7 +1587,7 @@ const ruleNames = {
   'E-006': '权威清单前缀合法',
   'E-007': '不按值持有兄弟插件',
   'E-008': '文档词表 == 代码词表',
-  'E-009': '依赖边闭集（白名单 + 兄弟 + providers 三条件；session/sdk 限期豁免）',
+  'E-009': '依赖边闭集（白名单 + 兄弟 + providers 三条件；控制面可直连平台）',
   'E-011': '配置挂载点不手写 dispatch',
   'E-012': '路由常量名↔值同构且值可分发',
   'E-013': 'loop 驱动器的 import 根 ⊆ 闭族',

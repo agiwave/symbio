@@ -10,11 +10,11 @@
 //! （`agent::declarations`）。本模块如今只剩两条**机制私有名**（`plugin.row.asked`
 //! / `driver.stalled`）——名字的唯一定义处仍在 `plugin-api`，这里只登记格位。
 
-use symbio_kernel::decl::ring::{Decl, Pattern};
-use symbio_kernel::decl::{ActorDecl, PluginDeclarations};
-use symbio_kernel::event::{Entity, EventDecl, Verb};
+use symbio_platform::kernel::decl::ring::{Decl, Pattern};
+use symbio_platform::kernel::decl::{ActorDecl, PluginDeclarations};
+use symbio_platform::kernel::event::{Entity, EventDecl, Verb};
 
-use symbio_kernel::event::EVENT_RETRY;
+use symbio_platform::kernel::event::EVENT_RETRY;
 use symbio_plugin_api::drive::EVENT_DRIVER_STALLED;
 use symbio_plugin_api::rows::{declared_writes, ASK_KIND, PLUGIN_ROW, PORT_ACTOR};
 use symbio_plugin_api::{EVENT_FAILED, EVENT_REQUEST, EVENT_RESPONSE, EVENT_SENT};
@@ -47,13 +47,13 @@ fn actors() -> Vec<ActorDecl> {
         ActorDecl {
             name: PLUGIN_ROW,
             // 反射 / 快速 / 深度三档的插件行都走它（`notes.reflect` 是最宽档）。
-            mode: symbio_kernel::LatencyTier::Deep,
+            mode: symbio_platform::kernel::LatencyTier::Deep,
             writes: row_writes,
         },
         ActorDecl {
             name: PORT_ACTOR,
             // 工具调用是秒–分钟级（`port.tool` 的租约 600s），最宽档。
-            mode: symbio_kernel::LatencyTier::Deep,
+            mode: symbio_platform::kernel::LatencyTier::Deep,
             // 端口执行体可以**开下一笔债**（工具批次把模型应答展开成逐调用 `request`，
             // `port.rs::open_drafts`）——这是 `request` 在声明面上的生产者。
             writes: &[EVENT_REQUEST],

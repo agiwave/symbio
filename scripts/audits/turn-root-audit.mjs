@@ -16,7 +16,7 @@
  * |---|---|---|
  * | `F1` | 标识符：`Turn…` / `turn_…` / `TURN_…` / 裸 `turn` 字段 | `crates/**`（`.rs`） |
  * | `F2` | `turn.<x>` 字面量、`Entity::Turn`、`FinalizesTurn` / `StopsTurn`、`turn_head` 等视图名、`*-turn` 行名 | `crates/**`（`.rs` / `.yml`） |
- * | `F3` | Rust DTO 字段 `turn:` / `turn?` | `crates/symbio/**`（`.rs`） |
+ * | `F3` | Rust DTO 字段 `turn:` / `turn?` | `crates/symbio/**` + 搬进运行时的两个驱动入口文件（`.rs`） |
  * | `F4` | 前端 / 展示层 `turn` | `tauri/src/**`（`.ts` / `.vue`） |
  * | `F5` | 存量数据迁移通道（`chat_node.ts` 旧词折叠） | 单文件 |
  *
@@ -99,7 +99,10 @@ const FACE_DEFS = [
   {
     id: 'F3',
     label: 'DTO 字段（Rust 命令层）',
+    // 部署驱动入口随 D-557 从装配方搬进运行时 host；扫描面跟着被测物走，
+    // 少算两个文件会让这里的「文件数」无声下降（曾降到 9，基线是 11）。
     roots: ['crates/symbio'],
+    extraFiles: ['crates/symbio-runtime/src/host/entry.rs', 'crates/symbio-runtime/src/host/entry.test.rs'],
     exts: ['.rs'],
     pattern: /\bturn\s*[:?]/g,
   },
@@ -170,6 +173,9 @@ function filesOf(face) {
   if (face.files) return face.files
   const out = []
   for (const root of face.roots) walk(path.join(ROOT, root), root, out)
+  // 搬家搬走的单文件要逐个点名：把整个目标 crate 加进 roots 会让文件数从 11 涨到 42，
+  // 冻结形同虚设；漏掉它又会无声降到 9。点的必须是搬走的那些文件本身。
+  out.push(...(face.extraFiles ?? []))
   return out.filter((rel) => face.exts.includes(path.extname(rel)))
 }
 

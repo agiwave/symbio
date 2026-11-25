@@ -1,12 +1,12 @@
 //! Session 数据类型：`Session` 实体 + 标题推导 + 清单投影。
 //!
-//! 注意与 `crates/symbio-sdk/src/chat/chat_node.rs`（消息级类型）区分：本文件
+//! 注意与 `crates/symbio-platform/src/sdk/chat/chat_node.rs`（消息级类型）区分：本文件
 //! 描述"会话"粒度的持久化实体。`derive_session_title` 供会话创建时兜底命名，
 //! 心跳调度参数（`HeartbeatConfig`）归心跳插件，见其自述文档。
 
 use serde::{Deserialize, Serialize};
 
-pub use symbio_kernel::chat::chat_node::ChatNode;
+pub use symbio_platform::kernel::chat::chat_node::ChatNode;
 
 /// 会话列表一行摘要：**最新一条助手回复**的首行（压缩空白、限长 60 字符）。
 ///
@@ -25,7 +25,7 @@ pub fn derive_session_summary(messages: &[ChatNode]) -> Option<String> {
         .filter(|m| {
             matches!(
                 m.node_role(),
-                Some(symbio_kernel::chat::chat_node::NodeRole::Assistant)
+                Some(symbio_platform::kernel::chat::chat_node::NodeRole::Assistant)
             )
         })
         .filter_map(|m| m.content.as_ref().map(|c| c.to_text()))
@@ -244,16 +244,16 @@ pub(crate) fn derive_session_title(messages: &[ChatNode]) -> Option<String> {
     for m in messages.iter().rev() {
         if !matches!(
             m.node_role(),
-            Some(symbio_kernel::chat::chat_node::NodeRole::User)
+            Some(symbio_platform::kernel::chat::chat_node::NodeRole::User)
         ) {
             continue;
         }
         let text = match &m.content {
-            Some(symbio_kernel::chat::chat_node::MessageContent::Text(s)) => s.clone(),
-            Some(symbio_kernel::chat::chat_node::MessageContent::Parts(parts)) => parts
+            Some(symbio_platform::kernel::chat::chat_node::MessageContent::Text(s)) => s.clone(),
+            Some(symbio_platform::kernel::chat::chat_node::MessageContent::Parts(parts)) => parts
                 .iter()
                 .filter_map(|p| match p {
-                    symbio_kernel::chat::chat_node::ContentPart::Text { text } => {
+                    symbio_platform::kernel::chat::chat_node::ContentPart::Text { text } => {
                         Some(text.clone())
                     }
                     _ => None,

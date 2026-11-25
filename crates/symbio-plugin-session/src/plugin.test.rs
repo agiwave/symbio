@@ -158,7 +158,7 @@ fn config_definition_covers_every_session_config_field() {
 
 /// 构造带 payload 的请求上下文（`PluginInvokeRequest::payload` 读的正是 `"payload"` 桶）。
 fn ctx_with(payload: serde_json::Value) -> Arc<dyn PluginInvokeRequest> {
-    let req = symbio_kernel::plugin::PluginSimpleRequest::new(None, None);
+    let req = symbio_platform::kernel::plugin::PluginSimpleRequest::new(None, None);
     req.extensions
         .write()
         .unwrap()

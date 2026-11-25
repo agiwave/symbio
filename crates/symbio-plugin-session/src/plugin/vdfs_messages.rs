@@ -9,18 +9,18 @@
 //! `commands` 的调用，再把变更投进订阅表。
 
 use super::*;
-use symbio_kernel::chat::chat_node as cm;
-use symbio_kernel::event::{Entity, Verb};
-use symbio_kernel::vdfs::{
+use symbio_platform::kernel::chat::chat_node as cm;
+use symbio_platform::kernel::event::{Entity, Verb};
+use symbio_platform::kernel::vdfs::{
     VdfsActionResult, VdfsContent, VdfsContext, VdfsError, VdfsNode, VdfsRequest, VdfsResponse,
     VdfsResult, VdfsWriteResponse, VDFS_ACTION_EXPAND_SKELETON, VDFS_ACTION_RETRY_COMPACTION,
     VDFS_ACTION_RETRY_SUBTREE, VDFS_ACTION_SWITCH_BRANCH, VDFS_ACTION_TRUNCATE,
 };
+use symbio_platform::sdk::plugin::fact_source::FACT_SOURCE;
 use symbio_plugin_api::events::{EVENT_MESSAGE_REMOVED, EVENT_USER_ANSWER};
 use symbio_plugin_api::FactDraft;
 use symbio_plugin_api::SESSION_ID;
 use symbio_plugin_api::{vdfs_from_plugin_error, vdfs_host_ctx};
-use symbio_sdk::plugin::fact_source::FACT_SOURCE;
 
 impl SessionPlugin {
     /// 转写区段（`<id>/message[/mid]`）：列表与单条消息。
@@ -130,7 +130,7 @@ impl SessionPlugin {
             VdfsRequest::Delete { .. } => {
                 // 转写区段（列表与单条）**不可 delete**：`delete` 的全局语义是
                 // 「**这一个**节点没了」，而「从这条删到末尾」是一种**区间**语义，
-                // 有它自己的动作——[`symbio_kernel::vdfs::VDFS_ACTION_TRUNCATE`]（落在起始消息上）。
+                // 有它自己的动作——[`symbio_platform::kernel::vdfs::VDFS_ACTION_TRUNCATE`]（落在起始消息上）。
                 // 动作承载这类集合操作——理由见 `VDFS_ACTION_TRUNCATE` 的文档。
                 Err(VdfsError::Forbidden(format!(
                     "转写区段不可 delete：删除某条及其之后请用 action(\"{truncate}\")：{path}",
@@ -207,7 +207,7 @@ impl SessionPlugin {
                     (Some(mid), VDFS_ACTION_SWITCH_BRANCH, payload) => {
                         let to = switch_branch_target(payload)?;
                         let host = vdfs_host_ctx(ctx)?;
-                        let actor = symbio_sdk::authz::request_principal(&*host);
+                        let actor = symbio_platform::sdk::authz::request_principal(&*host);
                         self.switch_branch(id, mid, &to, &actor)
                             .await
                             .map_err(vdfs_from_plugin_error)?;
@@ -230,7 +230,7 @@ impl SessionPlugin {
                     // `scope.branch` 折出「当前读哪一支」，旧支子树在请求装配时被裁掉。
                     (Some(mid), VDFS_ACTION_RETRY_SUBTREE, _payload) => {
                         let host = vdfs_host_ctx(ctx)?;
-                        let actor = symbio_sdk::authz::request_principal(&*host);
+                        let actor = symbio_platform::sdk::authz::request_principal(&*host);
                         let message = self
                             .retry_branch(id, mid, &actor)
                             .await
@@ -240,7 +240,7 @@ impl SessionPlugin {
                         let new_id = message.id.clone();
                         let workdir = host.get(symbio_plugin_api::WORKDIR);
                         let source_principal = host
-                            .get(symbio_sdk::keys::SOURCE_PRINCIPAL)
+                            .get(symbio_platform::sdk::keys::SOURCE_PRINCIPAL)
                             .filter(|s| !s.trim().is_empty());
                         self.enqueue_inbox(
                             id,
@@ -327,7 +327,7 @@ impl SessionPlugin {
                                 )
                             })?;
                         let host = vdfs_host_ctx(ctx)?;
-                        let actor = symbio_sdk::authz::request_principal(&*host);
+                        let actor = symbio_platform::sdk::authz::request_principal(&*host);
                         source
                             .append(
                                 actor,
@@ -356,7 +356,7 @@ impl SessionPlugin {
                     // **只落一条事实，不在这里续跑。** 动作闭集是
                     // `{answer, approve, reject}`，落成 `user.answer`（事实里的 `kind`
                     // 取 `answer | approve | deny`）：宿主看到事实源 head 前进后由写口
-                    // 踢一次驱动（契约 `symbio_sdk::drive`），工具侧那一行
+                    // 踢一次驱动（契约 `symbio_platform::sdk::drive`），工具侧那一行
                     // 按 `kind` 分岔——`answer` 把答复原文落成结果，`approve` 签发
                     // 一次性授权后走正常执行，`deny` 不执行、落 `user_rejected`。
                     // 挂起的调用**不在这里执行**（审批 / 答复恢复只能从事实进环）。
@@ -384,7 +384,7 @@ impl SessionPlugin {
                         // 按本次可信请求和会话绑定重新准备，缺作用域时 fail closed。
                         let host = vdfs_host_ctx(ctx)?;
                         let source_principal = host
-                            .get(symbio_sdk::keys::SOURCE_PRINCIPAL)
+                            .get(symbio_platform::sdk::keys::SOURCE_PRINCIPAL)
                             .filter(|source| !source.trim().is_empty());
                         // 走本部署根的写口，并在原轮根上重新占轮；由同一轮收尾面
                         // 等驱动收束后投影，避免 worker 重启后留下永久 busy。

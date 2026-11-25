@@ -57,7 +57,7 @@ const ROOT = rootArg ? path.resolve(rootArg.slice('--root='.length)) : path.reso
 
 const ROSTER_REL = 'docs/003-design/008-能力注册表与能力坐标系.md'
 const LEDGER_REL = 'docs/003-design/026-能力拆分与影响类.md'
-const DEPLOY_REL = 'crates/symbio-deploy/src/lib.rs'
+const DEPLOY_REL = 'crates/symbio-platform/src/deploy/mod.rs'
 const TASKS_REL = 'docs/007-task'
 
 /** 实现状态的三档闭集：设计在不在 / 实现还在不在，是两个字段。 */

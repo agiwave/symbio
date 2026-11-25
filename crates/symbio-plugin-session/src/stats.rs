@@ -49,13 +49,13 @@ use std::sync::Arc;
 
 use serde::{Deserialize, Serialize};
 
-use symbio_kernel::event::Event;
-use symbio_kernel::plugin::{
+use symbio_platform::kernel::event::Event;
+use symbio_platform::kernel::plugin::{
     PluginError, PluginInvokeRequest, PluginInvokeResponse, PluginPayload,
 };
-use symbio_kernel::present::ReadingPanel;
-use symbio_sdk::invariants::check_all;
-use symbio_sdk::projection::transcript::transcript;
+use symbio_platform::kernel::present::ReadingPanel;
+use symbio_platform::sdk::invariants::check_all;
+use symbio_platform::sdk::projection::transcript::transcript;
 
 use crate::projections::checkpoint::checkpoint;
 
@@ -202,7 +202,7 @@ pub(crate) struct SessionStats {
     /// （`slo-exit-audit` 对的就是这些列）；本字段是**人读**的那一份，同一个数的
     /// 另一种说法。两者由同一个源算出，且判据 `panel_matches_the_columns_it_describes`
     /// 钉住「不脱节」——否则就是两份真相。
-    pub panel: symbio_kernel::present::ReadingPanel,
+    pub panel: symbio_platform::kernel::present::ReadingPanel,
     /// 用量那**一格**的读数（`ReadingSection`）：给「地方只有一条、但必须在眼前」的
     /// 位置用（会话头），与 [`Self::panel`] 里那一段**同一次装配**
     /// （`stats_reading::usage_section` 的唯一实现，两处调同一个函数，不是两份口径）。
@@ -218,7 +218,7 @@ pub(crate) struct SessionStats {
     /// `None` = 一次实测都没有（`calls == 0`）⇒ 前端整格不渲染，不画一条空读数
     /// （与 `context_watermark` 缺数整条不出现同一条纪律）。
     #[serde(skip_serializing_if = "Option::is_none")]
-    pub usage: Option<symbio_kernel::present::ReadingSection>,
+    pub usage: Option<symbio_platform::kernel::present::ReadingSection>,
     /// **实例级聚合**（跨会话的 SLO 真数）。
     ///
     /// 上面每一列回答「**这一个会话**怎么样」；本列回答「**整个实例**怎么样」——
@@ -243,7 +243,7 @@ pub(crate) struct SessionStats {
 }
 
 /// 读一个会话的事实源，出四列读数 + 校准 / 声誉 / 就绪集 / 转写四列 + 不变量清单 + 承诺列，
-/// 再加一列**能力视图**：按各能力包公开的清单逐条经 `symbio_sdk::plugin::views` 读，
+/// 再加一列**能力视图**：按各能力包公开的清单逐条经 `symbio_platform::sdk::plugin::views` 读，
 /// 本插件不写任何视图名（DE-025 D-221）。
 ///
 /// 纯读：不写文件、不改网格、不碰会话存储（消息 / 转写）。事实由存储层以**值**
@@ -292,7 +292,7 @@ pub(crate) fn read(
     let content_scope = content_scope_of(&snapshot);
     let may_read = match viewer {
         None => true,
-        Some(principal) => symbio_sdk::authz::content_visible(content_scope, principal),
+        Some(principal) => symbio_platform::sdk::authz::content_visible(content_scope, principal),
     };
     let snapshot = if may_read { snapshot } else { Vec::new() };
 
@@ -414,7 +414,7 @@ impl SessionPlugin {
                 .map(str::to_string)
         }) {
             Some(agent) => symbio_plugin_api::principal_of(Some(&agent)),
-            None => symbio_sdk::authz::request_principal(ctx.as_ref()),
+            None => symbio_platform::sdk::authz::request_principal(ctx.as_ref()),
         };
         // 能力方贡献的配置键（`D-427`：技能编译开关归 `skill`、就绪集容量归 `task`）
         // 都由 owner 自己读——`D-489` 起开关按报表列交值，`D-490` 起容量在 owner 的

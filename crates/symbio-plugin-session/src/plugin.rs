@@ -32,20 +32,22 @@ use async_trait::async_trait;
 use serde_json::{json, Value};
 use std::collections::HashMap;
 use std::sync::{Arc, OnceLock, Weak};
-use symbio_kernel::capability::CapabilityRow;
-use symbio_kernel::plugin::{
+use symbio_platform::kernel::capability::CapabilityRow;
+use symbio_platform::kernel::plugin::{
     Plugin, PluginError, PluginInvokeRequest, PluginInvokeRequestExt, PluginInvokeResponse,
     PluginMeta, PluginPayload, PluginStopReason,
 };
-use symbio_kernel::present::{DetailDefinition, DetailField, DetailOption, DetailSection};
-use symbio_kernel::vdfs::{VdfsAccess, VdfsChange};
-use symbio_kernel::vdfs::{VDFS_PARAM_BEFORE, VDFS_PARAM_LIMIT};
+use symbio_platform::kernel::present::{
+    DetailDefinition, DetailField, DetailOption, DetailSection,
+};
+use symbio_platform::kernel::vdfs::{VdfsAccess, VdfsChange};
+use symbio_platform::kernel::vdfs::{VDFS_PARAM_BEFORE, VDFS_PARAM_LIMIT};
+use symbio_platform::sdk::chat::session_chat;
+use symbio_platform::sdk::plugin::fact_source::{FactSource, FACT_SOURCE};
+use symbio_platform::sdk::vdfs::host::VdfsChangeSubscriptions;
 use symbio_plugin_api::PLUGIN_ID_SESSION;
 use symbio_plugin_api::{plugin_dir_from_ctx, PluginConfigFile, PluginDir, PLUGIN_FILE};
 use symbio_plugin_api::{vdfs_context, VdfsItem, VdfsRequest, PLUGIN_ID_SUBAGENT};
-use symbio_sdk::chat::session_chat;
-use symbio_sdk::plugin::fact_source::{FactSource, FACT_SOURCE};
-use symbio_sdk::vdfs::host::VdfsChangeSubscriptions;
 use tokio::sync::{Mutex, OnceCell, RwLock};
 
 /// Session 插件
@@ -74,7 +76,7 @@ pub struct SessionPlugin {
     /// VDFS 实时：变更订阅表（引用计数 + 恰好一次投递）。
     ///
     /// provider 是**变更源的持有者**：会话的任何写入 / 删除都经这张表同步投给
-    /// 当前订阅者，[`symbio_kernel::vdfs::request::VdfsRequest::Watch`] 只往表里登记——变更因此无需
+    /// 当前订阅者，[`symbio_platform::kernel::vdfs::request::VdfsRequest::Watch`] 只往表里登记——变更因此无需
     /// 轮询即可到达 VDFS 事件总线，且**重叠订阅不会重复投递**（见该类型的文档）。
     ///
     /// 用 `Arc` 而非内联值：工作目录监听器（后台任务）也要投递进同一批订阅者，
@@ -84,7 +86,7 @@ pub struct SessionPlugin {
     ///
     /// 懒建：构造时父句柄可能还是弱引用，等第一次开轮再 upgrade；之后整份插件
     /// 共享同一实例（按会话的重入位因此只有一份）。
-    drive: OnceLock<Option<Arc<dyn symbio_sdk::drive::DriveEntry>>>,
+    drive: OnceLock<Option<Arc<dyn symbio_platform::sdk::drive::DriveEntry>>>,
     /// 指向自身的弱引用：轮收尾的后台任务（[`SessionPlugin::spawn_round_closer`]）
     /// 要活得比写臂久，必须持有一份 `'static` 的插件句柄，而 `dispatch` 只有 `&self`。
     ///
@@ -316,7 +318,7 @@ impl SessionPlugin {
             .fact_source_bound(
                 session_id,
                 self.drive_entry(),
-                symbio_kernel::exec::ExecEventSink::direct(sink),
+                symbio_platform::kernel::exec::ExecEventSink::direct(sink),
                 Some(supplements),
                 abort_signal,
                 port_bindings,
@@ -328,11 +330,12 @@ impl SessionPlugin {
     /// 本实例所属**部署根**的驱动实例（父插件即根；按根构造一次，随插件留守）。
     ///
     /// 未装配驱动工厂（单测）或无父插件 ⇒ `None`：写口落地即止，不去猜入口。
-    pub(crate) fn drive_entry(&self) -> Option<Arc<dyn symbio_sdk::drive::DriveEntry>> {
+    pub(crate) fn drive_entry(&self) -> Option<Arc<dyn symbio_platform::sdk::drive::DriveEntry>> {
         self.drive
             .get_or_init(|| {
                 let root = self.parent.as_ref()?.upgrade()?;
-                symbio_sdk::drive::declared_drive_binding().map(|binding| binding.bind(root))
+                symbio_platform::sdk::drive::declared_drive_binding()
+                    .map(|binding| binding.bind(root))
             })
             .clone()
     }
@@ -374,7 +377,9 @@ impl Plugin for SessionPlugin {
         Self::metadata()
     }
 
-    fn get_vfs_provider(self: Arc<Self>) -> Option<Arc<dyn symbio_kernel::vdfs::VdfsProvider>> {
+    fn get_vfs_provider(
+        self: Arc<Self>,
+    ) -> Option<Arc<dyn symbio_platform::kernel::vdfs::VdfsProvider>> {
         Some(self)
     }
 

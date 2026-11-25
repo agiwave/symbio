@@ -41,14 +41,16 @@
 //! 参与 traverse 的插件、读侧为 session 编排方，属跨插件契约）；本文件仅消费。
 
 use std::sync::Arc;
-use symbio_kernel::capability::Registry;
-use symbio_kernel::plugin::{Plugin, PluginError, PluginInvokeRequest, PluginInvokeRequestExt};
+use symbio_platform::kernel::capability::Registry;
+use symbio_platform::kernel::plugin::{
+    Plugin, PluginError, PluginInvokeRequest, PluginInvokeRequestExt,
+};
+use symbio_platform::sdk::capability::{capability_init_error_bucket, CAPABILITY_ERRORS};
 use symbio_plugin_api::AgentScope;
 use symbio_plugin_api::OPTION_VISITOR;
 use symbio_plugin_api::{AGENT_ID, PATH};
 use symbio_plugin_api::{TRAVERSE_AVAILABLE_OPTIONS, TRAVERSE_AVAILABLE_TOOLS};
 use symbio_providers::new_registry;
-use symbio_sdk::capability::{capability_init_error_bucket, CAPABILITY_ERRORS};
 
 /// 向所有插件广播"贡献工具"，返回装配好的能力管理器。
 ///
@@ -104,7 +106,7 @@ pub async fn collect_capabilities(
     // `agent_id` 解析成一份声明的地方），收集结束后由本函数把同一个 `Arc` 挂回
     // 调用方 ctx——工具执行期从那里读。与错误桶同一条路：容器对每个子插件各
     // fork 一份，插件写在自己那份上，收集方与兄弟都看不见，只能靠**共享的可变槽**。
-    symbio_sdk::agent::agent_perms_init_slot(&traverse_ctx);
+    symbio_platform::sdk::agent::agent_perms_init_slot(&traverse_ctx);
     // 沙箱句柄共享槽（D-531）：sandbox 插件在 traverse 里发布引擎，会话在这里建槽、
     // 收集结束后把同一个 Arc 挂回轮 ctx——工具执行期据此取句柄调 intercept / permits。
     // 与 AGENT_PERMS 同一条路：容器对每个子插件各 fork 一份，靠共享槽跨 fork 交换句柄。
@@ -169,7 +171,7 @@ pub(crate) fn require_agent_scope(
 }
 
 // 错误通道（CapabilityError / CAPABILITY_ERRORS / capability_report_error / capability_take_errors）
-// 见 `symbio_sdk::capability::CapabilityError`：写侧是任意参与 traverse 的插件，
+// 见 `symbio_platform::sdk::capability::CapabilityError`：写侧是任意参与 traverse 的插件，
 // 读侧是 session 编排方（orchestrator 在收集结束后 `capability_take_errors` 统一裁决）。
 
 // ==================== 选项收集机制（宿主侧） ====================

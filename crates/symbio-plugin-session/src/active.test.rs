@@ -8,7 +8,7 @@ use super::{runtime_of_state, ActiveSessionManager, ActiveSessionState};
 use crate::plugin::{OUTCOME_ABORTED, OUTCOME_COMPLETED, OUTCOME_FAILED};
 use crate::runtime::{RuntimeFacts, RuntimeOutcome};
 use std::sync::Arc;
-use symbio_sdk::vdfs::host::VdfsChangeSubscriptions;
+use symbio_platform::sdk::vdfs::host::VdfsChangeSubscriptions;
 use tokio::sync::Barrier;
 use tokio::task::JoinSet;
 

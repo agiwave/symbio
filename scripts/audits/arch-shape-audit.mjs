@@ -32,7 +32,7 @@
  * ## 为什么需要它（实测缺口）
  *
  * 「`VdfsProvider` 去样板」的处方（把单点分发推广成默认实现）要把
- * `symbio_sdk::VdfsProvider` 从**一个方法**扩成**十个方法**。按当时全部门禁的口径算一遍：
+ * `symbio_platform::sdk::VdfsProvider` 从**一个方法**扩成**十个方法**。按当时全部门禁的口径算一遍：
  *
  * - `core-export-audit` C-001 / C-002：动的是那个符号**内部**，根出口一个字符没改；
  * - C-003：`VdfsProvider` 早就是多消费方导出，它数的是**符号表**（Map 的键），
@@ -119,7 +119,7 @@ const ROOT = rootArg
   : path.resolve(path.dirname(fileURLToPath(import.meta.url)), '..', '..')
 
 /**
- * `--churn`：最近 N 次非 merge 提交里，`crates/symbio-sdk/src/` 的改动占比。
+ * `--churn`：最近 N 次非 merge 提交里，`crates/symbio-platform/src/sdk/` 的改动占比。
  *
  * **报告，不设门禁**（[DE-023](../../docs/003-design/023-内核边界与扩展局部性.md "DE-023-内核边界与扩展局部性") A1）：
  * 单次提交的占比没有阈值可定——修内核 bug 的提交本就该 100% 落在内核；判据是**走向**
@@ -155,7 +155,7 @@ function printChurn(windowSize = 50) {
     if (!m) continue
     const n = (m[1] === '-' ? 0 : Number(m[1])) + (m[2] === '-' ? 0 : Number(m[2]))
     total += n
-    if (m[3].startsWith('crates/symbio-sdk/src/')) {
+    if (m[3].startsWith('crates/symbio-platform/src/sdk/')) {
       core += n
       if (!counted) {
         coreCommits += 1
@@ -181,9 +181,9 @@ if (CHURN) {
   process.exit(0)
 }
 
-const SDK_REL = 'crates/symbio-sdk/src'
-/** 内核 crate（D-188 C2a）：文件集标记住 `lib.rs`，与 core 的 `kernel.rs` 合并判定。 */
-const KERNEL_REL = 'crates/symbio-kernel/src'
+const SDK_REL = 'crates/symbio-platform/src/sdk'
+/** 内核臂（D-188 C2a）：文件集标记住 `mod.rs`（平台合并后 crate 根文件改名），与 sdk 臂的 `kernel.rs` 合并判定。 */
+const KERNEL_REL = 'crates/symbio-platform/src/kernel'
 /** 本脚本自己：CS-002 读它源码里的放宽痕迹 */
 const SELF_REL = 'scripts/audits/arch-shape-audit.mjs'
 
@@ -289,7 +289,7 @@ const VOCAB_BASELINE = process.env.VOCAB_BASELINE
 // core-shape-allow structFields: D-315 `SessionView` 是 `session-config` 回体八格的唯一投影（端口交给环的交付值），八格逐字对应回体键名、改动即协议改动；它不是新增的数据面——随 P2-3b2-1（1069f346）从会话插件的请求构造搬进 sdk，正是 `port=session` 世界端口要求的那份「值」。既不能降 `pub(crate)`（消费方 loop 是另一个 crate），也不能合并进既有结构（八格只该有这一处形状，见 DE-048 / D-315）
 //
 // 330:193 → 545:240 不是放宽，是**换了一把尺子的量程**（D-279）：本判据原扫
-// `crates/symbio-sdk/src`，D-258…D-279 把 20 个域搬进 `symbio-sdk` 之后，core 只剩
+// `crates/symbio-platform/src/sdk`，D-258…D-279 把 20 个域搬进 `symbio-sdk` 之后，core 只剩
 // 322 行、量的是残余；被搬走的每一格数据面都还在，只是换了地址。改指 sdk 之后
 // 第一次实测 = 545 / 240，此后照旧只许降。545 → 546 是 `D-281` 的 `ViewDecl::agg`
 // 一格；546 → 550 是 `D-282` 的报告名单（`AssertionRead` 3 格 + `Frozen` 1 格）
@@ -394,7 +394,7 @@ function traitShape(body) {
  * 按目录划会把整个域的行为也算进内核。文件集只回答「哪几个文件是内核边界」。
  *
  * C2a 之后标记分居两处：`symbio_sdk/kernel.rs`（仍在 core 的语法）与
- * `crates/symbio-kernel/src/lib.rs`（已搬进内核 crate 的子集）。合并后的文件集才是判据范围。
+ * `crates/symbio-platform/src/kernel/mod.rs`（已搬进内核 crate 的子集）。合并后的文件集才是判据范围。
  *
  * 夹具仓库没有门面 ⇒ 返回 null，退回全 core 口径（夹具只验棘轮本身）。
  */
@@ -556,7 +556,7 @@ function measureDataSurface(dir) {
 }
 
 const sdkDir = path.join(ROOT, SDK_REL)
-if (!fs.existsSync(path.join(sdkDir, 'lib.rs'))) {
+if (!fs.existsSync(path.join(sdkDir, 'mod.rs'))) {
   console.error(red(`✗ 读不出 core 范围：${SDK_REL}/mod.rs 不存在（root=${ROOT}）—— 判据没有输入，宁红不静默`))
   process.exit(1)
 }
@@ -565,15 +565,15 @@ const kernelDir = path.join(ROOT, KERNEL_REL)
 // 纯形状的公共面只许降。批 1 把 `dialog` / `llm`（26 字段 / 5 变体）搬出 sdk 时基线没有
 // 下调，这份余量在 sdk+kernel 口径下一直悬着；契约层入扫后实测回到 615/256 = 基线，
 // 余量清零。搬地址不是新增长（D-408 / D-412 同一份类型闭包论证）。
-const contractDir = path.join(ROOT, 'crates/symbio-contract/src')
+const contractDir = path.join(ROOT, 'crates/symbio-platform/src/contract')
 const scanDirs = [
   sdkDir,
-  ...(fs.existsSync(path.join(kernelDir, 'lib.rs')) ? [kernelDir] : []),
-  ...(fs.existsSync(path.join(contractDir, 'lib.rs')) ? [contractDir] : []),
+  ...(fs.existsSync(path.join(kernelDir, 'mod.rs')) ? [kernelDir] : []),
+  ...(fs.existsSync(path.join(contractDir, 'mod.rs')) ? [contractDir] : []),
 ]
 const scopes = [
   readKernelScope(sdkDir, 'kernel.rs'),
-  scanDirs.includes(kernelDir) ? readKernelScope(kernelDir, 'lib.rs') : null,
+  scanDirs.includes(kernelDir) ? readKernelScope(kernelDir, 'mod.rs') : null,
 ].filter(Boolean)
 // 没有门面（夹具仓库）⇒ 退回全 core 口径；有门面则只量文件集的并集。
 const kernelAbs = scopes.length > 0 ? new Set(scopes.flatMap((s) => [...s.abs])) : null
@@ -593,7 +593,7 @@ const shape = mergeShapes(scanDirs.map((d) => measureCoreShape(d, kernelAbs)))
 // 标记物取 `symbio-sdk/src/plugin/`：它是**宿主侧插件域**（目录 / 清单 / 遍历端点），
 // 只有真仓有。拆分之前标记取自壳里的装配清单，那批改动把它替换成了常量 `false`——于是「五格齐全」与 CS-004 的字面量回流**同时静默失效**，
 // 门禁全绿而两条判据没跑。回归测试（CS-004 那条）是唯一抓住它的地方。
-const hasPlugins = fs.existsSync(path.join(ROOT, 'crates/symbio-sdk/src/plugin/mod.rs'))
+const hasPlugins = fs.existsSync(path.join(ROOT, 'crates/symbio-platform/src/sdk/plugin/mod.rs'))
 if (hasPlugins) {
   for (const name of KERNEL_TRAITS) {
     if (!shape.rows.some((r) => r.name === name)) {
@@ -779,16 +779,16 @@ if (pluginRefs.length > 0) {
  * 超出才是真红。登记只认内核文件集里的注释，判据面之外登记无效。
  */
 const NOUN_BASELINE = {
-  // （DE-023 C2b）：判定范围随语法整份迁到 `crates/symbio-kernel/src`（标记在
-  // `crates/symbio-kernel/src/lib.rs`）。域词汇里只剩两处**随类型一起**搬进内核的存量：
+  // （DE-023 C2b）：判定范围随语法整份迁到 `crates/symbio-platform/src/kernel`（标记在
+  // `crates/symbio-platform/src/kernel/mod.rs`）。域词汇里只剩两处**随类型一起**搬进内核的存量：
   //  - `chat/principal.rs`：`from_legacy` / `tool_principal` 的工具族前缀表（地址协议
   //    词汇，13 处）。清它要把这两个解析入口改成宿主侧自由函数（与 `actor_can_*`
   //    同一形态），见 DE-023 D-188 的 C2b 步；
   //  - `capability/family.rs`：能力家族 id `"model"` 与插件目录同名（1 处，报的是
   //    家族词汇而非插件依赖）。
   // 只许降，整张表的目标仍是空表。
-  'crates/symbio-kernel/src/capability/family.rs': 1,
-  'crates/symbio-kernel/src/chat/principal.rs': 4,
+  'crates/symbio-platform/src/kernel/capability/family.rs': 1,
+  'crates/symbio-platform/src/kernel/chat/principal.rs': 4,
 }
 
 const NOUN_ALLOW_RE =
@@ -910,12 +910,12 @@ if (hasPlugins && pluginIds.length > 0) {
 // 两张表是**迁移存量**：新事件经 `EventDecl` 进装配表，不在这里加行。扫描按文件存在
 // 与否分三种情况：都在 ⇒ 判；都不在 ⇒ 夹具仓库，不适用；只在一部分 ⇒ 红（判据已失效）。
 const VOCAB_SOURCES = {
-  kernelEvents: 'crates/symbio-kernel/src/event/mod.rs',
+  kernelEvents: 'crates/symbio-platform/src/kernel/event/mod.rs',
 }
 // `CELLS`（`event/grid.rs`）已随 D-203 归零批退役。它**不该再出现**：文件在 ⇒ 数它的
 // 业务行（基线 0，一行就红）；文件不在 ⇒ `cellsRows = 0`，正是目标值。这样「把表加回来」
 // 与「往表里加一行」都会红，判据不必依赖一张已经删掉的文件的形状。
-const RETIRED_CELLS = 'crates/symbio-kernel/src/event/grid.rs'
+const RETIRED_CELLS = 'crates/symbio-platform/src/kernel/event/grid.rs'
 const PROTOCOL_EVENT_VALUES = new Set(['request', 'sent', 'response', 'failed', 'retry'])
 const PROTOCOL_EVENT_NAMES = new Set(['REQUEST', 'SENT', 'RESPONSE', 'FAILED', 'RETRY'])
 

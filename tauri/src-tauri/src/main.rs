@@ -3,7 +3,7 @@ mod route_connection;
 
 use route_connection::RouteConnectionManager;
 use std::sync::Arc;
-use symbio_server::RuntimeHost;
+use symbio_runtime::RuntimeHost;
 use tauri::{Listener, Manager};
 use tracing::info;
 use tracing_subscriber::{fmt, prelude::*, EnvFilter};
@@ -45,7 +45,7 @@ fn build_id() -> String {
 }
 
 fn main() {
-    if let Some(code) = tauri::async_runtime::block_on(symbio_server::worker::run_worker_command(
+    if let Some(code) = tauri::async_runtime::block_on(symbio_runtime::worker::run_worker_command(
         std::env::args().skip(1),
     )) {
         std::process::exit(i32::from(code));

@@ -11,11 +11,11 @@
 
 use super::*;
 
+use symbio_platform::sdk::keys::SOURCE_PRINCIPAL;
 use symbio_plugin_api::principal::{Principal, PrincipalKind};
 use symbio_plugin_api::{
     PluginSimpleRequest, SymbioKey, VdfsAccess, VDFS_STATUS_ACTIVE, VDFS_STATUS_FAILED,
 };
-use symbio_sdk::keys::SOURCE_PRINCIPAL;
 
 fn session_node(status: &str, error: Option<&str>) -> VdfsNode {
     let mut n = VdfsNode::dir("sid", "子会话", VdfsAccess::READ);
@@ -153,8 +153,11 @@ struct StoredWorkdirParent {
 
 #[async_trait::async_trait]
 impl Plugin for StoredWorkdirParent {
-    fn meta(&self) -> symbio_kernel::plugin::PluginMeta {
-        symbio_kernel::plugin::PluginMeta::new("stored-workdir-test", "stored-workdir-test")
+    fn meta(&self) -> symbio_platform::kernel::plugin::PluginMeta {
+        symbio_platform::kernel::plugin::PluginMeta::new(
+            "stored-workdir-test",
+            "stored-workdir-test",
+        )
     }
 
     fn get_vfs_provider(self: Arc<Self>) -> Option<Arc<dyn VdfsProvider>> {

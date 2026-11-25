@@ -37,7 +37,7 @@ function audit ({ doc = 'docs/a.md', body = '# A\n', checkAll = 8, facts = { mec
     for (const [rel, content] of Object.entries(extra)) write(rel, content)
     // `check_all` 的形状照代码写：第一条是 `let mut all = …`，其余是 `all.extend(…)`
     write(
-      'crates/symbio-sdk/src/invariants/mod.rs',
+      'crates/symbio-platform/src/sdk/invariants/mod.rs',
       [
         'pub fn check_all(events: &[Event]) -> Vec<Violation> {',
         '    let mut all = first(events);',
@@ -147,7 +147,7 @@ test('不误报：数与名字之间有实词（读侧 `check_all` 会把同一�
     body: OK,
     checkAll: 8,
     extra: {
-      'crates/symbio-sdk/src/store/wal.rs': '/// 不拒绝而是计数 + 出声，读侧 `check_all` 会把同一条反复计入。\nfn t() {}\n',
+      'crates/symbio-platform/src/sdk/store/wal.rs': '/// 不拒绝而是计数 + 出声，读侧 `check_all` 会把同一条反复计入。\nfn t() {}\n',
     },
   })
   assert.equal(r.status, 0, r.stdout)
@@ -170,7 +170,7 @@ test('来源读不出（invariants 不存在）⇒ exit 2，不是「零违规�
 
 test('来源读不出（facts 生成物缺失 ⇒ 机制键数无从取得）⇒ exit 2', () => {
   return withTempTree({}, (root) => {
-    const abs = path.join(root, 'crates', 'symbio-sdk', 'src', 'invariants')
+    const abs = path.join(root, 'crates', 'symbio-platform', 'src', 'sdk', 'invariants')
     fs.mkdirSync(abs, { recursive: true })
     fs.writeFileSync(path.join(abs, 'mod.rs'), 'pub fn check_all(e: &[u8]) -> u8 {\n let mut all = a(e);\n all.extend(b(e));\n all\n}\n')
     fs.mkdirSync(path.join(root, 'docs'), { recursive: true })

@@ -73,15 +73,6 @@ export const ROWS = [
     asset: "契约实现（D-511）",
   },
   {
-    key: "sessionFrozen",
-    unit: "条",
-    label: "session 退役线冻结符号",
-    owner: "`scripts/exemptions/plugin-session-sdk.json`",
-    how: "`node scripts/audits/session-retire-audit.mjs`",
-    // D-499 / D-460：随控制面身份永久保留的冻结账，无到期日、不再按日期续期，不是欠账。
-    asset: "冻结账（D-499）",
-  },
-  {
     key: "debtExemptions",
     unit: "条",
     label: "EX-007 到期豁免",
@@ -263,7 +254,6 @@ export function collect(root) {
     // 计入会让「在册任务 1 条」与同页「共 0」自相矛盾。
     tasks: registry.entries.filter((e) => e.meta?.kind === "task" && !e.meta?.projection).length,
     archDead: symbolCount(root, "scripts/baselines/arch-dead-code.json"),
-    sessionFrozen: symbolCount(root, "scripts/exemptions/plugin-session-sdk.json"),
     debtExemptions: DEBT_EXEMPTIONS.length,
     injectionGaps: CELLS.filter((c) => c?.gap).length,
     ignoredTests: ignoredTests(root),

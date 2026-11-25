@@ -16,7 +16,7 @@ created: 2026-09-07
 错误码是 **ABI 的一部分**，跨版本禁止随意变更。
 
 ```rust
-// crates/symbio-kernel/src/plugin/error.rs（节选）— PluginError 是枚举，非结构体
+// crates/symbio-platform/src/kernel/plugin/error.rs（节选）— PluginError 是枚举，非结构体
 pub enum PluginError {
  NotFound(String), // -> "NOT_FOUND"
  NotImplemented, // -> "NOT_IMPLEMENTED"
@@ -131,7 +131,7 @@ try {
 
 ## 错误码是闭集
 
-码只有 [`PluginErrorCode`](../../crates/symbio-kernel/src/plugin/error.rs) 的 13 个变体这一份真源：
+码只有 [`PluginErrorCode`](../../crates/symbio-platform/src/kernel/plugin/error.rs) 的 13 个变体这一份真源：
 生产侧 `PluginError::code` 给出枚举、传输侧 `to_frame` 写 `as_str`、消费侧
 `PluginFrame::error_code` 解析回枚举后按值分派。
 

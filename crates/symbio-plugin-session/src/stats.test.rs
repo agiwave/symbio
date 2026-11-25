@@ -28,11 +28,11 @@ use crate::declarations::{CHAT_VOCAB, COMMITMENT_VOCAB, MESSAGE_VOCAB};
 use crate::stats_reading::{panel_of, totals_of};
 use crate::store::EventWalStore;
 use std::path::{Path, PathBuf};
-use symbio_kernel::event::{Entity, Event, EventEnvelope as _, Seq, Verb};
-use symbio_kernel::store::Store;
-use symbio_kernel::view::Budget;
-use symbio_sdk::invariants::check_all;
-use symbio_sdk::projection::transcript::transcript;
+use symbio_platform::kernel::event::{Entity, Event, EventEnvelope as _, Seq, Verb};
+use symbio_platform::kernel::store::Store;
+use symbio_platform::kernel::view::Budget;
+use symbio_platform::sdk::invariants::check_all;
+use symbio_platform::sdk::projection::transcript::transcript;
 
 use crate::declarations::EVENT_SESSION_CONSOLIDATED;
 use crate::projections::checkpoint::checkpoint;
@@ -77,7 +77,7 @@ fn read_path(
     viewer: Option<&str>,
     principal: &str,
     root: &Path,
-) -> Result<super::SessionStats, symbio_kernel::plugin::PluginError> {
+) -> Result<super::SessionStats, symbio_platform::kernel::plugin::PluginError> {
     read(
         session_id,
         facts_of(wal),
@@ -251,7 +251,7 @@ fn fleet_aggregates_every_session_in_the_instance() {
         "session-0",
         &wals[0],
         None,
-        symbio_sdk::authz::PRINCIPAL_MAIN,
+        symbio_platform::sdk::authz::PRINCIPAL_MAIN,
         &root,
     )
     .expect("读数");
@@ -287,7 +287,7 @@ fn fleet_scan_does_not_descend_into_session_subdirectories() {
         "session-0",
         &wals[0],
         None,
-        symbio_sdk::authz::PRINCIPAL_MAIN,
+        symbio_platform::sdk::authz::PRINCIPAL_MAIN,
         &root,
     )
     .expect("读数");
@@ -314,7 +314,7 @@ fn fleet_survives_a_session_whose_wal_cannot_be_opened() {
         "session-0",
         &wals[0],
         None,
-        symbio_sdk::authz::PRINCIPAL_MAIN,
+        symbio_platform::sdk::authz::PRINCIPAL_MAIN,
         &root,
     )
     .expect("读数");
@@ -336,7 +336,7 @@ fn fleet_aggregates_the_snapshots_it_is_given() {
     assert_eq!(facts.len(), 2, "存储层深遍交回两个会话的值");
 
     let ctx = symbio_plugin_api::reports::ReportCtx {
-        principal: symbio_sdk::authz::PRINCIPAL_MAIN,
+        principal: symbio_platform::sdk::authz::PRINCIPAL_MAIN,
         readable: true,
     };
     let got = fleet_reading(&facts, &ctx);
@@ -353,8 +353,8 @@ fn fleet_is_empty_when_the_reader_may_not_read() {
     let got = read_path(
         "session-0",
         &wals[0],
-        Some(symbio_sdk::authz::PRINCIPAL_MAIN),
-        symbio_sdk::authz::PRINCIPAL_MAIN,
+        Some(symbio_platform::sdk::authz::PRINCIPAL_MAIN),
+        symbio_platform::sdk::authz::PRINCIPAL_MAIN,
         &root,
     )
     .expect("读数");
@@ -415,7 +415,7 @@ fn totals_add_the_owner_rows() {
 #[test]
 fn unregistered_reports_are_absent_from_the_exit() {
     let wal = seed("absent");
-    let got = read_at(&wal, symbio_sdk::authz::PRINCIPAL_MAIN);
+    let got = read_at(&wal, symbio_platform::sdk::authz::PRINCIPAL_MAIN);
 
     assert!(got.has_wal, "事实源在——缺席不是因为没源");
     assert!(
@@ -446,7 +446,7 @@ fn fleet_landing_points_are_absent_when_no_owner_is_linked() {
         "session-0",
         &wals[0],
         None,
-        symbio_sdk::authz::PRINCIPAL_MAIN,
+        symbio_platform::sdk::authz::PRINCIPAL_MAIN,
         &root,
     )
     .expect("读数");
@@ -470,7 +470,7 @@ fn fleet_landing_points_are_absent_when_no_owner_is_linked() {
 #[test]
 fn panel_matches_the_columns_it_describes() {
     let wal = seed("panel");
-    let mut got = read_at(&wal, symbio_sdk::authz::PRINCIPAL_MAIN);
+    let mut got = read_at(&wal, symbio_platform::sdk::authz::PRINCIPAL_MAIN);
     // 逐档两列的**数**归 owner（本进程不链接 `slo`），而「这些数怎么说」是本插件的排版
     // 代码（`panel_of` 收 `&SessionStats`）。这里往报表列里交一档合成的行，验的正是那段
     // 排版：面板里的值必须逐字来自列里的值——与 owner 在不在无关，也不会因此造出一份
@@ -555,7 +555,10 @@ fn panel_matches_the_columns_it_describes() {
         .find(|r| r.label == "事实源在不在")
         .expect("有在不在行");
     assert_eq!(has_row.value, "在", "seed 造过事实源");
-    assert_eq!(has_row.tone, symbio_kernel::present::ReadingTone::Normal);
+    assert_eq!(
+        has_row.tone,
+        symbio_platform::kernel::present::ReadingTone::Normal
+    );
 
     // ③ 不变量段：seed 的 4 格干净 ⇒ 0 条违规、平常语气
     let inv = &panel.sections[2];
@@ -563,13 +566,13 @@ fn panel_matches_the_columns_it_describes() {
     assert_eq!(inv.rows[0].value, "0 条", "干净的事实源 ⇒ 0 违规");
     assert_eq!(
         inv.rows[0].tone,
-        symbio_kernel::present::ReadingTone::Normal
+        symbio_platform::kernel::present::ReadingTone::Normal
     );
     // 反过来：seed 的兜底率是 1/2 = 50%，远超 5% 阈值 ⇒ 时延段**本该**是 warn。
     // 这一条与下面「有违规 ⇒ warn」合起来覆盖两个方向：该标色的标、不该标的不标。
     assert_eq!(
         perf.rows[0].tone,
-        symbio_kernel::present::ReadingTone::Warn,
+        symbio_platform::kernel::present::ReadingTone::Warn,
         "兜底率 50% > 5% ⇒ 那一行需留意（面板不许把问题显示成没事）"
     );
     assert!(panel.has_warn(), "有 warn 行 ⇒ `has_warn()` 为真");
@@ -602,7 +605,10 @@ fn panel_matches_the_columns_it_describes() {
         cm_row.value, "本会话没有委托",
         "零条要说人话，不显示「0 条 · 违约 0 条」"
     );
-    assert_eq!(cm_row.tone, symbio_kernel::present::ReadingTone::Normal);
+    assert_eq!(
+        cm_row.tone,
+        symbio_platform::kernel::present::ReadingTone::Normal
+    );
 }
 
 /// 能力视图列应有的键：报表登记的 `views`（同名去重）。
@@ -633,7 +639,7 @@ fn expected_capability_view_names() -> Vec<&'static str> {
 #[test]
 fn capability_views_column_follows_the_report_registry() {
     let wal = seed("capability-views");
-    let got = read_at(&wal, symbio_sdk::authz::PRINCIPAL_MAIN);
+    let got = read_at(&wal, symbio_platform::sdk::authz::PRINCIPAL_MAIN);
     let col = got.capability_views.as_object().expect("能力视图列是对象");
 
     let mut names: Vec<&str> = col.keys().map(String::as_str).collect();
@@ -652,7 +658,7 @@ fn capability_views_column_follows_the_report_registry() {
 #[test]
 fn the_capability_section_has_one_row_per_registered_view() {
     let wal = seed("capability-panel");
-    let got = read_at(&wal, symbio_sdk::authz::PRINCIPAL_MAIN);
+    let got = read_at(&wal, symbio_platform::sdk::authz::PRINCIPAL_MAIN);
     let expected = expected_capability_view_names();
     let Some(section) = got
         .panel
@@ -713,12 +719,12 @@ fn a_warn_row_appears_when_the_invariants_are_broken() {
         std::fs::write(&wal, format!("{raw}{dup}\n")).expect("追加重复开轮");
     }
 
-    let got = read_at(&wal, symbio_sdk::authz::PRINCIPAL_MAIN);
+    let got = read_at(&wal, symbio_platform::sdk::authz::PRINCIPAL_MAIN);
     let inv = &got.panel.sections[2];
     let row = &inv.rows[0];
     assert_eq!(
         row.tone,
-        symbio_kernel::present::ReadingTone::Warn,
+        symbio_platform::kernel::present::ReadingTone::Warn,
         "违规 ⇒ 需留意"
     );
     assert!(row.value != "0 条", "且不再显示 0 条：{}", row.value);
@@ -734,8 +740,14 @@ fn a_missing_wal_is_a_warn_row_not_a_silent_zero() {
     let wal = dir.join(super::super::paths::V2_WAL_FILE);
     let root = dir.clone();
 
-    let got = read_path("s1", &wal, None, symbio_sdk::authz::PRINCIPAL_MAIN, &root)
-        .expect("没有事实源不是错");
+    let got = read_path(
+        "s1",
+        &wal,
+        None,
+        symbio_platform::sdk::authz::PRINCIPAL_MAIN,
+        &root,
+    )
+    .expect("没有事实源不是错");
     assert!(!got.has_wal, "没有源");
     let row = got.panel.sections[1]
         .rows
@@ -745,7 +757,7 @@ fn a_missing_wal_is_a_warn_row_not_a_silent_zero() {
     assert_eq!(row.value, "不在");
     assert_eq!(
         row.tone,
-        symbio_kernel::present::ReadingTone::Warn,
+        symbio_platform::kernel::present::ReadingTone::Warn,
         "没跑过 ⇒ 需留意"
     );
 }
@@ -754,7 +766,7 @@ fn a_missing_wal_is_a_warn_row_not_a_silent_zero() {
 #[test]
 fn stats_recompute_equals_direct_apply() {
     let wal = seed("recompute");
-    let got = read_at(&wal, symbio_sdk::authz::PRINCIPAL_MAIN);
+    let got = read_at(&wal, symbio_platform::sdk::authz::PRINCIPAL_MAIN);
 
     assert!(got.has_wal);
     assert_eq!(got.session_id, "s1");
@@ -794,7 +806,7 @@ fn stats_recompute_equals_direct_apply() {
 #[test]
 fn reverse_case_the_readout_moves_when_the_wal_changes() {
     let wal = seed("reverse");
-    let before = read_at(&wal, symbio_sdk::authz::PRINCIPAL_MAIN);
+    let before = read_at(&wal, symbio_platform::sdk::authz::PRINCIPAL_MAIN);
     assert_eq!(before.checkpoint["event_count"], 4, "种子四格");
     assert_eq!(
         before.transcript["entries"].as_array().map_or(0, Vec::len),
@@ -804,7 +816,7 @@ fn reverse_case_the_readout_moves_when_the_wal_changes() {
 
     // 删收束格（成功轮 1200ms）⇒ 断点少一条、转写少一行
     drop_line(&wal, "f0");
-    let after = read_at(&wal, symbio_sdk::authz::PRINCIPAL_MAIN);
+    let after = read_at(&wal, symbio_platform::sdk::authz::PRINCIPAL_MAIN);
     assert_eq!(after.checkpoint["event_count"], 3, "断点是事实计数");
     assert_eq!(
         after.transcript["entries"].as_array().map_or(0, Vec::len),
@@ -814,7 +826,7 @@ fn reverse_case_the_readout_moves_when_the_wal_changes() {
 
     // 删开轮格 ⇒ 两列再各少一条
     drop_line(&wal, "u0");
-    let after = read_at(&wal, symbio_sdk::authz::PRINCIPAL_MAIN);
+    let after = read_at(&wal, symbio_platform::sdk::authz::PRINCIPAL_MAIN);
     assert_eq!(after.checkpoint["event_count"], 2);
     assert_eq!(
         after.transcript["entries"].as_array().map_or(0, Vec::len),
@@ -828,7 +840,7 @@ fn reverse_case_the_readout_moves_when_the_wal_changes() {
 #[test]
 fn invariants_move_when_the_wal_changes() {
     let wal = seed("invariants");
-    let clean = read_at(&wal, symbio_sdk::authz::PRINCIPAL_MAIN);
+    let clean = read_at(&wal, symbio_platform::sdk::authz::PRINCIPAL_MAIN);
 
     // 复算：出口的清单与直接 `check_all` 逐字相等（口径只活在 core，出口不复判）。
     // 切片口径 = 完整史（归档段 + 未取代那段）：出口读什么，复算就比什么。
@@ -846,7 +858,7 @@ fn invariants_move_when_the_wal_changes() {
 
     // 删轮 0 的收束格 ⇒ 行删了 ⇒ C1 报 seq 跳号；轮次配对归义务环，不在此列。
     drop_line(&wal, "f0");
-    let list = read_at(&wal, symbio_sdk::authz::PRINCIPAL_MAIN).invariants;
+    let list = read_at(&wal, symbio_platform::sdk::authz::PRINCIPAL_MAIN).invariants;
     let list = list.as_array().expect("清单是数组");
     assert_eq!(list.len(), 1, "{list:?}");
     assert!(
@@ -876,7 +888,7 @@ fn invariants_move_when_the_wal_changes() {
 #[test]
 fn archival_does_not_shrink_the_readout() {
     let wal = seed("archive");
-    let before = read_at(&wal, symbio_sdk::authz::PRINCIPAL_MAIN);
+    let before = read_at(&wal, symbio_platform::sdk::authz::PRINCIPAL_MAIN);
     assert_eq!(before.checkpoint["event_count"], 4, "两轮四格全见");
 
     // 压缩：落一条快照，再把被取代的前缀整段归档（未取代那段只剩快照一条）。
@@ -905,7 +917,7 @@ fn archival_does_not_shrink_the_readout() {
     drop(store);
 
     // 读数口仍看完整史：不变量不假红，各列与成本一分不缩。
-    let after = read_at(&wal, symbio_sdk::authz::PRINCIPAL_MAIN);
+    let after = read_at(&wal, symbio_platform::sdk::authz::PRINCIPAL_MAIN);
     assert_eq!(
         after.invariants,
         serde_json::json!([]),
@@ -931,7 +943,7 @@ fn missing_wal_is_an_honest_zero_and_creates_nothing() {
     std::fs::create_dir_all(&dir).expect("临时目录");
     let wal = dir.join(super::super::paths::V2_WAL_FILE);
 
-    let got = read_at(&wal, symbio_sdk::authz::PRINCIPAL_MAIN);
+    let got = read_at(&wal, symbio_platform::sdk::authz::PRINCIPAL_MAIN);
     assert!(!got.has_wal);
     assert!(got.reports.is_empty(), "没有源 ⇒ 报表列整条缺席");
     assert_eq!(got.checkpoint["event_count"], 0);
@@ -952,12 +964,12 @@ fn missing_wal_is_an_honest_zero_and_creates_nothing() {
 fn declaring_the_owner_reads_everything() {
     let wal = seed("gate-owner");
     let root = wal.parent().expect("WAL 有父目录").to_path_buf();
-    let plain = read_at(&wal, symbio_sdk::authz::PRINCIPAL_MAIN);
+    let plain = read_at(&wal, symbio_platform::sdk::authz::PRINCIPAL_MAIN);
     let as_owner = read_path(
         "s1",
         &wal,
         Some(symbio_plugin_api::PRINCIPAL_USER),
-        symbio_sdk::authz::PRINCIPAL_MAIN,
+        symbio_platform::sdk::authz::PRINCIPAL_MAIN,
         &root,
     )
     .expect("属主读数");
@@ -985,7 +997,7 @@ fn a_non_owner_reads_nothing_at_all() {
             "s1",
             &wal,
             Some(viewer),
-            symbio_sdk::authz::PRINCIPAL_MAIN,
+            symbio_platform::sdk::authz::PRINCIPAL_MAIN,
             &root,
         )
         .expect("读数");
@@ -1084,7 +1096,7 @@ fn a_matrix_member_reads_shared_content_and_an_outsider_still_cannot() {
         .unwrap();
 
     let root = wal.parent().expect("WAL 有父目录").to_path_buf();
-    let session_principal = symbio_sdk::authz::PRINCIPAL_MAIN;
+    let session_principal = symbio_platform::sdk::authz::PRINCIPAL_MAIN;
 
     // ① 矩阵内主体（非属主）：读得到——共享内容让这份事实源不再纯私有。
     let as_member = read_path("s1", &wal, Some("session/main"), session_principal, &root)
@@ -1180,7 +1192,7 @@ fn reputation_column_is_absent_when_no_owner_registers_it() {
     for e in symbio_plugin_api::commitment_events(
         COMMITMENT_VOCAB,
         "c-rep",
-        symbio_sdk::authz::PRINCIPAL_MAIN,
+        symbio_platform::sdk::authz::PRINCIPAL_MAIN,
         symbio_plugin_api::PRINCIPAL_USER,
         "把这段复查看完",
         Ok(()),
@@ -1189,7 +1201,7 @@ fn reputation_column_is_absent_when_no_owner_registers_it() {
         store.append(e).expect("承诺入格");
     }
 
-    let got = read_at(&wal, symbio_sdk::authz::PRINCIPAL_MAIN);
+    let got = read_at(&wal, symbio_platform::sdk::authz::PRINCIPAL_MAIN);
     assert!(got.has_wal, "事实源在，账算不出来不改变这件事");
     assert!(
         !got.reports.contains_key("reputation"),
@@ -1205,8 +1217,8 @@ fn reputation_column_is_absent_when_no_owner_registers_it() {
     let denied = read_path(
         "s1",
         &wal,
-        Some(symbio_sdk::authz::PRINCIPAL_MAIN),
-        symbio_sdk::authz::PRINCIPAL_MAIN,
+        Some(symbio_platform::sdk::authz::PRINCIPAL_MAIN),
+        symbio_platform::sdk::authz::PRINCIPAL_MAIN,
         &root,
     )
     .expect("读数");
@@ -1248,7 +1260,7 @@ fn commitments_column_exposes_each_delegation_record() {
     for e in symbio_plugin_api::commitment_events(
         COMMITMENT_VOCAB,
         "v2c-t1-run-1",
-        symbio_sdk::authz::PRINCIPAL_MAIN,
+        symbio_platform::sdk::authz::PRINCIPAL_MAIN,
         "agent:reviewer",
         "让 reviewer 复查这段",
         Err("子智能体没起来"),
@@ -1262,7 +1274,7 @@ fn commitments_column_exposes_each_delegation_record() {
             symbio_plugin_api::commitment_events(
                 COMMITMENT_VOCAB,
                 "v2c-t2-run-1",
-                symbio_sdk::authz::PRINCIPAL_MAIN,
+                symbio_platform::sdk::authz::PRINCIPAL_MAIN,
                 "agent:worker",
                 "整理周报",
                 Ok(()),
@@ -1272,7 +1284,7 @@ fn commitments_column_exposes_each_delegation_record() {
         )
         .expect("立约入格");
 
-    let got = read_at(&wal, symbio_sdk::authz::PRINCIPAL_MAIN);
+    let got = read_at(&wal, symbio_platform::sdk::authz::PRINCIPAL_MAIN);
     let col = &got.commitments;
     assert_eq!(col["total"], 2, "两条约：一条违约、一条在途");
     assert_eq!(col["broken"], 1);
@@ -1324,7 +1336,7 @@ fn commitments_column_exposes_each_delegation_record() {
     );
     assert_eq!(
         row.tone,
-        symbio_kernel::present::ReadingTone::Warn,
+        symbio_platform::kernel::present::ReadingTone::Warn,
         "有违约 ⇒ 需留意"
     );
 
@@ -1332,8 +1344,8 @@ fn commitments_column_exposes_each_delegation_record() {
     let denied = read_path(
         "s1",
         &wal,
-        Some(symbio_sdk::authz::PRINCIPAL_MAIN),
-        symbio_sdk::authz::PRINCIPAL_MAIN,
+        Some(symbio_platform::sdk::authz::PRINCIPAL_MAIN),
+        symbio_platform::sdk::authz::PRINCIPAL_MAIN,
         &root,
     )
     .expect("读数");
@@ -1373,7 +1385,7 @@ fn readyset_column_is_absent_when_no_owner_registers_it() {
                     EVENT_TASK_OPENED,
                     Entity::Task,
                     Verb::Opened,
-                    symbio_sdk::authz::PRINCIPAL_MAIN,
+                    symbio_platform::sdk::authz::PRINCIPAL_MAIN,
                 )
                 .with_produced_by(0)
                 .with_payload(serde_json::json!({
@@ -1385,8 +1397,14 @@ fn readyset_column_is_absent_when_no_owner_registers_it() {
             .expect("任务开格");
     }
 
-    let got =
-        read_path("s-rs", &wal, None, symbio_sdk::authz::PRINCIPAL_MAIN, &root).expect("读数");
+    let got = read_path(
+        "s-rs",
+        &wal,
+        None,
+        symbio_platform::sdk::authz::PRINCIPAL_MAIN,
+        &root,
+    )
+    .expect("读数");
     assert!(
         !got.reports.contains_key("readyset"),
         "owner 不在 ⇒ 整条不出现（不是读方猜一份空集合冒充读数）"
@@ -1398,8 +1416,8 @@ fn readyset_column_is_absent_when_no_owner_registers_it() {
     let denied = read_path(
         "s-rs",
         &wal,
-        Some(symbio_sdk::authz::PRINCIPAL_MAIN),
-        symbio_sdk::authz::PRINCIPAL_MAIN,
+        Some(symbio_platform::sdk::authz::PRINCIPAL_MAIN),
+        symbio_platform::sdk::authz::PRINCIPAL_MAIN,
         &root,
     )
     .expect("读数");
@@ -1448,7 +1466,7 @@ fn calibration_column_is_absent_when_no_owner_registers_it() {
         }
     }
 
-    let got = read_at(&wal, symbio_sdk::authz::PRINCIPAL_MAIN);
+    let got = read_at(&wal, symbio_platform::sdk::authz::PRINCIPAL_MAIN);
     assert!(
         !got.reports.contains_key("calibration"),
         "owner 不在 ⇒ 整条不出现（不是读方猜一份空账冒充读数）"
@@ -1463,7 +1481,7 @@ fn calibration_column_is_absent_when_no_owner_registers_it() {
 #[test]
 fn skill_compile_slots_are_absent_without_their_owner() {
     let wal = seed("skills");
-    let got = read_at(&wal, symbio_sdk::authz::PRINCIPAL_MAIN);
+    let got = read_at(&wal, symbio_platform::sdk::authz::PRINCIPAL_MAIN);
     assert!(
         !got.reports.contains_key("compiled_skills")
             && !got.reports.contains_key("skill_compile_enabled"),
@@ -1483,7 +1501,7 @@ fn skill_compile_slots_are_absent_without_their_owner() {
 fn transcript_column_reads_the_conversation_back_from_the_wal() {
     let wal = seed("transcript");
     let root = wal.parent().expect("WAL 有父目录").to_path_buf();
-    let got = read_at(&wal, symbio_sdk::authz::PRINCIPAL_MAIN);
+    let got = read_at(&wal, symbio_platform::sdk::authz::PRINCIPAL_MAIN);
 
     // 复算：出口的转写列与直接 `apply` 逐字相等（口径只活在 core 的投影，出口不复判）。
     let ro = EventWalStore::open_readonly(&wal).expect("WAL 只读");
@@ -1511,7 +1529,7 @@ fn transcript_column_reads_the_conversation_back_from_the_wal() {
 
     // 反向：删掉成功轮的收束格 ⇒ 对应那一句必须从转写里消失（证明它真的在读文件，不是常数）。
     drop_line(&wal, "f0");
-    let after = read_at(&wal, symbio_sdk::authz::PRINCIPAL_MAIN);
+    let after = read_at(&wal, symbio_platform::sdk::authz::PRINCIPAL_MAIN);
     let entries = after.transcript["entries"].as_array().expect("条目数组");
     assert_eq!(entries.len(), 3, "删一条 final ⇒ 转写 4 → 3：{entries:?}");
     assert!(
@@ -1523,8 +1541,8 @@ fn transcript_column_reads_the_conversation_back_from_the_wal() {
     let denied = read_path(
         "s1",
         &wal,
-        Some(symbio_sdk::authz::PRINCIPAL_MAIN),
-        symbio_sdk::authz::PRINCIPAL_MAIN,
+        Some(symbio_platform::sdk::authz::PRINCIPAL_MAIN),
+        symbio_platform::sdk::authz::PRINCIPAL_MAIN,
         &root,
     )
     .expect("读数");
@@ -1557,7 +1575,7 @@ fn transcript_column_surfaces_tool_rows() {
         )
         .expect("追加工具格");
 
-    let got = read_at(&wal, symbio_sdk::authz::PRINCIPAL_MAIN);
+    let got = read_at(&wal, symbio_platform::sdk::authz::PRINCIPAL_MAIN);
     let entries = got.transcript["entries"].as_array().expect("条目数组");
     let tool_row = entries
         .iter()

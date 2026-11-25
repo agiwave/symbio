@@ -16,8 +16,8 @@
 
 use std::sync::Arc;
 
-use symbio_kernel::capability::CapabilityRow;
-use symbio_kernel::event::{Entity, Verb};
+use symbio_platform::kernel::capability::CapabilityRow;
+use symbio_platform::kernel::event::{Entity, Verb};
 use symbio_plugin_api::drive::DriveFact;
 use symbio_plugin_api::termination::{termination_row, TerminationView, TerminationWriter};
 use symbio_plugin_api::FactDraft;

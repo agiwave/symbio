@@ -16,7 +16,7 @@
 //! | [`row`] | 行执行体：规则命中 ⇒ 一条判决事实（0 次模型往返） |
 //!
 //! 理由码词表**不在本插件里**：它是 `Verdict` 的 `reason` 取值，而消费方在
-//! `compose`，故住在内核的 `dialog` 模块（`crates/symbio-kernel/src/dialog/`，判据见那里的模块文档）。
+//! `compose`，故住在内核的 `dialog` 模块（`crates/symbio-platform/src/kernel/dialog/`，判据见那里的模块文档）。
 //!
 //! 内部依赖是单向的：`plugin` → `rules` / `decide` / `debt`，`debt` → `rules`，
 //! `row` → `decl`，各行互不认识。

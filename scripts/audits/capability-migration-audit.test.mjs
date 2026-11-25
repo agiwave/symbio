@@ -54,7 +54,7 @@ import {
 const script = fileURLToPath(new URL('./capability-migration-audit.mjs', import.meta.url))
 const repoRoot = path.resolve(path.dirname(script), '..', '..')
 
-const CORE = 'crates/symbio-sdk/src/a.rs'
+const CORE = 'crates/symbio-platform/src/sdk/a.rs'
 const LOOP = 'crates/symbio-plugin-loop/src/loop_rows.rs'
 const SESSION = 'crates/symbio-plugin-session/src/lib.rs'
 
@@ -135,7 +135,7 @@ test('generatedPaths：描述符声明的输出都在清单里（含不带 .gen.
   for (const p of [
     'crates/symbio-plugin-api/src/events.rs',
     'crates/symbio-plugin-api/src/routes.rs',
-    'crates/symbio-sdk/src/authz/rows.gen.rs',
+    'crates/symbio-platform/src/sdk/authz/rows.gen.rs',
   ]) {
     assert.ok(g.has(p), `生成物清单漏了 ${p}`)
   }
@@ -148,7 +148,7 @@ test('generatedPaths：读不出目录时返回空集，不报错也不假装有
 test('isCapabilitySource：测试与生成物都不算可迁移源码', () => {
   assert.equal(isCapabilitySource(LOOP), true)
   assert.equal(isCapabilitySource('crates/symbio-plugin-loop/src/loop_rows.test.rs'), false)
-  assert.equal(isCapabilitySource('crates/symbio-sdk/src/authz/rows.gen.rs'), false)
+  assert.equal(isCapabilitySource('crates/symbio-platform/src/sdk/authz/rows.gen.rs'), false)
   assert.equal(isCapabilitySource('crates/symbio-plugin-api/src/events.rs'), false)
   assert.equal(isCapabilitySource('crates/symbio-plugin-api/src/context.rs'), true)
 })
@@ -228,13 +228,13 @@ test('migrationErrors：迁移提交在 SDK 机制面新增源码 ⇒ EX-007 红
     { path: LOOP, added: [], removed: ['row!("memory")'] },
   ])
   assert.match(e, /EX-007/)
-  assert.match(e, /crates\/symbio-sdk/)
+  assert.match(e, /crates\/symbio-platform\/src\/sdk/)
 })
 
 test('migrationErrors：机制面只加注释（如 arch-shape-allow 登记）⇒ 不算源码变宽', () => {
   assert.deepEqual(
     mig([
-      { path: 'crates/symbio-kernel/src/capability/family.rs', added: ['// arch-shape-allow CS-004 tool ×1: 用途=wire 词汇'], removed: [] },
+      { path: 'crates/symbio-platform/src/kernel/capability/family.rs', added: ['// arch-shape-allow CS-004 tool ×1: 用途=wire 词汇'], removed: [] },
       { path: LOOP, added: [], removed: ['row!("memory")'] },
     ]),
     [],
@@ -246,8 +246,8 @@ test('migrationErrors：机制面重写一条私有 use（删符号的必然结�
     mig([
       {
         path: 'crates/symbio-plugin-api/src/port.rs',
-        added: ['use symbio_kernel::plugin::{PluginInvokeRequest, PluginInvokeRequestExt};'],
-        removed: ['use symbio_kernel::plugin::{Plugin, PluginInvokeRequest, PluginInvokeRequestExt};'],
+        added: ['use symbio_platform::kernel::plugin::{PluginInvokeRequest, PluginInvokeRequestExt};'],
+        removed: ['use symbio_platform::kernel::plugin::{Plugin, PluginInvokeRequest, PluginInvokeRequestExt};'],
       },
       { path: LOOP, added: [], removed: ['row!("memory")'] },
     ]),
@@ -265,7 +265,7 @@ test('migrationErrors：控制面新增一行只有字符串字面量（日志�
 test('migrationErrors：折叠整文件搬出机制面、落进能力包 ⇒ 绿（D-283 判的是变宽）', () => {
   assert.deepEqual(
     mig([
-      { path: 'crates/symbio-sdk/src/projection/cost.rs', added: [], removed: ['pub fn cost_ledger() {}'] },
+      { path: 'crates/symbio-platform/src/sdk/projection/cost.rs', added: [], removed: ['pub fn cost_ledger() {}'] },
       { path: 'crates/symbio-plugin-cost/src/decl.rs', added: ['name: "cost.ledger"'], removed: [] },
       { path: LOOP, added: ['reports::read_all(snapshot)'], removed: ['cost_ledger()'] },
     ]),
@@ -325,7 +325,7 @@ test('migrationErrors：迁移中改测试与 .gen.rs 不判（断言与镜像�
   assert.deepEqual(
     mig([
       { path: 'crates/symbio-plugin-loop/src/loop_rows.test.rs', added: ['#[test]'], removed: [] },
-      { path: 'crates/symbio-sdk/src/authz/rows.gen.rs', added: ['X', 'Y'], removed: ['Z'] },
+      { path: 'crates/symbio-platform/src/sdk/authz/rows.gen.rs', added: ['X', 'Y'], removed: ['Z'] },
       { path: LOOP, added: [], removed: ['row!("memory")'] },
     ]),
     [],
@@ -335,7 +335,7 @@ test('migrationErrors：迁移中改测试与 .gen.rs 不判（断言与镜像�
 // ── 搬迁口径：净变化（D-404）─────────────────────────────────────────────
 
 const API_TEXT = 'crates/symbio-plugin-api/src/text.rs'
-const SDK_TEXT = 'crates/symbio-sdk/src/text.rs'
+const SDK_TEXT = 'crates/symbio-platform/src/sdk/text.rs'
 const MOVED = ['pub fn count(s: &str) -> usize { s.len() }', 'pub struct Tokenizer;']
 
 /** 一份「实现从 plugin-api 搬进 sdk」的补丁；`stub` 为 false 时故意不留 `pub use`。 */
@@ -344,7 +344,7 @@ function relocationPatch({ toLines = MOVED.length, stub = true } = {}) {
     {
       path: API_TEXT,
       removed: MOVED,
-      added: stub ? ['pub use symbio_sdk::text::*;'] : [],
+      added: stub ? ['pub use symbio_platform::sdk::text::*;'] : [],
     },
     {
       path: SDK_TEXT,
@@ -388,7 +388,7 @@ test('classifyCommit：净零搬迁是 relocation（不记欠账），净减仍�
   const zero = patchOf(relocationPatch())
   assert.equal(classifyCommit({ message: relocationMessage(), patch: zero }), 'relocation')
   const shrink = patchOf([
-    { path: API_TEXT, removed: MOVED, added: ['pub use symbio_sdk::text::*;'] },
+    { path: API_TEXT, removed: MOVED, added: ['pub use symbio_platform::sdk::text::*;'] },
     { path: SDK_TEXT, added: [MOVED[0]], removed: [] },
   ])
   assert.equal(classifyCommit({ message: relocationMessage(2, 1), patch: shrink }), 'migration')
@@ -428,7 +428,7 @@ test('relocationErrors 红 3：搬走 plugin-api 实现却不留 `pub use` ⇒ E
 
 test('relocationErrors 红 3：零扩展消费方的模块搬走不要求空转转发（D-416）', () => {
   const from = 'crates/symbio-plugin-api/src/zz_fixture.rs'
-  const to = 'crates/symbio-sdk/src/zz_fixture.rs'
+  const to = 'crates/symbio-platform/src/sdk/zz_fixture.rs'
   const message = `feat: 搬内部枚举进 sdk\n\nMigration: D-416\nfrom: ${from} (1)\nto: ${to} (1)`
   const files = [
     { path: from, removed: ['pub fn helper() {}'], added: [] },
@@ -439,8 +439,8 @@ test('relocationErrors 红 3：零扩展消费方的模块搬走不要求空转�
 
 test('crossTreeMoves：同树内删了又加不算搬家', () => {
   const same = patchOf([
-    { path: 'crates/symbio-sdk/src/a.rs', added: ['pub fn helper() {}'], removed: [] },
-    { path: 'crates/symbio-sdk/src/b.rs', added: [], removed: ['pub fn helper() {}'] },
+    { path: 'crates/symbio-platform/src/sdk/a.rs', added: ['pub fn helper() {}'], removed: [] },
+    { path: 'crates/symbio-platform/src/sdk/b.rs', added: [], removed: ['pub fn helper() {}'] },
   ])
   assert.equal(crossTreeMoves(same).count, 0)
 })
@@ -450,16 +450,16 @@ test('crossTreeMoves：只含括号 / 标点的行不算跨树搬迁（D-437）'
   // 「删掉一个文件 + 改另一个文件」的提交都会凭空多出十几行搬迁记录，于是提交者只能
   // 写一条假的 `from` / `to` 才过得了门——判据逼人撒谎，比漏判更糟。
   const p = patchOf([
-    { path: 'crates/symbio-kernel/src/llm/old.rs', deleted: true, removed: ['}', ');', '},', '};'] },
-    { path: 'crates/symbio-sdk/src/new.rs', new: true, added: ['}', ');', '},', '};'] },
+    { path: 'crates/symbio-platform/src/kernel/llm/old.rs', deleted: true, removed: ['}', ');', '},', '};'] },
+    { path: 'crates/symbio-platform/src/sdk/new.rs', new: true, added: ['}', ');', '},', '};'] },
   ])
   assert.equal(crossTreeMoves(p).count, 0)
 })
 
 test('crossTreeMoves：带名字的行仍然算搬迁（收窄只针对空壳行）', () => {
   const p = patchOf([
-    { path: 'crates/symbio-kernel/src/llm/old.rs', deleted: true, removed: ['pub fn round_trip(&self) -> Out;'] },
-    { path: 'crates/symbio-sdk/src/new.rs', new: true, added: ['pub fn round_trip(&self) -> Out;'] },
+    { path: 'crates/symbio-platform/src/kernel/llm/old.rs', deleted: true, removed: ['pub fn round_trip(&self) -> Out;'] },
+    { path: 'crates/symbio-platform/src/sdk/new.rs', new: true, added: ['pub fn round_trip(&self) -> Out;'] },
   ])
   assert.equal(crossTreeMoves(p).count, 1)
 })
@@ -469,8 +469,8 @@ test('crossTreeMoves：只有名字的字段初始化不算搬迁（`reads: &[],
   // 加一处（行侧）在 diff 里就是「跨树搬了一行」。它既不是声明也不是实现块，按搬迁判
   // 只会逼提交者补一条与自己意思无关的 `from` / `to`（同 `}` / `);` 那条，`D-437`）。
   const p = patchOf([
-    { path: 'crates/symbio-kernel/src/decl/mod.rs', removed: ['    reads: &[],'], added: [] },
-    { path: 'crates/symbio-sdk/src/declarations.test.rs', added: ['        reads: &[],'], removed: [] },
+    { path: 'crates/symbio-platform/src/kernel/decl/mod.rs', removed: ['    reads: &[],'], added: [] },
+    { path: 'crates/symbio-platform/src/sdk/declarations.test.rs', added: ['        reads: &[],'], removed: [] },
   ])
   assert.equal(crossTreeMoves(p).count, 0)
 })
@@ -479,10 +479,10 @@ test('mechanismAdditions：同名公开项也在机制面被删掉 ⇒ 不算新
   // 拆文件：旧文件整份消失，留下来的那半在新文件里「整份是新增」；
   // 换签名：新旧行文本不同，但声明的是同一个名字。两者都没让机制面变宽。
   const p = patchOf([
-    { path: 'crates/symbio-kernel/src/llm/model_provider.rs', deleted: true, removed: ['pub enum ModelFinishReason {'] },
-    { path: 'crates/symbio-kernel/src/llm/model.rs', new: true, added: ['pub enum ModelFinishReason {'] },
+    { path: 'crates/symbio-platform/src/kernel/llm/model_provider.rs', deleted: true, removed: ['pub enum ModelFinishReason {'] },
+    { path: 'crates/symbio-platform/src/kernel/llm/model.rs', new: true, added: ['pub enum ModelFinishReason {'] },
     {
-      path: 'crates/symbio-kernel/src/capability/row.rs',
+      path: 'crates/symbio-platform/src/kernel/capability/row.rs',
       removed: ['pub fn model(provider: Provider) -> Self {'],
       added: ['pub fn model(provider_id: &str) -> Self {'],
     },
@@ -492,8 +492,8 @@ test('mechanismAdditions：同名公开项也在机制面被删掉 ⇒ 不算新
 
 test('mechanismAdditions：真新增的公开项照样点名（抵账只认同名）', () => {
   const p = patchOf([
-    { path: 'crates/symbio-kernel/src/llm/model_provider.rs', deleted: true, removed: ['pub enum ModelFinishReason {'] },
-    { path: 'crates/symbio-sdk/src/port.rs', new: true, added: ['pub trait PortExecutor {'] },
+    { path: 'crates/symbio-platform/src/kernel/llm/model_provider.rs', deleted: true, removed: ['pub enum ModelFinishReason {'] },
+    { path: 'crates/symbio-platform/src/sdk/port.rs', new: true, added: ['pub trait PortExecutor {'] },
   ])
   assert.equal(mechanismAdditions(p).length, 1)
 })
@@ -502,12 +502,12 @@ test('mechanismAdditions：同文件改名（同形状、换词根）不算补�
   // turn→scope 的两笔欠账：改的是词根，声明形状一字未变，机制面没有变宽。
   const p = patchOf([
     {
-      path: 'crates/symbio-sdk/src/round/node_build.rs',
+      path: 'crates/symbio-platform/src/sdk/round/node_build.rs',
       removed: ['pub fn turn_root_of(node: &ChatNode) -> Option<&str> {'],
       added: ['pub fn scope_root_of(node: &ChatNode) -> Option<&str> {'],
     },
     {
-      path: 'crates/symbio-sdk/src/test_fixtures.rs',
+      path: 'crates/symbio-platform/src/sdk/test_fixtures.rs',
       removed: [
         'pub const EVENT_TURN_BRANCH: &str = "turn.branch";',
         'pub const EVENT_TURN_BRANCH_SELECTED: &str = "turn.branch_selected";',
@@ -525,7 +525,7 @@ test('mechanismAdditions：改名抵掉同形状后，多出来的真新增仍�
   // 删 1 个、加 2 个（其中 1 个是改名、1 个是真新增）⇒ 只点名真新增那条。
   const p = patchOf([
     {
-      path: 'crates/symbio-sdk/src/round/node_build.rs',
+      path: 'crates/symbio-platform/src/sdk/round/node_build.rs',
       removed: ['pub fn turn_root_of(node: &ChatNode) -> Option<&str> {'],
       added: [
         'pub fn scope_root_of(node: &ChatNode) -> Option<&str> {',
@@ -542,7 +542,7 @@ test('mechanismAdditions：只增不减时，即便形状彼此相同也不互�
   // 两个新增 const 形状相同但没有任何删除 ⇒ 都是真补件，不能自己抵自己。
   const p = patchOf([
     {
-      path: 'crates/symbio-sdk/src/test_fixtures.rs',
+      path: 'crates/symbio-platform/src/sdk/test_fixtures.rs',
       removed: [],
       added: [
         'pub const EVENT_ALPHA: &str = "alpha";',
@@ -683,7 +683,7 @@ test('supplementErrors：搬家行不算补件定制（D-279）', () => {
   // 那一行字没变、面也没变宽。夹具里把 id 换成本文件的 `notes`，道理相同。
   const line = 'pub const NOTES_TAG: &str = "notes";'
   const moved = movedLines(
-    patchOf([{ path: 'crates/symbio-sdk/src/actors/skill.rs', deleted: true, removed: [line] }]),
+    patchOf([{ path: 'crates/symbio-platform/src/sdk/actors/skill.rs', deleted: true, removed: [line] }]),
   )
   assert.deepEqual(supp('feat: 搬迁\n\nCore-Change: D-219', [{ path: CORE, added: [line], removed: [] }], { moved }), [])
 })
@@ -691,7 +691,7 @@ test('supplementErrors：搬家行不算补件定制（D-279）', () => {
 test('supplementErrors：搬家豁免只抵一次（同一行新增两处仍红）', () => {
   const line = 'pub const NOTES_TAG: &str = "notes";'
   const moved = movedLines(
-    patchOf([{ path: 'crates/symbio-sdk/src/actors/skill.rs', deleted: true, removed: [line] }]),
+    patchOf([{ path: 'crates/symbio-platform/src/sdk/actors/skill.rs', deleted: true, removed: [line] }]),
   )
   const errors = supp(
     'feat: 搬迁\n\nCore-Change: D-219',
@@ -713,7 +713,7 @@ test('supplementErrors：从 loop 删掉同一行再加进 sdk ⇒ 仍红（反�
 test('movedLines：只收「整份文件被删掉」的那些行', () => {
   const moved = movedLines(
     patchOf([
-      { path: 'crates/symbio-sdk/src/a.rs', deleted: true, removed: ['pub fn a() {}', ''] },
+      { path: 'crates/symbio-platform/src/sdk/a.rs', deleted: true, removed: ['pub fn a() {}', ''] },
       { path: LOOP, added: [], removed: ['pub fn b() {}'] },
     ]),
   )
