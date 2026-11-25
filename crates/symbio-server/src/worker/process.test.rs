@@ -286,3 +286,112 @@ async fn relayed_frames_do_not_stop_local_forwarding() {
     stop.cancel();
     task.await.expect("forward task");
 }
+
+#[tokio::test]
+async fn host_executor_runs_the_worker_protocol_over_duplex_io() {
+    use tokio::io::split;
+
+    let temp = tempfile::tempdir().expect("tempdir");
+    let homedir = temp.path().to_path_buf();
+    let session_id = "duplex";
+    let session_dir = homedir.join("session").join(session_id);
+    std::fs::create_dir_all(&session_dir).expect("session dir");
+    std::fs::write(
+        session_dir.join("session.json"),
+        json!({ "id": session_id }).to_string(),
+    )
+    .expect("session metadata");
+
+    let worker = EpochRegistry::new(session_id, &session_dir)
+        .expect("registry")
+        .allocate(BuildId::parse(format!("{:064x}", 1)).expect("build"))
+        .expect("epoch");
+    let bootstrap = WorkerBootstrap {
+        worker: worker.clone(),
+        homedir: homedir.clone(),
+        session_dir: session_dir.clone(),
+    };
+
+    let (control, unit) = tokio::io::duplex(super::super::protocol::MAX_LINE_BYTES);
+    let (control_read, mut control_write) = split(control);
+    let (unit_read, unit_write) = split(unit);
+    let mut control_read = BufReader::new(control_read);
+
+    let executor =
+        tokio::spawn(async move { run_worker_with_io(bootstrap, unit_read, unit_write).await });
+
+    let ready_line = tokio::time::timeout(
+        std::time::Duration::from_secs(5),
+        read_line(&mut control_read),
+    )
+    .await
+    .expect("ready timeout")
+    .expect("ready line")
+    .expect("ready frame");
+    let WorkerLine::Ready { worker: ready } =
+        serde_json::from_str(&ready_line).expect("ready parse")
+    else {
+        panic!("expected ready frame");
+    };
+    assert_eq!(ready, worker);
+
+    let message = PluginMessageWire {
+        metadata: json!({ "path": "home/get_homedir" }),
+        payload: json!({}),
+    };
+    let id = RequestId::parse("duplex-1").expect("id");
+    let inbox = DurableInbox::new(session_id, &session_dir).expect("inbox");
+    inbox
+        .enqueue(
+            InboxRequest::new(
+                id.as_str(),
+                message.metadata.clone(),
+                message.payload.clone(),
+                None,
+            )
+            .expect("inbox request"),
+        )
+        .expect("enqueue");
+    write_line(
+        &mut control_write,
+        &WorkerLine::Request {
+            id: id.clone(),
+            worker: worker.clone(),
+            message,
+        },
+    )
+    .await
+    .expect("request frame");
+
+    let response_line = tokio::time::timeout(
+        std::time::Duration::from_secs(5),
+        read_line(&mut control_read),
+    )
+    .await
+    .expect("response timeout")
+    .expect("response line")
+    .expect("response frame");
+    let WorkerLine::Response {
+        id: response_id,
+        result,
+    } = serde_json::from_str(&response_line).expect("response parse")
+    else {
+        panic!("expected response frame");
+    };
+    assert_eq!(response_id, id);
+    assert!(result.is_ok(), "response failed: {result:?}");
+
+    write_line(
+        &mut control_write,
+        &WorkerLine::Shutdown {
+            worker: worker.clone(),
+        },
+    )
+    .await
+    .expect("shutdown frame");
+    tokio::time::timeout(std::time::Duration::from_secs(5), executor)
+        .await
+        .expect("executor shutdown timeout")
+        .expect("executor task")
+        .expect("executor result");
+}

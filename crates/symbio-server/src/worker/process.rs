@@ -20,7 +20,7 @@ use symbio::symbio_plugin_api::{
 };
 use symbio::symbio_sdk::event_bus::EventBus;
 use symbio::symbio_sdk::keys::{PATH, SESSION_ID};
-use tokio::io::{stdin, stdout, BufReader};
+use tokio::io::{stdin, stdout, AsyncRead, AsyncWrite, BufReader};
 use tokio::sync::{mpsc, oneshot};
 use tokio::task::JoinSet;
 use tokio_util::sync::CancellationToken;
@@ -268,6 +268,19 @@ fn install_worker_ports<T: PluginInvokeRequest + 'static>(
 }
 
 pub async fn run_worker(bootstrap: WorkerBootstrap) -> Result<(), String> {
+    run_worker_with_io(bootstrap, stdin(), stdout()).await
+}
+
+/// 会话执行体主循环：stdio 与进程内 duplex 共用同一帧协议与恢复语义。
+pub(crate) async fn run_worker_with_io<I, O>(
+    bootstrap: WorkerBootstrap,
+    input: I,
+    output: O,
+) -> Result<(), String>
+where
+    I: AsyncRead + Unpin + Send + 'static,
+    O: AsyncWrite + Unpin + Send + 'static,
+{
     let WorkerBootstrap {
         worker,
         homedir,
@@ -305,7 +318,7 @@ pub async fn run_worker(bootstrap: WorkerBootstrap) -> Result<(), String> {
     .await
     .map_err(|error| error.to_string())?;
 
-    let mut stdout = stdout();
+    let mut stdout = output;
     let writer = tokio::spawn(async move {
         while let Some(line) = out_rx.recv().await {
             if let Err(error) = write_line(&mut stdout, &line).await {
@@ -385,7 +398,7 @@ pub async fn run_worker(bootstrap: WorkerBootstrap) -> Result<(), String> {
         }
     });
 
-    let mut stdin = BufReader::new(stdin());
+    let mut stdin = BufReader::new(input);
     loop {
         let line: Option<String> = read_line(&mut stdin)
             .await

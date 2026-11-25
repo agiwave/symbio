@@ -18,8 +18,8 @@ Symbio 有一个运行时实现和三种交付形态：CLI、Tauri 内嵌同一�
 模式仍是终端客户端。
 
 控制面持有 homedir（rootdir）、会话目录、审批、心跳与文件系统目录浏览。每个会话有且仅有
-一个活动执行 worker；默认落在宿主独立进程中，隔离模式把同一个 worker 放进容器。沙箱
-改变执行位置，不改变授权、审批或审计语义。
+一个活动执行体；默认落在宿主进程内，隔离模式把同一个执行体放进容器。沙箱改变执行位置，
+不改变授权、审批或审计语义。
 
 ## 关键决策
 
@@ -46,32 +46,33 @@ WebSocket 保留自身直至响应结束，避免连接自等待。
 
 ### D-537 一会话一 worker，沙箱只决定落点
 
-一个会话的活动执行体始终是一个独立 worker。`host` 是默认进程落点，不声称隔离；
-`container` 是同一 worker 的隔离落点。VM 后续复用同一启动边界。控制面不得再在 Server
+一个会话的活动执行体始终是一个独立执行体（D-555）。`host` 是默认进程内落点，不声称隔离；
+`container` 是同一执行体的独立进程落点。VM 后续复用同一启动边界。控制面不得再在 Server
 进程内直接执行会话工具，也不增加第三种与 host / container 并列的 process 模式。
-生产绑定已从 `RuntimeHost` 统一切换：会话作用域请求经 durable inbox 派发到同一二进制的
-隐藏 worker 入口，worker 的 VDFS 事件回传控制面总线；CLI / Tauri / Server 不再各自直调
-会话执行路径。worker 进程不启动心跳调度器，也不拉起 gateway 入站监听——它构造完整插件树只为执行端口，
+生产绑定已从 `RuntimeHost` 统一切换：会话作用域请求经 durable inbox 派发到当前落点的
+`SessionExecutor`；host 落点是同进程内的会话执行体，container 落点仍走同一二进制的隐藏
+worker 入口。执行体的 VDFS 事件回传控制面总线；CLI / Tauri / Server 不再各自直调
+会话执行路径。执行体不启动心跳调度器，也不拉起 gateway 入站监听——它构造完整插件树只为执行端口，
 入站与控制面同端口会让请求随机落到没有分发桥的那棵树上。
 
 ### D-538 worker 身份、持久入口与单写者
 
 `WorkerId = { session_id, epoch, build_id }`。epoch 对请求、事件、审批、子会话流与 homedir
-重载统一 fencing；每个会话只有当前 epoch 能改变状态。worker 在 ready 前取得会话 WAL
+重载统一 fencing；每个会话只有当前 epoch 能改变状态。执行体在 ready 前取得会话 WAL
 写锁，运行期直接持有该锁，控制面只读。控制面落盘的 durable inbox 是重启后恢复请求的
-唯一入口；会话元数据写操作只能交给 worker owner。心跳仍是控制面单例，不随会话复制。
+唯一入口；会话元数据写操作只能交给当前执行体 owner。心跳仍是控制面单例，不随会话复制。
 inbox 的状态转换与 epoch 登记分别在各自跨进程锁内完成：接受序号持久化且唯一；完成回执
 保留至会话退役，以支持跨重启的请求去重。
 
 ### D-539 子会话经 Supervisor 跨进程汇合
 
-子 Agent 会话同样拥有独立 worker。Supervisor 负责启动、停止、epoch 登记与父子事件 /
-审批路由；父 worker 不直接持有子进程对象。父 worker 经请求级 `session.subagent` 端口
+子 Agent 会话同样拥有独立执行体。Supervisor 负责启动、停止、epoch 登记与父子事件 /
+审批路由；父执行体不直接持有子执行体对象。父执行体经请求级 `session.subagent` 端口
 提交完整的 `PluginMessageWire`，Supervisor 先校验当前 epoch 与持久化父子归属，再启动
 或复用子 worker；子会话请求与其响应都经 durable inbox，pipe 身份负责帧来源校验。
 跨进程 VDFS 消息使用 `vdfs/root` 解析出的会话逻辑地址，并显式携带 `workdir`，不能把
 容器内相对地址当作宿主路由地址。子 worker 就绪后才接受请求，旧 epoch 的迟到帧一律
-丢弃。CLI / Tauri / Server 共用这一启动路径，不再保留父 worker 进程内执行子会话的
+丢弃。CLI / Tauri / Server 共用这一启动路径，不再保留父执行体进程内直接执行子会话的
 生产分支。
 
 ### D-540 容器默认拒绝越界能力
@@ -92,11 +93,12 @@ ready 必须先完成，之后才接受新请求。
 
 ### D-542 切换绑定与删除旧执行路径同提交
 
-per-session worker 成为唯一生产执行路径时，切换绑定与删除 Server / CLI / Tauri 的
+per-session 执行体成为唯一生产执行路径时，切换绑定与删除 Server / CLI / Tauri 的
 进程内会话执行路径必须发生在同一提交。不得保留双实现、双写或靠配置在两套语义间切换。
 顶层会话与子会话均已完成这一步：切换点在 `RuntimeHost` 与 Supervisor，CLI 不再
-直接打开会话 WAL 或调用 `session/project`，子会话也没有进程内生产执行分支。容器
-落点仍属后续工作，因此整体迁移保持 `partial`。本条沿用 D-245 的迁移纪律。
+直接打开会话 WAL 或调用 `session/project`，子会话也没有父进程内生产执行分支。D-555
+进一步把 host 默认落点从子进程收窄为进程内执行体，容器落点保留独立进程；两者共用同一
+执行协议，整体迁移仍随容器真实冒烟保持 `partial`。本条沿用 D-245 的迁移纪律。
 
 ### D-543 宿主执行绑定随异步事实驱动显式传递
 
@@ -221,7 +223,7 @@ Supervisor 只接受启动投影登记过的精确目标，剥离 worker 提供�
 ### D-552 事件转播标记归 Server：SDK 只留发布端口
 
 **现场**：跨 worker 事件的转播标记（`__relayed` 及其打标 / 判定函数）只被 Server 的
-Supervisor 与 worker 进程使用；SDK 里既有 event_bus 域的读者只有 Server，插件侧没有消费方。
+Supervisor 与各落点执行体使用；SDK 里既有 event_bus 域的读者只有 Server，插件侧没有消费方。
 它随 `D-546` 的驱动契约一起进了 SDK，使共享机制面多出三个公开项，EX-007 的欠账因此还剩
 一笔。
 
@@ -234,17 +236,38 @@ Supervisor 与 worker 进程使用；SDK 里既有 event_bus 域的读者只有 
 ### D-554 HTTP 入站调用统一经 RuntimeHost 分发
 
 **现场**：gateway 的 `POST /api/v1/invoke` 直接 `parent.route()` 控制面插件树，而 native IPC
-经 `RuntimeHost::invoke` 先问 Supervisor。会话 worker 化之后，同一条 `vdfs/write` 从 HTTP
-进来会落在控制面的 session 插件上；它拿不到 worker 持有的 WAL 写者令牌，于是忙窗插话、
+经 `RuntimeHost::invoke` 先问 Supervisor。会话执行体化之后，同一条 `vdfs/write` 从 HTTP
+进来会落在控制面的 session 插件上；它拿不到执行体持有的 WAL 写者令牌，于是忙窗插话、
 压缩 / 分支重试都报 `user.message 落格失败: NotTheWriter`。
 
 **裁决**：`symbio-http` 提供运行时调用分发桥（`InvokeDispatcher`），`RuntimeHost::create`
 在构造插件树之前先注册分发器占位（gateway 入站随构造期异步监听，事后注册会留下写请求落到
-控制面的窗口）；gateway ingress 只保留鉴权、幂等与只读策略，会话 worker 调用先交分发器，
+控制面的窗口）；gateway ingress 只保留鉴权、幂等与只读策略，会话执行体调用先交分发器，
 控制面调用仍由 ingress 自己的插件树边界裁决，未注册分发器时同样退回构造期插件树以支撑独立
 ingress 测试。HTTP / WS 的会话路径与 native IPC 从此共用同一条 worker 路由判据，transport
 不持有宿主实现，停止宿主时注销分发桥。心跳是控制面单例，它的自主触发同样经这条桥投递；
 worker 内的插件配置由每次能力收集从磁盘重读，避免控制面热切只更新自己那棵树。
+
+### D-555 SessionExecutor 端口：一会话一执行体，落点可替换
+
+**现场**：D-537 把「独立 worker」具体实现成 host 模式下每会话一个 OS 进程。该选择在 host
+模式没有换来隔离（D-537 明说不声称），却带来全局分发桥、worker 不启入站、跨进程事件
+转播、配置按轮重读、前端 homedir 回放与 e2e 读写串行等补偿层。进程数成了架构公理，而
+不是执行环境的可替换落点。
+
+**裁决**：架构形状从「一会话一 worker 进程」改为「一会话一执行体」。控制面只认识
+`SessionExecutor` 端口（启动 / 投递 / 取消 / 停止 / 事件流）；host 落点是同进程内的会话
+执行体——独立插件树、独立 epoch、durable inbox 与 WAL 写锁仍归该执行体；container 落点
+保留独立进程 / 容器，复用同一帧协议与恢复语义。两种落点共用同一套执行契约与回归测试，
+进程数量只是落点实现细节。D-538 的单写者、D-541 的恢复边界、D-545 的控制面读口、D-554
+的统一分发桥继续有效；它们服务会话语义，不服务进程边界本身。
+
+**后果**：host 模式不再从 `current_exe` 派生 `__worker` 子进程，也不再维护 pid / stdio
+reader；容器模式继续走隐藏 worker 入口。旧 host 进程路径与进程内执行体必须在同一提交中
+原子切换，不保留双实现（D-542）。host 执行体与宿主共用进程级事件总线：插件发布即已到达
+所有本地订阅者，监督者不得把同一帧再次回灌总线或转给另一个 host 执行体；跨进程事件仍由
+监督者中继给容器落点。本条不声称进程、网络或容器隔离；授权、审批、审计与事实语义不随
+落点改变，沙箱事实不进入承诺或义务记账。
 
 ## 验收边界
 
@@ -253,4 +276,4 @@ worker 内的插件配置由每次能力收集从磁盘重读，避免控制面�
   切回 native。
 - 同一会话出现两个可写 epoch、worker 未持 WAL 锁即 ready、旧 epoch 事件被消费，均判失败。
 - 容器缺 Docker、镜像摘要、受限挂载或凭证通道时，隔离模式不得退化为宿主执行。
-- 旧执行路径删除前，不声称已完成一会话一进程迁移。
+- 旧执行路径删除前，不声称已完成一会话一执行体迁移。

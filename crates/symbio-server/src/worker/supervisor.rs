@@ -18,8 +18,8 @@ use symbio::symbio_plugin_api::{
 use symbio::symbio_sdk::event_bus::EventBus;
 use symbio::symbio_sdk::keys::{PATH, SESSION_ID, WORKDIR};
 use symbio::symbio_sdk::vdfs::{declared_addr_root, join_addr};
-use tokio::io::BufReader;
-use tokio::process::{Child, Command};
+use tokio::io::{split, AsyncRead, AsyncWrite, BufReader};
+use tokio::process::Child;
 use tokio::sync::{mpsc, oneshot, Mutex, RwLock as AsyncRwLock};
 use tokio_util::sync::CancellationToken;
 use tracing::{debug, info, warn};
@@ -29,8 +29,13 @@ use super::container::{self, BrokerTarget, WorkerConfig, WorkerMode};
 use super::epoch::EpochRegistry;
 use super::event_relay::{is_relayed, mark_relayed};
 use super::id::validate_session_id;
-use super::protocol::{read_line, write_line, WorkerLine, CONTROL_CHANNEL_CAPACITY};
-use super::{BuildId, DurableInbox, InboxRequest, RequestId, WorkerError, WorkerId};
+use super::process::run_worker_with_io;
+use super::protocol::{
+    read_line, write_line, WorkerLine, CONTROL_CHANNEL_CAPACITY, MAX_LINE_BYTES,
+};
+use super::{
+    BuildId, DurableInbox, InboxRequest, RequestId, WorkerBootstrap, WorkerError, WorkerId,
+};
 
 const WORKER_READY_TIMEOUT: std::time::Duration = std::time::Duration::from_secs(60);
 const WORKER_SHUTDOWN_TIMEOUT: std::time::Duration = std::time::Duration::from_secs(30);
@@ -79,6 +84,8 @@ enum Outgoing {
 
 struct WorkerState {
     worker: WorkerId,
+    /// host 进程内执行体与宿主共享事件总线；它的事件已经直接投递过，不再回灌。
+    local: bool,
     sender: mpsc::Sender<Outgoing>,
     pending: Mutex<HashMap<RequestId, oneshot::Sender<Result<Value, String>>>>,
     resync_pending: AtomicBool,
@@ -852,44 +859,44 @@ async fn spawn_worker(
             let targets = launch.targets.clone();
             let child = launch.spawn().await?;
             let runtime = launch.runtime;
-            (child, Some(runtime), cleanup, targets, token)
+            (Some(child), Some(runtime), cleanup, targets, token)
         } else {
-            let executable = std::env::current_exe().map_err(|e| e.to_string())?;
-            let mut command = Command::new(executable);
-            command.env_clear();
-            for key in ["PATH", "SystemRoot", "WINDIR", "TEMP", "TMP"] {
-                if let Some(value) = std::env::var_os(key) {
-                    command.env(key, value);
-                }
-            }
-            command
-                .arg("__worker")
-                .arg("--session")
-                .arg(worker.session_id())
-                .arg("--session-dir")
-                .arg(&session_dir)
-                .arg("--epoch")
-                .arg(worker.epoch().value().to_string())
-                .arg("--build")
-                .arg(worker.build_id().as_str())
-                .arg("--homedir")
-                .arg(&homedir)
-                .env("SYMBIO_PROCESS_ROLE", "worker")
-                .stdin(std::process::Stdio::piped())
-                .stdout(std::process::Stdio::piped())
-                .stderr(std::process::Stdio::inherit())
-                .kill_on_drop(true);
-            let child = command.spawn().map_err(|e| e.to_string())?;
-            (child, None, None, HashMap::new(), String::new())
+            (None, None, None, HashMap::new(), String::new())
         };
-    let child_id = child.id();
-    let stdin = child.stdin.take().ok_or("worker stdin 不可用")?;
-    let stdout = child.stdout.take().ok_or("worker stdout 不可用")?;
+
+    // D-555：host 落点是进程内执行体；只有 container 仍派生独立进程。
+    // 两条路径共用 WorkerLine 帧协议、durable inbox、epoch 与 WAL 租约语义。
+    let stdin: Box<dyn AsyncWrite + Unpin + Send>;
+    let stdout: Box<dyn AsyncRead + Unpin + Send>;
+    let mut executor = None;
+    if let Some(ref mut child) = child {
+        stdin = Box::new(child.stdin.take().ok_or("worker stdin 不可用")?);
+        stdout = Box::new(child.stdout.take().ok_or("worker stdout 不可用")?);
+    } else {
+        let (control, unit) = tokio::io::duplex(MAX_LINE_BYTES);
+        let (control_read, control_write) = split(control);
+        let (unit_read, unit_write) = split(unit);
+        let bootstrap = WorkerBootstrap {
+            worker: worker.clone(),
+            homedir: homedir.clone(),
+            session_dir: session_dir.clone(),
+        };
+        let executor_worker = worker.clone();
+        executor = Some(tokio::spawn(async move {
+            if let Err(error) = run_worker_with_io(bootstrap, unit_read, unit_write).await {
+                warn!(%error, worker = %executor_worker, "host 执行体退出");
+            }
+        }));
+        stdin = Box::new(control_write);
+        stdout = Box::new(control_read);
+    }
+    let child_id = child.as_ref().map(|child| child.id());
 
     let (sender, outgoing) = mpsc::channel::<Outgoing>(CONTROL_CHANNEL_CAPACITY);
     let stop = CancellationToken::new();
     let state = Arc::new(WorkerState {
         worker: worker.clone(),
+        local: child_id.is_none(),
         sender,
         pending: Mutex::new(HashMap::new()),
         resync_pending: AtomicBool::new(false),
@@ -959,6 +966,7 @@ async fn spawn_worker(
         state: state.clone(),
         child,
         stdout,
+        executor,
         ready: ready_tx,
         targets,
         broker_token,
@@ -972,7 +980,10 @@ async fn spawn_worker(
     let ready = tokio::time::timeout(WORKER_READY_TIMEOUT, ready_rx).await;
     let error = match ready {
         Ok(Ok(Ok(()))) => {
-            info!(worker = %worker, pid = child_id, "worker 已就绪");
+            match child_id {
+                Some(pid) => info!(worker = %worker, pid, "worker 已就绪"),
+                None => info!(worker = %worker, "会话执行体已就绪（进程内）"),
+            }
             return Ok(state);
         }
         Ok(Ok(Err(error))) => error,
@@ -1004,8 +1015,9 @@ struct WorkerReader {
     expected: WorkerId,
     done: CancellationToken,
     state: Arc<WorkerState>,
-    child: Child,
-    stdout: tokio::process::ChildStdout,
+    child: Option<Child>,
+    stdout: Box<dyn AsyncRead + Unpin + Send>,
+    executor: Option<tokio::task::JoinHandle<()>>,
     ready: oneshot::Sender<Result<(), String>>,
     targets: HashMap<String, BrokerTarget>,
     broker_token: String,
@@ -1022,8 +1034,9 @@ async fn read_worker(reader: WorkerReader, stop: CancellationToken) {
         expected,
         done,
         state,
-        mut child,
+        child,
         stdout,
+        executor,
         ready,
         targets,
         broker_token,
@@ -1072,13 +1085,7 @@ async fn read_worker(reader: WorkerReader, stop: CancellationToken) {
                         }
                     }
                     WorkerLine::Event { frame } => {
-                        publish_frame(frame.clone());
-                        let workers: Vec<_> = inner.workers.lock().await.iter().map(|(id, worker)| (id.clone(), Arc::clone(worker))).collect();
-                        for (session_id, worker) in workers {
-                            if expected.session_id() != session_id {
-                                relay_event(&worker, frame.clone());
-                            }
-                        }
+                        route_worker_event(&inner, &state, &expected, frame).await;
                     }
                     WorkerLine::StartSubagent { id, child_session_id, message } => {
                         if let Err(error) = ensure_running(&inner) {
@@ -1191,8 +1198,18 @@ async fn read_worker(reader: WorkerReader, stop: CancellationToken) {
     stop.cancel();
     brokers.stop().await;
     drop(broker_tx);
-    if let Err(error) = child.kill().await {
-        warn!(%error, "停止 worker 进程失败");
+    if let Some(mut child) = child {
+        if let Err(error) = child.kill().await {
+            warn!(%error, "停止 worker 进程失败");
+        }
+    }
+    if let Some(handle) = executor {
+        if !handle.is_finished() {
+            handle.abort();
+        }
+        if let Err(error) = handle.await {
+            warn!(%error, "host 执行体任务异常退出");
+        }
     }
     if let Some((config, name)) = container_cleanup {
         if let Err(error) = container::remove_container(&config, &name).await {
@@ -1202,6 +1219,30 @@ async fn read_worker(reader: WorkerReader, stop: CancellationToken) {
     drop(container_runtime);
     info!(worker = %expected, "worker 已退出");
     done.cancel();
+}
+
+async fn route_worker_event(
+    inner: &SupervisorInner,
+    state: &WorkerState,
+    expected: &WorkerId,
+    frame: PluginFrame,
+) {
+    // host 执行体与宿主共用事件总线：插件发布时前端已经收到这一帧，
+    // 监督者再投一次会让流式正文叠字。容器 worker 仍需监督者跨进程回灌。
+    if !state.local {
+        publish_frame(frame.clone());
+    }
+    let workers: Vec<_> = inner
+        .workers
+        .lock()
+        .await
+        .iter()
+        .filter(|(id, worker)| expected.session_id() != **id && !worker.local)
+        .map(|(id, worker)| (id.clone(), Arc::clone(worker)))
+        .collect();
+    for (_, worker) in workers {
+        relay_event(&worker, frame.clone());
+    }
 }
 
 fn publish_frame(frame: PluginFrame) {

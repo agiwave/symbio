@@ -65,7 +65,8 @@ export const BASELINE = {
   //   当前 2152 = `cargo test --workspace` 的本地求和。逐次增减的归属见
   //   `git log -S'rustTests'` 与各提交的「门禁：」段——**这里不记变更史**：原先 147 行
   //   「A → B」注释里只有最后一条会被 `baselineWaivers` 读到（Map 按键覆盖），其余是死重量。
-  rustTests: 2152,
+  // baseline-allow rustTests: 2152 → 2153（+1，D-555）——新增 host 进程内执行体的 duplex 协议回归用例；host 不再派生 __worker 子进程，同一 WorkerLine / inbox / epoch 语义由进程内执行体承担。纯新增判据。
+  rustTests: 2153,
   kernelRustTests: 131,
 
   // baseline-allow ciRustTestsTotal: CI 侧同一口径（同一条 `cargo test --workspace`、同一批
@@ -97,7 +98,9 @@ export const BASELINE = {
   //   22 条判据：broker 7（fencing / 取消 / 凭证注入 / 输入与配置拒绝 / 错误不外泄 / 头过滤）、
   //   shim 6（target / 分片 / 背压 / 端到端 / 截断 / 断连取消）、container 9（镜像与摘要、
   //   workdir 与凭证、UID 权限、安全上限、投影脱敏与符号链接、目标路由）。非侵蚀：全是新增用例。
-  ciRustTestsTotal: 2601,
+  // baseline-allow ciRustTestsTotal: 2601 → 2603（+2，D-555）——新增两条判据：host 执行体
+  // duplex 帧协议往返，以及监督者不把 host 帧回灌总线 / 不转给另一 host 执行体。纯新增判据。
+  ciRustTestsTotal: 2603,
   cliRustTests: 23,
   tauriRustTests: 5,
   // doc-link-allow D-010: 下一行是退役文件的历史叙述（已把这两个文件删掉），不是入链

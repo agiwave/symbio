@@ -397,6 +397,7 @@ async fn deleting_a_session_stops_its_worker_subtree_only() {
             id.to_string(),
             Arc::new(WorkerState {
                 worker,
+                local: false,
                 sender,
                 pending: Mutex::new(HashMap::new()),
                 resync_pending: AtomicBool::new(false),
@@ -454,6 +455,75 @@ async fn subagent_rejects_payload_targeting_another_session() {
 }
 
 #[tokio::test]
+async fn local_executor_events_are_not_relayed_to_other_local_executors() {
+    let temp = tempfile::tempdir().expect("tempdir");
+    let supervisor = WorkerSupervisor::new(temp.path().to_path_buf()).expect("supervisor");
+    let new_worker = |session: &str, epoch: u64| {
+        WorkerId::new(
+            session,
+            crate::worker::Epoch::new(epoch).expect("epoch"),
+            supervisor.inner.build_id.clone(),
+        )
+        .expect("worker")
+    };
+    let (source_tx, _source_rx) = mpsc::channel(1);
+    let source = Arc::new(WorkerState {
+        worker: new_worker("source", 1),
+        local: true,
+        sender: source_tx,
+        pending: Mutex::new(HashMap::new()),
+        resync_pending: AtomicBool::new(false),
+        stop: CancellationToken::new(),
+        done: CancellationToken::new(),
+    });
+    let (local_tx, mut local_rx) = mpsc::channel(4);
+    let local = Arc::new(WorkerState {
+        worker: new_worker("local", 2),
+        local: true,
+        sender: local_tx,
+        pending: Mutex::new(HashMap::new()),
+        resync_pending: AtomicBool::new(false),
+        stop: CancellationToken::new(),
+        done: CancellationToken::new(),
+    });
+    let (remote_tx, mut remote_rx) = mpsc::channel(4);
+    let remote = Arc::new(WorkerState {
+        worker: new_worker("remote", 3),
+        local: false,
+        sender: remote_tx,
+        pending: Mutex::new(HashMap::new()),
+        resync_pending: AtomicBool::new(false),
+        stop: CancellationToken::new(),
+        done: CancellationToken::new(),
+    });
+    {
+        let mut workers = supervisor.inner.workers.lock().await;
+        workers.insert("local".to_string(), Arc::clone(&local));
+        workers.insert("remote".to_string(), Arc::clone(&remote));
+    }
+
+    let frame = PluginFrame::data(event_bus_build_envelope(
+        "vdfs",
+        None,
+        json!({ "path": "session/source" }),
+    ));
+    route_worker_event(&supervisor.inner, &source, &source.worker, frame).await;
+
+    let Outgoing::Event { frame: relayed } = remote_rx.recv().await.expect("remote event") else {
+        panic!("expected remote event");
+    };
+    assert_eq!(
+        relayed.value().expect("frame")["data"]["kind"],
+        "vdfs",
+        "跨进程事件应原样投递（中继标记在写帧时补）"
+    );
+    assert!(
+        local_rx.try_recv().is_err(),
+        "进程内执行体与宿主共享总线，不应再收到中继帧"
+    );
+}
+
+#[tokio::test]
 async fn full_event_destination_does_not_block_relay_and_receives_one_resync() {
     let temp = tempfile::tempdir().expect("tempdir");
     let supervisor = WorkerSupervisor::new(temp.path().to_path_buf()).expect("supervisor");
@@ -464,6 +534,7 @@ async fn full_event_destination_does_not_block_relay_and_receives_one_resync() {
     let (sender, mut receiver) = mpsc::channel(1);
     let destination = Arc::new(WorkerState {
         worker,
+        local: false,
         sender,
         pending: Mutex::new(HashMap::new()),
         resync_pending: AtomicBool::new(false),
@@ -519,6 +590,7 @@ async fn cancelled_dispatch_removes_pending_reply_and_durable_record() {
     let (sender, mut receiver) = mpsc::channel(1);
     let state = Arc::new(WorkerState {
         worker,
+        local: false,
         sender,
         pending: Mutex::new(HashMap::new()),
         resync_pending: AtomicBool::new(false),

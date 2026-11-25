@@ -43,9 +43,11 @@ symbio-cli serve --bind 127.0.0.1 --port 9231 --homedir <系统根> --frontend-d
 宿主目录入口是 `GET /api/v1/host/runtime` 与
 `GET /api/v1/host/directories?path=<Server 路径>`；两者都要求鉴权，且只返回目录信息。
 
-一会话一 worker 的生产绑定已落到 `RuntimeHost`：会话作用域请求经 durable inbox 派发到
-独立 worker 进程，顶层与子会话使用同一 Supervisor，worker 的事件回传控制面总线。独立
-进程与容器落点都不宣称隔离；授权、审批、审计与事实语义不随落点改变，目标拓扑见
+一会话一执行体的生产绑定已落到 `RuntimeHost`：会话作用域请求经 durable inbox 派发到
+`SessionExecutor` 端口的当前落点——host 为进程内执行体，container 为独立容器进程；顶层
+与子会话使用同一 Supervisor；host 插件的事件直接投递进程总线，container 事件由监督者
+跨进程回灌，监督者只把事件中继给其他容器落点。两种落点都不宣称隔离；授权、
+审批、审计与事实语义不随落点改变，目标拓扑见
 [DE-060](../../docs/003-design/060-Server运行时与会话执行.md)。
 
 ## 容器 worker

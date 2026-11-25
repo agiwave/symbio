@@ -200,7 +200,5 @@
       "evidence": "docs/003-design/009-VDFS规范.md"
     }
   ],
-  "baseline-allow": [
-    "symbols@with_field|crates/symbio-kernel/src/vdfs/error.rs→(none) 共享路径错误构造已接入生产调用 D-533"
-  ]
+  "baseline-allow": []
 }
