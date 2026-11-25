@@ -51,7 +51,8 @@ WebSocket 保留自身直至响应结束，避免连接自等待。
 进程内直接执行会话工具，也不增加第三种与 host / container 并列的 process 模式。
 生产绑定已从 `RuntimeHost` 统一切换：会话作用域请求经 durable inbox 派发到同一二进制的
 隐藏 worker 入口，worker 的 VDFS 事件回传控制面总线；CLI / Tauri / Server 不再各自直调
-会话执行路径。worker 进程不启动心跳调度器。
+会话执行路径。worker 进程不启动心跳调度器，也不拉起 gateway 入站监听——它构造完整插件树只为执行端口，
+入站与控制面同端口会让请求随机落到没有分发桥的那棵树上。
 
 ### D-538 worker 身份、持久入口与单写者
 
@@ -123,8 +124,12 @@ future 在发送完成前丢弃时，同时撤销 reply 槽与尚未认领的 pe
 
 全局 VDFS 管理调用即使携带尚未持久化的临时会话上下文也留在控制面；只有 `session/*`
 动作或显式会话节点载荷才派发给 worker。具名会话仅在目标不存在且明确 `create` 时由控制面
-创建，既有会话的写入仍归 worker。显式 VDFS 路径是资源归属的唯一事实，metadata 的会话
-上下文可作 IPC 通道名，不得覆盖或否定路径中的叶节点。显式会话节点只认声明根下的
+创建，既有会话的写入仍归 worker。`session/stats` 与 `session/changes` 始终由控制面回答
+（会话不存在时答「有据的空」，存在时读快照），不把「会话不存在」伪装成 worker 路由失败。
+只读 VDFS 投影（`read` / `list` / `stat` / `tree` / `search`）同样留在控制面：读方一旦被派给
+worker，长驻读进程就会持有 WAL 写令牌，挡住真正要写的进程。显式 VDFS 路径是资源
+归属的唯一事实，metadata 的会话上下文可作 IPC 通道名，不得覆盖或否定路径中的叶节点。
+显式会话节点只认声明根下的
 `session/...` 或相对 `session/...`；其他挂载点与物理绝对路径里的同名片段不改变路由归属。
 嵌套子会话按逻辑地址的叶节点
 归属路由，不因物理归档在父目录下而误派给父 worker。删除会话本体是控制面生命周期操作：
@@ -225,6 +230,21 @@ Supervisor 与 worker 进程使用；SDK 里既有 event_bus 域的读者只有 
 端口；`PluginFrame` 仍是现成内核语法，不为 Server 新增跨插件契约。事件语义、帧形状与
 背压补送路径逐字不变，只是标记的所有者从共享机制回到唯一读者。EX-007 按真实机制面净减
 记一笔迁移，抵掉 `D-546` 那一笔补件；不为消账改基线、不加到期豁免。
+
+### D-554 HTTP 入站调用统一经 RuntimeHost 分发
+
+**现场**：gateway 的 `POST /api/v1/invoke` 直接 `parent.route()` 控制面插件树，而 native IPC
+经 `RuntimeHost::invoke` 先问 Supervisor。会话 worker 化之后，同一条 `vdfs/write` 从 HTTP
+进来会落在控制面的 session 插件上；它拿不到 worker 持有的 WAL 写者令牌，于是忙窗插话、
+压缩 / 分支重试都报 `user.message 落格失败: NotTheWriter`。
+
+**裁决**：`symbio-http` 提供运行时调用分发桥（`InvokeDispatcher`），`RuntimeHost::create`
+在构造插件树之前先注册分发器占位（gateway 入站随构造期异步监听，事后注册会留下写请求落到
+控制面的窗口）；gateway ingress 只保留鉴权、幂等与只读策略，会话 worker 调用先交分发器，
+控制面调用仍由 ingress 自己的插件树边界裁决，未注册分发器时同样退回构造期插件树以支撑独立
+ingress 测试。HTTP / WS 的会话路径与 native IPC 从此共用同一条 worker 路由判据，transport
+不持有宿主实现，停止宿主时注销分发桥。心跳是控制面单例，它的自主触发同样经这条桥投递；
+worker 内的插件配置由每次能力收集从磁盘重读，避免控制面热切只更新自己那棵树。
 
 ## 验收边界
 

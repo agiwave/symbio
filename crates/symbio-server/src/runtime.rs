@@ -1,6 +1,7 @@
 use std::path::PathBuf;
-use std::sync::Arc;
+use std::sync::{Arc, OnceLock, Weak};
 
+use async_trait::async_trait;
 use serde_json::{json, Value};
 use symbio::init::create_root_plugin;
 use symbio::symbio_kernel::plugin::{
@@ -10,6 +11,7 @@ use symbio::symbio_kernel::plugin::{
 use symbio::symbio_plugin_api::routes::{ROUTE_HOME_GET_HOMEDIR, ROUTE_HOME_RELOAD};
 use symbio::symbio_plugin_api::{SymbioKey, VdfsCaller, VDFS_CALLER};
 use symbio::symbio_sdk::keys::{PATH, TRACE_ID};
+use symbio_http::{clear_invoke_dispatcher, set_invoke_dispatcher, InvokeDispatcher};
 use tracing::{debug, error};
 
 use crate::worker::WorkerSupervisor;
@@ -20,8 +22,42 @@ pub struct RuntimeHost {
     supervisor: Option<Arc<WorkerSupervisor>>,
 }
 
+struct RuntimeDispatcher {
+    host: OnceLock<Weak<RuntimeHost>>,
+}
+
+fn worker_reply_to_payload(reply: PluginMessageWire) -> Result<PluginPayload, String> {
+    match serde_json::from_value::<PluginPayloadWire>(reply.payload)
+        .map_err(|error| error.to_string())?
+    {
+        PluginPayloadWire::Data(value) => Ok(PluginPayload::new(&value)),
+        PluginPayloadWire::Connection(_) => Err("worker 不应返回跨进程会话通道".to_string()),
+    }
+}
+
+#[async_trait]
+impl InvokeDispatcher for RuntimeDispatcher {
+    async fn invoke_session(
+        &self,
+        message: PluginMessageWire,
+    ) -> Option<Result<PluginPayload, String>> {
+        let Some(host) = self.host.get().and_then(Weak::upgrade) else {
+            return Some(Err("运行时尚未就绪或已停止".to_string()));
+        };
+        host.route_session_invoke(message).await
+    }
+}
+
 impl RuntimeHost {
-    pub async fn create() -> Result<Self, String> {
+    pub async fn create() -> Result<Arc<Self>, String> {
+        // gateway 入站在插件树构造期就会异步监听；分发桥必须先占位，否则窗口期进来的
+        // 会话写请求会落到还没有 worker 语义的控制面树上。
+        let dispatcher = Arc::new(RuntimeDispatcher {
+            host: OnceLock::new(),
+        });
+        let concrete = Arc::<RuntimeDispatcher>::clone(&dispatcher);
+        let erased: Arc<dyn InvokeDispatcher> = concrete;
+        set_invoke_dispatcher(erased);
         let root = create_root_plugin().await;
         let bootstrap = Self {
             root,
@@ -44,10 +80,12 @@ impl RuntimeHost {
                     .unwrap_or_else(|| PathBuf::from(".symbio"))
             });
         let supervisor = WorkerSupervisor::new(homedir).map_err(|error| error.to_string())?;
-        Ok(Self {
+        let host = Arc::new(Self {
             root: bootstrap.root,
             supervisor: Some(Arc::new(supervisor)),
-        })
+        });
+        let _ = dispatcher.host.set(Arc::downgrade(&host));
+        Ok(host)
     }
 
     pub fn from_root(root: Arc<dyn Plugin>) -> Self {
@@ -62,6 +100,10 @@ impl RuntimeHost {
     }
 
     pub async fn invoke(&self, message: PluginMessageWire) -> Result<PluginPayload, String> {
+        self.route_invoke(message).await
+    }
+
+    async fn route_invoke(&self, message: PluginMessageWire) -> Result<PluginPayload, String> {
         if let Some(supervisor) = &self.supervisor {
             if let Some(payload) = supervisor
                 .invoke_delete(message.clone(), &self.root)
@@ -70,14 +112,7 @@ impl RuntimeHost {
                 return Ok(payload);
             }
             if let Some(reply) = supervisor.invoke(message.clone()).await? {
-                return match serde_json::from_value::<PluginPayloadWire>(reply.payload)
-                    .map_err(|error| error.to_string())?
-                {
-                    PluginPayloadWire::Data(value) => Ok(PluginPayload::new(&value)),
-                    PluginPayloadWire::Connection(_) => {
-                        Err("worker 不应返回跨进程会话通道".to_string())
-                    }
-                };
+                return worker_reply_to_payload(reply);
             }
         }
         let path = message
@@ -112,6 +147,23 @@ impl RuntimeHost {
             }
         }
         result
+    }
+
+    async fn route_session_invoke(
+        &self,
+        message: PluginMessageWire,
+    ) -> Option<Result<PluginPayload, String>> {
+        let supervisor = self.supervisor.as_ref()?;
+        match supervisor.invoke_delete(message.clone(), &self.root).await {
+            Ok(Some(payload)) => return Some(Ok(payload)),
+            Ok(None) => {}
+            Err(error) => return Some(Err(error.to_string())),
+        }
+        match supervisor.invoke(message.clone()).await {
+            Ok(Some(reply)) => Some(worker_reply_to_payload(reply)),
+            Ok(None) => None,
+            Err(error) => Some(Err(error.to_string())),
+        }
     }
 
     async fn control(&self, path: &str) -> Result<Value, String> {
@@ -160,6 +212,8 @@ impl RuntimeHost {
         if let Some(supervisor) = &self.supervisor {
             supervisor.shutdown().await;
         }
-        self.root.clone().stop(PluginStopReason::Shutdown).await
+        let result = self.root.clone().stop(PluginStopReason::Shutdown).await;
+        clear_invoke_dispatcher();
+        result
     }
 }

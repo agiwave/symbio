@@ -6,6 +6,7 @@
 use async_trait::async_trait;
 use serde::Serialize;
 use std::collections::HashMap;
+use std::sync::{Arc, RwLock};
 
 pub use symbio_kernel::plugin::PluginPayloadWire;
 use symbio_plugin_api::{PluginChannel, PluginMessageWire, PluginPayload};
@@ -116,6 +117,43 @@ pub trait Ingress: Send + Sync + 'static {
 
     /// 实时通道退出后通知 ingress，供宿主在热重载前 drain 所有浏览器连接。
     async fn realtime_closed(&self, _cancel: tokio_util::sync::CancellationToken) {}
+}
+
+/// 运行时调用分发桥：让入站 transport 不必持有具体宿主即可走同一条 worker / 控制面路由。
+#[async_trait]
+pub trait InvokeDispatcher: Send + Sync {
+    /// 只接管归 worker 的会话调用；返回 `None` 让 ingress 保留自己的控制面边界。
+    async fn invoke_session(
+        &self,
+        _message: PluginMessageWire,
+    ) -> Option<Result<PluginPayload, String>> {
+        None
+    }
+}
+
+static INVOKE_DISPATCHER: RwLock<Option<Arc<dyn InvokeDispatcher>>> = RwLock::new(None);
+
+pub fn set_invoke_dispatcher(dispatcher: Arc<dyn InvokeDispatcher>) {
+    *INVOKE_DISPATCHER
+        .write()
+        .unwrap_or_else(|poisoned| poisoned.into_inner()) = Some(dispatcher);
+}
+
+pub fn clear_invoke_dispatcher() {
+    *INVOKE_DISPATCHER
+        .write()
+        .unwrap_or_else(|poisoned| poisoned.into_inner()) = None;
+}
+
+/// `None` = 该分发器不接管这条会话调用；调用方保留自己的控制面边界。
+pub async fn dispatch_session_invoke(
+    message: PluginMessageWire,
+) -> Option<Result<PluginPayload, String>> {
+    let dispatcher = INVOKE_DISPATCHER
+        .read()
+        .unwrap_or_else(|poisoned| poisoned.into_inner())
+        .clone()?;
+    dispatcher.invoke_session(message).await
 }
 
 /// 普通 HTTP 请求的处理结果。

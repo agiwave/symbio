@@ -132,12 +132,13 @@ impl SessionPlugin {
         // 载荷 = 读方身份声明（可选）；带了却解析不出 ⇒ 拒绝（fail-closed），
         // 与 `session/stats` 同判据。
         let viewer: Option<String> = viewer_of(&ctx, "session/changes")?;
-        let source = self
+        // 纯读数口：只读快照，不持有写者令牌（会话 worker 才有资格写 WAL）。
+        let snapshot = self
             .get_store()
             .await?
-            .fact_source(&sid)
+            .read_events_opt(&sid)
             .map_err(PluginError::InternalError)?;
-        let changes = read_changes(&sid, source.map(|s| s.range(0)), viewer.as_deref());
+        let changes = read_changes(&sid, snapshot, viewer.as_deref());
         Ok(PluginPayload::new(&changes))
     }
 }

@@ -26,11 +26,13 @@ use std::hash::{Hash, Hasher};
 use std::sync::Arc;
 use std::time::Duration;
 use symbio_plugin_api::chat_node as cm;
+use symbio_plugin_api::routes::ROUTE_VDFS_WRITE;
 use symbio_plugin_api::PLUGIN_ID_SESSION;
 use symbio_plugin_api::{
-    clock_now_ms, vdfs_context, DynVdfsProvider, PluginInvokeRequest, PluginSimpleRequest,
-    VdfsContent, VdfsContext, VdfsNode, VdfsRequest, VdfsResponse, VdfsResult,
-    EVENT_TRIGGER_KIND_SCHEDULED, EVENT_TRIGGER_META_KEY, VDFS_STATUS_WORKING,
+    clock_now_ms, descend_addr, join_addr, vdfs_context, DynVdfsProvider, PluginInvokeRequest,
+    PluginMessageWire, PluginSimpleRequest, VdfsContent, VdfsContext, VdfsError, VdfsNode,
+    VdfsRequest, VdfsResponse, VdfsResult, EVENT_TRIGGER_KIND_SCHEDULED, EVENT_TRIGGER_META_KEY,
+    VDFS_STATUS_WORKING,
 };
 
 /// 扫描间隔（秒）
@@ -255,8 +257,22 @@ impl HeartbeatPlugin {
     ) -> VdfsResult<()> {
         let hb = HeartbeatConfig::from_metadata(&view.metadata);
         let message = trigger_message(&view.id, &hb, idle_ms);
-        let body = serde_json::to_string(&message)
-            .map_err(|e| symbio_plugin_api::VdfsError::Internal(e.to_string()))?;
+        let body =
+            serde_json::to_string(&message).map_err(|e| VdfsError::Internal(e.to_string()))?;
+        // 心跳只是控制面调度器：会话写臂归 worker，直接写本进程的 VDFS 会在 worker
+        // 持令牌时拿到 NotTheWriter。先走同一条会话分发桥；没有运行时（单测）仍用
+        // 构造期注入的 provider 兜底。
+        let addr = join_addr(
+            &descend_addr("", ""),
+            &format!("{PLUGIN_ID_SESSION}/{}/{SEG_INBOX}", view.id),
+        );
+        let invoke = PluginMessageWire {
+            metadata: json!({ "path": ROUTE_VDFS_WRITE }),
+            payload: json!({ "path": addr, "text": body }),
+        };
+        if let Some(result) = symbio_http::dispatch_session_invoke(invoke).await {
+            return result.map(|_| ()).map_err(VdfsError::Internal);
+        }
         provider
             .dispatch(
                 vctx,

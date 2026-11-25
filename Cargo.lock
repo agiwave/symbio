@@ -4424,6 +4424,7 @@ dependencies = [
  "futures",
  "serde",
  "serde_json",
+ "symbio-http",
  "symbio-plugin-api",
  "symbio-providers",
  "symbio-testkit",

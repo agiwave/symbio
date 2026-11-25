@@ -648,25 +648,26 @@ async fn facts_hands_out_one_shared_instance_per_session() {
     );
 }
 
-/// 只读面**不要求会话主体**：载体（`session.json`）读不到的会话照常开事实源。
+/// 只读面**不要求会话主体**：载体（`session.json`）读不到的会话照常读快照。
 ///
-/// D-339 的「拒绝回落主体」是**落账**的纪律（`@principal` 解析），不是打开处的闸：
+/// D-339 的「拒绝回落主体」是**落账**的纪律（`@principal` 解析），不是读面的闸：
 /// 在那里拒绝会把 `session/stats` / `session/changes` 一起判死——而它们根本不落账。
 /// 用户看到的后果是「每打开一个旧会话就报一次内部错误」，读数是永远出不来。
-#[tokio::test]
-async fn a_session_without_metadata_still_opens_its_fact_source() {
+#[test]
+fn a_session_without_metadata_still_reads_its_events() {
     let tmp = TempDir::new().unwrap();
     let store = SessionStore::new(tmp.path().to_path_buf());
-    save(&store, &session_with("sess_legacy", None)).await;
-    std::fs::remove_file(dir_for(tmp.path(), "sess_legacy").join("session.json"))
-        .expect("删掉元数据载体，模拟旧 / 损坏会话");
+    let dir = dir_for(tmp.path(), "sess_legacy");
+    std::fs::create_dir_all(&dir).expect("旧会话目录");
+    std::fs::write(dir.join("session.json"), "{}").expect("先造载体");
+    std::fs::remove_file(dir.join("session.json")).expect("删掉元数据载体，模拟旧 / 损坏会话");
 
     assert!(
         store
-            .fact_source("sess_legacy")
-            .expect("载体读不到不是打开失败")
+            .read_events_opt("sess_legacy")
+            .expect("载体读不到不是读失败")
             .is_some(),
-        "目录在 ⇒ 事实源照常打开（读面不需要主体）"
+        "目录在 ⇒ 只读快照照常回答（读面不需要主体）"
     );
 }
 
@@ -729,6 +730,33 @@ async fn drain_parked_lands_parked_edits_through_the_opening_window() {
         !pending.exists() || std::fs::read_dir(&pending).unwrap().next().is_none(),
         "寄存区应清空"
     );
+}
+
+/// 控制面读数口（`session/stats` / `changes` / 会话清单运行态）只取事件快照，
+/// 不许 `open` 写句柄：那会抢在会话 worker 前面持有写者令牌，让开轮的
+/// `user.message` 当场收到 `NotTheWriter`。
+#[test]
+fn control_plane_snapshot_does_not_steal_the_writer_lock() {
+    use symbio_kernel::event::Seq;
+    use symbio_kernel::store::Store as _;
+
+    let tmp = TempDir::new().unwrap();
+    let store = SessionStore::new(tmp.path().to_path_buf());
+    let dir = dir_for(tmp.path(), "sess_reader");
+    std::fs::create_dir_all(&dir).unwrap();
+    let writer = EventWalStore::open(dir.join(paths::V2_WAL_FILE)).unwrap();
+    assert!(writer.is_writer());
+
+    let events = store
+        .read_events_opt("sess_reader")
+        .expect("只读快照失败")
+        .expect("会话目录在，应回答 Some");
+    assert!(events.is_empty());
+
+    writer
+        .append(user_event("e1", "n1", "第一问", 1))
+        .expect("控制面读数不能抢走写者令牌");
+    assert_eq!(writer.range(Seq::new(0)).len(), 1);
 }
 
 /// 目录在、事实源**打不开** ⇒ `Err`，不是 `Ok(None)`。

@@ -88,6 +88,15 @@ fn config_definition() -> DetailDefinition {
     )
 }
 
+/// worker 构造完整插件树是为了拿到执行端口，不是为了对外服务：让它照宿主的入站配置
+/// 监听会与控制面的同一个端口打架，请求随机落到没有分发桥的那棵树上。
+fn effective_config(mut config: GatewayConfig, process_role: Option<&str>) -> GatewayConfig {
+    if process_role == Some("worker") {
+        config.inbound_enabled = false;
+    }
+    config
+}
+
 pub struct GatewayPlugin {
     config: Arc<RwLock<GatewayConfig>>,
     /// 配置文件的呈现与校验（`<根>/gateway/PLUGIN.yml`）——落盘写的是自己目录里的文件
@@ -110,6 +119,8 @@ impl GatewayPlugin {
                 GatewayConfig::default()
             }
         };
+        let role = std::env::var("SYMBIO_PROCESS_ROLE").ok();
+        let config = effective_config(config, role.as_deref());
         let parent = ctx.parent();
         let arc = Arc::new(Self::new(parent, config, dir));
         // 启动期若已启用入站服务，则拉起监听（配置变更后由 VDFS 写入路径重建）

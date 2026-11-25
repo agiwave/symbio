@@ -146,14 +146,20 @@ impl Ingress for GatewayIngress {
             .get(TRACE_ID.name())
             .and_then(Value::as_str)
             .unwrap_or("-");
-
         if self.readonly && !is_readonly_allowed(path, &message.payload) {
             warn!(trace_id = %trace_id, path = %path, "只读模式下拒绝调用");
             return Err(format!("只读模式下禁止调用: {path}"));
         }
 
-        let context = build_ctx(&message);
         debug!(trace_id = %trace_id, path = %path, "网关路由");
+        if let Some(result) = symbio_http::dispatch_session_invoke(message.clone()).await {
+            return result.map_err(|error| {
+                error!(trace_id = %trace_id, path = %path, error = %error, "运行时分发失败");
+                error
+            });
+        }
+        // 没有 RuntimeHost 分发器时（独立 ingress 单测）仍走构造期注入的插件树。
+        let context = build_ctx(&message);
         self.parent.clone().route(context).await.map_err(|error| {
             error!(trace_id = %trace_id, path = %path, error = %error, "网关路由失败");
             error.to_string()

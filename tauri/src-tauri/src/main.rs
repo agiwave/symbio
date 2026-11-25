@@ -75,11 +75,11 @@ fn main() {
         .setup(|app| {
             info!("Setup starting");
 
-            let host = Arc::new(tauri::async_runtime::block_on(async {
+            let host = tauri::async_runtime::block_on(async {
                 RuntimeHost::create()
                     .await
                     .map_err(std::io::Error::other)
-            })?);
+            })?;
             info!("RuntimeHost created with all plugins registered");
 
             let route_manager = Arc::new(RouteConnectionManager::new());

@@ -26,7 +26,7 @@ pub async fn run(args: ServeArgs) -> ExitCode {
     }
 
     let host = match RuntimeHost::create().await {
-        Ok(host) => Arc::new(host),
+        Ok(host) => host,
         Err(error) => {
             eprintln!("运行时启动失败: {error}");
             return ExitCode::FAILURE;

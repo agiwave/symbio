@@ -78,3 +78,36 @@ fn web_search_registration_publishes_configured_upstream_url_fact() {
         "https://html.duckduckgo.com/html/?q=rust"
     );
 }
+
+#[tokio::test]
+async fn search_facts_reread_config_written_by_another_process() {
+    let dir = PluginDir::at(
+        std::env::temp_dir().join("symbio-web-plugin-search-refresh"),
+        PLUGIN_ID_WEB,
+    );
+    let plugin = WebPlugin::new(None, WebConfig::default(), dir.clone());
+    let fresh = WebConfig {
+        search_api_base: "https://fresh.example/base/".to_string(),
+        tavily_api_key: Some("fresh-key".to_string()),
+        ..WebConfig::default()
+    };
+    std::fs::create_dir_all(dir.dir()).expect("插件目录");
+    std::fs::write(
+        dir.config_path(),
+        serde_json::to_string(&fresh).expect("配置可序列化"),
+    )
+    .expect("写入磁盘配置");
+
+    plugin.refresh_config().await;
+
+    let entry = plugin
+        .tool_impls
+        .iter()
+        .find(|entry| entry.meta.name == "web_search")
+        .expect("web_search 工具");
+    let ctx: Arc<dyn PluginInvokeRequest> =
+        Arc::new(PluginSimpleRequest::from_parts(serde_json::json!({}), None));
+    let facts =
+        entry.facts.as_ref().expect("事实回调")(&serde_json::json!({"query": "rust"}), &ctx);
+    assert_eq!(facts[0].value, "https://fresh.example/base/search");
+}

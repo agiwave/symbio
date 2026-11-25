@@ -10,6 +10,8 @@ import './styles/markdown.css'
 import App from './App.vue'
 import { useAppearanceStore } from './stores/appearance'
 import { initGatewayTransport } from './services/plugin'
+import { restoreHomedirAtStartup } from './services/home'
+import { setLocationError } from './services/systemLocation'
 import { ensureVdfsRoot } from './services/vdfs'
 
 const app = createApp(App)
@@ -20,6 +22,15 @@ app.use(router)
 // 在挂载前应用已持久化的外观设置（主题 / 字体大小）
 useAppearanceStore().apply()
 
+// 先定出站（embedded native / browser 同源 Server / remote HTTP），再把已持久化的
+// 本地 homedir 下发给目标后端；否则首次 vdfs/root 与数据列表仍按后端默认目录装配。
+await initGatewayTransport()
+try {
+  await restoreHomedirAtStartup()
+} catch (err) {
+  setLocationError(`启动恢复系统目录失败：${err instanceof Error ? err.message : String(err)}`)
+}
+
 // 挂载前引导 VDFS 根锚点（`vdfs/root`，见 schemas/vdfsRoot）：路由换算
 // （schemas/vdfsAddress）读它，必须先于首次导航就绪——顶层 await 消除
 // 「深链接直达 /vdfs/… 时锚点未就绪」的窗口。失败不阻断启动（降级为
@@ -27,7 +38,3 @@ useAppearanceStore().apply()
 await ensureVdfsRoot()
 
 app.mount('#app')
-
-// 启动期预读连接模型（Promise 已缓存）：embedded 默认 native，browser 默认同源 Server。
-// ensureVdfsRoot 的首次出站也会等待同一 Promise，不会与初始化竞态。
-void initGatewayTransport()

@@ -2,7 +2,7 @@
 
 use std::collections::HashMap;
 use std::io::ErrorKind;
-use std::net::IpAddr;
+use std::net::{IpAddr, ToSocketAddrs};
 use std::sync::atomic::{AtomicU64, Ordering};
 use std::sync::{Arc, Mutex};
 use std::time::Duration;
@@ -11,7 +11,7 @@ use base64::Engine;
 use serde_json::Value;
 use symbio_plugin_api::{PluginChannel, PluginFrame, PluginMessageWire, PluginPayload};
 use tokio::io::{AsyncRead, AsyncReadExt, AsyncWrite, AsyncWriteExt};
-use tokio::net::{TcpListener, TcpStream};
+use tokio::net::{TcpListener, TcpSocket, TcpStream};
 use tokio::sync::{OwnedSemaphorePermit, Semaphore};
 use tokio::task::JoinSet;
 use tokio_util::sync::CancellationToken;
@@ -73,6 +73,31 @@ pub async fn stop(handle: ServerHandle) {
     }
 }
 
+/// e2e 的端口探测 socket 带 `SO_REUSEADDR`；这里对齐同一语义，避免 Windows 上
+/// 探测通过、 Tokio bind 却撞 TIME_WAIT（os error 10048）。
+fn bind_reusable(bind: &str, port: u16) -> Result<TcpListener, String> {
+    let addr = (bind, port)
+        .to_socket_addrs()
+        .map_err(|e| format!("解析监听地址 {bind}:{port} 失败: {e}"))?
+        .next()
+        .ok_or_else(|| format!("监听地址 {bind}:{port} 无可用解析结果"))?;
+    let socket = if addr.is_ipv4() {
+        TcpSocket::new_v4()
+    } else {
+        TcpSocket::new_v6()
+    }
+    .map_err(|e| format!("创建监听 socket 失败: {e}"))?;
+    socket
+        .set_reuseaddr(true)
+        .map_err(|e| format!("设置 SO_REUSEADDR 失败: {e}"))?;
+    socket
+        .bind(addr)
+        .map_err(|e| format!("监听失败 {bind}:{port}: {e}"))?;
+    socket
+        .listen(1024)
+        .map_err(|e| format!("开始监听 {bind}:{port} 失败: {e}"))
+}
+
 pub async fn start(
     config: ServerConfig,
     ingress: Arc<dyn Ingress>,
@@ -88,10 +113,7 @@ pub async fn start(
     {
         return Err("allowed_origin 必须是 http(s)://host[:port] 形式的精确 Origin".to_string());
     }
-    let addr = (config.bind.as_str(), config.port);
-    let listener = TcpListener::bind(addr)
-        .await
-        .map_err(|e| format!("监听失败 {}:{}: {e}", config.bind, config.port))?;
+    let listener = bind_reusable(&config.bind, config.port)?;
     let local = listener
         .local_addr()
         .map_err(|e| format!("读取监听地址失败 {}:{}: {e}", config.bind, config.port))?;

@@ -21,6 +21,7 @@
  * 字段形状由 `protocol-mirror-audit` D 组逐字段看守。
  */
 import { callPlugin, setLastWorkdir } from './plugin'
+import { loadSystemLocation } from './systemLocation'
 import type { home_get_homedir, home_get_workspace, home_reload, home_set_workspace } from '@/schemas/home'
 import { withFallback } from './fallback'
 import {
@@ -81,6 +82,26 @@ export async function switchHomedir(
     undefined,
     opts?.forceNative ? { forceNative: true } : undefined
   )
+}
+
+function sameHomedir(left: string, right: string): boolean {
+  const key = (value: string) => value.trim().replace(/[\\/]+$/, '').toLowerCase()
+  return key(left) === key(right)
+}
+
+/**
+ * 启动期回放已持久化的本地 homedir。
+ *
+ * 传输初始化只决定「连到哪个后端」，不会把 `localPath` 下发给后端；若不在首次 VDFS
+ * 读取前调用 `home/reload`，插件树仍按后端默认目录装配，表现为重启后看不到上次选的
+ * model 等资源。remote 目标不归本机 homedir 管，直接跳过。
+ */
+export async function restoreHomedirAtStartup(): Promise<void> {
+  const loc = loadSystemLocation()
+  if (loc.kind !== 'local' || !loc.localPath?.trim()) return
+  const info = await getHomedirInfo()
+  if (sameHomedir(info.homedir, loc.localPath)) return
+  await switchHomedir(loc.localPath)
 }
 
 // =====================================================================

@@ -68,10 +68,11 @@ export default defineCase('T2 工具回路（MCP stdio）：tool_calls → 执�
       `收尾正文应体现工具返回的关键内容（实际: ${JSON.stringify(r.stdout)}）`,
     );
 
-    // 配置只加载一次：build 的异步预热与首次请求都经 `ensure_loaded`（互斥 + 完成标志），
-    // 「预热直调 load_from_storage」会让两条入口各加载一次——两次磁盘读 + 两行重复日志。
+    // 每棵插件树只加载一次：控制面根与会话 worker 根各构造一棵，两个进程各自经
+    // `ensure_loaded`（互斥 + 完成标志）合并 build 预热与首请求的加载。多于两行才说明
+    // 同一进程里出现了「预热直调 load_from_storage」那样的重复入口。
     const loadLines = r.stderr.split('\n').filter((l) => l.includes('加载了') && l.includes('MCP Server'));
-    assertEq(loadLines.length, 1, `MCP 配置应只加载一次（实际 ${loadLines.length} 行: ${loadLines.join(' | ')}）`);
+    assertEq(loadLines.length, 2, `MCP 配置应每棵插件树加载一次（实际 ${loadLines.length} 行: ${loadLines.join(' | ')}）`);
 
     // mock-mcp 真被 spawn 且执行了调用
     const record = readFileSyncSafe(join(hd.homedir, 'mcp-record.ndjson'));

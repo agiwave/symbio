@@ -173,6 +173,16 @@ impl WebPlugin {
         }
     }
 
+    /// worker 与控制面各有自己的插件实例：配置写入只更新写方那棵树的内存槽。
+    /// 每轮能力收集前从磁盘重读一次，读方才不会长期拿旧 key / 旧基址执行工具。
+    async fn refresh_config(&self) {
+        if let Ok(Some(fresh)) = self.config_file.dir().load::<WebConfig>() {
+            if let Ok(mut config) = self.config.try_write() {
+                *config = fresh;
+            }
+        }
+    }
+
     async fn get_parent(&self) -> Option<Arc<dyn Plugin>> {
         let guard = self.parent.read().await;
         guard.as_ref().and_then(|w| w.upgrade())
@@ -221,6 +231,7 @@ impl Plugin for WebPlugin {
         _path: String,
         ctx: Arc<dyn PluginInvokeRequest>,
     ) -> PluginInvokeResponse<PluginPayload> {
+        self.refresh_config().await;
         let sub_path = ctx.get(symbio_plugin_api::PATH).unwrap_or_default();
         if sub_path != symbio_plugin_api::TRAVERSE_AVAILABLE_TOOLS {
             return Err(symbio_plugin_api::PluginError::NotFound(format!(

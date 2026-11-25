@@ -35,6 +35,19 @@ use super::{BuildId, DurableInbox, InboxRequest, RequestId, WorkerError, WorkerI
 const WORKER_READY_TIMEOUT: std::time::Duration = std::time::Duration::from_secs(60);
 const WORKER_SHUTDOWN_TIMEOUT: std::time::Duration = std::time::Duration::from_secs(30);
 
+/// 会话读数口只读事实源，不碰 worker 的 WAL 写令牌；即使会话存在也留控制面。
+const CONTROL_PLANE_SESSION_READS: &[&str] = &["session/stats", "session/changes"];
+
+/// 只读 VDFS 投影永远留控制面：读方一旦派给 worker，就会让长驻读进程长期持有
+/// WAL 写令牌，真正要写的进程反而拿到 `NotTheWriter`。
+const CONTROL_PLANE_VDFS_READS: &[&str] = &[
+    symbio::routes::ROUTE_VDFS_READ,
+    symbio::routes::ROUTE_VDFS_LIST,
+    symbio::routes::ROUTE_VDFS_STAT,
+    symbio::routes::ROUTE_VDFS_TREE,
+    symbio::routes::ROUTE_VDFS_SEARCH,
+];
+
 const CONTROL_PREFIXES: &[&str] = &[
     "home/",
     "event_bus/",
@@ -184,6 +197,12 @@ impl WorkerSupervisor {
             .iter()
             .any(|prefix| path.starts_with(prefix))
         {
+            return Ok(None);
+        }
+        if CONTROL_PLANE_VDFS_READS.contains(&path) {
+            return Ok(None);
+        }
+        if CONTROL_PLANE_SESSION_READS.contains(&path) {
             return Ok(None);
         }
         let Some(session_id) = session_for_message(&self.inner, message)? else {

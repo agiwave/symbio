@@ -69,10 +69,16 @@ export default defineCase('T49 流中断：断流轮用户可见地失败并收�
     );
 
     // ③ 恢复轮：同一会话照常工作（用户被坑过后能继续用）。
+    // 单写者语义下，读回进程不能与写进程同时持有会话；先退掉读回，写完再重开。
+    api.stop();
+    api = null;
     const r2 = await runCli({ homedir: hd.homedir, workdir: hd.workdir, message: '正常回答', provider: PROVIDER_ID, session: 'e2e-t49', timeoutMs: 90_000 });
     assert(r2.code === 0, `恢复轮应正常完成（code=${r2.code}, stderr: ${r2.stderr.slice(0, 300)}）`);
 
     // ④ 两个轮都进了同一个转写，历史一致可读。
+    api = await startReadbackCli({
+      homedir: hd.homedir, workdir: hd.workdir, session: 'e2e-t49', provider: PROVIDER_ID, gatewayPort: GATEWAY_PORT,
+    });
     const msgs = await readSessionMessages(api, 'e2e-t49');
     assertTranscriptInvariants(msgs, 'T49 全程');
     const texts = (msgs ?? []).map((m) => (typeof m.content === 'string' ? m.content : '')).join('\n');

@@ -234,7 +234,7 @@ fn routing_ignores_session_segments_outside_the_declared_root() {
 }
 
 #[test]
-fn routing_accepts_temporary_context_on_explicit_session_reads() {
+fn temporary_context_never_routes_reads_to_worker() {
     let temp = tempfile::tempdir().expect("tempdir");
     write_session(&temp.path().join("session/child"), "child", None);
     let supervisor = WorkerSupervisor::new(temp.path().to_path_buf()).expect("supervisor");
@@ -252,10 +252,7 @@ fn routing_accepts_temporary_context_on_explicit_session_reads() {
                 "messages"
             )
         });
-        assert_eq!(
-            supervisor.session_for(&read).expect("session read"),
-            Some("child".to_string())
-        );
+        assert_eq!(supervisor.session_for(&read).expect("session read"), None);
     }
 }
 
@@ -329,6 +326,37 @@ fn routing_keeps_global_vdfs_calls_on_the_control_plane() {
         supervisor.session_for(&create).expect("existing upsert"),
         Some("parent".to_string())
     );
+}
+
+#[test]
+fn session_reads_never_route_to_worker() {
+    let temp = tempfile::tempdir().expect("tempdir");
+    let supervisor = WorkerSupervisor::new(temp.path().to_path_buf()).expect("supervisor");
+
+    for route in ["session/stats", "session/changes"] {
+        let mut msg = message(route);
+        msg.metadata["session_id"] = json!("never");
+        msg.payload = json!({});
+        assert_eq!(supervisor.session_for(&msg).expect(route), None);
+    }
+
+    // 会话存在也不派发只读投影：读方不能抢走 worker 的 WAL 写令牌。
+    write_session(&temp.path().join("session/child"), "child", None);
+    for route in [
+        "session/stats",
+        "session/changes",
+        symbio::routes::ROUTE_VDFS_READ,
+        symbio::routes::ROUTE_VDFS_LIST,
+        symbio::routes::ROUTE_VDFS_STAT,
+    ] {
+        let mut msg = message(route);
+        msg.payload = json!({ "path": "session/child/inbox" });
+        assert_eq!(
+            supervisor.session_for(&msg).expect(route),
+            None,
+            "route={route}"
+        );
+    }
 }
 
 #[test]

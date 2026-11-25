@@ -205,12 +205,14 @@ impl SessionPlugin {
     /// 事实投影只是 `Option`（无 WAL 的 v1 会话没有），名册的合并规则
     /// 决定「缓存优先、无缓存读投影」（见 `ActiveSessionManager::runtime_of`）。
     pub(super) async fn runtime_of(&self, id: &str) -> SessionRuntime {
+        // 运行态只读：用只读快照，绝不 `open` 写句柄——会话清单常在开轮之前被前端
+        // 拉取，若这里抢到写者令牌，随后 worker 落 user.message 会收到 NotTheWriter。
         let facts = match self.get_store().await {
             Ok(store) => store
-                .fact_source(id)
+                .read_events_opt(id)
                 .ok()
                 .flatten()
-                .map(|source| crate::runtime::project(&source.range(0))),
+                .map(|events| crate::runtime::project(&events)),
             Err(_) => None,
         };
         self.active_mgr.runtime_of(id, facts.as_ref()).await

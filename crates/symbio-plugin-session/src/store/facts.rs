@@ -173,6 +173,18 @@ impl SessionStore {
             .map_err(|e| format!("事实源打不开（{}）：{e}", wal.display()))
     }
 
+    /// 控制面读口的事件快照：保留「会话不存在 ⇒ `None`」与「存在但无 WAL ⇒ `Some([])`」的区别。
+    ///
+    /// `session/stats` / `session/changes` / 会话清单运行态都只需要 `range(0)`，不需要
+    /// `FactSource` 上的写口。经 `fact_source_bound` 读会 `open` 写句柄并永久缓存，
+    /// 抢在会话 worker 前面持有写者令牌 ⇒ worker 落 `user.message` 收到 `NotTheWriter`。
+    pub(crate) fn read_events_opt(&self, session_id: &str) -> Result<Option<Vec<Event>>, String> {
+        if self.session_dir(session_id).is_none() {
+            return Ok(None);
+        }
+        self.read_events(session_id).map(Some)
+    }
+
     /// 本会话的**读方主体**：与开轮写事件的 `actor` 同一取值点（`principal_of`）。
     ///
     /// 召回读侧的可见域收放按它收放——判的是读方、不是写方（D-084）。会话目录/元数据
@@ -195,24 +207,9 @@ impl SessionStore {
             .filter(|s| !s.is_empty())
     }
 
-    /// 该会话的契约事实源（五个方法的中性面）；装配层与插件共用同一底层 `WalStore`。
-    pub(crate) fn fact_source(
-        &self,
-        session_id: &str,
-    ) -> Result<Option<Arc<dyn symbio_sdk::plugin::fact_source::FactSource>>, String> {
-        self.fact_source_bound(
-            session_id,
-            None,
-            symbio_kernel::exec::ExecEventSink::silent(),
-            None,
-            std::sync::Arc::new(std::sync::RwLock::new(None)),
-            None,
-        )
-    }
-
     /// 按**部署根**绑定的契约事实源：驱动句柄与执行期出口随事实源一起打开。
     ///
-    /// 只读调用方走 [`Self::fact_source`]（显式无驱动、静默）；开轮写口必须走本方法，
+    /// 只读调用方走 [`Self::read_events_opt`]（只读快照，不取写者令牌）；开轮写口必须走本方法，
     /// 把本根的驱动实例与真实转写出口绑上——写口自己不做任何进程级反查。
     ///
     /// `supplements` 只由开轮写口传入（批次边界折叠，见

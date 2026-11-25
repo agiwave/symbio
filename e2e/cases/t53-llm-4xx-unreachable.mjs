@@ -85,8 +85,14 @@ export default defineCase('T53 LLM 不可用：401 错误态与起点不可达�
     );
 
     // ④ 恢复轮：服务正常后，同一会话照常工作。
+    // 单写者语义下读回进程先退场，避免它与恢复轮争同一会话的 WAL 写令牌。
+    api.stop();
+    api = null;
     const rOk = await runCli({ homedir: hd.homedir, workdir: hd.workdir, message: '恢复测试', provider: PROVIDER_ID, session: 'e2e-t53', timeoutMs: 90_000 });
     assert(rOk.code === 0, `恢复轮应正常完成（code=${rOk.code}, stderr: ${rOk.stderr.slice(0, 300)}）`);
+    api = await startReadbackCli({
+      homedir: hd.homedir, workdir: hd.workdir, session: 'e2e-t53', provider: PROVIDER_ID, gatewayPort: GATEWAY_PORT,
+    });
     const texts = (await readSessionMessages(api, 'e2e-t53') ?? []).map((m) => (typeof m.content === 'string' ? m.content : '')).join('\n');
     assert(texts.includes('服务恢复后的正常回答'), '恢复轮回复应在转写里');
   } finally {

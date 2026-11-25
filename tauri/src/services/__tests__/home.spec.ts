@@ -31,23 +31,28 @@
 import { describe, expect, it, vi, beforeEach } from 'vitest'
 
 vi.mock('@/services/plugin', () => ({ callPlugin: vi.fn(), setLastWorkdir: vi.fn() }))
+vi.mock('@/services/systemLocation', () => ({ loadSystemLocation: vi.fn() }))
 vi.mock('@/utils/logger', () => ({
   logger: { error: vi.fn(), warn: vi.fn(), debug: vi.fn(), info: vi.fn() },
 }))
 
 import { callPlugin, setLastWorkdir } from '@/services/plugin'
+import { loadSystemLocation } from '@/services/systemLocation'
 import {
   getHomedirInfo,
   getWorkspacePath,
+  restoreHomedirAtStartup,
   setWorkspacePath,
   switchHomedir,
 } from '../home'
 
 const callPluginMock = vi.mocked(callPlugin)
 const setLastWorkdirMock = vi.mocked(setLastWorkdir)
+const loadSystemLocationMock = vi.mocked(loadSystemLocation)
 
 beforeEach(() => {
   vi.clearAllMocks()
+  loadSystemLocationMock.mockReturnValue({ kind: 'local', localPath: '' })
 })
 
 describe('home 服务：home/* 两条臂', () => {
@@ -89,6 +94,37 @@ describe('home 服务：home/* 两条臂', () => {
     callPluginMock.mockRejectedValueOnce(new Error('reload failed'))
 
     await expect(switchHomedir('/x')).rejects.toThrow('reload failed')
+  })
+})
+
+describe('home 服务：启动回放', () => {
+  it('本地目标与后端当前 homedir 不同 ⇒ 启动时下发 home/reload', async () => {
+    loadSystemLocationMock.mockReturnValue({ kind: 'local', localPath: 'C:\\repo\\.symbio' })
+    callPluginMock
+      .mockResolvedValueOnce({ homedir: 'C:\\other\\.symbio', bootstrap_path: '' })
+      .mockResolvedValueOnce({ homedir: 'C:\\repo\\.symbio', workdir: '', status: 'ok' })
+
+    await restoreHomedirAtStartup()
+
+    expect(callPluginMock).toHaveBeenCalledTimes(2)
+    expect(callPluginMock).toHaveBeenLastCalledWith('home/reload', { homedir: 'C:\\repo\\.symbio' }, undefined, undefined)
+  })
+
+  it('本地目标已生效 ⇒ 不再 reload，避免启动期重建插件树', async () => {
+    loadSystemLocationMock.mockReturnValue({ kind: 'local', localPath: 'C:\\repo\\.symbio\\' })
+    callPluginMock.mockResolvedValueOnce({ homedir: 'C:\\repo\\.symbio', bootstrap_path: '' })
+
+    await restoreHomedirAtStartup()
+
+    expect(callPluginMock).toHaveBeenCalledTimes(1)
+  })
+
+  it('远端目标不回放本机 homedir（browser / embedded 都不回退 native）', async () => {
+    loadSystemLocationMock.mockReturnValue({ kind: 'remote', remoteUrl: 'http://host:9231' })
+
+    await restoreHomedirAtStartup()
+
+    expect(callPluginMock).not.toHaveBeenCalled()
   })
 })
 

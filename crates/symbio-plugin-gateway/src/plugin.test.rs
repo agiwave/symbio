@@ -10,6 +10,16 @@ use symbio_plugin_api::{
 };
 use symbio_plugin_api::{VdfsContext, VdfsError, VdfsProvider};
 
+#[test]
+fn worker_role_disables_inbound_even_when_host_config_enables_it() {
+    let config = GatewayConfig {
+        inbound_enabled: true,
+        ..GatewayConfig::default()
+    };
+    assert!(!effective_config(config.clone(), Some("worker")).inbound_enabled);
+    assert!(effective_config(config, None).inbound_enabled);
+}
+
 /// 以子插件直接收的**已剥离前缀**路径（如 `status`）调用 route，
 /// 模拟 home composite 转发后的行为。
 async fn call(
