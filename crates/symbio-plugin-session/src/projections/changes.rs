@@ -34,7 +34,7 @@
 //! （`FsWatcher` → `VdfsChange`），不入这条账。本账**不承诺重建旧内容**：它记的是
 //! 「谁在哪一轮改过这个路径」，不是写入前的全文。
 //!
-//! [D-169]: ../../../../../docs/003-design/001-核心架构.md "DE-001-核心架构"
+//! [D-169]: ../../../../docs/003-design/001-核心架构.md "DE-001-核心架构"
 
 use symbio_platform::kernel::event::Event;
 use symbio_platform::kernel::projection::Projection;

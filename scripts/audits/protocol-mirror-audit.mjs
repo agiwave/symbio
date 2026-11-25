@@ -578,14 +578,14 @@ const META_KEYS = [
   {
     // 重试留下的「并存几支 + 一个选中态」在节点上的投影（D-173 口径 1）。
     key: 'branch',
-    owner: 'crates/symbio-platform/src/sdk/projection/branch.rs',
+    owner: 'crates/symbio-plugin-session/src/projections/branch.rs',
     what: '分支标注 {group, candidates, index, total, selected}：这一支在组里的位置与「此刻读哪一支」',
   },
   {
     // `flat` 档升根的节点没有 `parent_id`，子树同一性靠它补上（D-173「子树同一性只有一份实现」）。
     // D-502/B6：写口由 turn_root 改成 scope_root（未发布产品，无存量需兼容，旧键直接删除）。
     key: 'scope_root',
-    owner: 'crates/symbio-platform/src/sdk/round/node_build.rs',
+    owner: 'crates/symbio-plugin-session/src/projections/node_build.rs',
     what: '本轮升根节点的作用域根锚：子树口径 = `parent_id` ∪ 本键，两侧各写一份必漂',
   },
   {

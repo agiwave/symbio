@@ -134,7 +134,7 @@ export const BASELINE = {
   // baseline-allow e2eCases: 97 → 88（D-395）——9 条整例退役（t89/t91/t93/t94/t98/t100/t101/
   // t102/t103），它们钉的是被撤回的专用验证包；判据对象随实现一起消失，通用扩展面由
   // `t96-glossary-extension.mjs` 承接。非侵蚀。
-  e2eCases: 95,
+  e2eCases: 96,
   // 累计「补件 : 迁移」的**欠账本金**（D-372，`capability-migration-audit` 的付账线）。
   // 不是「比值上限」：范围基线一变计数就变，比值当阈值会假红。这里记的是判据落地当天的
   // 存量按脚本每轮重算，不手抄。文档里的手写读数
@@ -943,6 +943,16 @@ export const LEGACY_TREES = Object.freeze([
   // 部署驱动入口：从装配方 `symbio` 搬进 host
   ['crates/symbio/src/drive.rs/', 'crates/symbio-runtime/src/host/entry.rs/'],
   ['crates/symbio/src/drive.test.rs/', 'crates/symbio-runtime/src/host/entry.test.rs/'],
+  // 会话投影实现：平台 → session（D-561）。逐文件别名，不能把仍留在 SDK 的
+  // `vocab` / `task_vocab` 一起折算走；无尾斜杠表示整文件相等匹配。
+  ...['branch', 'elision', 'mutations', 'prompt_fidelity', 'transcript'].flatMap((name) => [
+    [`crates/symbio-platform/src/sdk/projection/${name}.rs`, `crates/symbio-plugin-session/src/projections/${name}.rs`],
+    [`crates/symbio-platform/src/sdk/projection/${name}.test.rs`, `crates/symbio-plugin-session/src/projections/${name}.test.rs`],
+  ]),
+  ['crates/symbio-platform/src/sdk/round/facts.rs', 'crates/symbio-plugin-session/src/projections/facts.rs'],
+  // round/node_build.rs 仍是平台转发文件，不能把仍存在的现路径折算走；其旧实现删除与
+  // session 新实现新增由 Git 直接识别。只给已删除的同源测试文件留历史别名。
+  ['crates/symbio-platform/src/sdk/round/node_build.test.rs', 'crates/symbio-plugin-session/src/projections/node_build.test.rs'],
 ])
 
 /** 把一条路径折算到现在的树：命中旧前缀就换（最长的旧前缀优先），否则原样返回。 */
@@ -970,7 +980,8 @@ export function legacyPathspecs(trees) {
   const out = [...trees]
   for (const t of trees) {
     for (const [from, to] of LEGACY_TREES) {
-      if (`${t}/`.startsWith(to) || to.startsWith(`${t}/`)) out.push(from.slice(0, -1))
+      if (!from.endsWith('/') && (t === to || `${t}/`.startsWith(to) || to.startsWith(`${t}/`))) out.push(from)
+      else if (`${t}/`.startsWith(to) || to.startsWith(`${t}/`)) out.push(from.slice(0, -1))
     }
   }
   return [...new Set(out)]

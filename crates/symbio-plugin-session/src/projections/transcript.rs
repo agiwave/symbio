@@ -30,10 +30,10 @@
 //! 在 prompt 里长得一样。条目 → 请求消息的转换**不在这里**：合成 `tool_call_id` 的
 //! 唯一规则住在组装请求的那一侧（`plugin-model`），转写只给事实（D-448）。
 
-use super::super::event::{event_payload_node_id, event_result_node_id, Event};
-use super::vocab::{slot_node_of, slot_of, ChatSlot};
-use crate::kernel::Projection;
-use crate::sdk::projection::vocab::{ChatVocab, MessageVocab};
+use symbio_platform::kernel::event::{event_payload_node_id, event_result_node_id, Event};
+use symbio_platform::kernel::Projection;
+use symbio_platform::sdk::projection::vocab::{slot_node_of, slot_of, ChatSlot};
+use symbio_platform::sdk::projection::vocab::{ChatVocab, MessageVocab};
 
 use serde::{Deserialize, Serialize};
 
@@ -101,7 +101,7 @@ pub fn transcript(c: ChatVocab, m: MessageVocab) -> Projection<TranscriptView> {
         // `elision`：这段被摘要取代）与未选中分支两种来源在同一个 `elides` 上合流。
         // 为什么必须合流见 `elision` 的模块文档——两个出口各判一遍，分叉是静默的。
         //
-        // 未选中支的根 id（[D-173](../../../../../docs/003-design/001-核心架构.md "DE-001-核心架构")）：
+        // 未选中支的根 id（[D-173](../../../../docs/003-design/001-核心架构.md "DE-001-核心架构")）：
         // 同一个问题在请求包里只能有**一支**答复，否则模型读到的是自己没说过的话。
         // 这里问「还在不在」的证据取变更格（被删的支不在世），而不是「有没有节点」——
         // 重试那一幕的新支此刻还没有任何节点，而那正是该把旧支挤出请求包的时刻。
@@ -134,7 +134,7 @@ pub fn transcript(c: ChatVocab, m: MessageVocab) -> Projection<TranscriptView> {
         // 收一条条目：**出生时就按索引定稿**（被删的不收；被编辑过的用新读法）。
         //
         // `node` = 该条目对应的节点身份（与 `rebuild` / 变更格同一套 id，见
-        // [`crate::sdk::event::event_payload_node_id`]）。它**不进线格式**——`TranscriptEntry`
+        // [`symbio_platform::kernel::event::event_payload_node_id`]）。它**不进线格式**——`TranscriptEntry`
         // 的字段一个没多，折叠键只在投影内部存在。
         //
         // **换基边界不重复产行**（`from_snapshot` 为假时才查 `superseded`）：自动压缩把
@@ -150,7 +150,7 @@ pub fn transcript(c: ChatVocab, m: MessageVocab) -> Projection<TranscriptView> {
         //
         // 收束 / 进展格的内容节点身份取载荷 `answer_id`（引擎在落格前算定，与重建同源），
         // 缺失时按 `root_id` 派生合成 id（见
-        // [`crate::sdk::event::event_produced_text_node_id`]）。
+        // [`symbio_platform::kernel::event::event_produced_text_node_id`]）。
         let produced_node = |e: &Event| slot_node_of(e, &c, &m).unwrap_or_default();
         let mut push = |mut entry: TranscriptEntry, node: String, from_snapshot: bool| {
             if mutations.is_removed(&node) {

@@ -7,8 +7,9 @@
 // 证明不了「产投影清单」与当前结构一致。
 //
 // PP-004 / PP-005 是**棘轮**，不是模式匹配：现值来自真实扫描（夹具恒为 1/1），判红
-// 只能靠把基线收紧，所以两格的反例都走 `CORE_PROJECTION_BASELINE`；而「放宽要挂一条
-// 打开得了的决策」这条，判据读本脚本自己的源码，夹具就得连假脚本一起摆进来。
+// 只能靠把基线收紧，所以两格的反例都走 `CORE_PROJECTION_BASELINE`；夹具默认显式用
+// `1:1`，不让生产基线的收紧误伤规则回归。真仓门禁不设该环境变量——
+// `gate.d/35-baseline.mjs` 另判「覆盖值不得比默认值更松」。
 import { test } from 'node:test'
 import assert from 'node:assert/strict'
 import { spawnSync } from 'node:child_process'
@@ -49,7 +50,7 @@ function audited(files, env = {}) {
       fs.writeFileSync(p, content)
     }
     return spawnSync(process.execPath, [script, `--root=${root}`], {
-      env: { ...process.env, NO_COLOR: '1', ...env },
+      env: { ...process.env, NO_COLOR: '1', CORE_PROJECTION_BASELINE: '1:1', ...env },
       encoding: 'utf8',
       timeout: 10000,
     })

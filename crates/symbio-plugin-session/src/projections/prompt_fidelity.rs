@@ -63,11 +63,11 @@
 //! 纯函数 + 单测层：不起 CLI、不 mock LLM、不碰 IO。所以它不会被「太重」跳过——这一点
 //! 是本条存在的意义，全量 e2e 反而做不到（每步都要重起进程、跑 42 个用例）。
 
-use super::super::event::Event;
 use super::elision::{is_replacement, Elisions};
 use super::mutations::{OutputIndex, TranscriptEntry};
-use super::vocab::{slot_node_of, slot_of, ChatSlot};
-use crate::sdk::projection::vocab::{ChatVocab, MessageVocab};
+use symbio_platform::kernel::event::Event;
+use symbio_platform::sdk::projection::vocab::{slot_node_of, slot_of, ChatSlot};
+use symbio_platform::sdk::projection::vocab::{ChatVocab, MessageVocab};
 
 /// 缺口的一条报告。**故意不 derive `PartialEq`**：报告要给门禁与日志读，字段顺序变动
 /// 不该让「内容相同」的报告变成另一种类型。
@@ -370,7 +370,7 @@ fn claim_nodes(
     rep: &mut PromptReport,
     used: &mut [bool],
     sent: &[TranscriptEntry],
-    msgs: &[crate::kernel::chat::chat_node::ChatNode],
+    msgs: &[symbio_platform::kernel::chat::chat_node::ChatNode],
     mutations: &super::mutations::MessageMutations,
     kind: &str,
     fact: &str,

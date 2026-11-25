@@ -33,7 +33,6 @@ pub use symbio_platform::sdk::declarations::sealed_declarations;
 pub use symbio_platform::sdk::invariants::check_all;
 pub use symbio_platform::sdk::keys::PRINCIPAL_MAIN;
 pub use symbio_platform::sdk::plugin::fact_source;
-pub use symbio_platform::sdk::projection::prompt_fidelity;
 pub use symbio_plugin_api::EVENT_BUS_RESYNC_MARKER_TYPE; // D-530：线上契约经门面转出（契约层）
 
 #[cfg(test)]

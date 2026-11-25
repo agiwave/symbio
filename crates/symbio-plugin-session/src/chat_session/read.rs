@@ -30,7 +30,7 @@ impl PersistentChatSession {
         // 读侧走 `read_events`（不取写者令牌）：本进程只是读时若开写者句柄，
         // 会把真正要写的另一个进程降级成 `NotTheWriter`（另一个 CLI 进程正好在写）。
         if let Ok(facts) = self.store.read_events(&self.session_id) {
-            symbio_platform::sdk::projection::branch::stamp_branches(
+            crate::projections::branch::stamp_branches(
                 &mut messages,
                 &facts,
                 &crate::declarations::CHAT_VOCAB,

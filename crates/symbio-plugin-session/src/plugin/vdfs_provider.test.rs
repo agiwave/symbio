@@ -1210,7 +1210,7 @@ async fn switch_branch(
 async fn switch_branch_changes_the_reading_not_the_facts() {
     use crate::declarations::EVENT_MESSAGE_REMOVED;
     use crate::declarations::EVENT_SCOPE_BRANCH_SELECTED;
-    use symbio_platform::sdk::projection::branch::branch_selected;
+    use crate::projections::branch::branch_selected;
     let (_dir, p) = fixture();
     let id = unique_id("branch-switch");
     // m0 = 问，m1 = 第一次答，m2 = 重试的那一支
@@ -1243,7 +1243,7 @@ async fn switch_branch_changes_the_reading_not_the_facts() {
     assert!(!branch_selected(m2), "另一支降成候选");
 
     // 模型读侧（同一问题在请求包里只能有一个答复）归 sdk 的投影
-    // （`symbio_platform::sdk::projection::transcript` 的分支用例）；本插件只出存储视图。
+    // （`crate::projections::transcript` 的分支用例）；本插件只出存储视图。
 
     // 事实：只多一条选择格。**没有** `message.removed`——换读法不毁事实。
     let kinds = fact_kinds(&p, &id).await;

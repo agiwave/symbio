@@ -6,7 +6,7 @@
 //! 可重建的缓存」。读侧要给出前端与轮次窗口看的那份**图语义**消息列表，就必须有人
 //! 把**事实**（事件）折回**节点树**。本模块就是那个人。
 //!
-//! 它与 `symbio_platform::sdk::projection::transcript` 是**两个出口、同一份事实**：
+//! 它与 `crate::projections::transcript` 是**两个出口、同一份事实**：
 //!
 //! | 出口 | 形态 | 消费者 |
 //! |---|---|---|
@@ -26,8 +26,8 @@
 //!
 //! | 节点 | 形状的单点定义 | 重建怎么拿到 |
 //! |---|---|---|
-//! | Turn / Reasoning / Text / ToolCall / 工具结果 | [`symbio_platform::sdk::round::node_build`] 的 `llm_build_*` | 直接调用 |
-//! | 对话面节点（首响 / 汇报 / 答话） | [`symbio_platform::sdk::round::node_build::dialog_node`]、[`symbio_platform::sdk::round::facts::ReportDraft::to_message`] | 直接调用 |
+//! | Turn / Reasoning / Text / ToolCall / 工具结果 | [`crate::projections::node_build`] 的 `llm_build_*` | 直接调用 |
+//! | 对话面节点（首响 / 汇报 / 答话） | [`crate::projections::node_build::dialog_node`]、[`crate::projections::facts::ReportDraft::to_message`] | 直接调用 |
 //! | 用户发言 / 补充 | **写入侧内联构造**（入站请求体 / 会话的补充路径） | 逐字复刻（无共享构造器） |
 //!
 //! 「逐字复刻」那两格是**已知的脆弱点**：没有共享构造器可调，只能靠判据钉住
@@ -77,6 +77,8 @@
 
 use std::collections::HashSet;
 
+use crate::projections::mutations::added_messages;
+use crate::projections::mutations::is_reader_reply;
 use symbio_platform::kernel::chat::chat_node::{
     ChatNode, MessageContent, NodeKind, NodeStatus, CHAT_STYLE_TAG_COMPRESSION,
     CHAT_STYLE_TAG_REASONING, CHAT_STYLE_TAG_RUN,
@@ -87,21 +89,19 @@ use symbio_platform::kernel::event::{
     event_produced_text_node_id, event_result_node_id, EVENT_FAILED, EVENT_REQUEST, EVENT_RESPONSE,
 };
 use symbio_platform::kernel::event::{Entity, Event, Verb};
-use symbio_platform::sdk::projection::mutations::added_messages;
-use symbio_platform::sdk::projection::mutations::is_reader_reply;
 use symbio_platform::sdk::projection::vocab::{slot_of, ChatSlot};
 use symbio_platform::sdk::projection::vocab::{ChatVocab, MessageVocab};
 use symbio_plugin_api::debt::{STAMP_FAILURE, STAMP_KEY};
 use symbio_plugin_api::vocab::PORT_TOOL;
 use symbio_plugin_api::PRINCIPAL_USER;
 
-// 节点形状与汇报格的单点定义都在 core 词汇表（[D-082](../../../docs/003-design/014-单环一表.md#d-082-6b驱动器成片落为独立插件-loop触发走地址面服务走端口词表先上移分四刀 "DE-014-单环一表") 裁决三）：
+// 节点形状与汇报格的单点定义都在共享词汇表（[D-082](../../../docs/003-design/014-单环一表.md#d-082-6b驱动器成片落为独立插件-loop触发走地址面服务走端口词表先上移分四刀 "DE-014-单环一表") 裁决三）：
 // 写侧（落库）与重建侧（回放）引的是同一个构造器，留守层因此不必反向够驱动器。
-use symbio_platform::kernel::chat::principal::Principal;
-use symbio_platform::sdk::round::facts::ReportDraft;
-use symbio_platform::sdk::round::node_build::{
+use crate::projections::facts::ReportDraft;
+use crate::projections::node_build::{
     dialog_node, llm_build_text_node, llm_build_tool_call_node, llm_build_tool_message,
 };
+use symbio_platform::kernel::chat::principal::Principal;
 
 /// 事件主体 → 节点身份：重建与写侧**同一条**派生（[`Principal::from_legacy`]）。
 ///
@@ -226,7 +226,7 @@ pub fn rebuild(events: &[Event], c: &ChatVocab, m: &MessageVocab) -> Vec<ChatNod
     // 必须从那里起折；否则被保留的后缀会被整段跳过。旧快照没有这一格 ⇒ 回落
     // `快照下标 + 1`，与旧行为逐字一致。
     let (start, snapshot_messages) =
-        match symbio_platform::sdk::projection::mutations::mutations_latest_snapshot(events, m) {
+        match crate::projections::mutations::mutations_latest_snapshot(events, m) {
             Some((i, msgs, keep_from)) => {
                 let start = keep_from
                     .as_deref()
@@ -347,7 +347,7 @@ pub fn rebuild(events: &[Event], c: &ChatVocab, m: &MessageVocab) -> Vec<ChatNod
     // 在这里做而不是在读口做，是因为**两个读出口必须是同一棵树**（转写列表与会话叶子
     // 是同一份数据的两个地址）——标注属节点形状，随重建出格一次就够；
     // 「哪一支当前读」因此对重建的两个消费者同口径，不需要谁记得再调一次。
-    symbio_platform::sdk::projection::branch::stamp_branches(&mut out, events, c);
+    crate::projections::branch::stamp_branches(&mut out, events, c);
     out
 }
 
@@ -594,7 +594,7 @@ fn reported_node(e: &Event) -> ChatNode {
 
 /// 对话面开场白（`round × asserted`）：`Escalate` 首响。
 ///
-/// 形状经 [`symbio_platform::sdk::round::node_build::dialog_node`] **同一构造器**复刻（与 [`dialog_node`]
+/// 形状经 [`crate::projections::node_build::dialog_node`] **同一构造器**复刻（与 [`dialog_node`]
 /// 及 `reported_node` 同一条纪律：构造只有一份，漂移才不可能）。理由码与
 /// `exclude_from_context` 从载荷读——它们是这条节点的形状（`meta.reason` /
 /// `meta.exclude_from_context`），由写侧 `apply_verdict` 原样透传。

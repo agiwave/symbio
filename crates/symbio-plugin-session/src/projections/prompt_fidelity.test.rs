@@ -12,8 +12,8 @@
 use super::super::mutations::TranscriptEntry;
 use super::super::transcript::{transcript, TranscriptView};
 use super::{verify, PromptGap as Gap};
-use crate::sdk::event::{Entity, Event, Verb};
-use crate::sdk::test_fixtures::{
+use symbio_platform::kernel::event::{Entity, Event, Verb};
+use symbio_platform::sdk::test_fixtures::{
     CHAT, EVENT_ARTIFACT_ADDED, EVENT_CHAT_ASSISTANT_FINAL, EVENT_CHAT_ASSISTANT_REPORTED,
     EVENT_MESSAGE_EDITED, EVENT_MESSAGE_REMOVED, EVENT_USER_MESSAGE, MESSAGE,
 };
@@ -205,7 +205,11 @@ fn a_progress_report_lands_but_stays_out_of_the_request() {
         report(0, "已经完成 1 轮工具调用，用时约 3 秒，还在继续。"),
     ];
     let view = transcript(CHAT, MESSAGE)
-        .apply(&events, i64::MAX, crate::kernel::view::Budget::generous())
+        .apply(
+            &events,
+            i64::MAX,
+            symbio_platform::kernel::view::Budget::generous(),
+        )
         .value;
 
     let excluded: Vec<_> = view
@@ -340,7 +344,7 @@ fn snapshot(msgs: &[(&str, &str, &str)]) -> Event {
         .collect();
     Event::pending(
         "snap-0",
-        crate::sdk::test_fixtures::EVENT_SESSION_CONSOLIDATED,
+        symbio_platform::sdk::test_fixtures::EVENT_SESSION_CONSOLIDATED,
         Entity::Message,
         Verb::Progressed,
         "session/main",
@@ -440,7 +444,7 @@ fn a_snapshot_entry_missing_from_the_prompt_is_reported() {
 fn branch(of: &str, into: &str) -> Event {
     Event::pending(
         format!("branch-{into}"),
-        crate::sdk::test_fixtures::EVENT_SCOPE_BRANCH,
+        symbio_platform::sdk::test_fixtures::EVENT_SCOPE_BRANCH,
         Entity::Scope,
         Verb::Asserted,
         "person/local",
@@ -462,7 +466,11 @@ fn branch_events() -> Vec<Event> {
 fn a_replaced_branch_does_not_make_the_judge_red() {
     let events = branch_events();
     let view = transcript(CHAT, MESSAGE)
-        .apply(&events, i64::MAX, crate::kernel::view::Budget::generous())
+        .apply(
+            &events,
+            i64::MAX,
+            symbio_platform::kernel::view::Budget::generous(),
+        )
         .value;
     let msgs = request_messages(&view);
     assert_eq!(
@@ -483,7 +491,11 @@ fn a_replaced_branch_does_not_make_the_judge_red() {
 fn a_leaked_replaced_branch_shows_up_as_an_unsourced_message() {
     let events = branch_events();
     let view = transcript(CHAT, MESSAGE)
-        .apply(&events, i64::MAX, crate::kernel::view::Budget::generous())
+        .apply(
+            &events,
+            i64::MAX,
+            symbio_platform::kernel::view::Budget::generous(),
+        )
         .value;
     let mut msgs = request_messages(&view);
     msgs.insert(1, entry("assistant", "甲答复", None));

@@ -22,9 +22,9 @@ use super::{
     branch_candidates, branch_hide_unselected, branch_selected, drop_branch_subtrees,
     stamp_branches, unselected_roots, META_BRANCH,
 };
-use crate::kernel::chat::chat_node::ChatNode;
-use crate::sdk::test_fixtures::{CHAT, EVENT_SCOPE_BRANCH, EVENT_SCOPE_BRANCH_SELECTED};
-use crate::sdk::{Entity, Event, Verb};
+use symbio_platform::kernel::chat::chat_node::ChatNode;
+use symbio_platform::kernel::{Entity, Event, Verb};
+use symbio_platform::sdk::test_fixtures::{CHAT, EVENT_SCOPE_BRANCH, EVENT_SCOPE_BRANCH_SELECTED};
 
 fn node(id: &str) -> ChatNode {
     ChatNode {
@@ -80,7 +80,7 @@ fn 两支并存默认读最新那一次尝试() {
     assert_eq!(branch_of(&nodes[0]).unwrap()["total"], 2);
     assert_eq!(branch_of(&nodes[0]).unwrap()["group"], "t1");
     // 重试完什么都不点 ⇒ 读到的必须是新的一次（分支格自带读法，见
-    // `crate::kernel::event::branch`）。
+    // `symbio_platform::kernel::event::branch`）。
     assert!(!branch_selected(&nodes[0]));
     assert!(branch_selected(&nodes[1]));
 }

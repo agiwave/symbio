@@ -1,8 +1,8 @@
 //! 区间省略判据：闭区间、seq 口径、坏载荷少藏、分支照旧合流。
 
 use super::*;
-use crate::sdk::event::{Entity, Event, Seq, Verb};
-use crate::sdk::test_fixtures::{
+use symbio_platform::kernel::event::{Entity, Event, Seq, Verb};
+use symbio_platform::sdk::test_fixtures::{
     CHAT, EVENT_MESSAGE_ADDED, EVENT_SCOPE_BRANCH, EVENT_USER_MESSAGE, MESSAGE,
 };
 

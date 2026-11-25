@@ -43,6 +43,8 @@ zip = { workspace = true, features = ["deflate"] }
 tempfile = { workspace = true }
 
 [dev-dependencies]
+# 随会话投影迁入的用例仍使用平台按 owner 声明生成的事件拼写；仅测试构建开启。
+symbio-platform = { path = "../symbio-platform", features = ["test-fixtures"] }
 # 测试替身（`StubLlmAdapter` / `trivial_actor_spec`）—— 原住 core 的常开出口，
 # 拆 crate 后 `#[cfg(test)]` 对下游不可见，故搬 `symbio-testkit`，只以 dev 形态进来。
 symbio-testkit = { path = "../symbio-testkit" }

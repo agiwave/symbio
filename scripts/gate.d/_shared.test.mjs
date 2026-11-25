@@ -1099,6 +1099,37 @@ test('canonicalPath：现路径与无关路径原样返回（装配方 crates/sy
   assert.equal(canonicalPath('crates/symbio-plugin-sdkx/src/a.rs'), 'crates/symbio-plugin-sdkx/src/a.rs')
 })
 
+test('canonicalPath：会话投影逐文件迁到 session，共享词表不动', () => {
+  assert.equal(
+    canonicalPath('crates/symbio-platform/src/sdk/projection/transcript.rs'),
+    'crates/symbio-plugin-session/src/projections/transcript.rs',
+  )
+  assert.equal(
+    canonicalPath('crates/symbio-platform/src/sdk/projection/transcript.test.rs'),
+    'crates/symbio-plugin-session/src/projections/transcript.test.rs',
+  )
+  assert.equal(
+    canonicalPath('crates/symbio-platform/src/sdk/round/node_build.rs'),
+    'crates/symbio-platform/src/sdk/round/node_build.rs',
+  )
+  assert.equal(
+    canonicalPath('crates/symbio-platform/src/sdk/round/node_build.test.rs'),
+    'crates/symbio-plugin-session/src/projections/node_build.test.rs',
+  )
+  assert.equal(
+    canonicalPath('crates/symbio-platform/src/sdk/projection/vocab.rs'),
+    'crates/symbio-platform/src/sdk/projection/vocab.rs',
+  )
+})
+
+test('legacyPathspecs：逐文件别名保留完整文件名', () => {
+  const specs = legacyPathspecs(['crates/symbio-plugin-session/src/projections'])
+  assert.ok(specs.includes('crates/symbio-plugin-session/src/projections'))
+  assert.ok(specs.includes('crates/symbio-platform/src/sdk/projection/transcript.rs'))
+  assert.ok(specs.includes('crates/symbio-platform/src/sdk/round/node_build.test.rs'))
+  assert.ok(!specs.includes('crates/symbio-platform/src/sdk/round/node_build.rs'))
+})
+
 test('legacyPathspecs：当前树名与它的历史旧名都在，pathspec 在 git 侧才滤得中', () => {
   const specs = legacyPathspecs(['crates/symbio-runtime/src/host'])
   assert.ok(specs.includes('crates/symbio-runtime/src/host'))

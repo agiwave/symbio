@@ -1,30 +1,14 @@
-//! 跨切片**事实记录词汇**：写侧在驱动器（`loop` 片）、落侧/读侧在留守存储层的
-//! 那批纯数据记录类型。
+//! 会话的纯事实记录与汇报构造。
 //!
-//! ## 为什么住 core
-//!
-//! [D-082](../../../../../docs/003-design/014-单环一表.md#d-082-6b驱动器成片落为独立插件-loop触发走地址面服务走端口词表先上移分四刀 "DE-014-单环一表") 裁决三 4/5 组与 2 组的
-//! `ReportDraft` 半句：驱动器切成独立插件（[D-082](../../../../../docs/003-design/014-单环一表.md "DE-014-单环一表")）后，
-//! 这些类型隔着 E-009 的插件墙两头都要用——
-//!
-//! | 类型 | 写侧（驱动器） | 落/读侧（留守） |
-//! |---|---|---|
-//! | [`ReportDraft`] | `report_exec`（批次边界汇报执行体的产物） | `rebuild::reported_node` 回放汇报格 |
-//!
-//! 任务表的声明类型**不在这里**：写侧与落侧现在同属 `symbio-plugin-loop`
-//! （效果端口把「哪一次调用算声明」交回 owner，DE-025 D-207），类型随 owner 住
-//! 那个插件——core 的数据面只装真的跨插件的东西。
-//!
-//! 与 `types::Session` 一族同判：**存储的记录类型，归属随数据 owner，跨插件者上移**。
-//! 本模块只装**数据与纯构造**（[`ReportDraft::to_message`] 经 [`crate::sdk::round::node_build`]
-//! 的同一构造器）；记账判据（`note_*` 的门与 `behaviors` 里的 `delegation_promise` 声明）与
-//! 派发机制（行表 / 绑定表 / 执行体）都不在这里——它们是机制不是词汇，随各自的 owner 住插件侧。
+//! `ReportDraft` 由本插件写侧与重建侧共用，构造出的 ChatNode 经
+//! [`super::node_build::dialog_node`] 保持同一形状。任务声明类型归 loop owner，
+//! 插件间共享的词表由 SDK 提供。
 
-use crate::kernel::chat::chat_node::ChatNode;
-use crate::sdk::round::node_build::dialog_node;
+use super::node_build::dialog_node;
+use symbio_platform::kernel::chat::chat_node::ChatNode;
 
-use crate::kernel::event::Event;
 use serde::{Deserialize, Serialize};
+use symbio_platform::kernel::event::Event;
 
 /// 一句汇报的草稿：文本 + 它据以生成的运行现状。
 ///
@@ -65,7 +49,10 @@ impl ReportDraft {
     /// 为什么**不复抄** `dialog_node` 的构造：构造只有一份，漂移才不可能；
     /// `SURFACE_REPLY` / `REASON_PROGRESS` 两个常量留在各自判定点那侧，
     /// 由函数签名（`reason: &str`）承担跨模块契约。
-    pub fn to_message(&self, principal: &crate::kernel::chat::principal::Principal) -> ChatNode {
+    pub fn to_message(
+        &self,
+        principal: &symbio_platform::kernel::chat::principal::Principal,
+    ) -> ChatNode {
         dialog_node(&self.text, "progress", true, principal)
     }
 }

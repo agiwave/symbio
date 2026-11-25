@@ -34,11 +34,11 @@
 
 use std::collections::{HashMap, HashSet};
 
-use crate::kernel::chat::chat_node::{ChatNode, MessageContent, NodeRole};
-use crate::kernel::event::branch::removed_ids;
-use crate::sdk::event::{Entity, Event, Verb, EVENT_FAILED, EVENT_RESPONSE};
-use crate::sdk::port_stamp::{STAMP_KEY, STAMP_ROLE};
-use crate::sdk::projection::vocab::MessageVocab;
+use symbio_platform::kernel::chat::chat_node::{ChatNode, MessageContent, NodeRole};
+use symbio_platform::kernel::event::branch::removed_ids;
+use symbio_platform::kernel::event::{Entity, Event, Verb, EVENT_FAILED, EVENT_RESPONSE};
+use symbio_platform::sdk::port_stamp::{STAMP_KEY, STAMP_ROLE};
+use symbio_platform::sdk::projection::vocab::MessageVocab;
 
 use serde::{Deserialize, Serialize};
 

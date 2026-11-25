@@ -1,7 +1,7 @@
 //! `session/stats` —— v2 事实源的**只读读数口**。
 //!
-//! 背景：SLO §1.2 的四列（时延 / 兜底 / 成本 / 断点）由本插件的投影与 core 的
-//! 协议投影算得出，
+//! 背景：SLO §1.2 的四列（时延 / 兜底 / 成本 / 断点）由本插件投影与能力包视图
+//! 算得出，
 //! 但**算得出 ≠ 读得到**——没有生产出口，投影只是「能算的函数」，三类收益
 //! 无法验收、回归也看不见。本模块就是那一格的读侧出口：出口形态②（只读路由）。
 //! 读数今天还多一族**能力视图**：键来自各能力包的报表登记（`ReportDecl.views`）、值由
@@ -14,7 +14,7 @@
 //!   契约字段，以及「读哪些会话、快照怎么来」的取数与路由。它出错，红的是
 //!   **读不到 / 字段缺**；
 //! - [`stats_reading`]：**读数装配**——把投影值排成每一格（可见域、承诺列、实例级
-//!   聚合、面板）。它出错，红的是**某一格的数字与 core 的口径不符**。
+//!   聚合、面板）。它出错，红的是**某一格的数字与投影 owner 的口径不符**。
 //!
 //! 分在这里不是为了行数，是因为这两类红的处置动作不同：前者要改的是出口契约与
 //! 取数范围，后者要改的是换算，而纪律要求它们都不许自己发明口径。
@@ -22,7 +22,7 @@
 //! ## 三条纪律
 //!
 //! - **只调已有投影，不另写一份统计**：
-//!   这两个文件里没有分位数 / 占比 / 累计的算式——口径只活在投影里（本插件 `projections/` 与 core 的协议投影），出口
+//!   这两个文件里没有分位数 / 占比 / 累计的算式——口径只活在投影里（本插件 `projections/` 与能力包视图），出口
 //!   只做「取数 + 排版」。否则同一份事实会长出两套口径，读数与投影静默漂移，
 //!   而两边都自称是 SLO。**不变量同理**：清单只调 `check_all`，宽限与预算判据
 //!   由 core 定（本处不复判）。
@@ -34,8 +34,7 @@
 //! - **不重写视图类型**：口径住在 owner 那里——时延 / 兜底 / 跨度三列归能力包 `slo`、
 //!   成本列归能力包 `cost`（各自 `ViewDecl::eval`，`slo` 另有 `agg`），本插件按名字读
 //!   （`D-221`）并把值原样装进出口（`D-281`）；自主程度等仍是本插件 `projections/` 里的
-//!   纯折叠。core 只留协议自身的投影（转写 / 轮状态 / 任务词表等），不再为会话读数占根
-//!   出口（DE-025 D-221）。
+//!   纯折叠。core 只留共享投影词表，不再为会话读数占根出口（DE-025 D-221）。
 //!
 //! ## as-of 口径
 //!
@@ -49,13 +48,13 @@ use std::sync::Arc;
 
 use serde::{Deserialize, Serialize};
 
+use crate::projections::transcript::transcript;
 use symbio_platform::kernel::event::Event;
 use symbio_platform::kernel::plugin::{
     PluginError, PluginInvokeRequest, PluginInvokeResponse, PluginPayload,
 };
 use symbio_platform::kernel::present::ReadingPanel;
 use symbio_platform::sdk::invariants::check_all;
-use symbio_platform::sdk::projection::transcript::transcript;
 
 use crate::projections::checkpoint::checkpoint;
 
@@ -311,7 +310,7 @@ pub(crate) fn read(
     // 空形状（空形状住在 owner 那里）。
     let reports = symbio_plugin_api::reports::read_all(&snapshot, &report_ctx);
 
-    // 以下各列仍由本插件折叠与排版（口径在 core 的投影与本插件的投影）。
+    // 以下各列仍由本插件折叠与排版（口径在本插件投影与能力包视图）。
     // 断点列读 `checkpoint` 投影；用量与金额两列不在这里——它们是 `model` 的报表
     // （`D-461`），随 `reports` 一起到。
     let ck = checkpoint().read_all(&snapshot).value;

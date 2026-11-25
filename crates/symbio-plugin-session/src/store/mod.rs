@@ -48,6 +48,7 @@
 
 use super::types::{ChatNode, Session, SessionSummary};
 use crate::paths;
+use crate::projections::facts::FleetSnapshot;
 use serde::{Deserialize, Serialize};
 use std::collections::HashMap;
 use std::path::{Path, PathBuf};
@@ -55,7 +56,6 @@ use std::sync::Arc;
 use symbio_platform::kernel::event::{Event, Seq};
 use symbio_platform::kernel::plugin::PluginError;
 use symbio_platform::kernel::store::Store;
-use symbio_platform::sdk::round::facts::FleetSnapshot;
 use tokio::sync::{Mutex, OwnedMutexGuard};
 
 mod fact_source;

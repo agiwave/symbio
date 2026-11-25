@@ -1,8 +1,7 @@
-//! `crates/symbio-platform/src/sdk/round/node_build.rs` 的单元测试 —— 与实现同级分文件
+//! `crates/symbio-plugin-session/src/projections/node_build.rs` 的单元测试 —— 与实现同级分文件
 //! （约定：`X.rs` + `X.test.rs`）。
 //!
-//! 两批用例随构造器自 session 上移（[D-082](../../../../../docs/003-design/014-单环一表.md#d-082-6b驱动器成片落为独立插件-loop触发走地址面服务走端口词表先上移分四刀 "DE-014-单环一表")
-//! 裁决三）：
+//! 本文件钉住共享的节点构造契约：
 //!
 //! - **对话面节点形状**（原 `chat_loop/compose.test.rs`）：`dialog_node` 承载的
 //!   「落点 + 两个标记」——错了不会报错、只表现为界面不对，必须由断言钉住。
@@ -10,11 +9,11 @@
 //!   建树 flat 折叠随策略实现归 session 的 `config.test.rs`；本文件只留共享节点构造契约。
 
 use super::*;
-use crate::kernel::chat::chat_node::NodeRole;
+use symbio_platform::kernel::chat::chat_node::NodeRole;
 
 /// 构造器入参：本文件的节点模仿**落库/流式面**，身份写 `principal`（D-147）。
-fn assistant_principal() -> crate::kernel::chat::principal::Principal {
-    crate::kernel::chat::principal::Principal::from_legacy("session/main")
+fn assistant_principal() -> symbio_platform::kernel::chat::principal::Principal {
+    symbio_platform::kernel::chat::principal::Principal::from_legacy("session/main")
 }
 
 // ── 对话面节点形状（dialog_node，原 compose.test.rs）────────────────────

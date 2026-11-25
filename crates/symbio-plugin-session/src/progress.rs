@@ -42,7 +42,7 @@ use std::sync::Arc;
 
 use serde_json::{json, Value};
 
-use symbio_platform::sdk::round::facts::ReportDraft;
+use crate::projections::facts::ReportDraft;
 use symbio_plugin_api::debt::{session_config_id, DebtFacts, DebtSource, DebtSpec, DriveRequest};
 use symbio_plugin_api::events::{
     EVENT_CHAT_ASSISTANT_FINAL, EVENT_SESSION_CONFIG, EVENT_TOOL_REQUESTED, EVENT_USER_MESSAGE,

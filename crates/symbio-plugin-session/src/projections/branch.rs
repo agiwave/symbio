@@ -5,11 +5,11 @@
 //! 重试若是**删除式**的（失败轮连子树一起删掉，再按普通新轮重来），转写就永远只有一条
 //! 竖直的历史，于是「同 parent 多候选可切换」这件事**没有数据来源**——不是界面缺一个
 //! `‹ ›`，是树上没有第二个孩子。裁决与理由见
-//! [D-173](../../../../../docs/003-design/001-核心架构.md "DE-001-核心架构")。
+//! [D-173](../../../../docs/003-design/001-核心架构.md "DE-001-核心架构")。
 //!
 //! 现在重试不删了：它落一条 `EVENT_SCOPE_BRANCH`（`{of, into}`：新根是那一条的另一
 //! 支），用户点切换器落 `EVENT_BRANCH_SELECTED`。**「读哪一支」由这两类事实共同说**，
-//! 组内后到的胜出（[`crate::kernel::event::branch`]）——分支格自带读法，否则「切回旧支再重试」会
+//! 组内后到的胜出（[`symbio_platform::kernel::event::branch`]）——分支格自带读法，否则「切回旧支再重试」会
 //! 停在用户刚发起重试的那一支上。两者都是**事实**，本模块把它们折回节点
 //! 形状——重建是纯函数，所以「哪一支在当前历史里」必须能从事实里读出来，而不是由
 //! 某个调用方记得传一个参数。
@@ -37,7 +37,7 @@
 //! 用户刚按下的重试在模型眼里等于没发生。
 //!
 //! 分岔的只有这一句问话；**挑哪一支的算术**住在
-//! [`crate::kernel::event::branch::branch_marks`] 一处（事实层判断，与节点形状无关；
+//! [`symbio_platform::kernel::event::branch::branch_marks`] 一处（事实层判断，与节点形状无关；
 //! 插件侧不该为了它依赖应用门面，DE-051 D-362）。本模块只负责把结论盖成
 //! `meta.branch`。两个出口各算一遍就会对同一段历史给出两种读法，而那种分叉是静默的。
 //!
@@ -47,12 +47,13 @@
 //! 「同一轮的第二幕」误读成「另一支」。载荷里因此只出现根 id（节点身份是事实的一部分，
 //! 与 `root_id` / `result_id` 同一条纪律）。
 
-use crate::kernel::event::branch::branch_marks;
+use symbio_platform::kernel::event::branch::branch_marks;
 
-use crate::kernel::chat::chat_node::ChatNode;
-use crate::sdk::event::Event;
-use crate::sdk::projection::vocab::ChatVocab;
-use crate::sdk::round::node_build::subtree_of;
+#[cfg(test)]
+use super::node_build::subtree_of;
+use symbio_platform::kernel::chat::chat_node::ChatNode;
+use symbio_platform::kernel::event::Event;
+use symbio_platform::sdk::projection::vocab::ChatVocab;
 
 /// 成员根节点上的分支标注键（`meta.branch`）。
 ///
@@ -92,7 +93,7 @@ pub fn stamp_branches(nodes: &mut [ChatNode], events: &[Event], v: &ChatVocab) {
 /// 助手侧的产出事实记，见 `turn_runner/facts.rs`）。那些正是各支的**共同祖先**——按它剪
 /// 会连用户的问题一起剪掉。
 ///
-/// 键名与 [`crate::kernel::event::branch`] 的载荷读法同一处，请求包的两个出口（[`super::transcript`]
+/// 键名与 [`symbio_platform::kernel::event::branch`] 的载荷读法同一处，请求包的两个出口（[`super::transcript`]
 /// 与 [`super::prompt_fidelity`]）引的是同一个判据。
 pub fn event_branch_root(e: &Event) -> Option<&str> {
     e.payload
@@ -111,7 +112,7 @@ pub fn unselected_roots(
     removed: impl Fn(&str) -> bool,
     v: &ChatVocab,
 ) -> std::collections::HashSet<String> {
-    crate::kernel::event::branch::unselected_roots(
+    symbio_platform::kernel::event::branch::unselected_roots(
         events,
         |id| !removed(id),
         v.branch,
@@ -190,6 +191,7 @@ pub fn branch_candidates(node: &ChatNode) -> Option<Vec<String>> {
 ///
 /// 子树收集用 [`subtree_of`]——`flat` 档下本轮节点升了根（`parent_id: None` +
 /// `meta.scope_root` 记号），只按 `parent_id` 够不着它们。
+#[cfg(test)]
 pub fn branch_hide_unselected(messages: &mut Vec<ChatNode>) {
     let unselected: Vec<String> = messages
         .iter()
@@ -200,6 +202,7 @@ pub fn branch_hide_unselected(messages: &mut Vec<ChatNode>) {
 }
 
 /// 丢掉**点名的那几支**的整棵子树（与上面同一把尺，只是判据来自调用方而不是标注）。
+#[cfg(test)]
 fn drop_branch_subtrees(messages: &mut Vec<ChatNode>, roots: &[String]) {
     if roots.is_empty() {
         return;

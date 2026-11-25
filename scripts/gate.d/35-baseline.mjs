@@ -307,7 +307,7 @@ const RATCHETS = [
   },
   {
     // PP-004 core 投影面两格（产投影文件数 / 投影构造器条数）。能力折叠一旦长回
-    // `symbio_sdk/projection/`，「加一个能力」就又成了改架构模块（DE-025 D-221）；
+    // `symbio_platform::sdk::projection/`，「加一个能力」就又成了改架构模块（DE-025 D-221）；
     // 放宽的资格由 PP-005 判（必须挂一条存在的决策），本条只判数字有没有比上一版更松。
     id: 'core-projection',
     file: 'scripts/audits/projection-purity.mjs',

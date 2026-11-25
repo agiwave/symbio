@@ -170,18 +170,6 @@
       "evidence": "docs/003-design/001-核心架构.md"
     },
     {
-      "symbol": "branch_hide_unselected",
-      "path": "crates/symbio-platform/src/sdk/projection/branch.rs",
-      "why": "契约实现：公开判据/转换入口，由调用方按契约驱动；本仓生产面当前未直调",
-      "evidence": "docs/003-design/001-核心架构.md"
-    },
-    {
-      "symbol": "verify",
-      "path": "crates/symbio-platform/src/sdk/projection/prompt_fidelity.rs",
-      "why": "契约实现：会话 WAL 测试的 prompt 保真度复核判据——core 只出让 `verify` / `transcript` 两个纯函数给测试复核（生产运行器不直调，属合法契约实现）",
-      "evidence": "crates/symbio-plugin-session/src/store/wal.test.rs"
-    },
-    {
       "symbol": "closes_as_final",
       "path": "crates/symbio-platform/src/sdk/projection/vocab.rs",
       "why": "契约实现：公开判据/转换入口，由调用方按契约驱动；本仓生产面当前未直调",
@@ -200,5 +188,8 @@
       "evidence": "docs/003-design/009-VDFS规范.md"
     }
   ],
-  "baseline-allow": []
+  "baseline-allow": [
+    "symbols@branch_hide_unselected|crates/symbio-platform/src/sdk/projection/branch.rs→(none) 投影实现随唯一生产消费方迁入 session，测试期辅助函数不再是架构面生产符号 D-561",
+    "symbols@verify|crates/symbio-platform/src/sdk/projection/prompt_fidelity.rs→(none) prompt fidelity 仅测试构建并随会话投影迁入 session，不再是架构面生产符号 D-561"
+  ]
 }

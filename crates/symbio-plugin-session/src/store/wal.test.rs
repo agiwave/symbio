@@ -4,6 +4,8 @@
 use super::*;
 use crate::declarations::{CHAT_VOCAB, MESSAGE_VOCAB};
 use crate::projections::checkpoint::{checkpoint, CheckpointState};
+use crate::projections::prompt_fidelity::verify as verify_prompt_fidelity;
+use crate::projections::transcript::transcript;
 use symbio_platform::kernel::decl::ring::Decl;
 use symbio_platform::kernel::decl::ring::Pattern;
 use symbio_platform::kernel::decl::{Builder, PluginDeclarations};
@@ -13,12 +15,10 @@ use symbio_platform::kernel::event::{
 };
 use symbio_platform::kernel::view::Budget;
 use symbio_platform::sdk::invariants::check_all;
-use symbio_platform::sdk::projection::transcript::transcript;
 use symbio_plugin_api::events::{
     EVENT_ARTIFACT_ADDED, EVENT_CHAT_ASSISTANT_FINAL, EVENT_USER_MESSAGE,
 };
 use symbio_plugin_api::vocab;
-use symbio_testkit::prompt_fidelity::verify as verify_prompt_fidelity;
 
 /// 造一条 pending 事件（入库前无 seq；带溯源与正文载荷）。
 fn ev(id: &str, kind: &str, entity: Entity, verb: Verb, _turn: u64, text: &str) -> Event {

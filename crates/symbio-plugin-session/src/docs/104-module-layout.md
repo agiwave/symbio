@@ -109,23 +109,20 @@ impl: done
 `SessionPlugin` **类型本身**不入表：inherent impl 分布在领域层文件是全仓惯例
 （`commands.rs` / `options` 皆如此），没有「一个类型一个 impl 文件」的集中处。
 
-### 1.5 跨片共享词表（住 core，不住本插件）
+### 1.5 共享词表与本插件投影
 
-会话切成驱动器（`loop` 片）与留守两片时，隔着 E-009 插件墙**两头都要用**的
-**词汇**归位 core（九组反向引用逐条定归属、被否决的方案见
-[D-082](../../../../docs/003-design/014-单环一表.md "DE-014-单环一表") 裁决三）。两片都不再持有
-这些定义，只经根别名取用：
+跨插件共享的参数表住平台 SDK；会话私有的实现与同源测试住本插件 `src/projections/`。
+归属按生产消费方分布确定（D-534 / D-561），不按目录名保留第二份实现。
 
-| core 落点 | 装什么 | 取用方（留守 / 驱动器） |
+| 落点 | 装什么 | 取用方 |
 |---|---|---|
-| `symbio_platform::sdk::round::node_build` | ChatNode 的**写侧构造与建树整形**：`dialog_node`、`llm_build_*`、`PresentationTree` 与 `flatten_whole_tree` / `turn_root_of` | 留守：`chat_session/read` · `plugin/{nodes,vdfs_provider}` · `config`（档名解析）· `orchestrator/failure`；驱动器：`chat_loop/{io,compose}` · `message_build` · `resume` · `report_exec` · `tool_dispatch` · `tools/tool_executor` · `turn_exec` · `turn_runner` |
-| `symbio_platform::sdk::round::facts` | 跨端口的**事实记录类型**：`Delegation`、`TaskDeclaration` / `TaskItem` / `TaskStatus`、`ReportDraft` | 写侧驱动器 `tools/tool_executor/{delegation,task_decl}` 的 `note_*` 出参 · 落侧 `derived_facts` · 读侧 `task_events` · `tool_dispatch` · `report_exec` |
-| `symbio_platform::sdk::authz::request_principal` | 「本请求以谁的身份跑轮」的**唯一取值点**（core 既有键 `AGENT_ID` 的纯派生函数，不住任何片） | 驱动器 `chat_loop` / `chat_loop/state` · `chat_loop/inputs` · `context/pipeline`；留守 `stats` |
+| `symbio_platform::sdk::projection::vocab` | `ChatVocab` / `MessageVocab` / `CommitmentVocab` 与 `ChatSlot` 派生 | actors、session、门面及投影实现 |
+| `symbio_platform::sdk::projection::task_vocab` | 任务族五个名字的 `TaskVocab` 形状 | task 与 session |
+| `symbio_platform::sdk::round::node_build` | 内核规则 `result_node_id` 的既有转发路径 | `symbio-plugin-local` 经门面 |
+| `crate::projections` | 转写、分支、变更、省略、汇报记录、节点构造及测试期保真度判据 | 本插件生产代码与测试 |
 
-判据与 `types::Session` 一族同一条：**词汇的归属随数据 owner，跨插件者上移**。
-**机制留在原处**——`note_*` 的门与行为声明（`delegation_promise` /
-`task_table`）、`RoundHookFn` 的回调形态、`llm_build_assistant_messages` 的
-一轮装配，都不在词表里。
+任务声明、派发机制与行为登记分别归 loop owner 和平台 SDK；它们不属于会话投影。
+`prompt_fidelity` 没有生产消费方，只在测试构建中存在。
 
 ---
 

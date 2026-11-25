@@ -25,6 +25,7 @@
 
 use super::{fleet_reading, read, TierRow};
 use crate::declarations::{CHAT_VOCAB, COMMITMENT_VOCAB, MESSAGE_VOCAB};
+use crate::projections::transcript::transcript;
 use crate::stats_reading::{panel_of, totals_of};
 use crate::store::EventWalStore;
 use std::path::{Path, PathBuf};
@@ -32,7 +33,6 @@ use symbio_platform::kernel::event::{Entity, Event, EventEnvelope as _, Seq, Ver
 use symbio_platform::kernel::store::Store;
 use symbio_platform::kernel::view::Budget;
 use symbio_platform::sdk::invariants::check_all;
-use symbio_platform::sdk::projection::transcript::transcript;
 
 use crate::declarations::EVENT_SESSION_CONSOLIDATED;
 use crate::projections::checkpoint::checkpoint;
@@ -1495,7 +1495,7 @@ fn skill_compile_slots_are_absent_without_their_owner() {
 /// 读的是**事实源**（`user.message` / `chat.assistant.final` / `chat.assistant.fallback` /
 /// `artifact.added` 四格）而不是会话存储里的消息副本。
 ///
-/// 判据 = 复算同源（口径只活在 core 的 `transcript` 投影）+ 期望值钉死 + 反向
+/// 判据 = 复算同源（口径只活在本插件 `transcript` 投影）+ 期望值钉死 + 反向
 /// （删一格 ⇒ 那一句从转写里消失）+ 读侧闸（非属主 ⇒ `{entries: []}`，四列形态）。
 #[test]
 fn transcript_column_reads_the_conversation_back_from_the_wal() {
@@ -1503,7 +1503,7 @@ fn transcript_column_reads_the_conversation_back_from_the_wal() {
     let root = wal.parent().expect("WAL 有父目录").to_path_buf();
     let got = read_at(&wal, symbio_platform::sdk::authz::PRINCIPAL_MAIN);
 
-    // 复算：出口的转写列与直接 `apply` 逐字相等（口径只活在 core 的投影，出口不复判）。
+    // 复算：出口的转写列与直接 `apply` 逐字相等（口径只活在本插件投影，出口不复判）。
     let ro = EventWalStore::open_readonly(&wal).expect("WAL 只读");
     let snap = ro.range(Seq::new(0));
     let direct = serde_json::to_value(
@@ -1553,7 +1553,7 @@ fn transcript_column_reads_the_conversation_back_from_the_wal() {
 /// 转写列把**工具结果**也读出来：
 /// `artifact.added` 进投影 ⇒ 列里多一条 `role = "tool"`（带 `tool` = 工具名）。
 ///
-/// 这是「口径只活在 core 投影」的直接后果——出口不加任何判断，投影多一格，列就多一行。
+/// 这是「口径只活在本插件投影」的直接后果——出口不加任何判断，投影多一格，列就多一行。
 /// 判据独立于上一条（上一条的种子不含工具轮）：这条**补一格工具产物**再看列，因此它
 /// 证的是「列真的会浮出工具行」，不是「列恒等于种子那四行」。
 #[test]

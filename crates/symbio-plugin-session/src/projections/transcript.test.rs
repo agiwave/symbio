@@ -6,9 +6,9 @@
 //! 缺口（少了它，一次截断在 prompt 面上等于没发生过）。
 
 use super::transcript;
-use crate::kernel::view::Budget;
-use crate::sdk::event::{Entity, Event, Verb};
-use crate::sdk::test_fixtures::{
+use symbio_platform::kernel::event::{Entity, Event, Verb};
+use symbio_platform::kernel::view::Budget;
+use symbio_platform::sdk::test_fixtures::{
     CHAT, EVENT_CHAT_ASSISTANT_FINAL, EVENT_MESSAGE_EDITED, EVENT_MESSAGE_REMOVED,
     EVENT_USER_MESSAGE, MESSAGE,
 };
@@ -201,7 +201,7 @@ fn an_edit_for_an_unknown_node_is_a_no_op() {
 fn snapshot(tag: &str, msgs: Vec<serde_json::Value>) -> Event {
     Event::pending(
         format!("snap-{tag}"),
-        crate::sdk::test_fixtures::EVENT_SESSION_CONSOLIDATED,
+        symbio_platform::sdk::test_fixtures::EVENT_SESSION_CONSOLIDATED,
         Entity::Message,
         Verb::Progressed,
         "session/main",
@@ -296,7 +296,7 @@ fn the_user_turn_a_snapshot_carries_is_not_emitted_twice() {
 }
 
 /// 去重**只**作用在换基边界，不在事实事件彼此之间：兜底 / 汇报那几格的节点身份是按
-/// `root_id` 派生的合成 id（[`crate::sdk::event::event_produced_text_node_id`]），同一轮里
+/// `root_id` 派生的合成 id（[`symbio_platform::kernel::event::event_produced_text_node_id`]），同一轮里
 /// 两条不同事件可能撞到同一个合成 id，而它们在 `rebuild` 里是两个不同的节点——把它们
 /// 合并就是**另一种**分叉。这条钉住判据的边界，免得后来人把它「顺手」改成全局去重。
 #[test]
@@ -347,7 +347,7 @@ fn only_the_latest_snapshot_counts() {
 fn an_empty_or_malformed_snapshot_does_not_wipe_the_history() {
     let broken = Event::pending(
         "snap-x",
-        crate::sdk::test_fixtures::EVENT_SESSION_CONSOLIDATED,
+        symbio_platform::sdk::test_fixtures::EVENT_SESSION_CONSOLIDATED,
         Entity::Message,
         Verb::Progressed,
         "session/main",
@@ -450,7 +450,7 @@ fn a_snapshot_report_node_stays_out_of_the_request_package() {
 fn branch(of: &str, into: &str) -> Event {
     Event::pending(
         format!("branch-{into}"),
-        crate::sdk::test_fixtures::EVENT_SCOPE_BRANCH,
+        symbio_platform::sdk::test_fixtures::EVENT_SCOPE_BRANCH,
         Entity::Scope,
         Verb::Asserted,
         "person/local",
@@ -502,7 +502,7 @@ fn switching_back_moves_the_request_package_back() {
     events.push(
         Event::pending(
             "sel-1",
-            crate::sdk::test_fixtures::EVENT_SCOPE_BRANCH_SELECTED,
+            symbio_platform::sdk::test_fixtures::EVENT_SCOPE_BRANCH_SELECTED,
             Entity::Scope,
             Verb::Asserted,
             "person/local",

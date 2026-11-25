@@ -38,10 +38,9 @@
 
 use std::collections::HashSet;
 
-use super::super::event::Event;
-use super::vocab::{slot_of, ChatSlot};
-use crate::sdk::projection::vocab::ChatVocab;
-use crate::sdk::projection::vocab::MessageVocab;
+use symbio_platform::kernel::event::Event;
+use symbio_platform::sdk::projection::vocab::{slot_of, ChatSlot};
+use symbio_platform::sdk::projection::vocab::{ChatVocab, MessageVocab};
 
 /// 一次切片里所有「不读」的落点：显式区间 + 未选中的分支。
 #[derive(Debug, Clone, Default)]

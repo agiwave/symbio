@@ -12,7 +12,7 @@
  * | PP-001 | 产投影文件不得 `use` 导入**同根产投影的兄弟**（不含 `Projection::new` 的共享读侧——`mutations` / `rebuild` / `turns` / `prompt_fidelity` / `tiers`——谁都可以导） | 投影 A 读投影 B 的输出（L2，DE-001 §13.2）：视图叠视图，外壳 `degraded` / 预算语义在层间静默丢失 |
  * | PP-002 | 折叠目录里的生产文件禁 `SystemTime::now` / `rand::` / `static mut` / `std::time::Instant` | 隐式全局依赖：时钟、随机数、全局可变状态——确定性（N1）的口径外漏洞 |
  * | PP-003 | 每个 `pub fn X(..) -> Projection<` 构造器必须有**折叠目录之外**的生产消费方，或同文件里一行 `// projection-purity-allow <X>: 非空理由` | 死构造器：抽了纯函数视图却没有调用方——「为将来准备」的投机抽象（本仓只认消费方定的契约） |
- * | PP-004 | core 投影面的两格存量——**产投影文件数**与**投影构造器数**——只许降；放宽要按 PP-005 在本脚本旁留一条挂得住的决策 | **投影长回 core**：能力折叠一旦住在 `symbio_sdk/projection/`，「加一个能力」就又成了改架构模块。下沉判据是消费方分布（只有一个 owner 在读 ⇒ 归那个 owner），而这条把「又长回来」变成机器可判的红（[DE-025](../../docs/003-design/025-能力包与扩展面.md "DE-025-能力包与扩展面") D-221） |
+ * | PP-004 | core 投影面的两格存量——**产投影文件数**与**投影构造器数**——只许降；放宽要按 PP-005 在本脚本旁留一条挂得住的决策 | **投影长回 core**：能力折叠一旦住在 `symbio_platform::sdk::projection/`，「加一个能力」就又成了改架构模块。下沉判据是消费方分布（只有一个 owner 在读 ⇒ 归那个 owner），而这条把「又长回来」变成机器可判的红（[DE-025](../../docs/003-design/025-能力包与扩展面.md "DE-025-能力包与扩展面") D-221） |
  * | PP-005 | 上面两格的放宽注释 `// projection-purity-allow <格>: D-NNN <非空理由>` 里的 `D-NNN` 必须在设计文档里有 `### D-NNN` 锚点 | 「改一个数字」看起来像维护：注释写得再像理由，指向不存在的决策就不算豁免（与 CS-002 同一条判据形状） |
  *
  * ## 判定面：折叠搬到哪儿，判据跟到哪儿
@@ -25,14 +25,12 @@
  * ## PP-004 的口径边界（写清楚，免得把绿灯当成证明）
  *
  * 它数的是**core 这一侧的投影面**，不是「core 有多少 `.rs`」：`vocab.rs` / `task_vocab.rs`
- * 是折叠的**参数表**（不产 `Projection`），`mod.rs` 是 trait 本身——它们长宽都不判。
- * 目标是把两格继续往下推：今天还留在 core 的两个构造器（`transcript` / `turnstate`）
- * 各有 ≥2 个非 core 的 crate 在读（`loop` / `session`），读者迁完它们就该跟着走。
- * `readyset` 已在 `D-289` 随它的 owner 搬进 `crates/symbio-plugin-task`——搬过去之后它是
- * 声明视图的 `eval`（`ViewDecl`），不再是 `Projection::new` 的构造器，因此**不在本脚本的
- * 判定面上**：这条口径写在这里是免得把 PP 的绿灯读成「折叠都还在判」——那条算式的确定性
- * 由 owner 包内的双跑用例与 e2e 守。跨插件想读别人的折叠，走
- * `symbio_plugin_api::views` 的按名字读口，**不要**在 core 里再写一份。
+ * 是折叠的**参数表**（不产 `Projection`），`mod.rs` 是框架本身——它们长宽都不判。
+ * D-561 后两格已收平为 0 / 0：会话转写、分支、变更、汇报与造树实现归 session，
+ * core 不再持有 `Projection::new` 构造器。owner 的折叠仍由 PP-001 / 002 / 003 覆盖。
+ * `readyset` 在 `D-289` 随 owner 搬进 `crates/symbio-plugin-task` 后是声明视图的
+ * `eval`（`ViewDecl`），不在本脚本的判定面上；其确定性由 owner 包内双跑用例与 e2e 守。
+ * 跨插件读取 owner 的折叠走 `symbio_plugin_api::views` 的按名字读口，不在 core 再写一份。
  *
  * 环境变量 `CORE_PROJECTION_BASELINE=<files>:<ctors>` **只给回归测试用**（真仓门禁不设）；
  * 它能一次调用把上限放到天边，所以 `gate.d/35-baseline.mjs` 另判一次「覆盖值不得比
@@ -234,7 +232,7 @@ for (const { rel, raw, name } of ctorRows) {
 
 // ── PP-004：core 投影面只许降（DE-025 D-221）────────────────────────────
 /**
- * 两格的**现值**（2026-10-28 下沉六条之后冻结）：
+ * 两格的**现值**（D-561 会话实现归位后冻结）：
  * - `files`：`projection/` 下产 `Projection` 的文件数；
  * - `ctors`：其中 `pub fn X(..) -> Projection<` 的构造器条数。
  *
@@ -247,7 +245,7 @@ const PROJ_BASELINE = process.env.CORE_PROJECTION_BASELINE
       const [files, ctors] = process.env.CORE_PROJECTION_BASELINE.split(':').map((n) => Number(n))
       return { files, ctors }
     })()
-  : { files: 1, ctors: 1 }
+  : { files: 0, ctors: 0 }
 
 const PROJ_CELL_LABEL = {
   files: 'core 产投影文件数',
@@ -270,9 +268,9 @@ for (const [key, cap] of Object.entries(PROJ_BASELINE)) {
   if (now > cap) {
     fail(
       `PP-004 ${PROJ_CELL_LABEL[key]}变宽：实测 ${now} > 基线 ${cap} —— ` +
-        `能力折叠住进 \`symbio_sdk/projection/\` 就等于「加一个能力要改架构模块」（DE-025 D-221）。` +
+        `能力折叠住进 \`symbio_platform::sdk::projection/\` 就等于「加一个能力要改架构模块」（DE-025 D-221）。` +
         '唯一合法的路径按序走：① 数它有几个 crate 在读——只有一个 owner 在读就**下沉给那个 owner**' +
-        '（先例：checkpoint / fallback / slo / span / changes 归 session，consolidate 归 memory）；' +
+        '（先例：checkpoint / changes 归 session，fallback / slo / span 归 slo 能力包，consolidate 归 memory）；' +
         '② 别的插件想读 owner 的折叠，由 owner 用 `submit_reports!` 把视图登记成报表列' +
         '（`ReportDecl.views`），读方遍历 `reports()`——不在 core 里再写一份；' +
         '③ 三条路都不通才谈放宽：' +

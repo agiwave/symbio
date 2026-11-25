@@ -423,8 +423,8 @@ impl SessionPlugin {
         actor: &str,
     ) -> Result<(), PluginError> {
         use crate::declarations::EVENT_SCOPE_BRANCH_SELECTED;
+        use crate::projections::branch::{branch_candidates, branch_selected};
         use symbio_platform::kernel::event::{Entity, Verb};
-        use symbio_platform::sdk::projection::branch::{branch_candidates, branch_selected};
         use symbio_plugin_api::events::EVENT_SCOPE_BRANCH;
         use symbio_plugin_api::FactDraft;
         let chat_session = self.open_chat_session(session_id).await?;
@@ -590,7 +590,7 @@ impl SessionPlugin {
         message.status = None;
         message.error = None;
         if let Some(meta) = message.meta.as_mut().and_then(Value::as_object_mut) {
-            meta.remove(symbio_platform::sdk::projection::branch::META_BRANCH);
+            meta.remove(crate::projections::branch::META_BRANCH);
         }
         Ok(message)
     }

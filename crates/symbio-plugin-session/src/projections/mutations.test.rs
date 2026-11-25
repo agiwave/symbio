@@ -6,8 +6,8 @@
 //! 投影没查）——合成一个文件时，第二种会被第一种的症状盖住。
 
 use super::{mutations_latest_snapshot, MessageMutations};
-use crate::sdk::event::{Entity, Event, Verb};
-use crate::sdk::test_fixtures::{EVENT_MESSAGE_EDITED, EVENT_MESSAGE_REMOVED, MESSAGE};
+use symbio_platform::kernel::event::{Entity, Event, Verb};
+use symbio_platform::sdk::test_fixtures::{EVENT_MESSAGE_EDITED, EVENT_MESSAGE_REMOVED, MESSAGE};
 
 /// 一条 `message.edited`（载荷 = 补丁应用后的整条消息）。
 fn edited(node: &str, role: &str, text: &str) -> Event {
@@ -112,7 +112,7 @@ fn malformed_payloads_are_skipped_not_fatal() {
 fn only_mutation_cells_are_collected() {
     let lookalike = Event::pending(
         "u-0",
-        crate::sdk::test_fixtures::EVENT_USER_MESSAGE,
+        symbio_platform::sdk::test_fixtures::EVENT_USER_MESSAGE,
         Entity::Scope,
         Verb::Opened,
         "user",
@@ -161,7 +161,7 @@ fn a_removal_fact_outside_message_closed_is_not_a_removal() {
 
 // ── 压缩快照（取代格）──────────────────────────────────────
 
-use crate::sdk::test_fixtures::EVENT_SESSION_CONSOLIDATED;
+use symbio_platform::sdk::test_fixtures::EVENT_SESSION_CONSOLIDATED;
 
 /// 一条 `session.consolidated`：载荷 `messages` = 压缩后的整份列表。
 fn snapshot(tag: &str, msgs: &[(&str, &str, &str)]) -> Event {

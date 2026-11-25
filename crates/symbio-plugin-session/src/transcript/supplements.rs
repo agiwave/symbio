@@ -41,10 +41,8 @@ use std::sync::Arc;
 use symbio_platform::kernel::chat::chat_node as cm;
 use symbio_platform::sdk::vdfs::host::VdfsChangeSubscriptions;
 
-/// 合并标记的三个键名（唯一真源在 core 词汇表；重建侧与 loop 侧也读它们）。
-pub use symbio_platform::sdk::round::facts::{
-    META_SUPPLEMENT, META_SUPPLEMENT_COUNT, META_SUPPLEMENT_IDS,
-};
+/// 合并标记的三个键名（唯一真源在共享词汇表；重建侧与 loop 侧也读它们）。
+pub use crate::projections::facts::{META_SUPPLEMENT, META_SUPPLEMENT_COUNT, META_SUPPLEMENT_IDS};
 
 /// 合并 n 条补充时正文之间的连接符。
 ///

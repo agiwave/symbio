@@ -12,6 +12,7 @@
 use super::*;
 use crate::chat_session::Carrier;
 use crate::convergence::SessionStateChange;
+use crate::projections::facts::FleetSnapshot;
 use crate::route_guard::require_sid;
 use crate::transcript::publish::append_and_publish;
 use crate::transcript::supplements::merge_supplements;
@@ -21,7 +22,6 @@ use symbio_platform::kernel::LatencyTier;
 use symbio_platform::sdk::authz::PRINCIPAL_MAIN;
 use symbio_platform::sdk::drive::DriveEntry;
 use symbio_platform::sdk::plugin::fact_source::FactSource;
-use symbio_platform::sdk::round::facts::FleetSnapshot;
 use symbio_plugin_api::capability_take_errors;
 use symbio_plugin_api::debt::{session_config_id, session_recall_id};
 use symbio_plugin_api::events::{

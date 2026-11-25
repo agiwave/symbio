@@ -13,8 +13,8 @@
 //!
 //! ## 一份数据一个构造点
 //!
-//! 折法只有这一处：投影侧（`crate::sdk::projection::branch`）把它盖成
-//! `meta.branch`，请求包侧（[`unselected_roots`]）拿它裁掉不读的支，模型端口的
+//! 折法只有这一处：会话投影（`crates/symbio-plugin-session/src/projections/branch.rs`）
+//! 把它盖成 `meta.branch`，请求包侧（[`unselected_roots`]）拿它裁掉不读的支，模型端口的
 //! 请求装配也调同一个函数。三处各写一遍，必然有一份先漏——重试/切换后的裁剪与
 //! 转写投影就会给出不同的答案。
 //!
