@@ -8,8 +8,8 @@ use serde_json::Value;
 use super::epoch::EpochRegistry;
 use super::id::{validate_session_id, BuildId, Epoch, RequestId, WorkerId};
 use super::{
-    create_dir_durable, io_error, now_ms, read_json, read_optional_json, remove_durable,
-    rename_durable, sync_parent, try_exclusive_lock, write_json_atomic, WorkerError,
+    create_dir_durable, exclusive_lock, io_error, now_ms, read_json, read_optional_json,
+    remove_durable, rename_durable, sync_parent, write_json_atomic, WorkerError,
 };
 
 const PENDING: &str = "pending";
@@ -629,7 +629,7 @@ impl DurableInbox {
     }
 
     fn lock(&self) -> Result<File, WorkerError> {
-        try_exclusive_lock(&self.root.join(STATE_LOCK))
+        exclusive_lock(&self.root.join(STATE_LOCK))
     }
 
     fn pending_dir(&self) -> PathBuf {

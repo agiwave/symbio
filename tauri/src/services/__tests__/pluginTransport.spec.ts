@@ -48,6 +48,7 @@ import {
   callPlugin,
   connectPlugin,
   getConnectionModel,
+  getOutboundConfig,
   reloadGatewayTransport,
 } from '../plugin'
 
@@ -240,17 +241,28 @@ describe('协议违规：非法帧不击穿边界', () => {
   })
 })
 
-describe('http 传输：远端不可达回退 + invoke 错误', () => {
-  it('embedded 健康探测失败 ⇒ 回退 native（不卡死）', async () => {
+describe('http 传输：远端不可达与 invoke 错误', () => {
+  it('embedded 健康探测失败 ⇒ 保留 Server HTTP，绝不调用 IPC', async () => {
     S.location = { kind: 'remote', remoteUrl: 'http://remote.invalid', remoteKey: 'k' }
     const fetchMock = vi.fn().mockRejectedValue(new Error('offline'))
     vi.stubGlobal('fetch', fetchMock)
 
     await reloadGatewayTransport()
-    await callPlugin('vdfs/stat')
+    await expect(callPlugin('vdfs/stat', {}, 0, { forceNative: true })).rejects.toThrow('offline')
 
-    expect(fetchMock).toHaveBeenCalledTimes(1)
-    expect(vi.mocked(invoke)).toHaveBeenCalled()
+    expect(getConnectionModel()).toEqual({ environment: 'embedded', target: 'server' })
+    expect(getOutboundConfig()).toEqual({
+      protocol: 'http',
+      endpoint: 'http://remote.invalid',
+      token: 'k',
+    })
+    expect(setLocationError).toHaveBeenCalledWith(expect.stringContaining('保留 Server HTTP 连接'))
+    expect(fetchMock.mock.calls.map((call) => call[0])).toEqual([
+      'http://remote.invalid/api/v1/health',
+      'http://remote.invalid/api/v1/invoke',
+    ])
+    expect(invoke).not.toHaveBeenCalled()
+    expect(listen).not.toHaveBeenCalled()
   })
 
   it('invoke 非 2xx ⇒ 带 error 正文抛错', async () => {
@@ -302,7 +314,7 @@ describe('browser 传输模型', () => {
     await reloadGatewayTransport()
 
     await expect(callPlugin('vdfs/stat', {}, 0, { forceNative: true })).rejects.toThrow('offline')
-    expect(setLocationError).toHaveBeenCalledWith(expect.stringContaining('浏览器不会回退本机连接'))
+    expect(setLocationError).toHaveBeenCalledWith(expect.stringContaining('保留 Server HTTP 连接'))
     expect(getConnectionModel()).toEqual({ environment: 'browser', target: 'server' })
     expect(fetchMock.mock.calls.map((call) => call[0])).toEqual([
       'http://remote.test/api/v1/health',

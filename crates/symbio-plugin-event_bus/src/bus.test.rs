@@ -112,6 +112,37 @@ async fn full_channel_eventually_receives_resync_marker() {
     unregister_subscriber(&id);
 }
 
+#[tokio::test]
+async fn resync_marker_reaches_other_subscribers_when_one_channel_is_full() {
+    let _g = SERIAL.lock().await;
+    let (full_tx, mut full_rx) = mpsc::channel(1);
+    let (relay_tx, mut relay_rx) = mpsc::channel(4);
+    let full_id = "test_resync_full_source".to_string();
+    let relay_id = "test_resync_relay_target".to_string();
+    register_subscriber(full_id.clone(), full_tx);
+    register_subscriber(relay_id.clone(), relay_tx);
+
+    EventBus::try_publish(EVENT_BUS_KIND_VDFS, None, json!({ "n": 1 }));
+    EventBus::try_publish(EVENT_BUS_KIND_VDFS, None, json!({ "n": 2 }));
+    let _ = full_rx.recv().await;
+
+    let deadline = tokio::time::Instant::now() + Duration::from_secs(1);
+    loop {
+        let frame = tokio::time::timeout_at(deadline, relay_rx.recv())
+            .await
+            .expect("relay marker timeout")
+            .expect("relay marker");
+        let PluginFrame::Data(value) = frame else {
+            continue;
+        };
+        if value["data"]["data"]["type"] == EVENT_BUS_RESYNC_MARKER_TYPE {
+            break;
+        }
+    }
+    unregister_subscriber(&full_id);
+    unregister_subscriber(&relay_id);
+}
+
 /// 从通道里挑出带指定 `tag` 的帧，返回**载荷的 `Arc`**。
 ///
 /// 订阅表是进程级的、用例并行跑：本通道也会收到其它用例发布的事件，

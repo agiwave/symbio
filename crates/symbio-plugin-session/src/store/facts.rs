@@ -206,6 +206,7 @@ impl SessionStore {
             symbio_kernel::exec::ExecEventSink::silent(),
             None,
             std::sync::Arc::new(std::sync::RwLock::new(None)),
+            None,
         )
     }
 
@@ -220,10 +221,11 @@ impl SessionStore {
     pub(crate) fn fact_source_bound(
         &self,
         session_id: &str,
-        drive: Option<Arc<dyn symbio_sdk::plugin::drive_entry::DriveEntry>>,
+        drive: Option<Arc<dyn symbio_sdk::drive::DriveEntry>>,
         sink: symbio_kernel::exec::ExecEventSink,
         supplements: Option<crate::transcript::supplements::SupplementDrain>,
         abort_signal: Arc<std::sync::RwLock<Option<symbio_kernel::exec::ExecAbortSignal>>>,
+        port_bindings: Option<Arc<symbio_plugin_api::port::PortBindings>>,
     ) -> Result<Option<Arc<dyn symbio_sdk::plugin::fact_source::FactSource>>, String> {
         // 会话目录不存在 = 没跑过 = **没有事实源**（缺省态，不是失败）。
         // 只读面（`session/changes` 等）必须能回答「这个会话还没有 WAL」，
@@ -252,6 +254,7 @@ impl SessionStore {
                 self.agent_scope_cell(session_id),
                 self.source_principal_cell(session_id),
                 abort_signal,
+                port_bindings,
                 drive,
                 sink,
                 supplements,

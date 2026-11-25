@@ -15,6 +15,7 @@ use symbio_plugin_api::principal::{Principal, PrincipalKind};
 use symbio_plugin_api::{
     PluginSimpleRequest, SymbioKey, VdfsAccess, VDFS_STATUS_ACTIVE, VDFS_STATUS_FAILED,
 };
+use symbio_sdk::keys::SOURCE_PRINCIPAL;
 
 fn session_node(status: &str, error: Option<&str>) -> VdfsNode {
     let mut n = VdfsNode::dir("sid", "子会话", VdfsAccess::READ);
@@ -60,6 +61,40 @@ async fn agent_run_facts_include_target_agent_and_effective_workdir() {
             SandboxFact::new("vdfs_path", "/workspace/current"),
         ]
     );
+}
+
+#[test]
+fn worker_request_metadata_preserves_source_principal_across_the_wire() {
+    let ctx: Arc<dyn PluginInvokeRequest> = Arc::new(PluginSimpleRequest::new(None, None));
+    ctx.set(SOURCE_PRINCIPAL, "agent:requester".to_string());
+
+    for route in [
+        symbio_plugin_api::routes::ROUTE_VDFS_WRITE,
+        symbio_plugin_api::routes::ROUTE_VDFS_ACTION,
+    ] {
+        let wire = PluginMessageWire {
+            metadata: worker_request_metadata(&ctx, route, "child-1", &None),
+            payload: json!({}),
+        };
+        let decoded: PluginMessageWire =
+            serde_json::from_str(&serde_json::to_string(&wire).expect("serialize request"))
+                .expect("deserialize request");
+        let rebuilt =
+            PluginSimpleRequest::from_parts(decoded.payload, decoded.metadata.as_object());
+        assert_eq!(
+            rebuilt.get(SOURCE_PRINCIPAL).as_deref(),
+            Some("agent:requester")
+        );
+    }
+
+    let local: Arc<dyn PluginInvokeRequest> = Arc::new(PluginSimpleRequest::new(None, None));
+    let metadata = worker_request_metadata(
+        &local,
+        symbio_plugin_api::routes::ROUTE_VDFS_WRITE,
+        "child-1",
+        &None,
+    );
+    assert!(metadata.get("source_principal").is_none());
 }
 
 #[tokio::test]

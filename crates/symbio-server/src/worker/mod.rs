@@ -1,12 +1,13 @@
+mod entry;
 mod epoch;
 mod id;
 mod inbox;
 mod process;
 mod protocol;
 mod recovery;
-mod subagent;
 mod supervisor;
 
+pub use entry::run_worker_command;
 pub use epoch::EpochRegistry;
 pub use id::{BuildId, Epoch, Fenced, RequestId, WorkerId};
 pub use inbox::{
@@ -15,7 +16,6 @@ pub use inbox::{
 pub use process::{run_worker, WorkerBootstrap};
 // protocol lines are implementation details; tests import the module directly.
 pub use recovery::{RecoveryReport, WorkerReady, WorkerRecovery, WorkerStartup};
-pub use subagent::{StartSubagent, SubagentFrame, SubagentRoute};
 pub(crate) use supervisor::WorkerSupervisor;
 
 use serde::de::DeserializeOwned;
@@ -220,6 +220,20 @@ pub(super) fn sync_parent(parent: &Path) -> Result<(), WorkerError> {
         let _ = parent;
         Ok(())
     }
+}
+
+pub(super) fn exclusive_lock(path: &Path) -> Result<File, WorkerError> {
+    if let Some(parent) = path.parent() {
+        create_dir_durable(parent)?;
+    }
+    let file = OpenOptions::new()
+        .read(true)
+        .write(true)
+        .create(true)
+        .truncate(false)
+        .open(path)
+        .map_err(|error| io_error("打开锁", path, error))?;
+    file.lock().map_err(|_| WorkerError::Busy).map(|()| file)
 }
 
 pub(super) fn try_exclusive_lock(path: &Path) -> Result<File, WorkerError> {

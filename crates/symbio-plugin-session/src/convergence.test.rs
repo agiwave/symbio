@@ -7,10 +7,15 @@
 
 use super::*;
 use crate::config::SessionConfig;
-use crate::plugin::{SessionPlugin, OUTCOME_ABORTED, OUTCOME_COMPLETED};
+use crate::plugin::{SessionPlugin, OUTCOME_ABORTED};
+use crate::plugin::{OUTCOME_COMPLETED, OUTCOME_FAILED};
 use crate::types::Session;
+use std::sync::atomic::Ordering;
+use std::sync::{Arc, Mutex as StdMutex};
 use symbio_plugin_api::PluginDir;
 use symbio_sdk::vdfs::host::VdfsChangeSubscriptions;
+use tokio::sync::{oneshot, Notify};
+use tokio::task::JoinSet;
 /// 造一条已入库的事件（只给 `waits_for_user` 用：kind / payload / seq）。
 fn at(seq: u64, kind: &str, payload: serde_json::Value) -> Event {
     let mut event = Event::pending(
@@ -131,4 +136,122 @@ async fn aborted_and_completed_outcomes_are_distinct() {
         Some(OUTCOME_COMPLETED),
         "两个结局不得坍缩成同一个值——坍缩后中止会被当成正常完成"
     );
+}
+
+#[tokio::test(flavor = "multi_thread", worker_threads = 2)]
+async fn finished_frame_precedes_any_reserved_round() {
+    let (_dir, p) = fixture();
+    let sid = "s-order";
+    p.get_store()
+        .await
+        .unwrap()
+        .save_session(&Session::new(sid))
+        .await
+        .unwrap();
+    let changes = VdfsChangeSubscriptions::default();
+    let state = Arc::new(ActiveSessionState::with_session_id(
+        sid.into(),
+        changes.clone(),
+    ));
+    p.convergence
+        .active
+        .sessions
+        .write()
+        .await
+        .insert(sid.into(), Arc::clone(&state));
+    state.begin_turn().await;
+    let observed = Arc::new(StdMutex::new(Vec::new()));
+    let sink_observed = Arc::clone(&observed);
+    let entered = Arc::new(Notify::new());
+    let sink_entered = Arc::clone(&entered);
+    let release = Arc::new(Notify::new());
+    let sink_release = Arc::clone(&release);
+    let blocker = Arc::new(std::sync::atomic::AtomicBool::new(true));
+    let sink_block = Arc::clone(&blocker);
+    changes.watch(
+        sid,
+        Arc::new(move |change| {
+            sink_observed
+                .lock()
+                .expect("observed")
+                .push(change.data.expect("node"));
+            sink_entered.notify_one();
+            if sink_block.swap(false, Ordering::SeqCst) {
+                futures::executor::block_on(sink_release.notified());
+            }
+        }),
+    );
+
+    let mut tasks = JoinSet::new();
+    let finish_state = Arc::clone(&state);
+    let convergence = p.convergence.clone();
+    tasks.spawn(async move {
+        convergence
+            .emit_session_state(
+                &finish_state,
+                SessionStateChange::Finished {
+                    outcome: OUTCOME_FAILED,
+                    error: Some("失败".into()),
+                },
+            )
+            .await;
+        "finished"
+    });
+    tokio::time::timeout(std::time::Duration::from_secs(1), entered.notified())
+        .await
+        .expect("finish must reach the blocking VDFS sink");
+    assert_eq!(observed.lock().expect("observed").len(), 1);
+    assert!(
+        state.inner.read().await.is_working(),
+        "终态帧投递完成前不得释放轮次"
+    );
+
+    let (next_tx, next_rx) = oneshot::channel();
+    let next_state = Arc::clone(&state);
+    tasks.spawn(async move {
+        next_state.begin_when_idle().await;
+        let _ = next_tx.send(());
+        "next"
+    });
+    assert!(
+        tokio::time::timeout(std::time::Duration::from_millis(20), next_rx)
+            .await
+            .is_err(),
+        "下一轮必须等待终态投递"
+    );
+
+    release.notify_one();
+    let mut labels = Vec::new();
+    while let Some(result) =
+        tokio::time::timeout(std::time::Duration::from_secs(1), tasks.join_next())
+            .await
+            .expect("round transition timeout")
+    {
+        labels.push(result.expect("transition task"));
+    }
+    assert_eq!(labels, ["finished", "next"]);
+
+    let convergence = p.convergence.clone();
+    let working_state = Arc::clone(&state);
+    tasks.spawn(async move {
+        convergence
+            .emit_session_state(&working_state, SessionStateChange::Working)
+            .await;
+        "working"
+    });
+    while let Some(result) =
+        tokio::time::timeout(std::time::Duration::from_secs(1), tasks.join_next())
+            .await
+            .expect("working transition timeout")
+    {
+        labels.push(result.expect("working task"));
+    }
+    assert_eq!(labels, ["finished", "next", "working"]);
+    state.finish_turn(OUTCOME_COMPLETED, None).await;
+    let frames = observed.lock().expect("observed");
+    let statuses: Vec<_> = frames
+        .iter()
+        .map(|frame| frame["status"].as_str().expect("status"))
+        .collect();
+    assert_eq!(statuses, ["failed", "working"]);
 }

@@ -49,8 +49,12 @@ impl ServerHandle {
 pub async fn stop(handle: ServerHandle) {
     handle.cancel.cancel();
     handle.task.abort();
-    if let Err(error) = handle.task.await {
-        eprintln!("HTTP server task shutdown failed: {error}");
+    match handle.task.await {
+        Ok(()) => {}
+        Err(error) if !error.is_cancelled() => {
+            eprintln!("HTTP server task shutdown failed: {error}");
+        }
+        Err(_) => {}
     }
     let connections =
         std::mem::take(&mut *handle.connections.lock().unwrap_or_else(|e| e.into_inner()));

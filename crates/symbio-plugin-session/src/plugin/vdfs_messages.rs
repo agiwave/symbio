@@ -255,24 +255,28 @@ impl SessionPlugin {
                         .await;
                         // 开轮：形状与写收件箱逐字相同（同上一条注释）。
                         let source = self
-                            .fact_source(id)
+                            .fact_source_with_bindings(
+                                id,
+                                vdfs_host_ctx(ctx)?.get(symbio_plugin_api::port::PORT_BINDINGS),
+                            )
                             .await
                             .map_err(|e| VdfsError::internal(format!("开轮取事实源失败: {e}")))?;
                         let inbox_ctx = vdfs_host_ctx(ctx)?.fork();
                         inbox_ctx.set(SESSION_ID, id.to_string());
                         inbox_ctx.set(FACT_SOURCE, Arc::clone(&source));
                         let seq = self
-                            .consume_inbox_turn(&inbox_ctx, id, &*source)
+                            .consume_inbox_turn(&inbox_ctx, id, Arc::clone(&source))
                             .await
                             .map_err(|e| VdfsError::internal(format!("开轮失败: {e}")))?;
                         if let Some(seq) = seq {
                             let next_ctx = self.get_parent().map(|_| inbox_ctx.clone());
-                            self.spawn_turn_closer(
+                            self.spawn_round_closer(
                                 id.to_string(),
                                 seq,
                                 source,
                                 self.drive_entry(),
                                 next_ctx,
+                                None,
                             );
                         }
                         Ok(VdfsResponse::Action(VdfsActionResult {
@@ -306,7 +310,10 @@ impl SessionPlugin {
                             )));
                         }
                         let source = self
-                            .fact_source(id)
+                            .fact_source_with_bindings(
+                                id,
+                                vdfs_host_ctx(ctx)?.get(symbio_plugin_api::port::PORT_BINDINGS),
+                            )
                             .await
                             .map_err(|e| VdfsError::internal(format!("打开事实源失败：{e}")))?;
                         let anchor = source
@@ -349,7 +356,7 @@ impl SessionPlugin {
                     // **只落一条事实，不在这里续跑。** 动作闭集是
                     // `{answer, approve, reject}`，落成 `user.answer`（事实里的 `kind`
                     // 取 `answer | approve | deny`）：宿主看到事实源 head 前进后由写口
-                    // 踢一次驱动（契约 `symbio_sdk::plugin::drive_entry`），工具侧那一行
+                    // 踢一次驱动（契约 `symbio_sdk::drive`），工具侧那一行
                     // 按 `kind` 分岔——`answer` 把答复原文落成结果，`approve` 签发
                     // 一次性授权后走正常执行，`deny` 不执行、落 `user_rejected`。
                     // 挂起的调用**不在这里执行**（审批 / 答复恢复只能从事实进环）。
@@ -373,49 +380,39 @@ impl SessionPlugin {
                         // 产物）。解不出 wire id 就拒绝，不静默拿节点 id 顶替。
                         let msgs = self.transcript_of(id).await?;
                         let wire_id = wire_call_id_of(&msgs, mid)?;
-                        // 走**本部署根**的写口（不是通用开面）：驱动与转写出口都绑在
-                        // 这个句柄上，答复落格后由它踢出续跑的一环（`user.answer`
-                        // 只落事实，续跑由踢驱动发起）。
-                        let source = self
-                            .fact_source(id)
-                            .await
-                            .map_err(|e| VdfsError::internal(format!("打开事实源失败：{e}")))?;
-                        // 溯源锚（I2：断言类事实必须带 `produced_by`，且不许悬空）：
-                        // 答复不是对某条事实的**修改**，而是「站在当前这份状态上」的
-                        // 一次外部断言；取落格前最后一条事实的 seq——与
-                        // `message_events::provenance` 找不到承载事件时的退化口径一致。
-                        let anchor = source
-                            .range(0)
-                            .last()
-                            .and_then(|e| e.seq)
-                            .map(|s| s.value())
-                            .ok_or_else(|| {
-                                VdfsError::internal(
-                                    "答复未能入格：事实源为空，没有可用的溯源锚".to_string(),
-                                )
-                            })?;
-                        let draft = FactDraft {
-                            // 事实身份 = 它回答的那次调用（wire id 全局唯一）：
-                            // 工具侧的续接行按原债键（`tool:<request_id>`）开账，只把这
-                            // 条事实的身份放进载荷，答复原文 / `kind` 由执行体自己读。
-                            key: format!("user-answer:{wire_id}"),
-                            kind: EVENT_USER_ANSWER.to_string(),
-                            entity: Entity::Scope,
-                            verb: Verb::Asserted,
-                            payload: json!({
-                                "kind": kind,
-                                "call_id": wire_id,
-                                "answer": answer,
-                                "mode": mode,
-                                "by": symbio_plugin_api::PRINCIPAL_USER,
-                            }),
-                            produced_by: Some(anchor),
-                        };
-                        source
-                            .append(symbio_plugin_api::PRINCIPAL_USER.to_string(), draft)
-                            .map_err(|e| {
-                                VdfsError::internal(format!("user.answer 落格失败：{e}"))
-                            })?;
+                        // worker 重启后来源主体与 Agent 权限槽均为空；在答复落格前
+                        // 按本次可信请求和会话绑定重新准备，缺作用域时 fail closed。
+                        let host = vdfs_host_ctx(ctx)?;
+                        let source_principal = host
+                            .get(symbio_sdk::keys::SOURCE_PRINCIPAL)
+                            .filter(|source| !source.trim().is_empty());
+                        // 走本部署根的写口，并在原轮根上重新占轮；由同一轮收尾面
+                        // 等驱动收束后投影，避免 worker 重启后留下永久 busy。
+                        self.append_resume_fact(
+                            &host,
+                            id,
+                            &wire_id,
+                            source_principal,
+                            FactDraft {
+                                // 事实身份 = 它回答的那次调用（wire id 全局唯一）：
+                                // 工具侧的续接行按原债键（`tool:<request_id>`）开账，只把这
+                                // 条事实的身份放进载荷，答复原文 / `kind` 由执行体自己读。
+                                key: format!("user-answer:{wire_id}"),
+                                kind: EVENT_USER_ANSWER.to_string(),
+                                entity: Entity::Scope,
+                                verb: Verb::Asserted,
+                                payload: json!({
+                                    "kind": kind,
+                                    "call_id": wire_id,
+                                    "answer": answer,
+                                    "mode": mode,
+                                    "by": symbio_plugin_api::PRINCIPAL_USER,
+                                }),
+                                produced_by: None,
+                            },
+                        )
+                        .await
+                        .map_err(vdfs_from_plugin_error)?;
                         let label = match kind {
                             "approve" => "批准",
                             "deny" => "拒绝",

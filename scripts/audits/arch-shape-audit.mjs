@@ -315,6 +315,7 @@ const VOCAB_BASELINE = process.env.VOCAB_BASELINE
 // core-shape-allow structFields: D-532 详情表格列是通用对象数组编辑契约——`DetailColumn{key,label,widget,options,default,placeholder}` 六格是插件声明一列「叫什么 / 显示什么 / 用什么控件编辑 / 候选值 / 默认值 / 占位提示」的最小形状，六格折不开（少 `options` 就无法渲染枚举列、少 `default` 就无法预填合法首行）；降 pub(crate) 不行——写方是声明表格的插件（沙箱）、读方是前端表单机制经门面镜像，跨 crate 且插件互不可见（E-009）。它没有新增世界域名 / 端口名 / 事实名，也不是为某个插件开的口子——任何插件编辑对象数组都复用同一列契约（DE-059）。
 // core-shape-allow structFields: D-532 `DetailField.columns`(1) 是上述列契约在字段上的唯一挂载点——`table` widget 的列定义只能随字段声明走，不能塞进 `options`（那是标量选项候选值，语义不同），也不能新增「沙箱规则字段」之类的专用类型（会让表单机制反向依赖插件业务词，正是 D-531 否定的方向）。一格承载的是「这一列数组字段每行的列结构」，与 widget 字符串配套，机制层不含任何业务词。基线钉到实测 622，不留余量。
 // core-shape-allow structFields: D-533 同一次沙箱裁决的七格回体 `SandboxDecision` 与私有凭据载体 `ApprovalGrant` 各一格，是授权双方必须共同消费的完整快照和一次性凭据形状：缺许可/风险/拦截/审批模式/阈值/版本/原因任一项都会迫使执行闸门再次读策略或猜失败原因，重新引入 D-533 要消除的跨版本组合；凭据不能降为私有类型，因为签发方 tool 与消费方 collectors 跨 crate。八格承载的是通用授权结果，不含工具清单、路径策略或业务字段。基线钉到实测 630，不留余量。
+// core-shape-allow structFields: D-543 请求级宿主执行绑定随异步事实驱动显式传递——`DriveTarget.port_bindings`(1) 是 worker 的内部启动口跨 append / kick / drain 任务边界唯一可见的装订点；绑定只能由请求快照经事实源携带，不能依赖调用栈或进程级全局状态，也不能降为私有字段（生产消费方 host 与声明方 session 跨 crate）。它只承载执行出口，不改变授权、审批或沙箱策略，也不是新业务数据面。基线钉到实测 631，不留余量。
 // core-shape-allow enumVariants: D-533 `VdfsCaller::{Manager, Model}` 两格是宿主注入的进程内可信主体闭集：管理写入与模型文件访问必须可区分，且未知主体失败关闭；复用布尔或字符串都能由模型载荷伪造，开放枚举又失去闭集。它只表达调用来源，不认插件 id 或 VDFS 操作。基线钉到实测 258，不留余量。
 // 2026-11-16（D-505）：实测已收到 608（614 是 D-440 / D-446 时点的上限），基线同批
 // 钉到 608——余量不白留给下一次新增。2026-11-20（D-513）：608 → 609，`DriveTarget`
@@ -324,7 +325,7 @@ const DATA_BASELINE = process.env.CORE_DATA_BASELINE
       const [structFields, enumVariants] = process.env.CORE_DATA_BASELINE.split(':').map((n) => Number(n))
       return { structFields, enumVariants }
     })()
-  : { structFields: 630, enumVariants: 258 }
+  : { structFields: 631, enumVariants: 255 }
 
 const CELL_LABEL = {
   traits: '`pub trait` 数（接缝数）',
@@ -787,7 +788,7 @@ const NOUN_BASELINE = {
   //    家族词汇而非插件依赖）。
   // 只许降，整张表的目标仍是空表。
   'crates/symbio-kernel/src/capability/family.rs': 1,
-  'crates/symbio-kernel/src/chat/principal.rs': 7,
+  'crates/symbio-kernel/src/chat/principal.rs': 4,
 }
 
 const NOUN_ALLOW_RE =

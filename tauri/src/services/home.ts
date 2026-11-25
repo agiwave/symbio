@@ -67,9 +67,9 @@ export async function getHomedirInfo(): Promise<home_get_homedir.Response> {
  * 2. 调用成功后重新拉取数据（refreshData）
  *
  * @param homedir 目标 homedir（绝对路径或 `~` 前缀）
- * @param opts.forceNative embedded 中固定本机控制面；browser 应省略此选项，
- *        由当前 Server HTTP 出站处理 home/reload
- * @returns 切换结果；失败时抛出，调用方不得持久化目标或报告成功
+ * @param opts.forceNative 仅控制面提示；不能越过已选 Server HTTP。切换本地目标时应先
+ *        持久化并重载 outbound，再调用本函数，失败则由调用方恢复原目标与传输
+ * @returns 切换结果；失败时抛出，调用方不得报告成功
  */
 export async function switchHomedir(
   homedir: string,

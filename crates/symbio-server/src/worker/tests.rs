@@ -3,9 +3,9 @@ use std::sync::{Arc, Mutex};
 
 use async_trait::async_trait;
 use serde_json::json;
-use symbio::symbio_kernel::plugin::PluginMessageWire;
+use symbio::symbio_kernel::plugin::{PluginFrame, PluginMessageWire};
 
-use super::protocol::{read_line, write_line, WorkerLine};
+use super::protocol::{read_line, write_line, WorkerLine, MAX_LINE_BYTES};
 use super::*;
 
 fn build(tag: u8) -> BuildId {
@@ -25,16 +25,6 @@ fn allocate(temp: &std::path::Path, tag: u8) -> WorkerId {
 
 fn request(id: &str, text: &str) -> InboxRequest {
     InboxRequest::new(id, json!({ "text": text }), json!({}), None).expect("request")
-}
-
-fn retry_busy<T>(mut operation: impl FnMut() -> Result<T, WorkerError>) -> T {
-    for _ in 0..1000 {
-        match operation() {
-            Err(WorkerError::Busy) => std::thread::yield_now(),
-            result => return result.expect("inbox operation"),
-        }
-    }
-    panic!("inbox lock remained busy");
 }
 
 #[test]
@@ -178,7 +168,9 @@ fn concurrent_enqueue_is_idempotent_and_uses_one_acceptance_sequence() {
         let temp = temp.path().to_path_buf();
         tasks.push(std::thread::spawn(move || {
             let inbox = DurableInbox::new("session-1", temp).expect("inbox");
-            retry_busy(|| inbox.enqueue(request("request-a", "same")))
+            inbox
+                .enqueue(request("request-a", "same"))
+                .expect("enqueue")
         }));
     }
     let items: Vec<_> = tasks
@@ -419,7 +411,7 @@ fn corrupt_completed_receipt_blocks_recovery() {
 }
 
 #[tokio::test]
-async fn ready_holds_the_recovery_lease_until_it_is_dropped() {
+async fn ready_holds_the_worker_lease_without_blocking_inbox_or_epoch_checks() {
     let temp = tempfile::tempdir().expect("tempdir");
     let lock_path = temp.path().join("v2-events.wal.lock");
     let registry = EpochRegistry::new("session-1", temp.path()).expect("registry");
@@ -428,6 +420,7 @@ async fn ready_holds_the_recovery_lease_until_it_is_dropped() {
         lock_path: lock_path.clone(),
         held: Mutex::new(None),
     });
+    let recovery_probe = Arc::clone(&recovery);
     let first = WorkerStartup::new(
         recovery,
         EpochRegistry::new("session-1", temp.path()).expect("registry"),
@@ -436,21 +429,30 @@ async fn ready_holds_the_recovery_lease_until_it_is_dropped() {
     .await
     .expect("first worker ready");
     assert_eq!(first.worker(), &first_worker);
-    let second_worker = registry.allocate(build(1)).expect("second epoch");
-    let competing: Arc<dyn WorkerRecovery> = Arc::new(WalLockRecovery {
-        lock_path: lock_path.clone(),
-        held: Mutex::new(None),
-    });
+    assert_eq!(
+        registry.current().expect("current"),
+        Some(first_worker.clone())
+    );
+    let inbox = DurableInbox::new("session-1", temp.path()).expect("inbox");
+    let item = inbox
+        .enqueue(request("request-a", "first"))
+        .expect("enqueue");
+    assert_eq!(
+        inbox.claim_next(&first_worker).expect("claim"),
+        Some(item.clone())
+    );
+    inbox.complete(&first_worker, item.id()).expect("complete");
     assert!(matches!(
-        WorkerStartup::new(
-            competing,
-            EpochRegistry::new("session-1", temp.path()).expect("registry"),
-        )
-        .ready(second_worker.clone())
-        .await,
+        recovery_probe.recover(&first_worker).await,
         Err(WorkerError::Busy)
     ));
+    assert!(matches!(
+        registry.allocate(build(1)),
+        Err(WorkerError::Busy)
+    ));
+    drop(recovery_probe);
     drop(first);
+    let second_worker = registry.allocate(build(1)).expect("second epoch");
     let recovery: Arc<dyn WorkerRecovery> = Arc::new(WalLockRecovery {
         lock_path,
         held: Mutex::new(None),
@@ -483,34 +485,18 @@ async fn startup_rejects_a_worker_that_is_not_the_current_epoch() {
 }
 
 #[test]
-fn subagent_routes_fence_both_parent_and_child_workers() {
-    let parent = worker(3, 1);
-    let child =
-        WorkerId::new("child-1", parent.epoch(), parent.build_id().clone()).expect("child worker");
-    let route = SubagentRoute::new(parent.clone(), "child-1").expect("route");
-    let frame = SubagentFrame::new(route, child.clone(), json!({ "event": "message.delta" }))
-        .expect("frame");
-    assert_eq!(
-        frame.validate(&parent, &child).unwrap(),
-        &json!({ "event": "message.delta" })
-    );
-    assert!(frame.validate(&worker(2, 1), &child).is_err());
-    let stale_child =
-        WorkerId::new("child-1", Epoch::new(2).expect("epoch"), build(1)).expect("stale child");
-    assert!(frame.validate(&parent, &stale_child).is_err());
-    assert!(SubagentFrame::new(
-        SubagentRoute::new(parent, "child-1").expect("route"),
-        worker(3, 1),
-        json!({}),
-    )
-    .is_err());
-}
-
-#[test]
 fn supervisor_routes_only_existing_session_scope() {
     let temp = tempfile::tempdir().expect("tempdir");
     let session_id = "session-1";
     fs::create_dir_all(temp.path().join("session").join(session_id)).expect("session dir");
+    fs::write(
+        temp.path()
+            .join("session")
+            .join(session_id)
+            .join("session.json"),
+        json!({ "id": session_id, "metadata": {} }).to_string(),
+    )
+    .expect("session metadata");
     let supervisor = WorkerSupervisor::new(temp.path().to_path_buf()).expect("supervisor");
 
     let session_call = PluginMessageWire {
@@ -522,9 +508,10 @@ fn supervisor_routes_only_existing_session_scope() {
         Some(session_id.to_string())
     );
 
+    let root = symbio::symbio_sdk::vdfs::declared_addr_root().expect("declared root");
     let vdfs_call = PluginMessageWire {
         metadata: json!({ "path": "vdfs/write" }),
-        payload: json!({ "path": format!("/session/{session_id}/inbox") }),
+        payload: json!({ "path": format!("{root}/session/{session_id}/inbox") }),
     };
     assert_eq!(
         supervisor.session_for(&vdfs_call).expect("route"),
@@ -536,6 +523,31 @@ fn supervisor_routes_only_existing_session_scope() {
         payload: json!({}),
     };
     assert_eq!(supervisor.session_for(&control_call).expect("route"), None);
+
+    let nested = temp
+        .path()
+        .join("session")
+        .join("parent")
+        .join("sessions")
+        .join("child");
+    fs::create_dir_all(&nested).expect("nested dir");
+    fs::write(
+        nested.join("session.json"),
+        json!({
+            "id": "child",
+            "metadata": { "parent_session_id": "parent" }
+        })
+        .to_string(),
+    )
+    .expect("nested metadata");
+    let nested_call = PluginMessageWire {
+        metadata: json!({ "path": "vdfs/write", "session_id": "child" }),
+        payload: json!({ "path": "session/child/inbox", "text": "hello" }),
+    };
+    assert_eq!(
+        supervisor.session_for(&nested_call).expect("route"),
+        Some("child".to_string())
+    );
 }
 
 #[tokio::test]
@@ -556,6 +568,88 @@ async fn worker_lines_round_trip_over_stdio() {
         serde_json::to_value(&decoded).expect("encode decoded"),
         serde_json::to_value(&line).expect("encode original")
     );
+
+    let exact = format!("{}\r\n", "x".repeat(MAX_LINE_BYTES));
+    let mut reader = tokio::io::BufReader::new(std::io::Cursor::new(exact.clone()));
+    assert_eq!(
+        read_line(&mut reader).await.expect("read limit").unwrap(),
+        exact
+    );
+    let oversized = format!("{}\n", "x".repeat(MAX_LINE_BYTES + 1));
+    let mut reader = tokio::io::BufReader::new(std::io::Cursor::new(oversized));
+    assert!(matches!(
+        read_line(&mut reader).await,
+        Err(WorkerError::Invalid(message)) if message.contains("长度上限")
+    ));
+    let oversized_utf8 = format!("{}\n", "é".repeat(MAX_LINE_BYTES / 2 + 1));
+    let mut reader = tokio::io::BufReader::new(std::io::Cursor::new(oversized_utf8));
+    assert!(matches!(
+        read_line(&mut reader).await,
+        Err(WorkerError::Invalid(message)) if message.contains("长度上限")
+    ));
+
+    let (mut writer, reader) = tokio::io::duplex(1);
+    drop(reader);
+    assert!(matches!(
+        write_line(&mut writer, &json!({ "text": "x".repeat(MAX_LINE_BYTES) })).await,
+        Err(WorkerError::Invalid(message)) if message.contains("长度上限")
+    ));
+}
+
+#[tokio::test]
+async fn subagent_and_event_lines_round_trip_over_stdio() {
+    let frame = PluginFrame::data(json!({
+        "type": "bus_event",
+        "data": {
+            "kind": "vdfs",
+            "session_id": "session-2",
+            "data": { "path": "session/session-2" }
+        }
+    }));
+    let cases = vec![
+        WorkerLine::Event {
+            frame: frame.clone(),
+        },
+        WorkerLine::DeliverEvent {
+            frame: frame.clone(),
+        },
+        WorkerLine::StartSubagent {
+            id: RequestId::parse("sub1").expect("id"),
+            child_session_id: "session-2".to_string(),
+            message: PluginMessageWire {
+                metadata: json!({ "path": "vdfs/write", "session_id": "session-2" }),
+                payload: json!({ "path": "session/session-2/inbox", "text": "hello" }),
+            },
+        },
+        WorkerLine::SubagentStarted {
+            id: RequestId::parse("sub1").expect("id"),
+            result: Ok(()),
+        },
+        WorkerLine::CancelSubagent {
+            id: RequestId::parse("sub1").expect("id"),
+            worker: WorkerId::new(
+                "session-1",
+                Epoch::new(1).expect("epoch"),
+                BuildId::parse(format!("{:064x}", 1)).expect("build"),
+            )
+            .expect("worker"),
+        },
+    ];
+
+    for line in cases {
+        let (mut writer, reader) = tokio::io::duplex(16 * 1024);
+        let mut reader = tokio::io::BufReader::new(reader);
+        write_line(&mut writer, &line).await.expect("write line");
+        let raw = read_line(&mut reader)
+            .await
+            .expect("read line")
+            .expect("line");
+        let decoded: WorkerLine = serde_json::from_str(&raw).expect("decode line");
+        assert_eq!(
+            serde_json::to_value(&decoded).expect("encode decoded"),
+            serde_json::to_value(&line).expect("encode original")
+        );
+    }
 }
 
 struct StaticRecovery {

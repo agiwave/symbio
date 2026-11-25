@@ -617,6 +617,53 @@ impl SessionPlugin {
         }
     }
 
+    /// worker 进程从持久化委派链恢复本会话的有效身份行。
+    pub(crate) async fn restore_session_identity(
+        &self,
+        session_id: &str,
+    ) -> Result<(), PluginError> {
+        let store = self.get_store().await?;
+        let mut chain = Vec::new();
+        let mut seen = std::collections::HashSet::new();
+        let mut current = store
+            .load_session_checked(session_id)
+            .await?
+            .ok_or_else(|| PluginError::NotFound(format!("会话不存在: {session_id}")))?;
+        loop {
+            if !seen.insert(current.id.clone()) {
+                return Err(PluginError::ValidationError(format!(
+                    "会话 {session_id} 的委派链存在环"
+                )));
+            }
+            let parent_id = current.parent_session_id().map(str::to_string);
+            chain.push(current);
+            let Some(parent_id) = parent_id else {
+                break;
+            };
+            current = store
+                .load_session_checked(&parent_id)
+                .await?
+                .ok_or_else(|| PluginError::NotFound(format!("委派父会话不存在: {parent_id}")))?;
+        }
+
+        let mut parent: Option<&Session> = None;
+        for session in chain.iter().rev() {
+            let principal = symbio_plugin_api::principal_of(
+                session.metadata.get("agent_id").and_then(Value::as_str),
+            );
+            if let Some(parent) = parent {
+                let parent_principal = symbio_plugin_api::principal_of(
+                    parent.metadata.get("agent_id").and_then(Value::as_str),
+                );
+                symbio_sdk::authz::bind_inheriting(&session.id, &principal, &parent_principal);
+            } else {
+                symbio_sdk::authz::bind_root(&session.id, &principal);
+            }
+            parent = Some(session);
+        }
+        Ok(())
+    }
+
     /// 会话的**全部后代 id**——删除父会话时整棵子树一并消失，登记面按同一棵树回收。
     ///
     /// 子会话按 `metadata.parent_session_id` 存在父目录的 `sessions/` 下，可能多层；

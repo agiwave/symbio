@@ -19,6 +19,27 @@
 use serde_json::Value;
 use std::sync::{Arc, LazyLock};
 
+use symbio_kernel::plugin::PluginFrame;
+
+pub const EVENT_BUS_RELAY_MARKER: &str = "__relayed";
+
+pub fn event_bus_mark_relayed(frame: PluginFrame) -> PluginFrame {
+    let PluginFrame::Data(value) = frame else {
+        return frame;
+    };
+    let mut outer = value.as_object().cloned().unwrap_or_default();
+    outer.insert(EVENT_BUS_RELAY_MARKER.to_string(), Value::Bool(true));
+    PluginFrame::Data(Arc::new(Value::Object(outer)))
+}
+
+pub fn event_bus_is_relayed(frame: &PluginFrame) -> bool {
+    frame
+        .value()
+        .and_then(|value| value.get(EVENT_BUS_RELAY_MARKER))
+        .and_then(Value::as_bool)
+        .unwrap_or(false)
+}
+
 // 投递实现的装配 id —— 与 `EMBEDDING_LOCAL` 同一条纪律：id 常量只有一个住处。
 // `D-530` 后与契约层解耦：本常量是 creator 装配键（机制面），不是线上词表，故留本层。
 pub const EVENT_BUS_SINK: &str = "event_bus_sink";
@@ -38,6 +59,8 @@ pub trait EventBusPublisher: Send + Sync {
     /// （信封形状见 `symbio_contract::event_bus::event_bus_build_envelope`）；
     /// 无订阅者时实现自行静默。
     fn publish(&self, kind: &str, session_id: Option<&str>, data: Value);
+
+    fn publish_frame(&self, frame: PluginFrame);
 }
 
 /// 声明出的发布实现，进程内懒装配一次（creator 无缓存，端口侧只装一次）。
@@ -63,4 +86,14 @@ impl EventBus {
             publisher.publish(kind, session_id, data);
         }
     }
+
+    pub fn try_publish_frame(frame: PluginFrame) {
+        if let Some(publisher) = PUBLISHER.as_ref() {
+            publisher.publish_frame(frame);
+        }
+    }
 }
+
+#[cfg(test)]
+#[path = "mod.test.rs"]
+mod tests;

@@ -24,8 +24,8 @@ use symbio_plugin_api::drive::{
     DriveFact, DrivePayload, DriveRow, DriveRunner, DriveSupport, DRIVE_FAMILY,
 };
 use symbio_plugin_api::port::{
-    PortBindings, PortExecHandles, PortExecutor, PortFact, PortFactEmit, PortFactReader,
-    PortFactWriter, PORT_BINDINGS,
+    PortExecHandles, PortExecutor, PortFact, PortFactEmit, PortFactReader, PortFactWriter,
+    PORT_BINDINGS,
 };
 use symbio_plugin_api::termination::{
     TerminationPayload, TerminationView, TerminationWriter, TERMINATION_FAMILY,
@@ -186,9 +186,13 @@ impl Host {
             ctx.set(PROVIDER_ID, provider.to_string());
         }
         ctx.set(CAPABILITY_VISITOR, manager.clone());
-        // 端口收集容器：**本次装配新建**（D-468）。插件在下面的 traverse 里把绑定写进它，
-        // 收完之后读快照折执行体表。复用上一轮的容器等于把旧绑定带进新装配。
-        let bindings = Arc::new(PortBindings::default());
+        // base 可能带请求级执行绑定（例如 worker 的子会话启动口）；本次装配在同一
+        // 请求容器内追加插件端口，执行期不能丢掉宿主绑定。
+        let bindings = Arc::new(
+            base.get(PORT_BINDINGS)
+                .map(|bindings| bindings.fresh())
+                .unwrap_or_default(),
+        );
         ctx.set(PORT_BINDINGS, Arc::clone(&bindings));
         symbio_sdk::capability::capability_init_error_bucket(&ctx);
         // 沙箱句柄共享槽（D-531）：traverse 前建槽，sandbox 插件在 traverse 里按

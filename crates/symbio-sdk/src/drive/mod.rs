@@ -29,6 +29,7 @@ use std::future::Future;
 use std::pin::Pin;
 use std::sync::{Arc, RwLock};
 
+use crate::capability::port::PortBindings;
 use symbio_kernel::exec::{ExecAbortSignal, ExecEventSink};
 use symbio_kernel::plugin::Plugin;
 
@@ -82,6 +83,9 @@ pub struct DriveTarget {
     /// 它是**驱动级信号**（`DE-047`：`abort` 留环），不是端口私有值：环把它挂进本轮
     /// ctx 的 `ABORT_SIGNAL`，模型 / 工具的读取面因此看到同一个对象。
     pub abort: Option<ExecAbortSignal>,
+    /// 请求级宿主执行绑定：随异步驱动传递，能力收集在其上追加本轮插件端口。
+    /// `None` = 没有宿主注入的内部启动口。
+    pub port_bindings: Option<Arc<PortBindings>>,
     /// 本会话的事实源句柄（写口打开的那一份，唯一写口）。
     pub facts: Arc<dyn FactSource>,
     /// 执行期出口：由装配层按根提供真实转写句柄；内部请求显式静默。

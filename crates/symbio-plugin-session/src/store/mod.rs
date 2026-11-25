@@ -141,7 +141,7 @@ impl SessionStore {
 
     /// 发布本会话的权限作用域（`None` = 明确「本会话没选中 Agent」）。
     ///
-    /// 唯一的发布方是会话轮装配（`collect_capabilities` 之后）；事实源只读。
+    /// 发布方是会话轮装配与恢复动作的共享准备（`collect_capabilities` 之后）；事实源只读。
     pub(crate) fn set_agent_scope(
         &self,
         session_id: &str,
@@ -166,8 +166,9 @@ impl SessionStore {
 
     /// 发布本会话这一轮的来源主体（`None` = 本机用户发起）。
     ///
-    /// 唯一的发布方是开轮写口（`consume_item_turn`，值来自收件箱条目的 `params`）；
-    /// 事实源只读。**每轮都发布**（含 `None`）：上一轮的来源不能漏进下一轮。
+    /// 发布方是开轮写口与恢复动作的共享准备；开轮值来自收件箱条目的 `params`，
+    /// 恢复值来自本次可信请求。事实源只读。**每次都发布**（含 `None`）：上一轮的
+    /// 来源不能漏进下一次驱动。
     pub(crate) fn set_source_principal(&self, session_id: &str, source: Option<String>) {
         if let Ok(mut cell) = self.source_principal_cell(session_id).write() {
             *cell = source;
@@ -339,8 +340,12 @@ impl SessionStore {
         &self,
         parent_id: &str,
     ) -> Result<Vec<SessionSummary>, PluginError> {
-        let base = &self.base_dir;
-        let nested = dir_for(base, parent_id).join(SUB_SESSIONS_DIR);
+        let Some(nested) = self
+            .session_dir(parent_id)
+            .map(|dir| dir.join(SUB_SESSIONS_DIR))
+        else {
+            return Ok(Vec::new());
+        };
         if !nested.exists() {
             return Ok(Vec::new());
         }

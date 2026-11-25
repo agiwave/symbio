@@ -107,6 +107,40 @@ async fn sub_session_routes_into_parent_dir() {
         .is_empty());
 }
 
+#[tokio::test]
+async fn nested_descendants_follow_the_actual_parent_and_cascade_on_delete() {
+    let tmp = TempDir::new().unwrap();
+    let store = SessionStore::new(tmp.path().to_path_buf());
+    save(&store, &session_with("root", None)).await;
+    save(&store, &session_with("child", Some("root"))).await;
+    let broken = tmp.path().join("root/sessions/child/sessions/broken");
+    std::fs::create_dir_all(&broken).unwrap();
+    std::fs::write(broken.join("session.json"), b"{broken").unwrap();
+    save(&store, &session_with("grandchild", Some("child"))).await;
+
+    let child_dir = tmp.path().join("root/sessions/child");
+    assert_eq!(
+        store.session_dir("grandchild").unwrap(),
+        child_dir.join("sessions/grandchild")
+    );
+    assert_eq!(
+        store.list_sub_sessions("child").await.unwrap()[0].id,
+        "grandchild"
+    );
+    assert!(store
+        .load_session_checked("grandchild")
+        .await
+        .unwrap()
+        .is_some());
+
+    store.delete_session("child").await.unwrap();
+    assert!(store
+        .load_session_checked("grandchild")
+        .await
+        .unwrap()
+        .is_none());
+}
+
 /// 召回只扫**平级**会话：
 /// 嵌套子会话（`<根>/<父>/sessions/<子>/`）的事实源**不进**顶层召回快照。
 /// 这是召回读方（`recall_snapshots`）的范围裁决，不是漏扫——改范围先改裁决。

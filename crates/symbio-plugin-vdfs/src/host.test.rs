@@ -301,7 +301,10 @@ async fn dispatch_ignores_non_vdfs_path() {
 async fn action_forwards_verb_and_relative_path() {
     let (fs, rec) = fs_roots();
     let ctx = ctx_with(json!({ "path": ".vdfsv2/mem/a.txt", "action": "ping" }));
-    let resp = dispatch(&fs, VDFS_ACTION, &ctx).await.unwrap().unwrap();
+    let resp = dispatch(&fs, ROUTE_VDFS_ACTION, &ctx)
+        .await
+        .unwrap()
+        .unwrap();
     let data = resp.get::<VdfsActionResult>().unwrap();
     assert_eq!(data.action, "ping");
     assert!(data.ok);
@@ -309,7 +312,10 @@ async fn action_forwards_verb_and_relative_path() {
 
     // 空动作标识 → 拒绝（不打扰 provider）
     let bad = ctx_with(json!({ "path": ".vdfsv2/mem/a.txt", "action": "  " }));
-    assert!(dispatch(&fs, VDFS_ACTION, &bad).await.unwrap().is_err());
+    assert!(dispatch(&fs, ROUTE_VDFS_ACTION, &bad)
+        .await
+        .unwrap()
+        .is_err());
 }
 
 /// 类别根列表：门面把内部口径回填成 `.vdfsv2/...` 展示地址 + `ext` 推导

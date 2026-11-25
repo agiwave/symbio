@@ -27,7 +27,6 @@ import {
  * embedded 中控制面固定走本机 native；browser 中固定走当前 Server 的控制面 HTTP。
  * 两种环境都不允许 browser 回退 IPC。判定在 `sendRouteRequest`。
  */
-const GATEWAY_PATH = 'gateway'
 
 /** 未知值是否为可索引的对象——IPC 边界所有结构判定的唯一守卫。 */
 function isRecord(v: unknown): v is Record<string, unknown> {
@@ -241,7 +240,7 @@ export function getConnectionModel(): FrontendConnectionModel {
  * 应用启动时调用一次：读取持久化选择并决定传输。
  *
  * browser + local → 同源 HTTP；embedded + local → native；remote → HTTP。
- * 远端不可达时，embedded 可回退 native；browser 保留远端 HTTP 并显示错误，绝不调用 IPC。
+ * 远端不可达时保留所选 Server HTTP 并显示错误；任何运行环境都不回退 native。
  * 返回的 Promise 被缓存，供首次出站请求等待，消除初始化竞态。
  */
 export function initGatewayTransport(): Promise<void> {
@@ -265,27 +264,17 @@ async function pingRemote(url: string): Promise<boolean> {
 
 async function doInitGatewayTransport(): Promise<void> {
   const loc = loadSystemLocation()
-  const inBrowser = isBrowserEnvironment()
 
   if (loc.kind === 'remote' && loc.remoteUrl) {
     const parsedRemote = parseRemoteAddress(loc.remoteUrl)
     const endpoint = parsedRemote.url
     const token = loc.remoteKey || parsedRemote.key
     const ok = await pingRemote(endpoint)
-    if (ok || inBrowser) {
-      outbound = { protocol: 'http', endpoint, token }
-      setCurrentLocation(loc)
-      setLocationError(ok ? null : `远端地址不可达：${endpoint}（浏览器不会回退本机连接）`)
-      if (ok) logger.info('Transport', `系统目录=远端，出站协议已切换为 HTTP: ${endpoint}`)
-      else logger.warn('Transport', '远端地址不可达，保留 Server HTTP 连接:', endpoint)
-      return
-    }
-
-    // 只有 embedded 允许回退 native，确保坏远端不会让桌面端永久卡死。
-    outbound = { protocol: 'native', endpoint: '', token: '' }
+    outbound = { protocol: 'http', endpoint, token }
     setCurrentLocation(loc)
-    setLocationError(`远端地址不可达，已回退到本地连接：${endpoint}`)
-    logger.warn('Transport', '远端地址不可达，回退 native:', endpoint)
+    setLocationError(ok ? null : `远端地址不可达：${endpoint}（保留 Server HTTP 连接）`)
+    if (ok) logger.info('Transport', `系统目录=远端，出站协议已切换为 HTTP: ${endpoint}`)
+    else logger.warn('Transport', '远端地址不可达，保留 Server HTTP 连接:', endpoint)
     return
   }
 
@@ -363,8 +352,8 @@ export interface PluginOptions {
    */
   origin?: string;
   /**
-   * 强制走控制面：embedded 为本机 Tauri IPC，browser 为当前 Server 的 HTTP。
-   * browser 中此选项绝不是原生调用，也不会改变已选择的 Server 地址。
+   * 控制面提示：native 目标走 Tauri IPC；已选 Server HTTP 时仍走该 Server。
+   * browser 中此选项绝不会触发原生调用，也不会改变已选择的 Server 地址。
    */
   forceNative?: boolean;
 }
@@ -431,25 +420,16 @@ async function sendRouteRequest(
 ): Promise<{ response: PluginMessage; connection?: Connection }> {
   await initGatewayTransport();
   const ob = getOutboundConfig();
+  const serverSelected = ob.protocol === 'http' && !!ob.endpoint;
 
-  const target = request.path.replace(/^\/+/, '');
-  const isGatewaySelf = target === GATEWAY_PATH || target.startsWith(`${GATEWAY_PATH}/`);
-
-  // 浏览器只有 Server HTTP 一个出口。forceNative / gateway 控制面也必须走 HTTP，
-  // 不能因为“需要控制面”而获得 native 特权。
-  if (isBrowserEnvironment()) {
-    if (ob.protocol !== 'http' || !ob.endpoint) {
-      throw new Error('[Transport] 浏览器需要可用的 Server HTTP 地址，不能回退 Tauri IPC')
-    }
-    return httpTransport(request, mode, ob, onFrame, onEof)
+  // 浏览器只有 Server HTTP 一个出口；embedded 一旦显式选择 Server，控制面提示
+  // （forceNative / gateway 路径）也不得把请求偷偷送回本机 IPC。
+  if (!serverSelected && isBrowserEnvironment()) {
+    throw new Error('[Transport] 浏览器需要可用的 Server HTTP 地址，不能回退 Tauri IPC')
   }
-
-  // embedded：控制面固定本机 native，其余请求按当前 outbound 选择。
-  const useNative = request.forceNative || isGatewaySelf || !(ob.protocol === 'http' && ob.endpoint);
-  if (!useNative) {
-    return httpTransport(request, mode, ob, onFrame, onEof);
-  }
-  return nativeTransport(request, onFrame, onEof);
+  return serverSelected
+    ? httpTransport(request, mode, ob, onFrame, onEof)
+    : nativeTransport(request, onFrame, onEof);
 }
 
 // ==================== 原生传输（Tauri IPC，现状） ====================

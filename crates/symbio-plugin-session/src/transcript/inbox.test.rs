@@ -231,6 +231,38 @@ async fn disabled_supplements_take_one_item_per_pass() {
     assert_eq!(p.inbox_items("s1").await.len(), 2, "其余留队");
 }
 
+#[tokio::test]
+async fn empty_drain_does_not_reserve_a_turn() {
+    let p = plugin();
+    let state = p.active_mgr.get_or_create("s1").await;
+
+    assert!(p.take_inbox_batch_when_idle(&state).await.is_empty());
+    assert!(
+        !state.inner.read().await.is_working(),
+        "空队列不得把会话留在忙态"
+    );
+}
+
+/// 出队与占轮在同一把状态锁里完成：两个消费者竞争时只能有一个拿到条目。
+#[tokio::test]
+async fn concurrent_front_takers_reserve_only_one_turn() {
+    let p = plugin();
+    enqueue_n(&p, 2).await;
+    let state = p.active_mgr.get_or_create("s1").await;
+
+    let (first, second) = tokio::join!(p.take_inbox_front(&state), p.take_inbox_front(&state));
+    assert_eq!(
+        [
+            first.as_ref().map(|i| i.id.as_str()),
+            second.as_ref().map(|i| i.id.as_str())
+        ],
+        [Some("i1"), None],
+        "同一会话不得因两个消费者并发检查而开出两轮"
+    );
+    assert!(state.inner.read().await.is_working());
+    assert_eq!(p.inbox_items("s1").await.len(), 1);
+}
+
 /// 订阅**本插件实例**的变更流，收集被通知的地址。
 ///
 /// 抽成函数有两个理由，都不是为了好看：

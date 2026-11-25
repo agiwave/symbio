@@ -1,3 +1,4 @@
+use std::fs::File;
 use std::sync::Arc;
 
 use async_trait::async_trait;
@@ -26,7 +27,7 @@ impl WorkerStartup {
     }
 
     pub async fn ready(self, worker: WorkerId) -> Result<WorkerReady, WorkerError> {
-        let _epoch_lock = self.epochs.check_current(&worker)?;
+        let worker_lease = self.epochs.acquire_current(&worker)?;
         let report = self.recovery.recover(&worker).await?;
         if !report.snapshot.interrupted.is_empty() {
             return Err(WorkerError::RecoveryRequired {
@@ -38,6 +39,7 @@ impl WorkerStartup {
             worker,
             report,
             _recovery: self.recovery,
+            _worker_lease: worker_lease,
         })
     }
 }
@@ -46,6 +48,7 @@ pub struct WorkerReady {
     worker: WorkerId,
     report: RecoveryReport,
     _recovery: Arc<dyn WorkerRecovery>,
+    _worker_lease: File,
 }
 
 impl WorkerReady {

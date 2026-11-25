@@ -91,7 +91,13 @@ pub async fn collect_capabilities(
     // 端口收集容器（D-468）：本次装配新建，插件在 traverse 里把绑定写进它。
     // 判重就在写入点上：同名再登记当场把该键转成不可执行并落错误桶，
     // 不需要「收集完再回表分组」的第二趟。
-    let bindings = std::sync::Arc::new(symbio_plugin_api::port::PortBindings::default());
+    // 请求上下文可能已带宿主执行绑定（如 worker 的子会话启动口）；本轮收集在同一
+    // 请求容器内追加，避免把执行面覆盖成只有插件绑定。
+    let bindings = std::sync::Arc::new(
+        ctx.get(symbio_plugin_api::port::PORT_BINDINGS)
+            .map(|bindings| bindings.fresh())
+            .unwrap_or_default(),
+    );
     traverse_ctx.set(symbio_plugin_api::port::PORT_BINDINGS, bindings.clone());
     capability_init_error_bucket(&traverse_ctx);
     // Agent 权限作用域槽（D-153）：子智能体插件在 traverse 里发布（它是唯一能把
@@ -153,6 +159,10 @@ pub(crate) fn require_agent_scope(
     match (bound, published) {
         (Some(id), None) => Err(PluginError::InternalError(format!(
             "会话绑定智能体 {id}，但能力收集期没有发布权限作用域；拒绝按宿主态放行"
+        ))),
+        (Some(id), Some(scope)) if scope.id != id => Err(PluginError::InternalError(format!(
+            "会话绑定智能体 {id}，但能力收集期发布的是 {}；拒绝错配作用域",
+            scope.id
         ))),
         (_, published) => Ok(published),
     }

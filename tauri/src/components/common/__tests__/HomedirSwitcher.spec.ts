@@ -11,8 +11,8 @@
  *    且切换按钮在非法时禁用。
  * 3. **失败不关对话框**：切换失败要把错误留在框里（关了就只剩一个 toast，用户
  *    来不及读），同时 `busy` 期间**关不掉**（防止切换途中把对话框收了）。
- * 4. **控制面强制 native**：本地切换走 `switchHomedir(path, { forceNative: true })`
- *    ——即便当前已指向远端 / 远端不可达，也必须能切回来。
+ * 4. **先切出站再重载**：本地切换先保存 local 目标并重载传输，再调用
+ *    `switchHomedir(path)`；不能拿 `forceNative` 提示越过已选 Server HTTP。
  * 5. **key 的归属**：地址里的 `?token=` 与密钥输入框是同一个东西的两个入口，
  *    输入框优先。
  */
@@ -192,7 +192,7 @@ describe('HomedirSwitcher — 二次确认与执行', () => {
     expect(hoisted.switchHomedir).not.toHaveBeenCalled()
   })
 
-  it('确认后：持久化 + 强制 native 切换 + 重载传输 + emit reloaded + 关闭', async () => {
+  it('确认后：先持久化并重载出站，再切换 homedir、emit reloaded、关闭', async () => {
     const w = await openSwitcher({ localPath: '/new/home' })
     await w.find('.btn-primary').trigger('click')
     await w.findComponent({ name: 'ConfirmDialog' }).vm.$emit('confirm')
@@ -201,13 +201,38 @@ describe('HomedirSwitcher — 二次确认与执行', () => {
       kind: 'local',
       localPath: '/new/home',
     })
-    // 控制面必须强制命中本机后端，否则远端不可达时就切不回来了
-    expect(hoisted.switchHomedir).toHaveBeenCalledWith('/new/home', { forceNative: true })
-    expect(hoisted.switchHomedir.mock.invocationCallOrder[0])
-      .toBeLessThan(hoisted.saveSystemLocation.mock.invocationCallOrder[0])
-    expect(hoisted.reloadGatewayTransport).toHaveBeenCalled()
+    // 旧目标可能是远端；必须先让 outbound 指向 local/native，home/reload 才不会发往旧 Server。
+    expect(hoisted.switchHomedir).toHaveBeenCalledWith('/new/home')
+    expect(hoisted.reloadGatewayTransport.mock.invocationCallOrder[0])
+      .toBeLessThan(hoisted.switchHomedir.mock.invocationCallOrder[0])
     expect(w.emitted('reloaded')).toHaveLength(1)
     expect(w.emitted('update:open')).toEqual([[false]])
+  })
+
+  it('embedded 从远端切回 local：重载传输完成后才允许调用 home/reload', async () => {
+    let releaseReload: (() => void) | undefined
+    hoisted.loadSystemLocation.mockReturnValue({
+      kind: 'remote', remoteUrl: 'http://old-server:8080', remoteKey: 'k',
+    } as never)
+    hoisted.reloadGatewayTransport.mockImplementationOnce(() => new Promise<void>((resolve) => {
+      releaseReload = resolve
+    }))
+    const w = mount(HomedirSwitcher, { props: { open: false } })
+    await w.setProps({ open: true })
+    await flush()
+    await w.findAll('.seg-btn').find((button) => button.text() === '本地目录')!.trigger('click')
+    await w.find('#sysdir-input').setValue('/local/home')
+    await w.find('.btn-primary').trigger('click')
+    await w.findComponent({ name: 'ConfirmDialog' }).vm.$emit('confirm')
+    await flush()
+
+    expect(hoisted.saveSystemLocation).toHaveBeenCalledWith({ kind: 'local', localPath: '/local/home' })
+    expect(hoisted.switchHomedir).not.toHaveBeenCalled()
+    releaseReload?.()
+    await flush()
+    expect(hoisted.switchHomedir).toHaveBeenCalledWith('/local/home')
+    expect(hoisted.switchHomedir.mock.invocationCallOrder[0])
+      .toBeGreaterThan(hoisted.reloadGatewayTransport.mock.invocationCallOrder[0])
   })
 
   it('browser local 先切到同源 Server，再经 HTTP home/reload（不 force native）', async () => {
@@ -237,6 +262,20 @@ describe('HomedirSwitcher — 二次确认与执行', () => {
     )
   })
 
+  it('远端：embedded 不可达也保留 HTTP，不提示回退本地', async () => {
+    const w = await openSwitcher({ kind: 'remote' })
+    await w.find('#sysdir-url').setValue('http://127.0.0.1:8080')
+    await w.find('.btn-primary').trigger('click')
+    await w.findComponent({ name: 'ConfirmDialog' }).vm.$emit('confirm')
+    await flush()
+
+    expect(hoisted.reloadGatewayTransport).toHaveBeenCalledTimes(1)
+    const { toasts } = useToast()
+    const toast = toasts.value[toasts.value.length - 1]
+    expect(toast?.text).toContain('不会回退本机')
+    expect(toast?.text).not.toContain('自动回退本地')
+  })
+
   it('远端：密钥留空则取地址里的 token', async () => {
     const w = await openSwitcher({ kind: 'remote' })
     await w.find('#sysdir-url').setValue('http://127.0.0.1:8080?token=from-url')
@@ -250,14 +289,20 @@ describe('HomedirSwitcher — 二次确认与执行', () => {
 })
 
 describe('HomedirSwitcher — 失败与忙态', () => {
-  it('切换失败：错误留在框里，不持久化目标、不报告重载成功，也不关闭对话框', async () => {
+  it('切换失败：恢复原目标与传输，错误留在框里，不报告成功，也不关闭对话框', async () => {
     hoisted.switchHomedir.mockRejectedValueOnce(new Error('reload 失败'))
     const w = await openSwitcher({ localPath: '/x' })
     await w.find('.btn-primary').trigger('click')
     await w.findComponent({ name: 'ConfirmDialog' }).vm.$emit('confirm')
     await flush()
     expect(w.find('.error').text()).toContain('切换失败')
-    expect(hoisted.saveSystemLocation).not.toHaveBeenCalled()
+    expect(hoisted.saveSystemLocation).toHaveBeenNthCalledWith(1, {
+      kind: 'local', localPath: '/x',
+    })
+    expect(hoisted.saveSystemLocation).toHaveBeenNthCalledWith(2, {
+      kind: 'local', localPath: '/x',
+    })
+    expect(hoisted.reloadGatewayTransport).toHaveBeenCalledTimes(2)
     expect(w.emitted('reloaded')).toBeUndefined()
     expect(w.emitted('update:open')).toBeUndefined()
   })

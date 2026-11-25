@@ -309,35 +309,28 @@ async function handleConfirm() {
   }
 }
 
-/** local：确认后端重载成功后才持久化目标；browser 始终经当前 Server HTTP。 */
+/** local：先切出站传输，再让新目标执行 home/reload；失败恢复原目标与传输。 */
 async function applyLocal(path: string) {
   const previous = loadSystemLocation()
   const loc: SystemLocation = { kind: 'local', localPath: path }
-  if (inBrowser) {
-    // 先把出站地址切到同源 Server，再调用 home/reload；不能借用旧远端的控制面。
-    saveSystemLocation(loc)
+  saveSystemLocation(loc)
+  try {
+    await reloadGatewayTransport()
+    await switchHomedir(path)
+  } catch (error) {
+    saveSystemLocation(previous)
     try {
       await reloadGatewayTransport()
-      await switchHomedir(path)
-    } catch (error) {
-      saveSystemLocation(previous)
-      try {
-        await reloadGatewayTransport()
-      } catch (rollbackError) {
-        logger.error('sysdir-switcher', '恢复原传输失败:', rollbackError)
-      }
-      throw error
+    } catch (rollbackError) {
+      logger.error('sysdir-switcher', '恢复原传输失败:', rollbackError)
     }
-  } else {
-    await switchHomedir(path, { forceNative: true })
-    saveSystemLocation(loc)
-    await reloadGatewayTransport()
+    throw error
   }
   const label = inBrowser ? '当前 Server' : '本地目录'
   showToast('success', `已切换到${label}：${path}`)
 }
 
-/** 远端地址：解析(含 key) + 校验 + 重载传输（不可达自动回退 native） */
+/** 远端地址：解析(含 key) + 校验 + 重载传输；不可达时保留 HTTP 并显示连接错误。 */
 async function applyRemote() {
   const { url, key: urlKey } = parseRemoteAddress(remoteUrl.value)
   const key = (remoteKey.value.trim() || urlKey).trim()
@@ -346,9 +339,9 @@ async function applyRemote() {
   }
   const loc: SystemLocation = { kind: 'remote', remoteUrl: url, remoteKey: key }
   saveSystemLocation(loc)
-  // 重载传输：browser 不可达时保留 HTTP 并置 locationError；embedded 才回退 native。
+  // browser 与 embedded 都保留已选 Server HTTP；不可达由 locationError 显示。
   await reloadGatewayTransport()
-  const suffix = inBrowser ? '（不可达时会显示连接错误，不会回退本机）' : '（若不可达将自动回退本地）'
+  const suffix = '（不可达时会显示连接错误，不会回退本机）'
   showToast('info', `已切换到远端：${url}${suffix}`)
 }
 

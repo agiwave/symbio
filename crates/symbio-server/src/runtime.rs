@@ -63,6 +63,12 @@ impl RuntimeHost {
 
     pub async fn invoke(&self, message: PluginMessageWire) -> Result<PluginPayload, String> {
         if let Some(supervisor) = &self.supervisor {
+            if let Some(payload) = supervisor
+                .invoke_delete(message.clone(), &self.root)
+                .await?
+            {
+                return Ok(payload);
+            }
             if let Some(reply) = supervisor.invoke(message.clone()).await? {
                 return match serde_json::from_value::<PluginPayloadWire>(reply.payload)
                     .map_err(|error| error.to_string())?
@@ -150,10 +156,10 @@ impl RuntimeHost {
         self.control(ROUTE_HOME_GET_HOMEDIR).await
     }
 
-    pub async fn shutdown(self) -> Result<(), PluginError> {
+    pub async fn shutdown(&self) -> Result<(), PluginError> {
         if let Some(supervisor) = &self.supervisor {
             supervisor.shutdown().await;
         }
-        self.root.stop(PluginStopReason::Shutdown).await
+        self.root.clone().stop(PluginStopReason::Shutdown).await
     }
 }

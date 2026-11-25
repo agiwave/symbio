@@ -54,8 +54,9 @@ pub struct ActiveSessionStateInner {
     /// 工作态（进程局部量，[`WorkingState`]）。
     ///
     /// **字段私有**：生产侧的写点只有 `ActiveSessionState` 上的迁移方法
-    /// （`begin_turn` / `finish_turn`），它们都经 [`WorkingState::apply`] 并把
-    /// 「由忙变闲」交给 `round_done` 唤醒。收件箱消费者因此不再轮询。
+    /// （`begin_turn` / `finish_turn`）与出队口的 `try_begin`，它们都经
+    /// [`WorkingState::apply`] 并把「由忙变闲」交给 `round_done` 唤醒。
+    /// 收件箱消费者因此不再轮询。
     working: WorkingState,
     /// 在途 Turn 的中止信号（登记后中止动作直接置位，无需投帧）。
     ///
@@ -92,6 +93,19 @@ pub struct ActiveSessionStateInner {
 }
 
 impl ActiveSessionStateInner {
+    /// 在出队临界区内预留轮次；已忙时不得再次占用。
+    pub(crate) fn try_begin(&mut self) -> bool {
+        if self.is_working() {
+            return false;
+        }
+        self.working.apply(WorkingTransition::Begin);
+        self.last_content.clear();
+        self.last_tool_calls.clear();
+        self.last_outcome = None;
+        self.last_error = None;
+        true
+    }
+
     /// 是否在途忙——`session_busy` 守卫、收件箱「忙则排队」、运行态投影共用的**唯一**读法。
     pub(crate) fn is_working(&self) -> bool {
         self.working.is_working()
@@ -209,11 +223,35 @@ impl ActiveSessionState {
     /// 读的就是它，而开轮事实是 spawn 之后才追加的。
     pub(crate) async fn begin_turn(&self) {
         let mut inner = self.inner.write().await;
-        inner.working.apply(WorkingTransition::Begin);
-        inner.last_content.clear();
-        inner.last_tool_calls.clear();
-        inner.last_outcome = None;
-        inner.last_error = None;
+        self.try_begin_locked(&mut inner);
+    }
+
+    /// 调用方已持 `inner` 写锁时原子占轮，并同时登记本轮唯一的中止信号。
+    pub(crate) fn try_begin_locked(&self, inner: &mut ActiveSessionStateInner) -> bool {
+        if inner.is_working() {
+            return false;
+        }
+        // 先登记信号再公开忙态：中止读同一把 `inner` 锁，不会出现忙但信号尚空。
+        *self
+            .abort_signal
+            .write()
+            .unwrap_or_else(|poisoned| poisoned.into_inner()) = Some(ExecAbortSignal::new());
+        inner.try_begin();
+        true
+    }
+
+    /// 等到当前轮次收束后原子占轮；恢复动作不得与收尾抽干或新 inbox 轮并发。
+    pub(crate) async fn begin_when_idle(&self) {
+        loop {
+            let notified = self.round_done.notified();
+            let mut inner = self.inner.write().await;
+            if !inner.is_working() {
+                self.try_begin_locked(&mut inner);
+                return;
+            }
+            drop(inner);
+            notified.await;
+        }
     }
 
     /// 收轮：结局与错误文案（`failed` 时才带）落进缓存。
@@ -225,11 +263,11 @@ impl ActiveSessionState {
             let mut inner = self.inner.write().await;
             // 同一临界区：工作态落闲与注销中止信号一起可见——不留「已收轮但信号
             // 仍置位」的窗口（那会让下一轮带着上一轮已取消的信号开局）。
+            let became_idle = inner.working.apply(WorkingTransition::Finish);
             *self
                 .abort_signal
                 .write()
                 .unwrap_or_else(|poisoned| poisoned.into_inner()) = None;
-            let became_idle = inner.working.apply(WorkingTransition::Finish);
             inner.last_outcome = Some(outcome.to_string());
             inner.last_error = error;
             became_idle
@@ -237,31 +275,24 @@ impl ActiveSessionState {
         self.wake_if_idle(became_idle);
     }
 
-    /// 开轮登记：把**本轮唯一的信号对象**放进格子。必须在第一次 `append` 之前调用
-    /// ——第一次 append 就会踢驱动，而 `DriveTarget` 只带当时的当前值。
-    pub(crate) fn register_abort_signal(&self, signal: ExecAbortSignal) {
-        *self
-            .abort_signal
-            .write()
-            .unwrap_or_else(|poisoned| poisoned.into_inner()) = Some(signal);
-    }
-
     /// 中止在途一轮：**只置位、不取走**。返回是否确有在途信号（没有 ⇒ 会话没在跑）。
     ///
     /// 取走会让本轮后续派发（如工具行）读到空槽、由环现造一个死信号——那正是
     /// 「用户按下中止、工具照常跑」。注销由 [`Self::finish_turn`] 在同一临界区做。
-    pub(crate) fn abort_current_turn(&self) -> bool {
+    pub(crate) async fn abort_current_turn(&self) -> bool {
+        let inner = self.inner.read().await;
+        if !inner.is_working() {
+            return false;
+        }
         let slot = self
             .abort_signal
             .read()
             .unwrap_or_else(|poisoned| poisoned.into_inner());
-        match slot.as_ref() {
-            Some(signal) => {
-                signal.abort();
-                true
-            }
-            None => false,
-        }
+        let Some(signal) = slot.as_ref() else {
+            return false;
+        };
+        signal.abort();
+        true
     }
 }
 

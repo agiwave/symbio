@@ -25,6 +25,258 @@ fn fixture() -> (tempfile::TempDir, SessionPlugin) {
     (dir, plugin)
 }
 
+struct ScopePublishingParent {
+    root: std::path::PathBuf,
+}
+
+#[async_trait::async_trait]
+impl Plugin for ScopePublishingParent {
+    fn meta(&self) -> PluginMeta {
+        PluginMeta::new("resume-scope-test", "resume-scope-test")
+    }
+
+    async fn route(
+        self: Arc<Self>,
+        _ctx: Arc<dyn PluginInvokeRequest>,
+    ) -> symbio_plugin_api::PluginInvokeResponse<PluginPayload> {
+        Err(PluginError::NotFound("resume-scope-test".into()))
+    }
+
+    async fn traverse(
+        self: Arc<Self>,
+        _path: String,
+        ctx: Arc<dyn PluginInvokeRequest>,
+    ) -> symbio_plugin_api::PluginInvokeResponse<PluginPayload> {
+        if let Some(agent_id) = ctx.get(symbio_plugin_api::AGENT_ID) {
+            symbio_plugin_api::AgentScope {
+                id: agent_id,
+                root: self.root.clone(),
+                permissions: Default::default(),
+            }
+            .publish(&ctx);
+        }
+        Ok(PluginPayload::new(&Vec::<Value>::new()))
+    }
+}
+
+#[tokio::test]
+async fn worker_restores_undeployed_root_identity() {
+    let (_dir, p) = fixture();
+    let mut session = Session::new("worker-auth-root");
+    session.metadata["agent_id"] = serde_json::json!("worker-auth-reviewer");
+    p.save_session(&session).await.unwrap();
+    let principal = symbio_plugin_api::principal_of(Some("worker-auth-reviewer"));
+    assert!(!symbio_plugin_api::production_matrix().can_reply(&principal));
+
+    p.restore_session_identity(&session.id).await.unwrap();
+
+    assert!(symbio_plugin_api::production_matrix().can_reply(&principal));
+    symbio_sdk::authz::unbind_session(&session.id);
+}
+
+#[tokio::test]
+async fn worker_restores_delegation_intersection_without_reply() {
+    let (_dir, p) = fixture();
+    let mut parent = Session::new("worker-auth-parent");
+    parent.metadata["agent_id"] = serde_json::json!("verifier");
+    p.save_session(&parent).await.unwrap();
+    let mut child = Session::new("worker-auth-child");
+    child.metadata["agent_id"] = serde_json::json!("worker-auth-child-reviewer");
+    child.metadata["parent_session_id"] = serde_json::json!(parent.id);
+    p.save_session(&child).await.unwrap();
+
+    p.restore_session_identity(&child.id).await.unwrap();
+
+    let matrix = symbio_plugin_api::production_matrix();
+    let child_principal = symbio_plugin_api::principal_of(Some("worker-auth-child-reviewer"));
+    assert!(matrix.can_write_name(&child_principal, symbio_plugin_api::CAP_ASSERT_VERIFICATION));
+    assert!(!matrix.can_reply(&child_principal));
+    symbio_sdk::authz::unbind_session(&parent.id);
+    symbio_sdk::authz::unbind_session(&child.id);
+}
+
+#[tokio::test]
+async fn worker_identity_restore_rejects_broken_delegation_chain() {
+    let (_dir, p) = fixture();
+    let mut child = Session::new("worker-auth-orphan");
+    child.metadata["parent_session_id"] = serde_json::json!("worker-auth-missing-parent");
+    p.save_session(&child).await.unwrap();
+
+    assert!(p.restore_session_identity(&child.id).await.is_err());
+}
+
+async fn wait_session_idle(p: &SessionPlugin, id: &str) {
+    let state = p.active_mgr.get_or_create(id).await;
+    for _ in 0..100 {
+        if !state.inner.read().await.is_working() {
+            return;
+        }
+        tokio::time::sleep(std::time::Duration::from_millis(2)).await;
+    }
+    panic!("会话 {id} 的恢复轮未收束");
+}
+
+#[tokio::test]
+async fn resume_after_worker_restart_republishes_source_and_agent_scope() {
+    let (dir, seed) = fixture();
+    let id = unique_id("resume-after-restart");
+    seed_resumable_tool(&seed, &id).await;
+    drop(seed);
+
+    let parent: Arc<dyn Plugin> = Arc::new(ScopePublishingParent {
+        root: dir.path().join("subagent").join("resume-reviewer"),
+    });
+    let p = SessionPlugin::new(
+        Some(Arc::downgrade(&parent)),
+        SessionConfig::default(),
+        symbio_plugin_api::PluginDir::at(dir.path(), "session"),
+    );
+    let mut session = p.session_of(&id).await.unwrap();
+    session.metadata["agent_id"] = json!("resume-reviewer");
+    p.save_session(&session).await.unwrap();
+    p.restore_session_identity(&id).await.unwrap();
+    let store = p.get_store().await.unwrap();
+    assert!(store.source_principal_cell(&id).read().unwrap().is_none());
+    assert!(store.agent_scope_cell(&id).read().unwrap().is_none());
+
+    let response = p
+        .dispatch(
+            &resume_vctx("remote:resume-reviewer"),
+            &message_path(&id, "approval-card"),
+            VdfsRequest::Action {
+                action: "approve".into(),
+                payload: Some(json!({ "answer": true, "mode": "once" })),
+            },
+        )
+        .await
+        .unwrap();
+    assert!(response.into_action().unwrap().ok);
+
+    let answers = p
+        .fact_source(&id)
+        .await
+        .unwrap()
+        .facts()
+        .into_iter()
+        .filter(|event| event.kind == symbio_plugin_api::events::EVENT_USER_ANSWER)
+        .collect::<Vec<_>>();
+    assert_eq!(answers.len(), 1);
+    assert_eq!(answers[0].payload["kind"], "approve");
+    assert_eq!(answers[0].payload["call_id"], "wire-resume");
+    assert_eq!(
+        *store.source_principal_cell(&id).read().unwrap(),
+        Some("remote:resume-reviewer".to_string())
+    );
+    assert_eq!(
+        store
+            .agent_scope_cell(&id)
+            .read()
+            .unwrap()
+            .as_ref()
+            .map(|scope| scope.id.as_str()),
+        Some("resume-reviewer")
+    );
+    wait_session_idle(&p, &id).await;
+    let state = p.active_mgr.get_or_create(&id).await;
+    assert!(!state.inner.read().await.is_working());
+    assert!(state.abort_signal.read().unwrap().is_none());
+    assert_eq!(
+        state.inner.read().await.last_outcome.as_deref(),
+        Some("completed")
+    );
+    symbio_sdk::authz::unbind_session(&id);
+}
+
+#[tokio::test]
+async fn resume_after_worker_restart_fails_closed_without_agent_scope() {
+    let (_dir, p) = fixture();
+    let id = unique_id("resume-after-restart-no-scope");
+    seed_resumable_tool(&p, &id).await;
+    let mut session = p.session_of(&id).await.unwrap();
+    session.metadata["agent_id"] = json!("resume-unpublished-reviewer");
+    p.save_session(&session).await.unwrap();
+    p.restore_session_identity(&id).await.unwrap();
+
+    let error = p
+        .dispatch(
+            &resume_vctx("remote:resume-unpublished-reviewer"),
+            &message_path(&id, "approval-card"),
+            VdfsRequest::Action {
+                action: "approve".into(),
+                payload: Some(json!({ "answer": true, "mode": "once" })),
+            },
+        )
+        .await
+        .expect_err("绑定 Agent 却未发布作用域时必须拒绝恢复");
+    assert!(
+        error.to_string().contains("拒绝按宿主态放行"),
+        "错误应指认 fail-closed 原因：{error}"
+    );
+    assert!(
+        fact_kinds(&p, &id)
+            .await
+            .iter()
+            .all(|kind| kind != symbio_plugin_api::events::EVENT_USER_ANSWER),
+        "准备失败时不得落下审批事实"
+    );
+    wait_session_idle(&p, &id).await;
+    let state = p.active_mgr.get_or_create(&id).await;
+    assert!(state.abort_signal.read().unwrap().is_none());
+    assert_eq!(
+        state.inner.read().await.last_outcome.as_deref(),
+        Some("failed")
+    );
+    symbio_sdk::authz::unbind_session(&id);
+}
+
+#[tokio::test]
+async fn resume_waits_for_active_turn_before_reattaching_round() {
+    let (_dir, plugin) = fixture();
+    let p = Arc::new(plugin);
+    let id = unique_id("resume-waits-for-round");
+    seed_resumable_tool(&p, &id).await;
+    let state = p.active_mgr.get_or_create(&id).await;
+    {
+        let mut inner = state.inner.write().await;
+        assert!(state.try_begin_locked(&mut inner));
+    }
+    let task = {
+        let p = Arc::clone(&p);
+        let id = id.clone();
+        tokio::spawn(async move {
+            p.dispatch(
+                &resume_vctx("remote:waiting-reviewer"),
+                &message_path(&id, "approval-card"),
+                VdfsRequest::Action {
+                    action: "answer".into(),
+                    payload: Some(json!({ "answer": "继续", "mode": "once" })),
+                },
+            )
+            .await
+        })
+    };
+    for _ in 0..20 {
+        tokio::time::sleep(std::time::Duration::from_millis(2)).await;
+    }
+    assert!(!task.is_finished(), "原轮未收束时恢复动作必须等待");
+    assert!(fact_kinds(&p, &id)
+        .await
+        .iter()
+        .all(|kind| kind != symbio_plugin_api::events::EVENT_USER_ANSWER));
+    state.finish_turn("completed", None).await;
+    task.await.unwrap().unwrap();
+    wait_session_idle(&p, &id).await;
+    assert_eq!(
+        fact_kinds(&p, &id)
+            .await
+            .iter()
+            .filter(|kind| kind == &symbio_plugin_api::events::EVENT_USER_ANSWER)
+            .count(),
+        1
+    );
+    assert!(state.abort_signal.read().unwrap().is_none());
+}
+
 // ==================== VDFS provider ====================
 
 fn vctx() -> VdfsContext {
@@ -36,6 +288,16 @@ fn vctx() -> VdfsContext {
 fn host_vctx() -> VdfsContext {
     let req: std::sync::Arc<dyn symbio_kernel::plugin::PluginInvokeRequest> =
         std::sync::Arc::new(symbio_kernel::plugin::PluginSimpleRequest::new(None, None));
+    symbio_plugin_api::vdfs_context(&req)
+}
+
+fn resume_vctx(source_principal: &str) -> VdfsContext {
+    let req: std::sync::Arc<dyn PluginInvokeRequest> =
+        std::sync::Arc::new(symbio_kernel::plugin::PluginSimpleRequest::new(None, None));
+    req.set(
+        symbio_sdk::keys::SOURCE_PRINCIPAL,
+        source_principal.to_string(),
+    );
     symbio_plugin_api::vdfs_context(&req)
 }
 
@@ -765,6 +1027,69 @@ async fn seed_nodes(p: &SessionPlugin, id: &str, nodes: Vec<cm::ChatNode>) {
         )
         .expect("种诞生事实失败");
     }
+}
+
+/// 种一条带 wire id 的工具卡；恢复动作认的是 wire id，不是节点地址。
+async fn seed_resumable_tool(p: &SessionPlugin, id: &str) {
+    use symbio_kernel::event::{Entity, Event, Verb};
+    use symbio_kernel::store::Store as _;
+
+    seed_messages(p, id, &["请确认这次调用"]).await;
+    let dir = p
+        .get_store()
+        .await
+        .unwrap()
+        .session_dir(id)
+        .expect("会话目录");
+    let fs = crate::store::EventWalStore::open(dir.join(crate::paths::V2_WAL_FILE))
+        .expect("打开事实源失败");
+    let user_seq = fs
+        .append(
+            Event::pending(
+                "T1",
+                symbio_plugin_api::events::EVENT_USER_MESSAGE,
+                Entity::Scope,
+                Verb::Opened,
+                symbio_plugin_api::PRINCIPAL_USER,
+            )
+            .with_payload(json!({ "text": "请确认这次调用", "id": "seed-user" })),
+        )
+        .expect("种用户开轮事实失败");
+    let request_seq = fs
+        .append(
+            Event::pending(
+                "resume-tool-requested",
+                symbio_plugin_api::events::EVENT_TOOL_REQUESTED,
+                Entity::Scope,
+                Verb::Asserted,
+                symbio_sdk::authz::PRINCIPAL_MAIN,
+            )
+            .with_payload(json!({
+                "root_id": "T1",
+                "calls": [{ "id": "wire-resume", "node_id": "approval-card" }],
+            }))
+            .with_produced_by(user_seq.value()),
+        )
+        .expect("种工具请求失败");
+    fs.append(
+        Event::pending(
+            "resume-tool-artifact",
+            symbio_plugin_api::events::EVENT_ARTIFACT_ADDED,
+            Entity::Artifact,
+            Verb::Asserted,
+            symbio_sdk::authz::PRINCIPAL_MAIN,
+        )
+        .with_payload(json!({
+            "tool": "shell",
+            "text": "等待确认",
+            "tool_call_id": "wire-resume",
+            "args": "{}",
+            "success": false,
+            "needs_user_action": true,
+        }))
+        .with_produced_by(request_seq.value()),
+    )
+    .expect("种工具产物失败");
 }
 
 /// 转写列表里现有哪几条（经 VDFS 的 `消息` 列表，即使用方看到的那一份）。

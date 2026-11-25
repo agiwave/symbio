@@ -8,6 +8,7 @@ use super::{read_optional_json, try_exclusive_lock, write_json_atomic, WorkerErr
 
 const EPOCH_FILE: &str = "epoch.json";
 const EPOCH_LOCK: &str = "epoch.lock";
+const WORKER_LEASE: &str = "worker.lock";
 
 #[derive(Debug, Serialize, Deserialize)]
 struct EpochRecord {
@@ -35,7 +36,11 @@ impl EpochRegistry {
 
     pub fn allocate(&self, build_id: BuildId) -> Result<WorkerId, WorkerError> {
         let _lock = self.lock()?;
-        let next = match self.current_unlocked()? {
+        let current = self.current_unlocked()?;
+        if current.is_some() {
+            let _lease = try_exclusive_lock(&self.worker_dir().join(WORKER_LEASE))?;
+        }
+        let next = match current {
             Some(worker) => worker.epoch().value().checked_add(1),
             None => Some(1),
         }
@@ -60,15 +65,23 @@ impl EpochRegistry {
 
     pub(super) fn check_current(&self, worker: &WorkerId) -> Result<File, WorkerError> {
         let lock = self.lock()?;
-        match self.current_unlocked()? {
-            Some(current) => worker.validate(&current)?,
-            None => {
-                return Err(WorkerError::Invalid(
-                    "会话尚未分配 worker epoch".to_string(),
-                ))
-            }
-        }
+        self.validate_current_unlocked(worker)?;
         Ok(lock)
+    }
+
+    pub(super) fn acquire_current(&self, worker: &WorkerId) -> Result<File, WorkerError> {
+        let _lock = self.lock()?;
+        self.validate_current_unlocked(worker)?;
+        try_exclusive_lock(&self.worker_dir().join(WORKER_LEASE))
+    }
+
+    fn validate_current_unlocked(&self, worker: &WorkerId) -> Result<(), WorkerError> {
+        match self.current_unlocked()? {
+            Some(current) => worker.validate(&current),
+            None => Err(WorkerError::Invalid(
+                "会话尚未分配 worker epoch".to_string(),
+            )),
+        }
     }
 
     fn lock(&self) -> Result<File, WorkerError> {

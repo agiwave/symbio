@@ -206,9 +206,10 @@ impl SessionPlugin {
     /// 只在该会话**空闲**时取走队首一批（至多 `supplements_max_per_drain` 条），
     /// 并逐条发删除变更——轮收尾后的抽干口。
     ///
-    /// 那道忙门是必须的：抽干与开下一轮是同一件事的两半，若抽干时本轮还在跑，
-    /// 抽出来的那一批会在另一条轮上再开一次——同一份存储出现两个写方。
-    /// 忙则返回空批（条目留在队里）。
+    /// 判空、占轮与取批在同一状态写锁内完成；空队列不会把会话留在忙态。那道忙门
+    /// 是必须的：抽干与开下一轮是同一件事的两半，若抽干时本轮还在跑，抽出来的
+    /// 那一批会在另一条轮上再开一次——同一份存储出现两个写方。忙则返回空批
+    /// （条目留在队里）。
     ///
     /// 判空、取批与变更通知在**同一处**完成（[`announce_drained`]）：调用方拿到的批
     /// 一定已从队列里消失，也一定已经投递过删除变更。分开写就会出现"抽了没通知"
@@ -224,7 +225,7 @@ impl SessionPlugin {
 
         let batch: Vec<InboxItem> = {
             let mut inner = state.inner.write().await;
-            if inner.is_working() {
+            if inner.inbox.is_empty() || !state.try_begin_locked(&mut inner) {
                 return Vec::new();
             }
             let n = inner.inbox.len().min(limit);
@@ -235,6 +236,26 @@ impl SessionPlugin {
         batch
     }
 
+    /// 准备失败时把已抽干条目按原顺序放回队首；与出队通知成对。
+    pub(crate) async fn restore_inbox_front(
+        &self,
+        state: &Arc<ActiveSessionState>,
+        items: &[InboxItem],
+    ) {
+        {
+            let mut inner = state.inner.write().await;
+            for item in items.iter().rev() {
+                inner.inbox.push_front(item.clone());
+            }
+        }
+        for item in items {
+            self.change_subs.notify(&VdfsChange::with_data(
+                inbox_item_path(&state.session_id, &item.id),
+                inbox_item_node(item),
+            ));
+        }
+    }
+
     /// 取队首**一条**（一轮的最小单位），并通知这一条已出队。
     ///
     /// 与 [`Self::take_inbox_batch_when_idle`] 的区别只在**数量**：开轮是「一条消息 = 一轮」，
@@ -242,15 +263,15 @@ impl SessionPlugin {
     /// 一条只够开一轮——多抽的那些就再没有开轮的机会了。
     ///
     /// **忙则留队**（D-026 #4）：本轮还在跑时不再开第二轮——那是把「补充」当成
-    /// 并发会话，同一份存储会出现两个写方。忙窗写入只入队，出队由轮收尾后的
-    /// 抽干接手（[`Self::take_inbox_batch_when_idle`]）。
+    /// 并发会话，同一份存储会出现两个写方。判空、占轮与出队在同一状态写锁内完成，
+    /// 忙窗写入只入队，出队由轮收尾后的抽干接手（[`Self::take_inbox_batch_when_idle`]）。
     pub(crate) async fn take_inbox_front(
         &self,
         state: &Arc<ActiveSessionState>,
     ) -> Option<InboxItem> {
         let item = {
             let mut inner = state.inner.write().await;
-            if inner.is_working() {
+            if inner.inbox.is_empty() || !state.try_begin_locked(&mut inner) {
                 return None;
             }
             inner.inbox.pop_front()

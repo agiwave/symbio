@@ -124,6 +124,7 @@ export const useOnboardingStore = defineStore('onboarding', () => {
   async function maybeOpen(): Promise<void> {
     if (dismissed.value) return
     await refresh()
+    if (dismissed.value) return
     if (!modelReady.value) open.value = true
   }
 

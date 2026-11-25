@@ -46,12 +46,12 @@ use symbio_kernel::plugin::{
 };
 use symbio_plugin_api::drive::{DriveKey, EVENT_DRIVER_STALLED};
 use symbio_plugin_api::{ExecEventSink, FactDraft};
+use symbio_sdk::drive::{
+    declared_drive_entry, DriveBinding, DriveBindingDecl, DriveEntry, DriveTarget,
+};
 use symbio_sdk::keys::{
     VdfsCaller, AGENT_ID, MODE, RISK_LEVEL, SANDBOX_ID, SESSION_DIR, SOURCE_PRINCIPAL, VDFS_CALLER,
     WORKDIR,
-};
-use symbio_sdk::plugin::drive_entry::{
-    declared_drive_entry, DriveBinding, DriveBindingDecl, DriveEntry, DriveTarget,
 };
 use symbio_sdk::plugin::fact_source::{declared_fact_source_opener, FactSource, FACT_SOURCE};
 
@@ -89,6 +89,8 @@ pub struct FactWorld<'a> {
     /// 本轮的中止信号（`DE-047` 驱动级信号）：随事实源的交回值带来。
     /// `None` = 没有在途轮次；读方按「不会中止」处理（`ExecAbortSignal::of` 同一语义）。
     pub abort: Option<&'a ExecAbortSignal>,
+    /// 请求级宿主执行绑定；异步驱动必须显式携带，不能依赖原请求上下文仍在栈上。
+    pub port_bindings: Option<Arc<symbio_plugin_api::port::PortBindings>>,
     /// 执行期出口：由会话插件按根交出的真实转写句柄（内部请求显式静默）。
     pub sink: ExecEventSink,
 }
@@ -138,6 +140,9 @@ pub async fn drive_on_new_fact(
     // 父句柄交给执行体：工具 / 钩子按「调用方插件」路由，装配层给的是根插件
     // （环不碰这个字段，只原样转交）。
     let ctx = PluginSimpleRequest::new(Some(Arc::downgrade(root)), None);
+    if let Some(bindings) = &world.port_bindings {
+        ctx.set(symbio_plugin_api::port::PORT_BINDINGS, Arc::clone(bindings));
+    }
     ctx.set(VDFS_CALLER, VdfsCaller::Model);
     ctx.set(WORKDIR, world.workdir.to_string());
     // 会话级数据目录（D-513）：会话插件按唯一布局解析，宿主只递值；能力插件据此
@@ -434,6 +439,7 @@ async fn drain(root: &Arc<dyn Plugin>, target: &DriveTarget, state: &KickState) 
         agent_scope: target.agent_scope.as_ref(),
         source_principal: target.source_principal.as_deref(),
         abort: target.abort.as_ref(),
+        port_bindings: target.port_bindings.clone(),
         sink: target.sink.clone(),
     };
     match drive_on_new_fact(root, &world).await {

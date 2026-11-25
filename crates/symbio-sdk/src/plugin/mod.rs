@@ -4,8 +4,8 @@
 //! 这里保留宿主事实：插件目录与清单（[`dir`]）、遍历端点（[`traverse`]），
 //! 能力效果的机制面（[`effects`] / [`behaviors`]，随 `submit_behavior!` 从门面
 //! 整块搬来，`D-408`）、上下文贡献的机制面（[`context`]，随 `submit_context_provider!`
-//! 整块搬来，`D-412`），以及五个链接期注册表（[`retrieval`] / [`rows`] / [`settle`] /
-//! [`fact_source`] / [`drive_entry`]，随各自的提交宏整块搬来，`D-413`）；跨插件报表的
+//! 整块搬来，`D-412`），以及四个链接期注册表（[`retrieval`] / [`rows`] / [`settle`] /
+//! [`fact_source`]，随各自的提交宏整块搬来，`D-413`）；跨插件报表的
 //! 登记与读取（[`reports`]）与视图缺席原因（[`views`]）随注册表搬来（`D-416`）。
 
 // 契约词汇由本域子模块直接从 `symbio_kernel::plugin` 取；本域**不再**整模块转出内核的
@@ -20,7 +20,6 @@ mod traverse;
 
 pub mod behaviors;
 pub mod context;
-pub mod drive_entry;
 pub mod effects;
 pub mod fact_source;
 pub mod reports;

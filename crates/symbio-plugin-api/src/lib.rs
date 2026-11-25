@@ -7,9 +7,6 @@
 //!
 //! - [`routes`]：跨插件调用路径（地址）常量
 //! - [`events`]：跨插件事件名常量与共享事件行（写闸的共享臂；清单生成物）
-//! - [`behaviors`]：行为名的收集面（实现住 sdk，本 crate 只转出，D-408）
-//! - [`effects`]：能力效果的实现端口（`ToolBehavior`）与草稿（`FactDraft`）（转出，`D-408`）
-//! - [`rows`]：能力行的执行体端口（`RowHandler`）与债实例（`RowRequest`）（转出，`D-413`）
 //! - [`port`]：世界端口的注册面（`PortProvider` 与 port 族——名字与契约静态，提供者随活插件的能力行动态收集）
 //! - [`settle`]：收束之后贡献派生事实的端口（`Contributor`）（转出，`D-413`）
 //! - [`retrieval`]：轮首检索的端口（`Retriever`）——宿主交可见切片与发言，能力交回自有值（D-264）（转出，`D-413`）
@@ -77,7 +74,7 @@ pub use effects::{
     apply as apply_effects, apply_before, BeforeDecision, BeforeReadings, BeforeRefusal,
     BeforeRequest, EffectCall, EffectEnv, EffectInput, FactDraft, FileOp, ToolBehavior,
 };
-pub use symbio_sdk::plugin::drive_entry::publish_deployment_root;
+pub use symbio_sdk::drive::publish_deployment_root;
 // fact_source 登记面不上门面（D-443）：唯一消费方是控制面 session（owner），按 D-253 / D-428
 // 走 sdk 豁免直取本体；`Principal` 留下（扩展层在用）。
 pub use symbio_sdk::plugin::fact_source::Principal;

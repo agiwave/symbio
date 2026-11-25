@@ -70,10 +70,16 @@ pub const ROUTE_MODEL_PROJECT_TOOLS: &str = "model/project_tools";
 
 // ============ session ============
 
-/// session/worker_ready — worker 启动闸门：打开并缓存该会话的事实源写句柄，完成 WAL 恢复并持有令牌。
+/// session/worker_ready — worker 启动闸门：恢复持久化委派链的身份行，再打开事实源写句柄。
 pub const ROUTE_SESSION_WORKER_READY: &str = "session/worker_ready";
 
 // ============ vdfs ============
+
+/// vdfs/action — 经 `VDFS_OPS` 分发（无静态 `match` 臂）
+pub const ROUTE_VDFS_ACTION: &str = "vdfs/action";
+
+/// vdfs/delete — 经 `VDFS_OPS` 分发（无静态 `match` 臂）
+pub const ROUTE_VDFS_DELETE: &str = "vdfs/delete";
 
 /// vdfs/list — 经 `VDFS_OPS` 分发（无静态 `match` 臂）
 pub const ROUTE_VDFS_LIST: &str = "vdfs/list";

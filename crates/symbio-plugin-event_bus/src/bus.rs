@@ -87,24 +87,42 @@ impl EventBusPublisher for BusPublisher {
         // 出帧路径上因此**没有任何整树遍历**，见 `event_bus_build_envelope`。
         let frame = PluginFrame::data(event_bus_build_envelope(kind, session_id, data));
 
-        // 先收集再处理（DashMap 迭代期不删除）。
-        let mut gone: Vec<String> = Vec::new();
-        let mut full: Vec<(String, mpsc::Sender<PluginFrame>)> = Vec::new();
-        for entry in SUBSCRIBERS.iter() {
-            let (id, tx) = (entry.key(), entry.value());
-            if tx.is_closed() {
-                gone.push(id.clone());
-            } else if let Err(mpsc::error::TrySendError::Full(_)) = tx.try_send(frame.clone()) {
-                full.push((id.clone(), tx.clone()));
-            }
+        self.publish_frame(frame);
+    }
+
+    fn publish_frame(&self, frame: PluginFrame) {
+        let Some(kind) = frame
+            .value()
+            .and_then(|value| value.get("data"))
+            .and_then(|bus| bus.get("kind"))
+            .and_then(Value::as_str)
+        else {
+            return;
+        };
+        let kind = kind.to_string();
+        publish_frame(frame, &kind);
+    }
+}
+
+/// 投递一条已经成形的总线帧（跨进程事件回灌用；信封形状仍只有 `build_envelope` 一个 owner）。
+pub(crate) fn publish_frame(frame: PluginFrame, kind: &str) {
+    // 先收集再处理（DashMap 迭代期不删除）。
+    let mut gone: Vec<String> = Vec::new();
+    let mut full: Vec<(String, mpsc::Sender<PluginFrame>)> = Vec::new();
+    for entry in SUBSCRIBERS.iter() {
+        let (id, tx) = (entry.key(), entry.value());
+        if tx.is_closed() {
+            gone.push(id.clone());
+        } else if let Err(mpsc::error::TrySendError::Full(_)) = tx.try_send(frame.clone()) {
+            full.push((id.clone(), tx.clone()));
         }
-        for id in gone {
-            unregister_subscriber(&id);
-        }
-        for (id, tx) in full {
-            warn_slow_once(&id);
-            schedule_resync(kind, id, tx);
-        }
+    }
+    for id in gone {
+        unregister_subscriber(&id);
+    }
+    for (id, tx) in full {
+        warn_slow_once(&id);
+        schedule_resync(kind, id, tx);
     }
 }
 
@@ -156,6 +174,8 @@ fn schedule_resync(kind: &str, id: String, tx: mpsc::Sender<PluginFrame>) {
     let kind = kind.to_string();
     handle.spawn(async move {
         let marker = resync_marker(&kind);
+        // 跨进程中继也是订阅者；只补发目标通道会让其它 worker 永远等不到重读信号。
+        publish_frame(marker.clone(), &kind);
         for attempt in 0..RESYNC_RETRY {
             match tx.try_send(marker.clone()) {
                 Ok(()) => {

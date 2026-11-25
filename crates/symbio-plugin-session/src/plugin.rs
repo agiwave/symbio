@@ -84,8 +84,8 @@ pub struct SessionPlugin {
     ///
     /// 懒建：构造时父句柄可能还是弱引用，等第一次开轮再 upgrade；之后整份插件
     /// 共享同一实例（按会话的重入位因此只有一份）。
-    drive: OnceLock<Option<Arc<dyn symbio_sdk::plugin::drive_entry::DriveEntry>>>,
-    /// 指向自身的弱引用：轮收尾的后台任务（[`SessionPlugin::spawn_turn_closer`]）
+    drive: OnceLock<Option<Arc<dyn symbio_sdk::drive::DriveEntry>>>,
+    /// 指向自身的弱引用：轮收尾的后台任务（[`SessionPlugin::spawn_round_closer`]）
     /// 要活得比写臂久，必须持有一份 `'static` 的插件句柄，而 `dispatch` 只有 `&self`。
     ///
     /// 装配期在 [`Self::build`] 里登记一次（`Weak` 不延长生命周期，不构成泄漏）；
@@ -262,7 +262,8 @@ impl SessionPlugin {
         if let Some(source) = ctx.get(FACT_SOURCE) {
             return Ok(source);
         }
-        self.fact_source(session_id).await
+        self.fact_source_with_bindings(session_id, ctx.get(symbio_plugin_api::port::PORT_BINDINGS))
+            .await
     }
 
     /// 该会话的契约事实源：与装配层经开面打开的是同一底层 `WalStore`。
@@ -273,10 +274,19 @@ impl SessionPlugin {
         &self,
         session_id: &str,
     ) -> Result<Arc<dyn FactSource>, PluginError> {
+        self.fact_source_with_bindings(session_id, None).await
+    }
+
+    pub(crate) async fn fact_source_with_bindings(
+        &self,
+        session_id: &str,
+        port_bindings: Option<Arc<symbio_plugin_api::port::PortBindings>>,
+    ) -> Result<Arc<dyn FactSource>, PluginError> {
         let sink = Arc::new(super::transcript::sink::TranscriptSink::new(
             Arc::clone(&self.active_mgr),
             session_id.to_string(),
         ));
+        let port_bindings = port_bindings.map(|bindings| Arc::new(bindings.fresh()));
         let store = self.get_store().await?;
         // 开面播种（D-340）：会话尚无事实时，把部署级已裁决的 `verdict.asserted`
         // 复制进本会话事实流。只在**这一处**开面调用，运行期不追发；跨会话索引
@@ -309,6 +319,7 @@ impl SessionPlugin {
                 symbio_kernel::exec::ExecEventSink::direct(sink),
                 Some(supplements),
                 abort_signal,
+                port_bindings,
             )
             .map_err(PluginError::InternalError)?
             .ok_or_else(|| PluginError::NotFound(format!("会话 {session_id} 没有事实源")))
@@ -317,14 +328,11 @@ impl SessionPlugin {
     /// 本实例所属**部署根**的驱动实例（父插件即根；按根构造一次，随插件留守）。
     ///
     /// 未装配驱动工厂（单测）或无父插件 ⇒ `None`：写口落地即止，不去猜入口。
-    pub(crate) fn drive_entry(
-        &self,
-    ) -> Option<Arc<dyn symbio_sdk::plugin::drive_entry::DriveEntry>> {
+    pub(crate) fn drive_entry(&self) -> Option<Arc<dyn symbio_sdk::drive::DriveEntry>> {
         self.drive
             .get_or_init(|| {
                 let root = self.parent.as_ref()?.upgrade()?;
-                symbio_sdk::plugin::drive_entry::declared_drive_binding()
-                    .map(|binding| binding.bind(root))
+                symbio_sdk::drive::declared_drive_binding().map(|binding| binding.bind(root))
             })
             .clone()
     }
@@ -411,10 +419,11 @@ impl Plugin for SessionPlugin {
             // 读数：本会话改过哪些文件（D-169：`artifact.added` 的一条投影，不是新事实族）。
             // 同样是纯计算、零副作用。
             "changes" => return self.handle_changes(ctx).await,
-            // worker 启动闸门：打开并缓存该会话的事实源写句柄，完成 WAL 恢复并持有令牌。
+            // worker 启动闸门：恢复持久化委派链的身份行，再打开事实源写句柄。
             // 只有 worker 进程调用；控制面的读数口一律走只读开法。
             "worker_ready" => {
                 let sid = super::route_guard::require_sid(&ctx, "session/worker_ready")?;
+                self.restore_session_identity(&sid).await?;
                 let _source = self.fact_source_for(&ctx, &sid).await?;
                 return Ok(PluginPayload::Empty);
             }

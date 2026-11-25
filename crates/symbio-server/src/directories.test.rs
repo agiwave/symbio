@@ -20,4 +20,13 @@ fn only_directories_are_returned() {
     let listing = list_directories(Some(&temp.path().to_string_lossy())).expect("listing");
     assert_eq!(listing.entries.len(), 1);
     assert_eq!(listing.entries[0].name, "child");
+    #[cfg(windows)]
+    {
+        assert!(!listing.path.starts_with(r"\\?\"));
+        assert!(!listing.entries[0].path.starts_with(r"\\?\"));
+        assert_eq!(
+            display_path(Path::new(r"\\?\UNC\server\share")),
+            r"\\server\share"
+        );
+    }
 }

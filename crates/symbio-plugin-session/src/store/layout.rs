@@ -62,7 +62,8 @@ pub(super) fn file_for(base: &Path, session_id: &str) -> PathBuf {
 
 /// 子会话目录：`<base>/<safe(父)>/sessions/<safe(子)>/`
 pub(super) fn sub_dir_for(base: &Path, parent_id: &str, session_id: &str) -> PathBuf {
-    base.join(paths::safe_id(parent_id))
+    let parent = find_nested_dir(base, parent_id).unwrap_or_else(|| dir_for(base, parent_id));
+    parent
         .join(SUB_SESSIONS_DIR)
         .join(paths::safe_id(session_id))
 }
@@ -370,17 +371,24 @@ pub(super) fn read_session_dir(dir: &Path) -> Option<Session> {
     Some(meta.into_session(messages))
 }
 
-/// 嵌套查找：在所有顶层会话目录的 `sessions/<safe_id>/` 中定位子会话，
-/// 返回其目录。仅在顶层未命中时调用（miss 路径，开销可接受）。
+/// 嵌套查找：在任意深度父目录的 `sessions/<safe_id>/` 中定位子会话。
+/// 返回前核对元数据身份，避免安全段名碰撞把另一个会话当成目标。
 pub(super) fn find_nested_dir(base: &Path, session_id: &str) -> Option<PathBuf> {
-    let entries = std::fs::read_dir(base).ok()?;
-    for entry in entries.flatten() {
-        let dir = entry
-            .path()
-            .join(SUB_SESSIONS_DIR)
-            .join(paths::safe_id(session_id));
-        if dir.join(SESSION_FILE).is_file() {
-            return Some(dir);
+    fn walk(dir: &Path, session_id: &str) -> Option<PathBuf> {
+        let nested = dir.join(SUB_SESSIONS_DIR);
+        for child in session_dirs_under(&nested) {
+            if read_meta(&child).is_some_and(|meta| meta.id == session_id) {
+                return Some(child);
+            }
+            if let Some(found) = walk(&child, session_id) {
+                return Some(found);
+            }
+        }
+        None
+    }
+    for dir in session_dirs_under(base) {
+        if let Some(found) = walk(&dir, session_id) {
+            return Some(found);
         }
     }
     None

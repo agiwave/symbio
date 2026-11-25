@@ -82,6 +82,19 @@ describe('onboarding 自动弹出（判据是数据，不是「读过没」）',
     expect(s.open).toBe(false)
   })
 
+  it('检查完成前跳过引导 ⇒ 晚到的结果不得重新打开', async () => {
+    arrange({ models: 0 })
+    let release: ((value: { items: unknown[] }) => void) | undefined
+    hoisted.listVdfs.mockReturnValue(new Promise(resolve => { release = resolve }))
+    const s = useOnboardingStore()
+    const opening = s.maybeOpen()
+    await vi.waitFor(() => expect(hoisted.listVdfs).toHaveBeenCalled())
+    s.dismiss()
+    release?.({ items: [] })
+    await opening
+    expect(s.open).toBe(false)
+  })
+
   it('用户跳过过一次 ⇒ 之后一律不自动弹（且落盘）', async () => {
     arrange({ models: 0 })
     const s = useOnboardingStore()

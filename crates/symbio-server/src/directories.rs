@@ -35,10 +35,7 @@ pub fn roots() -> Vec<PathBuf> {
 
 pub fn list_directories(requested: Option<&str>) -> Result<DirectoryListing, String> {
     let roots = roots();
-    let root_strings: Vec<String> = roots
-        .iter()
-        .map(|path| path.to_string_lossy().to_string())
-        .collect();
+    let root_strings: Vec<String> = roots.iter().map(|path| display_path(path)).collect();
     let Some(requested) = requested.filter(|value| !value.trim().is_empty()) else {
         return Ok(DirectoryListing {
             path: String::new(),
@@ -47,8 +44,8 @@ pub fn list_directories(requested: Option<&str>) -> Result<DirectoryListing, Str
             entries: roots
                 .iter()
                 .map(|path| DirectoryEntry {
-                    name: path.to_string_lossy().to_string(),
-                    path: path.to_string_lossy().to_string(),
+                    name: display_path(path),
+                    path: display_path(path),
                     kind: "directory",
                 })
                 .collect(),
@@ -86,16 +83,14 @@ pub fn list_directories(requested: Option<&str>) -> Result<DirectoryListing, Str
         }
         entries.push(DirectoryEntry {
             name: entry.file_name().to_string_lossy().to_string(),
-            path: entry_path.to_string_lossy().to_string(),
+            path: display_path(&entry_path),
             kind: "directory",
         });
     }
     entries.sort_by(|left, right| left.name.to_lowercase().cmp(&right.name.to_lowercase()));
     Ok(DirectoryListing {
-        parent: path
-            .parent()
-            .map(|parent| parent.to_string_lossy().to_string()),
-        path: path.to_string_lossy().to_string(),
+        parent: path.parent().map(display_path),
+        path: display_path(&path),
         roots: root_strings,
         entries,
         truncated,
@@ -109,6 +104,25 @@ fn expand_canonical(path: &Path) -> Result<PathBuf, String> {
         return Err(format!("路径不是目录: {}", canonical.display()));
     }
     Ok(canonical)
+}
+
+fn display_path(path: &Path) -> String {
+    let path = path.to_string_lossy();
+    #[cfg(windows)]
+    {
+        let stripped = path.strip_prefix(r"\\?\").unwrap_or(&path);
+        if stripped
+            .get(..4)
+            .is_some_and(|prefix| prefix.eq_ignore_ascii_case("UNC\\"))
+        {
+            return format!(r"\\{}", &stripped[4..]);
+        }
+        stripped.to_string()
+    }
+    #[cfg(not(windows))]
+    {
+        path.into_owned()
+    }
 }
 
 #[cfg(test)]

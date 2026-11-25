@@ -33,6 +33,9 @@ pub const PORT_MODEL: &str = "model";
 /// `todo_write` 的落格行为：`local` 声明工具，`task` 实现行为。
 pub const BEHAVIOR_TASK_TABLE: &str = "task_table";
 
+/// 子会话启动端口：`session` 调用，宿主为每个 worker 请求装配执行体。
+pub const PORT_SESSION_SUBAGENT: &str = "session.subagent";
+
 /// 会话收件箱路径段：`agent` / `heartbeat` / `telegram` / `session` 共用。
 pub const SEG_INBOX: &str = "inbox";
 

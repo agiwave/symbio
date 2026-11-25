@@ -174,7 +174,10 @@ impl SessionPlugin {
                     // `user.message` / `session.config` 落进外层 WAL——子会话
                     // 永远没有事实、也就永远不会被写口踢起驱动。
                     let source = self
-                        .fact_source(id)
+                        .fact_source_with_bindings(
+                            id,
+                            vdfs_host_ctx(ctx)?.get(symbio_plugin_api::port::PORT_BINDINGS),
+                        )
                         .await
                         .map_err(|e| VdfsError::Internal(format!("开轮取事实源失败: {e}")))?;
                     // 能力收集与开轮都按**这条消息的会话**算：fork 出独立上下文，
@@ -183,23 +186,23 @@ impl SessionPlugin {
                     inbox_ctx.set(SESSION_ID, id.to_string());
                     inbox_ctx.set(FACT_SOURCE, Arc::clone(&source));
                     let seq = self
-                        .consume_inbox_turn(&inbox_ctx, id, &*source)
+                        .consume_inbox_turn(&inbox_ctx, id, Arc::clone(&source))
                         .await
                         .map_err(|e| VdfsError::Internal(format!("开轮失败: {e}")))?;
-                    // 收尾：等这轮驱动空闲后投影终答（见 `spawn_turn_closer`）。
+                    // 收尾：等这轮驱动空闲后投影终答（见 `spawn_round_closer`）。
                     // 本臂的调用方可能是 CLI（自己会 `session/project`，幂等），也可能
                     // 是 `agent_run`（子会话没有投影方——缺席就永远停在 `working`）。
                     if let Some(seq) = seq {
-                        // 收尾任务用本轮开出的能力视图上下文（`consume_inbox_turn` 已把
-                        // 能力视图挂到 `inbox_ctx` 上）去开下一轮；父插件未挂载时按既有
-                        // 路径降级（只投影、不抽干）。
+                        // 收尾任务沿用本轮开轮前的可信基底 ctx；能力收集写在独立
+                        // round_ctx 上，下一轮不得继承本轮端口 / 权限 / 沙箱槽。
                         let next_ctx = self.get_parent().map(|_| inbox_ctx.clone());
-                        self.spawn_turn_closer(
+                        self.spawn_round_closer(
                             id.to_string(),
                             seq,
                             source,
                             self.drive_entry(),
                             next_ctx,
+                            None,
                         );
                     }
                 }

@@ -11,8 +11,8 @@
  * - remote：另一台 Server 的 HTTP/WS 地址，Bearer token 只放 Authorization 请求头。
  *
  * 浏览器没有 native 出口：远端不可达只记录 `locationError`，绝不回退 Tauri IPC。
- * `forceNative` 在 embedded 中表示本机控制面，在 browser 中表示当前 Server 的
- * 控制面 HTTP。homedir 是 Symbio 配置根，workdir 是会话工作区，两者不互换。
+ * `forceNative` 只是控制面提示；embedded 已选 Server 时仍走该 Server，browser 中表示
+ * 当前 Server 的控制面 HTTP。homedir 是 Symbio 配置根，workdir 是会话工作区，两者不互换。
  */
 
 import { ref, type Ref } from 'vue'

@@ -6,14 +6,14 @@ use symbio_deploy::PLUGIN_ID_LOOP;
 use symbio_kernel::event::{Entity, Event, Verb};
 use symbio_kernel::keys::SymbioKey;
 use symbio_kernel::plugin::{
-    Plugin, PluginError, PluginInvokeRequest, PluginInvokeResponse, PluginMeta, PluginPayload,
-    PluginSimpleRequest,
+    Plugin, PluginError, PluginInvokeRequest, PluginInvokeRequestExt, PluginInvokeResponse,
+    PluginMeta, PluginPayload, PluginSimpleRequest,
 };
 use symbio_kernel::store::Store;
 use symbio_plugin_api::debt::{debt_row, DebtFacts, DebtSource, DebtSpec, DriveRequest};
 use symbio_plugin_api::events::{EVENT_CHAT_ASSISTANT_FINAL, EVENT_USER_MESSAGE};
 use symbio_plugin_api::port::{
-    PortExecContext, PortExecutor, PortInput, PortOutcome, PortProvider,
+    PortBindings, PortExecContext, PortExecutor, PortInput, PortOutcome, PortProvider,
 };
 use symbio_plugin_api::FactDraft;
 use symbio_plugin_loop as _;
@@ -72,6 +72,31 @@ async fn a_session_with_no_debt_reports_no_debt() {
 
     assert_eq!(report.outcome, DriveOutcome::NoDebt);
     assert_eq!(report.dispatched, 0);
+}
+
+#[tokio::test]
+async fn drive_gather_preserves_request_scoped_host_ports() {
+    let host = Host::new(Arc::new(EmptyRoot));
+    let base = bound_base();
+    let bindings = Arc::new(PortBindings::default());
+    assert!(bindings
+        .bind(
+            &["session.subagent".to_string()],
+            "server.worker",
+            Some(Arc::new(SmokeExecutor)),
+        )
+        .is_empty());
+    base.set(PORT_BINDINGS, Arc::clone(&bindings));
+
+    let gathered = host.gather(&base, "s-1", None).await.expect("装配成立");
+
+    let collected = gathered
+        .ctx
+        .get(PORT_BINDINGS)
+        .expect("驱动上下文必须携带本轮端口容器");
+    assert!(!Arc::ptr_eq(&bindings, &collected));
+    assert_eq!(bindings.bound(), vec!["session.subagent".to_string()]);
+    assert!(gathered.executors.contains_key("session.subagent"));
 }
 
 /// 最小 smoke 的模型端口：执行体只读事实、只落 `response`。

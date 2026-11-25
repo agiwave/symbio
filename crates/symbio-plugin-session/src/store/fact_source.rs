@@ -14,7 +14,7 @@ use symbio_kernel::store::Store;
 use symbio_plugin_api::events::EVENT_ARTIFACT_ADDED;
 use symbio_plugin_api::FactDraft;
 use symbio_plugin_api::Principal;
-use symbio_sdk::plugin::drive_entry::{DriveEntry, DriveTarget};
+use symbio_sdk::drive::{DriveEntry, DriveTarget};
 use symbio_sdk::plugin::fact_source::{FactSource, FactSourceOpener};
 
 use super::layout::SessionParams;
@@ -62,6 +62,8 @@ pub(crate) struct SessionFactSource {
     /// 同一个 `Arc`（唯一所有者是 `ActiveSessionState`）。每次踢驱动读当前值，
     /// 置位后本轮后续任何派发都读得到（取走会退化成「只打断当前这次调用」）。
     abort_signal: Arc<RwLock<Option<ExecAbortSignal>>>,
+    /// 请求级宿主执行绑定：worker 的内部启动口随事实源交给异步驱动。
+    port_bindings: Option<Arc<symbio_plugin_api::port::PortBindings>>,
     /// 本会话所属**部署根**的驱动实例；`None` = 只读事实源，不踢驱动。
     drive: Option<Arc<dyn DriveEntry>>,
     /// 执行期出口：真实转写句柄，或本根**显式声明**的静默。
@@ -91,6 +93,7 @@ impl SessionFactSource {
         agent_scope: Arc<RwLock<Option<symbio_plugin_api::AgentScope>>>,
         source_principal: Arc<RwLock<Option<String>>>,
         abort_signal: Arc<RwLock<Option<ExecAbortSignal>>>,
+        port_bindings: Option<Arc<symbio_plugin_api::port::PortBindings>>,
         drive: Option<Arc<dyn DriveEntry>>,
         sink: ExecEventSink,
         supplements: Option<SupplementDrain>,
@@ -106,6 +109,7 @@ impl SessionFactSource {
             agent_scope,
             source_principal,
             abort_signal,
+            port_bindings,
             drive,
             sink,
             supplements,
@@ -269,6 +273,7 @@ impl FactSource for SessionFactSource {
                         .read()
                         .ok()
                         .and_then(|signal| signal.clone()),
+                    port_bindings: self.port_bindings.clone(),
                     facts,
                     sink: self.sink.clone(),
                 };
@@ -323,6 +328,7 @@ impl FactSourceOpener for SessionFactOpener {
             Arc::new(RwLock::new(None)),
             // 只读开面没有在途轮次：中止槽独立空置（不是任何会话状态的那一格）。
             Arc::new(RwLock::new(None)),
+            None,
             None,
             ExecEventSink::silent(),
             None,

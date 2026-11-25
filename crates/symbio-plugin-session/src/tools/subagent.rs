@@ -57,6 +57,7 @@ use std::sync::Arc;
 use symbio_plugin_api::chat_node::{
     ChatNode, MessageContent, NodeKind, NodeRole, NodeStatus, ResumeAction, ResumeRequest,
 };
+use symbio_plugin_api::port::PortFactEmit;
 use symbio_plugin_api::routes::{
     ROUTE_EVENT_BUS_SUBSCRIBE, ROUTE_VDFS_ROOT, ROUTE_VDFS_UNWATCH, ROUTE_VDFS_WATCH,
 };
@@ -66,15 +67,16 @@ use symbio_plugin_api::{
 use symbio_plugin_api::{message_of_node, SEG_MESSAGES};
 use symbio_plugin_api::{
     port_result, ExecAbortSignal, ExecEnv, ExecEventSink, Plugin, PluginError, PluginFrame,
-    PluginInvokeRequest, PluginInvokeRequestExt, PluginPayload, PortExecContext, PortExecutor,
-    PortInput, PortOutcome, SandboxFact, AGENT_ID, MODE, PATH, PROVIDER_ID, RISK_LEVEL, SANDBOX_ID,
-    SESSION_ID, TOOL_CALL_ID, TOOL_NODE_ID, WORKDIR,
+    PluginInvokeRequest, PluginInvokeRequestExt, PluginMessageWire, PluginPayload, PortExecContext,
+    PortExecutor, PortInput, PortOutcome, SandboxFact, AGENT_ID, MODE, PATH, PROVIDER_ID,
+    RISK_LEVEL, SANDBOX_ID, SESSION_ID, TOOL_CALL_ID, TOOL_NODE_ID, WORKDIR,
 };
 use symbio_plugin_api::{vdfs_context, VdfsError};
 use symbio_plugin_api::{
     VdfsContent, VdfsListResponse, VdfsNode, VdfsProvider, VdfsRequest, VDFS_STATUS_WORKING,
 };
 use symbio_plugin_api::{PLUGIN_ID_SESSION, PLUGIN_ID_SUBAGENT};
+use symbio_sdk::keys::SOURCE_PRINCIPAL;
 
 // ── 本工具的身份约定（续跑参数经**载荷**回传，由 tool_executor 落到 meta.prompt）──
 /// 工具名。**两处必须同源**：`CapabilityMeta.name`（LLM 看到的短名）与待审批载荷
@@ -87,7 +89,7 @@ const KEY_PARENT_SESSION_ID: &str = "parent_session_id";
 ///
 /// 名字住 `plugin-api` 的词汇面（D-364）：跨插件共用的地址段只有一个住处，
 /// 拼错表现为「消息进不去队列」，不会静默错乱。
-use symbio_plugin_api::vocab::SEG_INBOX;
+use symbio_plugin_api::vocab::{PORT_SESSION_SUBAGENT, SEG_INBOX};
 
 /// agent_run 能力：把任务委托给指定 agent 目录（子智能体）。
 pub struct AgentRunCapability {
@@ -249,6 +251,26 @@ impl PortExecutor for AgentRunCapability {
         let env = ExecEnv::from_request(&*ctx);
         port_result(self.run(input.payload, &env, ctx).await)
     }
+}
+
+fn worker_request_metadata(
+    ctx: &Arc<dyn PluginInvokeRequest>,
+    route: &str,
+    child_session_id: &str,
+    effective_workdir: &Option<String>,
+) -> Value {
+    let mut metadata = json!({
+        "path": route,
+        "session_id": child_session_id,
+        "workdir": ctx.get(WORKDIR).or_else(|| effective_workdir.clone()),
+    });
+    if let Some(source) = ctx
+        .get(SOURCE_PRINCIPAL)
+        .filter(|source| !source.trim().is_empty())
+    {
+        metadata["source_principal"] = json!(source);
+    }
+    metadata
 }
 
 /// 父会话批准只通过 collectors 消费一次性 grant 后写入的 ctx 标记传递。
@@ -436,6 +458,17 @@ impl AgentRunCapability {
             }
         };
 
+        // 宿主装配的内部启动端口只在 worker 请求上下文里存在；缺席时保留进程内
+        // 控制面 / 测试上下文路径。冲突必须硬失败，不能当作缺席回落到本进程执行。
+        let subagent_executor = match ctx.get(symbio_plugin_api::port::PORT_BINDINGS) {
+            Some(bindings) => match bindings.get(PORT_SESSION_SUBAGENT) {
+                Ok(Some((_, executor))) => Some(executor),
+                Ok(None) => None,
+                Err(error) => return Err(PluginError::InternalError(error)),
+            },
+            None => None,
+        };
+
         // ── 订阅子会话的实时面（先于发起本轮，避免丢首帧）──
         //
         // 与 CLI / 前端**同一条路径**（`D-487`：转播桥走 `event_bus/subscribe` 路由，
@@ -480,7 +513,97 @@ impl AgentRunCapability {
         // owner（[D-066] 理由 1）。
         let vctx = vdfs_context(&ctx);
         let rel = format!("{PLUGIN_ID_SESSION}/{child_session_id}");
-        let started: Result<(), PluginError> = if let Some(m) = first_message {
+        let started: Result<(), PluginError> = if let Some(executor) = subagent_executor {
+            let message = if let Some(m) = &first_message {
+                PluginMessageWire {
+                    metadata: worker_request_metadata(
+                        &ctx,
+                        symbio_plugin_api::routes::ROUTE_VDFS_WRITE,
+                        &child_session_id,
+                        &effective_workdir,
+                    ),
+                    payload: json!({
+                        "path": format!("{session_addr}/{SEG_INBOX}"),
+                        "text": serde_json::to_string(m)
+                            .map_err(|error| PluginError::InternalError(error.to_string()))?,
+                    }),
+                }
+            } else if let Some(r) = &resume_req {
+                let action = serde_json::to_value(&r.action)
+                    .ok()
+                    .and_then(|value| value.as_str().map(str::to_string))
+                    .ok_or_else(|| {
+                        PluginError::InternalError(format!(
+                            "恢复动作词形不可序列化：{:?}",
+                            r.action
+                        ))
+                    })?;
+                PluginMessageWire {
+                    metadata: worker_request_metadata(
+                        &ctx,
+                        symbio_plugin_api::routes::ROUTE_VDFS_ACTION,
+                        &child_session_id,
+                        &effective_workdir,
+                    ),
+                    payload: json!({
+                        "path": format!(
+                            "{session_addr}/{SEG_MESSAGES}/{}",
+                            r.target_id
+                        ),
+                        "action": action,
+                        "payload": {
+                            "args": r.args,
+                            "reason": r.reason,
+                            "answer": r.answer,
+                            "mode": ctx.get(MODE),
+                            "risk_level": ctx.get(RISK_LEVEL),
+                        },
+                    }),
+                }
+            } else {
+                return Err(PluginError::InternalError(
+                    "agent_run 未确定本轮输入（message 与 resume 皆空）".to_string(),
+                ));
+            };
+            let env = ExecEnv::from_request(&*ctx);
+            let outcome = executor
+                .execute(
+                    PortExecContext {
+                        abort: env.abort().clone(),
+                        idempotency_key: format!(
+                            "{PORT_SESSION_SUBAGENT}:{}",
+                            ctx.get(TOOL_CALL_ID)
+                                .unwrap_or_else(|| child_session_id.clone())
+                        ),
+                        sink: env.sink().clone(),
+                        emit: PortFactEmit::silent(),
+                        ctx: Some(ctx.clone()),
+                        subject: ctx
+                            .get(TOOL_CALL_ID)
+                            .unwrap_or_else(|| child_session_id.clone()),
+                        session_id: ctx.get(SESSION_ID).unwrap_or_default(),
+                        origin: None,
+                        scratch_dir: None,
+                        reader: None,
+                        source: ctx.get(SESSION_ID).unwrap_or_default(),
+                    },
+                    PortInput {
+                        port: PORT_SESSION_SUBAGENT.to_string(),
+                        payload: json!({
+                            "child_session_id": child_session_id,
+                            "message": message,
+                        }),
+                    },
+                )
+                .await;
+            if let Some(reason) = outcome.authz.denial() {
+                Err(PluginError::InternalError(reason.to_string()))
+            } else if let Some((_, why)) = outcome.error {
+                Err(PluginError::InternalError(why))
+            } else {
+                Ok(())
+            }
+        } else if let Some(m) = first_message {
             // 写体是这条消息的 JSON：判别式「以 `{` 开头」⇒ 它是 [`ChatNode`] 的
             // 字段子集，`id` 因此仍是**地址之外**的第二个身份来源，由 provider 归一。
             // 其余缺省由 `parse_inbox_message` 补（`role` / `msg_type` 缺省、

@@ -159,6 +159,16 @@ const ALIASES = [
     what: '进入地址空间：列出虚拟根（不给地址）',
   },
   {
+    ts: 'VDFS_ACTION',
+    rust: { file: 'crates/symbio-plugin-api/src/routes.rs', name: 'ROUTE_VDFS_ACTION' },
+    what: 'VDFS 动作分发（gateway 白名单按名判定、前端按旧名镜像）',
+  },
+  {
+    ts: 'VDFS_DELETE',
+    rust: { file: 'crates/symbio-plugin-api/src/routes.rs', name: 'ROUTE_VDFS_DELETE' },
+    what: '删除 VDFS 节点（Server 会话删除生命周期与前端按旧名镜像）',
+  },
+  {
     ts: 'VDFS_WATCH',
     rust: { file: 'crates/symbio-plugin-api/src/routes.rs', name: 'ROUTE_VDFS_WATCH' },
     what: '订阅某地址的变更（跨插件可见，故常量归宿主的 `routes.rs`）',

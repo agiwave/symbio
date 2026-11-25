@@ -28,7 +28,7 @@
 use super::active::ActiveSessionState;
 use super::chat_session::Carrier;
 use super::declarations::{CHAT_VOCAB, MESSAGE_VOCAB};
-use super::plugin::{session_node, OUTCOME_ABORTED, OUTCOME_COMPLETED};
+use super::plugin::{session_node, SessionRuntime, OUTCOME_ABORTED, OUTCOME_COMPLETED};
 use super::transcript::publish::append_and_publish;
 use super::types::SessionSummary;
 use serde_json::Value;
@@ -144,35 +144,108 @@ impl Convergence {
     ) {
         // 运行态写路径各只有一个方法（单写者）——见 `active.rs` 的
         // 「运行态的写路径」：写点散回调用方就会重新长出双写面。
-        match &change {
-            SessionStateChange::Working => state.begin_turn().await,
-            SessionStateChange::Finished { outcome, error } => {
-                state.finish_turn(outcome, error.clone()).await
-            }
-        }
+        let SessionStateChange::Finished { outcome, error } = change else {
+            state.begin_turn().await;
+            let rt = self.active.runtime_of(&state.session_id, None).await;
+            self.emit_session_view(state, &rt).await;
+            return;
+        };
+        // 终态视图直接取迁移入参，不重读事实；先投递再释放轮次，后一轮 Working 不可能越过它。
+        let rt = SessionRuntime::finished(outcome, error.clone());
+        self.emit_session_view(state, &rt).await;
+        state.finish_turn(outcome, error.clone()).await;
+    }
 
-        // 运行态变更挂在会话叶子 `<sid>` 上，`data` = 全量节点视图（与 `stat`
-        // 同一构造点 `session_node`）。会话已被删时取不到视图——退化为无载荷
-        // 变更，消费端回读 `stat` 得到 `NotFound` 即自然收敛。
+    /// 运行态变更挂在会话叶子 `<sid>` 上，`data` = 全量节点视图。
+    /// 会话已被删时退化为无载荷变更，消费端回读 `stat` 得到 `NotFound`。
+    async fn emit_session_view(&self, state: &ActiveSessionState, rt: &SessionRuntime) {
         let node = match self.get_store().await {
             Ok(store) => match store.load_session_checked(&state.session_id).await {
-                Ok(Some(session)) => {
-                    let facts = store
-                        .fact_source(&state.session_id)
-                        .ok()
-                        .flatten()
-                        .map(|source| crate::runtime::project(&source.range(0)));
-                    let rt = self
-                        .active
-                        .runtime_of(&state.session_id, facts.as_ref())
-                        .await;
-                    Some(session_node(&SessionSummary::of(&session), &rt))
-                }
+                Ok(Some(session)) => Some(session_node(&SessionSummary::of(&session), rt)),
                 _ => None,
             },
             Err(_) => None,
         };
         state.transcript.lock().await.emit_session_state(node);
+    }
+
+    pub(crate) async fn finish_session_state(
+        &self,
+        session_id: &str,
+        outcome: &'static str,
+        error: Option<String>,
+    ) {
+        let state = self.active.get_or_create(session_id).await;
+        self.emit_session_state(&state, SessionStateChange::Finished { outcome, error })
+            .await;
+    }
+
+    /// 已落下开轮事实、但轮首装配失败：补一条轮级失败收束，再走同一投影路径。
+    pub(crate) async fn record_round_open_failure(
+        &self,
+        session_id: &str,
+        user_seq: u64,
+        source: &dyn FactSource,
+        error: String,
+    ) -> Result<(), PluginError> {
+        let events = source.range(0);
+        let Some(user) = events.iter().find(|event| {
+            event.kind == EVENT_USER_MESSAGE && event.seq.map(|seq| seq.value()) == Some(user_seq)
+        }) else {
+            return Err(PluginError::NotFound(format!(
+                "会话 {session_id} 中没有序号 {user_seq} 的开轮事实"
+            )));
+        };
+        let root_id = user.event_id.clone();
+        if events.iter().any(|event| {
+            event.kind == EVENT_CHAT_ASSISTANT_FALLBACK
+                && event.payload.get("root_id").and_then(Value::as_str) == Some(root_id.as_str())
+        }) {
+            return Ok(());
+        }
+        source
+            .append(
+                PRINCIPAL_MAIN.to_string(),
+                FactDraft {
+                    key: format!("{EVENT_CHAT_ASSISTANT_FALLBACK}:{root_id}"),
+                    kind: EVENT_CHAT_ASSISTANT_FALLBACK.to_string(),
+                    entity: Entity::Scope,
+                    verb: Verb::Closed,
+                    payload: serde_json::json!({
+                        "root_id": root_id,
+                        "status": "failed",
+                        "reason": "fallback",
+                        "detail": error,
+                        "text": "",
+                        "principal": PRINCIPAL_MAIN,
+                    }),
+                    produced_by: Some(user_seq),
+                },
+            )
+            .map_err(|error| {
+                PluginError::InternalError(format!("开轮失败收束落格失败: {error}"))
+            })?;
+        Ok(())
+    }
+
+    /// 等本轮驱动空闲后，必要时补开轮失败收束，再投影同一轮终态。
+    pub(crate) async fn settle_round(
+        &self,
+        session_id: &str,
+        user_seq: u64,
+        source: &dyn FactSource,
+        drive: Option<&Arc<dyn symbio_sdk::drive::DriveEntry>>,
+        opening_error: Option<String>,
+    ) -> Result<bool, PluginError> {
+        if let Some(entry) = drive {
+            entry.settled(session_id).await;
+        }
+        if let Some(error) = opening_error {
+            self.record_round_open_failure(session_id, user_seq, source, error)
+                .await?;
+        }
+        self.project_final_turn(session_id, user_seq, source, drive)
+            .await
     }
 
     /// 该开轮事实的终答事实 → 转写节点，并收束本轮；没有终答 ⇒ `false`（不投影）。
@@ -190,7 +263,7 @@ impl Convergence {
         session_id: &str,
         user_seq: u64,
         source: &dyn FactSource,
-        drive: Option<&Arc<dyn symbio_sdk::plugin::drive_entry::DriveEntry>>,
+        drive: Option<&Arc<dyn symbio_sdk::drive::DriveEntry>>,
     ) -> Result<bool, PluginError> {
         let events = source.range(0);
         let user = events
@@ -249,16 +322,23 @@ impl Convergence {
                     .iter()
                     .rev()
                     .find(|e| e.kind == symbio_plugin_api::EVENT_FAILED)
-                    .cloned();
+                    .cloned()
+                    .or_else(|| {
+                        waiting_events
+                            .iter()
+                            .rev()
+                            .find(|e| e.kind == EVENT_CHAT_ASSISTANT_FALLBACK)
+                            .cloned()
+                    });
                 let Some(failed) = failed else {
                     return Ok(false);
                 };
                 // 环侧失败格的键是 `reason`（`ring/engine.rs` 的 `failed` 载荷），
-                // 执行体自己落的那条用 `why`——两个写法都读，否则环收口那条会
-                // 掉回通用文案，把「长度截断」说成「模型调用失败」（t77）。
+                // 执行体自己落的那条用 `why`；轮首装配失败用已有的 fallback `detail`。
                 let why = failed
                     .payload
-                    .get("reason")
+                    .get("detail")
+                    .or_else(|| failed.payload.get("reason"))
                     .or_else(|| failed.payload.get("why"))
                     .and_then(Value::as_str)
                     .unwrap_or("模型调用失败")

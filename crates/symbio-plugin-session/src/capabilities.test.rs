@@ -52,6 +52,21 @@ fn published_scope_is_passed_through() {
     assert_eq!(got.expect("Some").id, scope.id);
 }
 
+#[test]
+fn published_scope_with_a_different_id_is_rejected() {
+    let scope = AgentScope {
+        id: "t84-other".into(),
+        root: std::path::PathBuf::from("/tmp/agent/t84-other"),
+        permissions: Default::default(),
+    };
+    let err = require_agent_scope(Some("t84-zero"), Some(scope))
+        .expect_err("发布作用域与会话绑定不是同一个 Agent 时必须拒绝");
+    assert!(
+        err.to_string().contains("t84-other"),
+        "错误要能指认实际发布的作用域：{err}"
+    );
+}
+
 /// 「槽空 ≠ 不限制」的真值表（**不依赖并发**）：只有**没选智能体**才是宿主态，
 /// 此时 `None` 合法；一旦会话绑定了智能体而作用域槽为空，`None` 就是「该拒」，
 /// 不是「没有限制」的同义词。
@@ -157,6 +172,42 @@ impl Plugin for DuplicatePortParent {
 /// 这条钉的是接线而不是判重规则本身（规则由 `plugin-api` 的 `port.test.rs` 守）：
 /// 容器挂在收集的子 ctx 上，登记错误若不落进桶，两个提供者同端口的装配错误会永远
 /// 无人读——判重退化为「照常跑」。
+#[tokio::test]
+async fn collection_preserves_request_scoped_host_ports() {
+    let ctx: Arc<dyn PluginInvokeRequest> =
+        Arc::new(symbio_kernel::plugin::PluginSimpleRequest::new(None, None));
+    let host_bindings = Arc::new(symbio_plugin_api::port::PortBindings::default());
+    assert!(host_bindings
+        .bind(
+            &["session.subagent".to_string()],
+            "server.worker",
+            Some(Arc::new(FixtureExecutor)),
+        )
+        .is_empty());
+    ctx.set(
+        symbio_plugin_api::port::PORT_BINDINGS,
+        host_bindings.clone(),
+    );
+    let parent: Arc<dyn Plugin> = Arc::new(DuplicatePortParent);
+
+    collect_capabilities(Some(&parent), &ctx, None).await;
+
+    let collected = ctx
+        .get(symbio_plugin_api::port::PORT_BINDINGS)
+        .expect("收集器必须发布本轮端口容器");
+    assert!(!Arc::ptr_eq(&host_bindings, &collected));
+    assert_eq!(host_bindings.bound(), vec!["session.subagent".to_string()]);
+    assert!(collected
+        .get("session.subagent")
+        .expect("宿主绑定必须可读")
+        .is_some());
+    assert!(collected
+        .get("fixture")
+        .err()
+        .expect("插件判重必须保留")
+        .contains("fixture"));
+}
+
 #[tokio::test]
 async fn duplicate_port_providers_are_reported_through_the_collection_ctx() {
     let ctx: Arc<dyn PluginInvokeRequest> =

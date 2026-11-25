@@ -43,15 +43,10 @@ use std::time::{Duration, SystemTime, UNIX_EPOCH};
 use serde_json::{json, Value};
 use tokio::sync::mpsc;
 
-use symbio::routes::{
-    ROUTE_EVENT_BUS_SUBSCRIBE, ROUTE_VDFS_ROOT, ROUTE_VDFS_STAT, ROUTE_VDFS_WRITE,
-};
+use symbio::routes::{ROUTE_VDFS_ROOT, ROUTE_VDFS_STAT, ROUTE_VDFS_WRITE};
 use symbio::symbio_kernel::chat::chat_node::ChatNode;
 use symbio::symbio_kernel::keys::SymbioKey;
-use symbio::symbio_kernel::plugin::{
-    Plugin, PluginFrame, PluginInvokeRequestExt, PluginMessageWire, PluginPayload,
-    PluginSimpleRequest,
-};
+use symbio::symbio_kernel::plugin::{PluginFrame, PluginMessageWire};
 use symbio::symbio_kernel::vdfs::{VdfsChange, VdfsNode, VDFS_STATUS_FAILED, VDFS_STATUS_WORKING};
 use symbio_server::RuntimeHost;
 // D-530：线上契约（解包 / 频道词表）按规则 B 迁入 symbio-contract，
@@ -132,7 +127,6 @@ fn bus_frame_of(frame: PluginFrame) -> Option<Frame> {
 
 pub struct SymbioClient {
     host: Arc<RuntimeHost>,
-    root: Arc<dyn Plugin>,
     /// `vdfs` 频道的下行帧（见 [`Frame`]）
     events: mpsc::UnboundedReceiver<Frame>,
     /// 当前会话 id
@@ -176,7 +170,6 @@ impl SymbioClient {
             .map_err(|e| format!("创建系统目录失败 {}: {e}", homedir.display()))?;
 
         let host = Arc::new(RuntimeHost::create().await?);
-        let root = host.root();
 
         // **一条**下行通道：事件总线的 `vdfs` 频道（消息 + 会话运行态 + 资源信号）。
         //
@@ -187,25 +180,7 @@ impl SymbioClient {
         //
         // 后端**广播**给全部订阅者，归属由信封的 `path` 给出（`<根>/session/<sid>/…`）：
         // 订阅一次覆盖所有会话，切会话不必重连。
-        let ctx = Arc::new(PluginSimpleRequest::new(None, None));
-        // 绝对地址**取常量**，不写字面量：`set(PATH, "<字面量>")` 会让「路由改名」
-        // 不产生任何编译错误，只在运行期表现为「订阅失败」——而失败的样子与
-        // 「后端没发布」完全一样。这条由 `scripts/audits/plugin-entry-audit.mjs` 的 E-003
-        // 判定型守卫强制。
-        //
-        // 常量从 `symbio::routes` 导入（宿主侧地址模块，DE-023 D-184），
-        // 不再是 `symbio-kernel` 的根出口——地址常量已随 `fire_hook` 一起搬出了内核。
-        ctx.set(PATH, ROUTE_EVENT_BUS_SUBSCRIBE.to_string());
-        ctx.set_payload(json!({}))
-            .map_err(|e| format!("构造订阅载荷失败: {e}"))?;
-        let mut stream = match Arc::clone(&root)
-            .route(ctx)
-            .await
-            .map_err(|e| format!("订阅 vdfs 频道失败: {e}"))?
-        {
-            PluginPayload::Session(c) => c,
-            other => return Err(format!("event_bus/subscribe 返回了非会话载荷: {other:?}")),
-        };
+        let mut stream = host.subscribe().await?;
 
         // 一个转发任务：解包后送进无界通道，主逻辑只面对 [`Frame`]。
         let (tx, events) = mpsc::unbounded_channel();
@@ -225,7 +200,6 @@ impl SymbioClient {
 
         let mut client = Self {
             host,
-            root,
             events,
             session_id,
             workdir,
@@ -239,7 +213,6 @@ impl SymbioClient {
         // 根叫什么**归 vdfs 插件**（`fs::VDFS_ADDR_ROOT`），使用方不写死——
         // 与前端同款：启动期问一次，之后一律从父地址往下拼。
         client.root_addr = client.fetch_root_addr().await?;
-        client.watch_session_changes().await?;
         // 选项会话化：provider / mode / risk 落在会话 metadata 上（D-066）。
         // 这里已随会话创建写过一次，故 `options_dirty` 初值为 `false`。
         client.ensure_session().await?;
@@ -254,36 +227,6 @@ impl SymbioClient {
             .filter(|p| !p.is_empty())
             .map(str::to_string)
             .ok_or_else(|| format!("vdfs/root 未返回根地址：{resp}"))
-    }
-
-    /// 订阅会话域的变更（`vdfs/watch`）——**下行帧能到达的前提**。
-    ///
-    /// ## 为什么 `event_bus/subscribe` 还不够（这里踩过，且症状极具误导性）
-    ///
-    /// 事件总线只是**广播口**：`EventBus::try_publish(EVENT_BUS_KIND_VDFS, …)` 只投给已注册
-    /// 的总线订阅者，而**谁来 publish** 取决于 VDFS 那一侧有没有 sink。sink 由
-    /// `vdfs/watch` 登记进 provider 的变更表（`VdfsChangeSubscriptions::watch`）——
-    /// 没有 watch 就没有 sink，也就没有任何帧会上总线。
-    ///
-    /// 两条下行通道已并成一条（`session/stream` 退役、会话实时面迁到 `vdfs`
-    /// 频道）时，这里保留了 `event_bus/subscribe` 却**漏掉了 `vdfs/watch`**。
-    /// 后果不是报错，而是**一条变更都收不到**：正文不渲染（stdout 为空）、
-    /// 会话运行态永远停在「处理中」，一路卡到超时——与「模型没有产出内容」
-    /// 的症状逐字相同，于是排查方向被引到 provider / 模型链路上。
-    ///
-    /// 判据：`SYMBIO_ROUTE_LOG=1` 下若只有出站请求、**没有任何 `[frame]` 行**，
-    /// 就是这里没装上（帧到了但没认出来会有 `[frame]` 行）。
-    ///
-    /// 订阅 `<根>/session` 而不是根：与前端同一粒度（`prefix: mountDir`），
-    /// 覆盖全部会话，切会话不必重连（归属由信封的 `path` 给出）。
-    async fn watch_session_changes(&self) -> Result<(), String> {
-        let addr = format!("{}/{SESSION_SEG}", self.root_addr.trim_end_matches('/'));
-        // 路由字面量：`VDFS_WATCH` 常量是前端在用的那份，Rust 侧自持字面量
-        // （与上面 `ROUTE_EVENT_BUS_SUBSCRIBE` 取常量的理由不同：这里是**插件内的相对臂
-        // 消费方**，写错表现为 `vdfs/watch` 路由不存在 → 订阅失败，不会静默）。
-        self.route("vdfs/watch", json!({ "path": addr }), None, Some(&addr))
-            .await?;
-        Ok(())
     }
 
     /// 路由一次调用。`payload` 走进程内强类型通道（零拷贝），
@@ -725,19 +668,11 @@ impl SymbioClient {
             .unwrap_or_else(|| "default（系统目录配置）".to_string())
     }
 
-    /// 全局收尾：对整棵插件树发一次 `stop(PluginStopReason::Shutdown)`。
-    ///
-    /// 调用点 = `main` 的**唯一出口**——四种使用方式（心跳守护 / 单条消息 /
-    /// 管道 / REPL）跑完各自返回，`main` 统一在本方法里收尾，任何一种用法的
-    /// 退出路径都不会漏。插件借此做最后落盘（心跳任务、会话状态等）。
+    /// 全局收尾：先停会话 worker，再对整棵插件树发一次
+    /// `stop(PluginStopReason::Shutdown)`。调用点 = `main` 的**唯一出口**。
     pub async fn shutdown(&self) {
-        if let Err(e) = self
-            .root
-            .clone()
-            .stop(symbio::symbio_kernel::plugin::PluginStopReason::Shutdown)
-            .await
-        {
-            eprintln!("收尾插件树失败: {e}");
+        if let Err(e) = self.host.shutdown().await {
+            eprintln!("收尾运行时失败: {e}");
         }
     }
 

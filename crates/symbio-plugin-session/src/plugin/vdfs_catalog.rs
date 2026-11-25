@@ -150,7 +150,7 @@ impl SessionPlugin {
             VdfsRequest::Action { action, .. } if action == VDFS_ACTION_ABORT => {
                 self.session_of(id).await?;
                 let state = self.active_mgr.get_or_create(id).await;
-                let ok = state.abort_current_turn();
+                let ok = state.abort_current_turn().await;
                 Ok(VdfsResponse::Action(VdfsActionResult {
                     action,
                     ok,

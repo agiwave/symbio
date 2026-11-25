@@ -40,7 +40,9 @@ use super::protocol::*;
 use async_trait::async_trait;
 use std::collections::VecDeque;
 use std::sync::Arc;
-use symbio_plugin_api::routes::{ROUTE_VDFS_ROOT, ROUTE_VDFS_UNWATCH, ROUTE_VDFS_WATCH};
+use symbio_plugin_api::routes::{
+    ROUTE_VDFS_ACTION, ROUTE_VDFS_ROOT, ROUTE_VDFS_UNWATCH, ROUTE_VDFS_WATCH,
+};
 use symbio_plugin_api::vdfs_context;
 use symbio_plugin_api::EVENT_BUS_KIND_VDFS;
 use symbio_plugin_api::{
@@ -285,7 +287,7 @@ pub async fn dispatch_with(
         ROUTE_VDFS_WATCH | ROUTE_VDFS_UNWATCH => {
             watch(fs, &vctx, ctx, path == ROUTE_VDFS_WATCH).await
         }
-        VDFS_ACTION => action(fs, &vctx, ctx).await,
+        ROUTE_VDFS_ACTION => action(fs, &vctx, ctx).await,
         _ => unreachable!("VDFS_OPS 与分发分支必须一一对应"),
     };
     Some(resp)

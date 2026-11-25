@@ -45,6 +45,12 @@ fn build_id() -> String {
 }
 
 fn main() {
+    if let Some(code) = tauri::async_runtime::block_on(symbio_server::worker::run_worker_command(
+        std::env::args().skip(1),
+    )) {
+        std::process::exit(i32::from(code));
+    }
+
     // 初始化 tracing 日志（开发用 pretty，生产用 JSON 由环境变量决定）
     tracing_subscriber::registry()
         .with(EnvFilter::try_from_default_env().unwrap_or_else(|_| EnvFilter::new("info")))
@@ -118,8 +124,8 @@ fn main() {
                 if let Some(state) = app_handle.try_state::<AppState>() {
                     let host = state.host.clone();
                     tauri::async_runtime::block_on(async move {
-                        if let Err(e) = host.root().stop(symbio::symbio_kernel::plugin::PluginStopReason::Shutdown).await {
-                            tracing::warn!(error = %e, "RuntimeHost stop(Shutdown) failed");
+                        if let Err(e) = host.shutdown().await {
+                            tracing::warn!(error = %e, "RuntimeHost shutdown failed");
                         } else {
                             info!("RuntimeHost stopped (Shutdown)");
                         }

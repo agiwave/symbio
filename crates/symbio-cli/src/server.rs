@@ -1,7 +1,6 @@
 use std::process::ExitCode;
 use std::sync::Arc;
 
-use symbio::symbio_kernel::plugin::PluginStopReason;
 use symbio_server::RuntimeHost;
 
 use crate::args::ServeArgs;
@@ -38,7 +37,7 @@ pub async fn run(args: ServeArgs) -> ExitCode {
         Ok(handle) => handle,
         Err(error) => {
             eprintln!("Server 启动失败: {error}");
-            if let Err(error) = host.root().stop(PluginStopReason::Shutdown).await {
+            if let Err(error) = host.shutdown().await {
                 eprintln!("RuntimeHost 停止失败: {error}");
             }
             return ExitCode::FAILURE;
@@ -46,13 +45,29 @@ pub async fn run(args: ServeArgs) -> ExitCode {
     };
     println!("Symbio Server 已启动: http://{}", handle.local_addr());
 
-    if tokio::signal::ctrl_c().await.is_err() {
-        eprintln!("无法监听 Ctrl+C，Server 将继续运行");
+    if wait_for_shutdown_signal().await.is_err() {
+        eprintln!("无法监听退出信号，Server 将继续运行");
     }
     symbio_server::stop(handle).await;
-    if let Err(error) = host.root().stop(PluginStopReason::Shutdown).await {
+    if let Err(error) = host.shutdown().await {
         eprintln!("RuntimeHost 停止失败: {error}");
         return ExitCode::FAILURE;
     }
     ExitCode::SUCCESS
+}
+
+#[cfg(windows)]
+async fn wait_for_shutdown_signal() -> std::io::Result<()> {
+    let mut ctrl_c = tokio::signal::windows::ctrl_c()?;
+    let mut ctrl_break = tokio::signal::windows::ctrl_break()?;
+    tokio::select! {
+        _ = ctrl_c.recv() => {}
+        _ = ctrl_break.recv() => {}
+    }
+    Ok(())
+}
+
+#[cfg(not(windows))]
+async fn wait_for_shutdown_signal() -> std::io::Result<()> {
+    tokio::signal::ctrl_c().await
 }
