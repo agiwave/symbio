@@ -19,7 +19,13 @@ import fs from 'node:fs'
 import os from 'node:os'
 import path from 'node:path'
 
-import { requiredSource, requiredHits } from './current.mjs'
+import {
+  providerConsumers,
+  providerSymbols,
+  requiredHits,
+  requiredSource,
+  workspaceGraph,
+} from './current.mjs'
 
 const tmp = () => fs.mkdtempSync(path.join(os.tmpdir(), 'facts-current-'))
 
@@ -52,4 +58,64 @@ test('requiredHits：提取结果为空 ⇒ 抛错（源文件读到了，但正
 test('requiredHits：非空 ⇒ 原样返回，供调用方继续用', () => {
   const got = requiredHits(['--message', '-m'], 'CLI 选项')
   assert.deepEqual(got, ['--message', '-m'])
+})
+
+const dep = (name, deps) => ({
+  name,
+  source: null,
+  dependencies: deps.map(([depName, kind = null]) => ({ name: depName, kind })),
+})
+
+test('workspaceGraph：只算生产边，dev/build 与外部 crate 不进图', () => {
+  const graph = workspaceGraph({
+    packages: [
+      dep('a', [['b'], ['b'], ['external'], ['c', 'dev'], ['d', 'build']]),
+      dep('b', [['c']]),
+      dep('c', []),
+      dep('d', []),
+      { name: 'external', source: 'registry', dependencies: [] },
+    ],
+  })
+  assert.deepEqual(
+    graph.rows.map((row) => [row.name, row.deps]),
+    [
+      ['a', ['b']],
+      ['b', ['c']],
+      ['c', []],
+      ['d', []],
+    ],
+  )
+  assert.equal(graph.edges, 2)
+  assert.equal(graph.maxDepth, 3)
+})
+
+test('workspaceGraph：生产环不能静默投影成有限深度', () => {
+  assert.throws(
+    () => workspaceGraph({ packages: [dep('a', [['b']]), dep('b', [['a']])] }),
+    /生产依赖图出现环/,
+  )
+})
+
+test('providerSymbols：pub use 的别名取 as 后的出口名', () => {
+  assert.deepEqual(
+    providerSymbols(`
+      pub use symbio_provider_vdfs_service::{
+        id_of as vdfs_id_of, DirVdfs,
+      };
+      pub use symbio_provider_collectors::{new_registry, FactsOf};
+    `),
+    ['DirVdfs', 'FactsOf', 'new_registry', 'vdfs_id_of'],
+  )
+})
+
+test('providerConsumers：认直接引用与花括号导入，不把同名裸标识符算进去', () => {
+  const sources = {
+    alpha: 'use symbio_providers::{DirVdfs, new_registry};',
+    beta: 'let x = symbio_providers::DirVdfs::at(p);',
+    gamma: 'let DirVdfs = local_type();',
+  }
+  assert.deepEqual(providerConsumers(['DirVdfs', 'agent_home_root'], sources), [
+    { symbol: 'DirVdfs', consumers: ['alpha', 'beta'] },
+    { symbol: 'agent_home_root', consumers: [] },
+  ])
 })

@@ -33,12 +33,13 @@
 // @gate test
 
 import { readFileSync, readdirSync, existsSync } from "node:fs";
-import { execSync } from "node:child_process";
+import { execFileSync, execSync } from "node:child_process";
 import { fileURLToPath } from "node:url";
 import path from "node:path";
 import { scopeRow as sharedScopeRow } from "../line-count.mjs";
 import { stripComments } from "../rust-scan.mjs";
 import { capabilityFacts, UNKNOWN, vdfsAddrRoot } from "./_capability.mjs";
+import { pluginIds, readPluginManifest } from "./_plugin-yml.mjs";
 import { createRefLink } from "./_ref-link.mjs";
 // 路由提取只有一份实现（`route-facts.mjs`），与前端常量生成器共用——
 // 「什么算一条路由」这条判据若有两遍，它们会在没人注意时分叉。
@@ -199,6 +200,101 @@ function scopeRows() {
     sharedScopeRow(ROOT, "tauri/src-tauri/src", [".rs"]),
     sharedScopeRow(ROOT, "tauri/src", [".ts", ".vue"]),
   ];
+}
+
+/** 生产依赖图只认 `cargo metadata`；另有手写解析器就等于有两张可能分叉的依赖表。 */
+export function workspaceGraph(metadata) {
+  const packages = (metadata?.packages ?? []).filter((pkg) => pkg.source === null && pkg.name);
+  requiredHits(packages, "workspace crate");
+  const names = new Set(packages.map((pkg) => pkg.name));
+  const rows = packages
+    .map((pkg) => ({
+      name: pkg.name,
+      deps: [
+        ...new Set(
+          (pkg.dependencies ?? [])
+            .filter((dep) => dep.kind == null && names.has(dep.name))
+            .map((dep) => dep.name),
+        ),
+      ].sort(),
+    }))
+    .sort((a, b) => a.name.localeCompare(b.name));
+  const byName = new Map(rows.map((row) => [row.name, row]));
+  const state = new Map();
+  const depth = new Map();
+  const stack = [];
+  const visit = (name) => {
+    if (state.get(name) === "done") return depth.get(name);
+    if (state.get(name) === "visiting") {
+      const from = stack.indexOf(name);
+      throw new Error(`生产依赖图出现环：${[...stack.slice(from), name].join(" → ")}`);
+    }
+    state.set(name, "visiting");
+    stack.push(name);
+    let tail = 0;
+    for (const dep of byName.get(name).deps) tail = Math.max(tail, visit(dep));
+    stack.pop();
+    state.set(name, "done");
+    const value = tail + 1;
+    depth.set(name, value);
+    return value;
+  };
+  let maxDepth = 0;
+  for (const row of rows) maxDepth = Math.max(maxDepth, visit(row.name));
+  return {
+    rows,
+    edges: rows.reduce((sum, row) => sum + row.deps.length, 0),
+    maxDepth,
+  };
+}
+
+function loadWorkspaceGraph() {
+  const out = execFileSync("cargo", ["metadata", "--no-deps", "--format-version", "1"], {
+    cwd: ROOT,
+    encoding: "utf8",
+    stdio: ["ignore", "pipe", "pipe"],
+    maxBuffer: 64 * 1024 * 1024,
+  });
+  return workspaceGraph(JSON.parse(out));
+}
+
+/** `symbio-providers/src/lib.rs` 的出口符号；只认 `pub use`，别名取 as 后的名字。 */
+export function providerSymbols(txt) {
+  const src = stripComments(txt);
+  const out = new Set();
+  for (const mm of src.matchAll(/pub\s+use\s+symbio_provider_[a-z_]+\s*::\s*\{([\s\S]*?)\}\s*;/g)) {
+    for (const raw of mm[1].split(",")) {
+      const item = raw.trim();
+      if (!item) continue;
+      const alias = item.match(/^([A-Za-z_][A-Za-z0-9_]*)\s+as\s+([A-Za-z_][A-Za-z0-9_]*)$/);
+      out.add(alias ? alias[2] : item);
+    }
+  }
+  return requiredHits([...out].sort(), "provider 出口符号");
+}
+
+/** 插件生产源码里的 `symbio_providers::` 消费；测试文件不在 `pluginSources` 扫描面内。 */
+export function providerConsumers(symbols, sourcesByPlugin) {
+  return symbols.map((symbol) => {
+    const name = symbol.replace(/[.*+?^${}()|[\]\\]/g, "\\$&");
+    const direct = new RegExp(`symbio_providers::\\b${name}\\b`);
+    const grouped = new RegExp(`symbio_providers::\\{[^}]*\\b${name}\\b[^}]*\\}`, "s");
+    return {
+      symbol,
+      consumers: Object.entries(sourcesByPlugin)
+        .filter(([, src]) => direct.test(src) || grouped.test(src))
+        .map(([id]) => id)
+        .sort(),
+    };
+  });
+}
+
+function pluginProductionSources(root) {
+  const out = {};
+  for (const id of pluginIds(root)) {
+    out[id] = pluginSources(path.join(root, "crates", `${PLUGIN_CRATE_PREFIX}${id}`, "src")).join("\n");
+  }
+  return out;
 }
 
 /**
@@ -419,7 +515,7 @@ function render() {
   L.push(`title: ${ENTRY_TITLE}`);
   L.push("status: active");
   L.push(`created: ${ENTRY_CREATED}`);
-  L.push("lists: [routes=owner, tools=owner, vdfs-ops=owner, cli-options=owner]");
+  L.push("lists: [routes=owner, tools=owner, vdfs-ops=owner, cli-options=owner, module-deps=owner]");
   L.push("---");
   L.push("");
   L.push(`# ${ENTRY_TITLE}`);
@@ -594,6 +690,70 @@ function render() {
   );
   L.push("");
 
+  // ── §6 依赖图与消费者事实（方案 D 第 1 步：手抄表搬成代码投影）────────
+  L.push("## 6. 依赖图与消费者事实（代码投影）");
+  L.push("");
+  L.push("<!-- list:module-deps owner -->");
+  L.push("");
+  const graph = loadWorkspaceGraph();
+  const pluginIdsHere = pluginIds(ROOT);
+  const pluginByCrate = new Map(
+    pluginIdsHere.map((id) => [`${PLUGIN_CRATE_PREFIX}${id}`, id]),
+  );
+  const manifests = new Map(pluginIdsHere.map((id) => [id, readPluginManifest(ROOT, id)]));
+  L.push(
+    `- workspace crate **${graph.rows.length}** 个，生产依赖边 **${graph.edges}** 条，` +
+      `最长链 **${graph.maxDepth}** 个 crate（只算 \`[dependencies]\`；\`dev\` / \`build\` 不计）。`,
+  );
+  L.push(
+    "- 依赖取自 `cargo metadata --no-deps`，插件身份取自各插件 `PLUGIN.yml`；" +
+      "**本节是 `module-deps` 清单的唯一 owner**，设计文档只指路。",
+  );
+  L.push("");
+  L.push("### 6.1 crate 生产依赖");
+  L.push("");
+  L.push("| crate | 插件身份 | 生产依赖（`symbio-*`） |");
+  L.push("|---|---|---|");
+  for (const row of graph.rows) {
+    const id = pluginByCrate.get(row.name);
+    let identity = "—";
+    if (id) {
+      const m = manifests.get(id);
+      identity = [
+        m.plugin_assembly ?? "—",
+        m.plugin_optional === "true" ? "可选" : null,
+        m.plugin_undisablable === "true" ? "不可停用" : null,
+      ]
+        .filter(Boolean)
+        .join(" · ");
+    } else if (row.name === "symbio-plugin-api") {
+      identity = "宿主门面";
+    }
+    L.push(`| \`${row.name}\` | ${identity} | ${fmtList(row.deps)} |`);
+  }
+  L.push("");
+  const providerTxt = requiredSource(
+    path.join(ROOT, "crates", "symbio-providers", "src", "lib.rs"),
+    "provider 出口表",
+  );
+  const consumers = providerConsumers(providerSymbols(providerTxt), pluginProductionSources(ROOT));
+  L.push("### 6.2 provider 符号的生产消费插件");
+  L.push("");
+  L.push(
+    "出口符号取自 `crates/symbio-providers/src/lib.rs` 的 `pub use`，" +
+      "消费者取插件生产源码中的 `symbio_providers::`（测试文件不计）；**本节是这张表的唯一 owner**。",
+  );
+  L.push("");
+  L.push("| 符号 | 生产消费插件 | 数 |");
+  L.push("|---|---|---:|");
+  for (const row of consumers) {
+    const who = row.consumers.length
+      ? row.consumers.map((id) => `\`${id}\``).join(" · ")
+      : "—";
+    L.push(`| \`${row.symbol}\` | ${who} | ${row.consumers.length} |`);
+  }
+  L.push("");
+
   // ── 生成信息 ──────────────────────────────────────────────────────
   L.push("---");
   L.push("");
@@ -751,7 +911,7 @@ function capabilityMatrixSection(root, plugins) {
 // 于是每次门禁都报「修复了 1 个文件」，而 CI 只能判红，**红的原因是时间戳**。
 export default {
   id: "current",
-  title: "读侧结构事实表（插件 / 工具 / 路由 / 存储 / 规模）",
+  title: "读侧结构事实表（插件 / 工具 / 路由 / 存储 / 规模 / 依赖与消费者）",
   out: OUT_REL,
   render,
 };
