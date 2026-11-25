@@ -50,5 +50,9 @@ fn worker_command_rejects_invalid_identity_and_unknown_flags() {
 
 #[tokio::test]
 async fn public_commands_do_not_dispatch_worker() {
-    assert!(run_worker_command(["serve"]).await.is_none());
+    assert!(
+        run_worker_command(["serve"], crate::root_factory::tests::test_root_factory())
+            .await
+            .is_none()
+    );
 }

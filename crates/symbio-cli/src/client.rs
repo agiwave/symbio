@@ -169,7 +169,7 @@ impl SymbioClient {
         std::fs::create_dir_all(homedir)
             .map_err(|e| format!("创建系统目录失败 {}: {e}", homedir.display()))?;
 
-        let host = RuntimeHost::create().await?;
+        let host = RuntimeHost::create(symbio::init::root_factory()).await?;
 
         // **一条**下行通道：事件总线的 `vdfs` 频道（消息 + 会话运行态 + 资源信号）。
         //

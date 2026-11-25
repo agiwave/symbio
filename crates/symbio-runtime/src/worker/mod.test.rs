@@ -497,7 +497,11 @@ fn supervisor_routes_only_existing_session_scope() {
         json!({ "id": session_id, "metadata": {} }).to_string(),
     )
     .expect("session metadata");
-    let supervisor = WorkerSupervisor::new(temp.path().to_path_buf()).expect("supervisor");
+    let supervisor = WorkerSupervisor::new(
+        temp.path().to_path_buf(),
+        crate::root_factory::tests::test_root_factory(),
+    )
+    .expect("supervisor");
 
     let session_call = PluginMessageWire {
         metadata: json!({ "path": "session/consume", "session_id": session_id }),

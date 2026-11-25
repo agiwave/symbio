@@ -25,7 +25,7 @@ pub async fn run(args: ServeArgs) -> ExitCode {
         );
     }
 
-    let host = match RuntimeHost::create().await {
+    let host = match RuntimeHost::create(symbio::init::root_factory()).await {
         Ok(host) => host,
         Err(error) => {
             eprintln!("运行时启动失败: {error}");

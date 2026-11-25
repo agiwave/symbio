@@ -4181,6 +4181,7 @@ dependencies = [
  "symbio-plugin-vdfs",
  "symbio-plugin-web",
  "symbio-providers",
+ "symbio-runtime",
  "tempfile",
  "tokio",
 ]
@@ -4826,7 +4827,6 @@ dependencies = [
  "serde_json",
  "serde_yaml_ng",
  "sha2",
- "symbio",
  "symbio-http",
  "symbio-platform",
  "symbio-plugin-api",

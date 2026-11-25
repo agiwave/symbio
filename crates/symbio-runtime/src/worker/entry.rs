@@ -1,9 +1,11 @@
 use std::path::{Path, PathBuf};
+use std::sync::Arc;
 
 use super::id::validate_session_id;
 use super::{run_worker, BuildId, Epoch, WorkerBootstrap, WorkerId};
+use crate::root_factory::RootFactory;
 
-pub async fn run_worker_command<I, S>(argv: I) -> Option<u8>
+pub async fn run_worker_command<I, S>(argv: I, root_factory: Arc<dyn RootFactory>) -> Option<u8>
 where
     I: IntoIterator<Item = S>,
     S: Into<String>,
@@ -13,7 +15,7 @@ where
         return None;
     }
     let code = match parse_worker(argv) {
-        Ok(bootstrap) => match run_worker(bootstrap).await {
+        Ok(bootstrap) => match run_worker(bootstrap, root_factory).await {
             Ok(()) => 0,
             Err(error) => {
                 eprintln!("worker 退出: {error}");

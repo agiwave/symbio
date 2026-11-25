@@ -317,8 +317,15 @@ async fn host_executor_runs_the_worker_protocol_over_duplex_io() {
     let (unit_read, unit_write) = split(unit);
     let mut control_read = BufReader::new(control_read);
 
-    let executor =
-        tokio::spawn(async move { run_worker_with_io(bootstrap, unit_read, unit_write).await });
+    let executor = tokio::spawn(async move {
+        run_worker_with_io(
+            bootstrap,
+            crate::root_factory::tests::test_root_factory(),
+            unit_read,
+            unit_write,
+        )
+        .await
+    });
 
     let ready_line = tokio::time::timeout(
         std::time::Duration::from_secs(5),

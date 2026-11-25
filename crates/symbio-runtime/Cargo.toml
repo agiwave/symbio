@@ -13,8 +13,6 @@ unused_variables = "warn"
 dead_code = "warn"
 
 [dependencies]
-# 装配根：运行时只向它要「这一份部署的根插件」，不认识任何具体插件。
-symbio = { path = "../symbio" }
 symbio-http = { path = "../symbio-http" }
 symbio-platform = { path = "../symbio-platform" }
 symbio-plugin-api = { path = "../symbio-plugin-api" }

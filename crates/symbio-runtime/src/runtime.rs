@@ -3,7 +3,6 @@ use std::sync::{Arc, OnceLock, Weak};
 
 use async_trait::async_trait;
 use serde_json::{json, Value};
-use symbio::init::create_root_plugin;
 use symbio_http::{clear_invoke_dispatcher, set_invoke_dispatcher, InvokeDispatcher};
 use symbio_platform::kernel::plugin::{
     Plugin, PluginError, PluginInvokeRequestExt, PluginMessageWire, PluginPayload,
@@ -14,6 +13,7 @@ use symbio_plugin_api::routes::{ROUTE_HOME_GET_HOMEDIR, ROUTE_HOME_RELOAD};
 use symbio_plugin_api::{SymbioKey, VdfsCaller, VDFS_CALLER};
 use tracing::{debug, error};
 
+use crate::root_factory::RootFactory;
 use crate::worker::WorkerSupervisor;
 
 /// One runtime tree shared by embedded clients and the standalone Server.
@@ -49,7 +49,7 @@ impl InvokeDispatcher for RuntimeDispatcher {
 }
 
 impl RuntimeHost {
-    pub async fn create() -> Result<Arc<Self>, String> {
+    pub async fn create(root_factory: Arc<dyn RootFactory>) -> Result<Arc<Self>, String> {
         // gateway 入站在插件树构造期就会异步监听；分发桥必须先占位，否则窗口期进来的
         // 会话写请求会落到还没有 worker 语义的控制面树上。
         let dispatcher = Arc::new(RuntimeDispatcher {
@@ -58,7 +58,9 @@ impl RuntimeHost {
         let concrete = Arc::<RuntimeDispatcher>::clone(&dispatcher);
         let erased: Arc<dyn InvokeDispatcher> = concrete;
         set_invoke_dispatcher(erased);
-        let root = create_root_plugin().await;
+        let root = root_factory
+            .create_root(Arc::new(PluginSimpleRequest::new(None, None)))
+            .await;
         let bootstrap = Self {
             root,
             supervisor: None,
@@ -79,7 +81,8 @@ impl RuntimeHost {
                     .or_else(|| dirs::home_dir().map(|home| home.join(".symbio")))
                     .unwrap_or_else(|| PathBuf::from(".symbio"))
             });
-        let supervisor = WorkerSupervisor::new(homedir).map_err(|error| error.to_string())?;
+        let supervisor =
+            WorkerSupervisor::new(homedir, root_factory).map_err(|error| error.to_string())?;
         let host = Arc::new(Self {
             root: bootstrap.root,
             supervisor: Some(Arc::new(supervisor)),

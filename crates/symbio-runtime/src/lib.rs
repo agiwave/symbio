@@ -6,17 +6,20 @@
 //! - [`worker`]：会话执行体（`__worker` 子命令、监督者、持久收件箱、epoch fencing）。
 //! - 浏览器 Server（[`start`] / [`ServerIngress`]）与入站目录选择。
 //!
-//! 运行时**不认识任何具体插件**：它只接收装配根 `symbio` 构造出的根插件。
+//! 运行时**不认识任何具体插件**：CLI / Tauri 在组合边界注入异步根工厂。
+//! 每次工厂调用返回独立根插件，控制面与会话执行体不共享插件树。
 //! 传输由 `symbio-http` 提供——它同时被扩展层的接入类插件依赖，所以留在
 //! 插件之下，不并入本 crate。
 
 mod directories;
 pub mod host;
+mod root_factory;
 mod runtime;
 mod server;
 pub mod worker;
 
 pub use host::Host;
+pub use root_factory::{RootFactory, RootFactoryFn, RootFactoryFuture};
 pub use runtime::RuntimeHost;
 pub use server::{start, ServerConfig, ServerIngress};
 pub use symbio_http::stop;

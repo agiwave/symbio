@@ -36,6 +36,7 @@ use super::protocol::{
 use super::{
     BuildId, DurableInbox, InboxRequest, RequestId, WorkerBootstrap, WorkerError, WorkerId,
 };
+use crate::root_factory::RootFactory;
 
 const WORKER_READY_TIMEOUT: std::time::Duration = std::time::Duration::from_secs(60);
 const WORKER_SHUTDOWN_TIMEOUT: std::time::Duration = std::time::Duration::from_secs(30);
@@ -160,6 +161,7 @@ struct SubagentStart {
 
 struct SupervisorInner {
     homedir: RwLock<PathBuf>,
+    root_factory: Arc<dyn RootFactory>,
     build_id: BuildId,
     config: WorkerConfig,
     workers: Mutex<HashMap<String, Arc<WorkerState>>>,
@@ -176,11 +178,12 @@ pub struct WorkerSupervisor {
 }
 
 impl WorkerSupervisor {
-    pub fn new(homedir: PathBuf) -> Result<Self, WorkerError> {
+    pub fn new(homedir: PathBuf, root_factory: Arc<dyn RootFactory>) -> Result<Self, WorkerError> {
         let config = WorkerConfig::from_env()?;
         Ok(Self {
             inner: Arc::new(SupervisorInner {
                 homedir: RwLock::new(homedir),
+                root_factory,
                 build_id: build_id()?,
                 config,
                 workers: Mutex::new(HashMap::new()),
@@ -882,8 +885,11 @@ async fn spawn_worker(
             session_dir: session_dir.clone(),
         };
         let executor_worker = worker.clone();
+        let root_factory = Arc::clone(&inner.root_factory);
         executor = Some(tokio::spawn(async move {
-            if let Err(error) = run_worker_with_io(bootstrap, unit_read, unit_write).await {
+            if let Err(error) =
+                run_worker_with_io(bootstrap, root_factory, unit_read, unit_write).await
+            {
                 warn!(%error, worker = %executor_worker, "host 执行体退出");
             }
         }));

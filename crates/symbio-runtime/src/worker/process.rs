@@ -2,9 +2,9 @@ use std::collections::HashMap;
 use std::path::{Path, PathBuf};
 use std::sync::{Arc, Mutex as StdMutex};
 
+use crate::root_factory::RootFactory;
 use async_trait::async_trait;
 use serde_json::{json, Value};
-use symbio::init::create_root_plugin;
 use symbio_platform::kernel::exec::ExecAbortSignal;
 use symbio_platform::kernel::plugin::{
     Plugin, PluginError, PluginFrame, PluginInvokeRequest, PluginInvokeRequestExt,
@@ -267,13 +267,17 @@ fn install_worker_ports<T: PluginInvokeRequest + 'static>(
     ctx.set(PORT_BINDINGS, Arc::new(bindings));
 }
 
-pub async fn run_worker(bootstrap: WorkerBootstrap) -> Result<(), String> {
-    run_worker_with_io(bootstrap, stdin(), stdout()).await
+pub async fn run_worker(
+    bootstrap: WorkerBootstrap,
+    root_factory: Arc<dyn RootFactory>,
+) -> Result<(), String> {
+    run_worker_with_io(bootstrap, root_factory, stdin(), stdout()).await
 }
 
 /// 会话执行体主循环：stdio 与进程内 duplex 共用同一帧协议与恢复语义。
 pub(crate) async fn run_worker_with_io<I, O>(
     bootstrap: WorkerBootstrap,
+    root_factory: Arc<dyn RootFactory>,
     input: I,
     output: O,
 ) -> Result<(), String>
@@ -293,7 +297,9 @@ where
     let homedir = std::fs::canonicalize(&homedir)
         .map_err(|error| format!("解析系统目录失败 {}: {error}", homedir.display()))?;
     let session_dir = resolve_session_dir(&homedir, &session_dir, worker.session_id())?;
-    let root = create_root_plugin().await;
+    let root = root_factory
+        .create_root(Arc::new(PluginSimpleRequest::new(None, None)))
+        .await;
     let inbox = Arc::new(
         DurableInbox::new(worker.session_id(), &session_dir).map_err(|error| error.to_string())?,
     );

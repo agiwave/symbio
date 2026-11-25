@@ -32,7 +32,11 @@ async fn subagent_rejects_a_child_owned_by_another_parent() {
         "child",
         Some("other"),
     );
-    let supervisor = WorkerSupervisor::new(temp.path().to_path_buf()).expect("supervisor");
+    let supervisor = WorkerSupervisor::new(
+        temp.path().to_path_buf(),
+        crate::root_factory::tests::test_root_factory(),
+    )
+    .expect("supervisor");
     let parent = EpochRegistry::new("parent", parent_dir)
         .expect("registry")
         .allocate(supervisor.inner.build_id.clone())
@@ -62,7 +66,11 @@ async fn shutdown_rejects_new_requests_and_subagent_starts() {
         "child",
         Some("parent"),
     );
-    let supervisor = WorkerSupervisor::new(temp.path().to_path_buf()).expect("supervisor");
+    let supervisor = WorkerSupervisor::new(
+        temp.path().to_path_buf(),
+        crate::root_factory::tests::test_root_factory(),
+    )
+    .expect("supervisor");
     let parent = EpochRegistry::new("parent", parent_dir)
         .expect("registry")
         .allocate(supervisor.inner.build_id.clone())
@@ -99,7 +107,11 @@ async fn lifecycle_cancellation_unblocks_subagent_waiting_for_routing() {
         "child",
         Some("parent"),
     );
-    let supervisor = WorkerSupervisor::new(temp.path().to_path_buf()).expect("supervisor");
+    let supervisor = WorkerSupervisor::new(
+        temp.path().to_path_buf(),
+        crate::root_factory::tests::test_root_factory(),
+    )
+    .expect("supervisor");
     let parent = EpochRegistry::new("parent", parent_dir)
         .expect("registry")
         .allocate(supervisor.inner.build_id.clone())
@@ -152,7 +164,11 @@ async fn subagent_rejects_control_routes_before_spawning() {
         "child",
         Some("parent"),
     );
-    let supervisor = WorkerSupervisor::new(temp.path().to_path_buf()).expect("supervisor");
+    let supervisor = WorkerSupervisor::new(
+        temp.path().to_path_buf(),
+        crate::root_factory::tests::test_root_factory(),
+    )
+    .expect("supervisor");
     let parent = EpochRegistry::new("parent", parent_dir)
         .expect("registry")
         .allocate(supervisor.inner.build_id.clone())
@@ -176,7 +192,11 @@ fn routing_rejects_unknown_session_scope() {
     let temp = tempfile::tempdir().expect("tempdir");
     write_session(&temp.path().join("session/parent"), "parent", None);
     write_session(&temp.path().join("session/child"), "child", None);
-    let supervisor = WorkerSupervisor::new(temp.path().to_path_buf()).expect("supervisor");
+    let supervisor = WorkerSupervisor::new(
+        temp.path().to_path_buf(),
+        crate::root_factory::tests::test_root_factory(),
+    )
+    .expect("supervisor");
 
     let mut unknown = message(ROUTE_VDFS_WRITE);
     unknown.payload["path"] = json!("session/missing/inbox");
@@ -202,7 +222,11 @@ fn routing_rejects_unknown_session_scope() {
 fn routing_ignores_session_segments_outside_the_declared_root() {
     let temp = tempfile::tempdir().expect("tempdir");
     write_session(&temp.path().join("session/child"), "child", None);
-    let supervisor = WorkerSupervisor::new(temp.path().to_path_buf()).expect("supervisor");
+    let supervisor = WorkerSupervisor::new(
+        temp.path().to_path_buf(),
+        crate::root_factory::tests::test_root_factory(),
+    )
+    .expect("supervisor");
     let declared = session_node_path("child").expect("session path");
     let root = declared_addr_root().expect("declared root");
 
@@ -237,7 +261,11 @@ fn routing_ignores_session_segments_outside_the_declared_root() {
 fn temporary_context_never_routes_reads_to_worker() {
     let temp = tempfile::tempdir().expect("tempdir");
     write_session(&temp.path().join("session/child"), "child", None);
-    let supervisor = WorkerSupervisor::new(temp.path().to_path_buf()).expect("supervisor");
+    let supervisor = WorkerSupervisor::new(
+        temp.path().to_path_buf(),
+        crate::root_factory::tests::test_root_factory(),
+    )
+    .expect("supervisor");
 
     for route in [
         symbio_plugin_api::routes::ROUTE_VDFS_LIST,
@@ -259,7 +287,11 @@ fn temporary_context_never_routes_reads_to_worker() {
 #[tokio::test]
 async fn subagent_cancellation_is_fenced_to_its_owner() {
     let temp = tempfile::tempdir().expect("tempdir");
-    let supervisor = WorkerSupervisor::new(temp.path().to_path_buf()).expect("supervisor");
+    let supervisor = WorkerSupervisor::new(
+        temp.path().to_path_buf(),
+        crate::root_factory::tests::test_root_factory(),
+    )
+    .expect("supervisor");
     let build = BuildId::parse(format!("{:064x}", 1)).expect("build");
     let owner = EpochRegistry::new("parent", temp.path().join("parent"))
         .expect("registry")
@@ -296,7 +328,11 @@ async fn subagent_cancellation_is_fenced_to_its_owner() {
 fn routing_keeps_global_vdfs_calls_on_the_control_plane() {
     let temp = tempfile::tempdir().expect("tempdir");
     write_session(&temp.path().join("session/parent"), "parent", None);
-    let supervisor = WorkerSupervisor::new(temp.path().to_path_buf()).expect("supervisor");
+    let supervisor = WorkerSupervisor::new(
+        temp.path().to_path_buf(),
+        crate::root_factory::tests::test_root_factory(),
+    )
+    .expect("supervisor");
 
     for route in [
         symbio_plugin_api::routes::ROUTE_VDFS_ROOT,
@@ -331,7 +367,11 @@ fn routing_keeps_global_vdfs_calls_on_the_control_plane() {
 #[test]
 fn session_reads_never_route_to_worker() {
     let temp = tempfile::tempdir().expect("tempdir");
-    let supervisor = WorkerSupervisor::new(temp.path().to_path_buf()).expect("supervisor");
+    let supervisor = WorkerSupervisor::new(
+        temp.path().to_path_buf(),
+        crate::root_factory::tests::test_root_factory(),
+    )
+    .expect("supervisor");
 
     for route in ["session/stats", "session/changes"] {
         let mut msg = message(route);
@@ -381,7 +421,11 @@ async fn deleting_a_session_stops_its_worker_subtree_only() {
     write_session(&parent, "parent", None);
     write_session(&parent.join("sessions/child"), "child", Some("parent"));
     write_session(&temp.path().join("session/other"), "other", None);
-    let supervisor = WorkerSupervisor::new(temp.path().to_path_buf()).expect("supervisor");
+    let supervisor = WorkerSupervisor::new(
+        temp.path().to_path_buf(),
+        crate::root_factory::tests::test_root_factory(),
+    )
+    .expect("supervisor");
     let build = supervisor.inner.build_id.clone();
     let mut receivers = Vec::new();
     for id in ["parent", "child", "other"] {
@@ -432,7 +476,11 @@ async fn subagent_rejects_payload_targeting_another_session() {
         "child",
         Some("parent"),
     );
-    let supervisor = WorkerSupervisor::new(temp.path().to_path_buf()).expect("supervisor");
+    let supervisor = WorkerSupervisor::new(
+        temp.path().to_path_buf(),
+        crate::root_factory::tests::test_root_factory(),
+    )
+    .expect("supervisor");
     let parent = EpochRegistry::new("parent", parent_dir)
         .expect("registry")
         .allocate(supervisor.inner.build_id.clone())
@@ -457,7 +505,11 @@ async fn subagent_rejects_payload_targeting_another_session() {
 #[tokio::test]
 async fn local_executor_events_are_not_relayed_to_other_local_executors() {
     let temp = tempfile::tempdir().expect("tempdir");
-    let supervisor = WorkerSupervisor::new(temp.path().to_path_buf()).expect("supervisor");
+    let supervisor = WorkerSupervisor::new(
+        temp.path().to_path_buf(),
+        crate::root_factory::tests::test_root_factory(),
+    )
+    .expect("supervisor");
     let new_worker = |session: &str, epoch: u64| {
         WorkerId::new(
             session,
@@ -526,7 +578,11 @@ async fn local_executor_events_are_not_relayed_to_other_local_executors() {
 #[tokio::test]
 async fn full_event_destination_does_not_block_relay_and_receives_one_resync() {
     let temp = tempfile::tempdir().expect("tempdir");
-    let supervisor = WorkerSupervisor::new(temp.path().to_path_buf()).expect("supervisor");
+    let supervisor = WorkerSupervisor::new(
+        temp.path().to_path_buf(),
+        crate::root_factory::tests::test_root_factory(),
+    )
+    .expect("supervisor");
     let worker = EpochRegistry::new("destination", temp.path())
         .expect("registry")
         .allocate(supervisor.inner.build_id.clone())

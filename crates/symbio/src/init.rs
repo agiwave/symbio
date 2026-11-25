@@ -9,6 +9,10 @@ pub fn initialize() {
     symbio_platform::sdk::logger::logger_init();
 }
 
+pub fn root_factory() -> Arc<dyn symbio_runtime::RootFactory> {
+    Arc::new(symbio_runtime::RootFactoryFn(|_| create_root_plugin()))
+}
+
 pub async fn create_root_plugin() -> Arc<dyn Plugin> {
     let context = Arc::new(symbio_platform::kernel::plugin::PluginSimpleRequest::new(
         None, None,

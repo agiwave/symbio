@@ -47,6 +47,7 @@ fn build_id() -> String {
 fn main() {
     if let Some(code) = tauri::async_runtime::block_on(symbio_runtime::worker::run_worker_command(
         std::env::args().skip(1),
+        symbio::init::root_factory(),
     )) {
         std::process::exit(i32::from(code));
     }
@@ -76,7 +77,7 @@ fn main() {
             info!("Setup starting");
 
             let host = tauri::async_runtime::block_on(async {
-                RuntimeHost::create()
+                RuntimeHost::create(symbio::init::root_factory())
                     .await
                     .map_err(std::io::Error::other)
             })?;

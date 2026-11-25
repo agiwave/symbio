@@ -33,7 +33,9 @@ use symbio_runtime::worker::run_worker_command;
 /// 插件日志宏退回 `eprintln!` —— 正好落在 stderr，stdout 保持纯净。
 #[tokio::main]
 async fn main() -> ExitCode {
-    if let Some(code) = run_worker_command(std::env::args().skip(1)).await {
+    if let Some(code) =
+        run_worker_command(std::env::args().skip(1), symbio::init::root_factory()).await
+    {
         return ExitCode::from(code);
     }
     let argv = std::env::args().skip(1);

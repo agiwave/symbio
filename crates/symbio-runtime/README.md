@@ -10,12 +10,15 @@ impl: partial
 # Server 与共享运行时
 
 `symbio-runtime` 是 Symbio 的共享运行时：传输与会话执行（`server`）加上每会话驱动
-（`host`）。CLI、Tauri 和 `symbio-cli serve` 都经 `RuntimeHost` 创建同一棵插件树；
-Server 额外提供静态 Vue 资源与宿主目录浏览 API。本 crate 不发布独立二进制。
+（`host`）。CLI、Tauri 和 `symbio-cli serve` 经 `RuntimeHost` 创建运行时，并注入异步
+`RootFactory`；控制面与会话执行体各自调用工厂，不共享插件树。Server 额外提供静态 Vue
+资源与宿主目录浏览 API。本 crate 不发布独立二进制，也不认识任何具体插件。
 
 ## 边界
 
 - `symbio-http` 拥有传输、鉴权与连接机制；本 crate 的 `Ingress` 决定 Server 的公开面。
+- 具体插件链接与根工厂实现归 CLI / Tauri 的组合边界；生产、构建与开发依赖均不得
+  反向指向装配 crate `symbio`（RB-001）。
 - 宿主目录 API 只列目录，不能读取文件，也不替代物理 VDFS。
 - 浏览器只走 HTTP/WS；Tauri IPC 只存在于 embedded 环境。
 - homedir / rootdir 是系统数据根，workdir 是会话元数据，二者不互换。

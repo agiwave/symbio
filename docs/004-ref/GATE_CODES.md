@@ -55,6 +55,7 @@ lists: [gate-codes=owner]
 | **PS** | prompt 形状基线 | `scripts/audits/prompt-shape-audit.mjs` | PS-001–003 | `PS-004` |
 | **PTS** | 端口面（协议名闭集 / 引擎对端口无感 / 求解器字节基线 / 协议格写方唯一 / 重试条文 / 读侧不认端口名） | `scripts/audits/port-surface-audit.mjs` | PTS-001–007 | `PTS-008` |
 | **R** | 死代码 | `scripts/audits/dead-code-audit.mjs` | R-001–003 | `R-004` |
+| **RB** | 运行时组合边界 | `scripts/audits/runtime-boundary-audit.mjs` | RB-001 | `RB-002` |
 | **RF** | 文档引用（编号 → 地址由机制生成） | `scripts/gens/gen-doc-refs.mjs` | RF-001–004 | `RF-005` |
 | **RG** | 登记条目校验（registry 单文档的字段 / 状态 / 依赖 / 判据指认 / 分解） | `scripts/registry-lib.mjs` | RG-001–027、RG-029–033 | `RG-034` |
 | **S** | 源码 grep 形态 | `scripts/audits/grep-audit.mjs` | S-002、S-008–010、S-012–017 | `S-018` |
@@ -251,6 +252,7 @@ lists: [gate-codes=owner]
 | **R-001** | `scripts/audits/dead-code-audit.mjs` |
 | **R-002** | `scripts/audits/dead-code-audit.mjs` |
 | **R-003** | `scripts/audits/dead-code-audit.mjs` |
+| **RB-001** | `scripts/audits/runtime-boundary-audit.mjs` |
 | **RF-001** | `scripts/gens/gen-doc-refs.mjs` |
 | **RF-002** | `scripts/gens/gen-doc-refs.mjs` |
 | **RF-003** | `scripts/gens/gen-doc-refs.mjs` |
