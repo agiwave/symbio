@@ -9,7 +9,9 @@
 //!   （经工厂 `creator_create_object::<dyn EmbeddingService>(...)` 取用）
 //! - `vdfs_service`：**基于 `VdfsProvider` 接口的集中实现**（单文件 / 目录 / 内存）
 //! - `collectors`：`*Visitor` 三个契约的**内存默认实现**（写入者是全体插件）
-//! - `memory`：「单文件长期记忆」的实现（work / session / agent 三插件共用一份口径）
+//!
+//! 「单文件长期记忆」此前也住在这里，唯一生产消费方 `memory` 插件已按 D-534 把它
+//! 收回自己的私有模块（`symbio-plugin-memory/src/memory_file.rs`），本层不再出口。
 //!
 //! ## 准入判据：**被多个插件模块公用**
 //!
@@ -28,15 +30,13 @@
 //! - **不存在第二种实现的机制底座**直接组合具体类型：`vdfs_service` 的三个实现
 //!   本身就是 `VdfsProvider`（接口在 core 已定，不会换）；业务模块在编译期就知道
 //!   自己要用哪种拓扑，再套一层 `dyn` 工厂只是把一次构造调用换成一次字符串查表。
-//!   因此业务模块**直接** `use crate::providers::{DirVdfs, SingleFileVdfs, MemoryVdfs}` /
-//!   `use crate::providers::MemoryFile`。
+//!   因此业务模块**直接** `use crate::providers::{DirVdfs, SingleFileVdfs, MemoryVdfs}`。
 //!
 //! **为什么直接组合的底座不能改成工厂（`creator_create_object`）**——不是偏好，是机械约束：
 //!
 //! 1. `type ObjectConstructor = fn(Arc<dyn PluginInvokeRequest>) -> Box<dyn Any + Send + Sync>`
-//!    **没有参数位**，而 `DirVdfs::at(dir, plugin_id, manifest)` 与
-//!    `MemoryFile::new(path, write_max, inject_max)` 的参数来自插件自己的配置，
-//!    不在 `ctx` 里。
+//!    **没有参数位**，而 `DirVdfs::at(dir, plugin_id, manifest)` 的参数来自插件自己的
+//!    配置，不在 `ctx` 里。
 //! 2. `DirVdfs` 有 **21 个**非 trait 的 `pub fn`（`write_json` / `entries` /
 //!    `import_pack` / `entry_dir` …），插件用的正是这些；工厂只能返回
 //!    `dyn VdfsProvider`，那些方法一个都调不到。
@@ -60,37 +60,23 @@
 //!
 //! workdir 不在本层持有：它始终由前端在每个请求的 `ctx.WORKDIR` 中显式传递。
 
-// ⭐ 子目录一律**私有**（与 `providers/embedding` 的同一条约定：子模块不带
-// `pub`）。每个目录自己的 `mod.rs` 是它的唯一出口，本文件再把各出口
-// **逐符号平铺**给 crate 内使用——与 `symbio-plugin-api` 的「一个出口（根平铺重导出）」
-// 同构：消费方一律写 `crate::providers::<符号>`，不深引 `::<目录>::<子模块>::`。
-// 深引会让出口形同虚设（子模块一改名就要改所有调用点），也让「公开面」散成两套。
-pub use symbio_provider_collectors as collectors;
-// `embedding` 是**可选臂**（D-254）：它带来 `ort` / `tokenizers` 与 55 个传递依赖，
-// 而插件侧只有 `local` 一个消费者，且只消费「为什么不可用」。
+// 实现源码随所有者迁入本 crate 的私有模块；出口仍是原来的 `symbio_providers::`
+// 平铺面，模块路径只保留给需要深引的装配代码。
+pub mod collectors;
 #[cfg(feature = "embedding")]
-pub use symbio_provider_embedding as embedding;
-pub use symbio_provider_memory as memory;
-pub use symbio_provider_vdfs_service as vdfs_service;
+pub mod embedding;
+pub mod vdfs_service;
 
-pub use symbio_provider_collectors::{
+pub use collectors::{
     approval_gate, new_registry, register_tool, register_tool_with_async_facts,
     register_tool_with_facts, AsyncFactsOf, FactsOf, RiskOf,
 };
-// `DefaultToolVisitor` 是**测试面**的句柄（各插件测试要拿具体类型做跨键装配 /
-// 直接 `put`），生产装配一律经 `new_registry()`——故只在测试构建里出口。
-pub use symbio_provider_collectors::DefaultToolVisitor;
-// `MemoryInjection` / `memory_render_segment` **不出口**：注入产物的形状与排版函数
-// 只有 `MemoryFile` 自己在用（插件拿到的是 `segment()` 出来的 `String`），
-// 出口只列**真有跨模块消费者**的符号——否则「公开面」里会混入没人要的东西，
-// 也就无从判断这条实现到底被谁依赖。
-pub use symbio_provider_memory::{MemoryFile, MemoryNodeSpec, MemorySegmentSpec};
-// `embedding` 的**实例**不在这里：两个实现经 `submit_object_creator!` 注册，
-// 业务模块用 `creator_create_object::<dyn EmbeddingService>(EMBEDDING_*, ctx)` 取。
-// 只出口「为什么不可用」：工具降级时要把原因写进返回体，而原因不是实例。
+// `DefaultToolVisitor` 是测试面句柄；生产装配一律经 `new_registry()`。
+pub use collectors::DefaultToolVisitor;
+// `embedding` 实例经 `submit_object_creator!` 注册，调用方只取「为什么不可用」。
 #[cfg(feature = "embedding")]
-pub use symbio_provider_embedding::unavailable_reason as embedding_unavailable_reason;
-pub use symbio_provider_vdfs_service::{
+pub use embedding::unavailable_reason as embedding_unavailable_reason;
+pub use vdfs_service::{
     agent_home_root, attach_round_providers, attach_scope_providers, auto_id as vdfs_auto_id,
     id_of as vdfs_id_of, safe_segment as vdfs_safe_segment, DirVdfs, MemoryVdfs, ScopeDirVdfs,
     SingleFileVdfs, VdfsPack, VdfsUnpack,

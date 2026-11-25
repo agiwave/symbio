@@ -2,13 +2,14 @@
 //!
 //! 与实现**同级**分文件（约定：`X.rs` + `X.test.rs`）。
 //!
-//! 共享实现的机制（读写 / 两道闸门 / 排版形状）由 `providers/memory` 自己测；
+//! 共享实现的机制（读写 / 两道闸门 / 排版形状）由 `memory_file` 自己测；
 //! 这里钉的是**本层的个性**：目录从哪来、地址怎么拼出来、空文件怎么降级。
 
 use super::*;
+use crate::memory_file::fixture;
+use crate::memory_file::MemoryFile;
 use std::path::{Path, PathBuf};
 use symbio_plugin_api::VdfsAccess;
-use symbio_providers::MemoryFile;
 
 /// 宿主目录 = 本插件目录的父目录（容器的装配规则，不需要额外上下文键）
 ///
@@ -25,9 +26,9 @@ fn file_path(host_dir: &Path) -> PathBuf {
     host_dir.join(MEMORY_FILE)
 }
 
-/// 测试专用的文件后端构造（保留「宿主目录 → 物理落位」的落位规则用例）
+/// 测试夹具：保留「宿主目录 → 物理落位」的落位规则用例
 fn store_at(host_dir: &Path, write_max_bytes: usize, inject_max_bytes: usize) -> MemoryFile {
-    MemoryFile::new(Some(file_path(host_dir)), write_max_bytes, inject_max_bytes)
+    fixture::at(Some(file_path(host_dir)), write_max_bytes, inject_max_bytes)
 }
 
 /// 宿主目录 = 本插件目录的父目录（容器的装配规则，不需要额外上下文键）

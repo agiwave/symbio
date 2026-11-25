@@ -15,7 +15,6 @@ dead_code = "warn"
 [dependencies]
 symbio-http = { path = "../symbio-http" }
 symbio-plugin-api = { path = "../symbio-plugin-api" }
-symbio-providers = { path = "../symbio-providers" }
 # 配置与策略载荷的序列化；WS 帧的 `rc` feature 由共享传输统一声明。
 serde = { workspace = true, features = ["derive"] }
 serde_json = { workspace = true }

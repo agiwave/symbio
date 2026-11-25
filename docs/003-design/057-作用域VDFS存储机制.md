@@ -127,7 +127,7 @@ provider 键，插件只经相对地址读写，物理路径只留在 provider �
 | `SessionVdfsKey` | `SESSION_VDFS` | `Option<DynVdfsProvider>` | false | `session_dir` |
 
 - `None` = 作用域不存在（没选工作区 / 无会话），是正常状态而非故障；
-  插件据此降级，语义等同 `MemoryFile::absent`。
+  插件据此降级，语义等同 `MemoryFile::via(None, …)`。
 - `WIRE = false`：进程内 trait object，无字符串形态，不进 `metadata`
   （与 `PLUGIN_PARENT` 同一纪律）。
 - 插件不再读 `WORKDIR` / `SESSION_DIR` 拼路径；两键的**对外协议面**
@@ -144,7 +144,7 @@ provider 键，插件只经相对地址读写，物理路径只留在 provider �
 dispatch(vctx, "AGENTS.md", Read/Write)  →  <根>/AGENTS.md
 ```
 
-实现形态（`symbio-provider-vdfs_service` 新增 `ScopeDirVdfs`）：
+实现形态（`symbio-providers` 新增 `ScopeDirVdfs`）：
 持有一个固定根 `PathBuf`，把相对地址拼上去，走 std::fs；继承既有容量与
 路径安全检查。它只是**当前后端**——插件只见 `dyn VdfsProvider`，后续可
 换成 `MemoryVdfs` / 网络实现而插件无感。这是本条的核心收益。

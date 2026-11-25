@@ -1,4 +1,4 @@
-//! 会话记忆的**落位与地址** —— 机制在共享实现（`providers/memory`）。
+//! 会话记忆的**落位与地址** —— 机制在共享实现（`memory_file`）。
 //!
 //! 本插件的三个记忆作用域同构：`agent_dir` / `work_dir` / `session_dir`。本模块是
 //! `session_dir` 那一腿的个性；另外两腿见 [`super::memory`] / [`super::workspace`]。
@@ -26,7 +26,7 @@
 //! `ctx[SESSION_DIR]` 缺失 / 为空 = 当前上下文没有会话作用域 → 什么都不注入、列表
 //! 里也不出现。这与工作区腿同一纪律；收集期读不到就没凭空造一份出来。
 
-use symbio_providers::{MemoryFile, MemoryNodeSpec, MemorySegmentSpec};
+use crate::memory_file::{MemoryFile, MemoryNodeSpec, MemorySegmentSpec};
 
 /// 会话记忆的**物理**文件名 —— `{session_dir}/MEMORY.md`。
 pub const SESSION_MEMORY_FILE: &str = "MEMORY.md";

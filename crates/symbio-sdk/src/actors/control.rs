@@ -2,7 +2,7 @@
 //!
 //! 抢占面已删（`D-388`：`crates/symbio-plugin-session/src/transcript/inbox` 今天只做
 //! 「忙则排队」）；外部执行闸门的授权在 `crates/symbio-plugin-tool/src/port.rs::gate_inputs`，
-//! 审批判据在 `crates/symbio-provider-collectors/src/approval.rs`。本模块的
+//! 审批判据在 `crates/symbio-providers/src/collectors/approval.rs`。本模块的
 //! [`EliminationDecider`] 是唯一真正跨 owner 的策略——写侧裁决在声誉包
 //! （声誉能力包的淘汰模块）、读侧翻译就在本文件的
 //! [`EliminationDecider::verdict_grants_changes`]。

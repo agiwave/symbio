@@ -37,8 +37,8 @@
 //! 工作区记忆的物理文件是 `{work_dir}/MEMORY.md`，会话记忆是
 //! `{session_dir}/MEMORY.md`。两者都是可选作用域：没选工作区 / 没有会话目录就
 //! 没有对应那一腿（不注入、列表缺席）；智能体腿则来自**装配**，插件被构造出来
-//! 这件事本身就意味着作用域存在。`session_dir` 由 session 插件按自己的唯一布局
-//! 解析、宿主随轮递来，本插件不从 `SESSION_ID` 拼路径，也不拿它开事实源（D-513）。
+//! 这件事本身就意味着作用域存在。`session_dir` 由会话上下文按值递来，本插件不从
+//! `SESSION_ID` 拼路径，也不拿它开事实源（D-513）。
 //!
 //! ## 三条腿 × 两样交出，缺一不可
 //!
@@ -57,7 +57,7 @@
 //! 子树的注册经作用域访问器加 `agent/<id>/` 前缀，
 //! 与系统侧**并集**且不撞名。
 //!
-//! ## 机制在 `providers/memory`，本插件只剩「个性」
+//! ## 机制在 `memory_file`，本插件只剩「个性」
 //!
 //! 工作区 / 会话 / 智能体几层记忆形态相同，共用一份实现（读写、两道容量闸门、
 //! 片段排版、VDFS 节点）。本插件负责的只有：**落位、地址、标题、空内容提示、
@@ -91,6 +91,7 @@ mod consolidate;
 mod debt;
 mod decl;
 mod episodic;
+mod memory_file;
 // 智能体腿实现与插件同名：memory 插件 = 智能体记忆（`memory`）+ 工作区记忆（`workspace`），
 // 两个作用域腿模块并列，先例见 `crates/symbio-plugin-composite/src/composite.rs`
 #[allow(clippy::module_inception)]

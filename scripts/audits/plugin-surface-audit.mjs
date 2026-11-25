@@ -283,13 +283,13 @@ export const MODULE_REEXPORT_BASELINE = 13
 /** 门面白名单所在的文件与块的起止标记。 */
 export const FACADE = 'crates/symbio-plugin-api/src/lib.rs'
 /**
- * 插件胶水层 `symbio-providers` 的**重臂**：嵌入推理（`ort` + `tokenizers`）。
- * 它默认必须是关的（D-254）——插件要的是 `DefaultToolVisitor` / `MemoryFile` 这些胶水，
- * 不是一套 ONNX 运行时。判据只看 manifest：`optional = true` + `default` 不含它。
+ * `symbio-providers` 的**重臂**：嵌入推理的原生运行时 `ort`（连同 `tokenizers`）。
+ * 它默认必须关（D-254）：判据只看 manifest——重依赖是 `optional = true`，
+ * 且 `[features] default` 不含 `embedding`。
  */
 export const HEAVY_ARM = {
   manifest: 'crates/symbio-providers/Cargo.toml',
-  dep: 'symbio-provider-embedding',
+  dep: 'ort',
   feature: 'embedding',
 }
 

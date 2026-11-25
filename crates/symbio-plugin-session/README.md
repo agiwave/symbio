@@ -1,17 +1,17 @@
 ---
 kind: design
 id: crates/symbio-plugin-session/README
-title: Unified Session & Memory Orchestration Architecture (会话与记忆系统化管理架构说明书)
+title: Session Orchestration Architecture (会话编排架构说明书)
 status: active
 created: 2026-07-20
 impl: done
 ---
 
-# Unified Session & Memory Orchestration Architecture (会话与记忆系统化管理架构说明书)
+# Session Orchestration Architecture (会话编排架构说明书)
 
-Session 插件是 Symbio 架构中的**会话持久化与生命周期中心**：持有事实源、转写与运行态，负责加载历史、**解析**系统提示词（收集各插件经提示词段行注册的段，本层不自己拼）、经 `Registry`（收集口，put/get/list 三方法）汇集工具与选项，并在**一轮的边界**上派发 / 等待 / 收尾（[D-086](../../docs/003-design/014-单环一表.md "DE-014-单环一表")）。一轮的执行本体（主循环）住在独立插件 [`crates/symbio-plugin-loop`](../symbio-plugin-loop/README.md "crates/symbio-plugin-loop/README")：它是不动点驱动，**由宿主 `symbio-host` 起唯一一次**，行数据由会话侧在装配期交来、环只按行还债，事实经 `Host.source` 落库；一轮的装配与收尾仍在会话插件的 `plugin/round.rs`。Model 插件是**无状态 LLM 网关**（按上下文注册 Provider + 协议适配），对 session 零依赖。
+Session 插件是 Symbio 架构中的**会话持久化与生命周期中心**：持有事实源、转写与运行态，负责加载历史、**解析**系统提示词（收集各能力经提示词段行注册的段，本层不自己拼）、经 `Registry`（收集口，put/get/list 三方法）汇集工具与选项，并在**一轮的边界**上派发 / 等待 / 收尾（[D-086](../../docs/003-design/014-单环一表.md "DE-014-单环一表")）。一轮的执行本体由宿主经驱动端口注入：环按行还债、事实经 `Host.source` 落库；本插件只负责装配与收尾。模型服务经模型端口接入，本插件不持有其实现。
 
-本文档将系统性地阐述 Symbio 的会话保存、内容压缩、工具迭代限制以及发送过滤策略，说明其具体规则、参数配置及 Rust 底层实现策略。
+本文档只阐述本插件内的会话保存、事实落库与写入期裁剪规则，说明其具体规则、参数配置及 Rust 实现落点。
 
 > **目标形状**见 [DE-001 §4.3 / §4.4](../../docs/003-design/001-核心架构.md "DE-001-核心架构")
 > 与 [DE-051](../../docs/003-design/051-机制形状规格.md "DE-051-机制形状规格")。
@@ -24,27 +24,23 @@ Session 插件是 Symbio 架构中的**会话持久化与生命周期中心**：
 
 ## 一、 系统架构数据流图 (Architecture & Data Flow)
 
-下列架构图展示了一个完整的“用户请求 -> Session（存储与生命周期）-> Loop 驱动器（视图组装/推理/工具）-> 磁盘持久化（会话目录）”的生命周期：
+下列架构图只标出**本插件的边界与交接面**：会话负责存储与生命周期，执行体由宿主注入，
+其内部形状不在本插件文档中描述。
 
 ```mermaid
 flowchart TD
  User([1. 用户消息：写 <sid>/inbox]) --> SaveUser[2. 入队收件箱 → 会话自己消费<br>空闲时取队首 → 保存/追加用户消息]
- SaveUser --> LoadHistory[3. 加载历史上下文<br>get_context_messages 轮次窗口对齐]
- LoadHistory --> InvokeLoop[4. 派发 loop/&lt;sid&gt; run_turn<br>TurnDispatch：TurnSpec + facts + sink]
+ SaveUser --> LoadHistory[3. 加载历史上下文<br>get_context_messages 只读全树]
+ LoadHistory --> Dispatch[4. 交出本轮事实与写柄<br>TurnSpec + facts + sink]
 
- subgraph Loop 驱动器插件（crates/symbio-plugin-loop）
- LoadHistory --> BuildPrompt[5. 解析系统提示词<br>收集各插件注册的段<br>人格/记忆/指令]
- BuildPrompt --> AggTools[6. 工具汇集<br>Registry 收集口]
- AggTools --> Resolve[7. 获取生效 ModelProvider<br>capability_model_active 单次解析]
- Resolve --> BuildView[8. 构建请求视图<br>build_request_sections<br>记忆/调度/委派三段注入]
- BuildView --> LLMCall[9. ModelProvider 推理调用<br>round_trip 直连无状态 LLM 网关]
- LLMCall --> ToolAction[10. 执行工具链]
- ToolAction --> LoopCheck{11. 迭代完成?}
- LoopCheck -- No --> BuildView
- end
+ Dispatch --> View[5. 请求视图由注入能力组装<br>段 / 工具 / 模型都经端口取用]
+ View --> LLMCall[6. 推理由注入的模型端口执行]
+ LLMCall --> ToolAction[7. 工具执行由注入的执行端口编排]
+ ToolAction --> LoopCheck{8. 是否继续?}
+ LoopCheck -- No --> View
 
- LoopCheck -- Yes --> EndTurn[12. 助理回答定格]
- EndTurn --> SaveFinal[13. 转写写柄落格 + TurnReport 交回 session]
+ LoopCheck -- Yes --> EndTurn[9. 助理回答定格]
+ EndTurn --> SaveFinal[10. 转写写柄落格 + TurnReport 交回会话]
  SaveFinal --> Disk[(会话目录<br>&lt;homedir&gt;/session/&lt;id&gt;/<br>session.json + messages.json)]
 ```
 
@@ -82,14 +78,10 @@ session:
  
  # 3. 上下文窗口与压缩
  context_messages: 6 # 发送给 AI 的对话上下文滑动窗口轮数 (以 User 消息轮次对齐截取；也是存储期 prune 的保留分水岭)
- # 上下文压缩不在本插件配置里：入口是 symbio-plugin-compact 的两行债（产物 session.consolidated）
+ # 上下文压缩不在本插件配置里：入口由压缩债声明（产物 session.consolidated）
  
  # 4. 存储期工具链裁剪
  prune_tool_history: true # 是否在落库时物理裁剪 context_messages 分水岭之前的历史工具链（Tool/ToolCall/Reasoning 及其子节点；只删节点不删归档）
-
- # 5. 会话记忆不在本插件配置里（D-513）：本体 / 注入 / 闸门全归 memory 插件
- #    （`session_max_bytes` / `session_inject_max_bytes`，见 crates/symbio-plugin-memory）；
- #    本插件只按自己的存储布局把会话目录按值递出（`ctx[SESSION_DIR]`）。
 ```
 
 ---
@@ -132,15 +124,14 @@ session:
  * 一次用户 Prompt 触发一个请求；请求内部 `推理 -> 工具调用 -> 工具结果返回 -> 再推理` 的迭代在
  v2 运行器的环体里跑完（turn_runner.rs（B2 退场，[DE-048](../../docs/003-design/048-端口机制裁决.md "DE-048-端口机制裁决") 的 `D-318`） 的 2e/2f），**主循环侧看不见第几轮工具**。
  * 界只有三条：单条响应内的工具调用数上限 `MAX_TOOL_CALLS_PER_RESPONSE = 32`
- （`crates/symbio-plugin-model/src/stream.rs`，超出的调用合成一条「本次调用未执行」的结果喂回模型，指引它
+ （模型端口执行体，超出的调用合成一条「本次调用未执行」的结果喂回模型，指引它
  把剩余调用放到下一轮）、用户中止、provider 断流。
  * 长度截断（`finish = Length`）由模型侧归一成 `ModelFinishReason::Length`，随结果以
- `truncated` / `reason` 上报（`crates/symbio-plugin-model/src/round.rs`）：收束判据据此区分
- 「自然结束」与「被截断」，末轮答话在截断时取空（同 crate `port.rs` 的 `fold_answer`）。
+ `truncated` / `reason` 上报（模型端口执行体）：收束判据据此区分
+ 「自然结束」与「被截断」，末轮答话在截断时取空。
  续写次数不是内核常量——它由上层按需再发一轮决定。
 * **为什么这一层不设软上限**：主循环读不到工具轮数——工具在 v2 运行器的环体里一批批跑完
- （turn_runner.rs（B2 退场，[DE-048](../../docs/003-design/048-端口机制裁决.md "DE-048-端口机制裁决") 的 `D-318`），步骤序列与批次边界见
- [`crates/symbio-plugin-loop/README.md`](../symbio-plugin-loop/README.md "crates/symbio-plugin-loop/README") 的环与行表一节），本轮请求侧只有一个
+ （turn_runner.rs 于 B2 退场，[DE-048](../../docs/003-design/048-端口机制裁决.md "DE-048-端口机制裁决") 的 `D-318`），本轮请求侧只有一个
  「发过几次请求」的计数（续写才让它 >1）。一个判不到真实轮数的
  上限等于**没有上限**，却会让人以为设过：它与「默认不限制」逐字等价，配错与没配长得一样，
  没有任何信号能区分。真要这道上限，位置在 2e（结果接进 `exchange`）与 2f（轮内注入）之间，
@@ -163,7 +154,7 @@ session:
  * 「哪些历史进请求」由事实网格的投影回答：`transcript` 折叠变更格、压缩快照、分支与区间省略，产出 `TranscriptView`；会话层不持有第二份截取逻辑。
 
  * **语义合并（已随 B2 退场，D-318）**：
- * 本仓没有会话侧语义合并写点；压缩实现归 `symbio-plugin-compact`（`D-336`），会话侧没有入口。
+ * 本仓没有会话侧语义合并写点；压缩由压缩端口处理（`D-336`），会话侧没有入口。
 
 ---
 
@@ -194,94 +185,56 @@ session:
 
 ---
 
-### 5. 请求级注入段（`build_request_sections`：长期记忆 / 任务调度 / 委派者真源）
+### 5. 请求级注入段（本插件只交事实，不拥有段）
 
-> **目标**：把**本轮才成立**的读视图送进请求——长期记忆召回、就绪任务集、委派判定。它们不是会话历史的一部分，因此不落库、每请求现算。
+> **目标**：把**本轮才成立**的读视图交出去——召回、就绪集、委派判定都由各自能力渲染。它们不是会话历史的一部分，因此不落库、每请求现算。
 >
 > **边界**：注入段只**追加**，不改写历史。发给模型的对话体是事实网格的纯投影（[D-048a](README.md "crates/symbio-plugin-session/README")）；请求视图级的内容淡化 / 轮次淡化 / 分层滑窗骨架化三层已按 [D-078](README.md "crates/symbio-plugin-session/README") 退役——那三层改写的是历史正文，与「请求体 = 投影」互斥。
 
-* **段的来源是端口，不是本模块的固定列表**（DE-025 D-215 / D-220）：`symbio_plugin_api::context::ContextProvider` 由能力包注册、`inventory` 编译期收集，`loop` 按节奏收集、按 owner 序拼接。本仓当前提交三条：`RecallProvider` 产 `slots::RECALL`（`owner() == "loop"`，发言级节奏）、`DelegateProvider` 产 `slots::DELEGATE`（请求级节奏）、`ReadySetProvider` 产 `slots::READYSET`（随任务能力包提交，发言级节奏）。加一类上下文 = 加一条 provider，不改 `loop`。
-* **具体规则**（唯一入口 `build_request_sections`，段各自独立、非空才插）：
- * **长期记忆召回段 (Recall Context)**：`run_recall` 在**本轮第一次请求**读一次跨会话召回视图（`memory_events::recall_view`，`off` 档或无目录时不读），转成端口形状（`RecallFacts`）交给 provider；`RecallProvider` 渲染出段落（`memory_events::prompt_section`，抬头 `【长期记忆】`），非空时产出 `meta.kind = "recall_context"` 的节点。**置顶不置尾**：置尾会把「最后一条 user 消息」从用户的问题换成记忆——mock 场景匹配与轮次窗口都读错；**不进系统提示词**：那里有「唯一真源 = 注册段」的纪律（本 README 第 1 节）。e2e `t29` 同时钉住「记忆段在包里」与「`messages.json` 里一个字都不多」。
- * **任务调度段 (Ready Set)**：`ReadySetProvider`（随任务能力包 `symbio-plugin-task` 提交）读本轮事实切片与**事实里的就绪集容量**（`session.config` 载荷的 `readyset_cap`，D-252）调 `task::prompt_section`（**只读**开档、不创建事实源，`off` 档不读），抬头 `【任务调度】`，只列**依赖已全部完成**的候选；非空时产出 `meta.kind = "readyset"`。**候选集空 ⇒ 整段不出现**（给模型一段空调度只会诱导它瞎猜）。e2e `t31` 同时钉住「段落在包里」与「`messages.json` 里一个字都不多」。
- * **委派者真源段 (Delegate Context)**：`DelegateProvider`（请求级节奏，`meta.kind = "delegate_context"`）把本轮**委派判定**（命中了哪条判据 / 为什么没启动子会话）+ 能力目录 + worker 进展渲染成一段。输入是 `LiveInputs { tools, delegate, workers }`：工具清单是**收集成形后**的那份（发言级取不齐），委派结论是控制面 Q1 判完的三态（`NotJudged` / `Start { reason }` / `Idle`）。provider 不读配置、不重判；渲染函数仍是 chat_loop/delegate.rs（B2 退场，[DE-048](../../docs/003-design/048-端口机制裁决.md "DE-048-端口机制裁决") 的 `D-318`） 的 `delegate_section`。
- * **段的消费形态**：`crates/symbio-sdk/src/plugin/context.rs::sections` 按 owner 字典序取出视图里**全部**段（不按下标——缺一段时下标全部左移；也不按名字查表——那会与 `slots` 形成第二处拼写），拼成一条 `system` 前缀消息交给运行器。**视图次序 = 装配次序 = 模型读到的次序**，而装配次序只与 owner 字典序有关（见 [D-047](../../docs/003-design/011-Agent目录规范.md "DE-011-Agent目录规范")）。
- * **水位治理不在本层**：压缩入口在 `symbio-plugin-compact` 的两行债（`compact-summarize`
- 取摘要、`compact-write` 落 `session.consolidated`），触发读 provider 收束载荷的
- 70% 水位。会话侧没有 `auto_compress_process`；失败后的跨轮抑制与重试住在
- `symbio-plugin-compact`（前缀指纹抑制 + 失败产物派生 `retry_compaction`）。
-* **Rust 实现形态**：模型端口执行体（`crates/symbio-plugin-model/src/port.rs::execute`）按 `Cadence::Utterance`（首幕一次）/ `Cadence::Request`（每次请求）收段，再拼成 `role: system` 的 `PromptMessage` 放在历史之前。**段数由 provider 决定**，宿主不假设几段；段身份 `slot` 只进裁剪读数，不再写进节点 `meta`——请求体是 `PromptMessage`，没有 `meta` 字段。
-* **段预算**：同一执行体在拼段前算余量（`effective_context_tokens` 减去历史 + system prompt + 工具定义），`fit_sections` 按段自报的 `prio` 裁剪；真的裁了才在日志里出声（`[section-budget]`）。预算与收束轮水位共用同一个上限。
+* **段的来源是端口，不是本模块的固定列表**（DE-025 D-215 / D-220）：`symbio_plugin_api::context::ContextProvider` 由能力包注册、`inventory` 编译期收集，宿主按节奏收集、按 owner 序拼接。本插件不列出、不实现任何一段。
+* **本插件的交出物**：`build_request_sections` 从本轮事实里取出端口需要的形状（召回事实 / 就绪集 / 委派判定），交给宿主收集；段的抬头、非空判定与次序由 owner 决定，本插件不假设几段。
+* **段的消费形态**：宿主按 owner 字典序取出视图里**全部**段，拼成一条 `system` 前缀消息交给运行器（见 [D-047](../../docs/003-design/011-Agent目录规范.md "DE-011-Agent目录规范")）。本插件不读这条消息。
+* **水位治理不在本层**：压缩入口、触发阈值与失败后的抑制 / 重试都由注入能力处理；会话侧只有事实写口与读口。
+* **段预算**：预算计算与裁剪都在执行体侧完成，本插件只提供事实与上限读数。
 
 ---
 
-## 四、 会话记忆：归 memory 插件，本插件只递目录（D-513）
+## 四、 策略对比与总结 (Summary Matrix)
 
-会话记忆是**本会话自己钉住的约定与结论**：轮次一多，早期的结论会被压缩、裁掉乃至淘汰出上下文；会话记忆的价值恰恰在于**不随上下文水位消失**。它是**文件记忆**三层（智能体 / 工作区 / 会话）之一。
-
-### 归属与分工（D-513）
-
-「谁能读写它，谁负责注入它」——三层文件记忆的**唯一所有者是 memory 插件**（`crates/symbio-plugin-memory`）：本体读写、系统提示词注入、VDFS 挂载（`<根>/memory/SESSION.md`）、两道容量闸门（`session_max_bytes` / `session_inject_max_bytes`）都在那边；层数、各层的地址与所有者的权威表格见 `crates/symbio-provider-memory` 的模块文档（复述必然漂移）。
-
-本插件在记忆这件事上只剩一个职责：**会话存储布局的唯一 owner**。memory 插件按目录实现三层记忆，但「会话目录在哪」是本插件的存储布局，别人不该认识——所以本插件把 `{会话目录}` 按**值**递出（`ctx[SESSION_DIR]`），两条通道：
-
-- **能力收集期**（每轮开轮）：开轮写口在收集前把会话目录挂上请求 ctx，memory 插件的会话腿据此落位与注入；
-- **驱动目标**（`DriveTarget.session_dir`）：事实源打开时一并装订，宿主挂进本轮驱动 ctx。
-
-本插件**不读** `{workdir}/AGENTS.md`，也不再注入任何记忆段——同一份文件被两个插件注入 = 同一内容进两次上下文；`PLUGIN.yml` / 配置里也没有记忆闸门（见第二节配置注释）。
-
-### 与「事件记忆」的分工（两层，不是一个东西的两份）
-
-文件记忆（`MEMORY.md`，钉住的约定，可编辑、走系统提示词注册通道）归 memory 插件（上节）。
-**事件记忆**是另一层，仍归本插件的转写链路：`memory_events.rs` 把每轮用户发言编码成 `memory.encoded`
-事件写进**本会话的 `v2-events.wal`**，跨会话召回后**置顶注入请求视图**（第 6 节第五步），
-活记忆到 4 条过 `consolidate::accept` 才合并——不另开文件、不经系统提示词注册通道、
-不进 VDFS。分工：文件记忆 = 会话自己的约定（人可读写）；事件记忆 = 可检索、
-可巩固、可排除式遗忘的**情景经验**（机器记账）。召回与巩固的判定方与四条口径见
-`crates/symbio-plugin-memory/src/recall/` 模块文档。
-
-### 会话目录的寻址
-
-会话级插件数据（`ctx[SESSION_DIR]`）是本插件存储布局的**值面出口**，不是一条新的事实读取路径：能力插件拿它落自己的会话数据（memory 的会话记忆 = `{会话目录}/MEMORY.md`），**不得**拿它拼事实源（`v2-events.wal`）路径——事实只经引擎（D-084）。
-
----
-
-## 五、 策略对比与总结 (Summary Matrix)
-
-| 策略维度 | 核心控制参数 | 执行时机 | 动作目标 | 底层实现文件 |
+| 策略维度 | 核心控制参数 | 执行时机 | 动作目标 | 本插件内位置 |
 | :--- | :--- | :--- | :--- | :--- |
-| **存储级轮数裁剪** | `max_messages` | `append_messages` 保存时 | FIFO 截断超出的最老对话轮（0 = 不限制），不动归档文件 | `crates/symbio-plugin-session/src/chat_session/write.rs` |
-| **单轮迭代边界** | （无配置项：v2 不设工具轮数上限） | v2 运行器环体（turn_runner.rs（B2 退场，[DE-048](../../docs/003-design/048-端口机制裁决.md "DE-048-端口机制裁决") 的 `D-318`） 2e/2f） | 跑多少批工具由模型自己收束；唯一的数量界是**单条响应**内 `MAX_TOOL_CALLS_PER_RESPONSE = 32`（超出的调用合成「本次调用未执行」喂回）。主循环侧读不到工具轮数，因此那一层的软上限不存在（裁决见 [D-074](../../docs/003-design/014-单环一表.md "DE-014-单环一表")） | `crates/symbio-plugin-model/src/stream.rs` |
-| **加载轮次对齐 + 宏观语义快照合并（已退场，D-318）** | `context_messages` 仅剩**写入期**工具链裁剪用途 | — | 会话读路径只交全树，不再做轮次对齐；请求体由 `projection::transcript` 投影，会话侧语义合并已随 B2 退场 | `crates/symbio-plugin-session/src/chat_session/read.rs`<br>`crates/symbio-sdk/src/projection/transcript.rs` |
-| **存储期历史工具链物理裁剪** | `context_messages`（分水岭）<br>`prune_tool_history`（开关） | `append_messages` 保存时 | 物理删除分水岭之前（默认最近 `context_messages` 轮内保留）的 Tool / ToolCall / Reasoning 及其子节点；**只删节点不删存档文件**（存档由 `tool` 插件 L0 守卫按会话作用域滚动回收，D-528） | `crates/symbio-plugin-session/src/chat_session/write.rs`（`prune_historical_tool_calls`） |
-| **请求级注入段** | （无配置项：三段各自判空） | `build_request_sections` 每轮请求前 | 长期记忆召回段（**置顶**，`meta.kind = recall_context`）→ 任务调度段（就绪任务集，`meta.kind = readyset`，记忆段仍占 `index 0`）→ 委派者真源段（`meta.kind = delegate_context`，落 `index 2`）；三段只追加、不改写历史，不落库幂等 | `crates/symbio-sdk/src/plugin/context.rs` |
+| **存储级轮数裁剪** | `max_messages` | `append_messages` 保存时 | FIFO 截断超出的最老对话轮（0 = 不限制），不动归档文件 | `src/chat_session/write.rs` |
+| **单轮迭代边界** | （无配置项：v2 不设工具轮数上限） | 执行体侧（B2 退场，[DE-048](../../docs/003-design/048-端口机制裁决.md "DE-048-端口机制裁决") 的 `D-318`） | 跑多少批工具由模型自己收束；唯一的数量界是**单条响应**内 `MAX_TOOL_CALLS_PER_RESPONSE = 32`（超出的调用合成「本次调用未执行」喂回）。会话侧读不到工具轮数，因此这里没有软上限（裁决见 [D-074](../../docs/003-design/014-单环一表.md "DE-014-单环一表")） | （不在本插件内） |
+| **加载轮次对齐 + 宏观语义快照合并（已退场，D-318）** | `context_messages` 仅剩**写入期**工具链裁剪用途 | — | 会话读路径只交全树，不再做轮次对齐；请求体由事实网格投影，会话侧语义合并已随 B2 退场 | `src/chat_session/read.rs`<br>（投影在机制面） |
+| **存储期历史工具链物理裁剪** | `context_messages`（分水岭）<br>`prune_tool_history`（开关） | `append_messages` 保存时 | 物理删除分水岭之前（默认最近 `context_messages` 轮内保留）的 Tool / ToolCall / Reasoning 及其子节点；**只删节点不删存档文件**（存档回收按会话作用域在写入侧另行守卫，D-528） | `src/chat_session/write.rs`（`prune_historical_tool_calls`） |
+| **请求级注入段** | （无配置项：三段各自判空） | `build_request_sections` 每轮请求前 | 长期记忆召回段（**置顶**，`meta.kind = recall_context`）→ 任务调度段（就绪任务集，`meta.kind = readyset`，记忆段仍占 `index 0`）→ 委派者真源段（`meta.kind = delegate_context`，落 `index 2`）；三段只追加、不改写历史，不落库幂等 | （注入面由宿主提供） |
 
-通过这套**协同策略**，Symbio 构建了"存储层（写入时 L0 工具守卫 + 保存时 `max_messages` FIFO / `prune_historical_tool_calls` 生命周期裁剪，内容节点恒为完整原文）→ 读路径（`get_messages` 只交全树）→ 请求层（`build_request_sections` 三段注入，只追加不改写）→ 请求投影（`projection::transcript` 从事实网格折出请求体）"的上下文治理链路，实现了高保真度的会话还原与清爽的本地持久化。请求体是事实网格的纯投影（[D-048a](README.md "crates/symbio-plugin-session/README")）——模型看到的每条历史都能在网格里找到出处，`prompt_fidelity` 每轮复核这一点。
+本插件内的链路只有三段：写入期（`max_messages` FIFO / `prune_historical_tool_calls` 生命周期裁剪，内容节点恒为完整原文）→ 读路径（`get_messages` 只交全树）→ 交接（`TurnSpec + facts + sink` 交给注入的执行体）。请求视图与请求投影都不由本插件持有；请求体是事实网格的纯投影（[D-048a](README.md "crates/symbio-plugin-session/README")），`prompt_fidelity` 每轮复核这一点。
 
 ---
 
-## 五a、 委托工具（`agent_run`）：会话级原语
+## 四a、 委托工具（`agent_run`）：会话级原语
 
 LLM 可见工具只有一条：`agent_run`（子智能体委托，D-500）——新建 / 续会话 / 恢复
-委托会话。归属裁决与「为什么它从 子智能体插件迁来」见
+委托会话。归属裁决见
 [DE-011 D-500](../../docs/003-design/011-Agent目录规范.md "DE-011-Agent目录规范")；
-这里只记模块形状：
+这里只记本插件内的形状：
 
 | 交出什么 | 机制 |
 |---|---|
-| 工具本体 | `src/tools/subagent.rs`（`PortExecutor`，普通工具零特殊化）；`traverse(session/available_tools)` **无条件注册**——子智能体插件缺席时 `agent_id` enum 为空，省略即纯对话子会话 |
-| `agent_id` 取值域 | 经**本作用域容器**的 VDFS 视图列 `subagent` 挂载点（`agent_id_candidates`）；执行期 `Stat subagent/<id>` 校验——agent 目录的枚举与存在性由它的 owner（子智能体插件）经地址面回答，E-009 边不新增 |
+| 工具本体 | `src/tools/subagent.rs`（`PortExecutor`，普通工具零特殊化）；`traverse(session/available_tools)` **无条件注册**——没有候选时 `agent_id` enum 为空，省略即纯对话子会话 |
+| `agent_id` 取值域 | 经**本作用域容器**的 VDFS 视图枚举候选（`agent_id_candidates`）；执行期 `Stat` 校验存在性。目录的枚举与存在性只经地址面回答，E-009 边不新增 |
 | 承诺面 | `src/tools/behavior.rs`：立约效果（`delegation_promise`）+ 淘汰闸（`assign_work`），经 `ToolBehavior` 交给写口；承诺事件 owner 随写方迁入本插件（D-389 同一条纪律） |
 
 ---
 
-## 六、 工具结果字段约定（跨插件契约）
+## 五、 工具结果字段约定（跨插件契约）
 
 > **目标**：让「工具返回任意 JSON → 压成一段给模型看的文本」这一**必要适配**不再隐式——加一个工具不必读 `extract_result` 源码才知道自己该返回哪个字段。
 
 工具可以返回任意 JSON（`shell` 给 `output`、`vdfs_read` 给 `VdfsContent`、`ask_user` 给 `content` + `prompt`、`todo_write` / `content_search` 同理），而模型只消费**一段文本**。这层「任意形状 → 文本」的压缩是**必要的**，不是失误；失误在于它曾**没有写下来**，加一个工具就得读源码才知道写哪个字段名。
 
-**唯一消费方**：[`extract_result`](../symbio-plugin-tool/src/port.rs)（字段名有常量 `RESULT_CONTENT = "content"` / `RESULT_OUTPUT = "output"`，判定顺序由 [`port.test.rs`](../symbio-plugin-tool/src/port.test.rs) 钉死——改顺序 = 改契约）。判定顺序（**先命中者胜**，而非「存在即取」）：
+**唯一消费方**：工具端口的结果抽取器（字段名有常量 `RESULT_CONTENT = "content"` / `RESULT_OUTPUT = "output"`，判定顺序由该抽取器的测试钉死——改顺序 = 改契约）。判定顺序（**先命中者胜**，而非「存在即取」）：
 
 | 序号 | 判据 | 结果 |
 |---|---|---|
@@ -309,7 +262,7 @@ LLM 可见工具只有一条：`agent_run`（子智能体委托，D-500）——
 
 ### D-003 Session 作为编排入口
 
-早期由 owner 插件独占会话编排，耦合严重。 `session` 是唯一编排入口（核心循环 `chat_loop`），owner 只负责「人格」。 关注点分离；同一 Session 可绑定不同 Agent；支持无 Agent 的纯工具模式。 Session 需要收集全树工具；子智能体插件适配为被动角色。
+早期由 owner 插件独占会话编排，耦合严重。 `session` 是唯一编排入口（核心循环 `chat_loop`），owner 只负责「人格」。 关注点分离；同一 Session 可绑定不同 Agent；支持无 Agent 的纯工具模式。 Session 需要收集全树工具；委托能力适配为被动角色。
 
 ### D-018 压缩失败不得裁剪历史——失败必须是可见、可重试、可持久化的状态
 
@@ -351,9 +304,9 @@ D-048 把出厂档位翻到 `full` 后，写侧换成 WAL 原生记账，`Sessio
 
 事实源里的每条事件必须完整回答谁（actor）、何时（ts）、发生了什么。这条不变量对 seq 成立（收口到 [`Store`](../../docs/003-design/001-核心架构.md "DE-001-核心架构") 唯一写入口），对 actor 与 ts 没有对应约束——`d781a6c7` 号会话的实测后果：363 条助手与工具产出被记成 `actor: "user"`（写入方写死 `PRINCIPAL_USER`），548 个事件 `ts` 缺失或为 0，时间轴无法重建。修法：actor 在写入方按真实来源派生，`ts` 兜底收进 `WalStore` 唯一写入口（`MemoryStore` 不兜底）。
 
-### D-072 `context_compact` 工具与 55% 水位提醒一并退役；压缩入口归 `symbio-plugin-compact`
+### D-072 `context_compact` 工具与 55% 水位提醒一并退役；压缩入口归压缩能力
 
-[DE-014 §5](../../docs/003-design/014-单环一表.md "DE-014-单环一表") 步骤 5 要删 v1 外壳的 `close_turn` 死分支。今天会话侧没有任何压缩入口：入口是 `symbio-plugin-compact` 的两行债，产物是 `session.consolidated`（`D-336`）。
+[DE-014 §5](../../docs/003-design/014-单环一表.md "DE-014-单环一表") 步骤 5 要删 v1 外壳的 `close_turn` 死分支。今天会话侧没有任何压缩入口：入口由压缩债声明，产物是 `session.consolidated`（`D-336`）。
 
 ### D-078 请求视图三层淡化退役：请求体是事实网格的纯投影，注入段只追加不改写
 
@@ -400,9 +353,9 @@ D-048 把出厂档位翻到 `full` 后，写侧换成 WAL 原生记账，`Sessio
 
 裁决按**事实的粒度**走：水位是**请求级事实**，一轮一次。
 
-- **测量点**：收束轮算一次（模型执行体 `crates/symbio-plugin-model/src/port.rs` 的终答载荷 `context`），随本轮的**骨架节点** `meta.context` 下发——骨架本来就在终答事实里带 `turn`，两个请求级事实同属一个载体，故不新增 run_op、不新增 core 投影、不改 `ChatNode` 顶层字段。用量取 provider 回报的**实测输入用量**，测不到就不写（见下文「缺数少一行」）。
+- **测量点**：收束轮算一次（模型端口执行体的终答载荷 `context`），随本轮的**骨架节点** `meta.context` 下发——骨架本来就在终答事实里带 `turn`，两个请求级事实同属一个载体，故不新增 run_op、不新增 core 投影、不改 `ChatNode` 顶层字段。用量取 provider 回报的**实测输入用量**，测不到就不写（见下文「缺数少一行」）。
 - **会话级**：`SessionSummary::of`（save 时的投影）扫尾部**最近一条**带水位的节点，落进 `session.json`。不给 `vdfs/stat` 加专用回读——那是热路径，而清单本来就是会话的唯一读入口。
-- **口径与措辞分家**（同 [D-111](README.md "crates/symbio-plugin-session/README")）：实测用量与 provider 上限归模型执行体（`crates/symbio-plugin-model/src/port.rs`），「数字怎么说」归 `stats_reading::context_reading_of`。读数因此只有「已用 / 上限」两格；一旦恢复压缩触发，阈值必须取自同一个数——两处各写一遍的系数必然漂，漂了表现为「界面上还没到刻度，后端已经动手整理」。
+- **口径与措辞分家**（同 [D-111](README.md "crates/symbio-plugin-session/README")）：实测用量与 provider 上限归模型端口执行体，「数字怎么说」归 `stats_reading::context_reading_of`。读数因此只有「已用 / 上限」两格；一旦恢复压缩触发，阈值必须取自同一个数——两处各写一遍的系数必然漂，漂了表现为「界面上还没到刻度，后端已经动手整理」。
 - **产出的是既有方言，不是自造形状**：本函数返回 `ReadingSection`（行 + 可选 `ReadingBar` 几何），条的 `level` 与参考线 `marks` 是产者**除好的 0..1 比率**。这里**不发一套自造的业务键**（`{ used_ratio, compress_ratio }` 那种形状）——业务键会把「已用」「压缩线」写进渲染器，换一个产者（成本、记忆）就得改前端，那正是 `present/reading` 模块文档立起来要挡的事。`bar` 是**方言里的通用几何槽**（不含任何主题词），且 `ReadingBar` 无方法、不是 trait：core 的三格形状（CS-001）不受影响。
 - **不给「压缩」入口**：[D-072](README.md "crates/symbio-plugin-session/README") 之后手动重试只由 failed 压缩节点下发，一条健康的水位线后面没有任何可点的东西；按钮不能承诺它没有的能力。这条线的职责只有一句——让你看见**后端会在这里接手**。
 - **缺数少一行，绝不补 0**：「水位已降到 0」是最坏的谎报（失败路径本就没有 `after_tokens`）；没有分母就没有 `bar`（渲染器因此整条不出现，而不是画一条宽度 0 的条）；过上限时文本仍报实测数，只有条画满。同一条诚实形状也用在失败上：方言载荷排不出来就**少这一格属性**，交付出口不为此炸进程——「形状被改坏」是 `stats_reading.test.rs` / `nodes.test.rs` 的断言，不是运行时的一次 panic。

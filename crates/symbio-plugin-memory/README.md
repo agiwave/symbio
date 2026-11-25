@@ -72,10 +72,6 @@ impl: done
 工作区记忆空文件也注入（带空内容提示，教会模型建立记忆）；智能体记忆空文件整段省略
 （没写过就不占上下文）。
 
-> 这一腿原属独立的 `work` 插件（2026-09 并入，见 [D-040](README.md "crates/symbio-plugin-memory/README")）：
-> 两个作用域同属「记忆」，收进同一个所有者后，「谁能读写它，谁负责注入它」在插件内
-> 一次成立。
-
 ## 挂载名 ≠ 物理名
 
 三层记忆的物理文件都叫 `MEMORY.md`，若原样挂进同一挂载点，列表里会出现三个
@@ -90,7 +86,7 @@ impl: done
 | 写入 | `memory_max_bytes` / `workspace_max_bytes` / `session_max_bytes`（默认各 16 KiB） | **拒绝**（不截断、不部分写入） |
 | 注入 | `memory_inject_max_bytes` / `workspace_inject_max_bytes` / `session_inject_max_bytes`（默认各 4 KiB） | **截断** + 指路 `vdfs_read` 取全文 |
 
-读写、两道闸门、片段排版、节点形状全部在共享实现 `providers/memory`——本插件只提供
+读写、两道闸门、片段排版、节点形状全部在本插件私有模块 `src/memory_file.rs`——本插件只提供
 **落位、地址、标题、空内容提示、闸门取值**，不再有第二份「超限怎么办」「截断怎么算」。
 每层另有独立注入开关（`agent_enabled` / `workspace_enabled` / `session_enabled`）：关掉只
 影响注入，文件与挂载条目照旧可用。
@@ -102,13 +98,11 @@ impl: done
 - 智能体记忆：没写过 → 整段省略——用户没写过时，不该让每个会话都背一段空头信息；
 - 工作区记忆：没写过 → 照注空头信息——需要主动教模型「这里可以建立记忆」。
 
-## 关联
+## 本插件的边界
 
-- 稳定指令 / 人格（`AGENTS.md`，归 setting 只读注入）+ 本智能体信息设置：`../setting/README.md`
-- 会话级记忆的落位目录来源：`../session/README.md`
-- 记忆的共享实现（各层共用）：`../../../providers/` 下的 `providers/memory`
-- 子智能体目录与子树装配：`../agent/README.md`
-- Agent 目录规范 §6：`docs/003-design/011-Agent目录规范.md`
+本插件只消费上下文按值递来的作用域信息（工作目录 / 会话目录 / 装配位置），不解析、也不描述
+其它能力的落位规则。三层记忆的共享实现是本插件私有的 `src/memory_file.rs`；Agent 目录规范见
+`docs/003-design/011-Agent目录规范.md`。
 
 ## 关键决策
 

@@ -1,6 +1,6 @@
-//! `providers/memory/mod.rs` 的单元测试 —— 三层记忆共用的那一份口径。
+//! `memory_file.rs` 的单元测试 —— 三层记忆共用的那一份口径。
 //!
-//! 与实现**同级**分文件（约定：`mod.rs` + `tests.rs`）。
+//! 与实现**同级**分文件（约定：`*.rs` + `*.test.rs`）。
 //!
 //! 这里钉的是**所有层都必须一致**的行为，因此每条都对应一个「一旦分叉就会让用户
 //! 困惑」的问题：
@@ -15,12 +15,13 @@
 //! 见模块文档），测试用别的名字才**证明**这一点——若哪天有人把某个具体文件名
 //! 硬编码回来，这里的用例会立刻红。
 
+use super::fixture;
 use super::{
     memory_render_segment, MemoryFile, MemoryInjection, MemoryNodeSpec, MemorySegmentSpec,
 };
 use async_trait::async_trait;
 use std::sync::Arc;
-use symbio_kernel::vdfs::{
+use symbio_plugin_api::{
     DynVdfsProvider, VdfsAccess, VdfsContext, VdfsError, VdfsProvider, VdfsRequest, VdfsResponse,
     VdfsResult,
 };
@@ -36,7 +37,7 @@ const ADDR: &str = "@vfs/work/NOTES.md";
 
 /// 临时目录里的一个记忆文件
 fn file_in(tmp: &TempDir, write_max: usize, inject_max: usize) -> MemoryFile {
-    MemoryFile::new(Some(tmp.path().join(FILE_NAME)), write_max, inject_max)
+    fixture::at(Some(tmp.path().join(FILE_NAME)), write_max, inject_max)
 }
 
 fn spec() -> MemorySegmentSpec<'static> {
@@ -80,9 +81,8 @@ async fn cut_falls_back_to_a_char_boundary() {
 /// 无作用域 = 「这层记忆此刻不适用」，是**正常状态**，不是故障
 #[tokio::test]
 async fn absent_scope_is_a_normal_state() {
-    let m = MemoryFile::absent(1024, 256);
+    let m = fixture::absent(1024, 256);
     assert!(!m.has_scope());
-    assert!(m.path().is_none());
     assert!(!m.exists().await);
     assert_eq!(m.size().await, 0);
     assert_eq!(m.updated_at().await, None);
@@ -107,9 +107,9 @@ async fn missing_file_reads_as_empty_not_as_error() {
     assert_eq!(m.size().await, 0);
 }
 
-/// 最小 provider：任何请求都报「节点不存在」，专门验证 Vdfs **后端**的读语义。
+/// 最小 provider：任何请求都报「节点不存在」，专门验证「没写过 = 空串」的读语义。
 /// 回归自 D-515：曾把 NotFound 当错误往外抛，导致每次首次读取都进收集期错误桶、
-/// 工作区腿的空内容提示永远出不来——与 File 后端「没写过 = 空串」分叉。
+/// 工作区腿的空内容提示永远出不来。
 struct NotFoundProvider;
 
 #[async_trait]

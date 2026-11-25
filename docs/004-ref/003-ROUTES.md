@@ -67,7 +67,7 @@ lists: [route-contracts=owner]
 
 ### 资源（VDFS）
 
-资源型插件**不提供任何资源类私有路由**：其资源统一经 VDFS 寻址（`<根>/<插件名>/…`）。**操作闭集见 [RE-006 §2.2](006-当前事实表.md "RE-006-当前事实表")**（源码 `crates/symbio-plugin-vdfs/src/protocol.rs::VDFS_OPS`，有测试锁计数）——本文不抄那份清单。每个 `<根>` 子目录由对应插件自己的 `impl VdfsProvider` 提供，落盘经 `crates/symbio-provider-vdfs_service/src/`（见 [DE-010](../003-design/010-VDFS前端页面规范.md "DE-010-VDFS前端页面规范") §2 分层与落点 / §8 一致性要求）。
+资源型插件**不提供任何资源类私有路由**：其资源统一经 VDFS 寻址（`<根>/<插件名>/…`）。**操作闭集见 [RE-006 §2.2](006-当前事实表.md "RE-006-当前事实表")**（源码 `crates/symbio-plugin-vdfs/src/protocol.rs::VDFS_OPS`，有测试锁计数）——本文不抄那份清单。每个 `<根>` 子目录由对应插件自己的 `impl VdfsProvider` 提供，落盘经 `crates/symbio-providers/src/vdfs_service/`（见 [DE-010](../003-design/010-VDFS前端页面规范.md "DE-010-VDFS前端页面规范") §2 分层与落点 / §8 一致性要求）。
 
 ---
 

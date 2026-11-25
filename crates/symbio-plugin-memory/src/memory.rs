@@ -1,4 +1,4 @@
-//! 智能体自身记忆的**落位与地址** —— 机制在共享实现（`providers/memory`）。
+//! 智能体自身记忆的**落位与地址** —— 机制在共享实现（`memory_file`）。
 //!
 //! ## 落位：宿主目录的 `MEMORY.md`
 //!
@@ -32,14 +32,14 @@
 //!
 //! | 谁 | 负责 |
 //! |---|---|---|
-//! | `providers/memory` | 读写、两道容量闸门、片段排版、VDFS 节点形状 |
+//! | `memory_file` | 读写、两道容量闸门、片段排版、VDFS 节点形状 |
 //! | 本模块 | 落位、VDFS 地址、片段标题、空内容提示 |
 //! | [`super::config`] | 两道闸门各开多大 |
 //!
 //! 于是本插件不再自己写「超限怎么办」「截断怎么算」——那些口径全项目只有一份。
 
+use crate::memory_file::{MemoryFile, MemoryNodeSpec, MemorySegmentSpec};
 use symbio_plugin_api::PLUGIN_ID_MEMORY;
-use symbio_providers::{MemoryFile, MemoryNodeSpec, MemorySegmentSpec};
 
 /// 记忆文件名 —— 三层统一 `MEMORY.md`（智能体 / 工作区 / 会话）。
 ///

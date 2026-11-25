@@ -277,7 +277,7 @@ board.columns: [impl]
 | [`crates/symbio-plugin-plugin_manager/README`](../../crates/symbio-plugin-plugin_manager/README.md) | Plugin_manager 插件（插件管理） | 与代码一致 |
 | [`crates/symbio-plugin-reputation/README`](../../crates/symbio-plugin-reputation/README.md) | 声誉能力包（声誉台账折叠） | 与代码一致 |
 | [`crates/symbio-plugin-sandbox/README`](../../crates/symbio-plugin-sandbox/README.md) | 安全运行环境插件（sandbox） | 部分落地 |
-| [`crates/symbio-plugin-session/README`](../../crates/symbio-plugin-session/README.md) | Unified Session & Memory Orchestration Architecture (会话与记忆系统化管理架构说明书) | 与代码一致 |
+| [`crates/symbio-plugin-session/README`](../../crates/symbio-plugin-session/README.md) | Session Orchestration Architecture (会话编排架构说明书) | 与代码一致 |
 | [`crates/symbio-plugin-session/src/docs/README`](../../crates/symbio-plugin-session/src/docs/README.md) | Session 插件文档 | 与代码一致 |
 | [`crates/symbio-plugin-setting/README`](../../crates/symbio-plugin-setting/README.md) | Setting 插件 | 与代码一致 |
 | [`crates/symbio-plugin-skill/README`](../../crates/symbio-plugin-skill/README.md) | Skill 插件 | 与代码一致 |

@@ -79,11 +79,12 @@ const PROVIDERS_OK = `[package]
 name = "symbio-providers"
 
 [dependencies]
-symbio-provider-embedding = { path = "../symbio-provider-embedding", optional = true }
+ort = { workspace = true, optional = true }
+tokenizers = { workspace = true, optional = true }
 
 [features]
 default = []
-embedding = ["dep:symbio-provider-embedding"]
+embedding = ["dep:ort", "dep:tokenizers"]
 `
 
 function runOn(root) {

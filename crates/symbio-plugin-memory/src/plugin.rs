@@ -36,6 +36,7 @@ use super::config::MemoryConfig;
 use super::memory::{self, PLUGIN_TITLE, SEGMENT_NAME};
 use super::session;
 use super::workspace;
+use crate::memory_file::MemoryFile;
 use async_trait::async_trait;
 use serde_json::json;
 use std::sync::Arc;
@@ -48,7 +49,6 @@ use symbio_plugin_api::{
     TRAVERSE_AVAILABLE_TOOLS, WORKSPACE_VDFS,
 };
 use symbio_plugin_api::{DetailDefinition, DetailField};
-use symbio_providers::MemoryFile;
 use tokio::sync::RwLock;
 
 /// 配置表单的定义 —— **定义由配置的拥有者产出**，默认值从 [`MemoryConfig::default`]

@@ -262,7 +262,9 @@ function loadWorkspaceGraph() {
 export function providerSymbols(txt) {
   const src = stripComments(txt);
   const out = new Set();
-  for (const mm of src.matchAll(/pub\s+use\s+symbio_provider_[a-z_]+\s*::\s*\{([\s\S]*?)\}\s*;/g)) {
+  for (const mm of src.matchAll(
+    /pub\s+use\s+(?:symbio_provider_[a-z_]+|collectors|embedding|vdfs_service)\s*::\s*\{([\s\S]*?)\}\s*;/g,
+  )) {
     for (const raw of mm[1].split(",")) {
       const item = raw.trim();
       if (!item) continue;

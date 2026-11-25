@@ -17,11 +17,8 @@ impl: done
 与系统同构的 composite 插件树，注册经代理层并进系统树）、**门槛**（manifest 不合规范时
 拒绝接入，绝不静默降级成「没有人格的通用助手」）。
 
-**当前智能体自身的指令与记忆都不归本插件**：稳定指令 / 人格（`AGENTS.md`）归
-[setting](../symbio-plugin-setting/README.md "crates/symbio-plugin-setting/README") 只读注入；
-动态记忆（`MEMORY.md`）的唯一所有者是
-[memory](../symbio-plugin-memory/README.md "crates/symbio-plugin-memory/README")。本插件只负责
-把子树里那两个实例**装进来**（分形），为什么这样切见 §指令与记忆不在本插件。
+本插件只负责把子树实例**装进来**（分形）；指令、记忆等能力由各自端口提供，本插件不持有
+它们的实现细节。
 
 ## 职责
 
@@ -31,9 +28,8 @@ impl: done
 | 子树装配 | 会话选定子智能体（`ctx[AGENT_ID]`）时构造该目录的插件树并转发能力收集；注册经 `SubAgentVisitor` 加来源前缀（`agent/<id>/…`），与系统树**并集**且不撞名 |
 | 选项贡献 | `traverse(agent/available_options)` 提供会话页的「子智能体」选择项 |
 
-委托工具（`agent_run`）不住在这里：它是**会话级原语**，由 [session](../symbio-plugin-session/README.md "crates/symbio-plugin-session/README")
-注册（D-500）。本插件与委托的关系只剩地址面——session 经容器 VDFS 视图列 `subagent` 挂载点
-得到 `agent_id` 候选、执行期 `Stat subagent/<id>` 校验存在性，不再有代码级接触。
+委托工具是会话级原语，本插件不持有它的注册或执行。本插件只提供地址面：经 VDFS 视图列
+`subagent` 挂载点得到 `agent_id` 候选、执行期以 `Stat subagent/<id>` 校验存在性。
 
 ### 为什么托管与门槛必须在同一个插件里
 
@@ -48,23 +44,6 @@ impl: done
 MCP 配置按约定文件名探测）等于宿主替技能系统与 MCP 客户端**再写一遍解析**，两条链必然
 长期不同步（规范 §3.2 第 2 条）。Agent 因此是**一棵插件树**：能力由目录里的插件实例
 自己解释，本插件只做枚举 / 建目录 / 导入导出，挂载点内**没有任何保留名**。
-
-### 指令与记忆不在本插件：谁能读写它，谁负责注入它
-
-智能体的指令 / 记忆文件就躺在被扫描、被装配、被整包浏览的那些目录里，「顺手一起管」
-最省事——但那样读写面与注入面就分在两个插件手里：`agent` 持有地址，别的插件注入正文，
-`谁能读写它，谁负责注入它` 这条原则当场破掉。而记忆的智能体腿与工作区腿本是**同一种
-东西的不同作用域**（同样的读写、同样的两道容量闸门、同样的片段排版），跨插件复述就会
-分叉成「超限是拒绝还是截断」随这条记忆属于哪一层而变。
-
-按 [D-527](../../docs/003-design/011-Agent目录规范.md "DE-011-Agent目录规范") 的切法，
-指令与记忆**语义隔离、各归其主**：稳定指令 / 人格（`AGENTS.md`）的读取与注入归 `setting`
-（两级覆盖，只读）；动态记忆（`MEMORY.md`）的落位、可编辑地址、两道闸门与空文件约定
-归 `memory`（三层叠加，各层可开关）
-（[Memory 插件](../symbio-plugin-memory/README.md "crates/symbio-plugin-memory/README") 与
-[规范附录 A.3](../../docs/003-design/011-Agent目录规范.md "DE-011-Agent目录规范")）。
-本插件交出的是**分形**：子树里 `setting` / `memory` 实例的父目录恰好就是 agent 目录，
-落位因此天然正确，谁也不必认识「系统智能体」与「子智能体」这两个词。
 
 ### 子 Agent 的默认插件清单
 
@@ -107,12 +86,10 @@ agent 目录的寻址是**挂载点语义**而非平铺三段（`route` 直接�
 agent id 的语法门槛（首字符必须是小写字母或数字）由规范 §5.1 定，准入判据落在
 `host/manifest.rs::validate`——本插件因此**不可能**与名为 `AGENTS.md` 的 agent 目录相撞。
 
-## 关联
+## 本插件的边界
 
-- 会话编排与系统提示词的拼接 / 消费：`../session/README.md`
-- 动态记忆的所有者（会话 / 智能体 / 工作区三层叠加）：`../memory/README.md`
-- 稳定指令 / 人格的所有者（`AGENTS.md` 只读注入）+ 设置入口：`../setting/README.md`
-- 插件管理入口（**不拥有任何指令或记忆文件**）：`../plugin_manager/README.md`
-- 记忆的共享实现（各层共用）：`providers/memory`
+本插件只经端口与地址面提供子智能体目录的枚举、装配与校验，不描述、不假设其它能力的实现。
+规范落点：
+
 - Agent 目录规范：`docs/003-design/011-Agent目录规范.md`
 - VDFS 机制（`<根>/subagent` 挂载点由本插件自持 `impl VdfsProvider`）：`docs/003-design/009-VDFS规范.md` §13.4

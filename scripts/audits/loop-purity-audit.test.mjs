@@ -96,14 +96,14 @@ test('LP-002 新增：Cargo 清单多一条 provider crate ⇒ 红', () => {
   const files = cleanFiles()
   files[CARGO] = files[CARGO].replace(
     'symbio-plugin-api = { path = "../symbio-plugin-api" }',
-    'symbio-plugin-api = { path = "../symbio-plugin-api" }\nsymbio-provider-memory = { path = "../symbio-provider-memory" }',
+    'symbio-plugin-api = { path = "../symbio-plugin-api" }\nsymbio-providers = { path = "../symbio-providers" }',
   )
   const box = sandbox(files)
   try {
     const r = run(box.root)
     assert.equal(r.status, 1, r.out)
     assert.match(r.out, /LP-002/)
-    assert.match(r.out, /symbio-provider-memory/)
+    assert.match(r.out, /symbio-providers/)
   } finally {
     box.cleanup()
   }

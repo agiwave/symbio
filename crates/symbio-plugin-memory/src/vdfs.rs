@@ -51,6 +51,7 @@ use super::memory::{self, MEMORY_FILE, PLUGIN_TITLE};
 use super::plugin::MemoryPlugin;
 use super::session::{self, MOUNT_FILE as SESSION_FILE, SEGMENT_TITLE as SESSION_LABEL};
 use super::workspace::{self, MOUNT_FILE as WORKSPACE_FILE, SEGMENT_TITLE as WORKSPACE_LABEL};
+use crate::memory_file::MemoryFile;
 use async_trait::async_trait;
 use symbio_plugin_api::PLUGIN_FILE;
 use symbio_plugin_api::PLUGIN_ID_MEMORY;
@@ -61,7 +62,6 @@ use symbio_plugin_api::{
     VdfsAccess, VdfsContent, VdfsContext, VdfsError, VdfsNode, VdfsProvider, VdfsRequest,
     VdfsResponse, VdfsResult, VdfsWriteResponse,
 };
-use symbio_providers::MemoryFile;
 
 const LABEL: &str = PLUGIN_TITLE;
 

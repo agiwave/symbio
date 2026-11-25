@@ -120,7 +120,7 @@ test('决策号允许三位以上（D-1000 不该被当成没写）', () => {
 })
 
 test('provider / testkit 也算「扩能力」侧的证据', () => {
-  for (const f of ['crates/symbio-provider-vdfs_service/src/lib.rs', 'crates/symbio-testkit/src/lib.rs']) {
+  for (const f of ['crates/symbio-providers/src/vdfs_service/mod.rs', 'crates/symbio-testkit/src/lib.rs']) {
     const r = judge(SHA, [CORE, f], msg('\nCore-Change: 随手改\n'))
     assert.equal(r.errors.length, 1, f)
     assert.match(r.errors[0], /^CC-002/)

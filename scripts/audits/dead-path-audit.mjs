@@ -133,7 +133,7 @@ function existingCrates() {
     .readdirSync(dir, { withFileTypes: true })
     .filter((e) => e.isDirectory() && e.name.startsWith('symbio-'))
     .map((e) => e.name.slice('symbio-'.length))
-  // 目录名里 `-` 与 `_` 混用是既成事实（`symbio-provider-vdfs_service`），比对时两边
+  // 目录名里 `-` 与 `_` 混用是既成事实（`vdfs_service/` 模块），比对时两边
   // 都抹掉分隔符——判的是「这个名字打不打得开」，不是「拼写是否一致」。
   return names.length ? new Set(names.map((n) => n.replace(/[-_]/g, ''))) : null
 }

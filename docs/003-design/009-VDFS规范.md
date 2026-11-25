@@ -20,7 +20,7 @@ impl: done
 `crates/symbio-plugin-vdfs/src/host.rs`（**访问层：拆信封 + 翻译操作 + 树遍历 + 事件投递**）、
 `crates/symbio-plugin-vdfs/src/physical.rs`（**物理层：磁盘真实文件 + 路径守卫**）、
 `crates/symbio-plugin-composite/src/vdfs.rs`（**拓扑：包含子目录列表的 provider**）、
-`crates/symbio-provider-vdfs_service/src/`（**宿主实现层：`VdfsProvider` 的三个集中实现**
+`crates/symbio-providers/src/vdfs_service/`（**宿主实现层：`VdfsProvider` 的三个集中实现**
 ——单文件 / 目录 / 内存，见 §2 分层与开放边界）
 
 > 本文件只写**规范与机制**。具体子目录（会话、模型、设置分区、工作目录……）

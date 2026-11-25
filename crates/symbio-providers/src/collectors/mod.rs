@@ -82,5 +82,5 @@ pub fn new_registry() -> Arc<dyn Registry> {
 }
 
 #[cfg(test)]
-#[path = "lib.test.rs"]
+#[path = "mod.test.rs"]
 mod tests;

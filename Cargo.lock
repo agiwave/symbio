@@ -4368,7 +4368,6 @@ dependencies = [
  "ignore",
  "serde_json",
  "symbio-plugin-api",
- "symbio-providers",
  "tempfile",
  "tokio",
  "tracing",
@@ -4396,7 +4395,6 @@ dependencies = [
  "serde_json",
  "symbio-http",
  "symbio-plugin-api",
- "symbio-providers",
  "tempfile",
  "time",
  "tokio",
@@ -4445,7 +4443,6 @@ dependencies = [
  "serde_yaml_ng",
  "shellexpand",
  "symbio-plugin-api",
- "symbio-providers",
  "tempfile",
  "tokio",
  "tracing",
@@ -4460,7 +4457,6 @@ dependencies = [
  "serde",
  "serde_json",
  "symbio-plugin-api",
- "symbio-providers",
  "tempfile",
  "time",
  "tokio",
@@ -4744,7 +4740,6 @@ dependencies = [
  "serde",
  "serde_json",
  "symbio-plugin-api",
- "symbio-providers",
  "symbio-testkit",
  "tempfile",
  "time",
@@ -4826,78 +4821,26 @@ dependencies = [
 ]
 
 [[package]]
-name = "symbio-provider-collectors"
+name = "symbio-providers"
 version = "0.1.14"
 dependencies = [
  "async-trait",
+ "base64 0.22.1",
+ "grep",
  "indexmap 2.14.2",
+ "ort",
+ "regex",
+ "serde",
  "serde_json",
  "symbio-kernel",
  "symbio-plugin-api",
- "symbio-sdk",
- "tempfile",
- "tokio",
- "tracing",
-]
-
-[[package]]
-name = "symbio-provider-embedding"
-version = "0.1.14"
-dependencies = [
- "async-trait",
- "ort",
- "regex",
- "symbio-kernel",
  "symbio-sdk",
  "tempfile",
  "time",
  "tokenizers",
  "tokio",
  "tracing",
-]
-
-[[package]]
-name = "symbio-provider-memory"
-version = "0.1.14"
-dependencies = [
- "async-trait",
- "symbio-contract",
- "symbio-kernel",
- "symbio-sdk",
- "tempfile",
- "time",
- "tokio",
-]
-
-[[package]]
-name = "symbio-provider-vdfs_service"
-version = "0.1.14"
-dependencies = [
- "async-trait",
- "base64 0.22.1",
- "grep",
- "serde",
- "serde_json",
- "symbio-kernel",
- "symbio-sdk",
- "tempfile",
- "time",
- "tokio",
- "tracing",
  "uuid",
- "zip",
-]
-
-[[package]]
-name = "symbio-providers"
-version = "0.1.14"
-dependencies = [
- "symbio-provider-collectors",
- "symbio-provider-embedding",
- "symbio-provider-memory",
- "symbio-provider-vdfs_service",
- "tempfile",
- "tokio",
  "zip",
 ]
 

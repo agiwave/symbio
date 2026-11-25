@@ -1,9 +1,8 @@
-//! 「单文件长期记忆」的实现 —— 各层记忆**同一份口径**。
+//! 「单文件长期记忆」的实现 —— 三层记忆**同一份口径**，归 `memory` 插件私有。
 //!
-//! > ⚠️ **与 `providers/vdfs_service` 的「内存后端 VDFS」无关**：那个 `memory` 是
-//! > 「**内存**后端」的 VDFS（运行期驻留、不落盘）；本模块的 `memory` 是「**长期记忆**
-//! > 文件」（落盘、要给模型读写，文件名各层自定）。两个词都取「memory」的常见义，但指的是
-//! > 完全不同的东西——读代码时先看路径（`providers/memory/` vs `providers/vdfs_service/memory.rs`）。
+//! > ⚠️ **与 `vdfs_service` 的「内存后端 VDFS」无关**：那个 `memory` 是「**内存**后端」
+//! > 的 VDFS（运行期驻留、不落盘）；本模块的 `memory` 是「**长期记忆文件**」（落盘、
+//! > 要给模型读写，文件名各层自定）。读代码时先看路径（本文件 vs `vdfs_service/memory.rs`）。
 //!
 //! ## 几层是同一件事的几个作用域
 //!
@@ -18,32 +17,23 @@
 //! **刻意不同**——工作区腿叫 `WORKSPACE.md`、会话腿叫 `SESSION.md`、智能体腿叫
 //! `MEMORY.md`，地址里已写作用域，列表里不会撞名（见 `crates/symbio-plugin-memory/src/workspace.rs`）。
 //!
-//! ⚠️ **指令文件 `AGENTS.md` 不在这里**：那是稳定指令 / 人格，归 `setting` 插件读取
-//! 并注入（工作区级 / 智能体级两级覆盖），与本模块管的动态记忆语义隔离、物理隔离。
+//! ⚠️ **指令文件 `AGENTS.md` 不在这里**：那是稳定指令 / 人格，由其它能力读取并注入，
+//! 与本模块管的动态记忆语义隔离、物理隔离。
 //!
 //! 各层形态完全一样——**一个 UTF-8 文本文件、两道容量闸门、一行头信息的提示词片段、
 //! 一个 VDFS 读写节点**。几份实现就是几份会各自漂移的口径：「写侧是拒绝还是截断」
 //! 「读不到算不算错误」这类判断一旦分叉，用户看到的行为就会随「这条记忆属于哪一层」
 //! 而变化，而用户根本无从知道差异从哪来。
 //!
-//! ## 为什么在 providers 而不是 `symbio-sdk`
+//! ## 为什么归在 memory 插件
 //!
-//! 判据是**「谁拥有它」**，不是「它够不够底层」（见
-//! D-023、D-035）：
+//! 判据是**「谁拥有它」**（D-534）：三层记忆只有 `memory` 一个生产消费方，实现此前
+//! 住在共享 provider 层只是让「唯一所有者」在编译图上不成立。现在实现与三层的落位
+//! 规则同处一个 crate，文件名仍由各层自己定义（`memory::MEMORY_FILE` /
+//! `workspace::WORK_MEMORY_FILE` / `session::SESSION_MEMORY_FILE`），本模块不认识它们。
 //!
-//! - 它**不隶属任何单个插件**：三层记忆的 owner 是同一个 `memory` 插件，但它仍有
-//!   三个作用域、三个落位规则（智能体 / 工作区 / 会话）；共享实现若住插件里，
-//!   就要从其它作用域反被引，违背插件墙。⇒ 归 `providers/`（思路 2）。
-//! - 它是**实现**而不是契约：没有任何一处需要 `dyn MemoryProvider`——插件在
-//!   **编译期**就知道自己要用哪种记忆。故走**方式 B**（具体类型直接组合，见
-//!   `crate::providers` 的两种接线方式），**不进** `creator_create_object`。
-//!   硬抽 trait 只会把一次构造换成一次字符串查表（D-035）。
-//!
-//! **core 里什么都不留**——本模块的**整个**概念面都搬来了 `providers/`：实现、两道闸门、
-//! 片段排版、节点形状，以及**文件名**。文件名尤其不该由 core 统一：各层各写各的文件、
-//! 互不干涉，共享一个字面量只是把「改一层」变成「改几层」。
-//! 各层自己的名字定义在 memory 插件里（`memory::memory::MEMORY_FILE` /
-//! `memory::workspace::WORK_MEMORY_FILE` / `memory::session::SESSION_MEMORY_FILE`）。
+//! 它是**实现**而不是契约：没有任何一处需要 `dyn MemoryProvider`，硬抽 trait 只会把
+//! 一次构造换成一次字符串查表（D-035）。
 //!
 //! ## 边界：本模块收「**有地址、要限容**」的东西
 //!
@@ -52,11 +42,10 @@
 //! > 收「模型能自己改的东西」（要有地址、要限容）；
 //! > 没有地址的只读片段走普通注册即可，硬塞进来只会多出一堆「可选字段」。
 //!
-//! ⚠️ 这条线划的是**形态**：`{homedir}/AGENTS.md` 曾以「可读写的智能体记忆」身份
-//! 进过本模块（地址 `<根>/memory/AGENTS.md`、设置页可编辑）。D-527 之后职责归位——
-//! AGENTS.md 是**稳定指令 / 人格**，改归 `setting` 只读注入（两道闸门与地址对它不再
-//! 适用），本模块只管三层的 `MEMORY.md` 动态记忆。反过来，模型插件注册的人格片段
-//! 没有地址，也永远不进来。
+//! ⚠️ 这条线划的是**形态**：`AGENTS.md` 曾以「可读写的智能体记忆」身份进过本模块
+//! （地址 `<根>/memory/AGENTS.md`、设置页可编辑）。D-527 之后职责归位——它是**稳定指令 /
+//! 人格**，只读注入（两道闸门与地址对它不再适用），本模块只管三层的 `MEMORY.md` 动态记忆。
+//! 反过来，没有地址的人格片段也永远不进来。
 //!
 //! ## 归属：一个作用域只有一个所有者
 //!
@@ -69,8 +58,8 @@
 //! 因此三层的 `{work_dir}/MEMORY.md`、`{agent_dir}/MEMORY.md` 与
 //! `{session_dir}/MEMORY.md` **都归 memory**（D-513 / D-527）——它同时给出读写面
 //! （`<根>/memory/…`）与注入面，三个作用域同属一个所有者，印在片段里的地址与闸门
-//! 都是**它自己会执行**的；`AGENTS.md` 两级指令归 `setting`，session 只递出
-//! `SESSION_DIR` 和事实源，不再读任何记忆文件。指令与记忆物理隔离、所有者不同。
+//! 都是**它自己会执行**的；`AGENTS.md` 两级指令另属只读注入能力，作用域信息由上下文
+//! 按值递来，本模块不读任何指令文件。指令与记忆物理隔离、所有者不同。
 //!
 //! ## 个性不进来
 //!
@@ -93,16 +82,16 @@
 //!
 //! ## 本模块**不认识**文件名
 //!
-//! 名字由**各层自己**给：本模块只拿到一个完整路径（`path`），节点名从路径末段推导
+//! 名字由**各层自己**给：本模块只拿到相对地址（`rel`），节点名从地址末段推导
 //! （[`MemoryFile::file_name`]），**没有**任何硬编码的兜底文件名。D-527 之后三层
 //! 恰好都选了 `MEMORY.md`（统一是可预测性收益，不是本模块强制的）——但那三个字面量
 //! 仍各定义在 memory 插件的三层模块里，本模块不共享、不假设它们同名。名字也不是
 //! 「配置」：宿主不解析内容，只做三件事——**注入**、**限容**、**给地址**。
 
-use std::path::{Path, PathBuf};
-use symbio_kernel::vdfs::{
-    DynVdfsProvider, VdfsAccess, VdfsContent, VdfsContext, VdfsError, VdfsNode, VdfsRequest,
-    VdfsResponse,
+use std::path::Path;
+use symbio_plugin_api::{
+    text_floor_char_boundary, DynVdfsProvider, VdfsAccess, VdfsContent, VdfsContext, VdfsError,
+    VdfsNode, VdfsRequest, VdfsResponse,
 };
 
 /// 注入用正文的产物 —— 「按预算截断」这一步的全部信息。
@@ -131,7 +120,7 @@ impl MemoryInjection {
     ///
     /// `text_floor_char_boundary`
     pub fn cut(text: &str, budget_bytes: usize) -> Self {
-        let end = symbio_contract::text::text_floor_char_boundary(text, budget_bytes);
+        let end = text_floor_char_boundary(text, budget_bytes);
         Self {
             text: text[..end].to_string(),
             truncated: end < text.len(),
@@ -173,19 +162,15 @@ pub struct MemoryNodeSpec<'a> {
 
 /// 一个作用域里的一个记忆文件。
 ///
-/// `path = None` 表示**该作用域不存在**（没选工作区 / 没选智能体）——这不是错误，
+/// `provider = None` 表示**该作用域不存在**（没选工作区 / 没选智能体）——这不是错误，
 /// 是「这层记忆此刻不适用」。所有方法据此降级：读 → 空串，注入 → `None`，
 /// 写 → 明确报错。作用域判断因此不需要在每个调用点重复一遍。
-/// 记忆文件的存储后端（D-515）：`File` 是兼容形态（测试 / 老调用），
-/// `Vdfs` 是生产形态——经作用域 provider 读写，**插件不再拼物理路径**。
+/// 记忆文件的存储后端（D-515）：经作用域 provider 读写，**插件不拼物理路径**。
 #[derive(Clone)]
-enum MemoryBackend {
-    File(PathBuf),
-    Vdfs {
-        provider: DynVdfsProvider,
-        /// 相对地址（如 `MEMORY.md`），不含物理目录。
-        rel: String,
-    },
+struct MemoryBackend {
+    provider: DynVdfsProvider,
+    /// 相对地址（如 `MEMORY.md`），不含物理目录。
+    rel: String,
 }
 
 #[derive(Clone)]
@@ -196,19 +181,7 @@ pub struct MemoryFile {
 }
 
 impl MemoryFile {
-    /// 由落位与两道闸门构造（`path = None` = 作用域不存在）。
-    ///
-    /// **兼容形态**：生产路径改用 [`MemoryFile::via`]；本构造仍供测试与
-    /// 「落位规则」用例断言文件落在哪。
-    pub fn new(path: Option<PathBuf>, write_max_bytes: usize, inject_max_bytes: usize) -> Self {
-        Self {
-            backend: path.map(MemoryBackend::File),
-            write_max_bytes,
-            inject_max_bytes,
-        }
-    }
-
-    /// 由作用域 provider + 相对地址构造（D-515 生产形态）。
+    /// 由作用域 provider + 相对地址构造。
     /// `provider = None` = 作用域不存在（没选工作区 / 无会话）。
     pub fn via(
         provider: Option<DynVdfsProvider>,
@@ -217,19 +190,10 @@ impl MemoryFile {
         inject_max_bytes: usize,
     ) -> Self {
         Self {
-            backend: provider.map(|provider| MemoryBackend::Vdfs {
+            backend: provider.map(|provider| MemoryBackend {
                 provider,
                 rel: rel.into(),
             }),
-            write_max_bytes,
-            inject_max_bytes,
-        }
-    }
-
-    /// 作用域不存在时的构造（无工作区 / 无智能体 / 无会话）
-    pub fn absent(write_max_bytes: usize, inject_max_bytes: usize) -> Self {
-        Self {
-            backend: None,
             write_max_bytes,
             inject_max_bytes,
         }
@@ -240,49 +204,20 @@ impl MemoryFile {
         self.backend.is_some()
     }
 
-    /// 记忆文件路径（无作用域 → `None`）。
-    ///
-    /// **仅测试**：生产路径（Vdfs 后端）没有物理路径，落位由 provider 持有；
-    /// 这里只对 `File` 兼容形态返回，供「落位」用例断言。
-    pub fn path(&self) -> Option<&Path> {
-        match self.backend.as_ref() {
-            Some(MemoryBackend::File(p)) => Some(p.as_path()),
-            _ => None,
-        }
-    }
-
     /// 文件名 —— 节点名从这里来（**地址用真实文件名**，不另传一份字面量）。
     ///
     /// 无作用域 → `None`：没有文件，就没有名字。本模块**没有**兜底文件名
     /// （叫什么由各层自己定，见模块文档），所以这里如实返回 `None`。
     pub fn file_name(&self) -> Option<&str> {
-        match self.backend.as_ref() {
-            Some(MemoryBackend::File(p)) => p.file_name().and_then(|s| s.to_str()),
-            Some(MemoryBackend::Vdfs { rel, .. }) => {
-                Path::new(rel).file_name().and_then(|s| s.to_str())
-            }
-            None => None,
-        }
-    }
-
-    /// 写入闸门取值。
-    ///
-    /// **仅测试**：闸门的**效果**（超限拒绝 / 超预算截断）已由本类型的读写路径与
-    /// `tests.rs` 覆盖；插件侧的用例用它断言「配置值确实透传进来了」。
-    pub fn write_max_bytes(&self) -> usize {
-        self.write_max_bytes
-    }
-
-    /// 注入闸门取值（**仅测试**，同 `write_max_bytes`）
-    pub fn inject_max_bytes(&self) -> usize {
-        self.inject_max_bytes
+        self.backend
+            .as_ref()
+            .and_then(|b| Path::new(&b.rel).file_name().and_then(|s| s.to_str()))
     }
 
     /// 记忆文件是否已存在
     pub async fn exists(&self) -> bool {
         match self.backend.as_ref() {
-            Some(MemoryBackend::File(p)) => p.is_file(),
-            Some(MemoryBackend::Vdfs { provider, rel }) => stat_vdfs(provider, rel).await.is_ok(),
+            Some(MemoryBackend { provider, rel }) => stat_vdfs(provider, rel).await.is_ok(),
             None => false,
         }
     }
@@ -290,8 +225,7 @@ impl MemoryFile {
     /// 记忆文件字节数（不存在 / 无作用域 → 0）
     pub async fn size(&self) -> u64 {
         match self.backend.as_ref() {
-            Some(MemoryBackend::File(p)) => std::fs::metadata(p).ok().map(|m| m.len()).unwrap_or(0),
-            Some(MemoryBackend::Vdfs { provider, rel }) => stat_vdfs(provider, rel)
+            Some(MemoryBackend { provider, rel }) => stat_vdfs(provider, rel)
                 .await
                 .ok()
                 .and_then(|n| n.size)
@@ -303,12 +237,7 @@ impl MemoryFile {
     /// 最后修改时间（Unix 秒；取不到 → `None`）
     pub async fn updated_at(&self) -> Option<i64> {
         match self.backend.as_ref() {
-            Some(MemoryBackend::File(p)) => std::fs::metadata(p)
-                .ok()
-                .and_then(|m| m.modified().ok())
-                .and_then(|t| t.duration_since(std::time::UNIX_EPOCH).ok())
-                .map(|d| d.as_secs() as i64),
-            Some(MemoryBackend::Vdfs { provider, rel }) => stat_vdfs(provider, rel)
+            Some(MemoryBackend { provider, rel }) => stat_vdfs(provider, rel)
                 .await
                 .ok()
                 .and_then(|n| n.updated_at),
@@ -321,24 +250,16 @@ impl MemoryFile {
     /// 文件不存在 → **空串**（不是错误）：记忆是「可以还没有」的东西，把它当错误
     /// 会让每一次「首次读取」都变成异常路径。无作用域 → 明确报错。
     pub async fn read(&self) -> Result<String, String> {
-        match self.backend.as_ref() {
-            Some(MemoryBackend::File(p)) => match std::fs::read_to_string(p) {
-                Ok(text) => Ok(text),
-                Err(e) if e.kind() == std::io::ErrorKind::NotFound => Ok(String::new()),
-                Err(e) => Err(format!("读取记忆失败（{}）：{e}", p.display())),
-            },
-            Some(MemoryBackend::Vdfs { provider, rel }) => {
-                let vctx = VdfsContext::new(());
-                match provider.dispatch(&vctx, rel, VdfsRequest::Read).await {
-                    Ok(resp) => Ok(resp.into_read().and_then(|c| c.text).unwrap_or_default()),
-                    // 「还没写过」不是故障：provider 报节点不存在 ⇒ 空串，
-                    // 与 File 后端的 NotFound → Ok("") 完全同一口径。否则每一次
-                    // 首次读取都会进收集期错误桶，工作区腿的空内容提示也永远出不来。
-                    Err(VdfsError::NotFound(_)) => Ok(String::new()),
-                    Err(e) => Err(format!("读取记忆失败：{e}")),
-                }
-            }
-            None => Err("当前作用域没有记忆文件".to_string()),
+        let Some(MemoryBackend { provider, rel }) = self.backend.as_ref() else {
+            return Err("当前作用域没有记忆文件".to_string());
+        };
+        let vctx = VdfsContext::new(());
+        match provider.dispatch(&vctx, rel, VdfsRequest::Read).await {
+            Ok(resp) => Ok(resp.into_read().and_then(|c| c.text).unwrap_or_default()),
+            // 「还没写过」不是故障：provider 报节点不存在 ⇒ 空串。否则每一次
+            // 首次读取都会进收集期错误桶，工作区腿的空内容提示也永远出不来。
+            Err(VdfsError::NotFound(_)) => Ok(String::new()),
+            Err(e) => Err(format!("读取记忆失败：{e}")),
         }
     }
 
@@ -347,47 +268,30 @@ impl MemoryFile {
     /// **容量闸门**：`write_max_bytes` 是硬限制，超出**直接拒绝**（见模块文档：
     /// 不截断、不部分写入——被拒绝的写入不得留下半截内容）。
     pub async fn write(&self, text: &str) -> Result<(), String> {
-        // 无作用域直接拒写，与 read/inject 的降级同一口径；用 `let Some` 收口，
-        // 后面的 match 只剩两种真实后端，无需不可达兜底（不引入 panic 面）。
-        let Some(backend) = self.backend.as_ref() else {
+        let Some(MemoryBackend { provider, rel }) = self.backend.as_ref() else {
             return Err("当前作用域没有记忆文件，不可写".to_string());
-        };
-        let label = match backend {
-            MemoryBackend::File(p) => p.display().to_string(),
-            MemoryBackend::Vdfs { rel, .. } => rel.clone(),
         };
         if text.len() > self.write_max_bytes {
             return Err(format!(
                 "记忆超出容量上限（{}）：当前 {} 字节，上限 {} 字节。\
                  请精简后再写入（可先读取现有内容，合并改写而不是整篇重写）。",
-                label,
+                rel,
                 text.len(),
                 self.write_max_bytes
             ));
         }
-        match backend {
-            MemoryBackend::File(p) => {
-                if let Some(parent) = p.parent() {
-                    std::fs::create_dir_all(parent)
-                        .map_err(|e| format!("创建记忆目录失败（{}）：{e}", parent.display()))?;
-                }
-                std::fs::write(p, text).map_err(|e| format!("写入记忆失败（{}）：{e}", p.display()))
-            }
-            MemoryBackend::Vdfs { provider, rel } => {
-                let vctx = VdfsContext::new(());
-                provider
-                    .dispatch(
-                        &vctx,
-                        rel,
-                        VdfsRequest::Write {
-                            content: VdfsContent::text(text),
-                        },
-                    )
-                    .await
-                    .map_err(|e| format!("写入记忆失败：{e}"))?;
-                Ok(())
-            }
-        }
+        let vctx = VdfsContext::new(());
+        provider
+            .dispatch(
+                &vctx,
+                rel,
+                VdfsRequest::Write {
+                    content: VdfsContent::text(text),
+                },
+            )
+            .await
+            .map_err(|e| format!("写入记忆失败：{e}"))?;
+        Ok(())
     }
 
     /// 注入产物：按 `inject_max_bytes` 截断。无作用域 → `None`。
@@ -505,5 +409,9 @@ pub fn memory_render_segment(
 }
 
 #[cfg(test)]
-#[path = "lib.test.rs"]
+#[path = "memory_file_fixture.rs"]
+pub(crate) mod fixture;
+
+#[cfg(test)]
+#[path = "memory_file.test.rs"]
 mod tests;

@@ -57,10 +57,9 @@ impl: done
 | 持久化 | `store/mod.rs` | 一种磁盘布局、一种驻留方式（落盘；D-329）；没有可切换的存储后端 |
 | 运行态 | `active.rs` + `runtime.rs` | `active.rs`：进程内运行态注册表（待消费请求、请求 id、中止信号、变更订阅）；`runtime.rs`：上一轮结局从生命周期事实折出的**投影**（D-083 §5.2） |
 | 能力与选项收集 | `capabilities.rs` | `collect_capabilities`（工具）与 `collect_options`（选项字段）两个 traverse 收集器，同处一地 |
-| 心跳 | **不住本插件**：独立的心跳调度插件 | 空闲扫描与触发调度（15 秒节拍、错峰、每 tick 上限）连同它的设置工具与选项行是一个**独立插件**（落点判据 [D-077](../../../symbio-plugin-heartbeat/README.md "crates/symbio-plugin-heartbeat/README")）。本插件与它相接的只有两处：收件箱写臂识别 `meta.trigger`（`plugin/nodes.rs::trigger_declaration`）与自主开轮的落格窗口（`transcript/autonomous.rs`） |
+| 心跳 | **不住本插件**：宿主注入的调度能力 | 空闲扫描与触发调度不在本插件；本插件只提供两处交接面：收件箱写臂识别 `meta.trigger`（`plugin/nodes.rs::trigger_declaration`）与自主开轮的落格窗口（`transcript/autonomous.rs`） |
 | 选项 | `options/mod.rs` | 会话自有选项的字段声明（`build_option_definition`；收集器在 `capabilities.rs`） |
 | 工作目录 | `workdir/{mod,fs_watcher}.rs` | 会话工作目录的 VDFS 实现（`<根>/session/<id>/workdir/<rel>`）与其下的文件系统监听 |
-| 会话记忆 | `memory.rs` | 本会话自己的 `MEMORY.md`：落位、地址、两道闸门与系统提示词注册段（机制在 `providers/memory`） |
 | 消息变更事实 | `message_events.rs` | 「编辑 / 截断」入格的写方（D-053）：`commands::patch_message` / `commands::truncate_messages` 经唯一写入口落事实，重建读路径不会让旧内容复活 |
 | 统计读数 | `stats.rs` | `session/stats` 的只读投影出口 |
 | worker 进展 | `worker_progress.rs` | Q3（worker 进展）的**唯一归属**：`WorkerProgress` 类型、旧落库读法（`progress_of`）与 WAL 读法（`progress_from_wal`）、逐子会话编排的存储侧单入口 `for_session`——驱动器只调这一个入口，「枚举 + 加载 + 复核 + 读法」这条链不在驱动器侧自拼（[D-081](../../../../docs/003-design/014-单环一表.md "DE-014-单环一表") 裁决一第 4 条） |
