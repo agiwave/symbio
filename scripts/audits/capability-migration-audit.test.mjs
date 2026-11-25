@@ -304,6 +304,13 @@ test('migrationErrors：迁移提交没有删除旧实现 ⇒ EX-003 红（改�
   assert.match(e, /EX-003/)
 })
 
+test('migrationErrors：从 SDK 迁回宿主且旧实现已删 ⇒ EX-003 绿（旧 owner 在机制面）', () => {
+  assert.deepEqual(
+    mig([{ path: CORE, added: [], removed: ['pub fn old_marker() {}'] }]),
+    [],
+  )
+})
+
 test('migrationErrors：迁移中重生成 events.rs 不算碰机制面', () => {
   assert.deepEqual(
     mig([

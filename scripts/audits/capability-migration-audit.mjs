@@ -992,10 +992,23 @@ export function migrationErrors({
     )
   }
 
-  const deletions = control.reduce((n, f) => n + f.removed.length, 0)
+  // 旧实现可能在控制面（loop / session），也可能在机制面（sdk / kernel / plugin-api）：
+  // 事件转播标记这种只有宿主读者的语义从 SDK 迁回 Server 时，删除发生在后者。
+  // 只认 loop / session 会把「旧实现确实删了」的迁移判成两份实现同存，逼作者不写
+  // `Migration:`（EX-003 从此判不到）或去做一笔假的控制面删除。
+  const oldImplementation = [
+    ...control,
+    ...patch.filter(
+      (f) =>
+        inTrees(f.path, ARCH_TREES) &&
+        isCapabilitySource(f.path) &&
+        !isGenerated(f.path),
+    ),
+  ]
+  const deletions = oldImplementation.reduce((n, f) => n + f.removed.length, 0)
   if (deletions === 0) {
     errors.push(
-      'EX-003 迁移提交没有删除 `loop` / `session` 的非测试源码——插件落地与旧实现删除必须同提交（D-245），否则两份实现同时生效',
+      'EX-003 迁移提交没有删除旧实现所在受保护树的非测试源码——插件落地与旧实现删除必须同提交（D-245 / D-553），否则两份实现同时生效',
     )
   }
 
