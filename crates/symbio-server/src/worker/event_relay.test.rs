@@ -11,9 +11,9 @@ fn relay_marker_does_not_change_the_business_envelope() {
             "data": { "path": "session/child" }
         }
     }));
-    assert!(!event_bus_is_relayed(&frame));
-    let relayed = event_bus_mark_relayed(frame);
-    assert!(event_bus_is_relayed(&relayed));
+    assert!(!is_relayed(&frame));
+    let relayed = mark_relayed(frame);
+    assert!(is_relayed(&relayed));
     let PluginFrame::Data(value) = relayed else {
         panic!("relayed frame must remain data");
     };
@@ -23,9 +23,6 @@ fn relay_marker_does_not_change_the_business_envelope() {
 #[test]
 fn relay_marker_leaves_non_data_frames_unchanged() {
     let frame = PluginFrame::Error("boom".to_string(), None);
-    assert!(!event_bus_is_relayed(&frame));
-    assert!(matches!(
-        event_bus_mark_relayed(frame),
-        PluginFrame::Error(_, None)
-    ));
+    assert!(!is_relayed(&frame));
+    assert!(matches!(mark_relayed(frame), PluginFrame::Error(_, None)));
 }

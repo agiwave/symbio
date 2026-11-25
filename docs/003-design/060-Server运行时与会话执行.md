@@ -213,6 +213,19 @@ Supervisor 只接受启动投影登记过的精确目标，剥离 worker 提供�
 上游请求。该代理只提供受控网络出口，不授予工具、审批或沙箱策略权限，也不声称 Docker 本身
 提供容器、网络或进程隔离。
 
+### D-552 事件转播标记归 Server：SDK 只留发布端口
+
+**现场**：跨 worker 事件的转播标记（`__relayed` 及其打标 / 判定函数）只被 Server 的
+Supervisor 与 worker 进程使用；SDK 里既有 event_bus 域的读者只有 Server，插件侧没有消费方。
+它随 `D-546` 的驱动契约一起进了 SDK，使共享机制面多出三个公开项，EX-007 的欠账因此还剩
+一笔。
+
+**裁决**：把标记常量与 `mark_relayed` / `is_relayed` 连同同源测试迁到
+`crates/symbio-server/src/worker/event_relay.rs`，SDK 的 event_bus 域只保留发布入口与发布
+端口；`PluginFrame` 仍是现成内核语法，不为 Server 新增跨插件契约。事件语义、帧形状与
+背压补送路径逐字不变，只是标记的所有者从共享机制回到唯一读者。EX-007 按真实机制面净减
+记一笔迁移，抵掉 `D-546` 那一笔补件；不为消账改基线、不加到期豁免。
+
 ## 验收边界
 
 - Server 与 Gateway 共用传输实现，但调用者身份、公开面与路由策略不共享。

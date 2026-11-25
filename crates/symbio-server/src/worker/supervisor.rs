@@ -15,7 +15,7 @@ use symbio::symbio_plugin_api::{
     event_bus_build_envelope, PluginInvokeRequestExt, SymbioKey, VdfsCaller, EVENT_BUS_KIND_SYSTEM,
     EVENT_BUS_RESYNC_MARKER_TYPE, VDFS_CALLER,
 };
-use symbio::symbio_sdk::event_bus::{event_bus_is_relayed, event_bus_mark_relayed, EventBus};
+use symbio::symbio_sdk::event_bus::EventBus;
 use symbio::symbio_sdk::keys::{PATH, SESSION_ID, WORKDIR};
 use symbio::symbio_sdk::vdfs::{declared_addr_root, join_addr};
 use tokio::io::BufReader;
@@ -27,6 +27,7 @@ use tracing::{debug, info, warn};
 use super::broker::BrokerRegistry;
 use super::container::{self, BrokerTarget, WorkerConfig, WorkerMode};
 use super::epoch::EpochRegistry;
+use super::event_relay::{is_relayed, mark_relayed};
 use super::id::validate_session_id;
 use super::protocol::{read_line, write_line, WorkerLine, CONTROL_CHANNEL_CAPACITY};
 use super::{BuildId, DurableInbox, InboxRequest, RequestId, WorkerError, WorkerId};
@@ -914,7 +915,7 @@ async fn spawn_worker(
                     message,
                 },
                 Outgoing::Event { frame } => WorkerLine::DeliverEvent {
-                    frame: event_bus_mark_relayed(frame),
+                    frame: mark_relayed(frame),
                 },
                 Outgoing::Line(line) => line,
             };
@@ -1185,7 +1186,7 @@ async fn read_worker(reader: WorkerReader, stop: CancellationToken) {
 }
 
 fn publish_frame(frame: PluginFrame) {
-    if event_bus_is_relayed(&frame) {
+    if is_relayed(&frame) {
         return;
     }
     let is_system = frame

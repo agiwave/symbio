@@ -21,25 +21,6 @@ use std::sync::{Arc, LazyLock};
 
 use symbio_kernel::plugin::PluginFrame;
 
-pub const EVENT_BUS_RELAY_MARKER: &str = "__relayed";
-
-pub fn event_bus_mark_relayed(frame: PluginFrame) -> PluginFrame {
-    let PluginFrame::Data(value) = frame else {
-        return frame;
-    };
-    let mut outer = value.as_object().cloned().unwrap_or_default();
-    outer.insert(EVENT_BUS_RELAY_MARKER.to_string(), Value::Bool(true));
-    PluginFrame::Data(Arc::new(Value::Object(outer)))
-}
-
-pub fn event_bus_is_relayed(frame: &PluginFrame) -> bool {
-    frame
-        .value()
-        .and_then(|value| value.get(EVENT_BUS_RELAY_MARKER))
-        .and_then(Value::as_bool)
-        .unwrap_or(false)
-}
-
 // 投递实现的装配 id —— 与 `EMBEDDING_LOCAL` 同一条纪律：id 常量只有一个住处。
 // `D-530` 后与契约层解耦：本常量是 creator 装配键（机制面），不是线上词表，故留本层。
 pub const EVENT_BUS_SINK: &str = "event_bus_sink";
@@ -93,7 +74,3 @@ impl EventBus {
         }
     }
 }
-
-#[cfg(test)]
-#[path = "mod.test.rs"]
-mod tests;

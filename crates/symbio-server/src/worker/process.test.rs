@@ -1,6 +1,6 @@
 use super::super::{BuildId, Epoch, InboxRequest};
 use super::*;
-use symbio::symbio_sdk::event_bus::event_bus_mark_relayed;
+use crate::worker::event_relay::mark_relayed;
 
 fn test_launcher() -> (
     Arc<StdioLauncher>,
@@ -260,7 +260,7 @@ async fn relayed_frames_do_not_stop_local_forwarding() {
         .await
         .expect("send first");
     input_tx
-        .send(event_bus_mark_relayed(PluginFrame::data(json!({
+        .send(mark_relayed(PluginFrame::data(json!({
             "data": { "kind": "vdfs.changed", "data": { "path": "relayed" } }
         }))))
         .await

@@ -18,7 +18,7 @@ use symbio::symbio_plugin_api::{
     port_result, PortBindings, PortErrorClass, PortExecContext, PortExecutor, PortInput,
     PortOutcome, VdfsCaller, EVENT_BUS_KIND_SYSTEM, PORT_BINDINGS, VDFS_CALLER,
 };
-use symbio::symbio_sdk::event_bus::{event_bus_is_relayed, EventBus};
+use symbio::symbio_sdk::event_bus::EventBus;
 use symbio::symbio_sdk::keys::{PATH, SESSION_ID};
 use tokio::io::{stdin, stdout, BufReader};
 use tokio::sync::{mpsc, oneshot};
@@ -29,6 +29,7 @@ use tracing::{error, warn};
 use super::broker_shim;
 use super::container::MAX_BROKER_STREAMS;
 use super::epoch::EpochRegistry;
+use super::event_relay::is_relayed;
 use super::protocol::{read_line, write_line, WorkerLine, EVENT_CHANNEL_CAPACITY};
 use super::{
     DurableInbox, ReconciliationOutcome, RecoveryReport, RecoverySnapshot, RequestId, WorkerError,
@@ -546,7 +547,7 @@ async fn forward_events(
                     .and_then(|bus| bus.get("kind"))
                     .and_then(Value::as_str)
                     == Some(EVENT_BUS_KIND_SYSTEM);
-                if is_system || event_bus_is_relayed(&frame) {
+                if is_system || is_relayed(&frame) {
                     continue;
                 }
                 if let Err(error) = tokio::select! {

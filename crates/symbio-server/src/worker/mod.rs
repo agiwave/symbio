@@ -3,6 +3,7 @@ mod broker_shim;
 mod container;
 mod entry;
 mod epoch;
+mod event_relay;
 mod id;
 mod inbox;
 mod process;
