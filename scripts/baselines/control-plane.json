@@ -11,7 +11,7 @@
     "why": "指纹覆盖驱动循环体与 plan / expire 的归一化 token 流，加条件、改返回值、换比较符才进；历次演进已落代码，这里只留不变量"
   },
   "extension": {
-    "productionFiles": 9
+    "productionFiles": 8
   },
   "baseline-allow": []
 }

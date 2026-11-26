@@ -49,7 +49,6 @@ const ROOT = rootArg ? path.resolve(rootArg.slice('--root='.length)) : path.reso
 const LOOP_REL = 'crates/symbio-plugin-loop'
 const LOOP_SRC = `${LOOP_REL}/src`
 const ENGINE_REL = `${LOOP_SRC}/ring/engine.rs`
-const VOCAB_REL = `${LOOP_SRC}/vocab.rs`
 const BASELINE_REL = 'scripts/baselines/control-plane.json'
 const KERNEL_SRC = 'crates/symbio-platform/src/kernel'
 const SDK_SRC = 'crates/symbio-platform/src/sdk'
@@ -355,12 +354,11 @@ if (portNames.length === 0) {
   process.exit(2)
 }
 
-// 世界事件名：kernel / sdk / loop 的**代码**都不许持有名字。环的 `vocab.rs` 是声明表
-// 本身（`TC-2` 的「除声明表与测试外」），不算机制层；它里面的 `plugin.row.asked`
-// 是**机制事实**，不进 `worldNames`（那个集合只来自词汇家 `events.rs`）。
+// 世界事件名：kernel / sdk / loop 的**代码**都不许持有名字。sealed declarations 里的
+// `plugin.row.asked` 是机制事实，不进 `worldNames`（那个集合只来自词汇家 `events.rs`），
+// 且它现在住在平台声明模块，按常量名登记而不是字面量。
 for (const src of [KERNEL_SRC, SDK_SRC, LOOP_SRC]) {
   for (const rel of walk(src)) {
-    if (rel === VOCAB_REL) continue
     const code = commentsBlanked(read(rel) ?? '')
     for (const name of worldNames) {
       if (code.includes(`"${name}"`)) report('CP-004', rel, `机制层出现世界事件名字面量 "${name}"`)
@@ -372,7 +370,6 @@ for (const src of [KERNEL_SRC, SDK_SRC, LOOP_SRC]) {
 // kernel / sdk 里的 `"model"` / `"tool"` 大量是**载荷取值**、能力家族名与消息角色
 // （见 `plugin-api/vocab.rs` 的「多义拼写」注），文本扫描分不出概念，故不在此判。
 for (const rel of walk(LOOP_SRC)) {
-  if (rel === VOCAB_REL) continue
   const code = commentsBlanked(read(rel) ?? '')
   for (const name of portNames) {
     if (code.includes(`"${name}"`)) report('CP-004', rel, `派发面出现端口名字面量 "${name}"`)

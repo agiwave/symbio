@@ -944,12 +944,12 @@ function declaredPortNames() {
   return names
 }
 
-/** 世界事实名：门面事件常量 + 当前词汇持有者（`plugin-loop` 的 `vocab.rs`）。 */
+/** 世界事实名：门面事件常量 + 平台持有的机制名（`sdk/drive`）。 */
 function worldFactNames() {
   const names = new Set()
   for (const relPath of [
     'crates/symbio-plugin-api/src/events.rs',
-    'crates/symbio-plugin-loop/src/vocab.rs',
+    'crates/symbio-platform/src/sdk/drive/mod.rs',
   ]) {
     const abs = path.join(repoRoot, relPath)
     if (!fs.existsSync(abs)) continue

@@ -20,7 +20,10 @@ impl: done
 | [`src/ring/mod.rs`](src/ring/mod.rs) | 五类事实、事实投影、债表与驱动入口 |
 | [`src/drive.rs`](src/drive.rs) | 驱动执行者：把环交给宿主的通用驱动契约 |
 | [`src/plugin.rs`](src/plugin.rs) | 注册入口：交出驱动执行者 |
-| [`src/vocab.rs`](src/vocab.rs) | 端口名；全部从行数据读入，代码里没有字面量 |
+| [`src/plugin_rows.rs`](src/plugin_rows.rs) | 通用行执行体：按行数据派发，代码里没有端口名字面量 |
+
+通用执行体与端口出口行的声明归 `crates/symbio-platform/src/sdk/sealed_declarations.rs`，
+由装配期冻结；本 crate 只实现驱动，不持有声明表。
 
 ## 边界
 

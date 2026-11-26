@@ -182,7 +182,7 @@ pub struct DriveRow {
 ///
 /// 它不是世界词：不在任何插件的 `shared_events` 里，读方按名字取这一条机制记录，
 /// 不参与选债 / 派发 / 配对。
-pub const EVENT_DRIVER_STALLED: &str = "driver.stalled";
+pub const EVENT_DRIVER_STALLED: &str = symbio_platform::sdk::drive::EVENT_DRIVER_STALLED;
 
 /// 驱动出口。
 #[derive(Debug, Clone, PartialEq, Eq)]

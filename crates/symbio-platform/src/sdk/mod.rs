@@ -76,6 +76,7 @@ pub mod port_stamp;
 pub mod projection;
 pub mod round;
 pub mod sandbox;
+pub mod sealed_declarations;
 pub mod text;
 pub mod vdfs;
 

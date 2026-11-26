@@ -36,6 +36,12 @@ use crate::sdk::capability::port::PortBindings;
 use crate::sdk::agent::AgentScope;
 use crate::sdk::plugin::fact_source::FactSource;
 
+/// 驱动安全阀出口的机制事实名（`Exhausted` / `Stalled` 共用一种形状）。
+///
+/// 写方是宿主装配层，不是世界词；门面重导出这个名字，但声明表与宿主都从平台取，
+/// 编排 provider 搬出插件树后不必再持有它。
+pub const EVENT_DRIVER_STALLED: &str = "driver.stalled";
+
 /// 一次踢驱动要交回的全部输入：**根已绑在实现实例上**，这里只带本会话的事实。
 ///
 /// 事实源句柄由写口在打开时留下，踢的时候原样交回——实现不再按 `session_id`

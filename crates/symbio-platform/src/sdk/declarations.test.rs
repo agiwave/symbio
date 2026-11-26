@@ -76,3 +76,16 @@ fn assemble_collects_submitted_declarations() {
         .event_cell(crate::kernel::event::EVENT_REQUEST)
         .is_some());
 }
+
+#[test]
+fn sealed_declarations_survive_without_plugin_submissions() {
+    let frozen = assemble_declarations().expect("平台声明应能独立冻结");
+
+    assert!(frozen.actor(crate::sdk::plugin::rows::PLUGIN_ROW).is_some());
+    assert!(frozen.actor(crate::sdk::plugin::rows::PORT_ACTOR).is_some());
+    assert!(frozen.rows().iter().any(|row| row.name == "await-port"));
+    assert!(frozen
+        .event_cell(crate::sdk::plugin::rows::ASK_KIND)
+        .is_some());
+    assert!(frozen.host_written(crate::sdk::drive::EVENT_DRIVER_STALLED));
+}

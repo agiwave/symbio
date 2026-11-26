@@ -2,17 +2,13 @@
 //!
 //! ## 为什么本文件还要交一份「协议行」夹具
 //!
-//! 插件自己的单元测试二进制**只链接本 crate**：装配表里只有内核协议五格与本插件
-//! 声明的事件（`system.*` / `session.*` / 自 `loop` 移交过来的对话面），而协议事实的
-//! 归宿行住在 `crates/symbio-plugin-loop`——不在这里，就没有行读它们，
-//! `seal` 判据 7 报 `OrphanFact`，整张表失败（「失败是整体失败」），写闸于是
-//! 退到共享表。`system.*` 由本插件声明，不在共享表里 ⇒ 写不进去。
+//! 插件自己的单元测试二进制**只链接本 crate**：平台提交 sealed declarations
+//! （通用执行体与 `await-port` 行），本插件声明的事件（`system.*` / `session.*` /
+//! 对话面）也在表里。协议五格的归宿行仍由本夹具补——没有行读它们时 `seal` 判据 7
+//! 报 `OrphanFact`，整张表失败（「失败是整体失败」），写闸于是退到共享表。
+//! `system.*` 由本插件声明，不在共享表里 ⇒ 写不进去。
 //!
-//! 夹具补的正是**完整进程里由 loop 提供的那一半**：五条自读行让协议事实有归宿，
-//! 冻结表因此在本 crate 的测试进程里成立，端到端写闸用例才测得到 owner 声明。
-//! 它与 `symbio-plugin-api/src/declarations.test.rs` 的夹具同形，只在 `cfg(test)` 生效。
-//!
-//! 生产二进制不受影响：那里的协议行来自 loop 的提交，本夹具不参与编译。
+//! 夹具只在 `cfg(test)` 生效；生产二进制的平台声明与插件声明照常冻结。
 //!
 //! ## 为什么这里**不**给能力视图交替身
 //!
@@ -24,14 +20,13 @@
 //!
 //! 读数的**数字**归能力包自己的用例与 e2e——真实装配里跑的是 owner 那一份。
 
-use symbio_platform::kernel::adapters::LatencyTier;
 use symbio_platform::kernel::decl::ring::{Decl, Pattern};
-use symbio_platform::kernel::decl::{ActorDecl, PluginDeclarations};
+use symbio_platform::kernel::decl::PluginDeclarations;
 use symbio_platform::kernel::event::{
     Entity, EventDecl, Verb, EVENT_FAILED, EVENT_REQUEST, EVENT_RESPONSE, EVENT_RETRY, EVENT_SENT,
 };
 
-use super::{EVENT_SESSION_SETTLED, EVENT_SYSTEM_HEALTH, EVENT_SYSTEM_TRIGGERED};
+use super::{EVENT_SYSTEM_HEALTH, EVENT_SYSTEM_TRIGGERED};
 
 /// 技能观测的**格位**夹具：owner 是 `crates/symbio-plugin-skill`，它的折叠也住
 /// 在那里，而这条名字除 owner 之外没有生产读方 ⇒ 不在清单生成物里（`CS-007`）。
@@ -44,14 +39,6 @@ const HARNESS_EVENTS: &[EventDecl] = &[EventDecl::new(
     "memory.calibrated",
     (Entity::Memory, Verb::Asserted),
 )];
-
-/// `plugin_row` 执行体：生产装配里由 `loop` 交（写名单是全部行实现的并集），
-/// 本二进制只补这一行自己的出口——`session.settled`。
-const HARNESS_ACTORS: &[ActorDecl] = &[ActorDecl {
-    name: symbio_plugin_api::rows::PLUGIN_ROW,
-    mode: LatencyTier::Deep,
-    writes: &[EVENT_SESSION_SETTLED],
-}];
 
 /// 协议五格的**覆盖行**：内核无条件声明协议事实（`PROTOCOL_EVENTS` /
 /// `PROTOCOL_FACTS`），而 `seal` 要求每个被声明的事实至少有一行读到它——否则报
@@ -89,10 +76,8 @@ fn harness_declarations() -> PluginDeclarations<'static> {
         facts: &[],
         views: &[],
         ports: &[],
-        // 本插件不再声明任何端口行（端口绑定住在各端口所属插件与 loop），
-        // 因此测试夹具也不需要补 `port` 执行体——声明了却没有行指向它是
-        // `OrphanActor`，整张装配表会失败。
-        actors: HARNESS_ACTORS.to_vec(),
+        // 通用执行体由平台 sealed declarations 提供，夹具只补协议五格的读者。
+        actors: Vec::new(),
         rows: protocol_rows(),
     }
 }
