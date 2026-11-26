@@ -243,6 +243,23 @@ defineEmits<{
   overflow: hidden;
 }
 
+/* 窄屏：列表的行内 width 只是「宽屏下的期望值」，不是不可让的硬宽度。
+   放开收缩并压低 min-width，给详情区留出可读空间——否则 56px 图标栏 +
+   260px 列表会在 420px 视口把详情挤到约 100px，正文逐字竖排、输入框不可用。
+   列表自身有横向滚动边界（overflow:hidden + 卡片省略号），收缩不会撑破。 */
+@media (max-width: 34rem) {
+  .workbench-list {
+    flex: 1 1 auto;
+    min-width: 8rem;
+    max-width: 11rem;
+  }
+
+  .workbench-detail {
+    flex: 2 1 auto;
+    min-width: 0;
+  }
+}
+
 .panel-header {
   display: flex;
   align-items: center;

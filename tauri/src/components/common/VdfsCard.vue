@@ -116,8 +116,11 @@ const accessibleLabel = computed(() => {
   user-select: none;
 }
 
+/* hover 只给轻微的边框加深与阴影，不用 accent；选中态才是 accent 边框 +
+   背景填充的强信号。两者同色时，鼠标停在哪一项上，看起来都像「已选中」，
+   在「列表未选中但详情铺着新建草稿」的场景下尤其误导。 */
 .vdfs-card:hover {
-  border-color: var(--accent);
+  border-color: var(--border-strong);
   box-shadow: var(--shadow-1);
 }
 
@@ -218,15 +221,22 @@ const accessibleLabel = computed(() => {
   white-space: nowrap;
 }
 
-/* 元信息 */
+/* 元信息：保持单行。原先 flex-wrap:wrap 在窄屏（列表被压到 ~8rem）时把
+   「来源 / 条数 / 时间」拆成三行，一张卡被撑得又高又碎。现在不换行、溢出省略，
+   meta 是辅助信息，窄屏下截断优于逐行堆叠。 */
 .card-meta {
   display: flex;
   align-items: center;
   gap: var(--space-2);
-  flex-wrap: wrap;
+  flex-wrap: nowrap;
+  overflow: hidden;
   margin-top: var(--space-1);
   font-size: var(--font-size-xs);
   color: var(--text-muted);
+}
+
+.card-meta > * {
+  flex-shrink: 0;
 }
 
 .tag {
@@ -241,12 +251,18 @@ const accessibleLabel = computed(() => {
 .tag-info    { background: var(--info-bg); color: var(--info-fg); }
 .tag-muted   { background: var(--surface-sunken); color: var(--text-muted); }
 
+/* 描述给两行：列表卡片宽度受 Workbench 中栏约束（窄屏还会进一步收缩），
+   单行 nowrap 会把「当前目录下共有 **27 个条目**（13 个目录…」这类有用信息
+   砍成半句。两行截断既能读全意图，又不会让卡片无限变高。标题仍保持单行——
+   标题是身份，被截断有 title 属性兜底；描述是辅助信息，两行足够。 */
 .preview-text {
-  font-size: 0.72rem;
-  color: var(--text-muted);
-  line-height: 1.35;
+  font-size: var(--font-size-xs);
+  color: var(--text-secondary);
+  line-height: 1.4;
   overflow: hidden;
-  text-overflow: ellipsis;
-  white-space: nowrap;
+  display: -webkit-box;
+  -webkit-box-orient: vertical;
+  -webkit-line-clamp: 2;
+  line-clamp: 2;
 }
 </style>
