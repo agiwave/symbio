@@ -101,7 +101,7 @@ export const BASELINE = {
   // baseline-allow ciRustTestsTotal: 2601 → 2603（+2，）——新增两条判据：host 执行体
   // duplex 帧协议往返，以及监督者不把 host 帧回灌总线 / 不转给另一 host 执行体。纯新增判据。
   // baseline-allow ciRustTestsTotal: 2603 → 2604（+1，）——新增根工厂每次调用返回独立实例的回归。
-  ciRustTestsTotal: 2608,
+  ciRustTestsTotal: 2609,
   cliRustTests: 23,
   tauriRustTests: 5,
   // doc-link-allow D-010: 下一行是退役文件的历史叙述（已把这两个文件删掉），不是入链

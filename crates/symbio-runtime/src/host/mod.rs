@@ -43,7 +43,10 @@ use symbio_plugin_api::{ExecEventSink, FactDraft};
 pub use symbio_plugin_api::drive::{DriveKey, DriveOutcome, DriveReport};
 
 /// 宿主运行时：驱动入口与每会话推进状态（`P1` 批一：状态归宿主）。
+pub mod declared_drive_runner;
 pub mod drive;
+
+pub use declared_drive_runner::{declared_drive_runner, DriveRunnerDecl};
 /// 主部署驱动入口的装配登记（`DriveEntryDecl`，链接期生效）。
 pub mod entry;
 
@@ -252,15 +255,19 @@ impl Host {
             }
         }
 
-        let mut runner: Option<Arc<dyn DriveRunner>> = None;
-        for row in manager.list(DRIVE_FAMILY).await {
-            let Some(payload) = row.payload::<DrivePayload>() else {
-                continue;
-            };
-            if runner.is_some() {
-                return Err("drive 族出现多个提供者".to_string());
+        // 组合根登记优先：`drive` 族只是插件树还在时的回退发现口。登记存在时不再读族，
+        // 这样编排实现搬出插件树与插件退场可以分成两刀，而不会出现两个 runner。
+        let mut runner = declared_drive_runner();
+        if runner.is_none() {
+            for row in manager.list(DRIVE_FAMILY).await {
+                let Some(payload) = row.payload::<DrivePayload>() else {
+                    continue;
+                };
+                if runner.is_some() {
+                    return Err("drive 族出现多个提供者".to_string());
+                }
+                runner = Some(payload.runner());
             }
-            runner = Some(payload.runner());
         }
 
         // 簿记写方是按行收集的**数据**：宿主不认插件名，也不给某个内置写方开旁路
