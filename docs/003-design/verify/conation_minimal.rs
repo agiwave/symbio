@@ -188,7 +188,7 @@ pub enum GateDecision {
 
 // ═══════════════════════ 「欲」的参数（落进参数表的一行）═══════════════════════
 
-/// 对应 DE-001 §8 参数表的 `projection` / `event.entity` 取值扩展。
+/// 对应 DE-001 §9 参数表的 `projection` / `event.entity` 取值扩展。
 /// **注意：这里没有任何新机制键**——全是已有键的新取值。
 #[derive(Debug, Clone, Copy)]
 pub struct ConationPolicy {
@@ -296,8 +296,8 @@ fn main() {
     println!("  `ApprovedTask` 字段私有：模块外写不出结构体字面量（见 should_not_compile 用例 b）");
     println!("  → 强制力来自类型可见性与唯一构造点，不来自运行时字段");
 
-    // ── 语义守恒：这些"欲能力"落在哪个机制键上（对照 DE-008 §4 准入判定）──
-    println!("\n── 准入判定复核（DE-008 §4 四问）──");
+    // ── 语义守恒：这些"欲能力"落在哪个机制键上（对照 DE-008 §3 准入判定）──
+    println!("\n── 准入判定复核（DE-008 §3 四问）──");
     let mut ledger: BTreeMap<&str, &str> = BTreeMap::new();
     ledger.insert("目标自生成", "event.entity=conation（新取值）");
     ledger.insert("内在动机", "projection=conation（新取值）");

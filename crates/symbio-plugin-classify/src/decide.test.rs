@@ -87,7 +87,7 @@ fn unparsable_text_yields_none_not_answered() {
     }
 }
 
-/// 身份写 `principal`（D-147）：夹具模仿的是**落库面**的消息，`role` 只是读侧残留格。
+/// 身份写 `principal`夹具模仿的是**落库面**的消息，`role` 只是读侧残留格。
 fn principal_for(role: NodeRole) -> symbio_plugin_api::principal::Principal {
     use symbio_plugin_api::principal::Principal;
     match role {

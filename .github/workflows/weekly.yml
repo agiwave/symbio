@@ -1,6 +1,6 @@
 name: Weekly audits
 
-# 周档判据的慢车道（DE-016 D-496）——与 ci.yml 同一个门禁脚本、同一个门禁本体，
+# 周档判据的慢车道（DE-016 ）——与 ci.yml 同一个门禁脚本、同一个门禁本体，
 # 只换触发频率：`@gate weekly` 桶（style / test-layout / eol / slo-exit 这一类
 # 风格性 / 布局性 / 低频漂移判据）每周核一次，提交门禁不必每轮都为它们买单。
 #
@@ -41,7 +41,7 @@ jobs:
   # 跨平台 Rust 门禁：日常 ci.yml 只在 ubuntu 上跑 workspace 测试，Windows /
   # macOS 的编译差异（cfg、路径分隔符、平台 TLS、Tauri 平台前置）只有发布时才
   # 第一次暴露。放在周档而不是每次提交：平台漂移不随单次提交变化，每周一次足以
-  # 在累积成发布阻塞前抓住（与 D-496 的分频纪律同源）。
+  # 在累积成发布阻塞前抓住（与  的分频纪律同源）。
   platform-rust:
     name: Rust gate (${{ matrix.os }})
     strategy:

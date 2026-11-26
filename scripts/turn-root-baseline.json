@@ -26,27 +26,27 @@
     {
       "date": "2026-11-16",
       "faces": "F1.prod / F1.test（turn 词根五面归零）",
-      "reason": "`D-502` 收尾（项目方确认未发布产品、无存量需兼容；并明确『架构删除无用代码不需裁决，修改/添加才需裁决控制』）：①纯删除——后端 chat_node.rs 的 `\"turn\" => Skeleton` 旧 wire 折叠键（净减，无裁决）；②纪律 0 模块内部符号改名——model 的 message_builder 私有形参/局部 id/文案、bound_provider 日志文案、sdk 私有形参与测试私有符号；③模块路径改名——telegram 与 session 的 `mod turn` 连同文件 git mv 为 round/round.test.rs，Rust 路径、文档锚点（22 处活引用）、审计脚本硬编码路径（engine-ledger/session-retire/dynamic-port-registration）同批迁移（D-502 裁决二授权）；④测试自造数据字面量（port 名/payload 键/id 前缀/断言文案）改 round，生产无对应契约。F1 生产面 16 → 0、测试面 59 → 0，**turn 词根五面（F1~F5）全部归零**，target 0 达成。全程只删与模块内部/测试私有改名，未新增任何形状或协议。"
+      "reason": "`` 收尾（项目方确认未发布产品、无存量需兼容；并明确『架构删除无用代码不需裁决，修改/添加才需裁决控制』）：①纯删除——后端 chat_node.rs 的 `\"turn\" => Skeleton` 旧 wire 折叠键（净减，无裁决）；②纪律 0 模块内部符号改名——model 的 message_builder 私有形参/局部 id/文案、bound_provider 日志文案、sdk 私有形参与测试私有符号；③模块路径改名——telegram 与 session 的 `mod turn` 连同文件 git mv 为 round/round.test.rs，Rust 路径、文档锚点（22 处活引用）、审计脚本硬编码路径（engine-ledger/session-retire/dynamic-port-registration）同批迁移（ 裁决二授权）；④测试自造数据字面量（port 名/payload 键/id 前缀/断言文案）改 round，生产无对应契约。F1 生产面 16 → 0、测试面 59 → 0，**turn 词根五面（F1~F5）全部归零**，target 0 达成。全程只删与模块内部/测试私有改名，未新增任何形状或协议。"
     },
     {
       "date": "2026-11-16",
       "faces": "F1.prod / F2.prod / F2.test",
-      "reason": "`D-502`/B5（项目方确认未发布产品、无存量需兼容）：wire 事件名 `turn.branch`/`turn.branch_selected`/`turn.dispatch` → `scope.*`、`session.close-turn` → `session.close-scope`（作用域语义，按裁决三归 scope 而非 round），常量 `EVENT_TURN_*`→`EVENT_SCOPE_*`、`SESSION_CLOSE_TURN`→`SESSION_CLOSE_SCOPE` 全仓引用同步。源在 PLUGIN.yml 的 shared_events 与 session 的 EventDecl；events.rs / test_fixtures.rs 为生成物，重跑 gen-facts 产出，生成器 test-fixtures-rs.mjs 的夹具名与常量映射同批改。slo 读点、commands/transcript/port/vocab 的引用与测试夹具同批改。F2 生产面 11 → 0、测试面 4 → 0（**全清**）、F1 生产面 17 → 16 为**实测收窄**；目标 0 不变。余下 F1 16 + F1.test 59 为模块路径（mod turn / plugin/turn / close_turn / super::turn）与测试私有符号，见 D-502 裁决二之外与裁决三尾款。"
+      "reason": "``/B5（项目方确认未发布产品、无存量需兼容）：wire 事件名 `turn.branch`/`turn.branch_selected`/`turn.dispatch` → `scope.*`、`session.close-turn` → `session.close-scope`（作用域语义，按裁决三归 scope 而非 round），常量 `EVENT_TURN_*`→`EVENT_SCOPE_*`、`SESSION_CLOSE_TURN`→`SESSION_CLOSE_SCOPE` 全仓引用同步。源在 PLUGIN.yml 的 shared_events 与 session 的 EventDecl；events.rs / test_fixtures.rs 为生成物，重跑 gen-facts 产出，生成器 test-fixtures-rs.mjs 的夹具名与常量映射同批改。slo 读点、commands/transcript/port/vocab 的引用与测试夹具同批改。F2 生产面 11 → 0、测试面 4 → 0（**全清**）、F1 生产面 17 → 16 为**实测收窄**；目标 0 不变。余下 F1 16 + F1.test 59 为模块路径（mod turn / plugin/turn / close_turn / super::turn）与测试私有符号，见  裁决二之外与裁决三尾款。"
     },
     {
       "date": "2026-11-16",
       "faces": "F1.prod / F4.prod / F4.test / F5.prod",
-      "reason": "`D-502`/B7（项目方确认未发布产品、无存量需兼容）：删 `chat_node.ts` 的 `turn: NODE_KIND_SKELETON` 折叠键与 F5 allow（F5 1→0、allow[] 清空）；删 `Entity::Scope` 上的 `#[serde(alias=\"Turn\",alias=\"turn\")]` 及其兼容注释（F1.prod −2），并把 `event/mod.test.rs` 的旧词反序列化测试改写为「写侧只写当前词」（F1.test −4）；前端测试里 `type:'turn'`/`meta:{turn:0}`/`id:'turn'` 等夹具改五值或中性值（F4.test 9→0）；SkeletonNode.vue 注释里的业务词举例改中性表述（F4.prod 2→0，该处是 HTML 注释未被 stripComments 剥离）。F1 生产面 19 → 17、测试面 63 → 59、F4 生产 2 → 0、测试 9 → 0、F5 1 → 0 均为实测收窄；目标 0 不变。余下 F1 17 + F1.test 59 + F2 15 见 D-502 裁决三（wire 事件名）与纯私有形参。"
+      "reason": "``/B7（项目方确认未发布产品、无存量需兼容）：删 `chat_node.ts` 的 `turn: NODE_KIND_SKELETON` 折叠键与 F5 allow（F5 1→0、allow[] 清空）；删 `Entity::Scope` 上的 `#[serde(alias=\"Turn\",alias=\"turn\")]` 及其兼容注释（F1.prod −2），并把 `event/mod.test.rs` 的旧词反序列化测试改写为「写侧只写当前词」（F1.test −4）；前端测试里 `type:'turn'`/`meta:{turn:0}`/`id:'turn'` 等夹具改五值或中性值（F4.test 9→0）；SkeletonNode.vue 注释里的业务词举例改中性表述（F4.prod 2→0，该处是 HTML 注释未被 stripComments 剥离）。F1 生产面 19 → 17、测试面 63 → 59、F4 生产 2 → 0、测试 9 → 0、F5 1 → 0 均为实测收窄；目标 0 不变。余下 F1 17 + F1.test 59 + F2 15 见  裁决三（wire 事件名）与纯私有形参。"
     },
     {
       "date": "2026-11-16",
       "faces": "F1.prod / F1.test",
-      "reason": "`D-502`/B6：数据键 `meta.turn_root` → `meta.scope_root` 全栈改名（项目方确认：未发布正式产品、无存量数据需兼容，故不设读侧 alias，旧键直接删除）。后端 node_build.rs 写口 `merge_turn_root`→`merge_scope_root` 写 scope_root、读口 `turn_root_of`→`scope_root_of` 只读 scope_root；前端 `messageTurnRoot`→`messageScopeRoot` 读点同步；e2e t79、前端/后端测试的数据字面与函数名同批改 scope_root。protocol-mirror-audit 的 META_KEYS 登记键 turn_root→scope_root、owner 字面同步。F1 生产面 23 → 19、测试面 74 → 63 为**实测收窄**；目标 0 不变。余下 19 处见 D-502 裁决三~五（wire 事件名 / serde alias / session.close-turn / 私有形参）。"
+      "reason": "``/B6：数据键 `meta.turn_root` → `meta.scope_root` 全栈改名（项目方确认：未发布正式产品、无存量数据需兼容，故不设读侧 alias，旧键直接删除）。后端 node_build.rs 写口 `merge_turn_root`→`merge_scope_root` 写 scope_root、读口 `turn_root_of`→`scope_root_of` 只读 scope_root；前端 `messageTurnRoot`→`messageScopeRoot` 读点同步；e2e t79、前端/后端测试的数据字面与函数名同批改 scope_root。protocol-mirror-audit 的 META_KEYS 登记键 turn_root→scope_root、owner 字面同步。F1 生产面 23 → 19、测试面 74 → 63 为**实测收窄**；目标 0 不变。余下 19 处见  裁决三~五（wire 事件名 / serde alias / session.close-turn / 私有形参）。"
     },
     {
       "date": "2026-11-16",
       "faces": "F1.prod",
-      "reason": "`D-502`/B4：`symbio-sdk/src/turn/` 目录整目录搬成 `round/`，`pub mod turn` → `pub mod round`，全仓 14 行 `use symbio_platform::sdk::turn::…` / `crate::turn::…` 路径同步（node_build / facts / 各插件消费方）。`D-259` 留在 EX-008 的那条路径段豁免随之失去对象，extension-vocab-audit 的 EXEMPTIONS 1 → 0；protocol-mirror-audit 的 `meta.turn_root` owner 路径同步改指 `round/node_build.rs`；005/037/104 等文档锚点同批迁移。F1 生产面 38 → 23 为**实测收窄**；目标 0 不变。余下 23 处见 D-502 裁决三~五（wire 事件名 / meta.turn_root 键 / serde alias / session.close-turn）。"
+      "reason": "``/B4：`symbio-sdk/src/turn/` 目录整目录搬成 `round/`，`pub mod turn` → `pub mod round`，全仓 14 行 `use symbio_platform::sdk::turn::…` / `crate::turn::…` 路径同步（node_build / facts / 各插件消费方）。`` 留在 EX-008 的那条路径段豁免随之失去对象，extension-vocab-audit 的 EXEMPTIONS 1 → 0；protocol-mirror-audit 的 `meta.turn_root` owner 路径同步改指 `round/node_build.rs`；005/037/104 等文档锚点同批迁移。F1 生产面 38 → 23 为**实测收窄**；目标 0 不变。余下 23 处见  裁决三~五（wire 事件名 / meta.turn_root 键 / serde alias / session.close-turn）。"
     },
     {
       "date": "2026-11-16",
@@ -56,37 +56,37 @@
     {
       "date": "2026-11-16",
       "faces": "F1.prod / F1.test",
-      "reason": "模块内部标识符改名（`TurnOutcome`→`RoundOutcome`、`TURN_TIMEOUT`→`ROUND_TIMEOUT`、`turn_started/turn_id/turn_end_of/turn_done/turn_input/turn_events`→`round_*`，完全类比 `D-436` 的 `TurnOutput`→`RoundOutput`）：同名产物/计时/局部形参/私有字段，非 serde 载体、载荷无同名字符串、事件名未动、读侧无垫片。`SP-003` 纪律 0——模块内部修改不算架构调整、不需裁决单，收窄不需批准。F1 生产面 90 → 38、测试面 139 → 135 为**实测收窄**；目标 0 不变。余下 38 处为 `turn_root` 协议键 / `turn_root_of` pub API / `symbio-sdk/turn` 目录路径（D-259）/ serde alias（D-317）/ `session.close-turn` 事件名，均需各自裁决，不在本批。"
+      "reason": "模块内部标识符改名（`TurnOutcome`→`RoundOutcome`、`TURN_TIMEOUT`→`ROUND_TIMEOUT`、`turn_started/turn_id/turn_end_of/turn_done/turn_input/turn_events`→`round_*`，完全类比 `` 的 `TurnOutput`→`RoundOutput`）：同名产物/计时/局部形参/私有字段，非 serde 载体、载荷无同名字符串、事件名未动、读侧无垫片。`SP-003` 纪律 0——模块内部修改不算架构调整、不需裁决单，收窄不需批准。F1 生产面 90 → 38、测试面 139 → 135 为**实测收窄**；目标 0 不变。余下 38 处为 `turn_root` 协议键 / `turn_root_of` pub API / `symbio-sdk/turn` 目录路径（）/ serde alias（）/ `session.close-turn` 事件名，均需各自裁决，不在本批。"
     },
     {
       "date": "2026-11-10",
       "faces": "F1.prod",
-      "reason": "`D-437`：`ModelProvider` 这一族名字随 trait 一起离开内核——`provider_id` / `api_protocol` / `rate_limit_ms` / `max_context_tokens` / `effective_context_tokens` 与 `ProviderLlmAdapter` 的 `provider_adapter` 相关标识符都在模型插件内部了。F1 生产面 91 → 90 为**实测收窄**；测试面 142 不变（用例改写后词根数持平）。目标 0 不变，`turn` 余量 260 → 259。"
+      "reason": "``：`ModelProvider` 这一族名字随 trait 一起离开内核——`provider_id` / `api_protocol` / `rate_limit_ms` / `max_context_tokens` / `effective_context_tokens` 与 `ProviderLlmAdapter` 的 `provider_adapter` 相关标识符都在模型插件内部了。F1 生产面 91 → 90 为**实测收窄**；测试面 142 不变（用例改写后词根数持平）。目标 0 不变，`turn` 余量 260 → 259。"
     },
     {
       "date": "2026-11-10",
       "faces": "F1.prod / F1.test",
-      "reason": "`D-436`：模型端口的「一次往返产物」不再叫 `TurnOutput`。四个类型 `TurnOutput` / `TurnToolCallInfo` / `TurnToolCallAccumulator` / `TurnStreamChildIds` → `Round*`，两个模块 `kernel::llm::turn` / `sdk::llm::turn` → `round`。F1 生产面 141 → 91、测试面 179 → 142 为**实测收窄**；同时 `D-253` 那两条 EX-008 豁免（端口签名类型里的容器词）随类型改名失去豁免对象，一并删除，扩展面豁免回到 1 条（`D-259` 的模块路径段，待 `symbio-sdk/turn` 目录改名后清零）。目标 0 不变。"
+      "reason": "``：模型端口的「一次往返产物」不再叫 `TurnOutput`。四个类型 `TurnOutput` / `TurnToolCallInfo` / `TurnToolCallAccumulator` / `TurnStreamChildIds` → `Round*`，两个模块 `kernel::llm::turn` / `sdk::llm::turn` → `round`。F1 生产面 141 → 91、测试面 179 → 142 为**实测收窄**；同时 `` 那两条 EX-008 豁免（端口签名类型里的容器词）随类型改名失去豁免对象，一并删除，扩展面豁免回到 1 条（`` 的模块路径段，待 `symbio-sdk/turn` 目录改名后清零）。目标 0 不变。"
     },
     {
       "date": "2026-11-10",
       "faces": "F2.prod / F2.test",
-      "reason": "`D-318`（B2）表里最后一对内核角色名落地：`FinalizesTurn` / `StopsTurn` → `FinalizesScope` / `StopsScope`（`finalizes_scope` / `stops_scope`），角色名不落 WAL、无 alias。F2 生产面 21 → 11、测试面 11 → 4 为**实测收窄**；同批删掉 `pending` 的两条——它们的 `until` 写的是「随 Entity 裁决一并改名」，而 `Entity::Turn` 早在 `D-317` 就删了，条目一直在等一个已经发生过的条件。目标 0 不变。"
+      "reason": "``（B2）表里最后一对内核角色名落地：`FinalizesTurn` / `StopsTurn` → `FinalizesScope` / `StopsScope`（`finalizes_scope` / `stops_scope`），角色名不落 WAL、无 alias。F2 生产面 21 → 11、测试面 11 → 4 为**实测收窄**；同批删掉 `pending` 的两条——它们的 `until` 写的是「随 Entity 裁决一并改名」，而 `Entity::Turn` 早在 `` 就删了，条目一直在等一个已经发生过的条件。目标 0 不变。"
     },
     {
       "date": "2026-11-10",
       "faces": "F2.test",
-      "reason": "`5b950295`（D-432）把「每档 `FactRole` 都有人住」从装配口挪到整仓判据 `CS-011`，内核那条用例里逐档点名的三条角色断言（`FinalizesScope` / `StopsScope`）随 `Frozen::unmanned_roles` 一并退场，F2 测试面实测 14 → 11 为**实测收窄**。TR-002 要的是同批降基线——那次漏了，本批补上；目标 0 不变。"
+      "reason": "`5b950295`（）把「每档 `FactRole` 都有人住」从装配口挪到整仓判据 `CS-011`，内核那条用例里逐档点名的三条角色断言（`FinalizesScope` / `StopsScope`）随 `Frozen::unmanned_roles` 一并退场，F2 测试面实测 14 → 11 为**实测收窄**。TR-002 要的是同批降基线——那次漏了，本批补上；目标 0 不变。"
     },
     {
       "date": "2026-11-09",
       "faces": "F1.prod / F1.test",
-      "reason": "`4a2485aa`（D-405）删掉 15 条零调用的旧判据与旧读法（`actors/{control,spec}.rs` 的淘汰与 agent 判据、`turn/node_build.rs` 的两条旧建树口、`projection/transcript.rs`、`view/mod.rs`、`llm/frames.rs` 整文件），它们自己与只服务它们的用例里带着轮次词根，F1 生产面 145 → 142、测试面 182 → 179 为**实测收窄**；目标 0 不变，余量继续按退场批次清。"
+      "reason": "`4a2485aa`（）删掉 15 条零调用的旧判据与旧读法（`actors/{control,spec}.rs` 的淘汰与 agent 判据、`turn/node_build.rs` 的两条旧建树口、`projection/transcript.rs`、`view/mod.rs`、`llm/frames.rs` 整文件），它们自己与只服务它们的用例里带着轮次词根，F1 生产面 145 → 142、测试面 182 → 179 为**实测收窄**；目标 0 不变，余量继续按退场批次清。"
     },
     {
       "date": "2026-11-08",
       "faces": "F2.prod",
-      "reason": "D-390 拆名：`authz.denied` 与 model 语音键拒因分开，共享声明里的 `StopsScope` 随生成物退场一处，角色只落在 owner 私有的 `model.speech.denied` 声明（其余两面不变）。F2 生产面实测 22 → 21 为**实测收窄**；目标 0 不变。"
+      "reason": " 拆名：`authz.denied` 与 model 语音键拒因分开，共享声明里的 `StopsScope` 随生成物退场一处，角色只落在 owner 私有的 `model.speech.denied` 声明（其余两面不变）。F2 生产面实测 22 → 21 为**实测收窄**；目标 0 不变。"
     },
     {
       "date": "2026-11-08",
@@ -96,17 +96,17 @@
     {
       "date": "2026-11-08",
       "faces": "F1.test",
-      "reason": "D-381 失败轮节点可达：重建测试夹具改用真实生产形状（`root_id` 即用户消息事实 id，骨架并入同 id 节点），F1 测试面实测 183 → 182，为实测收窄；目标 0 不变。"
+      "reason": " 失败轮节点可达：重建测试夹具改用真实生产形状（`root_id` 即用户消息事实 id，骨架并入同 id 节点），F1 测试面实测 183 → 182，为实测收窄；目标 0 不变。"
     },
     {
       "date": "2026-11-07",
       "faces": "F1.prod / F2.prod",
-      "reason": "t87（`e75e5d7f`，D-358）给分支切换新增共享事实 `turn.branch_selected`：常量 `EVENT_TURN_BRANCH_SELECTED` 在 `plugin-api/events.rs` 计 F1 生产面 +1；事件字面量在 `plugin-api/events.rs` 的声明与 `session/PLUGIN.yml` 的 `shared_events` 各计一次，F2 生产面 +2。三面跟到实测 148 / 22（测试面 183 / 14 不变）；词本身是分支投影的既有词汇，去 turn 化随「分支投影改名」单独一笔做，目标 0 不变。"
+      "reason": "t87（`e75e5d7f`，）给分支切换新增共享事实 `turn.branch_selected`：常量 `EVENT_TURN_BRANCH_SELECTED` 在 `plugin-api/events.rs` 计 F1 生产面 +1；事件字面量在 `plugin-api/events.rs` 的声明与 `session/PLUGIN.yml` 的 `shared_events` 各计一次，F2 生产面 +2。三面跟到实测 148 / 22（测试面 183 / 14 不变）；词本身是分支投影的既有词汇，去 turn 化随「分支投影改名」单独一笔做，目标 0 不变。"
     },
     {
       "date": "2026-11-07",
       "faces": "F1.prod / F1.test / F2.prod",
-      "reason": "t28（`b924d376`）按 D-223 / D-262 / D-282 落幕级派发格 `turn.dispatch`：事件名与其声明 / 读法（`plugin-api/events.rs`、`loop/vocab.rs`、`loop/PLUGIN.yml`、`session/plugin/turn.rs` 及其内联判据）在 F2 生产面 16 → 20、F1 测试面 178 → 183 各计一次；同批的旧判据收窄让 F1 生产面 148 → 147。三面都跟到实测——事件名属裁决、不是顺手加词根，基线不跟就是空转。目标 0 不变。"
+      "reason": "t28（`b924d376`）按  /  /  落幕级派发格 `turn.dispatch`：事件名与其声明 / 读法（`plugin-api/events.rs`、`loop/vocab.rs`、`loop/PLUGIN.yml`、`session/plugin/turn.rs` 及其内联判据）在 F2 生产面 16 → 20、F1 测试面 178 → 183 各计一次；同批的旧判据收窄让 F1 生产面 148 → 147。三面都跟到实测——事件名属裁决、不是顺手加词根，基线不跟就是空转。目标 0 不变。"
     },
     {
       "date": "2026-11-06",
@@ -131,7 +131,7 @@
     {
       "date": "2026-11-05",
       "faces": "F1.prod",
-      "reason": "D-318（B2b）落地：`34526409` 退役 `symbio-sdk/src/projection/turns.rs` 等失去对象的判据，F1 生产面 226 → 219 为**实测收窄**；测试面 249 不变。目标 0 不变，余量继续按退场批次清。"
+      "reason": "（B2b）落地：`34526409` 退役 `symbio-sdk/src/projection/turns.rs` 等失去对象的判据，F1 生产面 226 → 219 为**实测收窄**；测试面 249 不变。目标 0 不变，余量继续按退场批次清。"
     },
     {
       "date": "2026-11-04",
@@ -141,12 +141,12 @@
     {
       "date": "2026-11-04",
       "faces": "F1.test / F2.test",
-      "reason": "既有项位移，非新事实名：`execution.test.rs` 的 `chat.assistant.final` 与 `policy.test.rs` 的 `user.message` 夹具回滚到生产声明格（`Entity::Turn`，在 F1/F2 两面各计一次），生产面未变。B1（D-317）时随 `Entity::Scope` 一并清零。"
+      "reason": "既有项位移，非新事实名：`execution.test.rs` 的 `chat.assistant.final` 与 `policy.test.rs` 的 `user.message` 夹具回滚到生产声明格（`Entity::Turn`，在 F1/F2 两面各计一次），生产面未变。B1（）时随 `Entity::Scope` 一并清零。"
     },
     {
       "date": "2026-11-04",
       "faces": "F1.prod / F1.test / F2.prod / F2.test",
-      "reason": "D-317（B1a）落地：`Entity::Turn` 变体删除、全仓改挂 `Entity::Scope`，信封 `turn` 字段改名 `scope`，行判据键随视图改 `scope`。F1 1454/1208 → 1271/870、F2 188/560 → 114/264 全部为实测收窄；F2 余量不是实体词（`Entity::Turn` 实测 0），而是内核角色名（`FinalizesScope` / `StopsScope`）与老层视图名（`turn_head` / `turn_stages` / `turn_closed` 等），归 B2。"
+      "reason": "（B1a）落地：`Entity::Turn` 变体删除、全仓改挂 `Entity::Scope`，信封 `turn` 字段改名 `scope`，行判据键随视图改 `scope`。F1 1454/1208 → 1271/870、F2 188/560 → 114/264 全部为实测收窄；F2 余量不是实体词（`Entity::Turn` 实测 0），而是内核角色名（`FinalizesScope` / `StopsScope`）与老层视图名（`turn_head` / `turn_stages` / `turn_closed` 等），归 B2。"
     }
   ],
   "allow": [],

@@ -1,4 +1,4 @@
-//! 重建引擎 —— 事件网格 → `ChatNode` 节点树（D-049 的读侧真源）。
+//! 重建引擎 —— 事件网格 → `ChatNode` 节点树（读侧真源）。
 //!
 //! ## 为什么需要它
 //!
@@ -18,7 +18,7 @@
 //!
 //! ## 形状来源：不在这里定义
 //!
-//! 本模块随唯一生产消费方住 session（[D-534](../../../docs/003-design/024-能力横向扩充的通路.md#d-534-rebuild-的唯一生产消费方收敛为-session域投影随-owner-下沉 "DE-024-能力横向扩充的通路")）；
+//! 本模块随唯一生产消费方住 session；
 //! 节点构造与机制词汇仍住 SDK，依赖方向是 session → SDK。
 //!
 //! **写入侧怎么构造，重建就怎么构造**——同一个节点只有一份形状定义。生产侧已经在
@@ -34,16 +34,16 @@
 //! （`rebuild.test.rs` 的形状复刻用例）。不在这里自作主张给用户消息补 `status`
 //! ——落库那份没有，于是同一条发言在实时面与重建面是两个身份，前端的节点合并键
 //! （把 `status` 算在内）当场失效。**重建不得"改进"形状**：改进属写侧，重建只负责
-//! 把发生过的事原样折回来（D-049 的零行为变更）。
+//! 把发生过的事原样折回来（零行为变更）。
 //!
-//! ## 变更格不产节点（D-053）
+//! ## 变更格不产节点
 //!
 //! `message.edited` / `message.removed` 不在上表里，因为它们**没有自己的节点**——
 //! 它们说的是「已有的某个节点现在读作 Y / 已经没了」，因此不经过 `nodes_of`，
 //! 由 [`rebuild`] 主循环**先一步**按 id 折叠（表见 [`rebuild`] 的文档）。
 //! 把它们塞进 `nodes_of` 会得到「一次编辑多出一条节点」，而那正是折叠要防的事。
 //!
-//! `message.added`（D-054）恰恰相反：它是
+//! `message.added`恰恰相反：它是
 //! **诞生格**，载荷里每条消息自带完整形状（写侧 `message_events::added` 直给），所以
 //! **每条都产节点**、经 `nodes_of` 的 `added_nodes` 逐条收下。边界同样封闭：只准
 //! 「无其他承载方的节点」（压缩记录等界面文本）搭这格；带对话内容的节点必须由
@@ -95,7 +95,7 @@ use symbio_plugin_api::debt::{STAMP_FAILURE, STAMP_KEY};
 use symbio_plugin_api::vocab::PORT_TOOL;
 use symbio_plugin_api::PRINCIPAL_USER;
 
-// 节点形状与汇报格的单点定义都在共享词汇表（[D-082](../../../docs/003-design/014-单环一表.md#d-082-6b驱动器成片落为独立插件-loop触发走地址面服务走端口词表先上移分四刀 "DE-014-单环一表") 裁决三）：
+// 节点形状与汇报格的单点定义都在共享词汇表（ 裁决三）：
 // 写侧（落库）与重建侧（回放）引的是同一个构造器，留守层因此不必反向够驱动器。
 use crate::projections::facts::ReportDraft;
 use crate::projections::node_build::{
@@ -123,7 +123,7 @@ fn user_principal() -> Principal {
 /// 所以混用是本模块最容易顺手写出来的错：快照载荷里带的那份号是**存储层**的槽位号
 /// （`snapshot_slot_seq` 的口径，量级可以很大且不连续），而重建的号必须是**本模块
 /// 发号器**给出的连续顺序锚。两套号混用会让「快照列表内部单调、与后继事件不单调」，
-/// 而前端的排序键只有一个。D-049 已判定「切源后 `seq` 分配属呈现细节」。
+/// 而前端的排序键只有一个。 已判定「切源后 `seq` 分配属呈现细节」。
 ///
 /// 做成类型之后，「把外来的号直接写进节点」不再是这个模块里一个能顺手写出来的动作：
 /// 节点上的重建号只有一个来路——[`RebuildSeq::assign`]。
@@ -145,7 +145,7 @@ impl RebuildSeq {
 /// 出现的那一份——收束载荷的 `tool_calls[]` 与 `artifact.added` 记的是同一批调用，
 /// 只认先到的那条（它们形状相同，但结果正文只归 `artifact.added`，见模块文档）。
 ///
-/// ## 折叠：不只是追加（D-053）
+/// ## 折叠：不只是追加
 ///
 /// 事实网格里除了「追加了什么」，还有「**改过什么**」——`message.edited` /
 /// `message.removed`。它们是**变更格**，语义不是「加一条节点」而是：
@@ -189,17 +189,17 @@ pub fn rebuild(events: &[Event], c: &ChatVocab, m: &MessageVocab) -> Vec<ChatNod
     // `tool_call_id`。这比在每条产物上复制一份分组标识更准确——产物属于
     // **那一次调用**，不属于整批。
     //
-    // 两组身份表由读段折出（`D-472` 拆分：读 `calls` 的段归 [`call_tables`]，
+    // 两组身份表由读段折出（ 拆分：读 `calls` 的段归 [`call_tables`]，
     // 读 `tool_calls` 的补写段归 [`backfill_node_ids`]）——一个函数体装着两种
     // 载荷契约的读法是职责失守，判据（`SV-004`）也要按函数收窄才接得上。
     let (group_of_call, mut node_of_call) = call_tables(events, m);
-    // 助手往返的 `tool_calls[]` 只补旧 WAL / 增量内容，不覆盖已有身份（`D-382` ③）。
+    // 助手往返的 `tool_calls[]` 只补旧 WAL / 增量内容，不覆盖已有身份（ ③）。
     backfill_node_ids(&mut node_of_call, events);
 
     // 被 `message.removed` 判死的节点 id（循环末尾统一剔除）。
     let mut gone: HashSet<String> = HashSet::new();
     let mut seq = RebuildSeq(0);
-    // 发言被写侧闸拒的轮（拒因格载荷 `key: chat.assistant.final`，D-390）。
+    // 发言被写侧闸拒的轮（拒因格载荷 `key: chat.assistant.final`）。
     //
     // 这些轮的那次**答复**（无工具调用的往返）是模型产出的**事实**，但它从未获准
     // 进入对话——fail-closed 的呈现面要求它不出现在消息列表里。判据是跨事件的
@@ -222,7 +222,7 @@ pub fn rebuild(events: &[Event], c: &ChatVocab, m: &MessageVocab) -> Vec<ChatNod
 
     // ── 压缩快照：先收下它那份列表，再从其下标之后接着折（见函数文档）────────
     //
-    // `keep_from`（D-401）：切片只压了最旧前缀时，首条未压事实在快照事件**之前**，
+    // `keep_from`切片只压了最旧前缀时，首条未压事实在快照事件**之前**，
     // 必须从那里起折；否则被保留的后缀会被整段跳过。旧快照没有这一格 ⇒ 回落
     // `快照下标 + 1`，与旧行为逐字一致。
     let (start, snapshot_messages) =
@@ -286,7 +286,7 @@ pub fn rebuild(events: &[Event], c: &ChatVocab, m: &MessageVocab) -> Vec<ChatNod
                 //
                 // 移交的判据是**状态不是 `Completed`**，不是「有没有 `error`」：中止轮
                 // 没有错误信息（它没失败），但它的终态仍必须写到轮根上，否则这一轮
-                // 「被用户按停」在读面与「正常结束」同形（`D-435`：中止轮不再为这件事
+                // 「被用户按停」在读面与「正常结束」同形（中止轮不再为这件事
                 // 造一条空正文节点）。成功轮不移交——既有节点自己的状态不被覆盖。
                 let terminal = (node.status != Some(NodeStatus::Completed))
                     .then(|| (node.status.clone(), node.error.clone()));
@@ -298,16 +298,16 @@ pub fn rebuild(events: &[Event], c: &ChatVocab, m: &MessageVocab) -> Vec<ChatNod
                 // 水位是**请求级**元数据：Turn 骨架的 id 就是发起这一轮的用户消息 id，
                 // 该 id 已被用户节点占住（「同 id 只认首次」），骨架随之被合并掉。
                 // 不能因此丢数——只补 `meta.context` 这一格，正文与状态的裁决不变。
-                // 骨架只补字段、不参与发布身份（D-335）。
+                // 骨架只补字段、不参与发布身份。
                 if let Some(watermark) = carried_context {
                     let meta = out[i].meta.get_or_insert_with(|| serde_json::json!({}));
                     if meta.get("context").is_none() {
                         meta["context"] = watermark;
                     }
                 }
-                // 收束格的骨架与用户节点同 id（`D-335` 之后 `root_id` 就是用户消息
+                // 收束格的骨架与用户节点同 id（ 之后 `root_id` 就是用户消息
                 // 事实 id）：这一轮的终态必须补到既有节点上，否则「以失败 / 中止结束」
-                // 在读面不可见（`D-381` 的失败那一半；`D-435` 把中止那一半补上）。
+                // 在读面不可见（失败那一半； 把中止那一半补上）。
                 // `error` 缺席时**不覆盖**既有那格（中止没有错误信息，见上）。
                 if let Some((status, error)) = terminal {
                     out[i].status = status;
@@ -343,7 +343,7 @@ pub fn rebuild(events: &[Event], c: &ChatVocab, m: &MessageVocab) -> Vec<ChatNod
         out.push(node);
     }
 
-    // 分支标注（[D-173](../../../docs/003-design/001-核心架构.md "DE-001-核心架构")）：重试留下的几支折成成员根节点上的 `meta.branch`。
+    // 分支标注：重试留下的几支折成成员根节点上的 `meta.branch`。
     // 在这里做而不是在读口做，是因为**两个读出口必须是同一棵树**（转写列表与会话叶子
     // 是同一份数据的两个地址）——标注属节点形状，随重建出格一次就够；
     // 「哪一支当前读」因此对重建的两个消费者同口径，不需要谁记得再调一次。
@@ -351,17 +351,17 @@ pub fn rebuild(events: &[Event], c: &ChatVocab, m: &MessageVocab) -> Vec<ChatNod
     out
 }
 
-/// 派发清单（`calls[]`）的两组身份表——`rebuild` 的读段（`D-472` 拆分）。
+/// 派发清单（`calls[]`）的两组身份表——`rebuild` 的读段（ 拆分）。
 ///
 /// 本函数**只读派发清单那一个键宇宙**：`tool.requested` 载荷的 `calls[]` 元素的
 /// `id`（配对用 wire id）与 `node_id`（工具卡的节点身份）。读 `tool_calls` 的段
 /// 不在这里——那是另一个事实的载荷、另一套元素键（`wire_id` / `parse_error`），
-/// 混进同一个函数体，判据（`SV-004`）按函数提取时就会把两种契约读成一份（`D-471`
+/// 混进同一个函数体，判据（`SV-004`）按函数提取时就会把两种契约读成一份（
 /// 的同形异义病），所以拆出去（[`backfill_node_ids`]）。
 ///
-/// **分组只来自 `tool.requested`**（`D-382` ①）：卡的存在由派发清单决定，不由
+/// **分组只来自 `tool.requested`**（ ①）：卡的存在由派发清单决定，不由
 /// 助手往返的 `tool_calls[]` 倒推。一条产物若找不到发它的派发事实，就没有卡可挂。
-/// 同一批 `calls[]` 先按调用 id 排序再折（`D-382` ②：顺序由调用 id 决定，不由
+/// 同一批 `calls[]` 先按调用 id 排序再折（ ②：顺序由调用 id 决定，不由
 /// 到达时刻决定）。
 ///
 /// 返回 `(group_of_call, node_of_call)`：调用 id → 分组（发起事实的 `root_id`）、
@@ -414,9 +414,9 @@ fn call_tables(
     (group_of_call, node_of_call)
 }
 
-/// 助手往返的 `tool_calls[]` 补写节点身份表——`rebuild` 的另一段读（`D-472` 拆分）。
+/// 助手往返的 `tool_calls[]` 补写节点身份表——`rebuild` 的另一段读（ 拆分）。
 ///
-/// **两个来源，一份身份表**（`D-382` ③）：派发清单 `calls[]` 的 `{ id, node_id }`
+/// **两个来源，一份身份表**（ ③）：派发清单 `calls[]` 的 `{ id, node_id }`
 /// 是主来源（恢复后再次发问没有助手往返，只有它，见 [`call_tables`]）；
 /// `tool_calls[]` 的 `{ id, wire_id }` 只补旧 WAL / 增量内容，**不覆盖已有身份**
 /// ——`or_insert_with` 的不覆盖语义就是这条边界的显式形态：主来源先折，补写段
@@ -475,7 +475,7 @@ fn removed_ids(e: &Event) -> Vec<String> {
 /// `group_of_call` 是调用 id → 发起这批调用的那条事实给的分组（见 [`rebuild`]）。
 /// `node_of_call` 是 wire id → 工具卡节点 id（见 [`rebuild`]）。
 ///
-/// 分类走 [`slot_of`]（DE-024 D-203）：折叠 `match` 的是**闭集枚举**而不是名字，
+/// 分类走 [`slot_of`]（DE-024 ）：折叠 `match` 的是**闭集枚举**而不是名字，
 /// 加一条对话面事件时 `match` 不全在编译期就红。协议格（`response` / `failed`）
 /// 不在这张表上——它们是内核语法，名字仍住内核，按常量判。
 fn nodes_of(
@@ -486,7 +486,7 @@ fn nodes_of(
     c: &ChatVocab,
     m: &MessageVocab,
 ) -> Vec<ChatNode> {
-    // 压缩失败（D-402 ①）：`compact` 端口的 `failed` 不是这一轮对读者说的话，
+    // 压缩失败：`compact` 端口的 `failed` 不是这一轮对读者说的话，
     // 但它有独立的读面形状（失败压缩叶，重试入口挂在上面），必须先于模型往返分支。
     if let Some(node) = compression_failure_node(e) {
         return vec![node];
@@ -516,7 +516,7 @@ fn nodes_of(
         // 轮边界汇报：界面文本，进列表（用户看得见），但不是模型的对话内容。
         Some(ChatSlot::Reported) => vec![reported_node(e)],
         // 对话面开场白（`Escalate` 首响）：与汇报同形（带 `meta.surface = "reply"` /
-        // `exclude_from_context`），只有理由码不同；父是**轮根**（`D-426`）——它是
+        // `exclude_from_context`），只有理由码不同；父是**轮根**——它是
         // 这一轮说给用户的第一句话，和工具卡 / 正文同级，不是独立的根级节点。
         Some(ChatSlot::Opening) => vec![opening_node(e)],
         // 工具结果：调用与结果两张卡都归这一格（一个事实一个 owner）。
@@ -545,7 +545,7 @@ fn nodes_of(
 /// （`completed`）就是两个身份：前端的节点合并键把 `status` 算在内
 /// （`useChatConnection.ts` 的 `own` 键），合并当场失效、历史里冒出重复节点。
 /// 「用户发言算不算完成态」是一个可以单独讨论的形状改进，但它属于**写侧**，
-/// 不归重建——重建只负责把发生过的事原样折回来（D-049 的零行为变更）。
+/// 不归重建——重建只负责把发生过的事原样折回来（零行为变更）。
 fn user_node(e: &Event) -> ChatNode {
     ChatNode {
         id: event_payload_node_id(e, "id"),
@@ -599,7 +599,7 @@ fn reported_node(e: &Event) -> ChatNode {
 /// `exclude_from_context` 从载荷读——它们是这条节点的形状（`meta.reason` /
 /// `meta.exclude_from_context`），由写侧 `apply_verdict` 原样透传。
 ///
-/// ## 父是轮根（`D-426`）
+/// ## 父是轮根
 ///
 /// `parent_id` 取载荷 `root_id`：首响是这一轮说给用户的第一句话，和工具卡 / 正文
 /// 一样挂在用户消息节点下。根级会让结构轴递归的渲染把它排到整轮子树之后（首响
@@ -644,7 +644,7 @@ fn opening_node(e: &Event) -> ChatNode {
 /// reasoning-only 时那段内容归 Text 子节点，不另立 Reasoning 子，否则同一段内容
 /// 在存储层出现两份）。
 ///
-/// ## 答话轮走**这一条**，不再有 `dialog` 分支（`D-435`）
+/// ## 答话轮走**这一条**，不再有 `dialog` 分支
 ///
 /// `chat.assistant.final` 的三个写方（模型端口 / 答话行 / 中止收束）交出同一份载荷
 /// 形状，所以这里只有一条折叠路径：轮骨架（id = `root_id`，与用户节点同 id ⇒「同 id
@@ -809,7 +809,7 @@ fn push_step_nodes(
     }
 }
 
-/// 压缩失败（`failed` + `stamp.failure = compression`）→ 一个 `Failed` 压缩叶（D-402 ①）。
+/// 压缩失败（`failed` + `stamp.failure = compression`）→ 一个 `Failed` 压缩叶。
 ///
 /// 成功那笔同样带这枚章（章按债行声明盖），所以只认 `failed` 格：成功仍由快照折出
 /// `Completed` 的压缩叶。节点身份取失败载荷的 `compression_id`（按前缀指纹派生，
@@ -891,7 +891,7 @@ fn output_nodes(e: &Event, speech_denied: bool) -> Vec<ChatNode> {
         return Vec::new();
     };
     // 节点主体 = **写这条事实的人**（`actor`），不是载荷里的 `principal`。
-    // 后者是计费口径（谁发起这一轮，`model` 的两本账读它，`D-461`），
+    // 后者是计费口径（谁发起这一轮，`model` 的两本账读它），
     // 拿它当发言人会把助手正文署成用户（t10：正文节点折出 `person/local`，
     // 实时面按「用户说的话」呈现，且与收束轮的答话节点主体不一致）。
     let principal = actor_principal(e);

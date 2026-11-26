@@ -103,7 +103,7 @@ const BAD = '✗'
 
 // ==================== A. 常量镜像 ====================
 
-// D-188 C2b：VDFS 全族、`ChatNode` 与呈现读数随语法住 `symbio-kernel` crate，
+//  C2b：VDFS 全族、`ChatNode` 与呈现读数随语法住 `symbio-kernel` crate，
 // 这里的后端真源路径跟着搬（前端镜像不变）。
 const VDFS_WORDS_RS = 'crates/symbio-platform/src/kernel/vdfs/words.rs'
 const VDFS_ACCESS_RS = 'crates/symbio-platform/src/kernel/vdfs/access.rs'
@@ -124,7 +124,7 @@ const SESSION_META_TS = 'tauri/src/schemas/session_meta.ts'
 const READING_RS = 'crates/symbio-platform/src/kernel/present/reading.rs'
 const READING_TS = 'tauri/src/schemas/reading.ts'
 // home 控制面四条臂：后端一份 `schemas.rs`（四个模块），前端一份 `schemas/home.ts`
-// （四个同名 namespace）。见 [D-112] 决策 2。
+// （四个同名 namespace）。见 [] 决策 2。
 const HOME_SCHEMAS_RS = 'crates/symbio-plugin-home/src/schemas.rs'
 const HOME_TS = 'tauri/src/schemas/home.ts'
 
@@ -204,7 +204,7 @@ const ALIASES = [
     what: '写内容（telegram / cli 调用、前端按旧名镜像）',
   },
   {
-    // D-530：event_bus 线上契约按规则 B 迁入 symbio-contract（sdk 侧只留投递机制面）。
+    // ：event_bus 线上契约按规则 B 迁入 symbio-contract（sdk 侧只留投递机制面）。
     ts: 'VDFS_EVENT_KIND',
     rust: { file: 'crates/symbio-platform/src/contract/event_bus.rs', name: 'EVENT_BUS_KIND_VDFS' },
     what: 'VDFS 变更的总线频道名',
@@ -250,7 +250,7 @@ const ALIASES = [
  * **当前为空**，且这个状态是刚刚挣来的：曾经这里有两条
  * （`VDFS_NEW_ENTRY_TYPE` / `VDFS_NEW_ENTRY_IMPORT`），它们是「新建」提示态里
  * 那两个入口按钮的动作 id。整包导入改走详情页动作（`VDFS_ACTION_IMPORT`，
- * 见 D-029）之后，前端不再有自己的动作词汇——**每一个动作名都由后端解释**，
+ * 见 ）之后，前端不再有自己的动作词汇——**每一个动作名都由后端解释**，
  * 于是没有任何一条常量需要留在这个逃生舱里。空着是对的：它意味着「前端不认识
  * 任何后端不认识的动词」这条不变式现在是**结构性成立**的，不是靠登记维持的。
  */
@@ -493,7 +493,7 @@ const STRUCT_SETS = [
     ts: { file: READING_TS, interface: 'ReadingSection' },
   },
   {
-    what: '读数条形几何（[D-137]：会话上下文水位复用的通用几何槽，渲染器只认 level/marks/tone）',
+    what: '读数条形几何（[]：会话上下文水位复用的通用几何槽，渲染器只认 level/marks/tone）',
     rust: { file: READING_RS, struct: 'ReadingBar' },
     ts: { file: READING_TS, interface: 'ReadingBar' },
   },
@@ -502,7 +502,7 @@ const STRUCT_SETS = [
     rust: { file: READING_RS, struct: 'ReadingPanel' },
     ts: { file: READING_TS, interface: 'ReadingPanel' },
   },
-  // ── home 四条控制面臂的载荷（相应批次 段二 / [D-112] 决策 2）────────────
+  // ── home 四条控制面臂的载荷（相应批次 段二 / [] 决策 2）────────────
   //
   // 这一族**必须**带模块限定：`crates/symbio-plugin-home/src/schemas.rs` 里四个模块各有一个
   // `Response`，不限定就会拿第一个匹配去比四个接口。前端把同名结构体放进**同名
@@ -561,7 +561,7 @@ const STRUCT_SETS = [
  *
  * **最省的一条清偿是删掉读点**：压缩与记忆的七个数字键（`compact_trigger` /
  * `context_limit` / `before_tokens` / `after_tokens` / `dropped` / `post_tokens` /
- * `transcript_path`）原先在这里登记，因为前端要拿它们自己拼口径；[D-111] 把口径
+ * `transcript_path`）原先在这里登记，因为前端要拿它们自己拼口径；[] 把口径
  * 搬回后端排成 `node.stats` 的行之后，**前端一个都不读了**，登记随之撤掉——
  * 漂移面从两处变成零处，比给键名生成常量更彻底。剩下的键仍是前端真在读的契约。
  *
@@ -576,14 +576,14 @@ const META_KEYS = [
     what: '压缩后的历史记忆标记（后端在读数面按它认快照；渲染成记忆而非用户气泡）',
   },
   {
-    // 重试留下的「并存几支 + 一个选中态」在节点上的投影（D-173 口径 1）。
+    // 重试留下的「并存几支 + 一个选中态」在节点上的投影（ 口径 1）。
     key: 'branch',
     owner: 'crates/symbio-plugin-session/src/projections/branch.rs',
     what: '分支标注 {group, candidates, index, total, selected}：这一支在组里的位置与「此刻读哪一支」',
   },
   {
-    // `flat` 档升根的节点没有 `parent_id`，子树同一性靠它补上（D-173「子树同一性只有一份实现」）。
-    // D-502/B6：写口由 turn_root 改成 scope_root（未发布产品，无存量需兼容，旧键直接删除）。
+    // `flat` 档升根的节点没有 `parent_id`，子树同一性靠它补上（「子树同一性只有一份实现」）。
+    // /B6：写口由 turn_root 改成 scope_root（未发布产品，无存量需兼容，旧键直接删除）。
     key: 'scope_root',
     owner: 'crates/symbio-plugin-session/src/projections/node_build.rs',
     what: '本轮升根节点的作用域根锚：子树口径 = `parent_id` ∪ 本键，两侧各写一份必漂',
@@ -1302,7 +1302,7 @@ console.log('E. 跨栈导航头（Corresponding Frontend / Backend）')
 /**
  * ChatNode 的每一个**顶层字段**都必须有「不通过 `meta` 间接读」的直接消费者。
  *
- * 决策依据：[D-070 §决策 2]（把「前端机制化 vs 业务化」的分界变成可判红的判据）。
+ * 决策依据：[ §决策 2]（把「前端机制化 vs 业务化」的分界变成可判红的判据）。
  * 一次「顺手往顶层加个 `tool_call_id`」的 PR 就能把纪律抹掉——没有这条守卫，纪律只是口号。
  *
  * 判据（只钉「被 meta 代理」这一种违规，不误伤别处）：
@@ -1342,7 +1342,7 @@ console.log('E. 跨栈导航头（Corresponding Frontend / Backend）')
           if (code.trim()) corpus.push({ f, code })
         }
       }
-      // CLI 语料：**真仓里这一面必须非空**才算判过。D-191 把 CLI 拆成独立 crate
+      // CLI 语料：**真仓里这一面必须非空**才算判过。 把 CLI 拆成独立 crate
       // （`crates/symbio-cli/`）之后这里曾指向旧目录，`walkRs` 扫到 0 文件而判据照绿
       // ——「全绿」对第二前端不携带信息量（DE-017「读空即全绿」）。
       // `--repo` 指向的是夹具树：它只搭判据要用到的那几棵，可以没有 CLI；

@@ -162,7 +162,7 @@ async fn agent_import_traverse_and_export() {
     );
 
     // ── 3. 系统提示词：子 Agent 自身的 AGENTS.md 由**子树里的 setting 实例**注入 ──
-    // AGENTS.md 是稳定指令 / 人格，D-527 后归 setting（只读、两级覆盖）；动态记忆
+    // AGENTS.md 是稳定指令 / 人格 后归 setting（只读、两级覆盖）；动态记忆
     // MEMORY.md 才归 memory。段名经作用域 visitor 加 `agent/<id>/` 前缀，与系统侧
     // 同名条目并集且不撞名。
     let segments = capability_prompts(&*manager).await;
@@ -322,7 +322,7 @@ async fn sub_agent_tree_is_assembled_and_prefixed() {
         .map(|(_, t)| t.as_str())
         .unwrap();
     assert!(injected.contains("你是评审专家"), "{injected}");
-    // 指令段用【本智能体指令】标题、正文原样，不再印 memory 地址（D-527）
+    // 指令段用【本智能体指令】标题、正文原样，不再印 memory 地址
     assert!(
         injected.contains("【本智能体指令】"),
         "指令段应有明确标题: {injected}"
@@ -341,7 +341,7 @@ async fn sub_agent_tree_is_assembled_and_prefixed() {
     );
 }
 
-/// `permissions.limits` 两字段的装载期反向用例（D-153：限额是**装载期**判据，
+/// `permissions.limits` 两字段的装载期反向用例（限额是**装载期**判据，
 /// 超限即整轮拒载，不是运行时截断）。
 ///
 /// 两条判据落在收集期错误通道（与 §10 门槛同一条路）：`max_prompt_bytes` 在转发
@@ -655,7 +655,7 @@ async fn sub_agent_mount_crossing_is_uniform_across_operations() {
     // 持有的目录决定，不由请求方喂。请求方塞一个进来，测的就不是生产形状了。
     ctx.set(AGENT_ID, "reviewer".to_string());
     ctx.set(WORKDIR, tmp.path().to_string_lossy().to_string());
-    // D-515：模拟宿主在会话 ctx 注入工作区 provider——子树 memory 的工作区腿
+    //：模拟宿主在会话 ctx 注入工作区 provider——子树 memory 的工作区腿
     // 经它读写 `{workdir}/MEMORY.md`（读的是父会话工作区，不落进智能体包）。
     let ws_provider: symbio_plugin_api::DynVdfsProvider =
         Arc::new(symbio_providers::ScopeDirVdfs::at(tmp.path().to_path_buf()));

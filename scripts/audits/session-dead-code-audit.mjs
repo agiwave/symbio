@@ -4,10 +4,10 @@
  *
  * | 编号 | 规则 | 它拦的是哪一种回潮 |
  * |---|---|---|
- * | SD-001 | `cargo check --workspace --all-targets` 报出的每一条 `dead_code` 都必须在 `scripts/exemptions/session-dead-code.json` 里有一行（按 `path` + 符号名）；台账里的每一行也必须在源码里仍然报 `dead_code` | 两头都会漂：源码悄悄长出新的死码（clippy 已按 D-331 让开 `dead_code`），或台账留着已经有消费者的旧行（一行永久豁免变成一张过期地图） |
+ * | SD-001 | `cargo check --workspace --all-targets` 报出的每一条 `dead_code` 都必须在 `scripts/exemptions/session-dead-code.json` 里有一行（按 `path` + 符号名）；台账里的每一行也必须在源码里仍然报 `dead_code` | 两头都会漂：源码悄悄长出新的死码（clippy 已按  让开 `dead_code`），或台账留着已经有消费者的旧行（一行永久豁免变成一张过期地图） |
  * | SD-002 | 源码里出现 `cfg_attr(...)` 包着 `allow(dead_code)`（如 `cfg_attr(not(test), …)` / `cfg_attr(not(any(test, doc)), …)`）⇒ 红；例外只能按 `path + 符号名 + 理由` 登记在 `CFG_ATTR_EXEMPT` | 测试专用符号留在生产构建里，用 cfg 换个拼写压掉同一条 dead_code 警告——与直接 `#[allow(dead_code)]` 是同一件事 |
  *
- * 五条红线（D-331）：
+ * 五条红线（）：
  *
  * 1. **源码有、台账没有** ⇒ 红。新死码不许静默存在。
  * 2. **台账有、源码没有** ⇒ 红。符号已有消费者或已不存在 ⇒ 删行。
@@ -23,7 +23,7 @@
  *
  * ## 为什么用 `cargo check` 而不是 clippy
  *
- * 后端阶段的 clippy 带 `-A dead_code`（D-331）：clippy 判的是其余 lint，`dead_code`
+ * 后端阶段的 clippy 带 `-A dead_code`（）：clippy 判的是其余 lint，`dead_code`
  * 的豁免/销账归本脚本。若本脚本也用 clippy 取诊断，就得再跑一遍 clippy；而
  * `cargo check --all-targets` 的 target 集合与 `clippy --all-targets` 相同，缓存虽
  * 不复用，但语义输入完全一致。
@@ -339,7 +339,7 @@ function main() {
   const landedRows = rows.filter((r) => landed.has(r.batch))
 
   if (unregistered.length || stale.length || landedRows.length) {
-    console.error(red('\nsession-dead-code-audit 未通过（D-331 / SD-001）'))
+    console.error(red('\nsession-dead-code-audit 未通过（ / SD-001）'))
     if (unregistered.length) {
       console.log(`\n  源码有 dead_code 但台账没有（${unregistered.length}）——登记能力 / 调用方 / 批次 / e2e，或直接删掉死码：`)
       for (const p of unregistered.slice(0, 30)) console.log(`    ${p.path}::${p.name}`)
@@ -359,7 +359,7 @@ function main() {
   }
 
   if (rows.length === 0) {
-    console.log(green('✓ session-dead-code-audit：台账为空且源码无 dead_code——B 类能力全部接入完成（D-331）'))
+    console.log(green('✓ session-dead-code-audit：台账为空且源码无 dead_code——B 类能力全部接入完成（）'))
     return 0
   }
   console.log(

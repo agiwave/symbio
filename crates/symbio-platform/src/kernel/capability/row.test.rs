@@ -2,7 +2,7 @@
 //!
 //! 钉两件事：**行的名字与 meta 出自同一次自述**（调用方没有机会填错，两份
 //! 表示结构上不分叉）、**meta 是入表时的快照**（行携带事实，行上没有执行对象——
-//! `D-440`：工具即端口，执行面在端口收集表上）。
+//! 工具即端口，执行面在端口收集表上）。
 
 use super::*;
 use crate::kernel::capability::{CapabilityMeta, CapabilityRiskLevel};
@@ -77,7 +77,7 @@ fn a_family_declared_outside_core_round_trips_its_payload() {
 
 /// 模型行的名字 = `provider_id`（表键）；生效位是行的一部分。
 ///
-/// 行里**没有执行对象**（`D-437`）：构造它不需要先有一个能跑的 provider，读它的
+/// 行里**没有执行对象**：构造它不需要先有一个能跑的 provider，读它的
 /// 人也拿不到一次调用能力——`payload::<T>()` 按族取不到别族的东西。
 #[test]
 fn a_model_row_carries_id_and_slot() {

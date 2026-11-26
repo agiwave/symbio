@@ -10,7 +10,7 @@
 //!    DE-037 §5「判定者不得直接发言」）；
 //! 4. **对等主体那一行比主智能体窄**（只持 `produce.artifact`，DE-038 §3——第一个
 //!    对等/图侧主体，窄于主智能体那一行）；
-//! 5. 取表口只有一条口径（[D-099]）：**表是权威**，登记过的主体拿自己那一行，
+//! 5. 取表口只有一条口径：**表是权威**，登记过的主体拿自己那一行，
 //!    未登记的主体在表里没有行 ⇒ 每个谓词为假（fail-closed）；
 //! 6. 读写两侧的闸按**属主 / 矩阵成员**分：主智能体与属主各得其所，`user` 不入表
 //!    （发言不是能力），矩阵外主体拒绝；表构造失败时的降级面（空矩阵）一概拒绝
@@ -18,7 +18,7 @@
 //! 7. **工人 / 规划者 / 验证者三行比主智能体窄**（三角色，行与路径
 //!    同批）：各自单能力独持，`production_matrix` 拿登记行，C15 两面（规划者不认证、
 //!    验证者不产出）在表这一层可见；
-//! 8. **绑定即登记**（[D-100]）：未部署的主体经绑定拿到来源行——能力随绑定来、
+//! 8. **绑定即登记**：未部署的主体经绑定拿到来源行——能力随绑定来、
 //!    **可见域不登记**、静态行不被放大、淘汰面只认部署表、委派上限两侧都在册；
 //! 9. **委派取交集**：子能力 = 父能力 ∩ 子主体的显式声明，父窄子宽时
 //!    子只保留父也持有的能力，空交集登记为「什么都不许」而不是退回部署行；
@@ -49,7 +49,7 @@ fn main_agent_row_is_the_documented_shape() {
 /// 自主发起者那一行（DE-042 §3）：**比主智能体窄**——只持 `define.work`，不持任何 `reply.*`。
 ///
 /// 这一行是本表里第一条「少给」的记录：它是这一主体的**全部能力来源**——
-/// 「自主行为不得冒充用户对话」与断言同方向（D-099：未登记 = 拒，窄行是唯一入口）。
+/// 「自主行为不得冒充用户对话」与断言同方向（未登记 = 拒，窄行是唯一入口）。
 #[test]
 fn the_autonomous_row_is_narrower_than_main() {
     let matrix = production_matrix();
@@ -73,7 +73,7 @@ fn the_autonomous_row_is_narrower_than_main() {
 /// 抢占判定者那一行（DE-037 §5）：**比主智能体窄**——只持 `judge.intent`，不持任何 `reply.*`。
 ///
 /// 判据落在**生产表**上（`production_matrix`），不再是自造矩阵：自造矩阵只证明
-/// 「我拒我」，表里少一行它照样绿。D-099 之后方向与断言同向：表是权威，
+/// 「我拒我」，表里少一行它照样绿。 之后方向与断言同向：表是权威，
 /// 这一行就是判定者的全部能力来源。
 #[test]
 fn the_reflex_row_is_narrower_than_main() {
@@ -108,7 +108,7 @@ fn the_reflex_row_is_narrower_than_main() {
 /// 严格窄于主智能体。
 ///
 /// DE-038 §3.1 的纪律：对等主体出现必须**自带窄行同批落地**——窄行是它唯一的入口
-/// （D-099：表是权威，未登记 = 拒）。
+/// （表是权威，未登记 = 拒）。
 #[test]
 fn the_peer_row_is_narrower_than_main() {
     let matrix = production_matrix();
@@ -146,7 +146,7 @@ fn the_peer_row_is_narrower_than_main() {
 /// 且都严格窄于主智能体那一行。
 ///
 /// 与自主 / 判定 / 对等三行同一条纪律：主体出现必须自带窄行同批落地——窄行是唯一
-/// 入口（D-099），「市场不得冒充主控发言」「仲裁者不自证」「守门者先判后发声」
+/// 入口，「市场不得冒充主控发言」「仲裁者不自证」「守门者先判后发声」
 /// 与断言同方向。
 /// 另钉 exit ① 的表半边：arbiter 持 `assert.verification` **不碰** C15（不持
 /// `define.work` / `produce.artifact`，构造期双持检查见 `governance`）。
@@ -226,7 +226,7 @@ fn the_three_society_rows_are_narrower_than_main() {
 /// **各自单能力独持**，严格窄于主智能体那一行。
 ///
 /// 与自主 / 判定 / 对等 / 市场 / 仲裁 / 守门六行同一条纪律：主体出现必须自带窄行
-/// 同批落地——窄行是唯一入口（D-099），「工人不以主控身份发言」「规划者不自我
+/// 同批落地——窄行是唯一入口，「工人不以主控身份发言」「规划者不自我
 /// 认证」「产出者不得既产出又认证」与断言同方向。
 ///
 /// 另钉两条 C15 的结构面：planner 持 `define.work` 而不持 `assert.verification`
@@ -310,13 +310,13 @@ fn the_three_role_rows_are_narrower_than_main() {
     }
 }
 
-/// 收束格按**种类**判（[D-067](../../../../../docs/003-design/011-Agent目录规范.md#d-067-产物收束的不变量面c4-认产物格closure_denied-数产物恢复锚刻意不认三处口径一次说清 "DE-011-Agent目录规范")）：
+/// 收束格按**种类**判：
 /// 产物收束问 `produce.artifact`、发言收束仍按 `reply.*`——同一张表的两道闸。
 ///
 /// 钉的是谓词面的**分派**，不是每个主体自己的窄行（那些在上面各测里）：对等主体
 /// 产物闸放行、发言闸仍拒；主智能体两道都放；判定者 / 自主层产物闸也拒（它们
 /// 持的不是 `produce.artifact`）。没有这道分派，对等主体跑一轮永远收束不了
-/// （D-065 的合并理由）；反过来若产物闸误用了 `can_reply`，对等主体的
+/// （合并理由）；反过来若产物闸误用了 `can_reply`，对等主体的
 /// 产物也落不了格——两种错位都被这条钉住。
 #[test]
 fn the_closure_gate_is_dispatched_by_kind() {
@@ -348,7 +348,7 @@ fn the_closure_gate_is_dispatched_by_kind() {
     assert!(!matrix.can_produce_artifact("session/ghost"));
 }
 
-/// 取表口只有一条口径（[D-099](../../../../../docs/003-design/011-Agent目录规范.md#d-099-授权默认翻-fail-closed未登记主体不再派生主智能体能力集认不出的能力名按已收回判 "DE-011-Agent目录规范")）：
+/// 取表口只有一条口径：
 /// **登记过的主体走表，未登记的主体什么也拿不到**——少一行是一条拒绝，不是一条漏判。
 #[test]
 fn an_unregistered_subject_gets_no_row_at_all() {
@@ -411,7 +411,7 @@ fn read_side_is_scoped_by_owner_and_membership() {
 /// 钉的是「两支叠在一起」这个形状，而不是 `can_see` 的三档语义（那些在上面那条与
 /// `governance/mod.test.rs` 里）：
 /// - 属主读**自己共享出去**的内容必须放行——`user` 在能力表里没有行（人不入表，
-///   [D-069 §后果]），单问 `can_see` 它连自己的 `shared` 都读不到；
+///   ），单问 `can_see` 它连自己的 `shared` 都读不到；
 /// - 矩阵内主体读他人 `shared` 放行、矩阵外必拒（fail-closed 不因叠了属主支而松开）；
 /// - `public` 人人可读；非属主读他人 `thread_private` 必拒（C10 缺省隔离）。
 ///
@@ -452,7 +452,7 @@ fn the_degraded_empty_matrix_denies_everything() {
 }
 
 /// **所有 `PRINCIPAL_*` 常量都是可路由地址 `<namespace>/<name>`**
-/// （[D-069 §决策 2]）——id 第一段是归属 namespace，可路由到那个插件或概念；
+/// ——id 第一段是归属 namespace，可路由到那个插件或概念；
 /// 这条把「授权表与主体地址形态同源」钉在编译期。
 ///
 /// 判据**逐条枚举**常量而不是 grep 字符串：加一个常量必须**同时加进本判据的列表**，
@@ -484,7 +484,7 @@ fn all_principals_are_routable_ids() {
             "`{name} = {principal}` 不是 `<ns>/<name>` 可路由地址（第一段是归属，可解析）"
         );
     }
-    // 关键锚点逐字锁死——漂移即红：id 形状就是 D-069 §决策 2 那张表里的取值。
+    // 关键锚点逐字锁死——漂移即红：id 形状就是  2 那张表里的取值。
     assert_eq!(PRINCIPAL_MAIN, "session/main");
     assert_eq!(PRINCIPAL_USER, "person/local");
     assert_eq!(PRINCIPAL_TOOL_VDFS_WRITE, "vdfs/write");
@@ -538,7 +538,7 @@ fn principal_of_derives_a_bare_asset_id_into_the_agent_family() {
     assert_eq!(principal_of(Some("   ")), PRINCIPAL_MAIN);
 }
 
-/// **三行工具主体登记进表**（[D-069 §决策 2 工具响应主体]）——今天写侧闸按会话主体判，
+/// **三行工具主体登记进表**——今天写侧闸按会话主体判，
 /// 这三行是**声明性**的；但表里没有行就等于「工具不是主体」，
 /// `plugin::attributed` 按 kind=Tool 补上的 principal 就没底。
 #[test]
@@ -564,7 +564,7 @@ fn tool_principals_have_declared_rows() {
     }
 }
 
-/// **人不入能力表**（[D-069 §后果] 与 [authz/mod.rs 模块文档]「两张表里的人」）——
+/// **人不入能力表**（ 与 [authz/mod.rs 模块文档]「两张表里的人」）——
 /// `PRINCIPAL_USER` 归一为 `person/local` 之后仍**不立行**；判据：
 /// `production_matrix().can_reply(PRINCIPAL_USER)` 依旧为假。
 #[test]
@@ -581,7 +581,7 @@ fn person_local_is_not_in_the_capability_table() {
     assert_eq!(principal_namespace(PRINCIPAL_USER), Some("person"));
 }
 
-// ── 绑定即登记（[D-100]）──────────────────────────────────────────────
+// ── 绑定即登记──────────────────────────────────────────────
 //
 // 运行期绑定面（`BOUND`）是**进程级**登记：下面五条用例只碰自己独有的主体名
 // （`session/t-bind-*`），不碰别处引用的 `session/main` / `ghost` / `worker` / `sub`
@@ -589,13 +589,13 @@ fn person_local_is_not_in_the_capability_table() {
 
 /// 绑定即登记：未部署的主体经 [`bind_inheriting`] 拿到来源行，收束闸随之放行。
 ///
-/// 这条钉的是 [D-100](../../../../../docs/003-design/008-能力注册表与能力坐标系.md#d-100-绑定即登记能力随会话创建而来与会话同寿可见域不登记 "DE-008-能力注册表与能力坐标系") 取代「派生回滚」的核心断言：`agent:<id>` 身份会话
+/// 这条钉的是  取代「派生回滚」的核心断言：`agent:<id>` 身份会话
 /// **不再靠未登记主体的静默派生拿主行**，而是随会话装配点的绑定拿到一行——
 /// 拿得到与拿不到都由可见的登记动作决定（少一行 = 一条拒绝）。
 #[test]
 fn a_bound_subject_takes_the_source_row() {
     let subject = "session/t-bind-root";
-    // 绑定前：既未部署、也未绑定 ⇒ 每个谓词为假（与 [D-099] 同向）。
+    // 绑定前：既未部署、也未绑定 ⇒ 每个谓词为假（与  同向）。
     assert!(
         production_matrix().grants_of(subject).is_empty(),
         "未绑定主体在合流面没有行"
@@ -710,7 +710,7 @@ fn delegated_binding_registers_both_sides() {
 //
 // 下面的用例钉的是**生命周期**而不是判定口径：登记以会话为持有人，会话结束
 // （`unbind_session`，生产由 `delete_session_internal` 调用）时整册消失。
-// 判定面（交集 / 替换 / 空行）仍由上面的 D-100 边界用例钉住。
+// 判定面（交集 / 替换 / 空行）仍由上面的  边界用例钉住。
 
 /// **创建即登记 + 同寿回收**：登记行的寿命就是会话的寿命——会话结束，行随之消失；
 /// 进程级绑定面不再为「出现过的每个 agent 身份」留一行。
@@ -898,7 +898,7 @@ fn a_deployed_root_keeps_its_own_row() {
     );
 }
 
-/// **表与常量一一对应**（DE-025 D-211 / `GEN-002`）。
+/// **表与常量一一对应**（DE-025  / `GEN-002`）。
 ///
 /// 表已由各插件的 `PLUGIN.yml` 生成（`rows.gen.rs`），常量留在本模块（它们承载
 /// 「这一行为什么这么窄」的理由）。两侧任何一侧多出来都是错的方向，且**都不会让
@@ -945,8 +945,8 @@ fn every_principal_constant_is_a_row_and_every_row_is_a_constant() {
     );
 }
 
-/// **可路由地址的归属段解析**（[D-069 §决策 2]）：`<ns>/<name>` 或更长的路径都取
-/// 第一段——与 VDFS 地址、route 常量同族形状。判据随函数归本报（DE-018 的 D-419：
+/// **可路由地址的归属段解析**：`<ns>/<name>` 或更长的路径都取
+/// 第一段——与 VDFS 地址、route 常量同族形状。判据随函数归本报（DE-018 的：
 /// `view` 模块整体搬走之后，`principal_namespace` 只剩这一处）。
 #[test]
 fn principal_namespace_is_the_first_route_segment() {

@@ -1,9 +1,9 @@
-//! `actors` 域的用例（随实现一起从旧 core 迁入，DE-023 D-276 / D-279）。
+//! `actors` 域的用例（随实现一起从旧 core 迁入，DE-023 ）。
 //!
 //! 覆盖四块：`ActorSpec` 的契约形状、收束闸判读规格自己的能力集、多主体隔离与
 //! 对等承诺的立约→守约→声誉链路，以及**闭环彩排**。
 //!
-//! 闭环彩排原先留在旧 core，理由是「它验的是轮次地基，不是主体策略」。D-279 复核
+//! 闭环彩排原先留在旧 core，理由是「它验的是轮次地基，不是主体策略」。 复核
 //! 后改判：彩排用的每一件东西（`store` / `projection` / `invariants` / `test_fixtures`）
 //! 都在 `symbio-kernel` 与 `symbio-sdk` 里，它当初住在 core **只是因为它用 `crate::sdk::` 前缀
 //! 写路径，而 core 的 21 个转发桩让那些路径解析得通**。桩删掉之后，这些用例的真实住址
@@ -74,7 +74,7 @@ fn spec_judgment_agrees_with_matrix_predicate_for_every_principal_shape() {
 // principal 隔离（下方验收 1/4）+ 无直连静态扫描（scripts/audits/no-direct-call-audit.mjs，
 // 出口判据「直连调用 0」；成对性拒绝 = DE-038 §6 验收 3，已在 governance 测试区覆盖）。
 // commitment 立约成格与配对判在这里；声誉台账的读数与「双跑一致」随折叠归它的 owner 包
-// （声誉能力包的判据用例，DE-045 D-288），本区只留淘汰裁决那一侧。
+// （声誉能力包的判据用例，DE-045 ），本区只留淘汰裁决那一侧。
 
 /// DE-038 §6 验收 1 + 4：thread_private 互不可见；内容可见域放宽成 public 后，
 /// 同一主体、同一份事件切片立刻可见——证明「可见域是参数在生效」，不是投影写死。
@@ -324,9 +324,9 @@ fn forced_failure_produces_fallback_with_provenance() {
 // ── 彩排：记忆链路 ──
 //
 // 这里留的是**内核侧**的判据：编码格子的溯源覆盖（I2）。巩固入库前的保真度
-// 闸门（N8）随 `consolidate` 住它的写方（`crates/symbio-plugin-loop`，DE-025 D-221）；
+// 闸门（N8）随 `consolidate` 住它的写方（`crates/symbio-plugin-loop`，DE-025 ）；
 // 检索那半条链路（`recall` 投影的 as-of、预算降级、主体隔离）随投影住它的唯一生产
-// 消费方（[DE-024](../../../../../docs/003-design/024-能力横向扩充的通路.md "DE-024-能力横向扩充的通路") D-201），验收在同侧。
+// 消费方（[DE-024](../../../../../docs/003-design/024-能力横向扩充的通路.md "DE-024-能力横向扩充的通路") ），验收在同侧。
 
 /// 溯源覆盖 100%——无溯源的记忆事件被 I2 抓住。
 #[test]
@@ -483,25 +483,25 @@ fn verdict_flow_folds_into_a_revocable_grants_overlay() {
 // DAG 无环（C14）；独立验证者（C15 不自验，构造期拒绝）；
 // 返工闭环（返工那格，返工次数有界 = 终止性前提 2）。
 //
-// 就绪集不在这里：那条折叠随它的 owner 进了 `crates/symbio-plugin-task`（DE-045 `D-289`），
+// 就绪集不在这里：那条折叠随它的 owner 进了 `crates/symbio-plugin-task`（DE-045 ），
 // 本节的三条判据都是**守门**（`invariants`），不是读数。
 
 use crate::sdk::invariants::{acyclic_deps, rework_bounded};
 
 /// 任务族的事件名字面量夹具：owner 在 `crates/symbio-plugin-task`，平台测试只声明
-/// 本节实际使用的三格，不依赖插件类型（D-565）。
+/// 本节实际使用的三格，不依赖插件类型。
 const TASK_OPENED: &str = "task.opened";
 const TASK_PROGRESSED: &str = "task.progress";
 const TASK_TERMINAL: &str = "task.asserted";
 
 /// `memory.encoded`：名字与格位都在 owner 插件（`crates/symbio-plugin-loop` 的 `EventDecl` + 清单
-/// `shared_events`，DE-024 D-204），core 不认识它。core 的夹具因此自己写这条字面量——
+/// `shared_events`，DE-024 ），core 不认识它。core 的夹具因此自己写这条字面量——
 /// 与 `REWORK` 同一形状：词汇是数据，不是 core 的常量。
 const MEMORY_ENCODED: &str = "memory.encoded";
 
 /// 返工那一格：名字与角色随 owner 插件（`crates/symbio-plugin-task::decl` 的 `EventDecl`），core 不认识它。
 ///
-/// core 的判据只认角色（DE-024 D-203），所以这里自己声明一行当词汇面——生产环境里
+/// core 的判据只认角色（DE-024 ），所以这里自己声明一行当词汇面——生产环境里
 /// 这张表由 owner 在装配期交来（`Frozen::vocab`）。
 const REWORK: &str = "task.rework_created";
 const REWORK_VOCAB: &[EventDecl] = &[EventDecl::with_roles(
@@ -676,7 +676,7 @@ fn high_risk_grant_combo_is_rejected() {
 //
 // 定时触发的**授权面**（出口判据「自主写入对话 0」，DE-042）留在这里；
 // 触发、长目标预算、欲治理与技能编译 / 路由的实现和用例随唯一消费方住
-// `crates/symbio-plugin-session/src/transcript/autonomous` 与 `crates/symbio-plugin-skill`（D-189 / D-262）。
+// `crates/symbio-plugin-session/src/transcript/autonomous` 与 `crates/symbio-plugin-skill`。
 
 /// DE-042 §6 验收 2：自主发起者尝试写 `chat.assistant.final` → 授权拒绝且不产生事件。
 ///
@@ -716,11 +716,11 @@ fn autonomous_actor_cannot_write_to_dialog() {
 }
 
 // DE-042 §6 验收 3 + 4：长目标预算判定的实现随发起者住 `crates/symbio-plugin-session/src/transcript/autonomous`
-// （D-189）；core 只留授权表结论（见上一条）。
+//；core 只留授权表结论（见上一条）。
 
 // [DE-001 §4.2](../../../../../docs/003-design/001-核心架构.md "DE-001-核心架构") 欲治理三条：(a) 候选造出来一定未批准 (b) 无溯源构造不出 (c) 关停后
 // 无任何自主任务但读侧投影照常（J2 平凡值）。实现与用例随唯一消费方住
-// `crates/symbio-plugin-session/src/transcript/autonomous`（D-189）。
+// `crates/symbio-plugin-session/src/transcript/autonomous`。
 
 /// 档位名字往返：LatencyTier::name / from_name 互逆；未知名字不静默归类。
 #[test]

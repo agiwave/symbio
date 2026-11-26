@@ -149,7 +149,7 @@ export default defineCase(
       // （`落地实现` 在 `todo_write` 的入参里），拿整包当判据等于在断言「历史里
       // 有历史」。
       const nextMsgs = reqs[2].body.messages ?? [];
-      // 请求级三段是**系统注入的读视图** ⇒ `role: system`（D-048a；标成 `user`
+      // 请求级三段是**系统注入的读视图** ⇒ `role: system`（标成 `user`
       // 会让「最后一条 user = 本轮发言」这个判据失真——t36 就是这么红的）。
       const sections = nextMsgs.filter(
         (m) => m.role === 'system' && textOf(m).includes('【任务调度】'),
@@ -226,7 +226,7 @@ export default defineCase(
         assertEq(
           deniedReady.cap,
           1,
-          '未授权读数的切片里没有配置事实 ⇒ `cap` 交出厂值（`TASK_CAP = 1`，D-490：' +
+          '未授权读数的切片里没有配置事实 ⇒ `cap` 交出厂值（`TASK_CAP = 1`' +
             '容量由 owner 从事实读，读不到配置与「这条史还没写过配置」同一处置）',
         );
       } finally {

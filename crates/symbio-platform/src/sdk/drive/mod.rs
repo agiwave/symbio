@@ -45,7 +45,7 @@ pub struct DriveTarget {
     pub session_id: String,
     /// 会话 metadata 的工作目录：`append` 不携带运行选项，由写口在打开时取来。
     pub workdir: Option<String>,
-    /// 会话级插件数据目录（D-513）：由会话插件按自己的唯一布局解析，随驱动目标交回，
+    /// 会话级插件数据目录：由会话插件按自己的唯一布局解析，随驱动目标交回，
     /// 再由宿主挂进本轮 ctx 的 `SESSION_DIR`。它不是事实源目录，能力面不得据此开档。
     pub session_dir: Option<String>,
     /// 会话主体来源：metadata 的 `agent_id`（空串 = 无绑定主体 ⇒ `session/main`）。
@@ -53,7 +53,7 @@ pub struct DriveTarget {
     /// 由写口在打开会话事实源时取来，`drive_on_new_fact` 据此设 `AGENT_ID`——
     /// **全链路只有这一处设它**，其余执行体只读。`None` = 取不到（拒绝回落主体）。
     pub agent_id: Option<String>,
-    /// 会话选中的沙箱档案 id（裁决 B / D-531）：前端选项栏呈现的唯一安全选项。
+    /// 会话选中的沙箱档案 id（裁决 B / ）：前端选项栏呈现的唯一安全选项。
     ///
     /// 与 `workdir` / `agent_id` 同一来源、同一理由：`append` 不携带运行选项，由写口
     /// 在打开会话事实源时从 metadata 取来；`drive_on_new_fact` 挂进本轮 ctx
@@ -67,14 +67,14 @@ pub struct DriveTarget {
     pub risk_level: String,
     /// 显式指定的 provider；`None` = 由模型侧选默认（本契约不猜）。
     pub provider_id: Option<String>,
-    /// 本会话的 Agent 权限作用域（D-153）：`agent_id` 经 owner 插件解析后的运行期
+    /// 本会话的 Agent 权限作用域：`agent_id` 经 owner 插件解析后的运行期
     /// 事实（目录根 + 声明），由**收集方**在 `collect_capabilities` 之后发布到事实源；
     /// `None` = 本会话没有选中 Agent（宿主态，工具侧按宿主权限处理）。
     ///
     /// 载在驱动目标上而不是让执行体回头解析：工具执行跑在驱动新建的 ctx 里，
     /// 与收集期的轮 ctx 不是同一个；重新读 manifest 就是第二个解析器。
     pub agent_scope: Option<AgentScope>,
-    /// 本轮入站来源主体（D-067）：请求 `metadata.source_principal` 声明的数据，
+    /// 本轮入站来源主体：请求 `metadata.source_principal` 声明的数据，
     /// 由开轮写方从收件箱条目发布、事实源随目标带过来。`None` = 本机用户发起。
     pub source_principal: Option<String>,
     /// 本轮的中止信号（`DE-047` 新增槽位）：由会话状态**唯一持有**，事实源只引用
@@ -155,7 +155,7 @@ pub fn declared_drive_entry() -> Option<&'static dyn DriveEntry> {
 //
 // 为什么要有这张表：驱动实例按根绑定，而「根」在装配树里有不止一个候选节点
 // （home 与其下的 worker 容器）。谁把哪个节点当根，取决于它站在树的哪一层——
-// 这让入口与写口各绑一份，等待读的那份永远空闲（t29 / D-365）。
+// 这让入口与写口各绑一份，等待读的那份永远空闲（t29 / ）。
 //
 // 因此由**装配根自己**登记：Home 构造 worker 后在这里登记它，插件 `drive_entry`
 // 绑的也是 worker，宿主入口（`settled` / `kick`）经同一张表解析。表的键是

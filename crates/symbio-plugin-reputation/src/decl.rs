@@ -37,7 +37,7 @@
 //!
 //! `commitment.*` 有 `EventDecl`（owner = `loop`，它同时是会话统计的读方）但**没有**
 //! `FactDecl`——那一族格子不属于义务环，给它补一份事实声明等于把词汇塞回控制面
-//! （`EX-007` 判「碰过机制面」的那一侧）。所以这四对按 `D-282` 的第二种读法登记：
+//! （`EX-007` 判「碰过机制面」的那一侧）。所以这四对按第二种读法登记：
 //! 名字由 `EventDecl` 保证拼对，字段无从校验；装载期进 `Frozen::assertion_reads()`
 //! 的名单，不是静默跳过。
 
@@ -60,7 +60,7 @@ pub(crate) const EVENT_VERDICT_ASSERTED: &str = "verdict.asserted";
 ///
 /// 这是 `EventDecl::owner` 的第二态——「作者主体 ≠ 会话主体」：写裁决的那一轮可能是
 /// 任一省话，但裁决的签名者恒为仲裁者。装配期会拿它查主体注册表，查不到即拒绝装配
-/// （D-339）；`plugin-api` 门面没有导出 `PRINCIPAL_ARBITER`，本包又不依赖 SDK
+///；`plugin-api` 门面没有导出 `PRINCIPAL_ARBITER`，本包又不依赖 SDK
 /// （E-009），故取登记表里同一个字面量。
 const VERDICT_AUTHOR: &str = "session/arbiter";
 
@@ -72,14 +72,14 @@ pub(crate) const EVENTS: &[EventDecl] =
     ];
 
 /// 对外可读的那条视图。名字只在本 crate 出现一次（`SV-001`）；公开动作是下面的
-/// 报表登记（`D-387`），读方按报表的 `views` 取，不依赖本 crate（`D-221`）。
+/// 报表登记，读方按报表的 `views` 取，不依赖本 crate。
 pub(crate) const REPUTATION_LEDGER: &str = "reputation.ledger";
 
 /// owner —— 与目录名同形（`crates/symbio-plugin-reputation`），装配表按它排序与报缺口。
 pub(crate) const OWNER: &str = "crates/symbio-plugin-reputation";
 
 /// 扫描成本上界（事件条数）。它是环内窗口求值的预算；跨插件读口不查它——读侧按
-/// 调用方给的切片全量折（`D-284`）。
+/// 调用方给的切片全量折。
 ///
 /// 声明的上界必须与全仓**同一个值**（`seal` 的 `ViewCostMismatch`：切点只有一个），
 /// 所以这里不按「承诺通常没几条」调小——调小会改整张表的切点。
@@ -172,7 +172,7 @@ pub(crate) fn ledger(events: &[Event], now: i64) -> Value {
     json!({ "by_principal": Value::Object(by_principal) })
 }
 
-// 报表登记（`D-387`）：`session/stats` 的 `reputation` 顶层键。`views` 是 owner 自己的
+// 报表登记：`session/stats` 的 `reputation` 顶层键。`views` 是 owner 自己的
 // 常量；台账本体与 `own` 行都在 [`report`] 里排，读方不再替 owner 猜形状。
 symbio_plugin_api::submit_reports!([ReportDecl {
     owner: "reputation",

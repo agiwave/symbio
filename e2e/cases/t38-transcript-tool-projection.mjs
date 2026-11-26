@@ -146,7 +146,7 @@ export default defineCase(
       const p1 = promptOf(reqs[1].body);
       const p2 = promptOf(reqs[2].body);
 
-      // ⚠️ 判据在**消息层**上：验「这条内容在**哪个角色**的消息里」（D-048a）
+      // ⚠️ 判据在**消息层**上：验「这条内容在**哪个角色**的消息里」
       // ——`role: user` / `role: assistant` / `role: tool` 三种消息，而不是文本前缀；
       // 「把用户发言标成 assistant」这类退化因此会红。
       // ⚠️ 只读 **LLM 请求包**里的消息——「用户如何对话就如何读」：

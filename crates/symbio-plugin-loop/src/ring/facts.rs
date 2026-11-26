@@ -165,7 +165,7 @@ impl<'a> FactView<'a> {
             .find(|f| f.kind == FactKind::Sent && &f.key == key)
     }
 
-    /// 这一笔尝试的**重试归属行**（`retry` 载荷的 `row`，D-442）。
+    /// 这一笔尝试的**重试归属行**（`retry` 载荷的 `row`）。
     ///
     /// 多行共用同一个 `(port, id)` 时（工具端口的首派行与恢复行），attempt 自增后
     /// 谁来重跑由这条指认回答——不是表序，而是**失败的那一行**。`retry` 是唯一

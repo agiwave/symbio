@@ -1,5 +1,5 @@
 /**
- * 事实 · **插件链接行**的共享材料（DE-025 D-211 / `GEN-002`）
+ * 事实 · **插件链接行**的共享材料（DE-025  / `GEN-002`）
  *
  * ## 它替掉了什么
  *
@@ -9,7 +9,7 @@
  * `inventory` 里那批注册项被链接器丢掉：插件「装上了」，只是它的工具、行为、
  * 上下文 provider 全部静默不生效。
  *
- * 链接行是私有的 `use symbio_plugin_<id> as _;`（`D-417`）：它只负责把 crate 拉进
+ * 链接行是私有的 `use symbio_plugin_<id> as _;`（``）：它只负责把 crate 拉进
  * 链接图，**不**把插件的完整公开面挂到宿主门面上。装配方要导出什么，由 `lib.rs`
  * 的上半段显式写；`pub use` 曾经同时是链接与出口，等于给每个插件开了一条无人复核的
  * 第二条导入路径。
@@ -32,7 +32,7 @@
 
 import { pluginIds, PLUGIN_CRATE_PREFIX } from "./_plugin-yml.mjs";
 
-/** `event_bus` → `symbio-plugin-event_bus`（crate 名就是目录名，D-191）。 */
+/** `event_bus` → `symbio-plugin-event_bus`（crate 名就是目录名，）。 */
 export function pluginCrateName(id) {
   return `${PLUGIN_CRATE_PREFIX}${id}`;
 }

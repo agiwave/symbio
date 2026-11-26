@@ -126,7 +126,7 @@ fn merge_content(items: &[InboxItem]) -> cm::MessageContent {
     cm::MessageContent::Parts(parts)
 }
 
-/// 补充整合在**批次边界**的落点：抽干整队并合并成一条补充（[D-086](../../../../docs/003-design/014-单环一表.md#d-086-loopsession-切片契约turndispatch-进程内交付turnspec-纯值面内部动作走地址面 "DE-014-单环一表") §6）。
+/// 补充整合在**批次边界**的落点：抽干整队并合并成一条补充（ §6）。
 ///
 /// ## 为什么住 session 而不随驱动器迁走
 ///

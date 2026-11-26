@@ -293,7 +293,7 @@ export default defineCase(
 
       // 事实面（批准后的形状）：**一次世界交互 = 一笔债 = 一条事实**。
       // ① `user.answer{kind:approve}` —— 人动作原文；批准结论另有一条
-      //    `authz.granted{basis:"approved"}`（D-368：风险档原样取审批卡的
+      //    `authz.granted{basis:"approved"}`（风险档原样取审批卡的
       //    `prompt.risk_level`，不在能力内重解析 = 不造第二个解析器）。
       // ② 批级 `sent`：恢复行复用首派债键 `tool:<request_id>`，收束落回同一笔批债
       //    （不再要求逐调用的 `request` —— 那是旧形状）。
@@ -314,7 +314,7 @@ export default defineCase(
         wireId,
         `user.answer 必须点名调用的 wire id（实际: ${JSON.stringify(approveFact.payload)}）`,
       );
-      // 批准结论（D-368）：风险档必须**原样**等于审批卡上的那一格（闸门是唯一解析点），
+      // 批准结论：风险档必须**原样**等于审批卡上的那一格（闸门是唯一解析点），
       // 且同一调用只落一条 approved 结论。
       const card = events1.find(
         (e) =>

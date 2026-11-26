@@ -17,7 +17,7 @@
  * |---|---|---|
  * | `FA-001` | 某文件或合计的行数**超过**基线 | 红；实现只许往 `symbio-sdk` / `symbio-host` 搬，不许往回长 |
  * | `FA-002` | 行数**低于**基线却没同批下调基线 | 红；否则基线留出余量，「删了再加」就不触发 FA-001 |
- * | `FA-003` | 基线条目形状不对（缺 `path` / `lines` / `adr`、`adr` 打不开、重名、登记的文件不在生产里、退役条目却还指着活文件） | 红；每个数字都必须带能打开的决策号 |
+ * | `FA-003` | 基线条目形状不对（缺 `path` / `lines` / `why`、理由太短、重名、登记的文件不在生产里、退役条目却还指着活文件） | 红；每个数字都必须带一条当前理由 |
  * | `FA-004` | 范围读不出（`crates/symbio-plugin-api/src` 缺失、没有生产 `.rs`、基线缺失或 JSON 坏） | 退 2；读不出不许当「0 行 ⇒ 通过」 |
  *
  * ## 退役条目：文件整份删除时，格子留 0，不留空
@@ -32,15 +32,15 @@
  * | `lines` | 必须是 **0**（退役 = 这一层不再承载任何实现行） |
  * | `retired` | 非空字符串，写新家（`crates/symbio-platform/src/sdk/plugin/<mod>.rs`） |
  * | 文件 | `CRATE_DIR` 下**必须不存在**（存在 ⇒ 退役没做完或又长回来了） |
- * | `adr` | 照旧：能打开的 `### D-NNN` |
+ * | `why` | 非空当前理由（≥10 字），写清今天为什么是这个行数 |
  *
  * ## 统计口径（这条比脚本本身重要）
  *
  * 数的是**生产文件的行数**：`*.test.rs` / `tests.rs` 及测试专用 cfg 声明的
  * 测试模块整体不计（`isTestFile` 是唯一实现），文件内的空行与注释照算——
- * 契约面的文档注释也是读者要读的那部分。根上的 `testkit` 测试声明本身也不计（D-563）。
+ * 契约面的文档注释也是读者要读的那部分。根上的 `testkit` 测试声明本身也不计（）。
  *
- * **清单镜像不计行数**（`D-470`）：`events.rs` / `routes.rs` 是各插件 `PLUGIN.yml` 清单的
+ * **清单镜像不计行数**（``）：`events.rs` / `routes.rs` 是各插件 `PLUGIN.yml` 清单的
  * 投影，由 `scripts/facts/` 的描述符重新生成——它们不是「手写进契约面的实现」。把它们
  * 计进合计，会让「声明一条跨插件路由」直接顶破基线，而 `FA-001` 没有豁免通道：合法的
  * 协议扩展被一条不针对它的棘轮挡住，可它一行实现都没写。
@@ -69,7 +69,6 @@ import path from 'node:path'
 import { fileURLToPath } from 'node:url'
 import { green, red, dim } from '../color.mjs'
 import { walk, isTestFile } from '../fs-walk.mjs'
-import { hasDecisionAnchor } from '../decision-anchors.mjs'
 import { generatedPaths } from './capability-migration-audit.mjs'
 
 const argv = process.argv.slice(2)
@@ -101,7 +100,7 @@ export function productionLines(text) {
 export function scanCrate(root = ROOT) {
   const dir = path.join(root, CRATE_DIR)
   if (!fs.existsSync(dir)) return { files: [], total: 0, error: `${CRATE_DIR} 不存在` }
-  // 清单镜像只登记存在性（FA-003），行数不参与判定（D-470）
+  // 清单镜像只登记存在性（FA-003），行数不参与判定（）
   const generated = generatedPaths(root)
   const files = []
   for (const abs of walk(dir)) {
@@ -138,10 +137,10 @@ export function readBaseline(root = ROOT) {
 
 /** 基数判据：正整数。 */
 const isCount = (n) => Number.isInteger(n) && n > 0
-const isAdr = (s) => typeof s === 'string' && /^D-\d{3}$/.test(s.trim())
+const hasWhy = (s) => typeof s === 'string' && s.trim().length >= 10
 
 /**
- * 基线条目的形状与署名（FA-003）。决策号存在性走 `decision-anchors`（唯一扫描实现）。
+ * 基线条目的形状与署名（FA-003）。每个数字都要带一条非空、当前的理由。
  *
  * @param {{files: object[], total: object}} baseline
  * @param {{path: string}[]} scanned  当前生产文件，用来判「登记的文件还在不在」
@@ -150,11 +149,6 @@ export function checkBaseline(baseline, scanned, root = ROOT) {
   const errors = []
   const seen = new Set()
   const live = new Set(scanned.map((f) => f.path))
-  const cache = new Map()
-  const exists = (adr) => {
-    if (!cache.has(adr)) cache.set(adr, hasDecisionAnchor(adr.replace(/^D-/, ''), root))
-    return cache.get(adr)
-  }
   for (const [i, f] of baseline.files.entries()) {
     const where = `${BASELINE_REL}#files[${i}]`
     if (!f || typeof f !== 'object' || Array.isArray(f)) {
@@ -187,13 +181,8 @@ export function checkBaseline(baseline, scanned, root = ROOT) {
     } else if (!isCount(f.lines)) {
       errors.push({ code: 'FA-003', message: `${where}（${f.path}）缺少正整数 lines` })
     }
-    if (!isAdr(f.adr)) {
-      errors.push({ code: 'FA-003', message: `${where}（${f.path}）缺少 adr（D-NNN）` })
-    } else if (!exists(f.adr.trim())) {
-      errors.push({
-        code: 'FA-003',
-        message: `${where}（${f.path}）挂的决策 ${f.adr} 不存在 ⇒ 每个数字都要带能打开的 D 号`,
-      })
+    if (!hasWhy(f.why)) {
+      errors.push({ code: 'FA-003', message: `${where}（${f.path}）缺少当前理由 why ⇒ 每个数字都要写清今天为什么是这个数` })
     }
     if (!retired && !live.has(f.path)) {
       errors.push({
@@ -206,13 +195,8 @@ export function checkBaseline(baseline, scanned, root = ROOT) {
   if (!isCount(t.lines)) {
     errors.push({ code: 'FA-003', message: `${BASELINE_REL}#total 缺少正整数 lines` })
   }
-  if (!isAdr(t.adr)) {
-    errors.push({ code: 'FA-003', message: `${BASELINE_REL}#total 缺少 adr（D-NNN）` })
-  } else if (!exists(t.adr.trim())) {
-    errors.push({
-      code: 'FA-003',
-      message: `${BASELINE_REL}#total 挂的决策 ${t.adr} 不存在`,
-    })
+  if (!hasWhy(t.why)) {
+    errors.push({ code: 'FA-003', message: `${BASELINE_REL}#total 缺少当前理由 why` })
   }
   return errors
 }

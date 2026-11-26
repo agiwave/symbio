@@ -1,4 +1,4 @@
-//! 本插件拥有的事实名、格位、归宿行与对外可读的视图（DE-024 D-197 / DE-025 D-209 / D-221 / D-281）。
+//! 本插件拥有的事实名、格位、归宿行与对外可读的视图（DE-024  / DE-025 ）。
 //!
 //! 一条事实 `conation.expressed`：**「我想要 X」这件事被表达过**。名字、格位、载荷形状与
 //! 归宿行同在这里；写方（会话的自主触发）从清单生成物取名字，读方（[`CONATION_INTENTS`]
@@ -14,25 +14,25 @@
 //!
 //! [`CONATION_INTENTS`] 是纯折叠：从 `conation.expressed` 折出「表达过哪些欲、各自升没升格」。
 //! 它在 `submit_reports!` 里登记为**对外可读**，读方经
-//! `symbio_plugin_api::reports` 遍历登记面、按名字求值——不依赖本 crate，也不在任何控制面里再写一份（D-221 / D-387）。
+//! `symbio_plugin_api::reports` 遍历登记面、按名字求值——不依赖本 crate，也不在任何控制面里再写一份。
 //!
-//! ## 为什么折叠要交两半（D-281）
+//! ## 为什么折叠要交两半
 //!
 //! 读方要的是两个基数上的同一个口径：**这一片**的采纳率（单会话列）与 **N 片**的采纳率
 //! （实例级聚合）。`eval` 交前者，`agg` 交后者；两半都由本插件交、同经冻结声明表被调用，
 //! 所以「率 = 已升格 / 已表达」这条算式只有一个 owner。少了 `agg`，跨会话合并就只能在读方
 //! 再折一遍——那是同一件事的第二份口径。
 //!
-//! ## 第三条视图为什么是「判决」（`D-384`）
+//! ## 第三条视图为什么是「判决」
 //!
 //! 判决不再是一条视图：开关、目标宽度与「已声明」由本包申报的债行判，动作由本包的
-//! 端口执行体做（`D-386`）。视图只回答「发生过什么」，动作面不借查询面绕路。
+//! 端口执行体做。视图只回答「发生过什么」，动作面不借查询面绕路。
 //!
 //! ## 为什么本包只声明一条事实
 //!
 //! 名册 #36 / #50 / #51（主动求知 / 好奇与探索 / 回避倾向）曾随本包交过名字、格位、载荷
 //! 与归宿行，但**从未有写方，也没有消费方**：声明一条运行期不会产生的事实
-//! 只是假声明。按 `D-411`（`D-395` 的「删实现不删设计行」）四条零写方声明面整体撤回，
+//! 只是假声明。按（「删实现不删设计行」）四条零写方声明面整体撤回，
 //! 设计行仍留名册 `planned-unspecified`。本包只留 `conation.expressed`——它有真实写方
 //! （会话自主触发）、真实读者（升格债与 `CONATION_INTENTS`）与真实出口（`task.opened`）。
 
@@ -55,18 +55,18 @@ pub(crate) use symbio_plugin_api::events::EVENT_CONATION_EXPRESSED;
 /// `reads` 会被 `seal` 判 `UnknownFact`——那才是真正的撒谎。
 pub(crate) use symbio_plugin_api::events::EVENT_TASK_OPENED;
 
-/// 自主程度折叠读的两格（任务族，`D-282` 第二种读法）：挂起与闭环。
+/// 自主程度折叠读的两格（任务族， 第二种读法）：挂起与闭环。
 pub(crate) use symbio_plugin_api::events::{EVENT_TASK_ASSERTED, EVENT_TASK_HELD};
 
 /// 对外可读的视图：表达过的欲及其升格状态。
 ///
-/// 读者按报表登记取（`D-387`，`slot = conation`）：出口只交历史形状的两格
+/// 读者按报表登记取（`slot = conation`）：出口只交历史形状的两格
 /// （`intents` / `adoption_rate`），其余三格是本包与跨会话合并用的中间量。
 pub(crate) const CONATION_INTENTS: &str = "conation.intents";
 
-/// 对外可读的第二条视图：无人干预完成率（DE-008 §3.1 自主程度）。
+/// 对外可读的第二条视图：无人干预完成率（DE-008 §2.1 自主程度）。
 ///
-/// 读者按报表登记取（`D-387`，`slot = autonomy`）：出口形状是这条视图的值本身，
+/// 读者按报表登记取（`slot = autonomy`）：出口形状是这条视图的值本身，
 /// 单片与跨会话合并后同形，`null` 表示这一格读不出来（零是读数）。
 pub(crate) const CONATION_AUTONOMY: &str = "conation.autonomy";
 
@@ -74,7 +74,7 @@ pub(crate) const CONATION_AUTONOMY: &str = "conation.autonomy";
 pub(crate) const OWNER: &str = "crates/symbio-plugin-conation";
 
 /// 扫描成本上界（事件条数）。它是环内窗口求值的预算；跨插件读口不查它——读侧按
-/// 调用方给的切片全量折（`D-284`）。
+/// 调用方给的切片全量折。
 ///
 /// 声明的上界必须与全仓**同一个值**（`seal` 的 `ViewCostMismatch`：切点只有一个），
 /// 所以这里不按「欲通常很少」调小——调小会改整张表的切点。
@@ -99,7 +99,7 @@ pub(crate) const FACTS: &[FactDecl] = &[FactDecl {
 /// 行表是义务，不是触发器；这条自读行只回答「这条事实归谁看护」。没有它，`seal` 会把
 /// `conation.expressed` 判成 `OrphanFact`（每条事实都要有归宿行）。
 ///
-/// `D-411` 之前另有四条同形行挂在零写方事实上，已随那些事实一并撤回——给一条永远不会
+///  之前另有四条同形行挂在零写方事实上，已随那些事实一并撤回——给一条永远不会
 /// 发生的事实配归宿行，只是把「没人执行」写成「有人看护」。
 pub(crate) const ROWS: &[Decl] = &[Decl {
     name: EVENT_CONATION_EXPRESSED,
@@ -134,7 +134,7 @@ pub(crate) const VIEWS: &[ViewDecl] = &[
     ViewDecl {
         name: CONATION_AUTONOMY,
         ver: 1,
-        // 任务族只有 `EventDecl`、没有 `FactDecl`：这两对按 `D-282` 的第二种读法登记
+        // 任务族只有 `EventDecl`、没有 `FactDecl`这两对按第二种读法登记
         // （名字由 `EventDecl` 保证拼对，字段无从校验），与 `task.readyset` 同形。
         reads: &[
             (EVENT_TASK_HELD, "task_id"),
@@ -231,14 +231,14 @@ fn intents(events: &[Event], now: i64) -> Value {
     })
 }
 
-/// **跨会话合并**：N 份 [`intents`] 的产物 → 一份汇总（`D-281`）。
+/// **跨会话合并**：N 份 [`intents`] 的产物 → 一份汇总。
 ///
 /// 只收分子 / 分母，率由 [`rate`] 从汇总值重算——合并的是**可加的量**，率是同一套算式在
 /// 汇总值上的再应用，不是另一份口径。不合并 `intents`：跨会话的意图流没有统一顺序，
 /// 拼起来既不是「这一片」也不是「全部」，读方要流就逐会话读。
 ///
 /// 认不出的载荷按 0 计：形状是本插件自己上一版交的，读不出说明版本对不上——那会让率变小，
-/// 而不会让率凭空出现（缺项不许伪装成读数，`D-281` 理由 3）。
+/// 而不会让率凭空出现（缺项不许伪装成读数， 理由 3）。
 fn merge(parts: &[Value]) -> Value {
     let mut expressed = 0u64;
     let mut escalated = 0u64;
@@ -256,9 +256,9 @@ fn merge(parts: &[Value]) -> Value {
 // 装配口的提交：宿主链接本 crate 即生效。本插件不认识也不依赖任何兄弟插件。
 symbio_plugin_api::submit_declarations!(OWNER, submitted_declarations);
 
-// 自主程度列的报表登记（`D-387`）：视图是 `conation.autonomy`，出口就是视图值本身。
+// 自主程度列的报表登记：视图是 `conation.autonomy`，出口就是视图值本身。
 //
-// 有 `fleet`：跨会话那一格由本包的 `agg` 合并（`D-281`），读方不认识分子分母。
+// 有 `fleet`跨会话那一格由本包的 `agg` 合并，读方不认识分子分母。
 //
 // 主动性列同理，但出口只有历史形状的两格：`declared` 与两个计数是本包判、本包合并用的
 // 中间量，不下发（下发等于把「这一列的形状」交给 owner 的口径去决定）。

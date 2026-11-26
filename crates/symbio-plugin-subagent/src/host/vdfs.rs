@@ -253,7 +253,7 @@ impl AgentPlugin {
             .get_vfs_provider()
             .ok_or_else(|| VdfsError::internal(format!("子智能体「{id}」未暴露 VDFS 根")))?;
 
-        // D-515：子树的 `memory` 实例经宿主 ctx 的 `AGENT_VDFS` 读写
+        //：子树的 `memory` 实例经宿主 ctx 的 `AGENT_VDFS` 读写
         // `<agentdir>/AGENTS.md`（见 `MemoryPlugin::agent_store`）。主 ctx 那份指向
         // 系统树根（`{homedir}`，T39），执行期经 `subagent/<id>/memory` 下钻必须重挂到
         // 本智能体目录，否则读到的是系统智能体记忆（T84 / T15）。
@@ -285,7 +285,7 @@ impl VdfsProvider for AgentPlugin {
     ///
     /// 根下只有一种新建类型：智能体——它由 [`Self::stat_at`] 的 `Root` 臂给出，
     /// 而**不是** trait 上的另一个方法。根与更深层的节点因此走同一条通道
-    /// （「描述这个节点」），使用方不必先知道某个节点是不是根（见 D-030）。
+    /// （「描述这个节点」），使用方不必先知道某个节点是不是根。
     async fn dispatch(
         &self,
         ctx: &VdfsContext,
@@ -388,7 +388,7 @@ impl AgentPlugin {
     ///
     /// 草稿上唯一可做的是**导入整包**，而它是详情页的一条动作
     /// （[`VDFS_ACTION_IMPORT`]，与「导出」「删除」同级），**不是类型里的字段**：
-    /// 类型只说「这类东西落成后长什么样」，创建语义归 provider（见 D-029）。
+    /// 类型只说「这类东西落成后长什么样」，创建语义归 provider。
     ///
     /// 这一项不能进同步的 `PluginMeta`（`schema` 是 `serde_json::Value`，装配期
     /// 就有，但别的 provider 可能要运行期汇流），因此它随**根节点自述**一起给出：

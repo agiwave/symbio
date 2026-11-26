@@ -57,7 +57,7 @@ pub(crate) const FACTS: &[FactDecl] = &[
 ];
 
 pub(crate) const ROWS: &[Decl] = &[Decl {
-    // 归宿行的名字不参与派发（开不出账，`D-306`），取一个不与行名冲突的名字。
+    // 归宿行的名字不参与派发（开不出账），取一个不与行名冲突的名字。
     name: "classify.verdict",
     reads: &[],
     expand: None,

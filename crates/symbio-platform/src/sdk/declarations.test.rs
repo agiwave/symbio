@@ -2,7 +2,7 @@
 //!
 //! 判据：链接期提交进来的声明表**能被装配方看到**，且冻结后的格位与 owner 与提交一致。
 //! 端到端那一半（写闸按冻结表收 / 拒）住在 `symbio-plugin-session` 的
-//! `injected_declarations_are_the_grid_the_gate_reads`（DE-024 D-200）：本 crate 只验
+//! `injected_declarations_are_the_grid_the_gate_reads`（DE-024 ）：本 crate 只验
 //! 收集通道，不复制写闸实现。
 
 use super::*;

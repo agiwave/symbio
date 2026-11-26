@@ -17,7 +17,7 @@ use crate::sdk::capability::{
 // ==================== 模型族（DE-025 §3：一行一个目录项，生效位在行上） ====================
 //
 // 机制化之前这族是**单槽目录 + 批量注册**（`register_model_providers`）；4b 把它改成
-// 与工具族同一张表：写是逐行 `put`。读口（`capability_model_*`）随 `D-437` 退场——
+// 与工具族同一张表：写是逐行 `put`。读口（`capability_model_*`）退场——
 // 它自建立起没有生产调用方，而行的读者本来只需要「目录里有谁、谁是生效者」。
 // 本文件钉住的仍是**表语义本身**：生效位只有一个（单槽）、空集是一等输入、行是数据。
 
@@ -45,7 +45,7 @@ async fn model_rows_carry_id_protocol_and_one_slot() {
         .map(|row| row.name().to_string())
         .collect();
     assert_eq!(ids, ["p1", "p2"]);
-    // 生效者 = 带位那一行；行里不装执行对象（`D-437`）
+    // 生效者 = 带位那一行；行里不装执行对象
     let actives: Vec<String> = mgr
         .list(family::MODEL)
         .await
@@ -162,7 +162,7 @@ async fn system_prompt_overwrite_keeps_first_registration_slot() {
 // 只由插件侧的使用方式间接兜着。表的三方法落位后，把语义钉在本文件：
 // **顺序 / 覆盖 / 按名取 / 两种口径逐条相等**。
 
-/// 只带元数据的最小桩：工具行是纯数据（`D-440` ③），注册面只读 `meta()`。
+/// 只带元数据的最小桩：工具行是纯数据（ ③），注册面只读 `meta()`。
 fn decl_meta(name: &str) -> CapabilityMeta {
     CapabilityMeta {
         name: name.to_string(),
@@ -174,7 +174,7 @@ fn decl_meta(name: &str) -> CapabilityMeta {
 
 /// **守门人**（DE-025 §3）：同一份工具清单以两种口径导出，逐条相等——
 /// 走表的 `list(Tool)` 与「入表时给的元数据」全量转储。顺序也逐条一致
-/// （注册序即表序，D-057 的工具面有序性就架在这条上）。
+/// （注册序即表序 的工具面有序性就架在这条上）。
 #[tokio::test]
 async fn tool_rows_match_the_meta_dump_entry_by_entry() {
     let mgr = DefaultToolVisitor::new();

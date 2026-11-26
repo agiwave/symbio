@@ -17,7 +17,7 @@ import type { ReadingSection } from './reading'
 // ==================== 主体（Principal） ====================
 
 /**
- * **主体族**——后端 `PrincipalKind` 的镜像（[D-069 §决策 1]，四值闭集）。
+ * **主体族**——后端 `PrincipalKind` 的镜像（四值闭集）。
  *
  * 与曾经的 `role` 是**同一件事**：`role` 从协议顶层退役后，`kind` 是
  * 这条发言归属哪一族的唯一判据。类型由常量数组派生，加一族只加一行。
@@ -43,7 +43,7 @@ export type PrincipalKind = (typeof PRINCIPAL_KINDS)[number]
 export const PRINCIPAL_USER = 'person/local'
 
 /**
- * **主体地址**——后端 `symbio_platform::kernel::chat::principal::Principal` 的镜像（[D-069 §决策 1]）。
+ * **主体地址**——后端 `symbio_platform::kernel::chat::principal::Principal` 的镜像。
  *
  * 三个字段正交：`kind` 是一族、`id` 是可路由地址 `<namespace>/<name>`（找到 / 调用 / 查看
  * 主体都靠这个地址）、`title` 是显示名。写侧构造即定型，序列化只出对象形态；
@@ -57,7 +57,7 @@ export interface Principal {
 }
 
 /**
- * **读侧一次性映射**（[D-069 §决策 6]，）：历史 `messages.json` 里的
+ * **读侧一次性映射**：历史 `messages.json` 里的
  * `principal` 是**裸字符串**（`"agent:main"` / `"user"` / `"session/main"`），新协议
  * 里是 `Principal` 结构体；前端消费方一律通过本函数拿到结构体形态。
  *
@@ -156,10 +156,10 @@ export function messageRoleOf(node: Pick<ChatNode, 'principal'>): ChatRole {
 
 // ==================== 消息形态 ====================
 
-// ---- wire 闭集五值 = 前端唯一分派轴（[D-070 §决策 3]）----
+// ---- wire 闭集五值 = 前端唯一分派轴----
 //
 // 这五值是**纯 UI 形状**，不含任何业务：同格内的业务差异（思考 vs 压缩、run vs tool）
-// 一律由后端在交互面折成 `title` / `icon` / `actions` **数据**（[D-070 §决策 2]），
+// 一律由后端在交互面折成 `title` / `icon` / `actions` **数据**，
 // 前端照数据显示，绝不读 `meta.style_tag` 反推。`style_tag` 就此从前端 wire 退役——
 // 它仍是后端业务判据（沉 `meta`），但不是前端消费的顶层字段。
 
@@ -205,7 +205,7 @@ export type NodeKind = (typeof NODE_KINDS)[number]
  * 内部只有五值——业务词不再进入任何判定。`reasoning` 与 `compression` 都归 `notice`
  * （同格），已是五值 / 未知取值原样返回（交给渲染兜底，不判红）。
  *
- * `turn` 旧业务词已随 `D-502`/B7 退场（未发布产品、无存量需兼容），不再折叠。
+ * `turn` 旧业务词已随 /B7 退场（未发布产品、无存量需兼容），不再折叠。
  */
 const LEGACY_TYPE_TO_NODE_KIND: Record<string, NodeKind> = {
   text: NODE_KIND_BODY,
@@ -319,7 +319,7 @@ export function isUnsettledNodeStatus(status?: NodeStatus | null): boolean {
  * `scripts/audits/protocol-mirror-audit.mjs` 的 C 组（后端枚举取值 ↔ 本词表）。
  */
 
-/** 子树重试：删除靶子节点及其子树 → 重新走 LLM 请求（[D-070 §决策 5]） */
+/** 子树重试：删除靶子节点及其子树 → 重新走 LLM 请求 */
 export const RESUME_ACTION_RETRY_SUBTREE = 'retry_subtree'
 /** **单工具**重试：删除该工具的失败结果 → 用原参数重新执行 */
 export const RESUME_ACTION_RETRY = 'retry'
@@ -443,11 +443,11 @@ export interface ChatNode {
   /**
    * **这条发言是谁说的**（跨栈身份字段，后端 `ChatNode.principal` 的镜像）。
    *
-   * / [D-069 §决策 1]：wire 上是**主体地址结构体** `{kind, id, title?}`——
+   * /：wire 上是**主体地址结构体** `{kind, id, title?}`——
    * `kind` 是一族（`person` / `agent` / `tool` / `system`）、`id` 是 `<ns>/<name>` 可路由地址、
    * `title` 是显示名。写侧构造即定型，序列化只出对象形态。
    *
-   * 身份**只有这一份**（[D-147]）：后端的 `role` 已改 `skip_serializing`，wire 上不再
+   * 身份**只有这一份**：后端的 `role` 已改 `skip_serializing`，wire 上不再
    * 出现；存量快照里的 `role` 由后端 `message_of_node` 在读边界折成本结构体。
    *
    * 类型只收结构体：历史 `messages.json` 里遗留的裸字符串（`"agent:main"` / `"user"`）
@@ -461,7 +461,7 @@ export interface ChatNode {
    */
   principal?: Principal;
   /**
-   * 形态词：**闭集五值 `NodeKind`**（[D-070 §决策 3]）——前端唯一分派轴。
+   * 形态词：**闭集五值 `NodeKind`**——前端唯一分派轴。
    *
    * wire 与前端内部表示同一个五值；存量快照的业务旧词在**读边界**由 `nodeKindOf` 一次性
    * 归一，业务词不进入任何判定。同格业务差异走 `title`/`icon`/`actions` 数据，不读 `meta`。
@@ -495,7 +495,7 @@ export interface ChatNode {
   /** 失败原因（面向用户的可读短消息），仅当 status === 'failed' 时存在 */
   error?: string;
   /**
-   * 头部**标题**——后端填的呈现数据（[]，[D-070 §决策 2]）。
+   * 头部**标题**——后端填的呈现数据（[]）。
    *
    * 机制化目标：前端按 `type`(NodeKind) + `title`/`icon`/`actions` 这些数据渲染，
    * **不再 `switch(style_tag)`**。`title`/`icon` 有值即优先用（后端是呈现权威）；
@@ -506,14 +506,14 @@ export interface ChatNode {
   /** 头部**图标**——后端填的呈现数据（同上，缺省退 legacy 表）。 */
   icon?: string;
   /**
-   * 本节点**可用的恢复动作**（后端填的呈现数据，[D-070 §决策 2]）。
+   * 本节点**可用的恢复动作**（后端填的呈现数据）。
    *
    * 前端据此决定是否给重试 / 补充参数 / 审批入口，而不是按业务类型（tool / compression）
    * 反推「该给什么按钮」。缺省（后端尚未填）时退回 legacy 的类型驱动判据。
    */
   actions?: ResumeAction[];
   /**
-   * 本节点的**读数行**（后端填的呈现数据，[D-111](../../../crates/symbio-plugin-session/README.md#d-111-消息读数由交付出口装配压缩与记忆的事实行离开前端 "crates/symbio-plugin-session/src/README")）：
+   * 本节点的**读数行**（后端填的呈现数据）：
    * 「压缩后水位 44.5k」「压掉 12 条」这类交代由后端排好版逐行下发，前端**只逐行排版**。
    *
    * 为什么这一格在顶层而不是 `meta`：判据是「不查看 `meta` 语义就能消费它」——渲染器

@@ -5,8 +5,8 @@ plugin_comment: 时延分层：按派发档折叠时延 / 兜底 / 跨度三列�
 # 理由）：装配清单按插件目录挂载，停用插件 ⇒ 实例不构造 ⇒ 三条视图从插件树里消失。
 plugin_assembly: sub_agent
 plugin_order: 58
-# 可选插件：默认不装配，由插件市场按需安装（D-520）
+# 可选插件：默认不装配，由插件市场按需安装
 plugin_optional: true
 # 它**不产事实**：三列读的都是别人的格（`chat.assistant.final` 的 `cost_ms` 是信封字段，
 # 档位读 `user.message` 的 `tier`）。所以这里没有 `shared_events`。
-# 对外可读的报表都在 `src/decl.rs` 的 `submit_reports!`（D-387）——本插件已无 `shared_views`。
+# 对外可读的报表都在 `src/decl.rs` 的 `submit_reports!`——本插件已无 `shared_views`。

@@ -165,7 +165,7 @@ test('FB-003 正例：注释里写宏名不算登记；测试夹具登记也不�
   assert.match(out(r), /FB-003.*零登记/s, '注释与夹具都不是登记')
 })
 
-test('FB-003 正例：登记点搬家不红，但提示核对 D-451', () => {
+test('FB-003 正例：登记点搬家不红，但提示核对 ', () => {
   const files = repo()
   files[OPENER_REL] = '// 空文件\n'
   files['crates/symbio-plugin-memory/src/opener.rs'] = 'symbio_platform::sdk::submit_fact_source_opener!(X);\n'

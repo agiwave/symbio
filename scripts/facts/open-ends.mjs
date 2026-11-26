@@ -50,7 +50,7 @@ created: 2026-11-13
  * `key` 指向 [`collect`] 的返回；新增一类欠账只加一行，并让 `collect` 从它的
  * owner 把数读出来。任何一格都不许写死数字——写死就制造了第二份会漂移的手抄读数。
  *
- * 带 `asset` 字段的行是「已由 owner 定性为契约资产 / 冻结账」的读数（D-511 / D-499），
+ * 带 `asset` 字段的行是「已由 owner 定性为契约资产 / 冻结账」的读数（ / ），
  * 不是待收口欠账：它们仍投影条数供核对（删了会让 owner 规模变得不可见），但单独成表、
  * 不混进欠账读数。这是分类口径，不是改判据——owner 与 `how` 都不变。
  */
@@ -68,9 +68,9 @@ export const ROWS = [
     label: "架构树零生产调用 `pub fn`",
     owner: "`scripts/baselines/arch-dead-code.json`",
     how: "`node scripts/audits/arch-dead-code-audit.mjs --report`",
-    // D-511：每一条都是类型自带的公开构造 / 查询口（契约实现），不是欠账。
+    // ：每一条都是类型自带的公开构造 / 查询口（契约实现），不是欠账。
     // 仍投影条数供核对，但性质是契约资产，不与待收口欠账混列。
-    asset: "契约实现（D-511）",
+    asset: "契约实现（）",
   },
   {
     key: "debtExemptions",
@@ -106,8 +106,8 @@ export const ROWS = [
     label: "verify 程序与生产源码耦合",
     owner: "`docs/003-design/verify/*.rs` 里指向 `crates/` 的 `#[path]` 行",
     how: "`grep -l '#\[path' docs/003-design/verify/*.rs`",
-    // D-511：这些 `#[path]` 正是「验证器跑的就是生产实现」这一保证的实现本身，不是欠账。
-    asset: "验证保证（D-511）",
+    // ：这些 `#[path]` 正是「验证器跑的就是生产实现」这一保证的实现本身，不是欠账。
+    asset: "验证保证（）",
     // 分子分母都由同一份目录现数：16 这个分母写进注释就会漂移（`55-verify.mjs`
     // 的头注释此前正是手抄了 `4/16`）。
     fmt: (v) => `${v.verifyCoupled} / ${v.verifyPrograms}`,

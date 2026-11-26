@@ -37,7 +37,7 @@ impl Plugin for FakeRoot {
 //
 // t29 的根因不是「等待语义写错了」，而是**等错了实例**：装配入口自己 `new` 了
 // 一份 `HostDrive`、`bind` 又 `new` 了一份，`settled` 读的那份 `KickState` 表
-// 永远空闲 ⇒ 等待立即返回（D-359 因此在 CLI 路径上从未生效）。
+// 永远空闲 ⇒ 等待立即返回（ 因此在 CLI 路径上从未生效）。
 // 下面这条钉住「一个根只有一份」：类型上 `HostDrive::new` 只对 `host` 可见。
 
 /// 同一个根绑两次拿到同一个实例；不同根各自一份。
@@ -163,7 +163,7 @@ fn exhausted_and_stalled_are_both_visible() {
     assert!(drive_notice("s", &DriveOutcome::NeedsHuman(vec![key()])).is_none());
 }
 
-// ==================== 安全阀出口落格（`D-393`） ====================
+// ==================== 安全阀出口落格 ====================
 //
 // stderr 只对 CLI 有意义：Tauri / gateway 没有控制台，两条安全阀出口在界面上与
 // 「正常结束」同形。出口必须同时是**一条机制事实**，非 CLI 宿主经 VDFS 订阅面读到。

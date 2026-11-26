@@ -69,7 +69,7 @@ impl BoundProvider {
 /// 被误删。
 ///
 /// 复用**既有的 `removed` 写口**（`llm_removed_frame`），不新造状态：时间线上会出现
-/// 一次删除，前端可能有删除动画（D-347）。这条语义**仅限**「重发撤销播种槽位」，
+/// 一次删除，前端可能有删除动画。这条语义**仅限**「重发撤销播种槽位」，
 /// 不扩大到别处。
 async fn revoke_untouched(sink: &ExecEventSink, seeded: &[String], kept: &[String]) {
     for id in seeded {
@@ -236,7 +236,7 @@ impl ModelProvider for BoundProvider {
         //   被完整快照覆盖，不新建第二条（`dispatch_and_track` 的首增量为整条快照）；
         // - 已广播的 ToolCall 节点 id 由 `reuse_node_ids` 播种进累积器，同理整条覆盖；
         // - 上一批广播了、本批**没真正收到**的 ToolCall 槽位补一条删除帧
-        //   （`revoke_untouched`，D-347）——卡片不会留在时间线上等一个不存在的调用；
+        //   （`revoke_untouched`）——卡片不会留在时间线上等一个不存在的调用；
         // - 根 Turn 节点由 session 侧在轮次开头创建一次，不在这里产生；
         // ⇒ 重试不产生任何「重复卡片」，也不留没人认领的空卡。
         //

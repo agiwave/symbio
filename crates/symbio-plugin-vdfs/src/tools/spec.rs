@@ -60,7 +60,7 @@ pub struct ToolSpec {
     /// 风险等级：这张表里的工具同形但风险不同（`vdfs_read` 只读、`vdfs_write`
     /// 改状态），故风险是**逐工具的差异**之一，不靠默认值隐式决定。
     pub risk: CapabilityRiskLevel,
-    /// 自声明的行为名（DE-025 D-210）。写族四个声明 `file_change`（产物格因此带上
+    /// 自声明的行为名（DE-025 ）。写族四个声明 `file_change`（产物格因此带上
     /// `file_op`，工作目录变更账按声明折，不按工具名猜）；读 / 统计族声明空集。
     pub behaviors: &'static [&'static str],
     /// 真逻辑：取参数、调 provider、拼回执
@@ -401,7 +401,7 @@ async fn tree_receipt(
 
         // 子地址 = 父目录 + 子名，拼接走全项目那一份规则（`join_addr`）：
         // 父段带绝对锚点（`/docs`）时子段必须带走，否则遍历交出相对地址、
-        // 把绝对子树读成工作目录下的影子树（见 D-172）
+        // 把绝对子树读成工作目录下的影子树
         let mut listed_all = true;
         for mut item in children {
             if out.len() >= count_limit {

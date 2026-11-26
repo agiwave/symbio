@@ -126,7 +126,7 @@ E2E_PROFILE=real node e2e/run-tests.mjs # 真实 provider 对照：等待沿用�
 | T13 | `t13-session-options` | 会话选项 schema 化：定义挂 `new_type.schema` 与清单项 `schema`（逐字节相同）、值随节点 `metadata` 回读、`vdfs/write` 浅合并落库、`stat` 不带定义、重启后仍在 |
 | T14 | `t14-no-redundant-vdfs` | **会话期间零回读**：一轮会话的路由留痕里不得出现 `vdfs/stat` / `vdfs/read` / `vdfs/list`——变更必须自带载荷（节点视图 / 正文 / 目录清单） |
 | T15 | `t15-subagent-inbox` | 子智能体空间**自驱动**：往 `<根>/subagent/<id>/session/<sid>/inbox` 写即发消息（无调用方）；空间自己消费成完会话（FIFO、忙则排队、排队中可取消）；子空间带自己的 `AGENTS.md` 与自己的模型服务 |
-| T16 | `t16-live-order` | 实时顺序与存储一致：`seq` 是唯一权威顺序锚点（D-025），在途节点带 `InflightSeq::BASE` 高位序 |
+| T16 | `t16-live-order` | 实时顺序与存储一致：`seq` 是唯一权威顺序锚点，在途节点带 `InflightSeq::BASE` 高位序 |
 | T17 | `t17-plugin-assembly` | 装配全链路：homedir → 装配（清单落位、二进制落位）→ 工具 → 会话收尾 → 停止生效 |
 | T18 | `t18-compression-streaming` | 压缩的六条契约：流式身份帧（摘要逐帧改道到压缩节点、无旁路节点）、结构化 meta（失败节点不带 `after_tokens`）、transcript 转存、失败纪律（failed + `failure_kind=llm_error` + 历史原封不动）、熔断（连续 3 个失败压缩节点后跳过自动压缩）、`retry_compaction` 重试恢复（删除-重建 → 成功 → 水位回落后不再压缩）；故障注入用静态 500，恢复由 `MockLlm.setPlan` 在重试前明确触发 |
 
@@ -255,7 +255,7 @@ await api.invoke('vdfs/action',
 
 `node e2e/ab/run.mjs` 跑的是**真 provider**（本机 `.symbio/model/` 里配好的那一个），CI 上没有
 LMStudio / 付费端点 ⇒ 它**天然不进 58-e2e，也不进任何门禁阶段**（`e2e/ab/` 不在用例发现范围内）。
-它把出厂形状与被 [D-048a](../crates/symbio-plugin-session/README.md "crates/symbio-plugin-session/README") 否决的拍平形状，在同一份真实链路
+它把出厂形状与被否决的拍平形状，在同一份真实链路
 捕获的请求体上各发一遍，比模型侧读数。判据口径归 `e2e/ab/tasks.mjs` 的文件头，
 形状变换归 `e2e/ab/flatten.mjs`，读数由脚本打到 `tmp/prompt-ab/`（**一次性读数，不入库**）——
 本处只留指路，不复述。
@@ -288,7 +288,7 @@ node scripts/gate.mjs # 全量门禁（e2e 在静态审计之后）
 
 `E2E_CONCURRENCY=1` 即串行（复现竞态用）；门禁侧是 `GATE_E2E_CONCURRENCY`。
 
-**慢例为什么慢，以及它们的下界**（`D-275`）：`t36`/`t90` 等的是心跳调度器的一个
+**慢例为什么慢，以及它们的下界**：`t36`/`t90` 等的是心跳调度器的一个
 tick（15s 一扫、首 tick 被丢弃），`t53` 等的是一次完整退避阶梯。这些是**生产定时器
 本身**，不是测试的浪费——再往下只能给生产加测试旋钮或减少覆盖，两条都不做。
 

@@ -76,7 +76,6 @@ import { fileURLToPath } from 'node:url'
 import { green, red, dim } from '../color.mjs'
 import { walk, isTestFile, isTestOnlyCfg } from '../fs-walk.mjs'
 import { blankComments, blankTestModules } from '../rust-scan.mjs'
-import { hasDecisionAnchor } from '../decision-anchors.mjs'
 import { gitRaw } from '../gate.d/_shared.mjs'
 
 const git = (args) => gitRaw(args, { cwd: ROOT, maxBuffer: 256 * 1024 * 1024 })
@@ -96,8 +95,8 @@ export const BASELINE_REL = 'scripts/baselines/arch-dead-code.json'
  * 扫描面：架构树（与 `capability-migration-audit` 的 `ARCH_TREES` 同一份口径）。
  *
  * ⚠️ 两处必须同时改：这份列表与 `capability-migration-audit.ARCH_TREES` 是同一件事的
- * 两个读者（同一个常量被两个脚本各抄一遍，`D-372` 治过一次「名单抄本分叉」）。
- * `D-486` 把 `symbio-contract` 立为冻结 ABI 层之后，它一度只进了受保护树与 CS-009 的
+ * 两个读者（同一个常量被两个脚本各抄一遍，`` 治过一次「名单抄本分叉」）。
+ * `` 把 `symbio-contract` 立为冻结 ABI 层之后，它一度只进了受保护树与 CS-009 的
  * 数据面，**没进本扫描面**——契约层的零调用 `pub fn` 因此是 AD-001…004 的盲区。
  */
 export const ARCH_TREES = [
@@ -274,24 +273,26 @@ export function readBaseline(root = ROOT) {
 }
 
 /**
- * 证据可打开：`D-NNN` 决策号，或一条**存在的**仓内路径（模块文档 / 契约文档）。
- *
- * 为什么允许路径：这一面的「为什么可以零调用」大多是**类型自带的契约**（构造器 /
- * 查询口），它由模块文档登记，而不是某一条 D 号裁决。要求每条都挂 D 号只会逼人
- * 给同一件事写七十份理由；而要求「能打开」仍然把「写个编号占位」挡在外面。
+ * 证据是一条存在的仓内相对路径，或明确的当前理由。
+ * 路径形状的值必须真实存在；裸决策号与空占位不是理由。
  */
 export function evidenceErrors(root, evidence) {
   if (typeof evidence !== 'string' || evidence.trim() === '') {
-    return ['缺少 evidence（D-NNN 或存在的仓内路径）']
+    return ['缺少 evidence（仓内路径或明确理由）']
   }
   const ev = evidence.trim()
-  if (/^D-\d{3}$/.test(ev)) {
-    return hasDecisionAnchor(ev.slice(2), root) ? [] : [`挂的决策 ${ev} 没有「### ${ev}」锚点 ⇒ 证据要能打开`]
+  if (/^(?:D|ADR)-\d+[a-z]?$/i.test(ev)) return [`裸决策号 ${ev} 不是证据；请写仓内路径或当前理由`]
+  const pathLike = path.isAbsolute(ev) || ev.includes('/') || ev.includes('\\') || /^[\w.-]+\.[A-Za-z0-9]+$/.test(ev)
+  if (!pathLike) return []
+  const abs = path.resolve(root, ev)
+  const rel = path.relative(path.resolve(root), abs)
+  if (rel === '' || rel === '..' || rel.startsWith(`..${path.sep}`) || path.isAbsolute(rel)) {
+    return [`证据路径 ${ev} 不是仓内相对路径`]
   }
-  return fs.existsSync(path.join(root, ev)) ? [] : [`证据路径 ${ev} 不存在 ⇒ 证据要能打开`]
+  return fs.existsSync(abs) ? [] : [`证据路径 ${ev} 不存在 ⇒ 证据要能打开`]
 }
 
-/** 基线条目的形状与署名（`AD-003`）。决策号存在性走 `decision-anchors`（唯一扫描实现）。 */
+/** 基线条目的形状与署名（`AD-003`）：证据必须能打开，且写的是当前理由。 */
 export function checkBaseline(baseline, root = ROOT) {
   const errors = []
   const seen = new Set()

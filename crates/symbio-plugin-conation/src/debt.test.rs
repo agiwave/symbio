@@ -1,4 +1,4 @@
-//! 升格债的三个 early return（`D-386`）：开关、授权、已声明。
+//! 升格债的三个 early return：开关、授权、已声明。
 //!
 //! 授权那一格在一个正常装配里恒真（`PRINCIPAL_AUTONOMOUS` 持 `define.work`），所以
 //! 这里没有「拒绝」用例——它由 `production_matrix` 的授权表保证，本包不造一个假矩阵
@@ -59,7 +59,7 @@ fn the_switch_off_produces_no_debt() {
 #[test]
 fn the_switch_reads_the_latest_config_in_this_round() {
     let mut facts = DebtFacts::default();
-    // 上一轮关着、本轮开着 ⇒ 本轮开口径（`D-386`）：最近一份为准。
+    // 上一轮关着、本轮开着 ⇒ 本轮开口径：最近一份为准。
     config(&mut facts, "cfg-1", json!(false));
     config(&mut facts, "cfg-2", json!(true));
     expressed(&mut facts, "want-1", "把周报写了", 3);

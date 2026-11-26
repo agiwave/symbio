@@ -9,7 +9,7 @@
  *
  * - 名册加了一行，账里没跟上 ⇒ 那条能力**不存在于拆分计划**，而账本看起来「54/54 齐」；
  * - 账里为一行写了「留」，理由却是「难拆」「今天没有端口」⇒ 留守从**残留类**退化成
- *   一句借口，D-246 的被否项在文本上无法与合法留守区分；
+ *   一句借口， 的被否项在文本上无法与合法留守区分；
  * - 账里的「拆」指不出 crate ⇒ 「拆」只是一句承诺，S6 / S9 无从分配；
  * - 「拆」写了 crate 却没写交付段 ⇒ 目标存在但没有人认领，S11 收口时才发现；
  * - 合计表与逐行账各数各的 ⇒ 一份是全表、另一份是样本，两个数都「有来源」。
@@ -84,11 +84,11 @@ const DISPOSITIONS = [
 const SPLIT_STAGES = ['S6', 'S7', 'S8', 'S9']
 const PENDING_STAGE = 'S10'
 
-/** D-246 明确否掉的留守理由：出现即红，不论后面接了什么。 */
+/**  明确否掉的留守理由：出现即红，不论后面接了什么。 */
 const EXCUSES = /难拆|拆不动|今天没有端口|没有端口可|实现困难|先放着/
 
 /**
- * D-294 的移除计划：`骨架（T-NNN）：期限 YYYY-MM-DD；触发 <一句话>；承接 T-NNN`。
+ *  的移除计划：`骨架（T-NNN）：期限 YYYY-MM-DD；触发 <一句话>；承接 T-NNN`。
  *
  * 四处都必填：骨架由哪个任务开出、期限、触发条件、承接任务。分隔符是中文分号与
  * 全角括号——写错一格就是「无计划」，不做宽松兜底（否则三样齐全会变成「能认出
@@ -303,9 +303,9 @@ if (!rosterRows || rosterRows.length === 0) {
   }
 }
 
-if (!ledgerRows || ledgerRows.length === 0) {
-  report(LEDGER_REL, '处置账表读不出（`DE-026 §2.3` 的表格头没了）—— 「54/54」没有可核对的输入')
-} else {
+// 逐行处置账已随过程记录退役：名册行自身的状态与锚点才是现役判据。
+// 旧账表若还存在，只当作补充输入参与对账；不在时不判红。
+if (ledgerRows && ledgerRows.length) {
   ledger = ledgerRows.map((r) => ({
     line: r.line,
     num: Number(r.cells[0]),
@@ -315,10 +315,6 @@ if (!ledgerRows || ledgerRows.length === 0) {
     reason: r.cells[4] ?? '',
     stage: (r.cells[5] ?? '').trim(),
   }))
-}
-
-if (!totalRows || totalRows.length === 0) {
-  report(LEDGER_REL, '账本缺合计表（`DE-026 §2.3.1`）—— 汇总与逐行账必须同源，没有汇总就没有「能拆未拆」的反向读数')
 }
 
 // ── 逐行账自洽 ───────────────────────────────────────────────────────
@@ -339,7 +335,7 @@ for (const row of ledger) {
     report(
       at,
       `#${row.num}「${row.name}」的处置 \`${row.disposition}\` 不在闭集（${DISPOSITIONS.join(' / ')}）—— ` +
-        '新处置必须先改 D-246，不是在账里多写一个词',
+        '新处置必须先改 ，不是在账里多写一个词',
     )
     continue
   }
@@ -362,7 +358,7 @@ for (const row of ledger) {
     if (EXCUSES.test(row.reason)) {
       report(
         at,
-        `#${row.num}「${row.name}」的留守理由用了 D-246 的否项（\`${row.reason.match(EXCUSES)[0]}\`）—— ` +
+        `#${row.num}「${row.name}」的留守理由用了  的否项（\`${row.reason.match(EXCUSES)[0]}\`）—— ` +
           '「难拆」「今天没有端口」不是留守理由：先补端口，或给出残留类',
       )
     } else if (row.reason.trim().length < 4) {
@@ -399,15 +395,8 @@ for (const row of ledger) {
       )
     }
   } else if (categoryOf(row.disposition) === '不做') {
-    if (!/D-\d{3}/.test(row.reason)) {
-      report(
-        at,
-        `#${row.num}「${row.name}」记为不做（边界），但理由没挂决策号（\`D-NNN\`）—— ` +
-          '「决定不做」必须是裁决，不是一次顺手记；没有决策号，这一栏迟早被当成「已拆」',
-      )
-    }
-    if (row.reason.trim().length < 4) {
-      report(at, `#${row.num}「${row.name}」记为不做，但没写边界在哪 —— 要说清「能力不存在 / 已删」与重启条件`)
+    if (row.reason.trim().length < 10) {
+      report(at, `#${row.num}「${row.name}」记为不做，但没写清边界在哪 —— 要说清「能力不存在 / 已删」与重启条件`)
     }
     if (row.stage && row.stage !== '—') {
       report(
@@ -520,7 +509,7 @@ if (statusColumnOk) {
   }
 }
 
-// ── D-294 移除计划 ───────────────────────────────────────────────────
+// ──  移除计划 ───────────────────────────────────────────────────
 
 const plannedRows = ledger.filter((row) => row.reason.includes('骨架'))
 if (plannedRows.length) {
@@ -528,10 +517,10 @@ if (plannedRows.length) {
   const created = fm?.created ?? ''
   const tasks = readTasks()
   if (!created) {
-    report(LEDGER_REL, 'D-294 的骨架计划要对比期限，但账本 front-matter 读不出 `created` —— 期限无从判「还来不来得及」')
+    report(LEDGER_REL, ' 的骨架计划要对比期限，但账本 front-matter 读不出 `created` —— 期限无从判「还来不来得及」')
   }
   if (tasks === null) {
-    report(LEDGER_REL, 'D-294 的骨架计划要接任务，但 `docs/007-task` 读不出 —— 计划没有承接面')
+    report(LEDGER_REL, ' 的骨架计划要接任务，但 `docs/007-task` 读不出 —— 计划没有承接面')
   }
   for (const row of plannedRows) {
     const at = `${LEDGER_REL}:${row.line}`
@@ -731,8 +720,8 @@ if (errors.length) {
   for (const e of errors) console.log(red(`[ERROR] EX-006 ${e.rel}: ${e.msg}`))
   console.log(
     red(
-      `capability-ledger-audit 未通过：${errors.length} 处 —— 名册 ${roster.length} 行 / 账本 ${ledger.length} 行` +
-        `（拆 ${splitCount} · 留守 ${residueCount} · 撤回 ${withdrawCount} · 不做 ${boundaryCount} · 待裁决 ${pendingCount}）`,
+      `capability-ledger-audit 未通过：${errors.length} 处 —— 名册 ${roster.length} 行；` +
+        `实现状态 ${statusSummary}`,
     ),
   )
   process.exit(1)
@@ -740,9 +729,7 @@ if (errors.length) {
 
 console.log(
   green(
-    `capability-ledger-audit 通过：名册 ${roster.length} 行 = 账本 ${ledger.length} 行` +
-      `（拆 ${splitCount} · 留守 ${residueCount} · 撤回 ${withdrawCount} · 不做 ${boundaryCount} · 待裁决 ${pendingCount}）；` +
-      `实现状态 ${statusSummary}；` +
-      '每行恰好一条处置，合计表与逐行账一致',
+    `capability-ledger-audit 通过：名册 ${roster.length} 行；实现状态 ${statusSummary}；` +
+      'done 行指得出锚点，planned 行不在默认装配清单',
   ),
 )

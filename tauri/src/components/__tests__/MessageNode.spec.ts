@@ -1,6 +1,6 @@
 // @vitest-environment happy-dom
 /**
- * MessageNode 组件级测试 —— 渲染只按 wire `NodeKind` 五值分派（[D-070 §后果 2]）。
+ * MessageNode 组件级测试 —— 渲染只按 wire `NodeKind` 五值分派。
  *
  * 分派轴只有五格（body / notice / skeleton / interaction / typing）：每格只按**形状 +
  * 呈现数据**（title / icon / actions）渲染，不含任何业务分支。类名钩子来自 `NodeShell`
@@ -324,7 +324,7 @@ describe('MessageNode：工具子骨架（skeleton 容器，自身正文提升�
  * 分派器路由与内容形态 —— 分派器只做「按 NodeKind 路由」，渲染形态由各渲染器负责。
  *
  * 这一组同时是压缩形态的回归锚：压缩与思考同在 `notice` 一格，靠**是否携带读数行**
- * （`node.stats`，[D-111](../../../../crates/symbio-plugin-session/README.md#d-111-消息读数由交付出口装配压缩与记忆的事实行离开前端 "crates/symbio-plugin-session/src/README")）分道——有行走「压缩动作」样式，
+ * （`node.stats`）分道——有行走「压缩动作」样式，
  * 无行走 Markdown。夹具因此只给 `stats` 而不给 `meta` 数字：**本组件不认识那些字段名**，
  * 数字→文案的口径在后端（判据在 `plugins/session/stats_reading.test.rs`）。
  */
@@ -474,9 +474,9 @@ describe('MessageNode：压缩后的历史记忆（折叠叶，不是「你说�
 })
 
 /**
- * 结构轴递归（[D-423]）—— **这次事故的回归锚**。
+ * 结构轴递归—— **这次事故的回归锚**。
  *
- * [D-335] 之后轮的根就是用户消息节点（`body` / `person`）：`rebuild` 折出的骨架与它
+ *  之后轮的根就是用户消息节点（`body` / `person`）：`rebuild` 折出的骨架与它
  * 同 id 被并掉，模型正文 / 思考 / 工具卡全部挂在它下面。而递归曾经只由 `skeleton`
  * 渲染器施加，于是整棵响应子树永不渲染——界面只剩一个用户气泡，typing 熄灭后什么都没有。
  *

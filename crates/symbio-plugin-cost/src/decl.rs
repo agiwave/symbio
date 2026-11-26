@@ -17,11 +17,11 @@
 //!
 //! 它只读**事件信封**的 `ts` / `actor` / `cost_ms`，一个载荷字段都不碰：`cost_ms` 不是某族
 //! 事实的载荷字段，它是每条事件自带的计量列（与 `slo.span` 只读 `ts` 同一形状）。所以
-//! `reads: &[]` 是合法声明（`D-282` 那条通道也不触发——没有任何载荷字段可校验）。
+//! `reads: &[]` 是合法声明（ 那条通道也不触发——没有任何载荷字段可校验）。
 //!
 //! ## 为什么没有 `agg` 那一半
 //!
-//! `D-281` 的合并服务于**实例级读数**（分位数 / 率 / 中位数），而成本台账今天没有实例级
+//!  的合并服务于**实例级读数**（分位数 / 率 / 中位数），而成本台账今天没有实例级
 //! 的那一列：闸门要的是「这个主体在这会话里花掉多少」，出口 `stats.cost` 是会话级的书。
 //! 跨会话合成本台账会得出「整个实例花过多少毫秒」，而它没有读者——交一份没人读的合并
 //! 函数只是多一处口径。真要那一列时，`agg` 与它的读方同批落地。
@@ -34,14 +34,14 @@ use symbio_plugin_api::reports::{ReportCtx, ReportDecl};
 use symbio_plugin_api::{Event, PluginDeclarations, ViewDecl};
 
 /// 对外可读的那条视图。名字只在本 crate 出现一次（`SV-001`）；公开动作是下面的
-/// 报表登记（`D-387`），读方按报表的 `views` 取，不依赖本 crate（`D-221`）。
+/// 报表登记，读方按报表的 `views` 取，不依赖本 crate。
 pub(crate) const COST_LEDGER: &str = "cost.ledger";
 
 /// owner —— 与目录名同形（`crates/symbio-plugin-cost`），装配表按它排序与报缺口。
 pub(crate) const OWNER: &str = "crates/symbio-plugin-cost";
 
 /// 扫描成本上界（事件条数）。它是环内窗口求值的预算；跨插件读口不查它——读侧按
-/// 调用方给的切片全量折（`D-284`）。
+/// 调用方给的切片全量折。
 ///
 /// 声明的上界必须与全仓**同一个值**（`seal` 的 `ViewCostMismatch`：切点只有一个），
 /// 所以这里不按「台账通常很短」调小——调小会改整张表的切点。
@@ -88,7 +88,7 @@ fn ledger(events: &[Event], now: i64) -> Value {
     json!({ "by_principal": Value::Object(by_principal), "total_ms": total_ms })
 }
 
-// 报表登记（`D-387`）：`session/stats` 的 `cost` 顶层键。`views` 是 owner 自己的
+// 报表登记：`session/stats` 的 `cost` 顶层键。`views` 是 owner 自己的
 // 常量；空形状留在 [`report`]，读方不再替 owner 猜形状。
 symbio_plugin_api::submit_reports!([ReportDecl {
     owner: "cost",

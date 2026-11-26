@@ -6,14 +6,14 @@
 //!   `symbio_plugin_api::vdfs`——那是 VDFS 的 centerpiece；
 //! - **线路格式**（请求 / 响应信封 + 协议路径常量）在本文件——只有 vdfs 插件
 //!   自己消费，**core 不暴露本文件的任何类型**。唯一例外是 [`VdfsListResponse`]：
-//!   `agent` 也要读它的 `path` 拼子会话地址，按 D-196 它属于领域（两个 Rust 侧消费方），
+//!   `agent` 也要读它的 `path` 拼子会话地址 它属于领域（两个 Rust 侧消费方），
 //!   归 `symbio_plugin_api::vdfs`，本文件只 `pub use` 转发。
 //!
 //! ⚠️ **跨插件消费的路径**（`vdfs/root` / `vdfs/watch` / `vdfs/unwatch` /
 //! `vdfs/list` / `vdfs/tree` / `vdfs/stat` / `vdfs/read` / `vdfs/write` /
 //! `vdfs/delete` / `vdfs/search` / `vdfs/action`）**归宿主的 `symbio_plugin_api::routes`**（`ROUTE_VDFS_*`，由本插件
 //! `PLUGIN.yml` 的 `plugin_routes` 生成）。本文件只引用、不重复定义——同一路径两份
-//! 常量就是「一个事实两个 owner」，必然漂移（D-364）。只有本插件自己消费的
+//! 常量就是「一个事实两个 owner」，必然漂移。只有本插件自己消费的
 //! `mkdir` / `edit` 仍是本地常量。
 //!
 //! 这与 model 插件把 `ModelProtocol` 钩子与注册常量收在
@@ -186,7 +186,7 @@ pub struct VdfsSearchRequest {
 
 // `vdfs/list` 与 `vdfs/root` 的响应形状定义在 `symbio_plugin_api::vdfs`，这里只转发：
 // 它有两个 Rust 侧消费方（本插件构造、`agent` 读 `path`），按 E-009 后者不能
-// `use symbio_plugin_vdfs`，按 D-196 该类型属于领域而不是某个插件。
+// `use symbio_plugin_vdfs` 该类型属于领域而不是某个插件。
 //
 // 用行注释而不是 `///`：给 `pub use` 挂文档注释并链接到被转发的项会让 rustdoc 在
 // 链接解析阶段 panic（`no resolutions for a doc link`，rustc 1.91）。语义与字段说明
@@ -207,8 +207,8 @@ pub struct VdfsTreeResponse {
     /// 为什么必须回这一份：`d781a6c7` 号会话里，一次 `vdfs_tree({"depth":3})` 的 500 个
     /// 配额被 `.workbuddy-ai`(180) + `.git`(73) + `.symbio`(60) 吃掉大半，`docs/adr`
     /// 只剩一个目录节点——那 63 个 ADR 一个都没有，而回执**只说 `truncated: true`，
-    /// 没说缺了什么**。于是模型开始**猜** ADR 编号（`../../../../docs/003-design/014-单环一表.md` …一路猜到 doc-link-allow D-010: 同行反引号路径是历史叙述——记录 d781a6c7 会话里模型实际猜过的编号（仓库只到 D-062，该文件当时不存在），非入链。
-    /// `D-213.md`），逐个用 shell 试，132 次全是「系统找不到指定的文件」，会话跑
+    /// 没说缺了什么**。于是模型开始**猜** ADR 编号（`../../../../docs/003-design/014-单环一表.md` …一路猜到 doc-link-allow D-010: 同行反引号路径是历史叙述——记录 d781a6c7 会话里模型实际猜过的编号（仓库只到，该文件当时不存在），非入链。
+    /// `.md`），逐个用 shell 试，132 次全是「系统找不到指定的文件」，会话跑
     /// 188 秒 181 次工具调用后被用户中止，**最终零产出**。
     ///
     ///

@@ -35,7 +35,7 @@ const STEP_BUDGET: usize = 128;
 ///
 /// 缓存（若有）由宿主自己持有；环每一步重新读一遍，跨步不保留任何东西。
 ///
-/// **时钟不在这里**：`now` 只取事实的 `at_ms` 最大值（`D-376`）。要推进时间就落一条
+/// **时钟不在这里**：`now` 只取事实的 `at_ms` 最大值。要推进时间就落一条
 /// 带更晚 `at_ms` 的事实——读墙钟会让同一份事实日志重放两次得到不同结果。
 pub(crate) trait DriveCtx: Send + Sync {
     /// 当前可见域的事实快照（只读投影）。
@@ -55,7 +55,7 @@ pub(crate) trait DriveCtx: Send + Sync {
     /// 返回的是**同一份事实账**的共享视图（实现方克隆的是句柄，不是账本）。
     fn shared(&self) -> Arc<dyn DriveCtx>;
 
-    /// 环的「现在」：事实时间轴上最晚的一笔（`D-376`），不读墙钟。
+    /// 环的「现在」：事实时间轴上最晚的一笔，不读墙钟。
     ///
     /// 默认只从五类事实取。宿主实现应覆盖成**全部**事实（含世界事实）：触发一次
     /// 驱动的往往是世界事实（用户消息 / 工具回执），它的 `ts` 就是这一圈的起点；
@@ -125,7 +125,7 @@ pub(crate) struct RunReport {
 struct Work {
     /// 可派发（可能先补 `request`）。
     dispatch: Vec<(DebtRow, u32)>,
-    /// 租约已过：推进尝试或判死；第三位是**在跑那行**的名字（D-442 行归属，
+    /// 租约已过：推进尝试或判死；第三位是**在跑那行**的名字（ 行归属，
     /// 来自 `sent` 载荷——共键多行时，本圈报出过期候选的行未必是在跑的行）。
     expire: Vec<(DebtRow, u32, Option<u32>, String)>,
     /// 已发未配，租约未过：**在飞**（环自己还能推进）。
@@ -138,7 +138,7 @@ struct Work {
     /// 只用于出口：一圈没有动作、账上也没有未收束债，但这里非空 ⇒ 有人在等一笔
     /// 没人能还的前提。必须报 `Stalled`，**不能报 `NoDebt`**（否则就是静默停摆）。
     blocked: Vec<DebtKey>,
-    /// 重试归属行已不在（D-442）：`retry` 指认的行这一圈没有被任何源申报。
+    /// 重试归属行已不在：`retry` 指认的行这一圈没有被任何源申报。
     ///
     /// 这笔债若留着只会悬挂——没有 `sent` 就没有租约，永远等不到动作。判死是
     /// 唯一诚实的收束：可见的失败优于不可见的停摆。
@@ -167,16 +167,16 @@ pub(crate) async fn drive(ctx: &dyn DriveCtx) -> RunReport {
 
         let source = ctx.source();
         let rows = source.rows(&view);
-        // `now` 只来自事实（`D-376`）：同一份日志重放两次，租约的判定逐字节相同。
+        // `now` 只来自事实：同一份日志重放两次，租约的判定逐字节相同。
         let now_ms = ctx.now_ms();
         let work = plan(&view, source, &rows, now_ms);
 
         if !work.dispatch.is_empty() {
             let cap = ctx.concurrency().max(1);
-            // 执行体的读面固定在**这一圈计划时**的快照上（`D-376`）：同一批里别的
+            // 执行体的读面固定在**这一圈计划时**的快照上：同一批里别的
             // 执行体随后落下的事实不进本笔的提示词 / 行输入。否则「收尾轮读到同轮
             // 摘要」这类先后就成了调度器的机缘——同一份事实日志重放两次，请求未必
-            // 逐字节相同。计划本来就只用一次快照（`D-343`），读面与之对齐。
+            // 逐字节相同。计划本来就只用一次快照，读面与之对齐。
             let reader = ctx.fact_reader().map(|reader| {
                 Arc::new(SnapshotReader::snapshot(&*reader)) as Arc<dyn PortFactReader>
             });
@@ -262,7 +262,7 @@ pub(crate) async fn drive(ctx: &dyn DriveCtx) -> RunReport {
     }
 }
 
-/// 环的「现在」：事实时间轴上最晚的一笔（`D-376`）。
+/// 环的「现在」：事实时间轴上最晚的一笔。
 ///
 /// 不读墙钟：同一份事实日志重放两次，租约到期与否逐字节相同。要让时间前进，
 /// 就落一条带更晚 `at_ms` 的事实——时间是账上的数据，不是进程的环境。
@@ -361,16 +361,16 @@ fn plan(view: &FactView<'_>, source: &dyn DebtSource, rows: &[DebtRow], now_ms: 
 
     // 第一步只算「这一行这一圈是什么动作」，**不看** `after_port`：前提端口有没有
     // 认领，取决于同一份行集合里别的行——那是第二步用本圈算出的动作集合回答的。
-    // 整个判断只用 `rows`（已由宿主按同一次事实快照求出），不第二次读事实（D-343）。
+    // 整个判断只用 `rows`（已由宿主按同一次事实快照求出），不第二次读事实。
     let mut candidates: Vec<Candidate> = Vec::new();
     let mut seen = HashSet::new();
-    // 重试归属（D-442）的两本小账：`attributed` 记「这个键的 retry 指认过行」，
+    // 重试归属的两本小账：`attributed` 记「这个键的 retry 指认过行」，
     // `matched` 记「指认的行这一圈真的报了动作」。两者之差就是孤儿键。
     let mut attributed: HashSet<DebtKey> = HashSet::new();
     let mut matched: HashSet<DebtKey> = HashSet::new();
     // 前提端口：这一圈**有人认领**的端口。两处来源合起来才是完整的「认领」：
     // 1. 申报方这一轮报了这一行、且它那笔债还开着（已派发未收束）——**不看 `when`
-    //    的判定**：`when` 读的是本圈计划快照（D-343），可能还没看见本圈刚落下的回执
+    //    的判定**：`when` 读的是本圈计划快照，可能还没看见本圈刚落下的回执
     //    （例如分类刚收到 `response`、还没等到下一圈 parse），此时这笔债仍然是有人
     //    在做的活，依赖方不能抢跑；
     // 2. 下文选出的可动作行所在端口（尤其首派发的行还没有 `sent`）。
@@ -404,7 +404,7 @@ fn plan(view: &FactView<'_>, source: &dyn DebtSource, rows: &[DebtRow], now_ms: 
             }
         }
         // 「该端口的债全部还清才欠」读的是债状态，不是事实状态（归属：选债）。
-        // 作用域可能只是**这一批债 id**（D-446）：同端口上别的债不挡——一笔迟归 /
+        // 作用域可能只是**这一批债 id**：同端口上别的债不挡——一笔迟归 /
         // 卡住的旧调用债不该把这一轮的续跑一起拖住。
         if let Some(scope) = &row.when_no_open {
             if view
@@ -430,7 +430,7 @@ fn plan(view: &FactView<'_>, source: &dyn DebtSource, rows: &[DebtRow], now_ms: 
             continue;
         }
         let Some(sent) = view.last_sent(&key) else {
-            // 重试归属（D-442）：多行共用同一个 `(port, id)` 时，attempt 自增后由
+            // 重试归属：多行共用同一个 `(port, id)` 时，attempt 自增后由
             // `retry` 载荷的 `row` 指认谁来重跑——不是表序先到先得。指认的不是本行
             // ⇒ 本行这一圈不动作；指认的行整圈无人申报 ⇒ 该键记为孤儿，由驱动
             // 判死（没有 `sent` 就没有租约，留着只会悬挂）。
@@ -490,7 +490,7 @@ fn plan(view: &FactView<'_>, source: &dyn DebtSource, rows: &[DebtRow], now_ms: 
             continue;
         }
         let next = (attempt < row.max_attempts).then(|| attempt + 1);
-        // 租约推进的行归属（D-442）：在跑的是 `sent` 载荷里记录的那一行，不是
+        // 租约推进的行归属：在跑的是 `sent` 载荷里记录的那一行，不是
         // 本圈报出过期候选的这行——共键多行时后者可能只是恰好排在前面。
         let owner = sent
             .payload
@@ -550,7 +550,7 @@ fn plan(view: &FactView<'_>, source: &dyn DebtSource, rows: &[DebtRow], now_ms: 
             Pick::Suspended => work.suspended.push(candidate.key),
         }
     }
-    // 重试归属的孤儿（D-442）：`retry` 指认了行、指认的行这一圈却无人申报。
+    // 重试归属的孤儿：`retry` 指认了行、指认的行这一圈却无人申报。
     // 判死而不是悬挂——见 `Work::orphaned` 的注释。
     for key in attributed {
         if !matched.contains(&key) && !work.blocked.contains(&key) {
@@ -571,7 +571,7 @@ struct Candidate {
 enum Pick {
     /// 可派发（可能先补 `request`）。
     Dispatch,
-    /// 租约已过：推进尝试或判死；`owner` 是在跑那行的名字（D-442 行归属）。
+    /// 租约已过：推进尝试或判死；`owner` 是在跑那行的名字（ 行归属）。
     Expire { next: Option<u32>, owner: String },
     /// 已发未配，租约未过：在飞。
     InFlight,
@@ -581,7 +581,7 @@ enum Pick {
 
 /// 租约已过：有下一笔就记账并再举，没有就判死。
 ///
-/// 行归属（D-442）：`owner` 是在跑那行的名字（来自 `sent` 载荷，派发时记录）——
+/// 行归属：`owner` 是在跑那行的名字（来自 `sent` 载荷，派发时记录）——
 /// `retry` 带上它，下一圈 `plan` 才能让**失败的那一行**重跑，而不是表序第一行。
 fn expire(
     ctx: &dyn DriveCtx,
@@ -621,7 +621,7 @@ fn expire(
 /// 派发一笔：补 `request` → 落 `sent` → 把执行体交给后台 → 按结局收账。
 ///
 /// `sent` 是 `before` 事实，**先于执行体**落格（`DE-022`）：执行体挂死时租约已经在
-/// 账上，下一圈 `plan` 看得到它，`expire` 能收束（`D-376`）。执行体因此不能挡在
+/// 账上，下一圈 `plan` 看得到它，`expire` 能收束。执行体因此不能挡在
 /// `drive` 的路径上——它跑在后台任务里，完成时经 [`finish`] 回写并再踢一次。
 ///
 /// 挂起不再改写 `sent`（事实源按 `(kind, key)` 吸收重复）：同 attempt 再落**第二条**
@@ -701,8 +701,8 @@ async fn dispatch(
 
     // 租约先落，执行体后跑（`DE-022` 的 `before`）：挂死时 `expire` 才有东西可判。
     // `request` 紧贴在它之后、执行体之前落：执行期间产生的世界事实以 `request` 为直接
-    // 前件（I2 的溯源锚），租约只是基础设施，不顶替「这次请求」的因果位（`D-376`）。
-    // `row` 是行归属（D-442）：租约推进与重试据此认领「在跑的是哪一行」。
+    // 前件（I2 的溯源锚），租约只是基础设施，不顶替「这次请求」的因果位。
+    // `row` 是行归属：租约推进与重试据此认领「在跑的是哪一行」。
     ctx.append(Fact::new(
         FactKind::Sent,
         key.clone(),
@@ -729,7 +729,7 @@ async fn dispatch(
         scratch_dir: handles.scratch_dir,
         session_id: handles.session_id,
         source: handles.source,
-        // 读面是这一圈计划时的快照（`D-376`），不是执行体跑起来时的活账本。
+        // 读面是这一圈计划时的快照，不是执行体跑起来时的活账本。
         reader,
     };
     let input = PortInput {
@@ -743,7 +743,7 @@ async fn dispatch(
     }))
 }
 
-/// 后台执行体返回后的收账（`D-376`）。
+/// 后台执行体返回后的收账。
 ///
 /// **迟归整笔丢弃**：完成时先看 `(port, id, attempt)` 这一笔还开不开——账上 attempt
 /// 已经推进（`retry` 落在 N+1），或同键已有收束（`failed` / `response`），或租约
@@ -753,7 +753,7 @@ async fn dispatch(
 /// **产物一次性提交**：执行体 `emit` 的草稿（五类协议事实与它写出的世界事实）都
 /// 缓冲到此处，只有这一笔还开着才一起落格。世界事实若在执行期间就写出去，工具产物
 /// 会先于工具债收束落账，把消费它的能力行提前叫醒——同一份事实日志的阅读顺序
-/// 因此取决于后台任务的完成时刻（`D-376`）。
+/// 因此取决于后台任务的完成时刻。
 async fn finish(
     ctx: Arc<dyn DriveCtx>,
     row: DebtRow,
@@ -774,7 +774,7 @@ async fn finish(
     if superseded || closed || lease_over {
         return;
     }
-    // D-385：执行体自判拒绝 ⇒ 它交来的任何草稿都不落格（fail-closed），这一笔按
+    //：执行体自判拒绝 ⇒ 它交来的任何草稿都不落格（fail-closed），这一笔按
     // 不可重试失败收束。环不替它补结论，也不把拒绝读成成功。
     if let Some(reason) = outcome.authz.denial() {
         ctx.append(Fact::new(
@@ -928,15 +928,15 @@ fn failure_payload(facts: &[Value], row: &DebtRow, class: PortErrorClass, why: &
         // 环侧读原因用 `reason`（notes 的 `reply_of` 与会话收束都读它）；执行体
         // 自带的 `why` 不覆盖，两个键同义并存。
         map.insert("reason".to_string(), json!(why));
-        // 行归属（D-442）：失败的诊断位——哪一行的动作没跑成。
+        // 行归属：失败的诊断位——哪一行的动作没跑成。
         map.insert("row".to_string(), json!(row.name));
     }
     payload
 }
 
-/// 执行体读面的**派发时刻快照**（`D-376`）。
+/// 执行体读面的**派发时刻快照**。
 ///
-/// 同一圈派发的每一笔都看到同一份事实：计划已经只用一次快照（`D-343`），执行体若
+/// 同一圈派发的每一笔都看到同一份事实：计划已经只用一次快照，执行体若
 /// 跑起来再读活账本，就会看见同批兄弟刚落下的事实——「哪一笔先完成」于是决定请求
 /// 正文，重放不再逐字节相同。快照在 `drive` 里取一次，克隆句柄分给整批。
 struct SnapshotReader {
@@ -963,7 +963,7 @@ impl PortFactReader for SnapshotReader {
     }
 }
 
-/// 执行体 emit 的收集器：**全部**草稿先缓冲，`finish` 时一次性提交（`D-376`）。
+/// 执行体 emit 的收集器：**全部**草稿先缓冲，`finish` 时一次性提交。
 ///
 /// 五类事实进环的账本、其余走应用出口——分派只在 `finish` 做一次，执行期间不写
 /// 任何东西：迟归的那一笔连同它的世界事实一起丢弃，半成品不会先落账。

@@ -154,7 +154,7 @@ const PLAN_SRC = `### 3.3 重放收敛
  * `facts` / `solver` / `event` / `writer` / `plan` 可覆盖，用来注入违规；基线**总是按夹具自己的求解器
  * 算出来**（基线是文件，随树走——这样「求解器变了」才是能被夹具表达的那件事）。
  */
-function fixture({ event = EVENT_SRC, facts = DECL_SRC, solver = SOLVER_SRC, ports = PORTS_SRC, writer = WRITER_SRC, plan = PLAN_SRC, adr = 'D-115', reason = '夹具基线', skipBaseline = false, createAdr = true } = {}) {
+function fixture({ event = EVENT_SRC, facts = DECL_SRC, solver = SOLVER_SRC, ports = PORTS_SRC, writer = WRITER_SRC, plan = PLAN_SRC, adr = '', reason = '夹具基线', skipBaseline = false, createAdr = true } = {}) {
   const root = fs.mkdtempSync(path.join(os.tmpdir(), 'port-surface-'))
   const write = (rel, body) => {
     const abs = path.join(root, rel)
@@ -184,7 +184,7 @@ function fixture({ event = EVENT_SRC, facts = DECL_SRC, solver = SOLVER_SRC, por
     })
     assert.equal(printed.status, 0, printed.stdout + printed.stderr)
     const hash = JSON.parse(printed.stdout).hash
-    write(BASELINE_REL, JSON.stringify({ solver: { file: SOLVER_REL, hash, adr, reason } }, null, 2))
+    write(BASELINE_REL, JSON.stringify({ solver: { file: SOLVER_REL, hash, why: reason } }, null, 2))
   }
   return root
 }
@@ -216,7 +216,7 @@ test('真仓当前状态通过，且各格判据都数得出非零输入', () =>
   assert.ok(facts, '通过信息里没有「带端口的事实条数」⇒ 判据可能已恒真')
   assert.ok(Number(facts[1]) > 0, '真仓里带端口的事实数为 0 ⇒ 提取器与源码形状脱节')
   assert.match(r.stdout, /PTS-003.*sha256:/)
-  assert.match(r.stdout, /PTS-004.*D-\d/)
+  assert.match(r.stdout, /PTS-004.*当前理由/)
   // PTS-005 也要数得出写点（扫空了就是判据静默变成「永远绿」）。
   const sites = /协议格写方唯一：(\S+)（命中 (\d+) 处构造）/.exec(r.stdout)
   assert.ok(sites, '通过信息里没有「协议格写方唯一」的实测名单与命中数 ⇒ PTS-005 可能没有输入')
@@ -283,7 +283,7 @@ test('豁免口：第 6 个协议名必须挂一条能打开的决策', () => {
     const self = fs.readFileSync(script, 'utf8')
     const patched = self.replace(
       'const WAIVER_RE =',
-      '// port-surface-allow protocol turn.sent: D-115 —— 夹具：协议族扩一个成员\nconst WAIVER_RE =',
+      '// port-surface-allow protocol turn.sent:  —— 夹具：协议族扩一个成员\nconst WAIVER_RE =',
     )
     assert.notEqual(patched, self)
     fs.writeFileSync(script, patched, 'utf8')
@@ -419,21 +419,11 @@ test('PTS-003 基线缺失 ⇒ 红（没有基准就没有判据）', () => {
   }
 })
 
-test('PTS-004 基线引用的决策打不开 ⇒ 红', () => {
-  const root = fixture({ adr: 'D-999', createAdr: false })
-  try {
-    const r = run(root)
-    expectAudit(r, 1, [onStderr(/PTS-004.*D-999/)])
-  } finally {
-    cleanup(root)
-  }
-})
-
-test('PTS-004 基线的理由为空 ⇒ 红', () => {
+test('PTS-004 基线里没有规则码 ⇒ 红', () => {
   const root = fixture({ reason: '   ' })
   try {
     const r = run(root)
-    expectAudit(r, 1, [onStderr(/PTS-004.*reason/)])
+    expectAudit(r, 1, [onStderr(/PTS-004.*why/)])
   } finally {
     cleanup(root)
   }

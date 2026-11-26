@@ -31,7 +31,7 @@ registerVdfsRenderer('text', markRaw(VdfsTextDetail))
 // 配置型插件 ui_prefs 的专属面板（节点以语义类型名 appearance 为 ext 声明）；
 // 「关于」不是插件，已从插件列表移除（无独立渲染器）。
 registerVdfsRenderer('appearance', markRaw(Appearance))
-// 插件市场：候选由后端现场计算，安装写回同一节点（D-520）
+// 插件市场：候选由后端现场计算，安装写回同一节点
 registerVdfsRenderer('market', markRaw(MarketPanel))
 // 目录与未命中：机制级只读兜底（资源管理器永不空白的原因）
 registerVdfsRenderer('dir', markRaw(VdfsReadonlyDetail))

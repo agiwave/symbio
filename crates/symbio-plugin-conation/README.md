@@ -17,8 +17,8 @@ impl: done
 | 面 | 交出物 | 谁用 |
 |---|---|---|
 | 事实 | `conation.expressed`，格位 `conation × opened`，字段 `goal` | 写闸按声明校验名字与格位；`seal` 按归宿行判它有没有人看护 |
-| 视图 | `conation.intents` → `{ intents, declared, expressed, escalated, adoption_rate }` | 任何按名字读的插件（报表登记，D-221 / D-387） |
-| 多片合并 | `ViewDecl::agg`：N 份单片读数 → `{ expressed, escalated, adoption_rate }` | 实例级聚合列的读方（D-281） |
+| 视图 | `conation.intents` → `{ intents, declared, expressed, escalated, adoption_rate }` | 任何按名字读的插件 |
+| 多片合并 | `ViewDecl::agg`：N 份单片读数 → `{ expressed, escalated, adoption_rate }` | 实例级聚合列的读方 |
 
 **没有工具、没有路由、没有配置、没有新端口。**
 
@@ -40,7 +40,7 @@ impl: done
   这条 `produced_by` 是**信封**字段，所以它不进 `reads`（`reads` 列的是载荷字段）。
 - **as-of**：形参 `now` 就是锚，`ts > now` 的欲与升格一概不见。
 
-## 为什么折叠要交两半（D-281）
+## 为什么折叠要交两半
 
 读方要的是两个基数上的同一个口径：**这一片**的采纳率（单会话列）与 **N 片**的采纳率
 （实例级聚合）。`eval` 交前者、`agg` 交后者，两半都由本包交、同经冻结声明表被调用，

@@ -1,4 +1,4 @@
-//! 「升格 / 重开」那笔债由 conation 自己申报（DE-042；`D-386` 之后的归属）。
+//! 「升格 / 重开」那笔债由 conation 自己申报（DE-042； 之后的归属）。
 //!
 //! 本包只申报**一笔**债：把一条 `conation.expressed`（「欲」）升格成 `task.opened`。
 //! session 只写触发、健康两格与「欲」本身，不再按视图名字读判决；三个 early return
@@ -15,7 +15,7 @@
 //! 无法在一轮内落成可执行行，升格它只会制造空转。
 //!
 //! 判据住这里、动作住 [`crate::port`]：`rows()` 决定欠不欠，执行体自判授权并交出
-//! `task.opened` 草稿（`D-385` 的「环不判、能力自判」）。
+//! `task.opened` 草稿（「环不判、能力自判」）。
 
 use std::collections::BTreeSet;
 use std::sync::Arc;
@@ -28,7 +28,7 @@ use symbio_plugin_api::events::{
 };
 use symbio_plugin_api::{production_matrix, CapabilityRow, CAP_DEFINE_WORK, PRINCIPAL_AUTONOMOUS};
 
-/// 本包申报的端口名：执行体也住本包（能力自带的 `PortExecutor`，D-385）。
+/// 本包申报的端口名：执行体也住本包（能力自带的 `PortExecutor`）。
 pub(crate) const PROMOTE_PORT: &str = "conation";
 
 /// 债行名（只在本包内用）。
@@ -45,7 +45,7 @@ pub(crate) struct PromoteDebts;
 
 impl DebtSource for PromoteDebts {
     fn rows(&self, _request: &DriveRequest, facts: &DebtFacts) -> Vec<DebtSpec> {
-        // early return 1：本轮开关（`D-386` 的口径：本轮 config，不是上一轮）。
+        // early return 1：本轮开关（口径：本轮 config，不是上一轮）。
         if !enabled(facts) {
             return Vec::new();
         }
@@ -86,15 +86,15 @@ impl DebtSource for PromoteDebts {
 
 /// 升格闸的授权判据：自主主体只持 `define.work`（`authz::ROWS`）。
 ///
-/// 债源与执行体调的是同一个函数——两处各写一遍判据必然漂移（`D-251`）。
+/// 债源与执行体调的是同一个函数——两处各写一遍判据必然漂移。
 pub(crate) fn authorized() -> bool {
     production_matrix().can_write_name(PRINCIPAL_AUTONOMOUS, CAP_DEFINE_WORK)
 }
 
 /// 本轮 `session.config` 的 `conation_enabled`；没有 config 或缺键 ⇒ 关。
 ///
-/// 取**最近一份** config：它由本轮开轮时写，因此读到的是本轮开关。`D-384` 的会话
-/// 读点发生在开轮前（读上一轮 config），口径差异见 `D-386`。
+/// 取**最近一份** config：它由本轮开轮时写，因此读到的是本轮开关。 的会话
+/// 读点发生在开轮前（读上一轮 config），口径差异见。
 fn enabled(facts: &DebtFacts) -> bool {
     facts
         .facts_of(EVENT_SESSION_CONFIG)

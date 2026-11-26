@@ -1,4 +1,4 @@
-//! 效果端口 —— 能力的**效果**由能力包交出，宿主只负责按序落格（DE-025 D-207）。
+//! 效果端口 —— 能力的**效果**由能力包交出，宿主只负责按序落格（DE-025 ）。
 //!
 //! ## 它补的是哪一格
 //!
@@ -30,7 +30,7 @@
 //! ## 前置判断：同一份声明，另一种出口
 //!
 //! [`ToolBehavior::before`] 与 `after` 的**选法相同**（按声明选、按 owner 序），出口不同：
-//! `before` 只回答「这次调用能不能跑」，任一实现拒绝即拒绝（fail-closed，DE-025 D-219）。
+//! `before` 只回答「这次调用能不能跑」，任一实现拒绝即拒绝（fail-closed，DE-025 ）。
 //! 它拿的是调用身份 + 主体 + 控制面批首读好的结论（[`BeforeReadings`]），**没有句柄、
 //! 没有词干**：判断发生在执行窗口之前，那时还没有可写的事实。
 //!
@@ -52,8 +52,8 @@
 //! ## 为什么住在 `symbio-sdk`
 //!
 //! 注册表（`BehaviorDecl` + `handlers()`）、宏与扩展点是**一个类型闭包**：采集实现
-//! 在定义类型的 crate 里生成，跨 crate 遍历必须先能命名它（`D-408`）。它属于
-//! `D-255` 的机制臂，门面 `symbio_plugin_api::effects` 只转出路径。
+//! 在定义类型的 crate 里生成，跨 crate 遍历必须先能命名它。它属于
+//!  的机制臂，门面 `symbio_plugin_api::effects` 只转出路径。
 
 use crate::kernel::event::{Entity, Event, Verb};
 use crate::sdk::plugin::behaviors::Kind;
@@ -85,7 +85,7 @@ pub struct EffectInput {
     pub declared: &'static [&'static str],
 }
 
-/// 写族工具的四种动作——`file_op` 的线格式判别词（DE-025 D-207）。
+/// 写族工具的四种动作——`file_op` 的线格式判别词（DE-025 ）。
 ///
 /// 生产方是写族工具的效果（`ToolBehavior::annotate` 交 `as_str`），消费方是变更账
 /// 投影（`from_wire` 读回）。**两边都只依赖本类型**：动作词表是插件间的契约（住
@@ -130,7 +130,7 @@ impl FileOp {
 /// 「宿主在哪一刻、以谁的名义、看得见哪些事实」。
 ///
 /// 本结构里没有轮号：跨轮唯一性要的是**词干**，而轮号是宿主的容器概念
-/// （DE-026 D-252）。词干由宿主构造（`loop` 的 `t{turn}`），能力只拼接。
+/// （DE-026 ）。词干由宿主构造（`loop` 的 `t{turn}`），能力只拼接。
 #[derive(Debug, Clone, Copy)]
 pub struct EffectEnv<'a> {
     /// 本轮的幂等词干（事件号的前缀来源，由宿主给）。
@@ -139,7 +139,7 @@ pub struct EffectEnv<'a> {
     pub user_seq: u64,
     /// 本会话主体（写事件的 `actor`）。
     pub principal: &'a str,
-    /// 来源主体（D-067：本主体向「这条消息的出处」立约）。
+    /// 来源主体（本主体向「这条消息的出处」立约）。
     pub source: &'a str,
     /// 轮初那份事实史（调用方交来的切片）。
     pub snapshot: &'a [Event],
@@ -207,7 +207,7 @@ impl EffectInput {
     }
 }
 
-// ── 前置判断（DE-025 D-219）────────────────────────────────────────────
+// ── 前置判断（DE-025 ）────────────────────────────────────────────
 
 /// 一次工具的**前置判断输入**：纯值。
 ///
@@ -231,11 +231,11 @@ pub struct BeforeRequest<'a> {
     pub readings: BeforeReadings,
 }
 
-/// 控制面交给前置判断的**读数**——判断的输入开放、判断闭集（D-208）。
+/// 控制面交给前置判断的**读数**——判断的输入开放、判断闭集。
 ///
 /// 这里只放宿主才能读到的结论：能力实现拿得到自己的声明面与调用参数，却拿不到
 /// 「部署级覆盖层收回了哪些能力」这类跨会话的折叠值。**加一条读数 = 新增一种判断的
-/// 输入，走决策**（DE-025 D-219）——它是插件认识的宿主词汇，不是自由形状。
+/// 输入，走决策**（DE-025 ）——它是插件认识的宿主词汇，不是自由形状。
 #[derive(Debug, Clone, Copy, Default)]
 pub struct BeforeReadings {
     /// 主体的 `assign.work` 是否已被淘汰回路收回（覆盖层 last-wins，从会话事实切片折叠）。
@@ -296,7 +296,7 @@ pub enum BeforeDecision {
 /// 字段是「宿主不解释的那部分」：`kind` 由 owner 的 `EventDecl` 登记、`payload`
 /// 由 owner 决定、`key` 是幂等键词干。`Event` 的信封三格（轮号 / 归属 / 时刻）由
 /// 写口填——行为无权指定「这笔账记在哪一轮、以谁的名义、在什么时刻」，那是宿主
-/// 的事实（DE-026 D-252）。
+/// 的事实（DE-026 ）。
 #[derive(Debug, Clone)]
 pub struct FactDraft {
     /// 幂等键（= 入库事件的 `event_id`）。跨轮唯一性由行为用 [`EffectCall::anchor`]
@@ -333,7 +333,7 @@ impl FactDraft {
 /// 能力对**自己的效果**的实现。
 ///
 /// 一个行为实例 = 一个实现 + 一次 `submit_behavior!`；加一个实例只改能力包。
-/// 新增一种行为**语义**（框架第一次出现这种判断）才是架构变更（DE-025 D-210）。
+/// 新增一种行为**语义**（框架第一次出现这种判断）才是架构变更（DE-025 ）。
 pub trait ToolBehavior: Sync {
     /// 装配顺序的依据：同一次调用上多个行为按 owner 字典序执行（DE-025 §3 第 4 条）。
     fn owner(&self) -> &'static str;
@@ -362,7 +362,7 @@ pub trait ToolBehavior: Sync {
     /// 一次调用**执行之前**的判断。返回 [`BeforeDecision::Allow`] = 不拦（**默认**）。
     ///
     /// 与 [`Self::after`] 同一份声明面：工具说「我受这项管辖」，本实现说「我来判这一关」。
-    /// 任一实现拒绝即拒绝（DE-025 D-219）；判断是纯函数——不写事实、不改参数、不取句柄。
+    /// 任一实现拒绝即拒绝（DE-025 ）；判断是纯函数——不写事实、不改参数、不取句柄。
     fn before(&self, _req: &BeforeRequest<'_>) -> BeforeDecision {
         BeforeDecision::Allow
     }
@@ -371,13 +371,13 @@ pub trait ToolBehavior: Sync {
     ///
     /// 与 [`Self::after`] 的分界是「有没有新格」：`after` 造新事实，本方法只给
     /// 已经要落的那条事实补字段。今天唯一的用法是工作目录变更账——`artifact.added`
-    /// 早就记下了 `tool` / `args` / `success`（[D-169]），缺的只是「这次写属于哪种
+    /// 早就记下了 `tool` / `args` / `success`，缺的只是「这次写属于哪种
     /// 动作」，而那个动作是工具自己的身份，不该由读侧按名字猜。
     ///
     /// 富化的对象是**产物格**（工具结果那一格），所以键名与取值都进载荷、跟着事实
     /// 一起走：读侧不再需要认识任何工具名。
     ///
-    /// [D-169]: ../../../../docs/003-design/001-核心架构.md "DE-001-核心架构"
+    /// : ../../../../docs/003-design/001-核心架构.md "DE-001-核心架构"
     fn annotate(&self, _input: &EffectInput) -> Vec<(&'static str, Value)> {
         Vec::new()
     }
@@ -461,7 +461,7 @@ pub fn annotations(input: &EffectInput) -> Vec<(&'static str, Value)> {
 /// 判一次调用：按 owner 序问「工具声明了这个行为」的实现，**先拒绝者胜**。
 ///
 /// fail-closed 的形状就是这一行 `Some` 的早退：任一道判断拒绝，后面的判断不再被问
-/// （它们可能依赖前者放行后的事实），调用也不进执行窗口（DE-025 D-219）。
+/// （它们可能依赖前者放行后的事实），调用也不进执行窗口（DE-025 ）。
 pub fn apply_before(req: &BeforeRequest<'_>) -> Option<BeforeRefusal> {
     for behavior in handlers() {
         if !req.declared.contains(&behavior.behavior()) {

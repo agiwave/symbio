@@ -7,7 +7,7 @@
 //! 的事：**指令段怎么写**——它直接决定答话像不像"这个助手本人"，而调它不该需要
 //! 改代码重编译。
 //!
-//! 「要不要用 `compose`」现在也在**这里**（D-427）：`compose_enabled` 曾由
+//! 「要不要用 `compose`」现在也在**这里**：`compose_enabled` 曾由
 //! `SessionConfig` 代管，并且会话还要去债表按 `PLUGIN_ID_COMPOSE` 查本插件在场，
 //! 才能算出有效开关。如今本插件挂载即贡献自己的开关值，未挂载 ⇒ 那一格缺席 ⇒
 //! 读方按出厂值 `false` 收敛；会话不再认识本插件的名字。判据同样是：插件目录 =
@@ -22,14 +22,14 @@
 //!
 //! 生成已搬到 `model.assist` 口债，执行体归 model 端口，本插件仍**不直连
 //! provider**。但「用哪个档」是能力方的知识：措辞知道要写得好，就在请求里带上
-//! 偏好；会话选定值是**缺省**，不是天花板（D-348）。
+//! 偏好；会话选定值是**缺省**，不是天花板。
 
 use serde::{Deserialize, Serialize};
 
 /// Compose 配置 —— 本插件的旋钮（字段真源）
 #[derive(Debug, Clone, Serialize, Deserialize)]
 pub struct ComposeConfig {
-    /// 要不要生成对话面措辞（D-427：本插件自持的开关，出厂 `true`）。
+    /// 要不要生成对话面措辞（本插件自持的开关，出厂 `true`）。
     ///
     /// 出厂值必须与迁移前 `SessionConfig::compose_enabled` 一致；过去会话还要
     /// 「配置值 ∧ 债表里 compose 在场」才算有效，现在**挂载即贡献**：卸载时这一格
@@ -47,7 +47,7 @@ pub struct ComposeConfig {
     /// 措辞用的**偏好 provider id**（`<根>/model/<id>`）。
     ///
     /// 措辞是一次「写得好」的生成，本插件知道该用哪个档，就在 assist 请求里带上
-    /// 这个偏好——与 `classify.model` 同一形态（D-348：请求偏好 > 会话选定 >
+    /// 这个偏好——与 `classify.model` 同一形态（请求偏好 > 会话选定 >
     /// 端口缺省）。缺席 / 空串 / 取不到该条目 ⇒ 回落**会话选定**的那一个，
     /// 降级而不失效。
     #[serde(default)]

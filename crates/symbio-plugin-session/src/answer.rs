@@ -54,11 +54,11 @@ use crate::wording::compose_wording;
 /// 只等端口（`after_port(plugin_row)`），不认这个行名。
 pub(crate) const SESSION_ANSWER: &str = "session.answer";
 
-/// 一次性问答端口名（数据）：名字住 `plugin-api` 的词汇面（D-364），提供者与
+/// 一次性问答端口名（数据）：名字住 `plugin-api` 的词汇面，提供者与
 /// 各消费方 import 同一常量。
 pub(crate) use symbio_plugin_api::vocab::PORT_MODEL_ASSIST as MODEL_ASSIST_PORT;
 
-/// 上游判决事实（classify 插件所有）：名字由 owner 的清单生成（D-364）。
+/// 上游判决事实（classify 插件所有）：名字由 owner 的清单生成。
 use symbio_plugin_api::events::EVENT_CLASSIFY_ANSWERED as CLASSIFY_ANSWERED;
 
 /// 终答的落格行。
@@ -137,7 +137,7 @@ async fn answer_step(req: &RowRequest<'_>, ctx: Option<Arc<dyn PluginInvokeReque
         // 契约里的平凡值：空串 = 没有对话面文本 ⇒ 不写节点（不另造一句顶上）。
         return RowStep::Facts(Vec::new());
     }
-    // 正文子节点的身份由内核那份派发算（`D-435`）：答话轮没有流式节点，回退到
+    // 正文子节点的身份由内核那份派发算：答话轮没有流式节点，回退到
     // `{root}-text`——与被中止的 `failed` 半截同一个 id，两格折出的节点因此合成一条。
     let reasoning = reply.reasoning.unwrap_or_default();
     let answer_id = symbio_plugin_api::event_output_text_node_id(
@@ -152,7 +152,7 @@ async fn answer_step(req: &RowRequest<'_>, ctx: Option<Arc<dyn PluginInvokeReque
         kind: EVENT_CHAT_ASSISTANT_FINAL.to_string(),
         entity: Entity::Scope,
         verb: Verb::Closed,
-        // **与 work 轮同一份终答载荷**（`D-435`）：答话不是第二种轮，它只是同一个
+        // **与 work 轮同一份终答载荷**：答话不是第二种轮，它只是同一个
         // 收束格在「没有工具循环」那一支上的取值。对话面的两样标记走 `meta`
         // （投影按 `payload.meta` 复刻，与用户格同一条纪律），不另立 `dialog` 子对象
         // ——那个对象只服务重建侧的一条专用分支，形状因此有两份。

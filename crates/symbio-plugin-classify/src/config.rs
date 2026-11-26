@@ -9,7 +9,7 @@
 //! 判据是：**「独立开关 / 独立模型」的落地形态是「插件目录 = 配置目录（各自 `PLUGIN.yml`）」**。
 //! 本文件是这句话的第一个实例。
 //!
-//! 「要不要请判决」也是本插件的事（D-427）：`classify_enabled` 曾由 `SessionConfig`
+//! 「要不要请判决」也是本插件的事：`classify_enabled` 曾由 `SessionConfig`
 //! 代管，如今由本插件自持，并在开轮收集期贡献进当轮配置快照。挂载即贡献，
 //! 未挂载 ⇒ 那一格缺席 ⇒ 读方按出厂值收敛，不需要会话替本插件查在场。
 //!
@@ -31,7 +31,7 @@ use serde::{Deserialize, Serialize};
 /// Classify 配置 —— 本插件的旋钮（字段真源）
 #[derive(Debug, Clone, Serialize, Deserialize)]
 pub struct ClassifyConfig {
-    /// 要不要请判决（D-427：本插件自持的开关，出厂 `true`）。
+    /// 要不要请判决（本插件自持的开关，出厂 `true`）。
     ///
     /// 真源在这里；开轮收集期由本插件贡献成 `classify_enabled` 一格。读方仍只读
     /// 当轮 `session.config` 事实，读不到按自己的出厂值收敛——所以**卸载**与

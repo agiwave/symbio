@@ -11,7 +11,7 @@ use symbio_plugin_api::events::EVENT_ARTIFACT_ADDED;
 /// 一条写：载荷形状就是**线上那一格**（`artifact.added` 加上 `file_op` 富化）。
 ///
 /// `file_op` 不是夹具为了方便造的字段——它是写族工具声明 `file_change` 行为之后由
-/// `ToolBehavior::annotate` 交出来的那一句（DE-025 D-214）。夹具照线上形状写，
+/// `ToolBehavior::annotate` 交出来的那一句（DE-025 ）。夹具照线上形状写，
 /// 才判得住「core 只认字段、不认工具名」。
 fn write(id: &str, path: &str) -> Event {
     Event::pending(

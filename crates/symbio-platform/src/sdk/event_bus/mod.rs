@@ -1,9 +1,9 @@
-//! 事件总线的**发布端口** —— 投递由实现声明（`D-487`）。
+//! 事件总线的**发布端口** —— 投递由实现声明。
 //!
-//! `D-530` 之后本域**只留投递机制面**：发布入口 [`EventBus`]、端口 trait
+//!  之后本域**只留投递机制面**：发布入口 [`EventBus`]、端口 trait
 //! [`EventBusPublisher`] 与装配 id [`EVENT_BUS_SINK`]。线上契约（信封构建、解包、
 //! 频道词表）已迁入 `symbio-contract::event_bus`——它们是插件间共享、内核不读的
-//! 纯形状，按 `D-486` 规则 B 归契约层；本域的三个符号有状态（creator 装配），按
+//! 纯形状，按  规则 B 归契约层；本域的三个符号有状态（creator 装配），按
 //! 规则 C 留服务层。
 //!
 //! 投递实现（订阅登记表、扇出、慢消费者处置、resync 补送）住 event_bus 插件
@@ -22,7 +22,7 @@ use std::sync::{Arc, LazyLock};
 use crate::kernel::plugin::PluginFrame;
 
 // 投递实现的装配 id —— 与 `EMBEDDING_LOCAL` 同一条纪律：id 常量只有一个住处。
-// `D-530` 后与契约层解耦：本常量是 creator 装配键（机制面），不是线上词表，故留本层。
+//  后与契约层解耦：本常量是 creator 装配键（机制面），不是线上词表，故留本层。
 pub const EVENT_BUS_SINK: &str = "event_bus_sink";
 
 /// 事件总线的**投递实现**端口。
@@ -32,7 +32,7 @@ pub const EVENT_BUS_SINK: &str = "event_bus_sink";
 /// （`crates/symbio-plugin-event_bus/src/bus.rs`），经 `submit_object_creator!`
 /// 按本域 id 声明进来。sdk 因此不持有订阅者登记表：订阅登记表是插件自己的机制。
 ///
-/// 走 creator（`D-036`）而不是新立收集类型：本机制的本分就是「按 id 装出对象」，
+/// 走 creator而不是新立收集类型：本机制的本分就是「按 id 装出对象」，
 /// 当前已服务 `dyn Plugin` / `dyn ModelProtocol` / `dyn EmbeddingService` 三个类型族，
 /// 这里是第四个——不为一个端口发明第二条装配路径。
 pub trait EventBusPublisher: Send + Sync {

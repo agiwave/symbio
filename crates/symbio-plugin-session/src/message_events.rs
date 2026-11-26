@@ -1,10 +1,10 @@
-//! 消息变更事实的写方（D-053）。
+//! 消息变更事实的写方。
 //!
 //! 消息列表的变更若不进事实源，就只有 `messages.json` 这一份。主读路径从 WAL
 //! 重建，被截断的消息会**复活**、编辑过的内容会**回退**——这是**正确性**问题，
 //! 不是缓存新鲜度问题。本模块是这两件事**入格**的写方：
 //! `commands::patch_message` / `commands::truncate_messages` 经唯一写入口
-//! `chat_session::apply` 各调一次——**先于**写缓存（D-054 决策 2 的
+//! `chat_session::apply` 各调一次——**先于**写缓存（ 决策 2 的
 //! 顺序反转），所以这里失败时缓存还没动过。
 //!
 //! ## 追加，不是改写
@@ -24,7 +24,7 @@
 //! - [`AppendOutcome::Landed`] / [`AppendOutcome::Nothing`]：落了 / 本来就没有事实可落；
 //! - [`AppendOutcome::Parked`]：拿不到写者令牌 ⇒ **寄存**，由持令牌方补落；
 //! - [`AppendOutcome::NoAnchor`]：事实源里没有可用的溯源锚——v1 遗留会话 / 从未走过
-//!   v2 轮。这类会话的读侧本就回落 `messages.json`（D-049），缓存仍是真源 ⇒ **豁免**；
+//!   v2 轮。这类会话的读侧本就回落 `messages.json`，缓存仍是真源 ⇒ **豁免**；
 //! - [`AppendOutcome::Failed`]：事实源打不开 / 追加被拒。**这是真失败**：主读已切 WAL，
 //!   这次变更在重建后会丢。`chat_session::apply` 在写缓存**之前**把它变成可见错误
 //!   ——报失败是如实，不是「把成功的动作说成失败」。
@@ -380,7 +380,7 @@ pub(crate) fn edited(store: &EventWalStore, session_id: &str, msg: &ChatNode) ->
 ///
 /// 只服务「**没有别的格可搭车**」的节点（压缩记录节点是最典型的一个）——承载着
 /// 对话内容的节点（用户发言 / 助手正文 / 工具结果）必须由它们自己的事实落，
-/// 否则同一条节点有两个 owner（D-049 理由 1）。
+/// 否则同一条节点有两个 owner（ 理由 1）。
 ///
 /// 空列表不落格：「没有节点诞生」不该在事实源上留下痕迹，与 [`removed`] 同一条判据。
 pub(crate) fn added(store: &EventWalStore, session_id: &str, msgs: &[ChatNode]) -> AppendOutcome {
@@ -442,7 +442,7 @@ pub(crate) enum AppendOutcome {
     /// 回执按成功走，因为这条变更已经有副本了——寄存失败不在这一格，它冒泡成 `Failed`。
     Parked,
     /// 无锚可指：事实源里没有可用的溯源锚（v1 遗留会话 / 从未走过 v2 轮）。
-    /// 这类会话的读侧本就回落 `messages.json`（D-049），缓存仍是真源 ⇒ 豁免。
+    /// 这类会话的读侧本就回落 `messages.json`，缓存仍是真源 ⇒ 豁免。
     NoAnchor,
     /// 真失败：事实源打不开 / 追加被拒。主读已切 WAL ⇒ 这次变更在重建后会丢。
     Failed(String),
@@ -532,7 +532,7 @@ fn actor_and_ts(payload: &Value) -> (String, i64) {
         return (PRINCIPAL_USER.to_string(), 0);
     };
 
-    // `principal` 兼容两种 wire 形态（[D-069 §决策 6]）：新形态是
+    // `principal` 兼容两种 wire 形态：新形态是
     // `{kind, id, title?}` 对象、历史 `messages.json` 里是裸字符串——都通过
     // `Principal::deserialize` 一次性折到 `.id`，事件层的 actor 键仍是**可路由地址字符串**。
     let principal = msg
@@ -569,7 +569,7 @@ fn actor_and_ts(payload: &Value) -> (String, i64) {
 ///
 /// [`append`]（就地落格）与 [`drain_parked`]（补落）共用这一份实现——一种变更
 /// 只有一个落格实现，寄存与否只是它外面的分支。`store` 由会话存储层按会话构造
-/// 一次（D-084 §2），本模块不再自己拼路径 `open`。
+/// 一次（本模块不再自己拼路径 `open`。
 fn append_into(
     store: &EventWalStore,
     session_id: &str,

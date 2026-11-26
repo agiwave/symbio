@@ -723,7 +723,7 @@ fn reopening_after_archival_sees_only_the_live_tail() {
 /// 「被取代」由折叠侧处理（`mutations_latest_snapshot` 从最近一份快照起折）。
 /// 按布局分叉的第二个口（只给 live 窗口）会让「读哪个」取决于调用方是否知道
 /// 「这条会话压缩过没有」——那是布局泄漏进抽象
-/// （[DE-001 §4.3](../../../../docs/003-design/001-核心架构.md "DE-001-核心架构") 一源）。
+/// （[DE-001 §5](../../../../docs/003-design/001-核心架构.md "DE-001-核心架构") 一源）。
 #[test]
 fn range_unions_archives_with_live_in_seq_order() {
     let (_dir, _path, store) = seeded(12);
@@ -732,7 +732,7 @@ fn range_unions_archives_with_live_in_seq_order() {
     // live 段只是尾部两条——那是实现的内部形态，不再是公开读法。
     assert_eq!(live_seqs(&store), vec![10, 11]);
 
-    // 完整史是原样的 12 条（逐条不重不漏——D-053 的「零回退损失」）。
+    // 完整史是原样的 12 条（逐条不重不漏—— 的「零回退损失」）。
     let all = store.range(Seq::new(0));
     assert_eq!(
         all.iter()
@@ -901,8 +901,8 @@ fn an_artifact_round_is_complete_after_reopen() {
         .apply(&events, i64::MAX, Budget::generous())
         .value;
     // 请求包里的行：转写条目按 `exclude_from_context` 过滤后就是**送出去的那批**
-    // （判据比 role / text / tool 三格，D-448；合成 `tool_call_id` 的规则住组装请求
-    // 那一侧 —— `plugin-model`，判据从不读它，D-452）。
+    // （判据比 role / text / tool 三格；合成 `tool_call_id` 的规则住组装请求
+    // 那一侧 —— `plugin-model`，判据从不读它）。
     let entries: Vec<_> = view
         .entries
         .iter()
@@ -1100,7 +1100,7 @@ fn the_grid_gate_rejects_a_name_claiming_another_cell() {
 ///
 /// 角色随声明走、不随名字走；按轮配对不在写闸里判——那是义务环的债表。
 ///
-/// 这是 DE-024 D-198 / D-199 / D-203 的端到端判据——只测 `Frozen::event_cell`
+/// 这是 DE-024  的端到端判据——只测 `Frozen::event_cell`
 /// 会漏掉「写闸有没有真的问它」这一格。
 #[test]
 fn injected_declarations_are_the_grid_the_gate_reads() {
@@ -1213,7 +1213,7 @@ fn injected_declarations_are_the_grid_the_gate_reads() {
     );
 }
 
-/// 领域扩展位：`Domain × Verb` 由 owner 的 `EventDecl` 声明，写闸照常校验（DE-025 D-209）。
+/// 领域扩展位：`Domain × Verb` 由 owner 的 `EventDecl` 声明，写闸照常校验（DE-025 ）。
 ///
 /// 这条判据要证明的是**两件事同时成立**：
 ///

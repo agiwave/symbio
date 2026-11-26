@@ -34,7 +34,7 @@ lists: [route-contracts=owner]
 | `hook/fire` | `session`（工具执行器）等插件 | `SimpleResponse` | 生命周期点调用；宿主常量 `crate::routes::ROUTE_HOOK_FIRE` |
 | `hook/list` | 仓内无调用方 | hook 清单 | — |
 | `hook/register` | 仓内无调用方 | `SimpleResponse` | — |
-| `session/changes` | 前端（`services/sessionChanges.ts`，会话头「变更」抽屉）/ e2e | `SessionChanges` | 只读读数：本会话改过的文件（`artifact.added` 的投影，D-169）；行呈现就绪（`{path, address, op, label, turn, changes}`），前端不解析工具参数；`address` 是**相对会话容器**的 `workdir/<path>`（与会话地址拼成完整地址）；`has_wal` / `readable` 把「没跑过」「不给看」「没改过」分成三种空 |
+| `session/changes` | 前端（`services/sessionChanges.ts`，会话头「变更」抽屉）/ e2e | `SessionChanges` | 只读读数：本会话改过的文件（`artifact.added` 的投影）；行呈现就绪（`{path, address, op, label, turn, changes}`），前端不解析工具参数；`address` 是**相对会话容器**的 `workdir/<path>`（与会话地址拼成完整地址）；`has_wal` / `readable` 把「没跑过」「不给看」「没改过」分成三种空 |
 | `session/stats` | 前端（`services/sessionStats.ts`）/ CLI（`client.rs`） | `SessionStats` | 只读读数；不得另写统计口径（DE-016 §4 复算判据） |
 | `skill/execute` | 仓内无调用方 | `SkillResponse` | 载荷 `{name, args}`，返回技能定义正文 |
 | `telegram/get_updates` | 外部客户端（gateway 原样转发） | 更新数组 | 长轮询 |
@@ -95,7 +95,7 @@ lists: [route-contracts=owner]
 >
 > **一条用户消息只有一个入口**：往收件箱写一条（不再有「发消息」专用路由），因此子智能体空间这类**没有调用方**的会话也能被驱动——写它的收件箱即可。新增消息触发一整轮编排（在空间空闲时由空间自己消费）；而**改写与删除**是普通的 VDFS节点操作——判据是「触发不触发编排」，不是「碰不碰消息」。
 >
-> **运转选项（provider / mode / risk）不在写入面上**：它们的唯一 owner 是会话 metadata（`vdfs/write(<根>/session/<id>, { create: true })` upsert），消费链的回退顺序是「调用级 → 会话 metadata → 默认值」（[D-066](../003-design/012-会话输入与地址.md "DE-012-会话输入与地址")）。恢复的 `mode` / `risk_level` 是这一格的仅有的两个**调用级**字段——恢复本就是「用当时的选项把当时那一轮做完」，与消息写入不是同一层级。
+> **运转选项（provider / mode / risk）不在写入面上**：它们的唯一 owner 是会话 metadata（`vdfs/write(<根>/session/<id>, { create: true })` upsert），消费链的回退顺序是「调用级 → 会话 metadata → 默认值」（[DE-012](../003-design/012-会话输入与地址.md "DE-012-会话输入与地址")）。恢复的 `mode` / `risk_level` 是这一格的仅有的两个**调用级**字段——恢复本就是「用当时的选项把当时那一轮做完」，与消息写入不是同一层级。
 >
 > `stats` 的读数只能调已有的投影、不得另写一份统计口径
 > （[DE-016](../003-design/016-工程落地与验证.md "DE-016-工程落地与验证") §4 的复算判据）；实现见 [`crates/symbio-plugin-session/src/stats.rs`](../../crates/symbio-plugin-session/src/stats.rs)。
@@ -132,7 +132,7 @@ lists: [route-contracts=owner]
 > **停用 `loop` ⇒ 该地址 `NotFound`、不再开新轮**；在飞的轮持有交付包与端口的 `Arc`，
 > 存活期长于插件实例，会在有限时间内收敛（守卫用例见
 > [`composite.test.rs`](../../crates/symbio-plugin-composite/src/composite.test.rs)）。
-> 本插件不贡献能力行与常驻任务，只贡献 1 条 Mount 行（[D-086](../003-design/014-单环一表.md "DE-014-单环一表")）。
+> 本插件不贡献能力行与常驻任务，只贡献 1 条 Mount 行。
 
 ---
 
@@ -150,13 +150,13 @@ lists: [route-contracts=owner]
 
 > 调用方只有 `session`。本插件**不写转写**：文本由 `session` 落库，转写只有一个写入者。契约 `ComposeRequest` 见 [`symbio_platform::sdk::dialog`](../../crates/symbio-platform/src/contract/dialog.rs)；其中 `snapshot`（`RunSnapshot`）是 `session` 投影的运行现状，**只有 `Report` 读它**。出参**空串 = 没有对话面文本**（平凡值），调用方据此不写节点。
 >
-> 不挂载本插件 ⇒ 路由 `NotFound` ⇒ `session` 按「缺插件」处理：`Answered` 拿不到措辞时**降级进工具循环**（不沉默），`Escalate` 没有首响，`Report` 只是"这次没说"且不消耗汇报配额（卸载平凡值）。三条产线（模板 0 次 LLM / `from_context` 生成 1 次静默 LLM / `Report` 填表 0 次 LLM）见 [compose 插件的 README](../../crates/symbio-plugin-compose/README.md "crates/symbio-plugin-compose/README")。调用方开关 `SessionConfig::compose_enabled`（`<session 目录>/PLUGIN.yml`）；`Report` 的**触发**另归 `SessionConfig::progress_enabled` 等四个旋钮（判据行 `policy.report` 与 `report_due` 视图见 [D-318 施工表](../003-design/048-端口机制裁决.md "DE-048-端口机制裁决")）——措辞与触发是两件事，各有各的开关。
+> 不挂载本插件 ⇒ 路由 `NotFound` ⇒ `session` 按「缺插件」处理：`Answered` 拿不到措辞时**降级进工具循环**（不沉默），`Escalate` 没有首响，`Report` 只是"这次没说"且不消耗汇报配额（卸载平凡值）。三条产线（模板 0 次 LLM / `from_context` 生成 1 次静默 LLM / `Report` 填表 0 次 LLM）见 [compose 插件的 README](../../crates/symbio-plugin-compose/README.md "crates/symbio-plugin-compose/README")。调用方开关 `SessionConfig::compose_enabled`（`<session 目录>/PLUGIN.yml`）；`Report` 的**触发**另归 `SessionConfig::progress_enabled` 等四个旋钮（判据行 `policy.report` 与 `report_due` 视图见 [DE-048](../003-design/048-端口机制裁决.md "DE-048-端口机制裁决")）——措辞与触发是两件事，各有各的开关。
 
 ---
 
 ## Model 插件
 
-**本插件无自有路由**：模型往返由环按端口名 `model` 取到本插件注册的 `PortProvider`，执行体在插件内部完成一次往返（`D-298` / `D-437`）；配置读写全在 VDFS 上（`<根>/model/<id>` 与 `<根>/model/PLUGIN.yml`）。
+**本插件无自有路由**：模型往返由环按端口名 `model` 取到本插件注册的 `PortProvider`，执行体在插件内部完成一次往返；配置读写全在 VDFS 上（`<根>/model/<id>` 与 `<根>/model/PLUGIN.yml`）。
 
 ### 支持的协议
 
@@ -167,7 +167,7 @@ lists: [route-contracts=owner]
 | `anthropic_messages` | Anthropic | `/v1/messages` |
 | `gemini_api` | Google | `generateContent` |
 
-> 协议适配内化于 `crates/symbio-plugin-model/src/protocols/`，机制见 `crates/symbio-plugin-model/README.md`；为什么支持多协议见 [D-004](../../crates/symbio-plugin-model/README.md "crates/symbio-plugin-model/README")。
+> 协议适配内化于 `crates/symbio-plugin-model/src/protocols/`，机制见 `crates/symbio-plugin-model/README.md`；各协议共用端口契约，差异留在适配器内。
 
 ---
 
@@ -279,7 +279,7 @@ HTTP/WebSocket 入站网关（实现锚点见[入站网关专题设计](../../cr
 
 ## 退役路由索引
 
-**只登记「路径 → 现在去哪」，不写过程叙述**（决策与理由见决策索引、变更史与迁移审计只在 `git log`）：
+**只登记「路径 → 现在去哪」，不写过程叙述**（变更史与迁移审计只在 `git log`）：
 
 > `{plugin}/config/get` · `{plugin}/config/set` · `{plugin}/config/schema` · `{plugin}/entities/*` · `model/chat` · `model/status` · `model/chat_sync` · `agent/list` · `get` · `upload` · `delete` · `preview` · `export` · `session/append` · `session/open` · `session/update` · `session/clear` · `session/chat/send` · `session/chat/abort` · `session/chat/update_message` · `session/chat/delete_message` · `session/chat/clear_messages` · `session/get_messages` · `session/options/list` · `session/stream` · `session/heartbeat/trigger` · `hook/trigger` · `hooks/*` · `event_bus/publish`
 

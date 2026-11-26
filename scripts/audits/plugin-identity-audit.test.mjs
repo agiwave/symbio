@@ -90,23 +90,6 @@ test('④ VDFS 地址 / 能力命名空间 / 协议名不误报 → exit 0', () 
   }, { dirs: DIRS })
 })
 
-test('⑤ D-NNN 历史决策正文不改写 → exit 0', () => {
-  withTempTree({
-    ...BASE,
-    'docs/003-design/099-夹具.md': [
-      '# 夹具',
-      '## 关键决策',
-      '### D-999 夹具历史决策',
-      '当时由 symbio-plugin-subagent 承担，理由略。',
-      '',
-      '## 现行规范',
-      '现行段落不含插件名。',
-    ].join('\n'),
-  }, (root) => {
-    assert.equal(audit({ root }).status, 0)
-  }, { dirs: DIRS })
-})
-
 test('⑥ 白名单文件不误报 → exit 0', () => {
   withTempTree({
     ...BASE,
@@ -134,7 +117,7 @@ test('⑨ 指向插件自述文档的链接目标不误报，但链接文字点�
     ...BASE,
     'docs/003-design/099-夹具.md': [
       '# 夹具',
-      // 链接目标含插件身份 ⇒ D-525 允许的「文档在哪」，不判。
+      // 链接目标含插件身份 ⇒  允许的「文档在哪」，不判。
       // 用字符串拼接避免 D-010 把夹具当成真实源码链接（它只解析源码文本）。
       '专题见[说明](../crates/symbio-plugin-gateway/README.md)。',
       // 链接文字里点名插件身份 ⇒ 是在描述能力，照常判红（target 指向真实文件，避免 D-010 误报）。
@@ -152,7 +135,7 @@ test('⑩ 源码注释里的 D-NNN 决策锚点链接不误报，但裸 crate �
   withTempTree({
     ...BASE,
     'crates/symbio-plugin-memory/src/夹具.rs': [
-      '//! 落点判据见 [D-077](../crates/symbio-plugin-heartbeat/README.md#d-077-历史决策)。',
+      '//! 落点判据见 [](../crates/symbio-plugin-heartbeat/README.md#d-077-历史决策)。',
       '//! 但实现锚点 `crates/symbio-plugin-heartbeat/src/setting.rs` 是身份点名。',
       '',
     ].join('\n'),

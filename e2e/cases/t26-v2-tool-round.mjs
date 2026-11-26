@@ -153,7 +153,7 @@ export default defineCase(
       // 第二次请求：模型请求过的工具 + 工具结果都在请求里。
       //
       // ⚠️ 判据在**消息层**上：验「调用在」「结果在」「结果是 `tool` 角色」「工具名
-      // 对得上」（D-048a）——而不是「某个字符串出现过」。
+      // 对得上」——而不是「某个字符串出现过」。
       const secondBody = reqs[1].body;
       const secondMsgs = secondBody.messages ?? [];
       const llmCalls = secondMsgs.flatMap((m) => m.tool_calls ?? []);

@@ -3,7 +3,7 @@
 use super::{Entity, Event};
 
 /// 实体词只有 `Scope` 一种写法；信封写侧不再有 `scope` 或旧的 `turn` 字段
-/// （会话身份改由事实源在打开时绑定，`D-317` / `D-502` B7）。
+/// （会话身份改由事实源在打开时绑定， /  B7）。
 #[test]
 fn envelope_writes_only_current_entity_word() {
     let fresh_json = r#"{"event_id":"e-1","kind":"chat.assistant.final","entity":"Scope","verb":"Closed","actor":"main","produced_by":null,"cost_ms":0,"ts":0,"payload":null,"seq":null}"#;

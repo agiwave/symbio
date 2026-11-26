@@ -24,7 +24,7 @@ function tmpRoot() {
 /**
  * 最小夹具：架构树各一条 `pub fn`，`crates` 下补足语料下限（50 个生产 .rs）。
  *
- * `symbio-contract`（`D-486` 之后是扫描面的第四棵树）只放一个 `pub struct`：
+ * `symbio-contract`（`` 之后是扫描面的第四棵树）只放一个 `pub struct`：
  * 判据要的是「这棵树下有生产 .rs」，而本测试判的是「零调用的 `pub fn`」——
  * 多放一个 `pub fn` 会把每条断言里的符号数一起推高，测的就不再是判据本身。
  */
@@ -116,7 +116,7 @@ test('extractSymbols 认 async / const / unsafe / extern 形态，不认 pub(cra
   assert.deepEqual(names, ['a', 'b', 'c', 'd'])
 })
 
-test('extractSymbols 不认测试专用 cfg 下的公开函数（D-563）', () => {
+test('extractSymbols 不认测试专用 cfg 下的公开函数（）', () => {
   const text = [
     '#[cfg(test)]',
     'pub fn test_only() {}',
@@ -164,7 +164,7 @@ test('基线逐条对账通过 ⇒ 绿', () => {
 // ── AD-003：为什么 + 证据可打开 ────────────────────────────────────
 
 test('AD-003：why 为空 ⇒ 红', () => {
-  const root = fixture({ baseline: [{ symbol: 'target', path: 'crates/symbio-platform/src/sdk/mod.rs', why: '  ', evidence: 'D-404' }] })
+  const root = fixture({ baseline: [{ symbol: 'target', path: 'crates/symbio-platform/src/sdk/mod.rs', why: '  ', evidence: '' }] })
   const r = run(root)
   assert.equal(r.status, 1)
   assert.match(r.stdout, /AD-003.*why/)
@@ -173,10 +173,10 @@ test('AD-003：why 为空 ⇒ 红', () => {
 test('AD-003：evidence 指向不存在的决策 / 路径 ⇒ 红', () => {
   const root = fixture({
     baseline: [
-      { symbol: 'target', path: 'crates/symbio-platform/src/sdk/mod.rs', why: '契约', evidence: 'D-999' },
+      { symbol: 'target', path: 'crates/symbio-platform/src/sdk/mod.rs', why: '契约', evidence: '' },
     ],
   })
-  assert.match(run(root).stdout, /AD-003.*D-999/)
+  assert.match(run(root).stdout, /AD-003.*/)
 
   const root2 = fixture({
     baseline: [

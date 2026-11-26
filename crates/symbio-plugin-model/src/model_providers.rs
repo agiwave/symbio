@@ -194,7 +194,7 @@ pub struct ModelProviderConfig {
     ///
     /// 执行方是 `BoundProvider` 持有的 `http::RateGate`：每轮 `round_trip` 在发出 POST
     /// 前先过闸，距上次派发不足这个间隔就等到可发送时刻，**不返回限流错误**；等待
-    /// 期间中止信号可打断。`D-437` 删掉的是零调用方的 trait getter（让缺口诚实留在
+    /// 期间中止信号可打断。 删掉的是零调用方的 trait getter（让缺口诚实留在
     /// 字段上），这道闸正是它点明的「独立的一笔」。
     #[serde(default = "default_rate_limit_ms")]
     pub rate_limit_ms: u64,

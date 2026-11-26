@@ -18,9 +18,9 @@
  * |---|---|---|---|
  * | DC-001 | `check_all` 条数 | `symbio_sdk/invariants/mod.rs` 的函数体 | 活跃文档陈述它有 N 条时，N 必须相等 |
  * | DC-002 | 机制表顶层键数 | `docs/003-design/verify/facts/mod.rs` 的 `MECHANISMS`（M1 的生成物） | 同上 |
- * | DC-003 | §8 登记的键数（含子键） | 同上文件的 `PARAM_KEYS` | 同上 |
+ * | DC-003 | §9 登记的键数（含子键） | 同上文件的 `PARAM_KEYS` | 同上 |
  * | DC-004 | 验证程序数 | `docs/003-design/verify/*.rs` 的文件数（门禁 55 阶段逐个编译运行的那批） | 同上 |
- * | DC-005 | 事件网格的行 × 列 | DE-001 §6 的表 vs `symbio_sdk/event/mod.rs` 的 `Entity` / `Verb` 变体 | 行数 = 实体数、列数 = 动词数 |
+ * | DC-005 | 事件网格的行 × 列 | DE-001 §7 的表 vs `symbio_sdk/event/mod.rs` 的 `Entity` / `Verb` 变体 | 行数 = 实体数、列数 = 动词数 |
  *
  * **DC-004 治的是哪一类漂移**：文档与门禁**读同一批文件**、却各数各的。
  * 一个新程序落进 `verify/` 之后，门禁当天就会跑它，而文档里「N 个验证程序」那句话
@@ -102,7 +102,7 @@ function checkAllCount(root) {
 }
 
 /** `facts/mod.rs`（M1 的生成物）里 `MECHANISMS` / `PARAM_KEYS` 的条目数。
- *  **不重新解析 DE-001 §8**：那份表已经由 `gen-verify-facts.mjs` 解析过一次，读它的
+ *  **不重新解析 DE-001 §9**：那份表已经由 `gen-verify-facts.mjs` 解析过一次，读它的
  *  生成物才是「提取实现只有一份」（纪律 3）。 */
 function factListCounts(root) {
   const abs = path.join(root, FACTS_REL)
@@ -281,7 +281,7 @@ if (checkAll == null || facts == null || verifyPrograms == null) {
 // 网格两侧的来源在**夹具根**里本就不存在（它们要真实的 core 源码与计划文档）。
 // 因此这里不 exit 2，而是**出声跳过**——静默跳过才是这类守卫最安静的死法。
 if (grid == null) {
-  console.log(`[WARN] DC-005 跳过：读不出事件网格两侧的来源（${path.join('symbio-platform','src','kernel','event','mod.rs')} 或 DE-001 §6 表）`)
+  console.log(`[WARN] DC-005 跳过：读不出事件网格两侧的来源（${path.join('symbio-platform','src','kernel','event','mod.rs')} 或 DE-001 §7 表）`)
 }
 const docs = activeDocs(REPO_ROOT)
 const comments = activeComments(REPO_ROOT)
@@ -320,10 +320,10 @@ if (errors) {
 if (grid) {
   const gridErrors = []
   if (grid.rows !== grid.entities) {
-    gridErrors.push(`DE-001 §6 的实体行数 ${grid.rows} ≠ 代码 Entity 变体数 ${grid.entities}`)
+    gridErrors.push(`DE-001 §7 的实体行数 ${grid.rows} ≠ 代码 Entity 变体数 ${grid.entities}`)
   }
   if (grid.cols !== grid.verbs) {
-    gridErrors.push(`DE-001 §6 的动词列数 ${grid.cols} ≠ 代码 Verb 变体数 ${grid.verbs}`)
+    gridErrors.push(`DE-001 §7 的动词列数 ${grid.cols} ≠ 代码 Verb 变体数 ${grid.verbs}`)
   }
   if (gridErrors.length) {
     for (const e of gridErrors) console.log(red(`[ERROR] DC-005 ${e} ⇒ 网格两处各记一份账`))

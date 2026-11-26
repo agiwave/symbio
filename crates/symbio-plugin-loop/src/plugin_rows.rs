@@ -1,4 +1,4 @@
-//! `plugin_row` 行执行体（机制侧，D-241 / D-304 / D-338）。
+//! `plugin_row` 行执行体（机制侧）。
 //!
 //! 本模块补的正是旧 `loop_rows` 的位置：**只认 `Decl` 与 `RowHandler` 的通用形状**，
 //! 不认识任何世界名（不 `use` notes / task 的任何类型）。
@@ -13,8 +13,8 @@
 //! **本模块不选债**：`owed` 由环的选债口调用（`TC-1b`），这里只把已求出的 `Debt`
 //! 投影成环认得的行形状。在派发器之外先问求解器再看结果，就是第二个选债口。
 //!
-//! `Ask` 不在这里调模型：那是 D-304 被否的那条。执行体只落一条事实并挂起，
-//! 往返由申报方声明的那笔债走端口（D-338）。
+//! `Ask` 不在这里调模型：那是  被否的那条。执行体只落一条事实并挂起，
+//! 往返由申报方声明的那笔债走端口。
 
 use std::sync::Arc;
 
@@ -39,7 +39,7 @@ const ROW_MAX_ATTEMPTS: u32 = 1;
 
 /// 选债口求出的 `Debt` → 环认得的债行（**不是**端口受理行的全部未结、前件成立的债）。
 ///
-/// 「谁执行」是派生的（`D-306` 裁决一），判据就是 `owes` 指向哪一格：
+/// 「谁执行」是派生的（ 裁决一），判据就是 `owes` 指向哪一格：
 ///
 /// - 指向端口开启格（`request`）⇒ 环的通用受理入口，债由端口自己的债表进来，
 ///   **不**走这条路（一条债被派发两遍是最坏的结果）；
@@ -67,7 +67,7 @@ pub(crate) fn rows_from_debts(debts: &[Debt<'_>], events: &[Event]) -> Vec<DebtR
                 unless: None,
                 when_no_open: None,
                 // 消费端口产物的行必须等该端口收束：派发不再等执行体之后，
-                // 「产物落格」与「响应落账」这两笔谁先到不能由调度机缘决定（D-376）。
+                // 「产物落格」与「响应落账」这两笔谁先到不能由调度机缘决定。
                 after_port: symbio_plugin_api::events::port_of_fact(debt.decl.owes.source)
                     .map(str::to_string),
                 lease_ms: ROW_LEASE_MS,
@@ -149,8 +149,8 @@ fn reply_of<'a>(events: &'a [Event], ask: &str) -> Option<RowReply<'a>> {
 /// 落格时按**声明表**给每份草稿定归属。
 ///
 /// `owner` 只从 `Frozen::event_writer(kind)` 来——机制侧知道这一格的归属主体；
-/// **不从草稿来**：`FactDraft` 没有 `actor` 字段，行为无权指定归属（DE-026 D-252）。
-/// 表上没有这一格的归属主体就显式失败：写口不猜默认值，也不静默丢（D-339）。
+/// **不从草稿来**：`FactDraft` 没有 `actor` 字段，行为无权指定归属（DE-026 ）。
+/// 表上没有这一格的归属主体就显式失败：写口不猜默认值，也不静默丢。
 async fn emit_attributed(
     exec: &PortExecContext,
     drafts: Vec<FactDraft>,
@@ -183,7 +183,7 @@ async fn emit_attributed(
     Ok(())
 }
 
-/// 通用行执行体：按行注册表派发到 [`RowHandler`]（`D-306`：行不声明自己归谁）。
+/// 通用行执行体：按行注册表派发到 [`RowHandler`]（行不声明自己归谁）。
 pub(crate) struct PluginRowExecutor;
 
 #[async_trait::async_trait]
@@ -205,7 +205,7 @@ impl PortExecutor for PluginRowExecutor {
             );
         };
         // 行执行体的主体只从会话载体来（`AGENT_ID` 由开面时唯一设置）。取不到就
-        // 显式失败——不回落 `session/main`，也不回落 `"user"`（D-339）。
+        // 显式失败——不回落 `session/main`，也不回落 `"user"`。
         let Some(principal) = session_principal(&exec) else {
             return PortOutcome::failed(
                 PortErrorClass::NonRetryable,
@@ -272,7 +272,7 @@ impl PortExecutor for PluginRowExecutor {
                     entity: Entity::Scope,
                     verb: Verb::Asserted,
                     // 行名与债键都在载荷里：种类只有一个名字（逐行造名会落进 OffGrid），
-                    // 申报方按 `row` 挑自己那行、按 `key` 认出自己的输入（D-338）。
+                    // 申报方按 `row` 挑自己那行、按 `key` 认出自己的输入。
                     payload: json!({ "row": handler.row(), "key": key, "prompt": ask.prompt }),
                     produced_by: exec.origin,
                 };
@@ -283,7 +283,7 @@ impl PortExecutor for PluginRowExecutor {
     }
 }
 
-/// 挂起：回执未到，不给租约上界（D-338）。
+/// 挂起：回执未到，不给租约上界。
 fn paused() -> PortOutcome {
     PortOutcome::failed(PortErrorClass::NeedsHuman, "等待模型回执")
 }
@@ -331,7 +331,7 @@ fn row_request<'a>(
 /// 供 `drive.rs` 拦截端口名：这一族由机制自己执行。
 ///
 /// `PLUGIN_ROW` 是**机制端口**，不是世界端口——它是环执行自己行表用的内部端口，
-/// 不属于「新增一个世界端口」的成本（后者要求改动架构文件数 = 0，见 D-394）。
+/// 不属于「新增一个世界端口」的成本（后者要求改动架构文件数 = 0D-394）。
 /// 这里的比较是执行体认领**自己**的端口，不是读侧按别人的端口名分支。
 pub(crate) fn is_row_port(port: &str) -> bool {
     port == PLUGIN_ROW

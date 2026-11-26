@@ -243,7 +243,7 @@ fn 点名空列表时不动一根() {
     assert_eq!(ids(&nodes), vec!["u1", "t1"]);
 }
 
-// ── 请求包读侧：`unselected_roots`（D-173 的读法判据）────────────────────
+// ── 请求包读侧：`unselected_roots`（读法判据）────────────────────
 //
 // 这条路是**送给模型的那一份**（`projection::transcript` 与 `prompt_fidelity` 共用）。
 // 它与 `stamp_branches` 的差别只有一处、却是全部要害：在世的证据取「有没有被删」，

@@ -31,7 +31,7 @@
 //! `unless_id(final)` 放行；说话方缺席 / 关闭 ⇒ 会话不申报，端口干净，
 //! **缺席即收束**，本行直接接管（t21-E / t22-C：不会整轮沉默）。
 //!
-//! ## 工具轮之后的续接：等 `plugin_row` 的边界簿记跑完（D-510）
+//! ## 工具轮之后的续接：等 `plugin_row` 的边界簿记跑完
 //!
 //! 续接行不能只看「工具端口此刻干净」：工具端口收束的那一圈，边界事实
 //! （`tool.calls.done`）与会话的进度汇报都还没进计划快照，续接行会和它们同圈派发。
@@ -40,7 +40,7 @@
 //! 下一轮请求」，汇报必然早于下一轮模型往返，末轮正文不可能抢在「还在继续」之前。
 //!
 //! 依赖方只认端口：本 crate 里没有兄弟插件的行名，也不拼债 id（调用集合的 id 由
-//! 本行的 `calls[]` 派生，属于 D-446 的端口作用域）；边界簿记是否还要跑，由端口
+//! 本行的 `calls[]` 派生，属于  的端口作用域）；边界簿记是否还要跑，由端口
 //! 这一圈的认领回答，不再另开一个载荷读口。
 //!
 //! 门本身有租约（`plugin_row` 行 60s / 1 次）：认领了却收不了束的，租约到期会被
@@ -61,11 +61,11 @@ use symbio_plugin_api::rows::PLUGIN_ROW;
 
 use crate::port::MODEL_PORT;
 
-/// 工具端口名（数据，不是类型）：名字住 `plugin-api` 的词汇面（D-364），
+/// 工具端口名（数据，不是类型）：名字住 `plugin-api` 的词汇面，
 /// 提供者 `tool` 与本行共用同一常量。
 use symbio_plugin_api::vocab::PORT_TOOL as TOOL_PORT;
 
-/// **本次**工具请求的调用集合：那几笔逐调用债的 id（D-446）。
+/// **本次**工具请求的调用集合：那几笔逐调用债的 id。
 ///
 /// 集合为什么是全的：模型在派发请求的那一刻就把整份 `calls[]` 写进 `tool.requested`
 /// 的载荷，同一处按 `calls[]` 落齐逐笔标记（`tool.call.requested`，见 `port.rs`）。
@@ -112,7 +112,7 @@ impl DebtSource for ModelDebts {
             "provider": request.provider,
             "root_id": user_id,
             // 会话主体随驱动请求而来（开面时从 `agent_id` 解析）；不再写死 `"user"`，
-            // 与信封归属（`@principal` → `session/*`）同源（D-339）。
+            // 与信封归属（`@principal` → `session/*`）同源。
             "principal": request.principal,
         });
         let reply = DebtSpec::new(
@@ -137,10 +137,10 @@ impl DebtSource for ModelDebts {
         // 两个门并用，读的是债状态的两面（谓词语义都不变）：
         // - `when_no_open(…调用集合)`：**本次调用**那几笔债未收束就不欠。集合只有
         //   本插件知道（它自己按 `calls[]` 派生的 id），所以由本行给出——整条端口
-        //   的读法会让一笔迟归 / 卡住的旧调用把这轮续跑一起拖住（D-446）；
+        //   的读法会让一笔迟归 / 卡住的旧调用把这轮续跑一起拖住；
         // - `after_port(plugin_row)`：完成行与进度行都是 `plugin_row` 债，这一圈
         //   还有边界簿记要跑就不进计划。于是顺序成为「工具收束 → 完成事实 → 进度
-        //   汇报 → 下一轮请求」，汇报必然早于下一轮模型往返（D-510）。
+        //   汇报 → 下一轮请求」，汇报必然早于下一轮模型往返。
         //
         // 为什么不是 `after_port(tool)`：工具端口收束的那一圈，完成行还没进计划快照，
         // 续接行会和它同圈派发；完成行是 `plugin_row` 债，等这个端口才等得到它。
@@ -154,7 +154,7 @@ impl DebtSource for ModelDebts {
             .when(EVENT_TOOL_REQUESTED)
             .when_id(EVENT_SESSION_CONFIG, config_id);
             spec = match call_set_of(facts) {
-                // 只认本次请求的那几笔调用：同端口上一笔迟归的旧债不挡（D-446）。
+                // 只认本次请求的那几笔调用：同端口上一笔迟归的旧债不挡。
                 Some(ids) => {
                     spec.when_no_open(symbio_plugin_api::debt::NoOpenScope::among(TOOL_PORT, ids))
                 }

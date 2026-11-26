@@ -1,7 +1,7 @@
 //! `port.rs` 的单元测试 —— 收集容器（登记 / 读回 / 判重 / 作用域前缀）与两条不变量
 //! （端口集不污染能力表、判重不静默）。
 //!
-//! 守的是 D-468 的形状：端口集是**装配期的收集结果**，不是能力表的行；同名登记永久
+//! 守的是  的形状：端口集是**装配期的收集结果**，不是能力表的行；同名登记永久
 //! 把该键转成不可执行，装配方读快照时整份失败。
 
 use super::*;
@@ -110,7 +110,7 @@ fn contract_defaults_are_absent() {
 /// 端口名种进事件 id 之前必须过校验：保留字符（`:`）**注册期拒绝**，不转义。
 ///
 /// 反例是真的会发生的那种：`model:assist` 会被事件 id 的 `:` 定界截成 `model`，
-/// 事实键与债键对不上（D-336）。容器不再拿端口名当表键，但事件 id 的定界没变。
+/// 事实键与债键对不上。容器不再拿端口名当表键，但事件 id 的定界没变。
 #[tokio::test]
 #[should_panic(expected = "保留字符")]
 async fn port_name_with_colon_is_rejected_at_registration() {
@@ -253,7 +253,7 @@ async fn provider_without_executor_is_rejected() {
     assert!(errors[0].message.contains("没有执行体"));
 }
 
-/// 作用域前缀：登记期就把端口名改好，派发侧按前缀名查得到（D-468）。
+/// 作用域前缀：登记期就把端口名改好，派发侧按前缀名查得到。
 #[tokio::test]
 async fn scope_prefix_is_applied_at_registration() {
     let (ctx, bindings) = ctx_with_bindings();

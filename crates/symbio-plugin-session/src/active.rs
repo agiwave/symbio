@@ -210,7 +210,7 @@ impl ActiveSessionState {
     //
     // `is_working` / `last_outcome` / `last_error` 的**唯一写点**。
     // 它们不是第二份可独立演化的状态：结局是 turn 事实投影（`runtime::project`）的
-    // 写穿缓存，开轮 / 收轮 / 中止各只经一个方法（[D-083 §5.2]）。
+    // 写穿缓存，开轮 / 收轮 / 中止各只经一个方法。
     // 拆散成调用点各写各的字段，正是要消掉的双写面。
     //
     // 工作态的迁移是**闭集**：只有 `WorkingTransition` 的三个变体，且唯一迁移函数是

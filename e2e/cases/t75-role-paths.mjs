@@ -220,7 +220,7 @@ export default defineCase(
       const userCell = childEvents.find((e) => e.kind === 'user.message');
       assert(userCell, `子会话应有开轮格（实际 kinds: ${JSON.stringify(kinds)}）`);
 
-      // 产物收束（D-067）：工具结果入格，**作者 = 工人自己**。
+      // 产物收束：工具结果入格，**作者 = 工人自己**。
       const artifact = childEvents.find((e) => e.kind === 'artifact.added');
       assert(artifact, `工人子会话必须落产物格（实际 kinds: ${JSON.stringify(kinds)}）`);
       assertEq(artifact.actor, 'session/worker', '产物格的作者 = 工人（委派链上的登记窄行主体）');
@@ -273,7 +273,7 @@ export default defineCase(
         assertEq(
           childStats.body?.data?.invariants.length,
           0,
-          `产物收束 ⇒ 子会话不变量清单为空（C4 认产物格，D-067；实际: ${JSON.stringify(childStats.body?.data?.invariants)}）`,
+          `产物收束 ⇒ 子会话不变量清单为空（C4 认产物格；实际: ${JSON.stringify(childStats.body?.data?.invariants)}）`,
         );
 
         // 声誉列（两个事实各断一面）：

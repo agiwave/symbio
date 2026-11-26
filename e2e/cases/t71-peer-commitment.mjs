@@ -1,12 +1,12 @@
 import './_selfrun.mjs';
-// T71 对等主体跑一轮（[D-065](../../docs/003-design/011-Agent目录规范.md "DE-011-Agent目录规范") / [D-067](../../docs/003-design/011-Agent目录规范.md "DE-011-Agent目录规范")）：
+// T71 对等主体跑一轮（ / ）：
 // **收束格按种类判** + **入站「来源主体」格数据**。
 //
 // ## 本用例钉的是什么
 //
-// - [D-065](../../docs/003-design/011-Agent目录规范.md "D-065") 的判据原文：「e2e（两会话两主体，
+// -  的判据原文：「e2e（两会话两主体，
 //   对等主体跑一轮 ⇒ 它的 `commitment.*` 入格、请求包不串主体，`t30` 纪律复用）」；
-// - [D-067](../../docs/003-design/011-Agent目录规范.md "D-067") 的三处下游口径：
+// -  的三处下游口径：
 //   C4 认产物（`invariants` 为空）、`closure_denied` 数产物（派生事实照写）、
 //   发言闸拒 ≠ 静默中断。
 //
@@ -225,7 +225,7 @@ export default defineCase(
         assertEq(
           stats.invariants.length,
           0,
-          `产物收束 ⇒ 不变量清单为空（C4 认产物格，D-067；实际: ${JSON.stringify(stats.invariants)}）`,
+          `产物收束 ⇒ 不变量清单为空（C4 认产物格；实际: ${JSON.stringify(stats.invariants)}）`,
         );
         const peerRep = stats.reputation.by_principal['session/peer-b'];
         assert(peerRep, `声誉列应有对等主体的条目（实际: ${JSON.stringify(stats.reputation)}）`);

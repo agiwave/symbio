@@ -1,6 +1,6 @@
 //! 默认能力收集器 —— [`Registry`] 的内存实现
 //!
-//! 写入者是全体插件；它归 SDK 而非任何具体插件，也不属于服务实现层（D-564）。
+//! 写入者是全体插件；它归 SDK 而非任何具体插件，也不属于服务实现层。
 
 use super::approval::{GatedExecutor, RiskOf};
 use crate::kernel::capability::{CapabilityFamily, CapabilityRow, Registry};
@@ -18,7 +18,7 @@ use tokio::sync::RwLock;
 /// - `rows`：装全部族，按注册顺序保序。这条顺序就是送给模型的 `tools` 数组顺序：
 ///   注册序来自能力收集的广播序，写成哈希表时**每起一个进程重洗一次**，而工具面是
 ///   prompt 里最大的一段（实测 18KB 对正文 1.1KB），换序等于每轮把这段
-///   前缀作废——这也是 D-057 一度记下「数组顺序每次不同」的根因。
+///   前缀作废——这也是  一度记下「数组顺序每次不同」的根因。
 /// - `families`：已登记族 → 首次声明的槽位策略。表按族名过滤（[`Registry::list`]），
 ///   槽位只用于「同名两套声明」的告警——族身份是名字，不是枚举值。
 pub struct DefaultToolVisitor {
@@ -64,7 +64,7 @@ impl Default for DefaultToolVisitor {
 #[async_trait]
 impl Registry for DefaultToolVisitor {
     async fn put(&self, row: CapabilityRow) {
-        // 表只认行（`D-440` ③）：行是纯数据，入表不裹闸、不派生——工具的
+        // 表只认行（ ③）：行是纯数据，入表不裹闸、不派生——工具的
         // 注册收口是 [`register_tool`]（一次写两处：装配期容器的端口绑定 +
         // 纯数据的工具行），其余各族直接入表。
         self.record_family(row.family()).await;
@@ -115,10 +115,10 @@ impl Registry for DefaultToolVisitor {
     }
 }
 
-/// 工具注册的**唯一收口**（`D-440` ③ / `D-468`）：一次写两处——
+/// 工具注册的**唯一收口**（ ③ / ）：一次写两处——
 ///
 /// 1. **端口绑定**：端口名 = `meta.name`（作用域里加前缀），执行体是裹了审批闸的
-///    [`GatedExecutor`]（判定是执行的第一段，`D-385`）。派发侧按端口名从装配期容器
+///    [`GatedExecutor`]（判定是执行的第一段）。派发侧按端口名从装配期容器
 ///    取到的就是它。
 /// 2. **工具行**：纯数据（`CapabilityMeta` 快照），目录装配与读面从这里看工具。
 ///

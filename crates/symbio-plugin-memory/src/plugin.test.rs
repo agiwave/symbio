@@ -15,7 +15,7 @@ use symbio_plugin_api::collectors::DefaultToolVisitor;
 use symbio_plugin_api::{capability_prompts, PluginInvokeRequestExt, Registry, VDFS_PARENT_ADDR};
 use tempfile::TempDir;
 
-/// 构造带能力收集器的上下文；三个目录分别注入三个作用域 provider（D-515），
+/// 构造带能力收集器的上下文；三个目录分别注入三个作用域 provider，
 /// `workdir` 用 `None` 模拟没选工作区，父地址模拟容器转发时写入的当前父地址
 fn ctx(
     agent_dir: Option<&Path>,
@@ -312,7 +312,7 @@ async fn disabled_agent_skips_injection_but_keeps_the_mount() {
 
 // ==================== 会话腿（会话作用域） ====================
 
-/// 会话记忆的落位来自 `ctx[SESSION_DIR]`，地址落在 memory 挂载点下（D-513）
+/// 会话记忆的落位来自 `ctx[SESSION_DIR]`，地址落在 memory 挂载点下
 #[tokio::test]
 async fn session_leg_injects_from_the_context_directory() {
     let tmp = TempDir::new().unwrap();

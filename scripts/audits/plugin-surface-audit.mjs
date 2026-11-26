@@ -1,6 +1,6 @@
 #!/usr/bin/env node
 /**
- * plugin-surface-audit — **扩展层插件的源码只认宿主面**（HS-001 / HS-002，D-253）
+ * plugin-surface-audit — **扩展层插件的源码只认宿主面**（HS-001 / HS-002，）
  *
  * ## 它治的病
  *
@@ -9,7 +9,7 @@
  * 于是由**某段代码当初顺手写了哪个前缀**决定，而不是由边界决定——cargo 依赖图表达不了
  * 任何意图，评审也看不出某次改动是不是在扩大插件的可见面。
  *
- * 裁决见 DE-023 D-253：扩展层插件的唯一宿主依赖是 `symbio-plugin-api`，门面里是一份
+ * 裁决见 DE-023 ：扩展层插件的唯一宿主依赖是 `symbio-plugin-api`，门面里是一份
  * **白名单**（每条都能报出消费方）。**manifest 依赖边只由 `plugin-entry-audit` 的
  * E-009 裁定**（白名单 = `plugin-api` / `kernel` / `providers` + 第三方）；本脚本只剩
  * 源码那一半，避免同一条依赖行有两个 owner。
@@ -19,11 +19,11 @@
  * | HS-001 | 非控制面插件的源码（注释外）出现 `symbio_platform::` | 从门面取那个符号；门面里没有 ⇒ 说明它还不该给插件看，先论证再加白名单 |
  * | HS-002 | 门面白名单条数超过基线（只许降） | 加一条要配一条决策理由，并同步上调基线 |
  * | HS-003 | 门面白名单里有符号在**扩展层插件代码里零引用** | 删掉它——白名单的每一条都要报得出消费方（与 C-003 同一把尺子）；报不出的就是空转条目 |
- * | HS-004 | 插件胶水层 `symbio-providers` 把**嵌入臂**设成默认开启（`default = ["embedding"]` 或依赖不是 `optional`） | 那一条 `default = []` 是有意的：`ort` / `tokenizers` 带来 55 个传递依赖（168 → 113），而插件侧只有 `local` 一个消费者。要开就在宿主与需要它的插件那里显式开（D-254） |
- * | HS-005 | 门面 manifest **或任一活跃 crate 的源码 / manifest** 里出现旧 core 名（两种拼写） | 旧 core 已整棵并入平台（D-279）；门面对宿主侧只依赖 `symbio-platform` 一条（D-486 五层规划），活跃区不再把已删名写成引用。要一条控制面符号，先论证它属于扩展面还是该换成宿主调用口（D-276） |
- * | HS-006 | 语法臂条数 > 基线，或模块级转发条数 > 基线 | 两格都「只许不涨」：语法臂不计债但计件；模块转发一行换 N 条，要显式（D-278） |
+ * | HS-004 | 插件胶水层 `symbio-providers` 把**嵌入臂**设成默认开启（`default = ["embedding"]` 或依赖不是 `optional`） | 那一条 `default = []` 是有意的：`ort` / `tokenizers` 带来 55 个传递依赖（168 → 113），而插件侧只有 `local` 一个消费者。要开就在宿主与需要它的插件那里显式开（） |
+ * | HS-005 | 门面 manifest **或任一活跃 crate 的源码 / manifest** 里出现旧 core 名（两种拼写） | 旧 core 已整棵并入平台（）；门面对宿主侧只依赖 `symbio-platform` 一条（ 五层规划），活跃区不再把已删名写成引用。要一条控制面符号，先论证它属于扩展面还是该换成宿主调用口（） |
+ * | HS-006 | 语法臂条数 > 基线，或模块级转发条数 > 基线 | 两格都「只许不涨」：语法臂不计债但计件；模块转发一行换 N 条，要显式（） |
  *
- * `symbio_platform::kernel::` 前缀对扩展层插件同样不放行（D-418）：DE-002 说扩展层插件的**唯一**
+ * `symbio_platform::kernel::` 前缀对扩展层插件同样不放行（）：DE-002 说扩展层插件的**唯一**
  * 宿主依赖是 `symbio-plugin-api`，而语法臂本来就把扩展层要用的共享类型转出去了。放行
  * 源码前缀等于绕开门面的计件与消费方核对——插件随手写一条 `symbio_platform::kernel::…` 即可，
  * 既不进门面棘轮、也不需要论证。控制面（`loop` / `session`）仍豁免这一档。
@@ -31,7 +31,7 @@
  * ## 为什么按插件身份分档，而不是一刀切
  *
  * `loop` / `session` 是**控制面**（DE-026 的影响类）：它们按轮的顺序运行、认识幕与
- * 容器概念。**源码前缀**这一档对它们豁免（D-253 候选 b 已否：压进门面只会逼出假豁免）；
+ * 容器概念。**源码前缀**这一档对它们豁免（ 候选 b 已否：压进门面只会逼出假豁免）；
  * 但 **manifest 依赖边不豁免**——控制面插件同样是插件，`symbio-sdk` / `symbio-deploy`
  * 一样由 E-009 判红。
  *
@@ -74,7 +74,7 @@ export const CONTROL_PLANE = ['symbio-plugin-api', 'symbio-plugin-loop', 'symbio
  * 子模块（`kernel` / `sdk` / `contract` / `deploy`）。扩展层插件的唯一宿主依赖是
  * `symbio-plugin-api`，四臂已经把扩展层要用的东西逐条转了出去。直接写
  * `symbio_platform::…` 会绕开门面的计件与消费方核对——那正是本判据要守的通道
- * （D-253 / D-418 / D-486）。控制面（`loop` / `session`）按身份豁免。
+ * （ /  / ）。控制面（`loop` / `session`）按身份豁免。
  *
  * manifest 依赖边不在这里判——它只有 E-009 一个 owner。
  */
@@ -108,23 +108,23 @@ export function readFacade(root) {
 /**
  * 机制臂条数基线：**只降不升**（HS-002）。实测低于它时打提示要求同步下调。
  *
- * 只数机制臂。门面按来源分四臂（D-255 / D-258 / D-486）：语法臂来自平台的 `kernel` 子模块
+ * 只数机制臂。门面按来源分四臂（ /  / ）：语法臂来自平台的 `kernel` 子模块
  * （直接依赖 6 个，插件取共享类型不增加任何机制面）、契约臂来自 `symbio-contract`
  * （纯形状 ABI，零状态零 IO，同样不计债）、SDK 臂来自 `sdk` 子模块（机制实现，但不认
  * 容器概念，同样不计债）、机制臂曾来自旧 core（每条都要控制面支撑）。
  * 把前两臂计进基线，会让「欠账还剩多少」被两个与债无关的数字稀释——248 听起来离 0
  * 很远，133 才是真实的待还量。
  *
- * 115 → 72（D-258 第一批：`text` / `clock` / `logger` / `event_bus` / `creator` /
+ * 115 → 72（ 第一批：`text` / `clock` / `logger` / `event_bus` / `creator` /
  * `vdfs` / `keys` 七个域搬进 `symbio-sdk`）→ 25（第二批：`chat` / `capability` /
  * `adapters` / `llm` / `plugin` 五个域；另把 `chat` 的三个子命名空间与内核语法
  * `ring` 各归其臂）→ 19（第三批：`agent` 与 `embedding` 两个域）→ 6（第四批：`turn` /
- * `projection` / `invariants` 三个域，D-259）。这些条**不是还清了存量**，是搬了家：
+ * `projection` / `invariants` 三个域，）。这些条**不是还清了存量**，是搬了家：
  * 它们一条不少地留在门面上，只是改从 `symbio_sdk` / `symbio_kernel` 取（HS-003 照旧
  * 逐条核消费方）。
  *
  * 剩的 6 条曾在 `authz`（4）与 `actors`（2），理由是「它们认识此刻这个主体能做什么」。
- * **D-276 复核后改判 0**：`principal_of` / `production_matrix` 只查一张部署表，`CAP_*` 是
+ * ** 复核后改判 0**：`principal_of` / `production_matrix` 只查一张部署表，`CAP_*` 是
  * 那张表的闭集，`actor_can_assign_work` / `commitment_events` 只读 `ActorSpec` 与事件流——
  * 没有一条认识轮次、幕或判决。它们随 `governance` / `authz` / `view` / `actors` 的
  * spec+commitment 一起进 `symbio-sdk`，门面从此不依赖旧 core（HS-005）。
@@ -132,158 +132,158 @@ export function readFacade(root) {
 export const WHITELIST_BASELINE = 0
 
 /**
- * SDK 臂（机制面）的基线：**这一臂同样进棘轮**（D-269 第 3 条）。
+ * SDK 臂（机制面）的基线：**这一臂同样进棘轮**（ 第 3 条）。
  *
  * 此前这一臂「不计债」——只由 HS-003 要求「每条有扩展层消费方」。代价是它成了
- * 门面增长的**零代价通道**：`D-261` 加两条（校准视图 / 字符截断）、`D-268` 改判前
+ * 门面增长的**零代价通道**：`` 加两条（校准视图 / 字符截断）、`` 改判前
  * 还要再加一条（保真度内核），没有任何门禁会红。机制面是「能力能调用宿主什么」的
  * 完整清单，与 `core` 臂是同一件事的两种住址，因此必须同一把尺子。
  *
- * 准入（D-269 §5.1 的两条判据）：与容器概念无关 ∧ ≥2 条能力要用。一条能力撑不起
+ * 准入（ §5.1 的两条判据）：与容器概念无关 ∧ ≥2 条能力要用。一条能力撑不起
  * 一次架构改动——要加一条就把理由写成决策，并同步上调本基线。
  *
  * 105：实测 105，低于此前基线 107（两格漏跟降）；按「账本只许降、基线跟着实测降」
  * 收平。这是下调，不是放宽。
  *
- * 106（D-386）：升格闸搬进 conation 后，`PRINCIPAL_AUTONOMOUS` 成为扩展层第二处消费的
+ * 106（）：升格闸搬进 conation 后，`PRINCIPAL_AUTONOMOUS` 成为扩展层第二处消费的
  * 授权常量（债源与执行体同一把尺）。它满足 §5.1 两条：不提能力名（是一条主体身份），
- * 且 ≥2 条能力要用（conation 的债与执行体）。上调一格，记在 D-386 的「判据」节。
+ * 且 ≥2 条能力要用（conation 的债与执行体）。上调一格，记在  的「判据」节。
  */
-// 106 → 120（D-413）：门面收掉九份纯转发壳文件之后，原先藏在壳里的出口在根上如实
+// 106 → 120（）：门面收掉九份纯转发壳文件之后，原先藏在壳里的出口在根上如实
 // 计件——7 个已搬走的模块名（`behaviors` / `context` / `effects` / `fact_source` /
 // `retrieval` / `rows` / `settle`）、改名转出的 `text`、5 个提交宏与
 // `publish_deployment_root`。**没有一个名字是新增的**：它们此前分别经壳里的
 // `pub use …::*;` 与壳内宏转发给出，旧读数只是看不见（`readFacadeArms` 只读 lib.rs）。
 // 同一批里扩展面对 `drive_entry` 的出口从 9 个符号 + 整模块收窄到 1 个符号。
 // 这是「把读数改成真的」，不是放宽：物理门面行数同期从 2703 降到 2635（FA-002）。
-// 122 → 124（D-416）：跨插件报表的登记面与读口整块搬进 sdk 之后，门面在根上转出
+// 122 → 124（）：跨插件报表的登记面与读口整块搬进 sdk 之后，门面在根上转出
 // 模块名 `reports` 与提交宏 `submit_reports`。两者此前分别经门面 `reports.rs` 与
 // `#[macro_export]` 给出，**同两个名字换住所**。视图缺席原因 `ViewUnavailable` 只有
 // 控制面 `session` 用，按 HS-003 不上门面（`session` 走 E-009）。
-// 124 → 126（D-420）：`chat` 组合模块分拣——`chat_node` / `principal` 两个模块级条目
+// 124 → 126（）：`chat` 组合模块分拣——`chat_node` / `principal` 两个模块级条目
 // 回到语法臂（它们本来就是内核共享语法），SDK 臂腾出的两格换成 sdk 自己的实现出口：
 // `AssistReply` / `AssistRequest` / `SEG_MESSAGES` / `message_of_node`。净 +2 是把原先
-// 藏在「一行放出整个命名空间」里的实现摊到账上（HS-006 的另一格，D-278），四条的实现
+// 藏在「一行放出整个命名空间」里的实现摊到账上（HS-006 的另一格，），四条的实现
 // 与消费方都没变——不是新增机制面。
-// 126 → 127（D-427）：能力自持配置之后，插件侧需要一条通用的「本轮快照贡献」声明口。
+// 126 → 127（）：能力自持配置之后，插件侧需要一条通用的「本轮快照贡献」声明口。
 // 它满足 §5.1 两条准入：不提任何能力名，且每一条带开关的能力都要用（≥2 条）。
 // 宿主侧读口只有控制面 session 消费，按 HS-003 不上门面（与 `ViewUnavailable` 同例）。
-// 127 → 128（D-428）：子作用域改名工具要向会话装配交出「(前缀名, 本名)」这一对，
+// 127 → 128（）：子作用域改名工具要向会话装配交出「(前缀名, 本名)」这一对，
 // 声明面沿用能力表的开放族构造口，门面上只多转出族常量 `SCOPE_TWIN` 一个名字；
 // 读口 `capability_scope_twins` 只有控制面用，按 HS-003 不上门面。两条准入同样成立：
 // 常量不含任何能力名，声明方（agent 子作用域）与读方（session 装配）是两个消费方，
 // 且前缀形状归声明方——控制面不再按名字猜副本。
-// 119 → 143（`D-438`）：`llm` 与 `dialog` 两块词汇从内核迁进 `symbio-sdk`（内核里零读者，
+// 119 → 143（``）：`llm` 与 `dialog` 两块词汇从内核迁进 `symbio-sdk`（内核里零读者，
 // 凭据只有一条已不存在的 trait）。门面上**同一个名字换了个住所**——24 条出口从语法臂
 // 搬到 SDK 臂，一条不是新增：`RoundOutput` / `RoundToolCallInfo` / `PromptMessage` /
 // `PromptToolCall` / `ModelFinishReason` / `ModelUsage` / `ModelSpend` 与 `dialog` 的
 // 判决 / 措辞契约，消费方一条没变（HS-003 照旧逐条核）。语法臂同批 −24，见
 // `GRAMMAR_BASELINE` 的注。这是「把读数改成真的」，不是放宽。
-// 143 → 138（`D-439`）：一次往返的**产物**五个名字（`RoundOutput` / `RoundToolCallInfo` /
+// 143 → 138（``）：一次往返的**产物**五个名字（`RoundOutput` / `RoundToolCallInfo` /
 // `ModelFinishReason` / `ModelUsage` / `ModelSpend`）退回 model 插件——`port.model` 之后
 // 会话侧读的是事实键（`usage` / `spend` / `reason`），全仓没有第二个读者，它们不再是
 // 跨插件词汇。留下的请求侧（`PromptMessage` / `PromptToolCall`）与 `dialog` 的三个消费方
 // 没变，所以这是一个**净减**，不是搬臂。
-// 138 → 131（`D-443`）：按「谁在用」压缩——`fact_source` 登记面五条的唯一插件消费方
-// 是控制面 session（owner），按 D-253 / D-428 分档走 session 的 sdk 豁免（冻结账，D-499）直取本体，
+// 138 → 131（``）：按「谁在用」压缩——`fact_source` 登记面五条的唯一插件消费方
+// 是控制面 session（owner），按  /  分档走 session 的 sdk 豁免（冻结账，）直取本体，
 // 不占扩展层门面计件；测试面消费不再续命（通道归 `plugin-api::testkit` feature）。
-// 133 → 132（2026-11-12 同步）：`D-469` 把协议命名的规则收进模型插件时，sdk 的副本与
+// 133 → 132（2026-11-12 同步）：`` 把协议命名的规则收进模型插件时，sdk 的副本与
 // 门面的转出行同批删除，实测臂已降到 132 而基线没跟（守卫的 △ 提示）；基线跟着降，
-// 账本只许降（`D-269` 同一把尺子）。
-// 132 → 113（`D-486`）：契约臂成立，dialog 17 条 + llm 请求词汇 2 条改从
+// 账本只许降（`` 同一把尺子）。
+// 132 → 113（``）：契约臂成立，dialog 17 条 + llm 请求词汇 2 条改从
 // `symbio-contract` 转出（五层规划的第一批，逐域套规则 B 的结果见该条映射表），
 // SDK 臂余下的是服务面（规则 C），基线随实测下调，余量不留。
-// 113 → 110（`D-486` 批 2）：chat 域的一次性问答载荷三条（`AssistRequest` /
+// 113 → 110（`` 批 2）：chat 域的一次性问答载荷三条（`AssistRequest` /
 // `AssistReply` / `SEG_MESSAGES`）改从契约层转出——纯 serde 形状 + 字面量，三个
 // 互不相认的插件共享，零 sdk 内部读者。同批复核把普查表里带状态 / 机制键的域
 // （authz / actors / agent / embedding / turn / vdfs 地址 / projection vocab）按
 // 重开条件判回服务层，`message_of_node` 因依赖 keys 域的 `PRINCIPAL_*` 随 keys
 // 留服务层。迁移记 `Migration:`，插件协议零改动。
-// 110 → 107（`D-486`）：text 域三条（`truncate_chars` / `text_truncate_bytes` /
+// 110 → 107（``）：text 域三条（`truncate_chars` / `text_truncate_bytes` /
 // `text_floor_char_boundary`）改从契约层转出——纯 std 算法、memory / skill / local /
 // mcp / web 多 owner 共享，verify 以 `#[path]` standalone 包含同一份源码。
-// `tokenizer` 是有预算语义的宿主机制（`D-404`），按规则 C 留守。
-// 107 → 108（`D-516`）：`TOOL_NODE_ID`（工具卡在转写里的节点地址键）入 SDK 臂——
+// `tokenizer` 是有预算语义的宿主机制（``），按规则 C 留守。
+// 107 → 108（``）：`TOOL_NODE_ID`（工具卡在转写里的节点地址键）入 SDK 臂——
 // §5.1 两条准入逐条过（不提能力名 ∧ tool 写 / session 读两个插件用），裁决见
-// `003-design/023` 的 D-516。
-// 108 → 109（`D-513`）：`SESSION_DIR`（会话级插件数据目录键）入 SDK 臂——不提能力名，
-// 会话插件写 / memory 插件读两个消费方，裁决见 `003-design/018` 的 D-513。
-// 109 → 112（`D-515`）：三条作用域存储键 `AGENT_VDFS` / `WORKSPACE_VDFS` /
+// `003-design/023` 的 。
+// 108 → 109（``）：`SESSION_DIR`（会话级插件数据目录键）入 SDK 臂——不提能力名，
+// 会话插件写 / memory 插件读两个消费方，裁决见 `003-design/018` 的 。
+// 109 → 112（``）：三条作用域存储键 `AGENT_VDFS` / `WORKSPACE_VDFS` /
 // `SESSION_VDFS` 入 SDK 臂——值是进程内 `DynVdfsProvider`，不提能力名；宿主三处
 // 注入写，memory / tool / local / skill 四个插件读（远超两条准入）。裁决见
-// `003-design/057` 的 D-515。
-// 112 → 106（`D-530`）：event_bus 线上契约六条（信封 / 解包 / 频道常量）按规则 B
+// `003-design/057` 的 。
+// 112 → 106（``）：event_bus 线上契约六条（信封 / 解包 / 频道常量）按规则 B
 // 迁入契约层，门面 SDK 臂 −6、契约臂 +6，两臂合计不变。留 SDK 的三条是投递机制面
-// （有状态 / creator 装配，规则 C）。裁决见 `003-design/054` 的 D-530。
-// 106 → 112（`D-531`）：沙箱横切句柄六条（接口 / 意图事实 / ctx 键 / 建槽 / 发布 / 读取）
+// （有状态 / creator 装配，规则 C）。裁决见 `003-design/054` 的 。
+// 106 → 112（``）：沙箱横切句柄六条（接口 / 意图事实 / ctx 键 / 建槽 / 发布 / 读取）
 // 入 SDK 臂——§5.1 两条准入逐条过：不提能力名（SandboxFace / SandboxFact / SANDBOX /
 // sandbox_* 全是中性机制词汇），≥2 条能力要用（发布方 sandbox 插件 + 拦截消费方 tool +
-// 查询消费方 shell 工具，远超两条）。裁决见 `003-design/058` 的 D-531。
-// 112 → 113（`D-531` 裁决 B 前端闭环）：`SANDBOX_ID`（会话选中的沙箱档案 id，值类型
+// 查询消费方 shell 工具，远超两条）。裁决见 `003-design/058` 的 。
+// 112 → 113（`` 裁决 B 前端闭环）：`SANDBOX_ID`（会话选中的沙箱档案 id，值类型
 // String）入 SDK 臂——§5.1 两条准入逐条过：不提能力名（中性机制词汇），消费方跨
 // session（写入 metadata / DriveTarget）与 sandbox（traverse 里按 id 选档）两个插件。
-// 会话选项栏由 sandbox 插件贡献字段，前端零业务改动。裁决见 `003-design/058` D-531。
-// 113 → 117（`D-533`）：`SandboxDecision` 让 sandbox 发布方与 tool 执行闸门交换同一次
+// 会话选项栏由 sandbox 插件贡献字段，前端零业务改动。裁决见 `003-design/058` 。
+// 113 → 117（``）：`SandboxDecision` 让 sandbox 发布方与 tool 执行闸门交换同一次
 // 快照裁决；`ApprovalGrant` 让 tool 审批恢复与 collectors 执行闸门交换一次性凭据；
 // `VdfsCaller` / `VDFS_CALLER` 让宿主管理入口与模型执行链交换进程内可信主体。
 // 四条均不含工具清单 / 策略 / 业务字段，消费方跨至少两个插件。
-// 117 → 118（`D-564`）：默认收集器整组从服务实现层迁入 sdk，门面只新增 `collectors`
+// 117 → 118（``）：默认收集器整组从服务实现层迁入 sdk，门面只新增 `collectors`
 // 一个模块级转发；交换条件是五个插件删除 providers 依赖、providers 删除门面依赖，
 // 内部生产边净减 6。实现符号仍住在平台，不在根出口逐条铺开。
-// 118 → 117（`D-565`）：`TaskVocab` 的唯一生产消费方是 task，类型与常量归位插件，
+// 118 → 117（``）：`TaskVocab` 的唯一生产消费方是 task，类型与常量归位插件，
 // 删除 SDK 文件与门面转出；模块级转发保持 13，门面生产行数 1272 → 1271。
 export const SDK_BASELINE = 117
 
 /**
- * 契约臂基线：**只许降**（`D-486`）。`symbio-contract` 是插件 ABI 的纯形状层，
+ * 契约臂基线：**只许降**（``）。`symbio-contract` 是插件 ABI 的纯形状层，
  * 依赖只有 kernel + serde——这一臂涨 = 插件 ABI 变重，要与「插件真的要用」同批论证。
  *
- * 19 → 22（`D-486` 批 2）：chat 域三条随批 1 的同一判据迁入（同一类型闭包的
+ * 19 → 22（`` 批 2）：chat 域三条随批 1 的同一判据迁入（同一类型闭包的
  * 地址搬迁，不是新增承诺——sdk 侧同批 −3，两臂合计读数不变）。
- * 22 → 25（`D-486`）：text 域三条同判据迁入（sdk 侧同批 −3）。
- * 25 → 31（`D-530`）：event_bus 域六条线上契约同判据迁入（sdk 侧同批 −6，两臂合计不变）。
+ * 22 → 25（``）：text 域三条同判据迁入（sdk 侧同批 −3）。
+ * 25 → 31（``）：event_bus 域六条线上契约同判据迁入（sdk 侧同批 −6，两臂合计不变）。
  */
 export const CONTRACT_BASELINE = 31
 
 /**
- * 语法臂基线：**只许不涨**（D-278）。
+ * 语法臂基线：**只许不涨**（）。
  *
  * 这一臂长期「不计债」——理由是内核本来就有的共享类型不增加机制面。理由成立，但它顺带
  * 让 136 条（门面里最大的一臂）成了唯一没有任何数字约束的通道：加一条语法符号不需要过
  * 任何棘轮。不计**债**与不计**数**是两件事，后者改起来一分钱不花。
  */
-// 136 → 137（`D-314`）：`response` 载荷的写方移入执行体后，`answer_id` 必须与读侧
+// 136 → 137（``）：`response` 载荷的写方移入执行体后，`answer_id` 必须与读侧
 // 共用内核那一份派生（`event_output_text_node_id`）；两处各算一遍会静默漂移。
 // 消费方是 `symbio-plugin-model`，不是控制面缺口。
-// 137 → 138（`D-319`）：model 执行体组装 assistant 应答要声明 `tool_calls` 的配对键，
+// 137 → 138（``）：model 执行体组装 assistant 应答要声明 `tool_calls` 的配对键，
 // 需要 `PromptToolCall` 这一值类型；插件不得直依赖 `symbio_kernel`（HS-001），只能经
 // 门面转出。消费方是 `symbio-plugin-model` 的执行体。
-// 138 → 137（`D-339`）：`OWNER_PRINCIPAL` 在扩展层零消费（唯一引用方 session 属控制面），
+// 138 → 137（``）：`OWNER_PRINCIPAL` 在扩展层零消费（唯一引用方 session 属控制面），
 // 按 HS-003 从门面删除；控制面改从 `symbio_platform::kernel::event` 取，棘轮随实测下调。
-// 137 → 139（`D-418`）：HS-001 对扩展层禁用 `symbio_platform::kernel::` 之后，model 执行体原先
+// 137 → 139（``）：HS-001 对扩展层禁用 `symbio_platform::kernel::` 之后，model 执行体原先
 // 直取的三条语法（`event::branch::{removed_ids, unselected_roots}`、`ClosureReason`）
 // 必须经门面转出——它们本来就是内核共享类型，只是此前有一条旁路没被计件。此前实测
 // 136（基线 137 留了一格余量），加三条后按实测收平到 139。
-// 139 → 141（`D-420`）：`chat_node` / `principal` 两个模块级条目从 SDK 臂换到语法臂。
+// 139 → 141（``）：`chat_node` / `principal` 两个模块级条目从 SDK 臂换到语法臂。
 // 它们本来就是 `symbio-kernel` 的共享语法，此前经 sdk 的整模块转出才被记在 SDK 臂；
 // 同两个名字换主人，门面之外没有任何新增的可写路径。
-// 141 → 116（`D-438`）：其中 24 条是 `llm` / `dialog` 迁进 `symbio-sdk` 之后换臂（名字、
-// 消费方都没动，见 `SDK_BASELINE` 的注），余下 1 条是 `D-437` 撤掉的模型行读口。
+// 141 → 116（``）：其中 24 条是 `llm` / `dialog` 迁进 `symbio-sdk` 之后换臂（名字、
+// 消费方都没动，见 `SDK_BASELINE` 的注），余下 1 条是 `` 撤掉的模型行读口。
 // 语法臂「只许不涨」，下调是账本跟着实测走。
-// 116 → 108（`D-443`）：`Builder` / `EVENT_RETRY` / `EventStore` / `Store` /
+// 116 → 108（``）：`Builder` / `EVENT_RETRY` / `EventStore` / `Store` /
 // `VDFS_KIND_DIR` / `Seq` 六条零生产消费方（全部消费方是插件测试面）——测试通道归
 // `plugin-api::testkit`，门面不再为测试夹具背书；`EVENT_RETRY` 控制面 loop 改取内核本体。
-// 108 → 109（`D-513`）：实测已为 109，基线同批收平；不是放宽，账本只许降，
-// 基线跟着实测走。新增的一条要有决策号，本批记在 D-513。
-// 109 → 110（`D-532`）：`DetailColumn` 经 sdk 的 `present` 整模块转出到 plugin-api 门面——插件要声明 `DetailField.columns` 就必须能在自己 crate 里构造列定义，而门面是插件唯一可依赖的机制层（E-009 插件互不可见）。同名的 kernel 共享语法换的是门面可见性，不是新增可写路径；通用表格列契约见 DE-059 / D-532。
-// 110 → 111（`D-533`）：`vdfs_normalize_path` 是地址契约的共享纯语法，VDFS / local / sandbox 三个插件必须用同一份归一化事实，不能各自解释分隔符与绝对锚点。
-// 111 → 112（`D-533`）：`vdfs_resolve_path` 同属地址契约的共享纯语法，按有效 WORKDIR 解析相对路径；三个插件必须共用，不能各自解释盘符相对路径与工作目录。
-// 112 → 111（`D-535`）：`PluginPayloadWire` 是线路载荷，消费方转为共享传输
+// 108 → 109（``）：实测已为 109，基线同批收平；不是放宽，账本只许降，
+// 基线跟着实测走。新增的一条要有决策号，本批记在 。
+// 109 → 110（``）：`DetailColumn` 经 sdk 的 `present` 整模块转出到 plugin-api 门面——插件要声明 `DetailField.columns` 就必须能在自己 crate 里构造列定义，而门面是插件唯一可依赖的机制层（E-009 插件互不可见）。同名的 kernel 共享语法换的是门面可见性，不是新增可写路径；通用表格列契约见 DE-059 / 。
+// 110 → 111（``）：`vdfs_normalize_path` 是地址契约的共享纯语法，VDFS / local / sandbox 三个插件必须用同一份归一化事实，不能各自解释分隔符与绝对锚点。
+// 111 → 112（``）：`vdfs_resolve_path` 同属地址契约的共享纯语法，按有效 WORKDIR 解析相对路径；三个插件必须共用，不能各自解释盘符相对路径与工作目录。
+// 112 → 111（``）：`PluginPayloadWire` 是线路载荷，消费方转为共享传输
 // `symbio-http`；插件门面不再为桌面 IPC / HTTP 双协议转发它。
 export const GRAMMAR_BASELINE = 111
 
 /**
- * 模块级转发的基线：**只许不涨**（D-278）。
+ * 模块级转发的基线：**只许不涨**（）。
  *
  * 白名单里有一类条目指向的不是一条符号，而是一个**子模块**（`chat_node` / `ring` /
  * `principal` / `family`）：一行放出的是一整个命名空间，而 HS-003 只按名字核消费方
@@ -291,25 +291,25 @@ export const GRAMMAR_BASELINE = 111
  * 这不是要禁掉模块转发——同族符号整块给出是合理的——而是要它**显式**：一行换 N 条，
  * 得在账上有数，不能是排版事故。
  */
-// 6 → 13（D-413）：同一次「壳文件收掉」把 7 个模块名与改名转出的 `text` 抬到根上。
+// 6 → 13（）：同一次「壳文件收掉」把 7 个模块名与改名转出的 `text` 抬到根上。
 // 它们此前各自在壳里以 `pub use …::*;` 放出一整个命名空间——那正是本判据要显式化的
-// 形状（D-278），只是壳文件让读数漏掉了。一行换 N 条的账现在记在门面上，条目一个不少。
-// D-415 复查时补上**单段模块转出**（`pub use symbio_platform::sdk::events;`）这一形态：它同样
+// 形状（），只是壳文件让读数漏掉了。一行换 N 条的账现在记在门面上，条目一个不少。
+//  复查时补上**单段模块转出**（`pub use symbio_platform::sdk::events;`）这一形态：它同样
 // 一行放出一整个命名空间，此前不在 `collect` 的匹配里。补完后实测仍是 13——`events`
 // 按 CS-008 / CP-004 留在门面，没有换成 `pub use`。
-// 13 → 14（D-416）：`reports` 模块随登记面整块搬进 sdk，一行放出报表的全部类型与读口；
-// 这是 D-278 要显式化的形状。`views` 没有上门面（零扩展消费方，HS-003）。
-// D-420 后 `chat_node` / `principal` 改由语法臂从内核转出：同两个名字换来源，条数不变。
-// 14 → 13（`D-443`）：`fact_source` 模块级转发随登记面五条一并退场（session 走豁免
+// 13 → 14（）：`reports` 模块随登记面整块搬进 sdk，一行放出报表的全部类型与读口；
+// 这是  要显式化的形状。`views` 没有上门面（零扩展消费方，HS-003）。
+//  后 `chat_node` / `principal` 改由语法臂从内核转出：同两个名字换来源，条数不变。
+// 14 → 13（``）：`fact_source` 模块级转发随登记面五条一并退场（session 走豁免
 // 直取 sdk 本体）。
-// D-564 的 `collectors` 由现有计件归入 SDK 臂，模块级转发读数仍为 13。
+//  的 `collectors` 由现有计件归入 SDK 臂，模块级转发读数仍为 13。
 export const MODULE_REEXPORT_BASELINE = 13
 
 /** 门面白名单所在的文件与块的起止标记。 */
 export const FACADE = 'crates/symbio-plugin-api/src/lib.rs'
 /**
  * `symbio-providers` 的**重臂**：嵌入推理的原生运行时 `ort`（连同 `tokenizers`）。
- * 它默认必须关（D-254）：判据只看 manifest——重依赖是 `optional = true`，
+ * 它默认必须关（）：判据只看 manifest——重依赖是 `optional = true`，
  * 且 `[features] default` 不含 `embedding`。
  */
 export const HEAVY_ARM = {
@@ -325,7 +325,7 @@ export function heavyArmViolations(toml) {
   if (!depLine || !/optional\s*=\s*true/.test(depLine)) {
     errors.push(
       `${HEAVY_ARM.manifest}  里 \`${HEAVY_ARM.dep}\` 不是 \`optional = true\`——` +
-        `嵌入臂必须可选（HS-004，D-254）：插件不该为一个胶水符号链接整套 ONNX 运行时`,
+        `嵌入臂必须可选（HS-004，）：插件不该为一个胶水符号链接整套 ONNX 运行时`,
     )
   }
   const idx = toml.indexOf('[features]')
@@ -336,7 +336,7 @@ export function heavyArmViolations(toml) {
   if (dm && dm[1].split(',').some((s) => s.trim().replace(/["']/g, '') === HEAVY_ARM.feature)) {
     errors.push(
       `${HEAVY_ARM.manifest}  的 \`[features] default\` 含 \`${HEAVY_ARM.feature}\`——` +
-        'HS-004 / D-254：默认关，宿主与需要它的插件各自显式开；默认开等于把这条裁决作废',
+        'HS-004 / ：默认关，宿主与需要它的插件各自显式开；默认开等于把这条裁决作废',
     )
   }
   return errors
@@ -345,9 +345,9 @@ export function heavyArmViolations(toml) {
 /**
  * 门面里按来源 crate 分区的三条 `pub use` 语句形态。
  *
- * **这里原来是一条块锚点**（`BLOCK_START` 锚的是旧的 core 门面块）。D-279 删掉那个
+ * **这里原来是一条块锚点**（`BLOCK_START` 锚的是旧的 core 门面块）。 删掉那个
  * crate 之后锚点再也打不中，`readWhitelist` 于是恒返回 `[]`——HS-002 读到「机制臂 0 条」、
- * 恒等于基线 0、恒绿。**判据与它守的对象一起消失，而它自己不红**（D-280 的第二次实例，
+ * 恒等于基线 0、恒绿。**判据与它守的对象一起消失，而它自己不红**（ 的第二次实例，
  * 而且是同一个人在同一件事上第二次踩）。
  *
  * 改法是换判据的形状：不问「那段块在不在」，问「门面把这些 `pub use` 都发给了谁」。
@@ -379,7 +379,7 @@ const GRAMMAR_RE = /pub use symbio_kernel(?:::[A-Za-z0-9_:]+)?::\{([^}]*)\}/g
  */
 const GRAMMAR_SINGLE_RE = /pub use symbio_kernel(?:::[A-Za-z0-9_]+)*::([A-Za-z0-9_]+);/g
 /**
- * SDK 臂：同样按模块分组、可能有多块（D-258）。它**不计债**——这些机制只依赖内核，
+ * SDK 臂：同样按模块分组、可能有多块（）。它**不计债**——这些机制只依赖内核，
  * 插件取它们不增加「要认识整个宿主」的代价——但它是门面对插件的承诺，所以和语法臂
  * 一样受 HS-003 管（每一条都要报得出消费方）。
  */
@@ -418,7 +418,7 @@ function isModuleItem(root, crate, segs, name) {
  * 这些名字是「本 crate 内的转手」：`pub use rows::{RowHandler, …};` 的 `rows` 已由
  * 根上一行 `pub use symbio_platform::sdk::plugin::rows;` 从机制臂转来，第二条只是把同一个
  * 来源的符号再摊到根上——它不是「四臂之外的来源」，不该按白名单条目计。判据按
- * **来源**分区，所以别名必须跟随它的来处（`D-413`）。
+ * **来源**分区，所以别名必须跟随它的来处（``）。
  */
 export function facadeModuleAliases(root, src) {
   const out = new Set()
@@ -454,7 +454,7 @@ function splitSymbols(body) {
  *
  * 返回 `{ counts, other }`：`counts` 是每个来源 crate 的语句数（日志里显示，让「0 条机制臂」
  * 是一次**读数**而不是一次沉默），`other` 是除四臂之外那些语句放出的符号名。
- * 读不到任何 `pub use …::` ⇒ `null`（判据的输入不在，不许亮绿灯，D-280）。
+ * 读不到任何 `pub use …::` ⇒ `null`（判据的输入不在，不许亮绿灯，）。
  */
 export function readFacadeArms(root) {
   const src = readFacade(root)
@@ -468,7 +468,7 @@ export function readFacadeArms(root) {
       : [],
   )
   // 根上从四臂转出的模块名也是「本 crate 内的转手」：`pub use rows::{…}` 的来源
-  // 不是另一个 crate，而是同一份机制臂的再摊开（`D-413`）。
+  // 不是另一个 crate，而是同一份机制臂的再摊开（``）。
   for (const name of facadeModuleAliases(root, src)) own.add(name)
   const counts = {}
   const other = []
@@ -498,7 +498,7 @@ export function readFacadeArms(root) {
  *
  * 空清单是一次**测量结果**（门面今天只从 kernel / contract / sdk / deploy 取东西），它的证据是
  * `readFacadeArms` 确实读到了 `read > 0` 条语句——这正是它和「锚点打不中所以返回 []」
- * 的区别，也是 D-280 要求的那一步。
+ * 的区别，也是  要求的那一步。
  */
 export function readWhitelist(root) {
   const arms = readFacadeArms(root)
@@ -516,7 +516,7 @@ export function readGrammar(root) {
   return out.length ? out : null
 }
 
-/** 读出门面契约臂的符号清单（`symbio_contract` 各分块的并集，D-486）。 */
+/** 读出门面契约臂的符号清单（`symbio_contract` 各分块的并集，）。 */
 export function readContractArm(root) {
   const src = readFacade(root)
   if (src === null) return null
@@ -556,11 +556,11 @@ function dependenciesHas(toml, name) {
  * 扩展层插件真正引用到的门面符号（剥注释后）：`symbio_plugin_api::X` 与
  * `symbio_plugin_api::{A, B}` 两种形态。
  *
- * **测试文件不算消费方**（D-443）：门面条目的存续消费方是扩展层**生产**代码——
+ * **测试文件不算消费方**（）：门面条目的存续消费方是扩展层**生产**代码——
  * 这与全仓公共面的统一口径一致（`core-export-audit` C-003 / `arch-shape-audit`：
  * 测试文件与 `#[cfg(test)]` 模块都不算）。测试是插件的内部验证，不是它对外承诺的
  * 依赖面；测试要用的宿主词汇走 `[dev-dependencies]` 直取来源 crate（先例：
- * `composite` / `model` 的测试直取 sdk，D-253 的门面口径节）。此前本函数把
+ * `composite` / `model` 的测试直取 sdk， 的门面口径节）。此前本函数把
  * `.test.rs` 也计入消费方，注释把「只有测试在用」的复判悬空委托给 C-003——
  * 而门面从来不在 C-003 的扫描范围里，委托落空，测试面消费在给条目续命
  * （实测 SDK 臂 138 条里有 7 条的生产消费为零）。
@@ -573,7 +573,7 @@ export function collectConsumers(root, pluginNames) {
     for (const f of walkFiles(srcDir, { exts: ['.rs'] })) {
       if (f.endsWith('.test.rs')) continue
       const code = stripRustCode(fs.readFileSync(f, 'utf8'))
-      // 统一两形态（D-443 收集器保真度）：
+      // 统一两形态（ 收集器保真度）：
       // ① `use symbio_plugin_api::<路径表达式>;`——花括号当分隔符拆 token，每段取
       //    **叶子名**（嵌套花括号 `a::{b::{C}, D}` 因此不截断——旧写法 `[^}]*` 在内层
       //    第一个 `}` 处停，同一条 use 里排在嵌套组之后的符号全部漏计，生产消费方
@@ -604,7 +604,7 @@ export function collectConsumers(root, pluginNames) {
 }
 
 /**
- * 门面里**指向子模块**的条目（D-278）。
+ * 门面里**指向子模块**的条目（）。
  *
  * 判法是「看文件」而不是「看名字」：对 `pub use <crate>::<父路径>::<名字>;`，去
  * `<crate>/src/<父路径>/<名字>.rs` 或 `<父路径>/<名字>/mod.rs` 找那个模块。名字撞车是常态
@@ -633,7 +633,7 @@ export function collectModuleReexports(root) {
     if (isMod(base, segs, m[3])) out.add(m[3])
   }
   // 单段转出（`pub use symbio_platform::sdk::events;`）同样一行放出一整个命名空间：不给它留
-  // 不计数的一格，否则「换个写法」就能绕过本判据（D-415）。
+  // 不计数的一格，否则「换个写法」就能绕过本判据（）。
   for (const m of src.matchAll(/pub use (symbio_kernel|symbio_sdk)::([A-Za-z0-9_]+);/g)) {
     if (isMod(crates[m[1]], [], m[2])) out.add(m[2])
   }
@@ -687,7 +687,7 @@ export function run(root) {
     for (const f of walkFiles(srcDir, { exts: ['.rs'] })) {
       // 测试面不判：`*.test.rs` 是插件的**内部验证**，不是它对外承诺的依赖面。
       // 容器测试要扮演一次「轮次派发」才能验证路由转发，那批符号属于控制面的容器
-      // 概念（`TurnSpec` / `TurnDispatch` / …），门面白名单里没有也不该有（D-253）。
+      // 概念（`TurnSpec` / `TurnDispatch` / …），门面白名单里没有也不该有（）。
       // 这与 EX-008 对 `*.test.rs` 不判是同一条纪律：测试可以把宿主词汇摆上桌。
       if (f.endsWith('.test.rs')) continue
       scannedFiles++
@@ -700,7 +700,7 @@ export function run(root) {
           const specific = /symbio_platform::(?:kernel|sdk|contract|deploy)::/.exec(line)
           errors.push(
             `${path.relative(root, f).split(path.sep).join('/')}:${idx + 1}  \`${specific?.[0] ?? pfx}\`——` +
-              '扩展层插件源码只经 `symbio_plugin_api::…` 取宿主面（HS-001 / D-418）：' +
+              '扩展层插件源码只经 `symbio_plugin_api::…` 取宿主面（HS-001 / ）：' +
               '`symbio_platform::` 是平台 crate（语法 / 机制 / ABI 形状 / 部署常量），扩展层插件依赖它等于绕开门面直接认宿主；' +
               '扩展层要的共享类型由门面的四臂转出，绕开它等于绕开门面的计件与消费方核对',
           )
@@ -713,7 +713,7 @@ export function run(root) {
   if (arms === null) {
     console.log(
       `${red('[ERROR]')} plugin-surface-audit：读不出门面白名单（${FACADE}）——` +
-        '一条 `pub use …::` 都没读到。门面文件在、但读法失效时，HS-002 会读到 0 条并恒绿（D-280）',
+        '一条 `pub use …::` 都没读到。门面文件在、但读法失效时，HS-002 会读到 0 条并恒绿（）',
     )
     return 1
   }
@@ -724,42 +724,42 @@ export function run(root) {
   const n = wl.length
   if (n > WHITELIST_BASELINE) {
     errors.push(
-      `门面机制臂 ${n} 条 > 基线 ${WHITELIST_BASELINE}——HS-002 只许降（D-253 / D-255）；` +
+      `门面机制臂 ${n} 条 > 基线 ${WHITELIST_BASELINE}——HS-002 只许降（ / ）；` +
         '新增一条要把「谁消费、为什么非给插件不可」写成决策理由，并同步上调 `WHITELIST_BASELINE`',
     )
   }
   const nc = contract.length
   if (nc > CONTRACT_BASELINE) {
     errors.push(
-      `门面契约臂 ${nc} 条 > 基线 ${CONTRACT_BASELINE}——HS-002 只许降（D-486）：` +
+      `门面契约臂 ${nc} 条 > 基线 ${CONTRACT_BASELINE}——HS-002 只许降（）：` +
         '契约层是插件 ABI 的纯形状面，新增一条要与「插件真的要用」同批论证并同步上调基线',
     )
   }
   const ns = sdk.length
   if (ns > SDK_BASELINE) {
     errors.push(
-      `门面机制臂（SDK）${ns} 条 > 基线 ${SDK_BASELINE}——HS-002 只许降，两臂同一把尺子（D-269）；` +
+      `门面机制臂（SDK）${ns} 条 > 基线 ${SDK_BASELINE}——HS-002 只许降，两臂同一把尺子（）；` +
         '新增一条要过 §5.1 的两条准入（不提能力名 ∧ ≥2 条能力要用），写成决策并同步上调 `SDK_BASELINE`',
     )
   }
 
-  // 语法臂与模块级转发：两条零代价通道，同一把尺子（D-278）。
+  // 语法臂与模块级转发：两条零代价通道，同一把尺子（）。
   if (gram.length > GRAMMAR_BASELINE) {
     errors.push(
-      `门面语法臂 ${gram.length} 条 > 基线 ${GRAMMAR_BASELINE}——HS-006 只许不涨（D-278）：` +
+      `门面语法臂 ${gram.length} 条 > 基线 ${GRAMMAR_BASELINE}——HS-006 只许不涨（）：` +
         '语法臂不计债，但计件；新增一条要写成决策并同步上调 `GRAMMAR_BASELINE`',
     )
   }
   const moduleEntries = [...collectModuleReexports(root)]
   if (moduleEntries.length > MODULE_REEXPORT_BASELINE) {
     errors.push(
-      `门面模块级转发 ${moduleEntries.length} 条 > 基线 ${MODULE_REEXPORT_BASELINE}——HS-006 (D-278)：` +
+      `门面模块级转发 ${moduleEntries.length} 条 > 基线 ${MODULE_REEXPORT_BASELINE}——HS-006 ()：` +
         `\`${moduleEntries.join('\` / \`')}\` 各自放出一整个子模块，一行换 N 条；` +
         '要加就把「为什么整块给」写成决策并同步上调基线',
     )
   }
 
-  // 消费方计数：**全部插件的生产代码**（扩展层 + 控制面），测试文件不续命（D-443）。
+  // 消费方计数：**全部插件的生产代码**（扩展层 + 控制面），测试文件不续命（）。
   // 控制面 loop / session 也是插件、也经门面拿宿主面——它们的生产消费同样证明一条
   // 出口不是空转；旧口径把它们排除，等于让「只被控制面用」的活条目永远过不了这关，
   // 反过来又逼着控制面去挖 E-009 不允许的 sdk 直连。测试面不计（与 C-003 同尺）：
@@ -776,9 +776,9 @@ export function run(root) {
 
   // HS-005：旧 core 名不得回到活跃区（门面 manifest + 任一活跃 crate 的源码 / manifest）。
   //
-  // 前半（D-276）：门面不得依赖旧 core。机制臂归零之后，这一条把「下次再为一条控制面
+  // 前半（）：门面不得依赖旧 core。机制臂归零之后，这一条把「下次再为一条控制面
   // 符号整块依赖实现层」的路堵死——否则 21 个插件的编译图会重新背上控制面。
-  // 后半（D-279）：旧 core 整棵并入 sdk 之后，任何 `use` / 依赖键写它都是编译不了的
+  // 后半（）：旧 core 整棵并入 sdk 之后，任何 `use` / 依赖键写它都是编译不了的
   // 死引用。**这条判据不是「名字不存在所以永远绿」**：被禁名以常量拼出，但扫描面是
   // 真实源码；回归用例把两种拼写写进夹具，各自必须红。
   const retiredCoreHits = []
@@ -808,7 +808,7 @@ export function run(root) {
   }
   if (retiredCoreHits.length) {
     errors.push(
-      `活跃区仍有已退役的旧 core 名：${[...new Set(retiredCoreHits)].join(' / ')}——HS-005 (D-276/D-279)：` +
+      `活跃区仍有已退役的旧 core 名：${[...new Set(retiredCoreHits)].join(' / ')}——HS-005 (/)：` +
         '旧 core 已整棵并入平台（`symbio-platform` 的 `sdk` 子模块）；源码里的 `use` 改成 `symbio_platform::sdk::…` / `symbio_platform::kernel::…`，' +
         'manifest 里的依赖键整条删掉。同一条判据也挡门面重新依赖实现层',
     )
@@ -818,7 +818,7 @@ export function run(root) {
     const toml = fs.readFileSync(facadeManifest, 'utf8')
     if (dependenciesHas(toml, RETIRED_CORE_CRATE)) {
       errors.push(
-        `crates/symbio-plugin-api/Cargo.toml  [dependencies] 里有 \`${RETIRED_CORE_CRATE}\`——HS-005 (D-276)：` +
+        `crates/symbio-plugin-api/Cargo.toml  [dependencies] 里有 \`${RETIRED_CORE_CRATE}\`——HS-005 ()：` +
           '门面对宿主侧只依赖 `symbio-platform` 一条（语法 / 机制 / ABI 形状 / 部署常量都在它里面）；' +
           '要一条控制面符号，先论证它属于扩展面还是该换成宿主调用口',
       )
@@ -859,8 +859,8 @@ export function run(root) {
         `${CONTROL_PLANE.join(' / ')}；manifest 依赖边归 E-009，控制面不豁免）· HS-002 机制臂 ${n} 条（基线 ${WHITELIST_BASELINE}，` +
         `读数来自 ${arms.read} 条 \`pub use\` 语句：` +
         `${FACADE_ARMS.map((c) => `${c} ${arms.counts[c] ?? 0}`).join(' · ')}）` +
-        `+ 契约臂 ${nc} 条（基线 ${CONTRACT_BASELINE}，D-486 五层规划）` +
-        `+ SDK 服务臂 ${ns} 条（基线 ${SDK_BASELINE}，D-269 起同进棘轮；规则 D 长期只降）` +
+        `+ 契约臂 ${nc} 条（基线 ${CONTRACT_BASELINE}， 五层规划）` +
+        `+ SDK 服务臂 ${ns} 条（基线 ${SDK_BASELINE}， 起同进棘轮；规则 D 长期只降）` +
         `· 语法臂 ${gram.length} 条（基线 ${GRAMMAR_BASELINE}，不计债但计件）` +
         `· 模块级转发 ${moduleEntries.length} 条（基线 ${MODULE_REEXPORT_BASELINE}）` +
         `· HS-003 每条都有扩展层消费方（0 空转）· HS-004 胶水层重臂默认关闭（${HEAVY_ARM.feature}）` +

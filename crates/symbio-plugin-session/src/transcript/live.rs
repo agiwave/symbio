@@ -2,15 +2,15 @@
 //!
 //! ## 缺口
 //!
-//! 两条通道（`D-314`）各只覆盖半段：执行期 `sink` 发的是**瞬时帧**——模型轮首帧把
+//! 两条通道各只覆盖半段：执行期 `sink` 发的是**瞬时帧**——模型轮首帧把
 //! 思考 / 正文 / 工具卡建成 `streaming`，工具侧只补 `meta.started_at`；而**终态**
 //! （结果子节点、工具卡 `completed`、思考 / 正文 `completed`）原先只有轮收尾的
 //! `Convergence::project_final_turn` 才由 `rebuild` 折出。于是只要一轮里有工具调用，
 //! 界面在整轮跑完前既看不到工具结果，思考与工具卡也一直停在运行态。
 //!
-//! ## 办法：让投影器在事实落格时跑（`D-424`）
+//! ## 办法：让投影器在事实落格时跑
 //!
-//! `D-312` 已定「节点是事实的投影，不是可写对象」——形状的唯一 owner 是 `rebuild`。
+//!  已定「节点是事实的投影，不是可写对象」——形状的唯一 owner 是 `rebuild`。
 //! 因此补齐终态不是让执行体学会写节点，而是让**同一个投影器**早一步跑：事实落格后，
 //! 取这条事实与它的**配对事实**（同一次调用的派发清单 / 同一轮的拒言事实）组成最小
 //! 切片，`rebuild` 折出节点，清掉重建号后交给转写唯一写入点。实时面与重建面因此
@@ -19,7 +19,7 @@
 //! ## 为什么是「配对切片」而不是「本轮整片」
 //!
 //! 投影一条事实只需要它自己与配对事实：`artifact.added` 靠派发清单拿分组与卡片身份
-//! （`D-382`），`response` / `failed` 靠拒言事实判本轮那句答复是否获准（`D-390`）。
+//!，`response` / `failed` 靠拒言事实判本轮那句答复是否获准。
 //! 首响（`chat.assistant.opening`）没有配对，自己成切片——它是说给正在等的用户的
 //! 第一句话，必须早于工具结果帧到达；父（轮根）由事实载荷的 `root_id` 给出，不必
 //! 借配对事实。全片重折既贵，也会把已被抑制 / 已删除的节点重新吐出来。
@@ -45,15 +45,15 @@ use crate::declarations::{CHAT_VOCAB, MESSAGE_VOCAB};
 /// 事实落格时的**配对索引**：实时投影只问「这条事实的伙伴在哪」。
 ///
 /// 只收两类事实——收它就要问它的伙伴在两个地方：
-/// - 派发清单（`tool.requested`）：产物格的工具卡身份与分组都由它给（`D-382`）；
-/// - 拒言事实：`response` / `failed` 折正文节点前要知道本轮那句答复是否获准（`D-390`）。
+/// - 派发清单（`tool.requested`）：产物格的工具卡身份与分组都由它给；
+/// - 拒言事实：`response` / `failed` 折正文节点前要知道本轮那句答复是否获准。
 #[derive(Default)]
 pub(crate) struct LiveIndex {
     /// wire id（`calls[].id`）→ 最近一条含它的派发清单。同一 wire id 跨轮复用时后到的为准。
     requests: HashMap<String, Event>,
     /// `root_id`（本轮开端事实 id）→ 拒言事实。
     denials: HashMap<String, Event>,
-    /// `root_id` → 该轮**在飞占位**的节点 id（`D-425`）。同一轮根同时最多一个。
+    /// `root_id` → 该轮**在飞占位**的节点 id。同一轮根同时最多一个。
     rounds: HashMap<String, String>,
 }
 
@@ -62,13 +62,13 @@ impl LiveIndex {
         Self::default()
     }
 
-    /// 一帧事实 → 需要下发的节点序列（`D-424` 终态投影 + `D-425` 轮占位）。
+    /// 一帧事实 → 需要下发的节点序列（ 终态投影 +  轮占位）。
     ///
     /// 占位与终态走同一出口：它们都是「这条事实落格这一刻该让用户看见什么」，
     /// 只是占位只存在于流通道，`rebuild` 里不会有它。
     pub(crate) fn frames_for(&mut self, event: &Event, wal: &EventWalStore) -> Vec<cm::ChatNode> {
-        // 首响没有配对：自己成切片（`D-424`）。父是轮根，由载荷 `root_id` 给出
-        // （`D-426`），不借配对事实。
+        // 首响没有配对：自己成切片。父是轮根，由载荷 `root_id` 给出
+        //，不借配对事实。
         if event.kind == CHAT_VOCAB.opening {
             return frames(event, Vec::new());
         }
@@ -163,7 +163,7 @@ impl LiveIndex {
 /// 这条事实是否需要过实时投影（要收进索引，或据它折帧）。
 ///
 /// `request` / `response` / `failed` 是否「带轮根」决定它们是否参与：内部往返与工具端口
-/// 的请求也落在这些格上，但它们的载荷没有 `root_id`，既不开轮也不收轮（`D-425`）。
+/// 的请求也落在这些格上，但它们的载荷没有 `root_id`，既不开轮也不收轮。
 pub(crate) fn watches(event: &Event) -> bool {
     event.kind == MESSAGE_VOCAB.tool_requested
         || CHAT_VOCAB.denies_speech(event)
@@ -172,7 +172,7 @@ pub(crate) fn watches(event: &Event) -> bool {
         || (ends_round(event) && root_of(event).is_some())
 }
 
-/// 这条事实是否**开启**一段在飞窗口——轮占位该出现（`D-425`）。
+/// 这条事实是否**开启**一段在飞窗口——轮占位该出现。
 ///
 /// `scope.dispatch` 是用户消息之后的第一条回合事实，分类 / 措辞这些内部往返都在它之后：
 /// 骨架从这里起，等待窗口从第一秒就可见；每次 reader `request` 再起一次，是同一轮里
@@ -184,7 +184,7 @@ fn starts_round(event: &Event) -> bool {
             || event.kind == symbio_plugin_api::EVENT_REQUEST)
 }
 
-/// 这条事实是否意味着**本轮输出已经开始或结束**——轮占位该退出（`D-425`）。
+/// 这条事实是否意味着**本轮输出已经开始或结束**——轮占位该退出。
 ///
 /// `chat.assistant.final` / `session.settled` / `session.terminated` 是兜底：模板直接
 /// 作答等不吐流式帧的轮次没有 `tool.requested` / reader `response`，靠轮收场事实退出。
@@ -214,7 +214,7 @@ pub(crate) fn is_round_placeholder(node: &cm::ChatNode) -> bool {
             == Some(true)
 }
 
-/// 「这一轮还在飞」的临时骨架（`D-425`）：父 = 轮根，身份 = 会话主体。
+/// 「这一轮还在飞」的临时骨架：父 = 轮根，身份 = 会话主体。
 ///
 /// 形状与 `rebuild` 折出的整轮骨架同构（`Skeleton` + `run` + `streaming`），前端的
 /// 等待态因此零改动就能把它画成「正在思考… / 运行中 / 秒数」。

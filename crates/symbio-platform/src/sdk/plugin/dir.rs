@@ -65,7 +65,7 @@
 //!   （[`PluginDir::save`] 等）自动补回。
 //! - **身份键是 manifest 的**：出厂声明在 `Plugin::meta()`，装配期经
 //!   [`PluginDir::seed_identity`] 投影一次；此后 manifest 权威，运行期经
-//!   [`PluginDir::identity`] 读——**停用的插件因此也有身份**（D-032）。
+//!   [`PluginDir::identity`] 读——**停用的插件因此也有身份**。
 //!
 //! ## 职责划分（本方案的全部要点）
 //!
@@ -136,7 +136,7 @@ pub const PLUGIN_KEY_NAME: &str = "plugin_name";
 /// 而「停用」是一个**显式**动作。反过来（缺省停用）会让每一个新插件都先隐形。
 pub const PLUGIN_KEY_ENABLED: &str = "plugin_enabled";
 
-// ==================== 身份键：manifest 是运行期唯一来源（D-032） ====================
+// ==================== 身份键：manifest 是运行期唯一来源 ====================
 //
 // 出厂声明在 `Plugin::meta()`，装配期由容器经 [`PluginDir::seed_identity`] **投影**
 // 进 manifest（键缺失才写，用户改过的不覆盖）。此后 manifest 权威：插件列表、
@@ -219,7 +219,7 @@ pub const PLUGIN_KEY_REQUIRED: &str = "plugin_required";
 /// 投影键：是否允许停用（= 不在装配方的 `ASSEMBLY_UNDISABLABLE_PLUGINS` 里）
 pub const PLUGIN_KEY_CAN_DISABLE: &str = "plugin_can_disable";
 
-/// 插件自身目录 Key（[`PluginDir`]）—— **键与值同住**（D-095 根因一）
+/// 插件自身目录 Key（[`PluginDir`]）—— **键与值同住**（ 根因一）
 ///
 /// 容器构造子插件时把它挂到子上下文上——插件据此知道「我的目录在哪」，
 /// 从而自己读写 `PLUGIN.yml`（父插件不再代管任何配置）。键名（`plugin_dir`）
@@ -280,7 +280,7 @@ pub fn plugin_expand_tilde_path(p: &Path) -> PathBuf {
 
 // ==================== 插件身份 ====================
 
-/// 一个插件的**身份** —— 从 `PLUGIN.yml` 读出的四个身份键（D-032）
+/// 一个插件的**身份** —— 从 `PLUGIN.yml` 读出的四个身份键
 ///
 /// 与 `PluginMeta` 的关系：`PluginMeta` 是插件的
 /// **出厂自述**（代码里声明的），本结构是它的**落盘形态**（manifest 里的值）。
@@ -405,7 +405,7 @@ impl PluginDir {
             })
     }
 
-    // ==================== 身份（D-032） ====================
+    // ==================== 身份 ====================
 
     /// 读本插件的身份 —— manifest 是运行期**唯一**来源
     ///
@@ -414,11 +414,11 @@ impl PluginDir {
     /// 该报警的事。
     ///
     /// 之所以能从 manifest 读（而不问 `Plugin::meta()`）：**停用的插件不被构造**，
-    /// 而插件列表必须能显示它的名字。见 D-032。
+    /// 而插件列表必须能显示它的名字。。
     ///
-    /// 图标键只接受 SVG 图元内容（D-523）：老清单里残留的图标**名字**（如
+    /// 图标键只接受 SVG 图元内容：老清单里残留的图标**名字**（如
     /// `session`）不是内容，按未声明处理，交给前端回退链；装配成功的插件会在
-    /// [`Self::seed_identity`] 里把它迁移成插件自给的内容（D-524）。
+    /// [`Self::seed_identity`] 里把它迁移成插件自给的内容。
     pub fn identity(&self) -> PluginIdentity {
         let map = self.read_manifest().ok().flatten().unwrap_or_default();
         PluginIdentity {
@@ -436,7 +436,7 @@ impl PluginDir {
     /// 键都在时**不碰文件**——无谓的写盘会搅乱 mtime，而变更通知的消费者只关心
     /// 真正的变化。
     ///
-    /// 图标键有一个例外（D-524）：旧版清单里存的是图标**名字**，而 D-523 起这个键
+    /// 图标键有一个例外：旧版清单里存的是图标**名字**，而  起这个键
     /// 的语义是插件自给的 SVG 图元内容。名字不是内容，按「未落位」处理，用当前
     /// 插件的出厂内容覆盖；已是 SVG 的值（含用户手写的内容）不覆盖。
     ///
@@ -446,7 +446,7 @@ impl PluginDir {
     pub fn seed_identity(&self, meta: &crate::kernel::plugin::PluginMeta) -> Result<(), String> {
         let mut map = self.read_manifest()?.unwrap_or_default();
         // 先补齐保留键再投影身份：`carry_over_reserved` 会把磁盘上的旧值取回，
-        // 若放在写入前调用，图标迁移刚写下的新值又会被同名旧值盖回去（D-524）。
+        // 若放在写入前调用，图标迁移刚写下的新值又会被同名旧值盖回去。
         self.carry_over_reserved(&mut map);
         let mut changed = false;
 
@@ -615,7 +615,7 @@ impl PluginDir {
 ///
 /// `title` / `description` / `version` 来自 `PLUGIN.yml` 的身份键
 /// （[`PluginDir::identity`]），因此**停用的插件也有身份**——它只是不被构造，
-/// 不是不存在（D-032）。
+/// 不是不存在。
 ///
 /// 字段仍可能为空：该目录**从未落位过**（新装 / 手写，但从未构造成功 ⇒ 出厂身份
 /// 还没被投影）。那时消费方按 `name`（目录名）兜底。
@@ -827,7 +827,7 @@ impl PluginConfigFile {
 /// 挂载根下**不止一份配置**、或有资源条的插件（model / skill / mcp / agent /
 /// work / session / plugin_manager）**不适用**本 trait——它们的 `dispatch` 携带
 /// 真实资源语义（条目 CRUD、动态子节点、订阅）。硬套会让机制去猜插件语义，
-/// 那正是本仓反复拒绝的方向（见 D-023）。
+/// 那正是本仓反复拒绝的方向。
 #[async_trait]
 pub trait PluginConfigMount: Send + Sync + 'static {
     /// 配置结构体（本插件的 `PLUGIN.yml` 反序列化目标）
@@ -859,7 +859,7 @@ pub trait PluginConfigMount: Send + Sync + 'static {
 /// 这是本仓唯一一处把「配置挂载点」翻译成 VDFS 操作的地方——五个插件共享它，
 /// 因此它们的 `List` / `Stat` / `Read` / `Write` 行为**在构造上不可能漂移**。
 ///
-/// **为什么不再是 blanket impl**：`VdfsProvider` 已住 `symbio_kernel`（D-188 C2b），
+/// **为什么不再是 blanket impl**：`VdfsProvider` 已住 `symbio_kernel`（ C2b），
 /// 在宿主 crate 里为 `T: PluginConfigMount` 实现外来 trait 会撞 orphan 规则。
 /// 故改为「一个自由函数 + 一个展开宏」：函数仍是唯一实现，各插件用
 /// `impl_config_mount_vdfs!` 声明自己走这条骨架。
@@ -977,7 +977,7 @@ fn optional_string_of(map: &Map<String, Value>, key: &str) -> Option<String> {
     }
 }
 
-/// `plugin_icon` 的值是**图元内容**还是旧版遗留的图标名（D-523 / D-524）。
+/// `plugin_icon` 的值是**图元内容**还是旧版遗留的图标名。
 ///
 /// 判据只取最小形状——去空白后以 `<` 起头。旧值（`session` / `terminal` /
 /// `settings` …）不含 `<`，因此能被准确认出；图元串（`<path …/><circle …/>`）

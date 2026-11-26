@@ -7,7 +7,7 @@ plugin_order: 40
 # crates/symbio-plugin-api/src/events.rs）。格位仍住在 vocab::EVENTS。
 # `chat.*` / `user.message` 已随词汇移交进会话簿记的清单，`memory.*` 已随词汇移交进
 # 记忆包的清单，`authz.*` / `task.controlled` 已移交工具插件，`commitment.*` 已移交
-# 代理插件（D-389 批二）。本插件不再导出任何跨插件事件名。
-# 跨插件按名字读的视图已退役（D-387）：读方遍历 owner 在 decl.rs 里用
+# 代理插件（ 批二）。本插件不再导出任何跨插件事件名。
+# 跨插件按名字读的视图已退役：读方遍历 owner 在 decl.rs 里用
 # `submit_reports!` 声明的报表描述符，不再有 `view_names` 生成物。
 # 纯机制环不导出报表。

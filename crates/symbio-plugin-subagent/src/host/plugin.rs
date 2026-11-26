@@ -163,7 +163,7 @@ impl AgentPlugin {
 
         // 与 `home` 造 `worker` 同形：把目录（子 Agent 的根）与核心插件清单告知
         // 容器，其余交给 composite 扫描装配——子 Agent 与系统 Agent 因此结构相同。
-        // 只注入核心集（D-520）：可选插件不默认补目录，由插件市场按需安装。
+        // 只注入核心集：可选插件不默认补目录，由插件市场按需安装。
         let sub_context = Arc::new(PluginSimpleRequest::child_of(ctx, self.router.clone()));
         sub_context.set(PLUGIN_DIR, PluginDir::at(&dir, PLUGIN_ID_COMPOSITE));
         sub_context.set(
@@ -186,7 +186,7 @@ impl AgentPlugin {
     /// 解析选中 Agent 的**权限作用域**（manifest → 运行期事实）。
     ///
     /// 这是全仓唯一能把 `agent_id` 变成一份声明的地方（目录由本插件持有），
-    /// 所以发布也发生在这里（D-153）：读侧是一堆互不相认的宿主工具
+    /// 所以发布也发生在这里：读侧是一堆互不相认的宿主工具
     /// （`web` / `vdfs`），它们只认 ctx 上的共享槽。
     ///
     /// 与 [`Self::sub_agent`] 各读一次 manifest：那边要的是插件树（带缓存），
@@ -273,7 +273,7 @@ impl AgentPlugin {
     ) -> usize {
         let sub = ctx.fork();
         sub.set(PATH, TRAVERSE_AVAILABLE_TOOLS.to_string());
-        // D-515：子树的 `memory` 实例经 `AGENT_VDFS` 读写 `<子agentdir>/AGENTS.md`。
+        //：子树的 `memory` 实例经 `AGENT_VDFS` 读写 `<子agentdir>/AGENTS.md`。
         // `fork()` 会继承父 ctx 的 extension——父作用域那份 provider 指向**父** agent
         // 目录，若直接继承，子树会读错文件（或根本没有 ⇒ 无作用域）。这里按本层
         // 发现的目录重挂一份，与 `AGENT_ID` 清空 / `VDFS_PARENT_ADDR` 续接同理。
@@ -297,7 +297,7 @@ impl AgentPlugin {
             Arc::new(super::scope::SubAgentVisitor::new(Arc::clone(visitor), id));
         let scoped_dyn: Arc<dyn Registry> = Arc::clone(&scoped) as Arc<dyn Registry>;
         sub.set(CAPABILITY_VISITOR, scoped_dyn);
-        // 端口名与工具名同一个前缀（D-468）：子树里的 `register_tool` / `register_ports`
+        // 端口名与工具名同一个前缀：子树里的 `register_tool` / `register_ports`
         // 登记端口时读这一格，于是「工具行叫什么」与「绑定叫什么」不靠写入顺序对齐。
         sub.set(
             symbio_plugin_api::port::PORT_SCOPE,

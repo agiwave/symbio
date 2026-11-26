@@ -173,8 +173,8 @@ jobs:
         # CI 语义 = 有差异即红）+ 单测、clippy -D warnings，以及 --profile 指定的构建。
         # fmt 单独成 `fmt` 阶段（阶段级并发的屏障，见 scripts/gate.d/05-fmt.mjs），
         # 所以这里必须是 fmt,backend 两个 id。
-        # rustdoc 阶段已废弃（D-274）：一次 core 改动实测 4m04s，比 backend 整阶段贵 4 倍。
-        # 需要时手跑一条命令，见 docs/003-design/016-工程落地与验证.md 的 D-274。
+        # rustdoc 阶段已废弃：一次 core 改动实测 4m04s，比 backend 整阶段贵 4 倍。
+        # 需要时手跑一条命令，见 docs/003-design/016-工程落地与验证.md 的。
         # ⚠️ 检查项只在 scripts/gate.mjs 里定义一处（CONTRIBUTING 的清单已删），
         #    要加 / 改检查就改脚本，不要在这里另写 cargo 命令。
         run: node scripts/gate.mjs --preset=rust --ci --profile=${{ matrix.profile }}

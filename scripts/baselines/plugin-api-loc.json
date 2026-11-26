@@ -1,56 +1,56 @@
 {
-  "note": "plugin-api 自有实现的行数棘轮：只许降。数的是生产文件物理行（含空行与注释），*.test.rs / tests.rs 与 #[cfg(test)] mod 不计；testkit/ 由 cfg(test) / test-fixtures feature 门控，属测试设施而非生产实现，也不计（D-563）；描述符声明的清单镜像（events.rs / routes.rs）只作存在性登记，行数不参与判定（D-470）。超一行即红；行数下降必须同批下调本文件，否则基线留出的余量会让「删 N 行再加 N 行」逃过判据。整份删除的转发文件不留空：条目钉到 lines:0 + retired（新家路径），文件若又出现即 FA-003 红。",
+  "note": "plugin-api 自有实现的行数棘轮：只许降。数的是生产文件物理行（含空行与注释），*.test.rs / tests.rs 与 #[cfg(test)] mod 不计；testkit/ 由 cfg(test) / test-fixtures feature 门控，属测试设施而非生产实现，也不计（）；描述符声明的清单镜像（events.rs / routes.rs）只作存在性登记，行数不参与判定（）。超一行即红；行数下降必须同批下调本文件，否则基线留出的余量会让「删 N 行再加 N 行」逃过判据。整份删除的转发文件不留空：条目钉到 lines:0 + retired（新家路径），文件若又出现即 FA-003 红。",
   "crate": "crates/symbio-plugin-api/src",
   "files": [
     {
       "path": "effects.rs",
       "lines": 0,
-      "adr": "D-413",
-      "retired": "crates/symbio-platform/src/sdk/plugin/effects.rs"
+      "retired": "crates/symbio-platform/src/sdk/plugin/effects.rs",
+      "why": "整份实现已迁出，行数钉到 0；新家是 sdk/plugin/effects.rs"
     },
     {
       "path": "declarations.rs",
       "lines": 27,
-      "adr": "D-415"
+      "why": "声明镜像留在门面供插件读取，行数只许降"
     },
     {
       "path": "events.rs",
       "lines": 192,
-      "adr": "D-415"
+      "why": "事件词汇镜像按存在性登记，行数只许降"
     },
     {
       "path": "port.rs",
       "lines": 22,
-      "adr": "D-440"
+      "why": "端口转发块保留在门面，行数只许降"
     },
     {
       "path": "text.rs",
       "lines": 0,
-      "adr": "D-413",
-      "retired": "crates/symbio-platform/src/sdk/text/tokenizer.rs"
+      "retired": "crates/symbio-platform/src/sdk/text/tokenizer.rs",
+      "why": "整份实现已迁出，行数钉到 0；新家是 sdk/text/tokenizer.rs"
     },
     {
       "path": "context.rs",
       "lines": 0,
-      "adr": "D-413",
-      "retired": "crates/symbio-platform/src/sdk/plugin/context.rs"
+      "retired": "crates/symbio-platform/src/sdk/plugin/context.rs",
+      "why": "整份实现已迁出，行数钉到 0；新家是 sdk/plugin/context.rs"
     },
     {
       "path": "reports.rs",
       "lines": 0,
-      "adr": "D-416",
-      "retired": "crates/symbio-platform/src/sdk/plugin/reports.rs"
+      "retired": "crates/symbio-platform/src/sdk/plugin/reports.rs",
+      "why": "整份实现已迁出，行数钉到 0；新家是 sdk/plugin/reports.rs"
     },
     {
       "path": "views.rs",
       "lines": 0,
-      "adr": "D-416",
-      "retired": "crates/symbio-platform/src/sdk/plugin/views.rs"
+      "retired": "crates/symbio-platform/src/sdk/plugin/views.rs",
+      "why": "整份实现已迁出，行数钉到 0；新家是 sdk/plugin/views.rs"
     }
   ],
   "total": {
     "lines": 1271,
-    "adr": "D-486"
+    "why": "门面自有实现总行数只许降，当前实测 1271 行不留余量"
   },
-  "total_note": "1272 → 1271（D-565）：TaskVocab 门面出口删除，生产合计同步收紧。"
+  "total_note": "1272 → 1271（）：TaskVocab 门面出口删除，生产合计同步收紧。"
 }

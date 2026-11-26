@@ -120,7 +120,7 @@ pub(crate) fn error_text(err: &Value) -> String {
 /// 「examples 要送达 LLM」是**协议适配层的组装细节**：core 的 `CapabilityMeta`
 /// 只声明 examples 存在，是否拼、以什么措辞拼，由各协议决定——四个协议的请求体
 /// 形状本就不同。此前它是 `CapabilityMeta` 上的一个方法，但消费方只有本模块的
-/// 四个协议实现，按「依赖方数量」判据（D-023）下沉到这里。
+/// 四个协议实现，按「依赖方数量」判据下沉到这里。
 ///
 /// 无 examples 时直接返回原 description，零开销。
 pub fn description_for_llm(meta: &CapabilityMeta) -> String {
@@ -135,7 +135,7 @@ pub fn description_for_llm(meta: &CapabilityMeta) -> String {
 /// 工具在模型侧的 wire 名：按 canonical 名查装配期别名表，命中用别名、
 /// 未命中回退 canonical 名本身（老夹具 / 空别名表兼容）。
 ///
-/// 与 [`description_for_llm`] 同为四个协议共用的装配口径（D-444）：别名是**描述数据**，
+/// 与 [`description_for_llm`] 同为四个协议共用的装配口径：别名是**描述数据**，
 /// 由装配期一次算出、随 `session.config` 下发；协议侧只读同一份表，不再各自做字符集
 /// 投影。线上工具名本就在协议字符集内，故命中值与回退值都等于旧投影结果——请求形状
 /// 逐字不变。
@@ -148,7 +148,7 @@ pub fn wire_name_for_llm(meta: &CapabilityMeta, aliases: &BTreeMap<String, Strin
 
 /// 标准协议事件 —— 把不同提供商的流解析成**统一方言**。
 ///
-/// ## 依赖方对照表（D-023 决策 2）
+/// ## 依赖方对照表（ 决策 2）
 ///
 /// | 角色 | 谁 |
 /// |---|---|
@@ -185,7 +185,7 @@ pub enum ModelProtocolEvent {
 /// **行解析在 [`sse`]**：本 trait 以 [`SseLineParser`] 为父 trait，而
 /// `super::stream::parse_sse_stream` 只认那个契约（完整行 + 未结束行的增量提取）。
 /// 契约与四个协议实现同处本模块，于是「谁实现、谁消费」都在一屏之内；
-/// 内核因此不必认识任何协议字段名（D-022），也不必承载协议抽象。
+/// 内核因此不必认识任何协议字段名，也不必承载协议抽象。
 #[async_trait]
 pub trait ModelProtocol: SseLineParser + Send + Sync {
     /// 请求目标 URL（含路径）

@@ -7,7 +7,7 @@ use super::{
     shell::ShellTool, todo_write::TodoWriteTool,
 };
 // 审批闸门的判定住在能力注册收口点（`register_tool` 写端口绑定时裹上的
-// `GatedExecutor`）；本插件只交声明，不再有第二条路径去判闸（D-466）。
+// `GatedExecutor`）；本插件只交声明，不再有第二条路径去判闸。
 use async_trait::async_trait;
 use serde_json::{json, Value};
 use std::sync::{Arc, Weak};
@@ -116,13 +116,13 @@ fn config_definition() -> DetailDefinition {
 ///
 /// 工具改形为 [`PortExecutor`] 后不再有 `Arc<dyn Capability>` 可藏；`traverse` 把
 /// 这三样交给注册收口点（`register_tool`），闸门与行都在那里成形。本插件**不执行**
-/// 工具——`route` 对工具名一律 `NotFound`（D-466）。
+/// 工具——`route` 对工具名一律 `NotFound`。
 struct ToolEntry {
     meta: CapabilityMeta,
     /// `None` = 静态档（`meta.effective_risk()`，与 `register_tool` 的 `risk = None`
     /// 分支同义）；`Some` = 风险随参数变化的覆写闭包（shell）。
     risk: Option<RiskOf>,
-    /// 沙箱事实提取器（D-531）：工具**自己**知道参数语义（`command` / 工作目录），
+    /// 沙箱事实提取器：工具**自己**知道参数语义（`command` / 工作目录），
     /// 把它翻成开放 kind 事实交给闸门查沙箱。沙箱不认识工具名，闸门不认识配置项。
     /// `None` = 该工具不提交事实（绝大多数工具），走原审批判定。
     facts: Option<FactsOf>,
@@ -195,7 +195,7 @@ impl LocalPlugin {
                     .unwrap_or(CapabilityRiskLevel::High)
             })
         };
-        // shell 的意图事实提取器（D-531）：只有 shell 自己知道 `args["command"]`
+        // shell 的意图事实提取器：只有 shell 自己知道 `args["command"]`
         // 是命令、ctx[WORKDIR] 是工作目录。翻成开放 kind 事实交给闸门查沙箱；
         // 沙箱按用户配的规则做 deny / 风险档覆盖，双方都不认识对方的实现细节。
         let shell_facts: FactsOf = Arc::new(|args: &Value, ctx: &Arc<dyn PluginInvokeRequest>| {
@@ -308,7 +308,7 @@ impl Plugin for LocalPlugin {
             }
         }
 
-        // 工具不再有第二条执行面（`D-440` / `D-466`）：执行只经 `port.tool` 契约，
+        // 工具不再有第二条执行面（ / ）：执行只经 `port.tool` 契约，
         // 闸门在注册收口点的 `GatedExecutor` 里。按工具名 `route` 一律 `NotFound`——
         // 保留父容器转发，是为了让本插件仍能代理挂在它下面的地址面。
         Err(PluginError::NotFound(format!("路径不存在: {path}")))

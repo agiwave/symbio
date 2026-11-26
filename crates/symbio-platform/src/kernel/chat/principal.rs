@@ -1,23 +1,23 @@
-//! 会话协议里的**主体地址**（[D-069 §决策 1]）。
+//! 会话协议里的**主体地址**。
 //!
 //! 三个字段各司其职、互相**正交**：
 //! - `kind`：**一族**（Person / Agent / Tool / System），编译期闭集，运行期判据读它
 //! - `id`：可路由地址 `<namespace>/<name>`——找到主体、调用它、查看它的信息都靠这个地址；
-//!   第一段是归属（哪个插件或概念），后续段是归属内的名字（[D-069 §决策 2]）
+//!   第一段是归属（哪个插件或概念），后续段是归属内的名字
 //! - `title`：**显示名**，渲染层用（工具响应节点常带、系统主体常不带）
 //!
 //! kind 与 id 分家是这条类型的**核心纪律**——过去把 kind 编进 id（`agent:main`）
 //! 意味着 id 不再可路由（"谁的 main"没人说得出），加一族就要动判据；kind 独立之后
 //! `is_agent_id` 用命名空间登记表分派（`AGENT_NAMESPACES`），加一族只是登记多一条。
 
-// arch-shape-allow CS-004 tool ×2: 用途=wire 词汇（PrincipalKind::Tool 的序列化词与 legacy 前缀 "tool"）；不是插件引用=这是主体地址协议的既有词汇，与插件目录名无关，内核不因此认识任何插件实现；依据=D-303；登记=2026-11-03
+// arch-shape-allow CS-004 tool ×2: 用途=wire 词汇（PrincipalKind::Tool 的序列化词与 legacy 前缀 "tool"）；不是插件引用=这是主体地址协议的既有词汇，与插件目录名无关，内核不因此认识任何插件实现；依据=主体地址协议的 legacy tool 前缀仍在历史事实中出现，删除会让旧日志不可读；登记=2026-11-03
 
 use serde::{Deserialize, Deserializer, Serialize};
 use serde_json::Value;
 
 use super::TOOL_NAMESPACES;
 
-/// **主体族**（[D-069 §决策 1]）——四值闭集。
+/// **主体族**——四值闭集。
 ///
 /// `role` 已退出协议顶层，`kind` 是主体族的唯一承载点。
 /// 因此映射里 `NodeRole::User` ↔ `PrincipalKind::Person`，`Assistant` ↔ `Agent`，
@@ -46,7 +46,7 @@ impl PrincipalKind {
         }
     }
 
-    /// 是否智能体一族——kind 层的族判据（[D-069 §决策 3]），生产面今天没有调用点（基线在案）。
+    /// 是否智能体一族——kind 层的族判据，生产面今天没有调用点（基线在案）。
     ///
     /// 从结构体字段**直接读**，不从 id 反推：协议携带 `Principal` 结构体；只有字符串
     /// 可读的入口（如授权表）改走 `crates/symbio-platform/src/sdk/authz/mod.rs::principal_namespace`
@@ -56,7 +56,7 @@ impl PrincipalKind {
     }
 }
 
-/// 会话协议携带的**主体**（[D-069 §决策 1]）。
+/// 会话协议携带的**主体**。
 ///
 /// 三个字段都是**协议字段**（进 wire）：`kind` 是族、`id` 是可路由地址、`title` 是显示名。
 /// 序列化形态：
@@ -68,13 +68,13 @@ impl PrincipalKind {
 ///
 /// **读侧兼容**：wire 上 `principal` 值既接受本结构体对象形态，也接受**裸字符串**
 /// （历史 `messages.json` 里的 `"agent:main"` / `"user"`，以及未升级的调用方）。
-/// 字符串走 [`Principal::from_legacy`]——[D-069 §决策 6] 的一次性读侧别名。
+/// 字符串走 [`Principal::from_legacy`]—— 的一次性读侧别名。
 /// 序列化始终出对象形态；写侧构造 `Principal` 后不再有第二份表达。
 #[derive(Debug, Clone, Serialize, PartialEq, Eq)]
 pub struct Principal {
     /// 一族（Person / Agent / Tool / System），编译期闭集。
     pub kind: PrincipalKind,
-    /// 可路由地址 `<namespace>/<name>`——本结构体唯一的主键（[D-069 §决策 5]）。
+    /// 可路由地址 `<namespace>/<name>`——本结构体唯一的主键。
     pub id: String,
     /// 显示名（渲染层用；与 kind 无关，工具与角色常带，用户与主智能体常不带）。
     #[serde(default, skip_serializing_if = "Option::is_none")]
@@ -132,7 +132,7 @@ impl Principal {
 
     /// 由 **LLM 可见工具名**（wire 形态）构造工具一族的主体。
     ///
-    /// 工具的结果节点归**工具自己**（[D-069 §决策 1]：`Tool` 族「工具的响应节点
+    /// 工具的结果节点归**工具自己**（`Tool` 族「工具的响应节点
     /// 归属它自己，不是调用它的 agent」）。地址仍按 `<namespace>/<name>` 规范合成：
     /// - 已带 `/` 段的限定名（`local/todo_write`、`mcp/github/create_issue`）原样；
     /// - MCP 双下划线拼接名（`mcp__server__tool`）⇒ `mcp/server/tool`；
@@ -166,7 +166,7 @@ impl Principal {
         Principal::new(PrincipalKind::Tool, id)
     }
 
-    /// 从历史 `principal: String` 一次性映射——[D-069 §决策 6] 读侧别名的实现点。
+    /// 从历史 `principal: String` 一次性映射—— 读侧别名的实现点。
     ///
     /// 旧形态（`agent:xxx` / `user` 裸字面量）与新形态（`<ns>/<name>`）都吃得下：
     /// - 新形态：第一段是 namespace，`session/*` ⇒ Agent，`person/*` ⇒ Person，
@@ -196,7 +196,7 @@ impl Principal {
             };
             return Principal::new(kind, s);
         }
-        // 旧形态：`agent:xxx` / `person:xxx` / `tool:xxx` / `system:xxx`（D-069 v1）。
+        // 旧形态：`agent:xxx` / `person:xxx` / `tool:xxx` / `system:xxx`（ v1）。
         if let Some((kind_word, name)) = s.split_once(':') {
             let (kind, id) = match kind_word {
                 "person" => (PrincipalKind::Person, s.to_string()),
@@ -216,7 +216,7 @@ impl Principal {
     }
 }
 
-// **读侧兼容反序列化**（[D-069 §决策 6]）：`Option<Principal>` 字段上的
+// **读侧兼容反序列化**：`Option<Principal>` 字段上的
 // 显式标记，语义已由 [`Principal::deserialize`] 的实现给出——`null` / 缺席 ⇒ `None`，
 // 字符串 ⇒ `Principal::from_legacy`，对象 ⇒ 正常解构。字段用 `#[serde(default)]` 即可。
 //

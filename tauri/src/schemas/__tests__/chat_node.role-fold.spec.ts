@@ -30,7 +30,7 @@ describe('normalizePrincipal 的命名空间表（与 Rust 的 namespace 派生�
   })
 })
 
-describe('messageRoleOf：身份只折叠主体（D-147）', () => {
+describe('messageRoleOf：身份只折叠主体', () => {
   it('principal.kind 四族一一对应', () => {
     expect(messageRoleOf({ principal: { kind: 'person', id: 'person/local' } })).toBe(CHAT_ROLE_USER)
     expect(messageRoleOf({ principal: { kind: 'agent', id: 'session/main' } })).toBe(

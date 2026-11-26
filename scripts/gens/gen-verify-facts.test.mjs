@@ -18,7 +18,7 @@ import {
 
 const REPO = path.resolve(import.meta.dirname, '..', '..')
 
-// ── 最小可用夹具：DE-001 §8 参数表 + 02 坐标系七张表 + 阶梯总表 + 两阶文档 ──────
+// ── 最小可用夹具：DE-001 §9 参数表 + 02 坐标系七张表 + 阶梯总表 + 两阶文档 ──────
 //
 // 夹具刻意只给两阶、两维：反向用例注入的是**形状**（少一行 / 多一个加粗 / 未知键 /
 // 表头改名 / 越界取值），与阶数、维数无关；两阶足以暴露「名册配对」「累计点亮全表」的两端。
@@ -49,14 +49,14 @@ const ARCH = `
 // + 名册与类型闭集（§6.1）+ 四张声明（§2 条数列、§5 说法、§6.2 空格、§7 社交、§3.3 共线登记）。
 // 声明与名册在这里刻意自洽——自洽与否由 verify 程序判，生成器只管读得出读不出。
 const FRAME = `
-## 2. 横向：五维
+## 1. 五维分类
 
 | 维度 | 回答 | 内涵 | 条数 |
 |---|---|---|:-:|
 | **知** Episteme | 我知道什么 | 记忆、因果 | 2 |
 | **行** Action | 我能做什么 | 工具、承诺 | 2 |
 
-## 3. 纵向：五轴
+## 2. 五轴刻度
 
 | 轴 | 低阶 | 高阶 | 要求的性质 | 禁止的性质 |
 |---|---|---|---|---|
@@ -64,7 +64,7 @@ const FRAME = `
 | **时域跨度** | 单轮、当下 | 跨会话 | \`cross_session\` | \`turn_local\` |
 | **抽象层级** | 具体指令 | 归纳规则 | \`generalize\` | \`literal_only\` |
 
-### 3.1 五轴的刻度
+### 2.1 刻度（四级）
 
 | 轴 | L1 | L2 | L3 |
 |---|---|---|---|
@@ -72,7 +72,7 @@ const FRAME = `
 | **时域跨度** | 单轮内 | 单会话内 | 跨会话 |
 | **抽象层级** | 逐字执行 | 按意图归纳 | 抽象出规则 |
 
-### 3.2 天梯 T1–T3 = 五轴的递进
+### 2.2 天梯 T1–T3 = 五轴的递进
 
 | 级 | 名称 | 核心能力 | 工具层级 |
 |---|---|---|:-:|
@@ -80,7 +80,7 @@ const FRAME = `
 | T2 | 能干活 | 工具接入 | L1–L2 |
 | T3 | 能记住 | 情景记忆 | L2 |
 
-### 3.3 轴与轴之间：共线的上限与登记
+### 2.3 轴与轴之间：共线的上限与登记
 
 **超限上限 = 2**（3 阶的一半）。
 
@@ -88,9 +88,9 @@ const FRAME = `
 |---|:-:|---|
 | 时域跨度 × 抽象层级 | 3 | 记忆类能力同时抬高两者，属同一件事的两面 |
 
-## 5. 伪高阶识别
+## 4. 伪高阶识别
 
-| 说法 | 为什么是伪高阶 |
+| 现象 | 为什么是伪高阶 |
 |---|---|
 | 工具数量多 | 是「行」的宽度 |
 | 会写代码 | 是技能 |
@@ -118,7 +118,7 @@ const FRAME = `
 | 知 × 自我模型精度 | 自主决定记什么 |
 | 行 × 时域跨度 | 长时任务 |
 
-## 7. 社会性
+### 6.3 主体数与社会性
 
 | 能力 | 提升的轴 |
 |---|---|
@@ -179,7 +179,7 @@ scope = child:<id>
 const S10 = `
 ## 2. 为什么它能落在 v2 上（J1）
 
-| 需求 | 认知体系要什么 | 落在 v2 的哪（逐条对 DE-001 §8 的取值域） | 归属阶段 |
+| 需求 | 认知体系要什么 | 落在 v2 的哪（逐条对 DE-001 §9 的取值域） | 归属阶段 |
 |---|---|---|---|
 | \`C01\` | 七类认知内容入库 | \`event.entity = turn\`、\`projection = recall:tag=judgment\` | S06 |
 | \`C06\` | 向量索引 + 关系索引 | — **不占参数键**：索引是 \`Store\` 的实现细节 | S06 |
@@ -211,7 +211,7 @@ const fixture = (over = {}) => ({
 
 // ── 正向：读得出来，且形状对 ────────────────────────────────────────────
 
-test('§8 的顶层键判据是形状：projection.param 是子键，不另计一个机制', () => {
+test('§9 的顶层键判据是形状：projection.param 是子键，不另计一个机制', () => {
   const { all, top } = mechanismsOf(ARCH)
   assert.deepEqual(all, [
     'store',
@@ -315,11 +315,11 @@ test('反向：§3 赋值块少一行 ⇒ 与总表声明的「参数变化」�
   )
 })
 
-test('反向：赋值块用了一个不在 §8 表里的键 ⇒ 指认它是要走 ADR 的新机制', () => {
+test('反向：赋值块用了一个不在 §9 表里的键 ⇒ 指认它是要走 ADR 的新机制', () => {
   const bad = S02.replace('scope = child:<id>', 'wizard.mode = on')
   assert.throws(
     () => buildFacts(fixture({ stageMds: { S01, S02: bad, S10 } })),
-    /不在 DE-001 §8 参数表里的键 `wizard.mode`/,
+    /不在 DE-001 §9 参数表里的键 `wizard.mode`/,
   )
 })
 
@@ -351,7 +351,7 @@ test('反向：§4 只在本文那一节里找表（前面另有一张「参数�
   assert.deepEqual(fallbackOf(withEarlier, ['store'], 'S02'), ['store', 'memory'])
 })
 
-// ── 取值域（DE-001 §8 的「取值域」列）：读得出形态，越界就红 ─────────────────
+// ── 取值域（DE-001 §9 的「取值域」列）：读得出形态，越界就红 ─────────────────
 
 test('取值域读得出来：`↳ §6` 的集合由那张网格自己拥有，`*` 是开放值域', () => {
   const d = domainsOf(ARCH)
@@ -372,7 +372,7 @@ test('反向：§3 赋一个值域之外的取值 ⇒ 抛错（「0 值域扩展
   const bad = S02.replace('store = wal', 'store = sqlite')
   assert.throws(
     () => buildFacts(fixture({ stageMds: { S01, S02: bad, S10 } })),
-    /`store = sqlite` 越出 DE-001 §8 声明的取值域/,
+    /`store = sqlite` 越出 DE-001 §9 声明的取值域/,
   )
 })
 
@@ -380,7 +380,7 @@ test('反向：§4 退路口的平凡值越界 ⇒ 同样抛（退路口也是�
   const bad = S02.replace('**`memory`**', '**`sqlite`**')
   assert.throws(
     () => buildFacts(fixture({ stageMds: { S01, S02: bad, S10 } })),
-    /§4 退路口.*越出 DE-001 §8/,
+    /平凡值与回退.*越出 DE-001 §9/,
   )
 })
 
@@ -414,11 +414,11 @@ test('反向：`↳` 的角色写错 ⇒ 出处读不出，抛错（不当成一
   assert.throws(() => domainsOf(ARCH.replace('`↳ §6 实体`', '`↳ §6 名词`')), /出处写法读不出来/)
 })
 
-test('反向：§8 表头第三列不叫「平凡值」⇒ 判定列位读歪，抛错', () => {
-  assert.throws(() => mechanismsOf(ARCH.replace('**平凡值**', '退路')), /表头不是/)
+test('反向：§9 表头没有「平凡值」这一列 ⇒ 参数面表读不出来，抛错', () => {
+  assert.throws(() => mechanismsOf(ARCH.replace('**平凡值**', '退路')), /表头缺/)
 })
 
-test('反向：§8 那张表整个不见 ⇒ 抛错，绝不返回一张空表', () => {
+test('反向：§9 那张表整个不见 ⇒ 抛错，绝不返回一张空表', () => {
   assert.throws(() => mechanismsOf('# 01\n\n正文里没有参数表\n'), /找不到「参数键」表头/)
 })
 
@@ -458,24 +458,24 @@ test('反向：等级写成裸数字 / 落点不是阶号 ⇒ 各自抛错（形
   )
 })
 
-test('反向：§3 的极性两列不是反引号 token ⇒ 抛错（形容词不是判据）', () => {
+test('反向：§2 的极性两列不是反引号 token ⇒ 抛错（形容词不是判据）', () => {
   const vague = FRAME.replace('| **主动性** | 只在被要求时行动 | 自己发起 | `unprompted` | `prompt_only` |', '| **主动性** | 只在被要求时行动 | 自己发起 | 更主动 | 更被动 |')
   assert.throws(() => frameOf(vague), /不是反引号形态/)
 })
 
-test('反向：§3.3 的超限上限写不出来 ⇒ 抛错（上限是判断，不写等于没有上限）', () => {
+test('反向：§2.3 的超限上限写不出来 ⇒ 抛错（上限是判断，不写等于没有上限）', () => {
   const noLimit = FRAME.replace('**超限上限 = 2**（3 阶的一半）。', '上限自定。')
   assert.throws(() => frameOf(noLimit), /读不出「超限上限 = N」/)
 })
 
-test('反向：§3.3 登记的轴对不是 §3 的轴 ⇒ 抛错', () => {
+test('反向：§2.3 登记的轴对不是 §2 的轴 ⇒ 抛错', () => {
   const bogus = FRAME.replace('| 时域跨度 × 抽象层级 | 3 |', '| 时域跨度 × 气场 | 3 |')
-  assert.throws(() => frameOf(bogus), /里有一条不是 §3 的轴/)
+  assert.throws(() => frameOf(bogus), /里有一条不是 §2 的轴/)
 })
 
-test('反向：§2 的条数列写成文字 ⇒ 声明读不出来，抛错', () => {
+test('反向：§1 的条数列写成文字 ⇒ 声明读不出来，抛错', () => {
   const odd = FRAME.replace('| **知** Episteme | 我知道什么 | 记忆、因果 | 2 |', '| **知** Episteme | 我知道什么 | 记忆、因果 | 十余条 |')
-  assert.throws(() => frameOf(odd), /§2「知」的条数 读不出整数/)
+  assert.throws(() => frameOf(odd), /§1「知」的条数 读不出整数/)
 })
 
 test('反向：§6.2 的空格不写「维 × 轴」⇒ 生长位读不出归属，抛错', () => {
@@ -483,16 +483,16 @@ test('反向：§6.2 的空格不写「维 × 轴」⇒ 生长位读不出归属
   assert.throws(() => frameOf(odd), /空格必须写成「维 × 轴」/)
 })
 
-test('反向：§3.1 / §3.2 的小节标题改名 ⇒ 按节定位失败，抛错而不是读成 §3 的五轴表', () => {
-  const noRubric = FRAME.replace(/^### 3\.1/m, '### 3-1')
-  assert.throws(() => frameOf(noRubric), /找不到 §3\.1 五轴刻度表/)
-  const noTiers = FRAME.replace(/^### 3\.2/m, '### 3-2')
-  assert.throws(() => frameOf(noTiers), /找不到 §3\.2 天梯表/)
+test('反向：§2.1 / §2.2 的小节标题改名 ⇒ 按节定位失败，抛错而不是读成 §2 的五轴表', () => {
+  const noRubric = FRAME.replace(/^### 2\.1/m, '### 2-1')
+  assert.throws(() => frameOf(noRubric), /找不到 §2\.1 五轴刻度表/)
+  const noTiers = FRAME.replace(/^### 2\.2/m, '### 2-2')
+  assert.throws(() => frameOf(noTiers), /找不到 §2\.2 天梯表/)
 })
 
-test('反向：§5 的表不见而小节还在 ⇒ 抛错，绝不在程序里退回一份词表', () => {
-  const gone = FRAME.replace('| 说法 | 为什么是伪高阶 |\n|---|---|\n| 工具数量多 | 是「行」的宽度 |\n| 会写代码 | 是技能 |\n\n', '')
-  assert.throws(() => frameOf(gone), /§5 伪高阶表里找不到表头首列为「说法」/)
+test('反向：§4 的表不见而小节还在 ⇒ 抛错，绝不在程序里退回一份词表', () => {
+  const gone = FRAME.replace('| 现象 | 为什么是伪高阶 |\n|---|---|\n| 工具数量多 | 是「行」的宽度 |\n| 会写代码 | 是技能 |\n\n', '')
+  assert.throws(() => frameOf(gone), /§4 伪高阶表里找不到表头首列为「现象」/)
 })
 
 test('反向：§6.1 名册整张不见 ⇒ 抛错，绝不返回空名册（空名册会让所有维都变空）', () => {
@@ -502,7 +502,7 @@ test('反向：§6.1 名册整张不见 ⇒ 抛错，绝不返回空名册（空
 
 // ── 认知需求清单（DE-040 §2 是唯一 owner）：读得出，越界就红 ─────────────────
 
-test('需求清单进生成物：落点逐项吃 §8，`—` 那行读成空赋值', () => {
+test('需求清单进生成物：落点逐项吃 §9，`—` 那行读成空赋值', () => {
   const ds = demandsOf(S10, 'S10')
   assert.deepEqual(ds.map((d) => d.id), ['C01', 'C06', 'C10'])
   assert.deepEqual(ds[0].assignments, [
@@ -513,7 +513,7 @@ test('需求清单进生成物：落点逐项吃 §8，`—` 那行读成空赋�
   const text = buildFacts(fixture())
   assert.match(text, /pub const COGNITIVE_DEMANDS: &\[CognitiveDemand\] = &\[\n {4}CognitiveDemand \{/)
   assert.match(text, /assignments: &\[\],/)
-  // 判据在 Rust 侧只有一份：生成物带出 §8 语法的镜像，两个程序共用
+  // 判据在 Rust 侧只有一份：生成物带出 §9 语法的镜像，两个程序共用
   assert.match(text, /pub fn in_domain\(key: &str, value: &str\) -> bool \{/)
 })
 
@@ -526,19 +526,19 @@ test('反向：`—` 之后不说明落在哪 ⇒ 抛错（"不占参数面"不�
   assert.throws(() => demandsOf(S10.replace('— **不占参数键**：索引是 `Store` 的实现细节', '—'), 'S10'), /没说明它落在哪/)
 })
 
-test('反向：需求的取值越出 §8 ⇒ 同一条判据，照样抛', () => {
+test('反向：需求的取值越出 §9 ⇒ 同一条判据，照样抛', () => {
   const bad = S10.replace('`event.entity = turn`', '`event.entity = memory`')
   assert.throws(
     () => buildFacts(fixture({ stageMds: { S01, S02, S10: bad } })),
-    /§2 C01：`event\.entity = memory` 越出 DE-001 §8 声明的取值域/,
+    /§2 C01：`event\.entity = memory` 越出 DE-001 §9 声明的取值域/,
   )
 })
 
-test('反向：需求用了一个不在 §8 的键 ⇒ 指认它是要走 ADR 的新机制', () => {
+test('反向：需求用了一个不在 §9 的键 ⇒ 指认它是要走 ADR 的新机制', () => {
   const bad = S10.replace('`principal = person:zhangsan`', '`cognition.layer = 5`')
   assert.throws(
     () => buildFacts(fixture({ stageMds: { S01, S02, S10: bad } })),
-    /不在 DE-001 §8 参数表里的键 `cognition\.layer`/,
+    /不在 DE-001 §9 参数表里的键 `cognition\.layer`/,
   )
 })
 
@@ -574,7 +574,7 @@ test('真实 docs/003-design 读得出 10 个顶层键与 13 阶名册', () => {
   assert.match(text, /pub const MECHANISMS/)
   assert.equal([...text.matchAll(/^ {4}StageClaim \{$/gm)].length, 13)
   assert.equal([...text.matchAll(/^ {4}StageDoc \{$/gm)].length, 13)
-  assert.match(text, /"projection\.param"/, '§8 的子键必须出现在 PARAM_KEYS 里')
+  assert.match(text, /"projection\.param"/, '§9 的子键必须出现在 PARAM_KEYS 里')
 })
 
 test('真实 02 读得出坐标系：名册、定义表与三处声明吃的是同一个集合', () => {

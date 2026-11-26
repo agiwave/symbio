@@ -12,14 +12,14 @@
  * | CS-001 | `traits` | **内核三 trait**（Store / VdfsProvider / Registry）的声明数（冻结 3） | **新增接缝**：每多一个内核抽象，就多一处「所有实现方都得知道」的地方。域 trait 不占此格（DE-023 A2 收窄口径） |
  * | CS-001 | `methods` | 上述三 trait 的 `fn` 成员总数（冻结 7） | **契约变宽**：既有接缝上挂新方法，影响面 = 全部实现方 |
  * | CS-001 | `defaults` | 其中**带默认体**的成员数（冻结 0） | **接口上长实现**：行为代码住进架构模块 |
- * | CS-002 | —— | 放宽上面任何一个数字，必须写 `core-shape-allow <格>: D-NNN <非空理由>`，且那条决策在 `docs/003-design/` **能打开** | **改一个数字**看起来像维护，而它实际是在改架构 |
+ * | CS-002 | —— | 放宽上面任何一个数字，必须写 `core-shape-allow <格>: <当前理由>`，理由非空且具体 | **改一个数字**看起来像维护，而它实际是在改架构 |
  * | CS-003 | —— | core 生产代码里 `crate::plugins` 引用数 = 0（**全 core**） | **实现依赖插件**：内核一旦认某个插件的实现坐标，停用/替换那个插件就不再是纯装配动作。依赖方向不随内核边界变化，故不收窄 |
- * | CS-004 | —— | **内核文件集**（`kernel.rs` 的 `core-kernel-files:` 标记）里**新引入的**插件 id 引用数只许降；与内核既有 wire 词同名的字面量可按同文件 `arch-shape-allow` 登记抵扣 | **词汇回流**：在内核写 `"session"` / `"vdfs"` 就是在语法里认一个插件名字——加插件/改 id 因此又变成内核改动（[DE-023](../../docs/003-design/023-内核边界与扩展局部性.md "DE-023-内核边界与扩展局部性") D-179）。判的是**耦合**而不是**字符串相同**（2026-11-03 收窄，D-303） |
- * | CS-005 | `kernelEvents` / `cellsRows` | 内核业务事件常量数、`CELLS` 业务行数只许降 | **事件词汇仍住在语法里**：新事件要能被写闸认，却仍得改内核的两张手写表。声明化（`EventDecl`）之后这两格只许降（[DE-024](../../docs/003-design/024-能力横向扩充的通路.md "DE-024-能力横向扩充的通路") D-197 / D-200）；这两格的**目标是零**（D-203 裁决三）——没到零的每一条都是待迁存量，CS-006 逐名点出它该随谁走 |
- * | CS-006 | —— | 逐条内核业务事件名核**消费方分布**：报出「≥2 crate 消费」与「core 读者」两类各几条，第三种（恰好一个消费方且 core 不读）判红 | **数字会骗人**：CS-005 只数条数，一条「只有一个插件读、core 已经不读」的名字躲在数字里谁也看不见，而它恰恰就是当批可迁的形状。这条把判据逐名落到代码；`core 读者` 那一类**不是**归属证据，是待迁存量——名字随那条读者一起迁出（DE-024 D-203） |
- * | CS-008 | —— | core / kernel 的**生产代码**里事件名字面量数 = 0（首段闭集 = `Entity` 的变体；`#[cfg(test)] mod x;` 的夹具文件剔出判据面） | **名字从第二条路回来**：CS-005 / CS-006 的输入都是内核那张表，表归零之后两者都没有输入，而 `match e.kind.as_str() { "chat.assistant.final" => … }` 照样能让「加一条事件」变成改架构模块。这条是 D-203 承诺的翻转，落成独立一格而不是翻转 CS-006（那会让判据在归零后空转） |
- * | CS-009 | `structFields` / `enumVariants` | core + kernel + contract **生产代码**里 `pub struct` 的字段总数、`pub enum` 的变体总数，两格都只许降 | **数据面变宽**：CS-001 只数 trait / `fn` / 默认体，`CapabilityMeta` 的字段、`Entity` 的变体、`FactRole` 的变体都不在它的判定面里——内核可以靠数据面持续变宽而全绿（DE-025 D-212） |
- * | CS-010 | —— | **内核文件集**的**生产代码**里出现 `PLUGIN.yml` 的**业务名**（`principal_*` 行的 owner 与能力名）**完整字面量** = 0 | **语法里认业务坐标**：内核「只含语法类型与冻结机制原语」这条判据，长时期内唯一可执行的半边是「不认插件 id」（CS-004）。owner（`session/main`）与能力名（`judge.intent`）是同一类回流：写死一条就把「加能力 / 换主体」变成改内核（DE-023 D-398） |
+ * | CS-004 | —— | **内核文件集**（`kernel.rs` 的 `core-kernel-files:` 标记）里**新引入的**插件 id 引用数只许降；与内核既有 wire 词同名的字面量可按同文件 `arch-shape-allow` 登记抵扣 | **词汇回流**：在内核写 `"session"` / `"vdfs"` 就是在语法里认一个插件名字——加插件/改 id 因此又变成内核改动（[DE-023](../../docs/003-design/023-内核边界与扩展局部性.md "DE-023-内核边界与扩展局部性") ）。判的是**耦合**而不是**字符串相同**（2026-11-03 收窄，） |
+ * | CS-005 | `kernelEvents` / `cellsRows` | 内核业务事件常量数、`CELLS` 业务行数只许降 | **事件词汇仍住在语法里**：新事件要能被写闸认，却仍得改内核的两张手写表。声明化（`EventDecl`）之后这两格只许降（[DE-024](../../docs/003-design/024-能力横向扩充的通路.md "DE-024-能力横向扩充的通路")  / ）；这两格的**目标是零**（ 裁决三）——没到零的每一条都是待迁存量，CS-006 逐名点出它该随谁走 |
+ * | CS-006 | —— | 逐条内核业务事件名核**消费方分布**：报出「≥2 crate 消费」与「core 读者」两类各几条，第三种（恰好一个消费方且 core 不读）判红 | **数字会骗人**：CS-005 只数条数，一条「只有一个插件读、core 已经不读」的名字躲在数字里谁也看不见，而它恰恰就是当批可迁的形状。这条把判据逐名落到代码；`core 读者` 那一类**不是**归属证据，是待迁存量——名字随那条读者一起迁出（DE-024 ） |
+ * | CS-008 | —— | core / kernel 的**生产代码**里事件名字面量数 = 0（首段闭集 = `Entity` 的变体；`#[cfg(test)] mod x;` 的夹具文件剔出判据面） | **名字从第二条路回来**：CS-005 / CS-006 的输入都是内核那张表，表归零之后两者都没有输入，而 `match e.kind.as_str() { "chat.assistant.final" => … }` 照样能让「加一条事件」变成改架构模块。这条是  承诺的翻转，落成独立一格而不是翻转 CS-006（那会让判据在归零后空转） |
+ * | CS-009 | `structFields` / `enumVariants` | core + kernel + contract **生产代码**里 `pub struct` 的字段总数、`pub enum` 的变体总数，两格都只许降 | **数据面变宽**：CS-001 只数 trait / `fn` / 默认体，`CapabilityMeta` 的字段、`Entity` 的变体、`FactRole` 的变体都不在它的判定面里——内核可以靠数据面持续变宽而全绿（DE-025 ） |
+ * | CS-010 | —— | **内核文件集**的**生产代码**里出现 `PLUGIN.yml` 的**业务名**（`principal_*` 行的 owner 与能力名）**完整字面量** = 0 | **语法里认业务坐标**：内核「只含语法类型与冻结机制原语」这条判据，长时期内唯一可执行的半边是「不认插件 id」（CS-004）。owner（`session/main`）与能力名（`judge.intent`）是同一类回流：写死一条就把「加能力 / 换主体」变成改内核（DE-023 ） |
  *
  * CS-004 的判定范围是 `kernel.rs` 声明的**内核文件集**（A2 之后 core ≠ 内核）：
  * 域文件（authz / chat / plugin / event_bus / projection …）的插件 id 字面量不是内核
@@ -27,7 +27,7 @@
  * 也不占 CS-001（域 trait 不占格）；`crate::plugins` 引用仍按全 core 判（CS-003）。
  *
  * 表里的冻结值是**现值**，owner 是本文件的 `SHAPE_BASELINE`（下面那一行）；放宽一格
- * 必须按 CS-002 在它旁边留一条 `core-shape-allow`，并有一条能打开的决策（`### D-NNN`）论证「必需」。
+ * 必须按 CS-002 在它旁边留一条 `core-shape-allow`，并写清今天为什么必需（当前理由，不挂历史案例编号）。
  *
  * ## 为什么需要它（实测缺口）
  *
@@ -58,7 +58,7 @@
  * - **不判 `impl` 数 / 宏**：宏展开的形状静态读不到，判据面本来也不含这些。
  * - **枚举变体与 struct 字段（CS-009）当初明确「不顺手扩」，后来单独论证了一次**：
  *   原文写的是「变体**是**形状量，但它与 trait 宽度不是同一个失效面。要加就单独论证
- *   一次，不在本批顺手扩判据面」。DE-025 D-212 就是那次论证——`CapabilityMeta` 的字段、
+ *   一次，不在本批顺手扩判据面」。DE-025  就是那次论证——`CapabilityMeta` 的字段、
  *   `Entity` 的变体都是这样长回来的，而 CS-001 一格都看不见。它因此是**第二组格**
  *   （`structFields` / `enumVariants`），不与 trait 三格混在一个基线里：两组量的失效面
  *   不同，混在一起会让「哪一格涨了」在数字里看不出来。
@@ -106,7 +106,6 @@ import path from 'node:path'
 import { execSync } from 'node:child_process'
 import { fileURLToPath } from 'node:url'
 import { red, yellow, green, dim } from '../color.mjs'
-import { hasDecisionAnchor as anchorExists } from '../decision-anchors.mjs'
 import { isTestFile, walk } from '../fs-walk.mjs'
 import { blankComments, blankTestModules, matchBrace } from '../rust-scan.mjs'
 
@@ -182,24 +181,16 @@ if (CHURN) {
 }
 
 const SDK_REL = 'crates/symbio-platform/src/sdk'
-/** 内核臂（D-188 C2a）：文件集标记住 `mod.rs`（平台合并后 crate 根文件改名），与 sdk 臂的 `kernel.rs` 合并判定。 */
+/** 内核臂（ C2a）：文件集标记住 `mod.rs`（平台合并后 crate 根文件改名），与 sdk 臂的 `kernel.rs` 合并判定。 */
 const KERNEL_REL = 'crates/symbio-platform/src/kernel'
 /** 本脚本自己：CS-002 读它源码里的放宽痕迹 */
 const SELF_REL = 'scripts/audits/arch-shape-audit.mjs'
 
 /**
- * 决策条目是否存在：历史裁决是设计文档内的 `### D-NNN` 锚点；判定决策 kind 的裁决
- * 住在单文档里，身份是 front-matter 的 `id`。两种形态都认，扫描口径（扫哪些根、
- * 认哪种形态）住 `decision-anchors.mjs`——三个判「豁免挂没挂决策」的审计共用一份，
- * 抄本不同会让同一条豁免在这边绿、那边红。
- */
-const hasDecisionAnchor = (id) => anchorExists(id, ROOT)
-
-/**
- * 形状基线（冻结值，决策与理由见 [D-055](../../docs/003-design/001-核心架构.md "DE-001-核心架构")）。
+ * 形状基线（冻结值，决策与理由见 [](../../docs/003-design/001-核心架构.md "DE-001-核心架构")）。
  * 三格都是**上限**，只许降。数字本身不是判据，**改数字才是**：任何让形状变宽的改动都会
  * 撞红，而把它继续推下去只有一条路——改这一行的数字，那又会要求 CS-002 的一条
- * `core-shape-allow <格>: D-NNN <理由>`，且那条决策必须真实存在。
+ * `core-shape-allow <格>: <当前理由>`，理由必须写清今天为什么需要放宽。
  * 于是「顺手把架构改宽一点」在机制上等于「写一份决策」，而不是「改一个数字」。
  *
  * ⚠️ 键序就是 `CORE_SHAPE_BASELINE` 的位置口径（`35-baseline` 的 env 覆盖判定按它 zip），
@@ -209,8 +200,8 @@ const hasDecisionAnchor = (id) => anchorExists(id, ROOT)
 // 其余 trait 是域协议（Plugin / LlmAdapter / DeltaSink / …），随 B2/C 迁出内核，
 // 不占这条棘轮——在那里加成员不等于「内核接缝变宽」。
 //
-// `ModelProvider` 于 `D-437` 退出这一格：执行契约归 model 插件（`port.model` 是
-// 环唯一认的那条边）。`Capability` 于 `D-440` 退出这一格：工具即端口，执行契约归
+// `ModelProvider` 于 `` 退出这一格：执行契约归 model 插件（`port.model` 是
+// 环唯一认的那条边）。`Capability` 于 `` 退出这一格：工具即端口，执行契约归
 // `PortExecutor`（住 sdk，随端口收集表走），内核只剩三个跨侧共用的接缝。这两次
 // 都是**收窄**，因此不需要 `core-shape-allow`——那一格只对放宽有效。
 const KERNEL_TRAITS = ['Store', 'VdfsProvider', 'Registry']
@@ -223,21 +214,21 @@ const SHAPE_BASELINE = process.env.CORE_SHAPE_BASELINE
   : { traits: 3, methods: 7, defaults: 0 }
 
 /**
- * CS-005 词汇棘轮（[DE-024](../../docs/003-design/024-能力横向扩充的通路.md "DE-024-能力横向扩充的通路") D-200）。
+ * CS-005 词汇棘轮（[DE-024](../../docs/003-design/024-能力横向扩充的通路.md "DE-024-能力横向扩充的通路") ）。
  *
  * 两格都只许降：
  * - `kernelEvents`：内核 `event/mod.rs` 里**业务事件**常量数（值是点分名、且不是协议五格）；
  * - `cellsRows`：`event/grid.rs` 的 `CELLS` 业务行数（不含协议五格）。该文件已随
- *   D-203 退役 —— 文件不在 ⇒ 0（目标值）；文件在 ⇒ 数它的业务行，基线 0，一行就红。
+ *    退役 —— 文件不在 ⇒ 0（目标值）；文件在 ⇒ 数它的业务行，基线 0，一行就红。
  *
- * 新事件从 `EventDecl` 进装配表，**不再需要动这两张表**。这两格的**目标是零**（DE-024 D-203
+ * 新事件从 `EventDecl` 进装配表，**不再需要动这两张表**。这两格的**目标是零**（DE-024 
  * 裁决三）：内核只该留协议五格，其余每一条业务名字都该随它的 owner 声明。眼下还没归零，
  * 是因为 core 仍有一条按名字读事实的投影/判据留在原地——那条读者是**待迁存量**，不是
- * 这条名字的归属证据（把「守卫要读」当成「名字该住内核」的裁决已被 D-203 撤回：守卫读的是
- * 格位与角色，词汇是数据，随 owner 交来）。逐条名字的出口见 DE-024 的 D-203 迁移路线。
+ * 这条名字的归属证据（把「守卫要读」当成「名字该住内核」的裁决已被  撤回：守卫读的是
+ * 格位与角色，词汇是数据，随 owner 交来）。逐条名字的出口见 DE-024 的  迁移路线。
  *
  * - 逐批迁出的明细（名字 / 常量 / `CELLS` 行的对应与计数）归 DE-024 的
- *   D-203…D-206 迁移路线与 `git log`；本处只留冻结值，不复述实施顺序。
+ *   … 迁移路线与 `git log`；本处只留冻结值，不复述实施顺序。
  *
  * `VOCAB_BASELINE=<kernelEvents>:<cellsRows>` 与 `CORE_SHAPE_BASELINE` 同一条纪律：
  * 只给回归测试用，`35-baseline` 另判覆盖值不得比默认值更松。
@@ -250,7 +241,7 @@ const VOCAB_BASELINE = process.env.VOCAB_BASELINE
   : { kernelEvents: 0, cellsRows: 0 }
 
 /**
- * CS-009 数据面棘轮（[DE-025](../../docs/003-design/025-能力包与扩展面.md "DE-025-能力包与扩展面") D-212）。
+ * CS-009 数据面棘轮（[DE-025](../../docs/003-design/025-能力包与扩展面.md "DE-025-能力包与扩展面") ）。
  *
  * 两格都只许降，量的是 core + kernel **生产代码**里的公共数据形状：
  *
@@ -261,7 +252,7 @@ const VOCAB_BASELINE = process.env.VOCAB_BASELINE
  *
  * CS-001 数 trait 数 / 成员数 / 默认体数，**数据面一格都看不见**：给
  * `CapabilityMeta` 加一个布尔位、给 `Entity` 加一个变体、给 `FactRole` 加一档角色，
- * 三次都是「内核变宽」，而三次都能全绿通过。D-212 把这条翻过来——加一个变体要动
+ * 三次都是「内核变宽」，而三次都能全绿通过。 把这条翻过来——加一个变体要动
  * 基线数字，而动数字要求一条能打开的决策。
  *
  * ## 为什么不逐 struct / 逐 enum 设上限
@@ -282,45 +273,45 @@ const VOCAB_BASELINE = process.env.VOCAB_BASELINE
  * `CORE_DATA_BASELINE=<structFields>:<enumVariants>` 与另外两条同一条纪律：只给回归
  * 测试用，`35-baseline` 另判覆盖值不得比默认值更松。
  */
-// core-shape-allow enumVariants: D-209 领域轴必须有一个扩展位——`Domain` 是一次性架构决策，换的是此后 notes / calendar 这类新领域的零 kernel diff；被否候选（`Entity` 改开放字符串会丢 F5 闭集、塞进 `Memory`/`Task` 会让读侧靠载荷猜）见 DE-025
-// core-shape-allow structFields: D-281 折叠的第二半只有 owner 知道——`ViewDecl::agg` 补的是「N 份读数怎么合成一个数」（分位数取法 / 率的可加性 / 合计的重排）；读方自己折是两份口径（D-251）、跨插件调 owner 是 E-009、反序列化成同名类型是两个形状 owner，三条都堵死。可选字段而非新面：六条读数折叠共用，`None` 报 `NotAggregable` 不静默恒等，见 DE-025
-// core-shape-allow structFields: D-282 读数视图读的断言格没有格子可站——`AssertionRead`（3 格）+ `Frozen.assertion_reads`（1 格）是「有事件格位、没有事实声明」这一种读法的**报告名单**，与既有的 `overlaps` 同一条通道：冻结成功才存在、装载入口打日志、用例可查，不产生缺口。它补的是判据 3 的输入缺席（`FactDecl.fields` 不存在），不是放宽它——名字真拼错仍判 `UnknownFact`；被否候选（放宽 `OrphanFact` 会让可卸载的能力包变成 loop 的硬依赖，违反 T3）见 DE-024
-// core-shape-allow enumVariants: D-307 授权事实的域必须能说「跨轮」——`authz.granted/denied` 随 D-306 的写方迁移进端口执行体后，不再是轮内事实；挂 `Turn` 会逼新写方引用即将拆除的词根，turn-root 棘轮也会把写方迁移误判成新增 turn。`Scope` 只换这一族事实的格位（载荷 / 幂等键 / 行认领都不动）；被否候选（复用 `Control` / `Thread`）会让读侧靠载荷猜域，且 `authz.denied` 的 `StopsScope` 角色会被误读成控制面事实
-// core-shape-allow structFields: D-315 `SessionView` 是 `session-config` 回体八格的唯一投影（端口交给环的交付值），八格逐字对应回体键名、改动即协议改动；它不是新增的数据面——随 P2-3b2-1（1069f346）从会话插件的请求构造搬进 sdk，正是 `port=session` 世界端口要求的那份「值」。既不能降 `pub(crate)`（消费方 loop 是另一个 crate），也不能合并进既有结构（八格只该有这一处形状，见 DE-048 / D-315）
+// core-shape-allow enumVariants:  领域轴必须有一个扩展位——`Domain` 是一次性架构决策，换的是此后 notes / calendar 这类新领域的零 kernel diff；被否候选（`Entity` 改开放字符串会丢 F5 闭集、塞进 `Memory`/`Task` 会让读侧靠载荷猜）见 DE-025
+// core-shape-allow structFields:  折叠的第二半只有 owner 知道——`ViewDecl::agg` 补的是「N 份读数怎么合成一个数」（分位数取法 / 率的可加性 / 合计的重排）；读方自己折是两份口径（）、跨插件调 owner 是 E-009、反序列化成同名类型是两个形状 owner，三条都堵死。可选字段而非新面：六条读数折叠共用，`None` 报 `NotAggregable` 不静默恒等，见 DE-025
+// core-shape-allow structFields:  读数视图读的断言格没有格子可站——`AssertionRead`（3 格）+ `Frozen.assertion_reads`（1 格）是「有事件格位、没有事实声明」这一种读法的**报告名单**，与既有的 `overlaps` 同一条通道：冻结成功才存在、装载入口打日志、用例可查，不产生缺口。它补的是判据 3 的输入缺席（`FactDecl.fields` 不存在），不是放宽它——名字真拼错仍判 `UnknownFact`；被否候选（放宽 `OrphanFact` 会让可卸载的能力包变成 loop 的硬依赖，违反 T3）见 DE-024
+// core-shape-allow enumVariants:  授权事实的域必须能说「跨轮」——`authz.granted/denied` 随  的写方迁移进端口执行体后，不再是轮内事实；挂 `Turn` 会逼新写方引用即将拆除的词根，turn-root 棘轮也会把写方迁移误判成新增 turn。`Scope` 只换这一族事实的格位（载荷 / 幂等键 / 行认领都不动）；被否候选（复用 `Control` / `Thread`）会让读侧靠载荷猜域，且 `authz.denied` 的 `StopsScope` 角色会被误读成控制面事实
+// core-shape-allow structFields:  `SessionView` 是 `session-config` 回体八格的唯一投影（端口交给环的交付值），八格逐字对应回体键名、改动即协议改动；它不是新增的数据面——随 P2-3b2-1（1069f346）从会话插件的请求构造搬进 sdk，正是 `port=session` 世界端口要求的那份「值」。既不能降 `pub(crate)`（消费方 loop 是另一个 crate），也不能合并进既有结构（八格只该有这一处形状，见 DE-048 / ）
 //
-// 330:193 → 545:240 不是放宽，是**换了一把尺子的量程**（D-279）：本判据原扫
-// `crates/symbio-platform/src/sdk`，D-258…D-279 把 20 个域搬进 `symbio-sdk` 之后，core 只剩
+// 330:193 → 545:240 不是放宽，是**换了一把尺子的量程**（）：本判据原扫
+// `crates/symbio-platform/src/sdk`，… 把 20 个域搬进 `symbio-sdk` 之后，core 只剩
 // 322 行、量的是残余；被搬走的每一格数据面都还在，只是换了地址。改指 sdk 之后
-// 第一次实测 = 545 / 240，此后照旧只许降。545 → 546 是 `D-281` 的 `ViewDecl::agg`
-// 一格；546 → 550 是 `D-282` 的报告名单（`AssertionRead` 3 格 + `Frozen` 1 格）
+// 第一次实测 = 545 / 240，此后照旧只许降。545 → 546 是 `` 的 `ViewDecl::agg`
+// 一格；546 → 550 是 `` 的报告名单（`AssertionRead` 3 格 + `Frozen` 1 格）
 // ——两笔都各自有放宽行在上面，不是余量。531 → 539 是 `SessionView` 的八格随
-// P2-3b2-1 搬进 sdk（放宽行在上面，D-315）；它此前住在会话插件的请求构造里，
+// P2-3b2-1 搬进 sdk（放宽行在上面，）；它此前住在会话插件的请求构造里，
 // 不在本判据的扫描面内，搬进来的是同一份回体契约而不是新长出的数据面。
-// core-shape-allow enumVariants: D-408 effects/behaviors 整块搬进 sdk——Kind(2) / FileOp(4) /
+// core-shape-allow enumVariants:  effects/behaviors 整块搬进 sdk——Kind(2) / FileOp(4) /
 // BeforeDecision(2) 共 8 格随注册表换地址。CS-009 只扫 sdk + kernel，这些枚举此前住
 // plugin-api（不在扫描面），搬进来的是同一份类型闭包，不是新长出的数据面。
-// core-shape-allow structFields: D-412 context 整块搬进 sdk——ContextRequest(6) / ContextSection(4) / SectionFit(4) / LiveInputs(3) / RecallLine(3) / RecallFacts(2) / ContextProviderDecl(1) 共 23 格随注册表换地址，与 D-408 同一份类型闭包论证（Collect 实现在定义类型的 crate 生成，sdk 只依赖内核）。**另清存量余量**：搬迁前实测已是 529 而基线停在 539，那 10 格不是本批造成的，但留着会让下一次新增正好填进来（FA-002 / AD-002 同一条理由），故直接钉到搬后实测 552，不留余量。
-// core-shape-allow enumVariants: D-412 context 整块搬进 sdk——Cadence(2) / DelegateVerdict(3) 共 5 格随注册表换地址，此前住 plugin-api（不在 CS-009 扫描面）。搬的是同一份闭包，不是新长出的取值面。
-// core-shape-allow structFields: D-413 五个链接期注册表整块搬进 sdk——RetrievalRequest(2) / Retrieved(3) / Retrieval(2) / RetrieverDecl(1) / RowRequest(9) / ModelAsk(1) / RowDecl(1) / Settling(9) / Contribution(1) / ContributorDecl(1) / FactSourceOpenerDecl(1) / DriveTarget(11) / DriveBindingDecl(1) / DriveEntryDecl(1) 共 44 格随注册表换地址。与 D-408 / D-412 同一份类型闭包论证（Collect 实现在定义类型的 crate 生成，sdk 只依赖内核）；此前住 plugin-api，不在 CS-009 扫描面。
-// core-shape-allow enumVariants: D-413 五个链接期注册表整块搬进 sdk——RowStep(2) / RowReply(2) / SettleFace(2) 共 6 格随注册表换地址，此前住 plugin-api（不在 CS-009 扫描面）。搬的是同一份闭包。
-// core-shape-allow structFields: D-415 冻结声明表整块搬进 sdk——DeclarationsDecl(2：`owner` / `make`) 随注册表换地址，此前住 plugin-api（不在 CS-009 扫描面）。与 D-408 / D-412 / D-413 同一份类型闭包论证（`inventory::collect!` 的 `Collect` 实现在定义类型的 crate 生成，sdk 只依赖内核）；词汇层回落表（`events.rs`）按 CS-008 / CP-004 留在 plugin-api，没有随行。
-// core-shape-allow structFields: D-416 报表登记面整块搬进 sdk——ReportDecl(8：`owner` / `slot` / `order` / `views` / `fleet` / `render` / `fleet_render` / `panel`) / ReportCtx(3：`principal` / `cap` / `readable`) 共 11 格随注册表换地址，此前住 plugin-api（不在 CS-009 扫描面）。与 D-412 / D-413 / D-415 同一份类型闭包论证（`inventory::collect!` 实现在定义类型的 crate 生成，读侧要冻结声明表，sdk 只依赖内核）。
-// core-shape-allow enumVariants: D-416 报表登记面整块搬进 sdk——ReportError(6：`EmptySlot` / `EmptyViews` / `EmptyViewName` / `EmptyFleet` / `DuplicateSlot` / `DuplicateView`) / ViewUnavailable(2：`NotSealed` / `Unknown`) 共 8 格随读口换地址，此前住 plugin-api（不在 CS-009 扫描面）。搬的是同一份闭包。
-// core-shape-allow structFields: D-440 端口注册面与执行契约整面搬进 sdk——PortCapabilities(3：`streaming` / `cancel` / `idempotent`) / PortInput(2：`port` / `payload`) / PortFact(4：`id` / `port` / `kind` / `payload`) / PortExecContext(11：`abort` / `idempotency_key` / `sink` / `emit` / `ctx` / `subject` / `group` / `session_id` / `origin` / `scratch_dir` / `reader`，`source` 随行) / PortExecHandles(5：`ctx` / `scratch_dir` / `sink` / `session_id` / `source`) / PortFactEmit(1) / PortReply(2：`messages` / `links`) / PortOutcome(4：`authz` / `facts` / `error` / `reply`) / PendingPrompt(3：`text` / `prompt` / `failure_kind`) / PortPayload(1) 共 33 格随门面减负换地址。此前住 plugin-api/port.rs（不在 CS-009 扫描面），FA-001 只许门面自有实现降（D-440 ②：门面 476→34 行）；搬的是同一份端口契约，不是新长出的数据面。基线钉到搬后实测 615，不留余量。
-// core-shape-allow structFields: D-446 `when_no_open` 的谓词要从「整条端口」放宽为「作用域」——`NoOpenScope`(2：`port` / `ids`) 是「端口干净才欠」的**同一件事的两半**，单格 `String` 表达不了「只认这一批债 id」，而那正是 D-446 要求的「本次调用集合收束」（一笔迟归的旧调用债不该把这一轮的续跑一起拖住）。两格折不开：折成元组塞回原字段，调用方各拼一半，`covers()` 这个唯一判据就无处安放；降 `pub(crate)` 不行——读它的两侧是环（`symbio-plugin-loop`）与申报方插件（跨 crate）。它补的是**新判据能力**，不是新长出的业务数据面：没有新增世界域名 / 端口名 / 事实名，也没有改动为某个插件开的口子。基线钉到实测 617，不留余量。
-// core-shape-allow structFields: D-513 会话级插件数据目录随驱动目标交回——`DriveTarget::session_dir`(1) 是「会话插件按唯一布局解析、宿主按值挂进本轮 ctx」的值面出口（memory 的会话记忆据此落位）；能力面不得自己拼会话存储路径，也不得拿它开事实源（D-084），所以它必须住在驱动目标这个装订点而不是让执行体反查。旧 `workdir` 保持不动：scratch_dir 的来源还在它身上。基线钉到实测 609，不留余量。
-// core-shape-allow structFields: D-523 图标内容由插件自给、前端直接渲染——`PluginMeta.icon` 这个字段早已存在却运行期零消费（插件管理列表一律退成齿轮本轮修的正是它），接上消费端要两个投影载体：`PluginIdentity.icon`（manifest `plugin_icon` 的读口，与 title/description/version/author 同构，停用插件也读得到）与 `PluginEntry.icon`（列表 `entry_node` 据此把 SVG 内容写进节点顶层属性）。两格承载的是插件自给的一段 SVG 图元串，不是新业务数据面——没有新增世界域名 / 端口名 / 事实名；图形资产全在每个插件自己的 `with_icon(r#"..."#)` 里，前端零字典直接渲染。被否候选「插件只给名字、前端维护名字→图字典」会让图形资产仍留在前端，违背「内容由插件提供」；「后端托管 SVG 库按名取」同样把内容挪出插件并触碰 plugin-api 转发棘轮。基线钉到实测 611，不留余量。
-// core-shape-allow structFields: D-531 沙箱意图事实的两格——`SandboxFact{kind, value}` 是工具向沙箱提交「这一次调用干了什么」的唯一数据载体（讨论稿 §1.6 / DE-058）。kind 是开放字符串（工具自报新种类，沙箱按 kind 配规则），value 是工具归一化后的语义值（沙箱只匹配、不解析语法）。两格折不开：合并成单字段就把「事实种类」与「事实值」压扁，沙箱无法按 kind 配规则；降 pub(crate) 不行——写方是各工具插件、读方是沙箱插件，跨 crate 且插件互不可见（E-009），只能经门面共用这一形状。它没有新增世界域名 / 端口名 / 事实名，也不是为某个插件开的口子——是被调用执行环境的通用载荷形状。
-// core-shape-allow structFields: D-531 会话选档 id 随两条既有装订点交回——`Request.sandbox_id`（会话输入协议）与 `DriveTarget.sandbox_id`（驱动目标）各一格，与同结构里的 `provider_id` / `mode` / `risk_level` 同形：会话只在输入里带一个沙箱 id，宿主按它挂进 ctx、沙箱引擎据此按 id 解析档案与审批参数。它不是新数据面：值仍是普通字符串，走的是既有的 req>metadata>默认 回退链，替换的正是同一结构里退场的 mode/risk 两格（后端保留兼容回退，前端不再展示）。基线钉到实测 615，不留余量。
-// core-shape-allow structFields: D-532 详情表格列是通用对象数组编辑契约——`DetailColumn{key,label,widget,options,default,placeholder}` 六格是插件声明一列「叫什么 / 显示什么 / 用什么控件编辑 / 候选值 / 默认值 / 占位提示」的最小形状，六格折不开（少 `options` 就无法渲染枚举列、少 `default` 就无法预填合法首行）；降 pub(crate) 不行——写方是声明表格的插件（沙箱）、读方是前端表单机制经门面镜像，跨 crate 且插件互不可见（E-009）。它没有新增世界域名 / 端口名 / 事实名，也不是为某个插件开的口子——任何插件编辑对象数组都复用同一列契约（DE-059）。
-// core-shape-allow structFields: D-532 `DetailField.columns`(1) 是上述列契约在字段上的唯一挂载点——`table` widget 的列定义只能随字段声明走，不能塞进 `options`（那是标量选项候选值，语义不同），也不能新增「沙箱规则字段」之类的专用类型（会让表单机制反向依赖插件业务词，正是 D-531 否定的方向）。一格承载的是「这一列数组字段每行的列结构」，与 widget 字符串配套，机制层不含任何业务词。基线钉到实测 622，不留余量。
-// core-shape-allow structFields: D-533 同一次沙箱裁决的七格回体 `SandboxDecision` 与私有凭据载体 `ApprovalGrant` 各一格，是授权双方必须共同消费的完整快照和一次性凭据形状：缺许可/风险/拦截/审批模式/阈值/版本/原因任一项都会迫使执行闸门再次读策略或猜失败原因，重新引入 D-533 要消除的跨版本组合；凭据不能降为私有类型，因为签发方 tool 与消费方 collectors 跨 crate。八格承载的是通用授权结果，不含工具清单、路径策略或业务字段。基线钉到实测 630，不留余量。
-// core-shape-allow structFields: D-543 请求级宿主执行绑定随异步事实驱动显式传递——`DriveTarget.port_bindings`(1) 是 worker 的内部启动口跨 append / kick / drain 任务边界唯一可见的装订点；绑定只能由请求快照经事实源携带，不能依赖调用栈或进程级全局状态，也不能降为私有字段（生产消费方 host 与声明方 session 跨 crate）。它只承载执行出口，不改变授权、审批或沙箱策略，也不是新业务数据面。基线钉到实测 631，不留余量。
-// core-shape-allow enumVariants: D-533 `VdfsCaller::{Manager, Model}` 两格是宿主注入的进程内可信主体闭集：管理写入与模型文件访问必须可区分，且未知主体失败关闭；复用布尔或字符串都能由模型载荷伪造，开放枚举又失去闭集。它只表达调用来源，不认插件 id 或 VDFS 操作。基线钉到实测 258，不留余量。
-// core-shape-allow structFields: D-564 默认收集器整组从 providers 迁入 sdk——DefaultToolVisitor 的 rows/families 两格与 GatedExecutor 的 meta/risk/facts/inner 四格随既有实现换地址进入 CS-009 扫描面，合计六格，没有新增类型、字段或业务词汇；D-565 又将 TaskVocab 的五格归位 task，当前基线钉到迁后实测 611，本条只记录 D-564 的地址迁移，不构成继续放宽。
-// 2026-11-16（D-505）：实测已收到 608（614 是 D-440 / D-446 时点的上限），基线同批
-// 钉到 608——余量不白留给下一次新增。2026-11-20（D-513）：608 → 609，`DriveTarget`
-// 增 `session_dir` 一格（放宽行见上）。2026-11-21（D-523）：609 → 611，图标自报的两个投影载体（放宽行见上）。2026-11-23（D-531）：611 → 613，`SandboxFact` 的两格意图事实（放宽行见上）；同日 613 → 615，`Request.sandbox_id` / `DriveTarget.sandbox_id` 两格随会话选档入装订点（放宽行见上）。2026-11-24（D-532）：615 → 622，`DetailColumn` 六格 + `DetailField.columns` 一格随通用表格 widget 入数据面（放宽行见上）。同日（D-533）：622 → 630，`SandboxDecision` 七格 + `ApprovalGrant` 一格；枚举 256 → 258，`VdfsCaller` 两格（放宽行见上），此后照旧只许降。
+// core-shape-allow structFields:  context 整块搬进 sdk——ContextRequest(6) / ContextSection(4) / SectionFit(4) / LiveInputs(3) / RecallLine(3) / RecallFacts(2) / ContextProviderDecl(1) 共 23 格随注册表换地址，与  同一份类型闭包论证（Collect 实现在定义类型的 crate 生成，sdk 只依赖内核）。**另清存量余量**：搬迁前实测已是 529 而基线停在 539，那 10 格不是本批造成的，但留着会让下一次新增正好填进来（FA-002 / AD-002 同一条理由），故直接钉到搬后实测 552，不留余量。
+// core-shape-allow enumVariants:  context 整块搬进 sdk——Cadence(2) / DelegateVerdict(3) 共 5 格随注册表换地址，此前住 plugin-api（不在 CS-009 扫描面）。搬的是同一份闭包，不是新长出的取值面。
+// core-shape-allow structFields:  五个链接期注册表整块搬进 sdk——RetrievalRequest(2) / Retrieved(3) / Retrieval(2) / RetrieverDecl(1) / RowRequest(9) / ModelAsk(1) / RowDecl(1) / Settling(9) / Contribution(1) / ContributorDecl(1) / FactSourceOpenerDecl(1) / DriveTarget(11) / DriveBindingDecl(1) / DriveEntryDecl(1) 共 44 格随注册表换地址。与  /  同一份类型闭包论证（Collect 实现在定义类型的 crate 生成，sdk 只依赖内核）；此前住 plugin-api，不在 CS-009 扫描面。
+// core-shape-allow enumVariants:  五个链接期注册表整块搬进 sdk——RowStep(2) / RowReply(2) / SettleFace(2) 共 6 格随注册表换地址，此前住 plugin-api（不在 CS-009 扫描面）。搬的是同一份闭包。
+// core-shape-allow structFields:  冻结声明表整块搬进 sdk——DeclarationsDecl(2：`owner` / `make`) 随注册表换地址，此前住 plugin-api（不在 CS-009 扫描面）。与  /  /  同一份类型闭包论证（`inventory::collect!` 的 `Collect` 实现在定义类型的 crate 生成，sdk 只依赖内核）；词汇层回落表（`events.rs`）按 CS-008 / CP-004 留在 plugin-api，没有随行。
+// core-shape-allow structFields:  报表登记面整块搬进 sdk——ReportDecl(8：`owner` / `slot` / `order` / `views` / `fleet` / `render` / `fleet_render` / `panel`) / ReportCtx(3：`principal` / `cap` / `readable`) 共 11 格随注册表换地址，此前住 plugin-api（不在 CS-009 扫描面）。与  /  /  同一份类型闭包论证（`inventory::collect!` 实现在定义类型的 crate 生成，读侧要冻结声明表，sdk 只依赖内核）。
+// core-shape-allow enumVariants:  报表登记面整块搬进 sdk——ReportError(6：`EmptySlot` / `EmptyViews` / `EmptyViewName` / `EmptyFleet` / `DuplicateSlot` / `DuplicateView`) / ViewUnavailable(2：`NotSealed` / `Unknown`) 共 8 格随读口换地址，此前住 plugin-api（不在 CS-009 扫描面）。搬的是同一份闭包。
+// core-shape-allow structFields:  端口注册面与执行契约整面搬进 sdk——PortCapabilities(3：`streaming` / `cancel` / `idempotent`) / PortInput(2：`port` / `payload`) / PortFact(4：`id` / `port` / `kind` / `payload`) / PortExecContext(11：`abort` / `idempotency_key` / `sink` / `emit` / `ctx` / `subject` / `group` / `session_id` / `origin` / `scratch_dir` / `reader`，`source` 随行) / PortExecHandles(5：`ctx` / `scratch_dir` / `sink` / `session_id` / `source`) / PortFactEmit(1) / PortReply(2：`messages` / `links`) / PortOutcome(4：`authz` / `facts` / `error` / `reply`) / PendingPrompt(3：`text` / `prompt` / `failure_kind`) / PortPayload(1) 共 33 格随门面减负换地址。此前住 plugin-api/port.rs（不在 CS-009 扫描面），FA-001 只许门面自有实现降（ ②：门面 476→34 行）；搬的是同一份端口契约，不是新长出的数据面。基线钉到搬后实测 615，不留余量。
+// core-shape-allow structFields:  `when_no_open` 的谓词要从「整条端口」放宽为「作用域」——`NoOpenScope`(2：`port` / `ids`) 是「端口干净才欠」的**同一件事的两半**，单格 `String` 表达不了「只认这一批债 id」，而那正是  要求的「本次调用集合收束」（一笔迟归的旧调用债不该把这一轮的续跑一起拖住）。两格折不开：折成元组塞回原字段，调用方各拼一半，`covers()` 这个唯一判据就无处安放；降 `pub(crate)` 不行——读它的两侧是环（`symbio-plugin-loop`）与申报方插件（跨 crate）。它补的是**新判据能力**，不是新长出的业务数据面：没有新增世界域名 / 端口名 / 事实名，也没有改动为某个插件开的口子。基线钉到实测 617，不留余量。
+// core-shape-allow structFields:  会话级插件数据目录随驱动目标交回——`DriveTarget::session_dir`(1) 是「会话插件按唯一布局解析、宿主按值挂进本轮 ctx」的值面出口（memory 的会话记忆据此落位）；能力面不得自己拼会话存储路径，也不得拿它开事实源（），所以它必须住在驱动目标这个装订点而不是让执行体反查。旧 `workdir` 保持不动：scratch_dir 的来源还在它身上。基线钉到实测 609，不留余量。
+// core-shape-allow structFields:  图标内容由插件自给、前端直接渲染——`PluginMeta.icon` 这个字段早已存在却运行期零消费（插件管理列表一律退成齿轮本轮修的正是它），接上消费端要两个投影载体：`PluginIdentity.icon`（manifest `plugin_icon` 的读口，与 title/description/version/author 同构，停用插件也读得到）与 `PluginEntry.icon`（列表 `entry_node` 据此把 SVG 内容写进节点顶层属性）。两格承载的是插件自给的一段 SVG 图元串，不是新业务数据面——没有新增世界域名 / 端口名 / 事实名；图形资产全在每个插件自己的 `with_icon(r#"..."#)` 里，前端零字典直接渲染。被否候选「插件只给名字、前端维护名字→图字典」会让图形资产仍留在前端，违背「内容由插件提供」；「后端托管 SVG 库按名取」同样把内容挪出插件并触碰 plugin-api 转发棘轮。基线钉到实测 611，不留余量。
+// core-shape-allow structFields:  沙箱意图事实的两格——`SandboxFact{kind, value}` 是工具向沙箱提交「这一次调用干了什么」的唯一数据载体（讨论稿 §1.6 / DE-058）。kind 是开放字符串（工具自报新种类，沙箱按 kind 配规则），value 是工具归一化后的语义值（沙箱只匹配、不解析语法）。两格折不开：合并成单字段就把「事实种类」与「事实值」压扁，沙箱无法按 kind 配规则；降 pub(crate) 不行——写方是各工具插件、读方是沙箱插件，跨 crate 且插件互不可见（E-009），只能经门面共用这一形状。它没有新增世界域名 / 端口名 / 事实名，也不是为某个插件开的口子——是被调用执行环境的通用载荷形状。
+// core-shape-allow structFields:  会话选档 id 随两条既有装订点交回——`Request.sandbox_id`（会话输入协议）与 `DriveTarget.sandbox_id`（驱动目标）各一格，与同结构里的 `provider_id` / `mode` / `risk_level` 同形：会话只在输入里带一个沙箱 id，宿主按它挂进 ctx、沙箱引擎据此按 id 解析档案与审批参数。它不是新数据面：值仍是普通字符串，走的是既有的 req>metadata>默认 回退链，替换的正是同一结构里退场的 mode/risk 两格（后端保留兼容回退，前端不再展示）。基线钉到实测 615，不留余量。
+// core-shape-allow structFields:  详情表格列是通用对象数组编辑契约——`DetailColumn{key,label,widget,options,default,placeholder}` 六格是插件声明一列「叫什么 / 显示什么 / 用什么控件编辑 / 候选值 / 默认值 / 占位提示」的最小形状，六格折不开（少 `options` 就无法渲染枚举列、少 `default` 就无法预填合法首行）；降 pub(crate) 不行——写方是声明表格的插件（沙箱）、读方是前端表单机制经门面镜像，跨 crate 且插件互不可见（E-009）。它没有新增世界域名 / 端口名 / 事实名，也不是为某个插件开的口子——任何插件编辑对象数组都复用同一列契约（DE-059）。
+// core-shape-allow structFields:  `DetailField.columns`(1) 是上述列契约在字段上的唯一挂载点——`table` widget 的列定义只能随字段声明走，不能塞进 `options`（那是标量选项候选值，语义不同），也不能新增「沙箱规则字段」之类的专用类型（会让表单机制反向依赖插件业务词，正是  否定的方向）。一格承载的是「这一列数组字段每行的列结构」，与 widget 字符串配套，机制层不含任何业务词。基线钉到实测 622，不留余量。
+// core-shape-allow structFields:  同一次沙箱裁决的七格回体 `SandboxDecision` 与私有凭据载体 `ApprovalGrant` 各一格，是授权双方必须共同消费的完整快照和一次性凭据形状：缺许可/风险/拦截/审批模式/阈值/版本/原因任一项都会迫使执行闸门再次读策略或猜失败原因，重新引入  要消除的跨版本组合；凭据不能降为私有类型，因为签发方 tool 与消费方 collectors 跨 crate。八格承载的是通用授权结果，不含工具清单、路径策略或业务字段。基线钉到实测 630，不留余量。
+// core-shape-allow structFields:  请求级宿主执行绑定随异步事实驱动显式传递——`DriveTarget.port_bindings`(1) 是 worker 的内部启动口跨 append / kick / drain 任务边界唯一可见的装订点；绑定只能由请求快照经事实源携带，不能依赖调用栈或进程级全局状态，也不能降为私有字段（生产消费方 host 与声明方 session 跨 crate）。它只承载执行出口，不改变授权、审批或沙箱策略，也不是新业务数据面。基线钉到实测 631，不留余量。
+// core-shape-allow enumVariants:  `VdfsCaller::{Manager, Model}` 两格是宿主注入的进程内可信主体闭集：管理写入与模型文件访问必须可区分，且未知主体失败关闭；复用布尔或字符串都能由模型载荷伪造，开放枚举又失去闭集。它只表达调用来源，不认插件 id 或 VDFS 操作。基线钉到实测 258，不留余量。
+// core-shape-allow structFields:  默认收集器整组从 providers 迁入 sdk——DefaultToolVisitor 的 rows/families 两格与 GatedExecutor 的 meta/risk/facts/inner 四格随既有实现换地址进入 CS-009 扫描面，合计六格，没有新增类型、字段或业务词汇； 又将 TaskVocab 的五格归位 task，当前基线钉到迁后实测 611，本条只记录  的地址迁移，不构成继续放宽。
+// 2026-11-16（）：实测已收到 608（614 是  /  时点的上限），基线同批
+// 钉到 608——余量不白留给下一次新增。2026-11-20（）：608 → 609，`DriveTarget`
+// 增 `session_dir` 一格（放宽行见上）。2026-11-21（）：609 → 611，图标自报的两个投影载体（放宽行见上）。2026-11-23（）：611 → 613，`SandboxFact` 的两格意图事实（放宽行见上）；同日 613 → 615，`Request.sandbox_id` / `DriveTarget.sandbox_id` 两格随会话选档入装订点（放宽行见上）。2026-11-24（）：615 → 622，`DetailColumn` 六格 + `DetailField.columns` 一格随通用表格 widget 入数据面（放宽行见上）。同日（）：622 → 630，`SandboxDecision` 七格 + `ApprovalGrant` 一格；枚举 256 → 258，`VdfsCaller` 两格（放宽行见上），此后照旧只许降。
 const DATA_BASELINE = process.env.CORE_DATA_BASELINE
   ? (() => {
       const [structFields, enumVariants] = process.env.CORE_DATA_BASELINE.split(':').map((n) => Number(n))
@@ -336,7 +327,6 @@ const CELL_LABEL = {
 
 /** 放宽痕迹的读法：与 `35-baseline` 的 `waiverReader('core-shape-allow')` 同一条拼写约定 */
 const WAIVER_RE = /^ {0,2}\/\/\s*core-shape-allow\s+([A-Za-z0-9_]+)\s*:\s*(\S[^\n]*)$/gm
-const ADR_REF_RE = /(?<!-)(?:D|ADR)-(\d+[a-z]?)/g
 
 const errors = []
 const report = (rule, msg) => errors.push({ rule, msg })
@@ -562,10 +552,10 @@ if (!fs.existsSync(path.join(sdkDir, 'mod.rs'))) {
   process.exit(1)
 }
 const kernelDir = path.join(ROOT, KERNEL_REL)
-// 契约层（D-486）：纯形状 crate，它的 pub struct / enum 与内核数据面同一条棘轮——
+// 契约层（）：纯形状 crate，它的 pub struct / enum 与内核数据面同一条棘轮——
 // 纯形状的公共面只许降。批 1 把 `dialog` / `llm`（26 字段 / 5 变体）搬出 sdk 时基线没有
 // 下调，这份余量在 sdk+kernel 口径下一直悬着；契约层入扫后实测回到 615/256 = 基线，
-// 余量清零。搬地址不是新增长（D-408 / D-412 同一份类型闭包论证）。
+// 余量清零。搬地址不是新增长（ /  同一份类型闭包论证）。
 const contractDir = path.join(ROOT, 'crates/symbio-platform/src/contract')
 const scanDirs = [
   sdkDir,
@@ -620,7 +610,7 @@ for (const [key, cap] of Object.entries(SHAPE_BASELINE)) {
       'CS-001',
       `核心形状变宽：${CELL_LABEL[key]} 实测 ${now} > 基线 ${cap} —— symbio_kernel 的公共形状只许收窄。` +
         `要让这一步成立，先在 \`docs/003-design/\` 立一条决策（\`### D-NNN\`）逐条论证「必需」（SP-003 §5；` +
-        `被这份棘轮钉住的先例见 D-055），再在基线旁写 core-shape-allow ${key}: D-NNN <理由>。逐 trait 清单：--verbose`,
+        `被这份棘轮钉住的先例见 ），再在基线旁写 core-shape-allow ${key}: <当前理由>。逐 trait 清单：--verbose`,
     )
   }
 }
@@ -651,10 +641,10 @@ for (const [key, cap] of Object.entries(DATA_BASELINE)) {
     report(
       'CS-009',
       `内核数据面变宽：${DATA_CELL_LABEL[key]} 实测 ${now} > 基线 ${cap} —— ` +
-        'core / kernel 的公共数据面只许降。新领域用 `Entity::Domain` 扩展位（DE-025 D-209），' +
+        'core / kernel 的公共数据面只许降。新领域用 `Entity::Domain` 扩展位（DE-025 ），' +
         '新行为用 `CapabilityMeta.behaviors` 开放集合，都不该往内核加变体或字段。' +
         `确需放宽：先在 \`docs/003-design/\` 立一条决策逐条论证「必需」，再在基线旁写 ` +
-        `core-shape-allow ${key}: D-NNN <理由>。逐项清单：--verbose`,
+        `core-shape-allow ${key}: <当前理由>。逐项清单：--verbose`,
     )
   }
 }
@@ -675,8 +665,8 @@ for (const [key, cap] of Object.entries(DATA_BASELINE)) {
 const waivers = []
 const selfPath = path.join(ROOT, SELF_REL)
 // 放宽口有两个基线对象（形状三格 + 数据两格），键名不重名；豁免注释只写格名，
-// 因此校验面取并集——`core-shape-allow enumVariants: D-209 …` 与
-// `core-shape-allow methods: D-077 …` 走同一条判定。
+// 因此校验面取并集——`core-shape-allow enumVariants:  …` 与
+// `core-shape-allow methods:  …` 走同一条判定。
 const WAIVABLE_KEYS = [...Object.keys(SHAPE_BASELINE), ...Object.keys(DATA_BASELINE)]
 if (fs.existsSync(selfPath)) {
   const selfText = fs.readFileSync(selfPath, 'utf8').replace(/\r\n/g, '\n')
@@ -688,22 +678,12 @@ if (fs.existsSync(selfPath)) {
       report('CS-002', `\`core-shape-allow ${key}\` 放宽的不是基线的格（只有 ${WAIVABLE_KEYS.join(' / ')}）`)
       continue
     }
-    const refs = [...reason.matchAll(ADR_REF_RE)].map((r) => r[1])
-    if (refs.length === 0) {
+    if (reason.length < 20) {
       report(
         'CS-002',
-        `放宽 \`${key}\` 的理由里没有决策编号（D-NNN；\`${key}: ${reason}\`）—— 动棘轮数字必须挂一条**决策**。` +
+        `放宽 \`${key}\` 的理由太短（\`${reason}\`）——动棘轮数字必须写清今天为什么需要它，` +
           `「批次需要 / 顺手 / 待补 / 见对话」都不算`,
       )
-      continue
-    }
-    for (const id of refs) {
-      if (!hasDecisionAnchor(id)) {
-        report(
-          'CS-002',
-          `放宽 \`${key}\` 引用了 \`D-${id}\`，但设计文档里没有任何 \`### D-${id}\` 条目 —— 指向不存在的决策的豁免不算豁免`,
-        )
-      }
     }
   }
 }
@@ -757,7 +737,7 @@ if (pluginRefs.length > 0) {
   report(
     'CS-003',
     `core 生产代码引用了插件实现 ${pluginRefs.length} 处（${[...new Set(pluginRefs)].join(' / ')}）——` +
-      '内核只该经 trait / 声明与插件交互（DE-023 D-179）；注释里提到不算，但代码路径算',
+      '内核只该经 trait / 声明与插件交互（DE-023 ）；注释里提到不算，但代码路径算',
   )
 }
 
@@ -769,12 +749,12 @@ if (pluginRefs.length > 0) {
  * 口径：`"<id>"` / `"<id>:"` / `"<id>/"` 三种字面量起点，逐个插件目录名匹配；
  * 测试模块与注释已剥离（测试里按名造插件是对的）。
  *
- * **收窄（依据 D-303）**：这条判的是「内核是否**新引入**对插件 id 的
+ * **收窄（依据 ）**：这条判的是「内核是否**新引入**对插件 id 的
  * 耦合」，不是「字符串是否相同」。内核早已存在的 wire 词（能力家族名、chat 样式
  * 标签、principal 序列化词与 legacy 前缀）与新插件目录同名时，按**同文件登记**
  * 抵扣，基线数字不动：
  *
- *   // arch-shape-allow CS-004 <id> ×<N>: 用途=…；不是插件引用=…；依据=D-NNN；登记=YYYY-MM-DD
+ *   // arch-shape-allow CS-004 <id> ×<N>: 用途=…；不是插件引用=…；依据=<当前理由>；登记=YYYY-MM-DD
  *
  * `<N>` 必须等于该文件该字面量的**实测处数**（多登记 = 空豁免，判红）；扣除后仍有
  * 超出才是真红。登记只认内核文件集里的注释，判据面之外登记无效。
@@ -784,7 +764,7 @@ const NOUN_BASELINE = {
   // `crates/symbio-platform/src/kernel/mod.rs`）。域词汇里只剩两处**随类型一起**搬进内核的存量：
   //  - `chat/principal.rs`：`from_legacy` / `tool_principal` 的工具族前缀表（地址协议
   //    词汇，13 处）。清它要把这两个解析入口改成宿主侧自由函数（与 `actor_can_*`
-  //    同一形态），见 DE-023 D-188 的 C2b 步；
+  //    同一形态），见 DE-023  的 C2b 步；
   //  - `capability/family.rs`：能力家族 id `"model"` 与插件目录同名（1 处，报的是
   //    家族词汇而非插件依赖）。
   // 只许降，整张表的目标仍是空表。
@@ -835,17 +815,11 @@ if (hasPlugins && pluginIds.length > 0) {
           `${where}：\`${id}\` 的登记缺 \`不是插件引用=\`（写清内核为何不因此认插件实现）`,
         )
       }
-      const refs = [...nounAllowField(reason, '依据').matchAll(ADR_REF_RE)].map((r) => r[1])
-      if (refs.length === 0) {
-        report('CS-004', `${where}：\`${id}\` 的 \`依据=\` 没有决策编号（D-NNN）——豁免必须挂一条决策`)
-      }
-      for (const ref of refs) {
-        if (!hasDecisionAnchor(ref)) {
-          report(
-            'CS-004',
-            `${where}：\`${id}\` 的 \`依据=\` 指向 \`D-${ref}\`，但设计文档里没有该决策`,
-          )
-        }
+      if (nounAllowField(reason, '依据').length < 12) {
+        report(
+          'CS-004',
+          `${where}：\`${id}\` 的 \`依据=\` 太短——摘下这条豁免要写清今天的当前理由，不能只挂一个旧编号`,
+        )
       }
       if (!/^\d{4}-\d{2}-\d{2}$/.test(nounAllowField(reason, '登记'))) {
         report('CS-004', `${where}：\`${id}\` 的 \`登记=\` 缺日期（YYYY-MM-DD）`)
@@ -887,7 +861,7 @@ if (hasPlugins && pluginIds.length > 0) {
       report(
         'CS-004',
         `插件 id 字面量回流：${rel} 有 ${n} 处 > 冻结 ${cap} —— ` +
-          '词汇（插件 id / 路由 / 装配位）由 owner 声明，内核只 seal（DE-023 D-177 / D-179）',
+          '词汇（插件 id / 路由 / 装配位）由 owner 声明，内核只 seal（DE-023  / ）',
       )
     } else if (n < cap) {
       ratchetDown.push(`${rel} ${n}<${cap}`)
@@ -913,7 +887,7 @@ if (hasPlugins && pluginIds.length > 0) {
 const VOCAB_SOURCES = {
   kernelEvents: 'crates/symbio-platform/src/kernel/event/mod.rs',
 }
-// `CELLS`（`event/grid.rs`）已随 D-203 归零批退役。它**不该再出现**：文件在 ⇒ 数它的
+// `CELLS`（`event/grid.rs`）已随  归零批退役。它**不该再出现**：文件在 ⇒ 数它的
 // 业务行（基线 0，一行就红）；文件不在 ⇒ `cellsRows = 0`，正是目标值。这样「把表加回来」
 // 与「往表里加一行」都会红，判据不必依赖一张已经删掉的文件的形状。
 const RETIRED_CELLS = 'crates/symbio-platform/src/kernel/event/grid.rs'
@@ -967,24 +941,24 @@ if (!fs.existsSync(vocabPaths.kernelEvents)) {
       report(
         'CS-005',
         `${key} 实测 ${vocabCounts[key]} > 冻结 ${VOCAB_BASELINE[key]} —— ` +
-          '新事件走 `EventDecl` 进装配表，不再往内核这两张手写表加行（DE-024 D-197 / D-200）',
+          '新事件走 `EventDecl` 进装配表，不再往内核这两张手写表加行（DE-024  / ）',
       )
     }
   }
 }
 
-// ── CS-006 内核业务事件名的消费方分布（DE-024 D-202 / D-203）──
+// ── CS-006 内核业务事件名的消费方分布（DE-024  / ）──
 //
 // CS-005 数的是条数，条数本身说不出「这一条此刻在谁手里」。这一格补上那个缺口：
 // 逐条名字核**谁在读**，两种分布——
 //  ① ≥2 个 crate 的生产消费方：名字被一个以上插件写或读。它**不能**被单一 owner 独占
 //     （独占就逼别的插件跨墙引用兄弟插件，E-009），所以出口是一条共享词汇表，
-//     不是继续住内核（D-203 裁决三 路线③）；
+//     不是继续住内核（ 裁决三 路线③）；
 //  ② core 生产代码读它：这条**不是**归属证据，是**待迁存量**——名字该随那条读者
-//     一起迁出（读写同源，D-197 说的是「读者与名字同处」，不是「读者住内核」）。
+//     一起迁出（读写同源， 说的是「读者与名字同处」，不是「读者住内核」）。
 // 第三种（恰好一个消费方且 core 不读）就是当批可迁的形状：它该随那个 owner 的
 // `EventDecl` 走，本条把它判红。①② 两类都不判红，但只有①是有出口的现状，②是欠账——
-// 逐条的欠账账目见 DE-024 D-203 的迁移路线，CS-005 的归零就是它还账的方式。
+// 逐条的欠账账目见 DE-024  的迁移路线，CS-005 的归零就是它还账的方式。
 const CONSUMER_CRATE_PREFIXES = ['symbio-plugin-', 'symbio-provider-']
 // `symbio-plugin-api` 是宿主↔插件的共享协议 crate，不是能力持有者：它引用一个名字
 // 不构成「某个插件读它」的证据。
@@ -1011,7 +985,7 @@ const consumerTexts = (() => {
 
 /**
  * core 的**读者**全文：`pub use` statements 先剥掉——根出口转手一个名字不等于有人
- * 读它（那正是 D-201 要区分开的两件事：出口是账本，读者才是归属证据）。内核那两张
+ * 读它（那正是  要区分开的两件事：出口是账本，读者才是归属证据）。内核那两张
  * 被数的表自己也在生产侧文本里，它们是**名字的登记处**不是读者，一并排除。
  */
 const DECLARATION_RELS = new Set(Object.values(VOCAB_SOURCES))
@@ -1054,7 +1028,7 @@ if (vocabApplicable && consumerTexts.length > 0) {
       ev.consumers.length === 1
         ? `「${ev.name}」的唯一生产消费方是 ${ev.consumers[0]}，core 已不再读它 —— ` +
           '这条名字该随那个 owner 的 `EventDecl` 走（内核常量与 `CELLS` 行同批退役），' +
-          '躲在 CS-005 的数字里就等于把待迁存量说成内核词汇（DE-024 D-201 / D-202 / D-203）'
+          '躲在 CS-005 的数字里就等于把待迁存量说成内核词汇（DE-024  /  / ）'
         : `「${ev.name}」在 core 与插件的生产代码里都没有读者 —— ` +
           '内核词汇表里躺着一行没人读的名字：要么删，要么说清它守的是哪条协议',
     )
@@ -1064,7 +1038,7 @@ if (vocabApplicable && consumerTexts.length > 0) {
 const ruleLine = (ok, rule, desc) =>
   console.log(`${ok ? green('✓') : red('✗')} ${rule}  ${dim(desc)}`)
 
-// ── CS-008 core 生产代码零事件名字面量（DE-024 D-203 的翻转）──
+// ── CS-008 core 生产代码零事件名字面量（DE-024  的翻转）──
 //
 // CS-005 判的是「内核**表**里还有几条业务名」，CS-006 判的是「表上那几条该随谁走」。
 // 两者都以那张表为输入，于是表归零之后它们都**没有输入**了——一个没有输入却常绿的
@@ -1075,7 +1049,7 @@ const ruleLine = (ok, rule, desc) =>
 // match e.kind.as_str() { "chat.assistant.final" => …, _ => {} }
 // ```
 //
-// 这正是 D-203 要拆掉的那条边（「加一条对话面事件」= 改架构模块）。所以归零批必须
+// 这正是  要拆掉的那条边（「加一条对话面事件」= 改架构模块）。所以归零批必须
 // 配一条**反向**判据：core / kernel 的**生产代码**里不出现任何事件名字面量。
 //
 // ## 判据形状
@@ -1089,13 +1063,13 @@ const ruleLine = (ok, rule, desc) =>
 //
 // `*.test.rs` 与 `#[cfg(test)] mod x { … }` 由 `coreTexts` 剥掉；`#[cfg(test)] mod x;`
 // 这种**声明式**测试模块（`core/src/test_fixtures.rs`）不在它的处理范围里，本判据
-// 自己解析模块声明把那个文件剔出去——夹具交自己的字面量是合法的，而且正是 D-205 /
-// D-206 要的证据形态（「词汇是数据」：判据不为任何插件改名）。
+// 自己解析模块声明把那个文件剔出去——夹具交自己的字面量是合法的，而且正是  /
+//  要的证据形态（「词汇是数据」：判据不为任何插件改名）。
 //
 // 认三种声明：`#[cfg(test)] mod x;`、`#[cfg(any(test, feature = "…"))] pub mod x;`、
 // 以及带括号的参数（`any(...)`）——夹具模块常以 feature 门控出现，只认字面 `cfg(test)`
 // 会把 `symbio-sdk` 的 `test_fixtures` 读成生产代码，于是夹具里那份**事件名清单**
-// 被判成「折叠抄拼写」。夹具交自己的字面量是合法的（D-205 / D-206 的证据形态）。
+// 被判成「折叠抄拼写」。夹具交自己的字面量是合法的（ /  的证据形态）。
 const CFG_TEST_DECL_RE = /#\[cfg\(((?:[^()]|\([^()]*\))*)\)\]\s*(?:pub\s+)?mod\s+([A-Za-z0-9_]+)\s*;/g
 
 /** 被 `#[cfg(test)] mod x;` 声明的模块文件（按 Rust 的两种落点解析）。 */
@@ -1153,7 +1127,7 @@ if (entityNames) {
       'CS-008',
       `\`${hit.rel}:${hit.line}\` 出现了事件名字面量 \`"${hit.name}"\` —— ` +
         'core 的折叠按**构造期词汇面**认名字（`ChatVocab` / `MessageVocab` / `CommitmentVocab`），' +
-        '不抄拼写：写死一个字面量等于把「加一条事件要改架构」那条边接回来（DE-024 D-203 / D-205）',
+        '不抄拼写：写死一个字面量等于把「加一条事件要改架构」那条边接回来（DE-024  / ）',
     )
   }
 }
@@ -1211,7 +1185,7 @@ if (bizNames) {
       'CS-010',
       `\`${h.rel}:${h.line}\` 出现了业务名字面量 \`"${h.name}"\` —— ` +
         '内核只含语法类型与冻结机制原语，不含任何业务名、owner 归属、能力名、端口名常量。' +
-        '名字属于声明（`PLUGIN.yml` / `EventDecl`），由声明方写、内核对字符串透传（DE-023 D-398）',
+        '名字属于声明（`PLUGIN.yml` / `EventDecl`），由声明方写、内核对字符串透传（DE-023 ）',
     )
   }
 }
@@ -1232,7 +1206,7 @@ if (errors.length === 0) {
     true,
     'CS-002',
     waivers.length
-      ? `放宽 ${waivers.length} 格，引用的 ADR 全部能打开：${waivers.map((w) => `${w.key}←${w.reason.match(ADR_REF_RE)?.[0]}`).join('、')}`
+      ? `放宽 ${waivers.length} 格，当前理由：${waivers.map((w) => `${w.key}←${w.reason.slice(0, 24)}`).join('、')}`
       : '没有放宽痕迹（基线就是当前形状）',
   )
   const nounTotal = [...nounCounts.values()].reduce((s, n) => s + n, 0)

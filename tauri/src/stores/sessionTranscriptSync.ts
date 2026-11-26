@@ -1,5 +1,5 @@
 /**
- * sessionTranscriptSync — 会话**实时面**的消费端（D-025：实时面走 VDFS 变更）
+ * sessionTranscriptSync — 会话**实时面**的消费端（实时面走 VDFS 变更）
  *
  * ## 一条通道，地址即身份
  *

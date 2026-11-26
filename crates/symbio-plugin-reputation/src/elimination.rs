@@ -5,7 +5,7 @@
 //! 声誉台账（[`crate::decl::REPUTATION_LEDGER`]）折的是**数**，判决住在读它的这一侧。
 //! 本贡献者只做三件事：按名字读账、按部署表与既有裁决筛主体、把裁决交成草稿。落格
 //! 归属不在这里——`verdict.asserted` 的 `EventDecl` 声明作者是仲裁者
-//! （`session/arbiter`），信封 `actor` 由声明表给定，执行体无权指定（D-339 / D-252）。
+//! （`session/arbiter`），信封 `actor` 由声明表给定，执行体无权指定。
 //!
 //! ## 三条筛选口径（与搬出前逐字相同）
 //!
@@ -33,7 +33,7 @@ use crate::decl::{ledger, EVENT_VERDICT_ASSERTED, OWNER};
 
 /// 被收回的能力（DE-043 §2 淘汰行的字面机制）。
 ///
-/// 名字住 `plugin-api` 的词汇面（D-364），门面转出 `symbio-sdk` 的同一常量；
+/// 名字住 `plugin-api` 的词汇面，门面转出 `symbio-sdk` 的同一常量；
 /// 本包仍不依赖兄弟插件，也不需要直接依赖 sdk（E-009）。
 use symbio_plugin_api::vocab::CAP_ASSIGN_WORK;
 
@@ -54,7 +54,7 @@ impl Contributor for EliminationVerdicts {
             return Vec::new();
         }
         // 读自己的视图：本包就是 owner，直接调折叠函数，不经过 `shared_views` 生成物
-        // （D-387：报表登记才是公开动作）。as-of 与读口一致：落盘即已发生。
+        // （报表登记才是公开动作）。as-of 与读口一致：落盘即已发生。
         let ledger = ledger(at.history, i64::MAX);
         let Some(rows) = ledger.get("by_principal").and_then(Value::as_object) else {
             return Vec::new();

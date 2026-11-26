@@ -1,5 +1,5 @@
 /**
- * shared-name-audit 回归测试 —— 证明 SV-001 / SV-003 / SV-004 **会红**（D-364 / D-462）
+ * shared-name-audit 回归测试 —— 证明 SV-001 / SV-003 / SV-004 **会红**（ / ）
  *
  * 一个只会亮绿灯的守卫等于没有守卫。逐条注入真实违规并断言脚本变红：
  *   ① 干净夹具（两侧只 import）→ exit 0；
@@ -53,7 +53,7 @@ const DEFAULT_CORE = {
 
 /**
  * SV-004 的规则源：写方（`artifact_payload` / `dispatch_calls`）、行为（`annotate`）、
- * 登记的读点（产物格三个 + 派发清单格六个，`D-471` 的「谁消费」表全表）。
+ * 登记的读点（产物格三个 + 派发清单格六个，`` 的「谁消费」表全表）。
  *
  * 判据不设「词汇表」——它从写方源码读出账本，再拿读点去对。夹具因此只需要写方
  * 和读点：判的是「读的键在不在账上」，不是「键有几格」。
@@ -430,7 +430,7 @@ test('㉑ calls 读段函数不在 ⇒ exit 2（读段改名后判据会恒真�
   }
 })
 
-test('㉒ tool_calls 补写段读 wire_id ⇒ 绿（不登记、不并账——D-471 的同形异义边界）', () => {
+test('㉒ tool_calls 补写段读 wire_id ⇒ 绿（不登记、不并账—— 的同形异义边界）', () => {
   const root = fixture({
     'crates/symbio-plugin-session/src/rebuild.rs':
       'fn artifact_nodes() {\n    let _ = e.payload.get("tool");\n}\n' +
@@ -445,7 +445,7 @@ test('㉒ tool_calls 补写段读 wire_id ⇒ 绿（不登记、不并账——D
   }
 })
 
-test('㉓ 会话侧登记读点读账外键 ⇒ 红（D-471 全表登记后，五个读点都在对账）', () => {
+test('㉓ 会话侧登记读点读账外键 ⇒ 红（ 全表登记后，五个读点都在对账）', () => {
   const root = fixture({
     'crates/symbio-plugin-session/src/transcript/live.rs':
       'fn partners() {\n    let _ = e.payload.get("tool_call_id");\n' +

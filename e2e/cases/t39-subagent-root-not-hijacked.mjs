@@ -110,7 +110,7 @@ export default defineCase(
       providers: [{ id: PROVIDER_ID, config: providerConfig(llm.port) }],
       pluginConfigs: { ...dialogFaceOff() },
     });
-    // 系统树记忆：{homedir}/MEMORY.md（三层统一物理名，D-527）
+    // 系统树记忆：{homedir}/MEMORY.md（三层统一物理名）
     writeFileSync(join(hd.homedir, 'MEMORY.md'), SYS_MEMORY);
     // 子智能体目录自己的 MEMORY.md：两棵树的同一条路径指向两份不同的正文。
     // AGENTS.md 保留为人格指令（归 setting），与记忆物理隔离。

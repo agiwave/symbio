@@ -1,6 +1,6 @@
 //! 会话存储测试 —— 顶层平级 + 子会话嵌套路由 + 会话 CRUD / 迁移 / 事实源。
 //!
-//! 落盘是唯一驻留（D-329），因此不再有「不落盘型逐条同构」这一类断言。
+//! 落盘是唯一驻留，因此不再有「不落盘型逐条同构」这一类断言。
 
 use super::*;
 use serde_json::json;
@@ -311,7 +311,7 @@ fn session_with_messages(id: &str, updated_at: i64) -> Session {
     s
 }
 
-/// 保存只写元数据：消息正文不归 store 写（[D-049]——`v2-events.wal` 是唯一
+/// 保存只写元数据：消息正文不归 store 写（——`v2-events.wal` 是唯一
 /// 事实源，正文由事实路径入格；`messages.json` 停写，v1 遗留文件不再有写方）
 #[tokio::test]
 async fn save_writes_metadata_only() {
@@ -337,7 +337,7 @@ async fn save_writes_metadata_only() {
     assert!(loaded.messages.is_empty());
 }
 
-/// [D-049] 真源判据：有 WAL 时 `messages.json` **缺失 / 写坏**都不影响读出完整
+///  真源判据：有 WAL 时 `messages.json` **缺失 / 写坏**都不影响读出完整
 /// 历史——读侧不依赖缓存文件，且**不读**那份坏缓存（坏缓存必须被无视，而不是
 /// 「恰好没坏所以没暴露」）。这是 t43 存储手术判断的 Rust 归属。
 #[tokio::test]
@@ -380,7 +380,7 @@ async fn wal_is_the_source_messages_json_is_ignored() {
     );
 }
 
-/// [D-049] 回落判据：WAL 不在时回落 `messages.json`——v1 遗留会话的事实从未
+///  回落判据：WAL 不在时回落 `messages.json`——v1 遗留会话的事实从未
 /// 入格，那个文件是它们历史的唯一记录，回落读法必须还在
 #[tokio::test]
 async fn legacy_messages_json_reads_back_when_no_wal() {
@@ -594,7 +594,7 @@ fn atomic_tmp_paths_are_unique_per_call() {
 
 /// 同一会话的并发保存不得互相覆盖（「整份 load → 改 → 整份重写」的丢更新）
 ///
-/// 判据载体是**元数据计数**（消息已不归 save 持久化，见 [D-049]）：锁仍然必须
+/// 判据载体是**元数据计数**（消息已不归 save 持久化，见 ）：锁仍然必须
 /// 包住整段「读 → 改 → 写」，否则 20 次自增会丢。
 #[tokio::test]
 async fn concurrent_saves_of_one_session_serialize_via_lock() {
@@ -625,7 +625,7 @@ async fn concurrent_saves_of_one_session_serialize_via_lock() {
     );
 }
 
-// ── D-084：事实源唯一端口（facts / snapshot） ─────────────────────────────
+// ──：事实源唯一端口（facts / snapshot） ─────────────────────────────
 
 /// 同一会话的 `facts()` 返回**同一个**实例：进程内只有一个 `head`、一把写锁。
 ///
@@ -655,7 +655,7 @@ async fn facts_hands_out_one_shared_instance_per_session() {
 
 /// 只读面**不要求会话主体**：载体（`session.json`）读不到的会话照常读快照。
 ///
-/// D-339 的「拒绝回落主体」是**落账**的纪律（`@principal` 解析），不是读面的闸：
+///  的「拒绝回落主体」是**落账**的纪律（`@principal` 解析），不是读面的闸：
 /// 在那里拒绝会把 `session/stats` / `session/changes` 一起判死——而它们根本不落账。
 /// 用户看到的后果是「每打开一个旧会话就报一次内部错误」，读数是永远出不来。
 #[test]
@@ -787,7 +787,7 @@ async fn an_unopenable_fact_source_is_an_error_not_none() {
     }
 }
 
-/// 退化用例（D-396）：**故意去掉某个格的唯一读者** ⇒ 装载期红。
+/// 退化用例：**故意去掉某个格的唯一读者** ⇒ 装载期红。
 ///
 /// 缺口形状与 `ring.test.rs` 的「去掉唯一读者 ⇒ `OrphanFact`」同一份：
 /// `artifact.added` 没有任何行读它。判据不是「环后来会拒收协议事实」，而是

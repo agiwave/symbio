@@ -126,9 +126,10 @@ test('GC-002 未登记前缀：@codes 用了本文件没声明的前缀 ⇒ 红'
 })
 
 test('GC-003 登记错位：码只出现在声明行里 ⇒ 红（本文件其实没判它）', () => {
-  const errs = errors({ 'a-audit.mjs': decl('D 文档正文与链接', 'D-001 D-099', 'console.log("D-001")') })
-  assert.equal(errs.length, 1, 'D-099 只在 @codes 行出现过')
-  assert.match(errs[0], /GC-003 登记错位：.*D-099/)
+  const errs = errors({ 'a-audit.mjs': decl('S 源码 grep 形态', 'S-001', 'console.log("S-002")') })
+  // 写错的 S-002 同时触发 GC-004（输出了未登记的码），两个红都要在
+  assert.equal(errs.length, 2, 'GC-003 + GC-004')
+  assert.ok(errs.some((e) => /GC-003 登记错位：.*/.test(e)), errs.join('\n'))
 })
 
 test('GC-004 输出了未登记的码 ⇒ 红；加判定要先登记', () => {
@@ -139,10 +140,10 @@ test('GC-004 输出了未登记的码 ⇒ 红；加判定要先登记', () => {
   assert.ok(errs.some((e) => /GC-004.*S-002.*没有任何脚本声明/.test(e)), errs.join('\n'))
 })
 
-test('GC-004 反向：前缀未登记的码形如 D-023 ⇒ 不判（它不是判据码）', () => {
+test('GC-004 反向：前缀未登记的码形如  ⇒ 不判（它不是判据码）', () => {
   const errs = errors({
-    'a-audit.mjs': decl('S 源码 grep 形态', 'S-001', 'console.log("S-001 D-023")'),
-    'b-audit.mjs': `console.log('依据 D-023')\n`,
+    'a-audit.mjs': decl('S 源码 grep 形态', 'S-001', 'console.log("S-001 ")'),
+    'b-audit.mjs': `console.log('依据 ')\n`,
   })
   assert.deepEqual(errs, [])
 })

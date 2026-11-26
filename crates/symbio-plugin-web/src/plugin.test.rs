@@ -1,6 +1,6 @@
 //! `crates/symbio-plugin-web/src/plugin.rs` 的单元测试 —— 与实现同级分文件。
 //!
-//! 锁的是「工具没有第二条执行面」（`D-466`）：工具执行只发生在 `port.tool` 的逐调用
+//! 锁的是「工具没有第二条执行面」：工具执行只发生在 `port.tool` 的逐调用
 //! 簿记里，本插件的 `route` 只剩父容器转发与 `NotFound`。
 
 use super::*;

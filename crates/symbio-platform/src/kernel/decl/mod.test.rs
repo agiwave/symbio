@@ -298,7 +298,7 @@ fn view_cannot_read_an_undeclared_fact() {
     );
 }
 
-/// D-282：视图读一条**只有事件格位、没有事实声明**的断言格 ⇒ **报告**，不是缺口。
+/// 视图读一条**只有事件格位、没有事实声明**的断言格 ⇒ **报告**，不是缺口。
 ///
 /// 判据 3 的输入是 `FactDecl.fields`，而这条事实没有 `FactDecl`——那意味着「无从校验」，
 /// 不是「字段错了」。原来的 `UnknownFact` 把两种完全不同的情况混成一个红：名字真拼错
@@ -461,7 +461,7 @@ fn eval_respects_the_declared_cost() {
 
 // ── 切点：一份切片喂给每一条视图（`scan_bound` / `ViewCostMismatch`）─────────
 //
-// 这一段测的是 D-222 订正 1 的终态。判据是「`cost` 超界不许静默变成『没有欠账』」，
+// 这一段测的是  订正 1 的终态。判据是「`cost` 超界不许静默变成『没有欠账』」，
 // 而 `eval` 回 `None`、`owed` 折成空集（`_ => Vec::new()`，字节冻结）。
 // 所以缺口只能从两头收：**切点只有一个真源**（`scan_bound` 取最小值），
 // **声明的分歧在装载期红**（`ViewCostMismatch`）。下面三条分别钉住这两头与
@@ -519,7 +519,7 @@ fn a_table_without_views_has_no_scan_bound() {
 
 /// 声明的 `cost` 分歧 ⇒ 装载期红，且报出**偏大的那一条**与实际的切点。
 ///
-/// 这是 D-222 订正 1 的内核侧一半：把某条视图的声明调到与切片不同步，装载就拒绝。
+/// 这是  订正 1 的内核侧一半：把某条视图的声明调到与切片不同步，装载就拒绝。
 /// 不留到运行期——运行期的两支（按大的切 / 按小的切）都是某一族行静默不开账。
 #[test]
 fn a_view_cost_that_disagrees_with_the_bound_is_rejected_at_load_time() {
@@ -595,7 +595,7 @@ fn the_request_cell_belongs_to_the_decider() {
     assert_eq!(gaps_of(b), vec![]);
 }
 
-/// 宿主写口是事件声明的一格：装载期问得到，普通事件格与未登记名不冒充（D-296）。
+/// 宿主写口是事件声明的一格：装载期问得到，普通事件格与未登记名不冒充。
 #[test]
 fn host_write_is_one_event_cell() {
     const EVENTS: &[EventDecl] = &[
@@ -626,7 +626,7 @@ fn host_write_is_one_event_cell() {
     );
 }
 
-/// 角色取自这一行的 `roles`，不是「同格就算」——判据读的是声明，不是格位表（DE-024 D-203）。
+/// 角色取自这一行的 `roles`，不是「同格就算」——判据读的是声明，不是格位表（DE-024 ）。
 #[test]
 fn roles_come_from_the_declaration_row() {
     // 只住一档：其余三档在表上无人。

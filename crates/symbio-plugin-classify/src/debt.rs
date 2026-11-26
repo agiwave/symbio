@@ -9,7 +9,7 @@
 //! classify.decide（plugin_row，债 id 恒为 `classify.decide:id=<user.message id>`）
 //!   ├─ 规则可判 → 债键带 reason → 执行体直接回判决事实（零 LLM）
 //!   └─ 规则不可判 → 债键只有 id → 执行体 Ask（plugin.row.asked）
-//!        └─ model.assist（申报方自报，D-338）→ 回执 → 同一行重触发 → parse 落判决
+//!        └─ model.assist（申报方自报）→ 回执 → 同一行重触发 → parse 落判决
 //! ```
 //!
 //! 模型路径的 `reason` 在**解析时**才出现，所以不能进债键：键一变，`ask_id` 与
@@ -45,7 +45,7 @@ use super::decide::SYSTEM_PROMPT;
 use super::decl::{CLASSIFY_ANSWERED, CLASSIFY_DECIDE, CLASSIFY_ESCALATE};
 use super::rules::classify_by_rule;
 
-/// 一次性问答的端口成员（数据）：名字住 `plugin-api` 的词汇面（D-364），
+/// 一次性问答的端口成员（数据）：名字住 `plugin-api` 的词汇面，
 /// `model` 提供者与本消费方 import 同一常量。
 use symbio_plugin_api::vocab::PORT_MODEL_ASSIST as ASSIST_PORT;
 
@@ -54,7 +54,7 @@ pub(crate) struct ClassifyDebts {
     rule_shortcut: bool,
     system_prompt: String,
     /// 本插件偏好的 provider id（配置的 `model`）；缺席 ⇒ 交给 `model.assist`
-    /// 回落会话选定（D-348：能力方知道该用什么档，就在请求里带偏好）。
+    /// 回落会话选定（能力方知道该用什么档，就在请求里带偏好）。
     provider: Option<String>,
 }
 
@@ -115,7 +115,7 @@ impl DebtSource for ClassifyDebts {
         }
         let mut rows = vec![spec];
 
-        // 申报方自报往返（D-338）：行只落「在等」，真正的请求由这里欠给端口。
+        // 申报方自报往返：行只落「在等」，真正的请求由这里欠给端口。
         // 正文留空 ⇒ 执行体从事实读面拼本轮转写（`model/assist.rs::transcript`）。
         if let Some((ask_id, _)) = ask {
             rows.push(

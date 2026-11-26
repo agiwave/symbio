@@ -66,7 +66,7 @@ pub(crate) mod supplements;
 // 帧构造 / 日志合并 / 合帧窗口（纯机械；状态机仍在根）
 mod deliver;
 /// 落库回包（§3.4 的唯一落地点）：`append_and_publish` 与它的两条发布通道。
-/// 原先住在 `plugin.rs`，被切的两片因此反过来引用宿主外壳——[D-075](../../../docs/003-design/002-架构总览.md#d-075-卸载能力先于目录分离session-切分立三条前置会话记忆与存储留守 "DE-002-架构总览")
+/// 原先住在 `plugin.rs`，被切的两片因此反过来引用宿主外壳——
 /// 前置 P3 的第一处归位，理由写在 `publish.rs` 模块头。
 pub(crate) mod publish;
 // 域内共享面：状态机（`impl Transcript`）与本域测试经 `super::*` 取用。
@@ -167,7 +167,7 @@ pub struct Transcript {
     pending: Option<PendingDelta>,
     /// 日志合并器（**只影响日志**，不参与序号与投递）。
     delta_log: DeltaLogCoalescer,
-    /// 轮占位登记（`D-425`）：父节点 id → 临时骨架 id。占位是「这一轮还在飞」的**流通道
+    /// 轮占位登记：父节点 id → 临时骨架 id。占位是「这一轮还在飞」的**流通道
     /// 信号**，不进历史；同一父下出现第一个真实子帧时撤掉（见 [`Self::apply`]）。
     placeholders: HashMap<String, String>,
 }
@@ -255,7 +255,7 @@ impl Transcript {
             return;
         }
 
-        // **轮占位让位**（`D-425`）：同一父下出现第一条真实节点（思考 / 正文 / 工具卡），
+        // **轮占位让位**：同一父下出现第一条真实节点（思考 / 正文 / 工具卡），
         // 占位就该走了——它的语义是「这一轮还没产出可看的东西」，产出到了即失效。
         // 流式帧不经过事实源，转写是唯一同时看得见占位与内容帧的地方。
         if let Some(parent) = msg.parent_id.as_deref() {
@@ -376,7 +376,7 @@ impl Transcript {
         self.emit(frame, FrameLog { level, detail });
     }
 
-    /// 撤掉一条轮占位（`D-425`）：走同一条删除路径，不新造退场形式。
+    /// 撤掉一条轮占位：走同一条删除路径，不新造退场形式。
     ///
     /// 登记表与图都在 `apply` 的删除分支里收口，因此这里只构造一帧 `removed`——
     /// 删除的线上表达本来就是一帧状态迁移。
@@ -532,7 +532,7 @@ impl Transcript {
     /// 变更投递的**唯一出口**（`changes.notify` 只在这里被调用）。
     ///
     /// 呈现（`title`/`icon` 与读数行 `stats`）在这里从节点**形状 + 已有数字**现算
-    /// （[D-111](README.md#d-111-消息读数由交付出口装配压缩与记忆的事实行离开前端 "crates/symbio-plugin-session/src/README")）：图里存的、事件里的
+    /// 图里存的、事件里的
     /// 节点都不含呈现——它是「session 把数据交给前端那一刻」才填的交互面元素，不属于
     /// 后端业务/存储事实。窄增量帧无 `msg_type`，派生判据全不命中即原样透传（幂等无副作用）。
     fn publish(&self, message: cm::ChatNode) {
@@ -546,7 +546,7 @@ impl Transcript {
     /// 发布一次**会话运行态**变更：`<sid>` 上 `data = VdfsNode`（全量节点视图）。
     ///
     /// 与消息走**同一张订阅表**：会话节点就是 `<sid>`（它既是清单里的文件又是
-    /// 容器目录，变更落点是它自身）。这与 D-025 的结论一致——实时面与历史面
+    /// 容器目录，变更落点是它自身）。这与  的结论一致——实时面与历史面
     /// 是同一条 `vdfs/watch`。
     ///
     /// ## `data` 为什么带**全量节点视图**

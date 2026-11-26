@@ -7,7 +7,7 @@ plugin_routes: worker_ready
 # 本插件导出给别的插件命名的跨插件事件名（scripts/facts/events-rs.mjs 读取 →
 # crates/symbio-plugin-api/src/events.rs）。格位仍住在 declarations::EVENTS。
 # `commitment.opened` / `released` / `broken` 三格随委托工具 `agent_run` 迁入
-# （写方 `tools::behavior`）：owner 跟着写方走（D-389 同一条纪律），声誉按名字读回
+# （写方 `tools::behavior`）：owner 跟着写方走（ 同一条纪律），声誉按名字读回
 # 承诺列。第四格 `commitment.asserted` 无跨插件读方（声誉「自报不进账」）——
 # 单消费方的名字随 owner 走、不进共享表（CS-007），字面量住 declarations.rs。
 shared_events: message.added, user.answer, session.recall, scope.branch_selected, message.removed, session.consolidated, chat.assistant.fallback, chat.assistant.final, user.message, session.config, scope.branch, scope.dispatch, commitment.broken, commitment.opened, commitment.released
@@ -15,7 +15,7 @@ shared_events: message.added, user.answer, session.recall, scope.branch_selected
 # 授权行：`<主体>|<能力名 + 连接>|<可见域>`（scripts/facts/authz-rows.mjs 读取 →
 # crates/symbio-platform/src/sdk/authz/rows.gen.rs）。能力名的闭集住 governance::Capability。
 # 本插件声明的十个会话主体：主智能体 5 项；其余九行都是**比主智能体窄**的记录
-# （窄行是唯一入口，D-099：未登记主体不派生任何能力）。
+# （窄行是唯一入口：未登记主体不派生任何能力）。
 principal_main: session/main|judge.intent+reply+define.work+produce.artifact+assign.work|thread_private
 principal_autonomous: session/autonomous|define.work|thread_private
 principal_reflex: session/reflex|judge.intent|thread_private

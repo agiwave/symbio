@@ -4,22 +4,22 @@
  *
  * ## 它判什么
  *
- * 名字属于词汇层，实现属于各自插件（D-364）。共享名（端口 / 事件 / 路由 / 行为 /
+ * 名字属于词汇层，实现属于各自插件（）。共享名（端口 / 事件 / 路由 / 行为 /
  * 视图 / 路径段 / 详情条件键）住宿主 `symbio-plugin-api` 的词汇面或清单投影，
  * 两个 crate 都 import 同一常量；插件之间仍不互相依赖（E-009）。
  *
  * | 编号 | 判什么 | 它拦的是哪一种腐烂 |
  * |---|---|---|
- * | SV-001 | ① **有结构**的名字（含 `.` 或 `/`）出现在两个以上非 `plugin-api` 的插件生产代码里；② 同名 `const` 在两个以上插件 crate 各声明一次；③ 机制层（`symbio-sdk` / `symbio-kernel` / `symbio`）的生产代码里出现**词汇层已有的事件名**字面量（词汇家 = `symbio-plugin-api/src/events.rs`，owner 声明补私有名） | 两份字面量 = 两个 owner：改名只改一处，另一处静默漂移；或绕过词汇层把名字抄回实现（D-364 / D-392） |
+ * | SV-001 | ① **有结构**的名字（含 `.` 或 `/`）出现在两个以上非 `plugin-api` 的插件生产代码里；② 同名 `const` 在两个以上插件 crate 各声明一次；③ 机制层（`symbio-sdk` / `symbio-kernel` / `symbio`）的生产代码里出现**词汇层已有的事件名**字面量（词汇家 = `symbio-plugin-api/src/events.rs`，owner 声明补私有名） | 两份字面量 = 两个 owner：改名只改一处，另一处静默漂移；或绕过词汇层把名字抄回实现（ / ） |
  * | SV-003 | 全仓 `submit_reports!` 每条登记的 `(slot, fleet)` 与 `024` 的出品契约表**双向**逐行相等 | 加了列 / 改了 slot 却没更新契约，或表里留着一条已经删掉的列——出口形状与声称的形状静默分叉 |
- * | SV-004 | 产物格（`artifact.added`）的**载荷键**：写方是 `tool` 的 `artifact_payload`（装配）与各行为的 `annotate`（追加）；登记的读点（`rebuild::artifact_nodes`、`changes` 全文、`model::turn_input`）读的键必须在写方账上或容错档里；两个写点不得争同一格。**同一结构的第二份账**（`D-471` / `D-472`）：派发清单格（`tool.requested` 的 `calls[]` 元素）——写方唯一（`model::dispatch_calls`，元素三格 + 条件两格），`D-471`「谁消费」表的五个读点（六个登记函数，见 `CALLS_READ_SITES`）全部只提取**元素键**；`tool_calls` 的补写段是另一个键宇宙，不登记不并账 | 写方把键改名，读方静默读到「没有」——而「没有这个字段」在读侧本来就有合法含义（存量事件 / 该轮没有中途产出），于是没有判据会红（`D-462`） |
+ * | SV-004 | 产物格（`artifact.added`）的**载荷键**：写方是 `tool` 的 `artifact_payload`（装配）与各行为的 `annotate`（追加）；登记的读点（`rebuild::artifact_nodes`、`changes` 全文、`model::turn_input`）读的键必须在写方账上或容错档里；两个写点不得争同一格。**同一结构的第二份账**（`` / ``）：派发清单格（`tool.requested` 的 `calls[]` 元素）——写方唯一（`model::dispatch_calls`，元素三格 + 条件两格），``「谁消费」表的五个读点（六个登记函数，见 `CALLS_READ_SITES`）全部只提取**元素键**；`tool_calls` 的补写段是另一个键宇宙，不登记不并账 | 写方把键改名，读方静默读到「没有」——而「没有这个字段」在读侧本来就有合法含义（存量事件 / 该轮没有中途产出），于是没有判据会红（``） |
  *
  * ## 为什么扫 `test_fixtures.rs`，又跳过生成物
  *
  * `crates/symbio-platform/src/sdk/test_fixtures.rs` 是 core 用例唯一的事件拼写面。它若手抄
  * 词汇层的名字，正是本判据要拦的第二份定义；所以这个文件名**不按「测试文件」排除**。
  * 但它（以及任何事实生成物）由生成器投影、首行带「生成，请勿手改」标记——带标记的
- * 文件整体跳过：**同一份 owner 声明生成两处产物**是允许的，手抄副本不是（D-392）。
+ * 文件整体跳过：**同一份 owner 声明生成两处产物**是允许的，手抄副本不是（）。
  *
  * ## 为什么不扫普通单词
  *
@@ -103,7 +103,7 @@ function productionFiles(dir) {
  * 生成物标记：首五行里带「生成，请勿手改」。
  *
  * 事实生成物（`events.rs`、`test_fixtures.rs` 等）与手写实现同形，但它的重复是
- * **单源投影**的结果，不是第二份定义。允许它；手写副本没有这行标记，照样红（D-392）。
+ * **单源投影**的结果，不是第二份定义。允许它；手写副本没有这行标记，照样红（）。
  */
 function isGenerated(text) {
   return text.split('\n', 5).some((line) => /生成[，,]?\s*请勿手改/.test(line))
@@ -268,25 +268,25 @@ const ARTIFACT_READ_SITES = [
  */
 const ARTIFACT_LEGACY_KEYS = new Set(['round'])
 
-/** 派发清单格（`tool.requested` 的 `calls[]` 元素）的唯一写点（`D-471`：写方唯一）。 */
+/** 派发清单格（`tool.requested` 的 `calls[]` 元素）的唯一写点（``：写方唯一）。 */
 const CALLS_WRITER_REL = path.join('crates', 'symbio-plugin-model', 'src', 'port.rs')
 /**
- * calls 格的登记读点（`D-471` 的「谁消费」表，五个全部登记；`D-472` 拆分后接上）。
+ * calls 格的登记读点（`` 的「谁消费」表，五个全部登记；`` 拆分后接上）。
  *
- * ① `call_tables`——`rebuild` 里读派发清单的那一段（`D-472` 拆出的读段）。读
+ * ① `call_tables`——`rebuild` 里读派发清单的那一段（`` 拆出的读段）。读
  *   `tool_calls` 的补写段（`backfill_node_ids`）**不登记**：那是另一个事实的载荷、
- *   另一套元素键（`wire_id` / `parse_error`），把两个键宇宙并进一份账正是 `D-471`
+ *   另一套元素键（`wire_id` / `parse_error`），把两个键宇宙并进一份账正是 ``
  *   否掉的「同形异义」病。
  * ② `partners` / `remember_request`——会话实时投影的配对反查与索引收编；两者体内
  *   的 `payload.get("tool_call_id")` / `payload.get("calls")` 是载荷层取键，不进
- *   元素账（`tool_call_id` 是产物格的键，归 `D-462` 那份账管）。
+ *   元素账（`tool_call_id` 是产物格的键，归 `` 那份账管）。
  * ③ `read_requested`——工具执行体，五格全读（含条件格 `node_id` /
  *   `overflow_notice`）；`KEY_REQUEST_ID` 等常量键与 `KEY_REPLY_KEY` 不在字面量
  *   形状里，且那些是 `tool.dispatch` 载荷层的键，不在元素账上。
  * ④ `execute`——模型逐笔标记的派生体；体内的 `payload.get("answer")` 是载荷层，
  *   元素取键只有 `id`。
  *
- * 轮收束的读点**不登记**：它已改成债行（D-508），只等工具端口的债全部收束
+ * 轮收束的读点**不登记**：它已改成债行（），只等工具端口的债全部收束
  * （`after_port`），不读 `calls[]` 的元素键；旧 `observe` 的逐 attempt 配对
  * 由端口状态承担。
  *
@@ -362,7 +362,7 @@ function topLevelKeys(objText) {
 }
 
 /**
- * 产物格的载荷契约（`D-462`）——**写方是账本，读方来对账**。
+ * 产物格的载荷契约（``）——**写方是账本，读方来对账**。
  *
  * 这里不设「词汇表」：键的拼写没有公共的家可以放——机制层不许出现插件名
  * （`EX-007`），而读方又跨层（`sdk` 在门面之下）。所以契约只能由**判据**接：
@@ -421,7 +421,7 @@ function artifactContract(root) {
 }
 
 /**
- * calls 格的写方账本（`D-471` 的五格）：元素 `json!` 对象的顶层键（基础三格）
+ * calls 格的写方账本（`` 的五格）：元素 `json!` 对象的顶层键（基础三格）
  * 加 `entry["…"]` 条件追加格。
  */
 function callsWriterKeys(writerBody) {
@@ -442,7 +442,7 @@ function callsWriterKeys(writerBody) {
 const CALLS_ELEMENT_SHAPE = /\b(?!payload\b)[a-z_][a-z0-9_]*\s*\.\s*get\(\s*"([a-z0-9_]+)"/g
 
 /**
- * calls 格的载荷契约（`D-471` / `D-472`）——与产物格同一条结构：判据不设词汇表，
+ * calls 格的载荷契约（`` / ``）——与产物格同一条结构：判据不设词汇表，
  * 写方写哪几格从源码读出，读方读的每一格都要在账上。
  * 返回 `{ writer, enriched, reads }`；任一半读不出 ⇒ `null`。
  */
@@ -478,14 +478,14 @@ function payloadKeyErrors(root) {
   const contracts = [
     {
       name: '产物格',
-      writerDesc: '写方（`artifact_payload` 与各 `annotate`）都不写它（`D-462`）',
+      writerDesc: '写方（`artifact_payload` 与各 `annotate`）都不写它（``）',
       ...artifact,
       legacy: ARTIFACT_LEGACY_KEYS,
       sites: ARTIFACT_READ_SITES.length,
     },
     {
       name: '派发清单格',
-      writerDesc: '写方（`dispatch_calls` 的元素格）不写它（`D-471`）',
+      writerDesc: '写方（`dispatch_calls` 的元素格）不写它（``）',
       ...calls,
       legacy: new Set(),
       sites: CALLS_READ_SITES.length,
@@ -516,7 +516,7 @@ function payloadKeyErrors(root) {
       if (!c.writer.includes(key)) continue
       errors.push(
         `\`"${key}"\` 既被 \`artifact_payload\` 装配、又被行为 \`annotate\` 追加——` +
-          '两个写点争同一格，读方分不清谁说了算（`D-462`）',
+          '两个写点争同一格，读方分不清谁说了算（``）',
       )
     }
 
@@ -533,7 +533,7 @@ function payloadKeyErrors(root) {
   return { errors, contracts }
 }
 
-/** 机制层 crate：它们不许自己写词汇层的事件名，只能 import / 由生成器投影（D-392）。 */
+/** 机制层 crate：它们不许自己写词汇层的事件名，只能 import / 由生成器投影（）。 */
 const CORE_CRATES = ['symbio-platform', 'symbio']
 
 function auditCrates(root) {
@@ -656,7 +656,7 @@ for (const [value, per] of [...literalHomes.entries()].sort((a, b) => a[0].local
   if (isMime(value) || isFileName(value)) continue
   errors.push(
     `"${value}" 在 ${per.size} 个插件 crate 各写了一次字面量：${whereOf(per)}——` +
-      '共享名应住 `symbio-plugin-api` 的词汇面（或清单投影），两侧 import 同一常量（D-364）',
+      '共享名应住 `symbio-plugin-api` 的词汇面（或清单投影），两侧 import 同一常量（）',
   )
 }
 
@@ -666,7 +666,7 @@ for (const [value, per] of [...constHomes.entries()].sort((a, b) => a[0].localeC
   if (isMime(value) || isFileName(value)) continue
   errors.push(
     `"${value}" 的 const 在 ${per.size} 个插件 crate 各声明一次：${whereOf(per)}——` +
-      '同一拼写两个家，改名只改一处就漂移；共享常量应住词汇层，其余改成 import（D-364）',
+      '同一拼写两个家，改名只改一处就漂移；共享常量应住词汇层，其余改成 import（）',
   )
 }
 
@@ -677,14 +677,14 @@ for (const [value, per] of [...coreLiteralHomes.entries()].sort((a, b) => a[0].l
   if (!home) continue
   errors.push(
     `词汇层已有事件名 "${value}"（${home}），机制层 crate 却自己写了一份字面量：` +
-      `${whereOf(per)}——机制层只能 import 或由生成器投影（D-392）`,
+      `${whereOf(per)}——机制层只能 import 或由生成器投影（）`,
   )
 }
 for (const [name, per] of [...coreConstHomes.entries()].sort((a, b) => a[0].localeCompare(b[0]))) {
   if (!vocab.constNames.has(name)) continue
   errors.push(
     `机制层 crate 声明了常量 \`${name}\`：${whereOf(per)}，与词汇层 ` +
-      `\`${EVENTS_REL.replace(/\\/g, '/')}\` 同名——词表只有一个家（D-392）`,
+      `\`${EVENTS_REL.replace(/\\/g, '/')}\` 同名——词表只有一个家（）`,
   )
 }
 

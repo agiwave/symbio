@@ -52,7 +52,7 @@ import {
 const TERMINAL = new Set(['completed', 'failed', 'aborted', 'waiting_user_action']);
 
 /**
- * 「已收场」= 终态 + 移除。移除是节点**已不存在**（`D-425` 的轮占位就是这么退场的），
+ * 「已收场」= 终态 + 移除。移除是节点**已不存在**（轮占位就是这么退场的），
  * 不是「还在转圈」；后端 `is_terminal` 不含它，是因为它不会出现在落库结果里。
  */
 const SETTLED = new Set([...TERMINAL, 'removed']);
@@ -100,7 +100,7 @@ export default defineCase('T10 节点协议全景：Reason/Text/ToolCall 三态�
     rt = await subscribeSessionRealtime(cli, { sessionId: 'e2e-t10', gatewayPort: GATEWAY_PORT });
 
     // ② 会话先建出来：收件箱是会话内部的集合，会话不在就没有它可写。
-    //    写入面**不承载**运行选项（[D-066] 决策 1）——`mode` 由会话 metadata 提供
+    //    写入面**不承载**运行选项（ 决策 1）——`mode` 由会话 metadata 提供
     //    （此处恰为默认值 auto），不需要也不该随消息再带一次。
     await createSession(cli, 'e2e-t10', { workdir: hd.workdir });
 
@@ -291,7 +291,7 @@ export default defineCase('T10 节点协议全景：Reason/Text/ToolCall 三态�
     );
     assertEq(cb.final.data.status, 'completed', 'tool_call 终态应为 completed');
 
-    // ⑩ 组合节点终态跟随子树。**Turn 不作为可见节点**（D-335：用户消息节点即轮，
+    // ⑩ 组合节点终态跟随子树。**Turn 不作为可见节点**（用户消息节点即轮，
     //     Turn 骨架只补字段、不参与发布身份）。实测实时面里**没有**会话运行态帧
     //     （`sessionChanges()` 为空：本用例的时间线没有任何 `path = 会话根` 的变更），
     //     因此「轮终态」落在**终答节点**上：最后一个到达的消息节点必须是 assistant 正文
@@ -333,7 +333,7 @@ export default defineCase('T10 节点协议全景：Reason/Text/ToolCall 三态�
     );
 
     // ⑫ 凡是进入过非终态的节点，都必须以终态收场（不留永远转圈的「运行中」）。
-    //    收场含**移除**：轮占位（D-425）已完成使命后从流上撤掉，不是「还在跑」。
+    //    收场含**移除**：轮占位已完成使命后从流上撤掉，不是「还在跑」。
     //
     // 判据是「进入过非终态」而不是「全部节点都必须有终态」：用户消息不参与状态机
     // （后端落库回包发的是存储副本，落点即终态），这是**已知

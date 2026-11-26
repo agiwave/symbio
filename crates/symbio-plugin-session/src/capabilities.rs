@@ -33,7 +33,7 @@
 //! ## 为什么放在 session 插件
 //!
 //! 本管线的唯一驱动方是 session 编排器：子智能体（委托工具 `agent_run`，本插件
-//! 提供，D-500）需要嵌套会话时，经收件箱地址写入（`vdfs/write <子会话地址>/inbox`）
+//! 提供）需要嵌套会话时，经收件箱地址写入（`vdfs/write <子会话地址>/inbox`）
 //! 复用本管线，而非由委托工具直接调用——管线不再是跨插件共享设施，故从旧 core
 //! 下沉到 session 插件内部。
 //!
@@ -90,7 +90,7 @@ pub async fn collect_capabilities(
     }
     traverse_ctx.set(PATH, TRAVERSE_AVAILABLE_TOOLS.to_string());
     traverse_ctx.set(symbio_plugin_api::CAPABILITY_VISITOR, manager.clone());
-    // 端口收集容器（D-468）：本次装配新建，插件在 traverse 里把绑定写进它。
+    // 端口收集容器：本次装配新建，插件在 traverse 里把绑定写进它。
     // 判重就在写入点上：同名再登记当场把该键转成不可执行并落错误桶，
     // 不需要「收集完再回表分组」的第二趟。
     // 请求上下文可能已带宿主执行绑定（如 worker 的子会话启动口）；本轮收集在同一
@@ -102,12 +102,12 @@ pub async fn collect_capabilities(
     );
     traverse_ctx.set(symbio_plugin_api::port::PORT_BINDINGS, bindings.clone());
     capability_init_error_bucket(&traverse_ctx);
-    // Agent 权限作用域槽（D-153）：子智能体插件在 traverse 里发布（它是唯一能把
+    // Agent 权限作用域槽：子智能体插件在 traverse 里发布（它是唯一能把
     // `agent_id` 解析成一份声明的地方），收集结束后由本函数把同一个 `Arc` 挂回
     // 调用方 ctx——工具执行期从那里读。与错误桶同一条路：容器对每个子插件各
     // fork 一份，插件写在自己那份上，收集方与兄弟都看不见，只能靠**共享的可变槽**。
     symbio_platform::sdk::agent::agent_perms_init_slot(&traverse_ctx);
-    // 沙箱句柄共享槽（D-531）：sandbox 插件在 traverse 里发布引擎，会话在这里建槽、
+    // 沙箱句柄共享槽：sandbox 插件在 traverse 里发布引擎，会话在这里建槽、
     // 收集结束后把同一个 Arc 挂回轮 ctx——工具执行期据此取句柄调 intercept / permits。
     // 与 AGENT_PERMS 同一条路：容器对每个子插件各 fork 一份，靠共享槽跨 fork 交换句柄。
     symbio_plugin_api::sandbox_init_slot(&traverse_ctx);
@@ -177,7 +177,7 @@ pub(crate) fn require_agent_scope(
 // ==================== 选项收集机制（宿主侧） ====================
 //
 // 本段原是旧 core 的 `capability/option.rs` 的后半：**收集管线**。下沉到这里的判据是
-// D-023 的「依赖方数量」——契约（收集口三方法与 `TRAVERSE_AVAILABLE_OPTIONS`
+//  的「依赖方数量」——契约（收集口三方法与 `TRAVERSE_AVAILABLE_OPTIONS`
 // 端点字面量）两侧都认，留在共享层；而「谁来收集」只有会话宿主一个答案。
 // 它与平行物 `collect_capabilities` 是**同一件事的两半**（工具 / 选项各一半），
 // 故两者同处本文件，不因历史路径而分居。

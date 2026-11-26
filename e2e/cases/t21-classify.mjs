@@ -213,7 +213,7 @@ export default defineCase(
       // `Answered` 写一句答话之后，"零助手节点"不再成立，因此判据落在"恰一条助手
       // 正文节点，且它是带对话面标记的那条"上。
       //
-      // 判据取**父是轮根 + `meta.surface = "reply"`**（`D-435`）：泄漏的形态是多出来
+      // 判据取**父是轮根 + `meta.surface = "reply"`**：泄漏的形态是多出来
       // 的第二条正文（分类请求自己说了一句话），它与答话的差别只在标记，不在位置。
       const userMsg = clsMsgs.find((m) => msgRoleOf(m) === 'user');
       assert(userMsg, 'B 线应有用户消息节点（轮根）');

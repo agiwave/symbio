@@ -139,7 +139,7 @@ impl CompositeVdfs {
     ///
     /// 目录名是路径首段的唯一键。**唯一性由容器实例表的键保证**：`PluginRegistry`
     /// 用 `IndexMap`，键就是目录名——VDFS 侧不做重复检查，只留一条调试断言，防止
-    /// `snapshot()` 将来被换成非键唯一的表（`D-459`）。
+    /// `snapshot()` 将来被换成非键唯一的表。
     ///
     /// 排序仍然必要：`order` 决定 `list("")` 的节点序，也决定能力收集的广播序。
     ///
@@ -196,7 +196,7 @@ impl CompositeVdfs {
 
         // 唯一性由注册表的**键**保证（`instances` 是 `IndexMap`，键就是目录名），
         // VDFS 侧不再逐项去重——这里原先那段「重名则 `warn` 并保留首个」永远不会命中
-        // （`D-459`）。留下断言而不是检查：谁将来把 `snapshot()` 换成非键唯一的表，
+        //。留下断言而不是检查：谁将来把 `snapshot()` 换成非键唯一的表，
         // 调试构建会先响，而不是让某个子插件静默不可达。
         debug_assert!(
             collected
@@ -235,8 +235,8 @@ impl CompositeVdfs {
     /// 候选 = 已注册但当前未挂载的工厂（见 [`PluginRegistry::installable`]），落成
     /// 动作就是根上的 `Write`（见 [`Self::install_plugin`]）——表单声明与执行者同在
     /// 一处。插件管理插件**不再转发这张通用表单**：它的「添加插件」入口改为插件
-    /// 市场页（候选由管理插件按 D-520 的口径下发），这张声明只服务直接访问容器根的
-    /// 场景（D-520）。
+    /// 市场页（候选由管理插件 的口径下发），这张声明只服务直接访问容器根的
+    /// 场景。
     fn install_new_type(&self) -> VdfsNewType {
         let options: Vec<DetailOption> = self
             .registry
@@ -267,7 +267,7 @@ impl CompositeVdfs {
 
     /// 子目录节点（`<dir>`）——合成的目录节点。
     ///
-    /// 两类字段**两个来源**（D-032）：
+    /// 两类字段**两个来源**：
     ///
     /// - **身份**（`title` / `description`）来自该插件目录的 `PLUGIN.yml`
     ///   （[`PluginRegistry::dir_of`] → `PluginDir::identity`）——与插件列表同一份，

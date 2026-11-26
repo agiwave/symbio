@@ -1,4 +1,4 @@
-//! model 端口通用执行面（`DE-048` D-305 裁决一）的用例。
+//! model 端口通用执行面（`DE-048`  裁决一）的用例。
 
 use std::sync::{Arc, Mutex};
 
@@ -119,7 +119,7 @@ fn input(payload: serde_json::Value) -> PortInput {
 }
 
 fn exec_context() -> symbio_plugin_api::port::PortExecContext {
-    // 开面后的下界：主体随 `AGENT_ID` 载体带进来（发言闸只读这一点，D-339）。
+    // 开面后的下界：主体随 `AGENT_ID` 载体带进来（发言闸只读这一点）。
     let meta = serde_json::Map::from_iter([(
         symbio_plugin_api::AGENT_ID.name().to_string(),
         json!("main"),
@@ -196,12 +196,12 @@ async fn a_final_answer_carries_the_measured_context_watermark() {
     );
 }
 
-/// 段预算真的生效：余量只够一段时，低优先级段被裁、高优先级留下（D-243）。
+/// 段预算真的生效：余量只够一段时，低优先级段被裁、高优先级留下。
 ///
 /// 成本用**注入的确定性函数**（字符数），不走 `default_tokenizer()`：那个实例的校准
 /// 系数是进程内全局的 `AtomicU32`，而 `port.rs` 每收到一次带实测用量的应答就
 /// `feedback` 一次。并行用例因此在「读 `budget`」与「读 `cost`」之间换了尺子——
-/// `kept.len()` 会在 0 与 1 之间抖（`D-464`）。被测的是「按优先级贪心裁」这条机制，
+/// `kept.len()` 会在 0 与 1 之间抖。被测的是「按优先级贪心裁」这条机制，
 /// 与尺子的具体读数无关；「同一把尺」那件事由下面的
 /// [`section_budget_subtracts_history_and_overhead`] 与 `sdk` 的 `fit_sections` 用例钉。
 #[test]
@@ -557,7 +557,7 @@ fn a_nested_tool_result_is_not_degraded_again() {
     );
 }
 
-/// 校准回灌的分母是**未校准**的启发式（`D-433`）。
+/// 校准回灌的分母是**未校准**的启发式。
 ///
 /// 钉的是「用了哪把尺子」而不是具体数值：`default_tokenizer().count` 每条都乘当前
 /// 系数再 `+1`，只要有人把分母换成它，这里立刻不等——而且与全局系数取值无关，

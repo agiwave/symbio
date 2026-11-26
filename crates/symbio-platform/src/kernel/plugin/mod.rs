@@ -1,4 +1,4 @@
-//! 插件契约的**内核面**：Plugin trait、请求上下文、信封与错误（D-188 C2b）。
+//! 插件契约的**内核面**：Plugin trait、请求上下文、信封与错误（ C2b）。
 //!
 //! 宿主侧的目录、清单、遍历端点仍在 `crate::sdk::plugin`；内核只装签名类型。
 
@@ -25,7 +25,7 @@ use std::any::Any;
 use std::collections::HashMap;
 use std::sync::{Arc, RwLock, Weak};
 
-/// 插件的**出厂自述**（D-032）—— 两半，消费方式**不同**
+/// 插件的**出厂自述**—— 两半，消费方式**不同**
 ///
 /// | 半 | 字段 | 消费方式 |
 /// |---|---|---|
@@ -67,7 +67,7 @@ pub struct PluginMeta {
     // 注：挂载点根下「可新建类型」（`VdfsNode::new_type`）**有意不在这里**——
     // session 的表单 schema 需要运行期汇流（options 广播），而本结构是同步纯数据。
     // 它挂在**根节点自己的自述**上，由容器向 provider 发一次 `Stat` 现场取
-    // （见 D-030）。
+    //。
 }
 
 fn default_meta_order() -> i32 {
@@ -361,7 +361,7 @@ impl PluginInvokeRequest for PluginSimpleRequest {
     }
 }
 
-/// 插件被停下的**原因**（D-033）
+/// 插件被停下的**原因**
 ///
 /// 三态而不是一个布尔量：插件的**处置不同**——「卸载时是否保留自己的缓存 / 数据」
 /// 是可恢复停用时不必做、卸载时必须当场决定的事。塞进布尔量，就会在插件里长出一堆
@@ -378,7 +378,7 @@ pub enum PluginStopReason {
 
 #[async_trait]
 pub trait Plugin: Send + Sync + 'static {
-    /// 插件的**出厂自述** —— 身份（种子）+ 挂载点呈现（见 D-032）
+    /// 插件的**出厂自述** —— 身份（种子）+ 挂载点呈现
     ///
     /// 两半的消费方式不同，别混：
     ///
@@ -399,7 +399,7 @@ pub trait Plugin: Send + Sync + 'static {
     /// 若将来确认要删，请连同各 impl 一并清理，不要只删这一行声明。
     fn meta(&self) -> PluginMeta;
 
-    /// 装配后、开始服务前调用一次（**同步**，见 D-033）
+    /// 装配后、开始服务前调用一次（**同步**）
     ///
     /// 默认无操作——内置插件因此一行不改、行为与加钩子前完全一致。
     ///
@@ -411,7 +411,7 @@ pub trait Plugin: Send + Sync + 'static {
         Ok(())
     }
 
-    /// 停用 / 卸载 / 收尾时调用（**异步**，见 D-033）
+    /// 停用 / 卸载 / 收尾时调用（**异步**）
     ///
     /// 默认无操作。调用点一律在**移除实例之前**（停用）或**删除目录之前**（卸载）——
     /// 顺序反了就等于让插件在数据已经没了之后再去做清理；卸载时尤其致命，
@@ -478,7 +478,7 @@ pub trait Plugin: Send + Sync + 'static {
     }
 }
 
-/// 父插件弱引用 Key（`Option<Weak<dyn Plugin>>`）—— **键与值同住**（D-095 根因一）
+/// 父插件弱引用 Key（`Option<Weak<dyn Plugin>>`）—— **键与值同住**（ 根因一）
 ///
 /// 值类型是 [`Plugin`] 的弱引用，故住本域。键名（`parent`）是 `ctx` 上的外部
 /// 协议面，**不随改名而变**——Rust 侧改名 `PARENT` → `PLUGIN_PARENT` 只为对齐

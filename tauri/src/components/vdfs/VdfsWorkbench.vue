@@ -427,7 +427,7 @@ watch(
 // 两条边界：① 用户还没选中任何东西（不抢深链进来的选择）；② 每个目录只开一次
 // （否则清空选中 / 删掉刚选中的项之后草稿会"复活"）。
 // ③ **schema 驱动的选择器页不自动开**（如插件市场）：它的数据在 `schema` 里，
-//    进目录第一眼该是已装列表，草稿只由用户点「新建 / 添加插件」打开（D-520）。
+//    进目录第一眼该是已装列表，草稿只由用户点「新建 / 添加插件」打开。
 //    判据来自渲染注册表（落成 ext → 渲染器），不写资源类型名、不改内核协议。
 let autoDraftDone = false
 watch(
@@ -666,8 +666,8 @@ const rendererComp = computed(() => {
  * `schema` 类（插件市场）→ 节点自述里的候选；其余 → 不传。
  *
  * 市场是一张草稿页（没有落盘、没有正文），候选由后端随 `new_type.schema` 下发，
- * 因此取 `selectedNode.schema` 而不是 `nodeText`（D-520）。外观面板的正文是
- * `ui_prefs` 下发的 JSON 配置文本，组件自行 parse（D-521）。
+ * 因此取 `selectedNode.schema` 而不是 `nodeText`。外观面板的正文是
+ * `ui_prefs` 下发的 JSON 配置文本，组件自行 parse。
  */
 const rendererData = computed<unknown>(() => {
   const r = renderer.value
@@ -688,7 +688,7 @@ function onSave(payload: unknown) {
         // 目录由 `write` 按草稿规则完成（无需读正文，见 useVdfs.write）
       write(payload as Record<string, unknown>)
       : r && rendererPayloadIsText(r)
-        ? // 外观面板：载荷已是偏好配置的 JSON 文本，原样写回（D-521）
+        ? // 外观面板：载荷已是偏好配置的 JSON 文本，原样写回
         write(String(payload ?? ''))
         : saveText()
   // 保存成功后 renderer 重新读入同一节点，身份门闩不会重跑预填 ⇒ 表单基线仍停在旧值，

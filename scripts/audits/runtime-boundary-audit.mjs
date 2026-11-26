@@ -61,7 +61,7 @@ try {
     if (/\bsymbio\s*::/.test(code)) report(rel, '生产源码不得引用装配根 symbio')
   }
 } catch (error) {
-  console.error(red(`✗ 范围读不出：${MANIFEST} 或 ${SRC} 无法读取（D-280）: ${error.message}`))
+  console.error(red(`✗ 范围读不出：${MANIFEST} 或 ${SRC} 无法读取（）: ${error.message}`))
   process.exit(2)
 }
 

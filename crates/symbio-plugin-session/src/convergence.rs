@@ -61,7 +61,7 @@ pub enum SessionStateChange {
 
 /// 会话**收敛**手柄：把一个会话的运行态与终态落到它身上所需的那四样。
 ///
-/// ## 为什么是手柄而不是插件（[D-075](../../../docs/003-design/002-架构总览.md#d-075-卸载能力先于目录分离session-切分立三条前置会话记忆与存储留守 "DE-002-架构总览") 前置 P2）
+/// ## 为什么是手柄而不是插件（ 前置 P2）
 ///
 /// 收敛这件事的调用方是会话动作（开轮 / 收轮 / 中止收口）——它们要的就是
 /// 「打开会话（存储 + 配置）+ 取会话摘要（存储）+ 取运行态（名册）+ 写进这一份
@@ -257,7 +257,7 @@ impl Convergence {
     ///
     /// `drive` 是**本部署根**的驱动实例（会话插件经 `drive_entry` 取，收轮任务用
     /// 开轮时绑好的那一份）。这里刻意不读进程级 `declared_drive_entry()`：那是
-    /// 主根的一份，子智能体容器的会话等它会等到别人的空闲上（t29 / D-365）。
+    /// 主根的一份，子智能体容器的会话等它会等到别人的空闲上（t29 / ）。
     pub(crate) async fn project_final_turn(
         &self,
         session_id: &str,
@@ -272,8 +272,8 @@ impl Convergence {
                 e.kind == EVENT_USER_MESSAGE && e.seq.map(|seq| seq.value()) == Some(user_seq)
             })
             .cloned();
-        // 终答一落格就踢起一轮驱动，让本轮编码 / 收束贡献都在本轮之内落格（D-359 / t29）。
-        // 之后的记忆巩固**不在这里**：它的格位是债（D-268 订正），由 memory 端口的
+        // 终答一落格就踢起一轮驱动，让本轮编码 / 收束贡献都在本轮之内落格（ / t29）。
+        // 之后的记忆巩固**不在这里**：它的格位是债（ 订正），由 memory 端口的
         // 执行体在看见本轮 `memory.encoded` 之后自己还，会话不留调用点。
         if let Some(entry) = drive {
             entry.settled(session_id).await;
@@ -301,9 +301,9 @@ impl Convergence {
                 .cloned()
                 .collect();
             let waiting_on_user = waits_for_user(&waiting_events);
-            // 发言闸拒也是**正常收束**（D-067）：终答格被拒 ⇒ 不落 `final`，但轮
+            // 发言闸拒也是**正常收束**：终答格被拒 ⇒ 不落 `final`，但轮
             // 照样了结——拒绝是记录层的结论，不是静默中断。判据按**格位 + 语音键**
-            // 认（D-390）：写侧闸的否定事实落在 `(Scope, Asserted)`、载荷
+            // 认：写侧闸的否定事实落在 `(Scope, Asserted)`、载荷
             // `key = chat.assistant.final`，`root_id` 归属本轮。名字是写方的私有拼写，
             // 会话不再按名字取。
             // 没有这一支，会话停在 `working`、CLI 等不到收束（t73 的 B 侧）。
@@ -343,7 +343,7 @@ impl Convergence {
                     .and_then(Value::as_str)
                     .unwrap_or("模型调用失败")
                     .to_string();
-                // 中止不是失败（D-044 / D-165：中止与失败只在 `status` 上区分）。
+                // 中止不是失败（中止与失败只在 `status` 上区分）。
                 // 中止只落终答格（`status: "aborted"`），**不落兜底、不推失败节点**
                 // ——那两条会把「用户按下停止」说成错误，也会把中止样本记进兜底率。
                 let aborted = failed.payload.get("status").and_then(Value::as_str)
@@ -385,7 +385,7 @@ impl Convergence {
                                         // 重建按 id 合成一条，不会多出第二个 aborted。
                                         "answer_id": format!("{root_id}-text"),
                                         "principal": PRINCIPAL_MAIN,
-                                        // 对话面标记：与正常终答同一个键（`D-435`）。
+                                        // 对话面标记：与正常终答同一个键。
                                         // 中止轮不写正文节点时（`text` 为空）这一轮只剩
                                         // 用户节点上的 `aborted` 交代——不再发一条空正文。
                                         "meta": { "surface": "reply", "reason": "interrupted" },
@@ -407,7 +407,7 @@ impl Convergence {
                         .collect();
                     // 正文节点全部由 `rebuild` 从事实折出：中止前已流过正文时来自
                     // `failed` 的半截，否则来自刚落格的终答（同 id，合一条）。
-                    // 中止不推 `failed:` 节点（那是失败路径，D-044 / D-165）。
+                    // 中止不推 `failed:` 节点（那是失败路径）。
                     let nodes: Vec<cm::ChatNode> =
                         crate::rebuild::rebuild(&fresh_waiting, &CHAT_VOCAB, &MESSAGE_VOCAB)
                             .into_iter()
@@ -516,7 +516,7 @@ impl Convergence {
                 }
                 // 失败节点**单独一批**走 `Here`：重建节点的事实已由运行器落过，
                 // 整批翻成 `Here` 会给它们补第二个 owner；而这条节点没有别的格
-                // 可搭车（兜底格 `text` 为空），必须靠自己的诞生事实进读面（D-381）。
+                // 可搭车（兜底格 `text` 为空），必须靠自己的诞生事实进读面。
                 append_and_publish(
                     &session,
                     vec![failed_node],
@@ -564,7 +564,7 @@ impl Convergence {
             // 发言闸拒：模型在流式期已经把正文推上实时面（`llm_emit_message`），但这一轮
             // 没有终答格来接替它（`chat.assistant.final` 被写侧闸拒）——不撤回落空的那条，
             // 转写里就留下一条永远 `streaming` 的助手正文，与「拒了就不入格」相矛盾
-            // （t71 ⑧）。撤销复用既有的 `removed` 帧，不新造状态（同 D-347 的口径）。
+            // （t71 ⑧）。撤销复用既有的 `removed` 帧，不新造状态（同  的口径）。
             if speech_denied {
                 let ghosts: Vec<cm::ChatNode> = {
                     let state = self.active.get_or_create(session_id).await;
@@ -653,7 +653,7 @@ impl Convergence {
     }
 }
 
-/// 本轮是否仍停在「等用户动作」的卡上（D-368）。
+/// 本轮是否仍停在「等用户动作」的卡上。
 ///
 /// 停在卡片上 = 某张 `needs_user_action` 的产物之后**没有**答复 / 批准事实。
 /// 两张决策事实在消费侧各有一个读法：

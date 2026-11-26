@@ -32,7 +32,7 @@
  * 否则一次 `--print-baseline` 重写就能把「新增一处债」和「修好一处」在 diff 里抹成同一形态。
  *
  * 账本面按**目录**发现（`scripts/baselines/*.json`，控制面除外），不维护第二份清单：
- * 新增一份基线文件自动进入本审计，不需要谁记得登记（`D-491`）。
+ * 新增一份基线文件自动进入本审计，不需要谁记得登记（``）。
  *
  * ## `baseline-allow` 的形状
  *
@@ -41,12 +41,12 @@
  *
  * ```json
  * "baseline-allow": [
- *   "sha256:old→sha256:new 驱动循环体随 D-324 迁移，逻辑逐字未动 D-324",
- *   "lp003WorldRoots/entry.rs→(none) 该文件的世界词根已归零 D-324"
+ *   "sha256:old→sha256:new 驱动循环体随  迁移，逻辑逐字未动 ",
+ *   "lp003WorldRoots/entry.rs→(none) 该文件的世界词根已归零 "
  * ]
  * ```
  *
- * 解析口径：`<old>→<new> <理由> D-NNN`（`D-NNN` 必须真的存在于 `docs/` 里）。
+ * 解析口径：`<old>→<new> <当前理由>`（理由非空且具体，不挂历史案例编号）。
  * **它只对「删除 / 机制面变化」开放**；计数上调与新增键永远不接受 allow——那两件事
  * 的正确答案不是「登记一条豁免」，而是「把这处红修掉」。
  *
@@ -81,7 +81,6 @@ import path from 'node:path'
 import { fileURLToPath } from 'node:url'
 import { spawnSync } from 'node:child_process'
 import { red, green, dim } from '../color.mjs'
-import { hasDecisionAnchor } from '../decision-anchors.mjs'
 import { canonicalPath } from '../gate.d/_shared.mjs'
 
 const argv = process.argv.slice(2)
@@ -99,7 +98,7 @@ const CP_REL = 'scripts/baselines/control-plane.json'
 const META = new Set(['note', 'baseline-allow'])
 
 /**
- * 账本里的路径按 D-559 的历史别名折算后再比：合并基里的旧 crate 路径与现在的新路径
+ * 账本里的路径按  的历史别名折算后再比：合并基里的旧 crate 路径与现在的新路径
  * 指的是同一格。只折算路径片段，不动符号名与散文；不折算就会把「搬家」误判成
  * 「清掉 32 格旧债 + 新增 32 格新债」（实测 64 项假红）。
  */
@@ -142,16 +141,16 @@ function allowRecords(obj) {
   const malformed = []
   const list = Array.isArray(obj?.['baseline-allow']) ? obj['baseline-allow'] : []
   for (const item of list) {
-    const m = /^(.+?)→(.+?)\s+(.+?)\s+(D-\d{3})$/.exec(String(item).trim())
+    const m = /^(.+?)→(.+?)\s+(.+)$/.exec(String(item).trim())
     if (!m) {
       malformed.push(String(item))
       continue
     }
-    if (!hasDecisionAnchor(m[4].slice(2), ROOT)) {
-      malformed.push(`${item}（决策 ${m[4]} 不存在）`)
+    if (m[3].trim().length < 8) {
+      malformed.push(`${item}（当前理由太短）`)
       continue
     }
-    records.push({ from: normPaths(m[1]), to: normPaths(m[2]), reason: m[3], adr: m[4], raw: String(item), used: false })
+    records.push({ from: normPaths(m[1]), to: normPaths(m[2]), reason: m[3], raw: String(item), used: false })
   }
   return { records, malformed }
 }
@@ -250,7 +249,7 @@ function compareMap(rel, objName, base, now, allow) {
     if (!nowKeys.has(k)) {
       const hit = findAllow(allow.records, key(objName, k), '(none)')
       if (!hit) {
-        report('BS-003', rel, `${objName}/${k} 从基线删除 —— 清债必须留下 \`baseline-allow: ${objName}/${k}→(none) <理由> D-NNN\``)
+        report('BS-003', rel, `${objName}/${k} 从基线删除 —— 清债必须留下 \`baseline-allow: ${objName}/${k}→(none) <当前理由>\``)
       }
       continue
     }
@@ -272,7 +271,7 @@ function compareArray(rel, objName, base, now, allow) {
     if (nowSet.has(item)) continue
     const hit = findAllow(allow.records, key(objName, item), '(none)')
     if (!hit) {
-      report('BS-003', rel, `${objName} 删除项 ${item} —— 清债必须留下 \`baseline-allow: ${objName}/${item}→(none) <理由> D-NNN\``)
+      report('BS-003', rel, `${objName} 删除项 ${item} —— 清债必须留下 \`baseline-allow: ${objName}/${item}→(none) <当前理由>\``)
     }
   }
 }
@@ -321,7 +320,7 @@ for (const field of ['file', 'hash']) {
       'BS-004',
       CP_REL,
       `mechanism.${field} 从 ${before} 变为 ${after} —— 机制面演进必须留下 ` +
-        `\`baseline-allow: ${before}→${after} <理由> D-NNN\``,
+        `\`baseline-allow: ${before}→${after} <当前理由>\``,
     )
   }
 }
@@ -414,7 +413,7 @@ function compareLedger(rel, base, now, allow) {
           'BS-006',
           rel,
           `新增格 \`${cell}\` —— 账本里长出新的一格就是登记新债；` +
-            `同批写 \`baseline-allow: (none)→${cell} <理由> D-NNN\` 或把那处红修掉`,
+            `同批写 \`baseline-allow: (none)→${cell} <当前理由>\` 或把那处红修掉`,
         )
       }
       continue
@@ -426,7 +425,7 @@ function compareLedger(rel, base, now, allow) {
           'BS-007',
           rel,
           `\`${cell}\` 的计数 ${was} → ${value} —— 把基线对齐到现状就是洗红；` +
-            `同批写 \`baseline-allow: ${cell}=${was}→${cell}=${value} <理由> D-NNN\``,
+            `同批写 \`baseline-allow: ${cell}=${was}→${cell}=${value} <当前理由>\``,
         )
       }
       continue
@@ -436,7 +435,7 @@ function compareLedger(rel, base, now, allow) {
         'BS-007',
         rel,
         `\`${cell}\` 的指纹被改写（${String(was).slice(0, 20)}… → ${String(value).slice(0, 20)}…）—— ` +
-          `机制面演进必须署名：\`baseline-allow: ${was}→${value} <理由> D-NNN\``,
+          `机制面演进必须署名：\`baseline-allow: ${was}→${value} <当前理由>\``,
       )
     }
   }
@@ -446,7 +445,7 @@ function compareLedger(rel, base, now, allow) {
       report(
         'BS-003',
         rel,
-        `格 \`${cell}\` 从账本删除 —— 清债必须留下 \`baseline-allow: ${cell}→(none) <理由> D-NNN\``,
+        `格 \`${cell}\` 从账本删除 —— 清债必须留下 \`baseline-allow: ${cell}→(none) <当前理由>\``,
       )
     }
   }
@@ -476,7 +475,7 @@ for (const rel of ledgerBaselines(ROOT)) {
   }
   const allow = allowRecords(nowObj)
   for (const m of allow.malformed) {
-    report('BS-005', rel, `\`baseline-allow\` 记录不合法：${m} —— 必须写「<old>→<new> <理由> D-NNN」`)
+    report('BS-005', rel, `\`baseline-allow\` 记录不合法：${m} —— 必须写「<old>→<new> <当前理由>」`)
   }
   compareLedger(rel, baseObj, nowObj, allow)
   for (const r of allow.records) {
@@ -497,7 +496,7 @@ for (const [rel, parsed] of [
   [CP_REL, cpAllow],
 ]) {
   for (const m of parsed.malformed) {
-    report('BS-005', rel, `\`baseline-allow\` 记录不合法：${m} —— 必须写「<old>→<new> <理由> D-NNN」`)
+    report('BS-005', rel, `\`baseline-allow\` 记录不合法：${m} —— 必须写「<old>→<new> <当前理由>」`)
   }
   for (const r of parsed.records) {
     if (r.used) continue

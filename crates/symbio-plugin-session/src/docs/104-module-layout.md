@@ -11,10 +11,9 @@ impl: done
 
 > 状态：**现行规范**（域划分、判据与落点）
 > 范围：`crates/symbio-plugin-session/src/`（存储与生命周期，**留守层**）与
-> `crates/symbio-plugin-loop/src/`（单环驱动器，[D-086](../../../../docs/003-design/014-单环一表.md "DE-014-单环一表") 切出的独立插件）
-> 判据的「为什么」与被否决的方案见 [D-039](../../../../docs/003-design/018-模块架构.md "DE-018-模块架构")
-> （`session` 按域重组）与 [D-086](../../../../docs/003-design/014-单环一表.md "DE-014-单环一表")
-> （驱动器成片、跨墙通货闭族）；文件清单与行数属**结构事实**，由代码生成，
+> `crates/symbio-plugin-loop/src/`（单环驱动器，独立插件）
+> 划分的现行边界见 [DE-018-模块架构](../../../../docs/003-design/018-模块架构.md "DE-018-模块架构")；
+> 文件清单与行数属**结构事实**，由代码生成，
 > 见 [当前事实表](../../../../docs/004-ref/006-当前事实表.md "RE-006-当前事实表")，本文件不抄。
 > 相关：[`../../loop/README.md`](../../../symbio-plugin-loop/README.md "crates/symbio-plugin-loop/README")（环的形状与收口点，主循环的现行 owner）、
 > [`../README.md`](../../README.md "crates/symbio-plugin-session/README")（现行机制与配置面）
@@ -31,7 +30,7 @@ impl: done
 | 4 | **域内分层，测试恒外置**：生产与测试分文件，一个实现文件对应一个测试文件 | 读实现要在大段测试里翻找生产函数 |
 | 5 | **跨域共享面走门面**：跨域共享符号以 `pub` + 域根 `pub use` 导出；`pub(super)` 只表达**域内部分工** | 跨域判据被 `pub(super)` 私藏，调用方被迫绕道或复制一份 |
 
-论证（为什么是这五条、否决了哪些切法）在 D-039；本文件只回答**现在怎么分、
+五条判据的论证与边界见 [DE-018-模块架构](../../../../docs/003-design/018-模块架构.md "DE-018-模块架构")；本文件只回答**现在怎么分、
 新代码落在哪**。两者互不复述。
 
 ---
@@ -44,7 +43,7 @@ impl: done
 |---|---|
 | `mod.rs` | 模块声明与公共面收敛 |
 | `plugin.rs` + `plugin/{nodes,vdfs_provider,words}.rs` | 插件装配：路由分发与**退役路由的防回潮断言**、`traverse` 能力收集、VDFS 会话节点树与路径模型、会话域协议词表 |
-| `orchestrator.rs` + `orchestrator/{entry,consume,runner,failure,sink,rate_limit,stop,consolidate}.rs` | 会话侧编排与**一轮的生命周期**：`TurnLauncher`（`runner.rs`）装配交付包并派发 `loop/<sid>` 的 `run_turn`，`consume.rs` 等待驱动器动作返回并按结局收尾（看门狗 / 接管 / 失败）；`Convergence`（`failure.rs` / `convergence.rs`）做状态广播与失败收口；`stop.rs` 保证 Stop 钩子恰好一次；`consolidate.rs` 是压缩快照的持令牌落格口（动作 `session/<sid>/_run/consolidate`）；`sink.rs` 与 `rate_limit.rs` 是执行期事件出口与发送限流。**主循环本体已不在本插件**（D-086 §8） |
+| `orchestrator.rs` + `orchestrator/{entry,consume,runner,failure,sink,rate_limit,stop,consolidate}.rs` | 会话侧编排与**一轮的生命周期**：`TurnLauncher`（`runner.rs`）装配交付包并派发 `loop/<sid>` 的 `run_turn`，`consume.rs` 等待驱动器动作返回并按结局收尾（看门狗 / 接管 / 失败）；`Convergence`（`failure.rs` / `convergence.rs`）做状态广播与失败收口；`stop.rs` 保证 Stop 钩子恰好一次；`consolidate.rs` 是压缩快照的持令牌落格口（动作 `session/<sid>/_run/consolidate`）；`sink.rs` 与 `rate_limit.rs` 是执行期事件出口与发送限流。**主循环本体已不在本插件** |
 | `convergence.rs` | 广播出口：会话运行态的唯一发射器与可恢复错误的收敛出口（3c-1 把存储句柄收成 `Convergence`，6b-③ 随留守层归位到插件根） |
 
 ### 1.2 领域层（留守：存储与生命周期）
@@ -53,16 +52,16 @@ impl: done
 |---|---|---|
 | 会话读写 | `chat_session.rs` + `chat_session/{read,write}.rs` | 读路径：三层清理与 `User` 轮次对齐的上下文装配；写路径：保存边界（轮数对齐裁剪 / 历史工具链裁剪 / 归档配对清理） |
 | 变更入口 | `commands.rs` | 会话与消息的**写语义**：新建 / 覆盖 / 删除会话，改写 / 截断 / 清空消息。VDFS（`write` / `delete` / `action`）与编排入口都只是它的调用方——「谁能改会话」的答案只在这一处（模块头说明它为什么仍在 `impl SessionPlugin` 上） |
-| 转写 | `transcript.rs` + `transcript/{frames,deliver,publish,inbox,supplements,autonomous}.rs` | 消息级变更的**唯一写入点与发射器**、帧构造 / 日志合并 / 合帧窗口（`deliver.rs`）、**落库回包的唯一出口**（`publish.rs`——「谁落库、谁发帧」那条 §3.4 硬不变量，原先住在 `plugin.rs` 里，被切的两片因此反过来引用汇编层，归位理由见该文件头）、状态帧与删除帧出口、收件箱入队与消费挑选、轮边界把 n 条补充并成**一条** `User` 消息，且「取批 + 合并 + 成形」的整体同步单入口 `take_supplement_batch_sync` 也住在本域（`supplements.rs`——存储裁剪按 User 轮次计数，逐条追加会多吃掉保留预算；单入口归位见 [D-081](../../../../docs/003-design/014-单环一表.md "DE-014-单环一表") 裁决三）、core 执行期转写写柄的桥 `compression_writer`（`transcript.rs`——驱动器不再把 `Arc<Mutex<Transcript>>` 持作字段，经本域构造的写柄落格，裁决一第 3 条）、自主开轮的落格窗口（`autonomous.rs`，写臂识别 `meta.trigger` 后经它开这一轮） |
-| 持久化 | `store/mod.rs` | 一种磁盘布局、一种驻留方式（落盘；D-329）；没有可切换的存储后端 |
-| 运行态 | `active.rs` + `runtime.rs` | `active.rs`：进程内运行态注册表（待消费请求、请求 id、中止信号、变更订阅）；`runtime.rs`：上一轮结局从生命周期事实折出的**投影**（D-083 §5.2） |
+| 转写 | `transcript.rs` + `transcript/{frames,deliver,publish,inbox,supplements,autonomous}.rs` | 消息级变更的**唯一写入点与发射器**、帧构造 / 日志合并 / 合帧窗口（`deliver.rs`）、**落库回包的唯一出口**（`publish.rs`——「谁落库、谁发帧」那条 §3.4 硬不变量，原先住在 `plugin.rs` 里，被切的两片因此反过来引用汇编层，归位理由见该文件头）、状态帧与删除帧出口、收件箱入队与消费挑选、轮边界把 n 条补充并成**一条** `User` 消息，且「取批 + 合并 + 成形」的整体同步单入口 `take_supplement_batch_sync` 也住在本域（`supplements.rs`——存储裁剪按 User 轮次计数，逐条追加会多吃掉保留预算；单入口归位见 [DE-018-模块架构](../../../../docs/003-design/018-模块架构.md "DE-018-模块架构")），core 执行期转写写柄的桥 `compression_writer`（`transcript.rs`——驱动器不再把 `Arc<Mutex<Transcript>>` 持作字段，经本域构造的写柄落格）、自主开轮的落格窗口（`autonomous.rs`，写臂识别 `meta.trigger` 后经它开这一轮） |
+| 持久化 | `store/mod.rs` | 一种磁盘布局、一种驻留方式（落盘）；没有可切换的存储后端 |
+| 运行态 | `active.rs` + `runtime.rs` | `active.rs`：进程内运行态注册表（待消费请求、请求 id、中止信号、变更订阅）；`runtime.rs`：上一轮结局从生命周期事实折出的**投影**（[DE-001-核心架构](../../../../docs/003-design/001-核心架构.md "DE-001-核心架构") §5.2） |
 | 能力与选项收集 | `capabilities.rs` | `collect_capabilities`（工具）与 `collect_options`（选项字段）两个 traverse 收集器，同处一地 |
 | 心跳 | **不住本插件**：宿主注入的调度能力 | 空闲扫描与触发调度不在本插件；本插件只提供两处交接面：收件箱写臂识别 `meta.trigger`（`plugin/nodes.rs::trigger_declaration`）与自主开轮的落格窗口（`transcript/autonomous.rs`） |
 | 选项 | `options/mod.rs` | 会话自有选项的字段声明（`build_option_definition`；收集器在 `capabilities.rs`） |
 | 工作目录 | `workdir/{mod,fs_watcher}.rs` | 会话工作目录的 VDFS 实现（`<根>/session/<id>/workdir/<rel>`）与其下的文件系统监听 |
-| 消息变更事实 | `message_events.rs` | 「编辑 / 截断」入格的写方（D-053）：`commands::patch_message` / `commands::truncate_messages` 经唯一写入口落事实，重建读路径不会让旧内容复活 |
+| 消息变更事实 | `message_events.rs` | 「编辑 / 截断」入格的写方：`commands::patch_message` / `commands::truncate_messages` 经唯一写入口落事实，重建读路径不会让旧内容复活 |
 | 统计读数 | `stats.rs` | `session/stats` 的只读投影出口 |
-| worker 进展 | `worker_progress.rs` | Q3（worker 进展）的**唯一归属**：`WorkerProgress` 类型、旧落库读法（`progress_of`）与 WAL 读法（`progress_from_wal`）、逐子会话编排的存储侧单入口 `for_session`——驱动器只调这一个入口，「枚举 + 加载 + 复核 + 读法」这条链不在驱动器侧自拼（[D-081](../../../../docs/003-design/014-单环一表.md "DE-014-单环一表") 裁决一第 4 条） |
+| worker 进展 | `worker_progress.rs` | Q3（worker 进展）的**唯一归属**：`WorkerProgress` 类型、旧落库读法（`progress_of`）与 WAL 读法（`progress_from_wal`）、逐子会话编排的存储侧单入口 `for_session`——驱动器只调这一个入口，「枚举 + 加载 + 复核 + 读法」这条链不在驱动器侧自拼 |
 
 ### 1.3 支撑单件（一文件一职责，留守）
 
@@ -82,16 +81,16 @@ impl: done
 | 主循环 | `chat_loop.rs` + `chat_loop/{state,inputs,turn,compose,delegate,drive}.rs` · `loop_rows.rs` · `report_exec.rs` · `stage_events.rs` · `turn_runner.rs` · `turn_exec.rs` | 环骨架、状态与契约、输入准备、**行表**、汇报的落点与能力口、阶段事实、执行引擎与单环派发器。`loop_rows.rs` 每行 = `Decl` 数据（`owes` / `until` / `unless` + 全局 `prio`）；**只有一张绑定表**，派发器 `turn_exec::drive` 向 `ring::drive` 传全表，结论由引擎现读；声明与视图在 `symbio_platform::kernel::decl`（DE-051） |
 | 上下文与请求 | `context.rs` + `context/{pipeline,view,prompt}.rs` · `message_build.rs` · `tokenizer.rs` · `model_chat.rs` | 压缩 / 注入 / 请求视图、助手轮装配、Token 估算与头尾切分、Model 推理请求协议 |
 | 工具与分派 | `tools.rs` + `tools/{tool_executor,tool_result_guard}.rs` · `tool_dispatch.rs` | 模型侧工具从分发到结果处理的全链路、L0 结果守卫与滚动存档 |
-| 事实与记忆 | `derived_facts.rs` · `memory_events.rs` · `task_events.rs` · `resume.rs` | 轮末派生事实（承诺 / 任务表 / 熔断 + 记忆三段）经会话动作面落格；恢复与历史重写。技能观测与校准随技能能力住 `symbio-plugin-skill`（D-262） |
+| 事实与记忆 | `derived_facts.rs` · `memory_events.rs` · `task_events.rs` · `resume.rs` | 轮末派生事实（承诺 / 任务表 / 熔断 + 记忆三段）经会话动作面落格；恢复与历史重写。技能观测与校准随技能能力住 `symbio-plugin-skill`（见 [DE-041-技能编译与自我改进](../../../../docs/003-design/041-技能编译与自我改进.md "DE-041-技能编译与自我改进")） |
 
 > 两片的连接只有三条：**触发**（session → `loop/<sid>` `run_turn`）、**回程**（动作返回 `TurnReport`）、
-> **会话侧读写**（loop → `session/<sid>/_run/<op>`）。任何第四条连接都要先改 D-086。
+> **会话侧读写**（loop → `session/<sid>/_run/<op>`）。任何第四条连接都要先完成 [DE-018-模块架构](../../../../docs/003-design/018-模块架构.md "DE-018-模块架构") 的边界评审。
 
 > 依赖方向是**规范不是机制**——本仓没有判定它的审计，由评审把持：编排层可以
 > 引用领域层，领域层不得反向引用编排层（`plugin.rs` / `orchestrator/` 即会话侧
 > 编排层；驱动器侧的 `plugin.rs` / `chat_loop.rs` 同理）。跨插件引用规则由
 > [`scripts/audits/plugin-entry-audit.mjs`](../../../../scripts/audits/plugin-entry-audit.mjs)
-> 的 **E-009**（不引兄弟插件）与 **E-013**（loop 的 import 根 ⊆ D-083 §4 闭族）
+> 的 **E-009**（不引兄弟插件）与 **E-013**（loop 的 import 根 ⊆ [DE-001-核心架构](../../../../docs/003-design/001-核心架构.md "DE-001-核心架构") §4 闭族）
 > 执行；内核深引是 `core-export-audit` 的 **C-002**——原 E-010 已迁走，避免两个脚本
 > 各判一遍（[`009-plugin-route-address.md`](../../../../docs/003-design/006-插件路由与地址.md "DE-006-插件路由与地址")
 > 只收地址类规则 E-001 ~ E-007）。
@@ -112,7 +111,7 @@ impl: done
 ### 1.5 共享词表与本插件投影
 
 跨插件共享的参数表住平台 SDK；会话私有的实现与同源测试住本插件 `src/projections/`。
-归属按生产消费方分布确定（D-534 / D-561），不按目录名保留第二份实现。
+归属按生产消费方分布确定，不按目录名保留第二份实现。
 
 | 落点 | 装什么 | 取用方 |
 |---|---|---|
@@ -120,7 +119,7 @@ impl: done
 | `symbio_platform::sdk::round::node_build` | 内核规则 `result_node_id` 的既有转发路径 | `symbio-plugin-local` 经门面 |
 | `crate::projections` | 转写、分支、变更、省略、汇报记录、节点构造及测试期保真度判据 | 本插件生产代码与测试 |
 
-任务词汇面 `TaskVocab` 随唯一生产消费方归 `symbio-plugin-task::decl`（D-565），不再是会话共享词表。
+任务词汇面 `TaskVocab` 随唯一生产消费方归 `symbio-plugin-task::decl`，不再是会话共享词表。
 任务声明、派发机制与行为登记分别归 loop owner 和平台 SDK；它们不属于会话投影。
 `prompt_fidelity` 没有生产消费方，只在测试构建中存在。
 
@@ -186,7 +185,7 @@ X/mod.rs + X/tests.rs 模块文件是 mod.rs 的（如 store/、workdir/）：
 - **不动机制语义**：分工只回答「代码落在哪」，不改判定、阈值、文案、执行顺序。
 - **不动单点结构**：`persist_turn` 与压缩内核的内部结构是「单一实现」约束的落点，
  拆开会让两条入口各自维护一套流水线——见 [`../../loop/README.md`](../../../symbio-plugin-loop/README.md "crates/symbio-plugin-loop/README") 的环体一节。
-- **不顺手收窄 / 放宽可见性**：搬移阶段只做归位；可见性调整是独立决策，
+- **不顺手收窄 / 放宽可见性**：搬移阶段只做归位；可见性调整是独立评审，
  要有跨域共享面或域内分工的判据支撑（§3）。
 - **不抄结构快照**：文件数、行数、代码规模一律以
  [当前事实表](../../../../docs/004-ref/006-当前事实表.md "RE-006-当前事实表") 为准；本文件若与它冲突，以它为准。

@@ -175,33 +175,6 @@ if (rsFiles.length === 0) {
 const feFiles = FE_ROOTS.flatMap((r) => collectSource(r, isFrontend))
 const toolFiles = TOOL_ROOTS.flatMap((r) => collectSource(r, isTool))
 
-/**
- * 决策正文的 `.rs::符号` 证据锚点：决策段此前整段跳过 ⇒ 「证据全假」在这里是看不见的。
- * 中间有一段时间按冻结表放行「裁决时点的旧锚点」；那张表已按自己的退役条件撤下
- * （`D-483`），现在只有一条判据：指得到就过，指不到就红——历史锚点改写成普通文字。
- */
-const DECISION_RS_ANCHOR = /`([A-Za-z0-9_][A-Za-z0-9_./-]*?\.rs)(::[A-Za-z0-9_]+)`/g
-const rsTextCache = new Map()
-function rsText (f) {
-  if (!rsTextCache.has(f)) rsTextCache.set(f, readFileSync(f, 'utf8'))
-  return rsTextCache.get(f)
-}
-function rsWordIn (text, sym) {
-  const esc = sym.replace(/[.*+?^${}()|[\]\\]/g, '\\$&')
-  return new RegExp(`(?:^|[^A-Za-z0-9_])${esc}(?:$|[^A-Za-z0-9_])`).test(text)
-}
-function auditDecisionAnchors (rel, line, lineNo) {
-  for (const m of line.matchAll(DECISION_RS_ANCHOR)) {
-    const base = m[1]
-    const sym = m[2].slice(2)
-    const anchor = `${base}${m[2]}`
-    const cands = rsFiles.filter((p) => p.replace(/\\/g, '/').endsWith('/' + base))
-    if (cands.some((f) => rsWordIn(rsText(f), sym))) continue
-    report(rel, lineNo, 'D-005',
-      `决策正文的证据锚点指不到：\`${anchor}\`——改指现行 owner，或把历史锚点写成普通文字`)
-  }
-}
-
 const identRe = /[A-Za-z_][A-Za-z0-9_]*/g
 /** D-005 的语料：只有 Rust */
 const idents = new Set()
@@ -594,18 +567,7 @@ function docBase (rel) {
 
 for (const rel of mdFiles) {
   const lines = readFileSync(join(REPO_ROOT, rel), 'utf8').split(/\r?\n/)
-  // 决策段（`### D-NNN`）与 ADR 正文同性质：记的是**当时**的设计，其中的符号可能早已改名 / 删除。
-  // `adr` kind 已废除、正文折进设计文档的这一节，故豁免按**节**判，而不是按目录判。
-  // 段内 `.rs::符号` 证据锚点按现行代码核验（`D-483` 撤下冻结表后不再有豁免面）：
-  // 指得到照常通过，指不到即判红（见 auditDecisionAnchors）。
-  let inDecision = false
   lines.forEach((line, i) => {
-    if (/^#{2,6}\s+D-\d{3}[a-z]?\b/.test(line)) inDecision = true
-    else if (/^#{1,2}\s/.test(line)) inDecision = false
-    if (inDecision) {
-      auditDecisionAnchors(rel, line, i + 1)
-      return
-    }
     // 承认通道：理由非空才生效。作用域是**本行或前一行**（与 D-006 / D-010 同一条约定）——
     // 表格行里塞进 HTML 注释会把这一行写花，机制不该逼人为了豁免去破坏排版。
     const allow = line.match(ALLOW_RE) ?? (i > 0 ? lines[i - 1].match(ALLOW_RE) : null)

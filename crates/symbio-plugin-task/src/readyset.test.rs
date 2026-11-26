@@ -7,7 +7,7 @@
 //!
 //! 这些判据搬出前住在 `crates/symbio-platform/src/sdk/actors/mod.test.rs` 的「彩排：任务树与返工」
 //! 一节（as-of 那一半在 `crates/symbio-plugin-session/src/transcript/inbox.test.rs`）。
-//! `D-289` 把折叠搬到 owner 包，判据跟着走——**改的是住在哪个 crate，不是算式**：
+//!  把折叠搬到 owner 包，判据跟着走——**改的是住在哪个 crate，不是算式**：
 //! 用例里的事件形状与搬出前逐条同构（开格带 `depends_on`、终态带溯源、租约带 `until_ms`）。
 //!
 //! ## 为什么这里的 `now` 是小得离谱的数
@@ -188,9 +188,9 @@ fn the_ready_set_is_dependency_closed_and_advances_one_node_at_a_time() {
     );
 }
 
-/// 容量随配置事实走（`D-490`）：求值口从切片里的 `session.config` 读 `readyset_cap`。
+/// 容量随配置事实走：求值口从切片里的 `session.config` 读 `readyset_cap`。
 ///
-/// 之前这件事写在类型上（求值口没有形参通道 ⇒ 视图不设容量）；`D-252` 的判据把通道
+/// 之前这件事写在类型上（求值口没有形参通道 ⇒ 视图不设容量）； 的判据把通道
 /// 补上了——容量是宿主本轮决定并已落格的事实，同一份史回放必然得到同一个容量。
 /// 折叠本体（[`ready_all`]）仍然无界：「谁就绪、什么序」不随配置变，截断是读者层。
 #[test]
@@ -418,7 +418,7 @@ fn an_n_step_chain_advances_exactly_one_task_at_a_time() {
 /// 声明的视图在冻结声明表里按名字读得出，且读出的就是折叠那一份（含生效容量）。
 ///
 /// 这一条钉的是「owner 交的是同一张表」：`session` 的统计列与本包的调度段读的是同一个
-/// `eval`，容量都从切片里的配置事实取（`D-490`）——两侧的前缀必然同源。视图名若改名、
+/// `eval`，容量都从切片里的配置事实取——两侧的前缀必然同源。视图名若改名、
 /// 或这条 `ViewDecl` 从 `decl.rs::VIEWS` 里掉出去，这条先红（报表登记的 `views` 指向
 /// 同一个名字，由 `decl.test.rs` 的登记用例守）。
 #[test]

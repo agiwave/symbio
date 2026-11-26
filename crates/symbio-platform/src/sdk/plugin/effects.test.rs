@@ -78,7 +78,7 @@ fn undeclared_tool_produces_nothing() {
 }
 
 /// 声明了就产生：草稿带词干、带溯源，而信封（轮号 / 归属 / 时刻）不在草稿里——
-/// 行为无权指定「这笔账记在哪一轮」，那是写口的事（DE-026 D-252）。
+/// 行为无权指定「这笔账记在哪一轮」，那是写口的事（DE-026 ）。
 #[test]
 fn declared_tool_produces_draft_with_anchor() {
     let i = input(&[TEST_TASK]);
@@ -127,7 +127,7 @@ fn handlers_are_sorted_by_owner() {
 /// 富化与效果走同一套选法：没声明就没有补充字段，声明了才补。
 ///
 /// 这条判据把 `annotate` 钉在**声明**上而不是名字上——文件变更那一路能迁出 core，
-/// 靠的就是这一点（D-214）。
+/// 靠的就是这一点。
 #[test]
 fn annotations_follow_the_declaration() {
     let undeclared = input(&[]);
@@ -140,7 +140,7 @@ fn annotations_follow_the_declaration() {
     assert_eq!(got[0].1, serde_json::json!("local/todo_write"));
 }
 
-/// 富化只需要「发生了什么」，因此**不**要求宿主面：调用收口就能算（D-214 第 1 条）。
+/// 富化只需要「发生了什么」，因此**不**要求宿主面：调用收口就能算（ 第 1 条）。
 ///
 /// 判据形态：`annotations` 的入参是 `EffectInput`，编译期就交不出 `turn` / `principal`。
 #[test]
@@ -152,7 +152,7 @@ fn annotations_do_not_need_the_host_face() {
 
 /// `facts()` 按发生顺序串两片历史：轮初的在前，本轮刚落格的在后。
 ///
-/// 这是 D-214 第 2 条的存在理由——同轮两个效果要互相看得见，否则第二条声明会把
+/// 这是  第 2 条的存在理由——同轮两个效果要互相看得见，否则第二条声明会把
 /// 第一条刚开的格再开一次。
 #[test]
 fn facts_chain_snapshot_then_applied() {
@@ -172,7 +172,7 @@ fn facts_chain_snapshot_then_applied() {
     assert_eq!(ids, ["e1", "e2"]);
 }
 
-// ── 前置判断（D-219）────────────────────────────────────────────────
+// ── 前置判断────────────────────────────────────────────────
 
 /// 一个只管前置判断的实现：读数里「已收回」⇒ 拒绝；同时验证它**不造格**。
 struct Gatekeeper;

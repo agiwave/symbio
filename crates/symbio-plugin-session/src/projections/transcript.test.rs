@@ -1,4 +1,4 @@
-//! 转写的**折叠**判据（D-053）。
+//! 转写的**折叠**判据。
 //!
 // doc-link-allow D-004: 同上，「四格 → 三角色」是静态映射非版本改造
 //! 与「四格 → 三角色」的基本口径分开成文件：那些是**追加**，折叠是**改写**。
@@ -16,7 +16,7 @@ use symbio_platform::sdk::test_fixtures::{
 /// 请求包里的文本：条目按 `exclude_from_context` 过滤后取正文。
 ///
 /// 旧 `TranscriptView::to_messages` 与随后的 `PromptMessage::from` 都只做这一步
-/// （后者在 D-448 一并删掉：合成 `tool_call_id` 的规则只该有一份，住组装请求那一侧）。
+/// （后者在  一并删掉：合成 `tool_call_id` 的规则只该有一份，住组装请求那一侧）。
 /// 判据的口径不变——「界面文本不进请求包」。
 fn sent_texts(view: &super::TranscriptView) -> Vec<String> {
     view.entries
@@ -441,7 +441,7 @@ fn a_snapshot_report_node_stays_out_of_the_request_package() {
     );
 }
 
-// ── 分支的读法（D-173）──────────────────────────────────────────────────
+// ── 分支的读法──────────────────────────────────────────────────
 //
 // 这一组钉的是「**送给模型的那一份**只有一支」——它是重试唯一的外部可见效果。
 // 标注与选中态本身在 `projection::branch` 的用例里钉，这里只钉折叠之后的**请求包**。

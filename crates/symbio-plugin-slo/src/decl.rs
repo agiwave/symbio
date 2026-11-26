@@ -1,4 +1,4 @@
-//! 时延分层能力包的三条视图（名册 #13，DE-016 §8.2 / DE-008 §3.1）。
+//! 时延分层能力包的三条视图（名册 #13，DE-016 §8.2 / DE-008 §2.1）。
 //!
 //! | 视图 | 折什么 | 单片（`eval`） | N 片（`agg`） |
 //! |---|---|---|---|
@@ -12,7 +12,7 @@
 //! 分家就会出现两份「这一轮属于哪一档」。档位不是这三条视图的私有词汇，它是派发事实的
 //! 读法——判据只有一份，住在 [`declared_tier`]。
 //!
-//! ## 为什么折叠交两半（`D-281`）
+//! ## 为什么折叠交两半
 //!
 //! 读方要两个基数上的同一个口径：**这一片**的分位数（单会话列）与 **N 片**的分位数
 //! （实例级聚合）。`eval` 交前者、`agg` 交后者，两半都由本包交、同经冻结声明表被调用。
@@ -31,7 +31,7 @@ use symbio_plugin_api::reports::{ReportCtx, ReportDecl};
 use symbio_plugin_api::{Entity, Event, LatencyTier, PluginDeclarations, Verb, ViewDecl};
 
 /// 对外可读的三条视图。名字只在本 crate 出现一次（`SV-001`）；公开动作是下面的
-/// 报表登记（`D-387`），读方按报表的 `views` 取，不依赖本 crate（`D-221`）。
+/// 报表登记，读方按报表的 `views` 取，不依赖本 crate。
 pub(crate) const SLO_LATENCY: &str = "slo.latency";
 pub(crate) const SLO_FALLBACK: &str = "slo.fallback";
 pub(crate) const SLO_SPAN: &str = "slo.span";
@@ -49,7 +49,7 @@ pub(crate) const VIEWS: &[ViewDecl] = &[
     ViewDecl {
         name: SLO_LATENCY,
         ver: 1,
-        // 档位只读派发格 `scope.dispatch` 的 `tier`（`D-282`：它是档位的唯一来源；
+        // 档位只读派发格 `scope.dispatch` 的 `tier`（它是档位的唯一来源；
         // `user.message` 上的 `tier` 是历史形态，新写入不再带它）。`cost_ms` 是**信封**
         // 字段，不是载荷，`reads` 表达不了也不该表达。
         reads: &[(EVENT_SCOPE_DISPATCH, "tier")],
@@ -326,7 +326,7 @@ fn span_merged(parts: &[Value]) -> Value {
     json!({ "sessions": spans.len(), "median_ms": median })
 }
 
-/// 一条视图交的档位名。形状归 owner（`D-281`），本处只做**查表**。
+/// 一条视图交的档位名。形状归 owner，本处只做**查表**。
 fn tier_names(view: &Value) -> Vec<String> {
     view.get("by_tier")
         .and_then(Value::as_array)
@@ -390,7 +390,7 @@ fn fallback_exit_rows(fallback: &Value) -> Vec<Value> {
         .collect()
 }
 
-// 报表登记（`D-387`）：`session/stats` 的 `tiers` 顶层键与 `fleet.by_tier` 落点。
+// 报表登记：`session/stats` 的 `tiers` 顶层键与 `fleet.by_tier` 落点。
 // 两条视图（时延 / 兜底）在 owner 这里按 `tier` 并成一行；读方不再并表、不再套形状。
 symbio_plugin_api::submit_reports!([ReportDecl {
     owner: "slo",
@@ -426,7 +426,7 @@ fn tiers_report(views: &[Value], _ctx: &ReportCtx<'_>) -> Value {
                     "tier": tier,
                     "turns": f.get("turns").and_then(Value::as_u64).unwrap_or(0),
                     "fallbacks": f.get("fallbacks").and_then(Value::as_u64).unwrap_or(0),
-                    // 率是 owner 的算式，本处只搬（`D-281`：形状归 owner）。
+                    // 率是 owner 的算式，本处只搬（形状归 owner）。
                     "rate": f.get("rate").and_then(Value::as_f64).unwrap_or(0.0),
                     "p50": l.get("p50").and_then(Value::as_u64).unwrap_or(0),
                     "p95": l.get("p95").and_then(Value::as_u64).unwrap_or(0),
@@ -439,7 +439,7 @@ fn tiers_report(views: &[Value], _ctx: &ReportCtx<'_>) -> Value {
     )
 }
 
-/// 实例级落点 `fleet.by_tier`：两列各自 `agg` 之后的排版（`D-387`：`fleet_render`
+/// 实例级落点 `fleet.by_tier`两列各自 `agg` 之后的排版（`fleet_render`
 /// 是 `agg` 之后的排版，不是第三份口径）。
 fn tiers_fleet(views: &[Value], _ctx: &ReportCtx<'_>) -> Value {
     let latency = views.first().unwrap_or(&Value::Null);
@@ -450,7 +450,7 @@ fn tiers_fleet(views: &[Value], _ctx: &ReportCtx<'_>) -> Value {
     })
 }
 
-// 报表登记（`D-387`）：`session/stats` 的 `span` 顶层键与 `fleet.axes.span` 落点。
+// 报表登记：`session/stats` 的 `span` 顶层键与 `fleet.axes.span` 落点。
 // 单会话交视图原样；实例级交 `agg` 之后的值——两处都不在本插件之外再排版。
 symbio_plugin_api::submit_reports!([ReportDecl {
     owner: "slo",

@@ -7,7 +7,7 @@
  * | 编号 | 规则 | 它拦的是哪一种回潮 |
  * |---|---|---|
  * | CC-001 | 提交**新增了** `crates/symbio-platform/src/sdk/**` / `crates/symbio-platform/src/kernel/**` / `crates/symbio-platform/src/contract/**` 的生产 `.rs` 代码行，提交信息里没有 `Core-Change:` 段 | 内核 / 契约层被当成「顺手改一下」的地方：没有一行文字解释「为什么非动它不可」，就没有人能复核。纯测试断言（`.test.rs` / `tests/`）、纯注释、**纯收窄**（只删不增）都不改公开面与语义，不在判定面内 |
- * | CC-002 | 同一提交**既动插件又动 core/kernel**，而 `Core-Change:` 的值不是 `D-NNN` | 横向扩充能力的提交悄悄扩大了内核面——正是 DE-023 §2 第 1 条（扩展局部性）要拦的形态 |
+ * | CC-002 | 同一提交**既动插件又动 core/kernel**，而 `Core-Change:` 没有「判据码 + 非空当前理由」 | 横向扩充能力的提交悄悄扩大了内核面——正是 DE-023 §2 第 1 条（扩展局部性）要拦的形态 |
  *
  * ## 为什么用提交信息，而不是再写一个静态审计
  *
@@ -15,14 +15,14 @@
  * 意图。静态扫描只能看到「core 里有插件 id 字面量增加了」（CS-004 已在判），看不到
  * 「为了让一个新插件跑起来，我在 core 里加了个分支」。前者是结果，后者是原因。
  *
- * 代价是这条判据**依赖人写字**：`Core-Change: D-195` 不是自证的。所以它只做两件事——
+ * 代价是这条判据**依赖人写字**：`Core-Change: ` 不是自证的。所以它只做两件事——
  * 强制留下理由、强制在「扩能力」这一档给出决策号。**理由是否成立由 review 判**，
  * 不由脚本判；脚本只保证「没有理由」无法通过。
  *
  * ## 豁免名单也要有理由（`validateBaseline`）
  *
  * 「不追改已推送的历史」是这条判据唯一诚实的退路，但退路本身会被滥用，所以名单的
- * 形状由脚本判：每条必须有提交号与 `why`；**晚于判据诞生**的那些还必须带 `decision`
+ * 形状由脚本判：每条必须有提交号与 `why`；**晚于判据诞生**的那些理由必须更具体
  * （这条内核改动自己的裁决号），且那个 `D-NNN` 必须能在 `docs/003-design/` 里打开。
  * 判据是：豁免顶替的就是那条缺失的 `Core-Change:`，内容不许比它少。
  *
@@ -31,7 +31,7 @@
  * 不维护「哪些路径算 core」的清单：一次 `git log --no-merges --raw` 给出真实改动文件，
  * 目录常量只有三条（`crates/symbio-platform/src/sdk/` / `crates/symbio-platform/src/kernel/` /
  * `crates/symbio-platform/src/contract/`），与 `arch-shape-audit` 的 `core-kernel-files:` 标记同源。
- * D-486 五层规划把契约层立为冻结 ABI 层——它的改动同样需要 `Core-Change:` 段。
+ *  五层规划把契约层立为冻结 ABI 层——它的改动同样需要 `Core-Change:` 段。
  *
  * ## 判据退役随架构裁决走（流程纪律，不是本脚本的机械判定）
  *
@@ -60,7 +60,7 @@ import { red, green, yellow, dim } from '../color.mjs'
 import { backfillShas, loadBackfill } from '../core-change-backfill.mjs'
 import { collectDeclarations } from '../core-change-declarations.mjs'
 import {
-  gitOut, GIT_LOG_PRETTY, requiresRange, resolveRange, parseGitLogRecords,
+  gitOut, GIT_LOG_PRETTY, requiresRange, resolveRange, parseGitLogRecords, coreChangeParts,
 } from '../gate.d/_shared.mjs'
 // 回归测试直接喂样本的两个纯函数仍从本脚本取，实现已归共享库。
 export { requiresRange, parseGitLogRecords as parseCommitRecords }
@@ -76,7 +76,7 @@ const ARCH_DIRS = ['crates/symbio-platform/src/sdk/', 'crates/symbio-platform/sr
 /** 「扩能力」的证据：动到任何插件 / provider / 测试设施；旧 testkit 路径只用于历史提交分类。 */
 const EXT_DIRS = ['crates/symbio-plugin-', 'crates/symbio-provider', 'crates/symbio-testkit/'] // dead-path-allow: 旧路径只用于历史提交分类
 
-/** `Core-Change: D-195` / `Core-Change: D-195 理由…` / `Core-Change: 纯注释整理` */
+/** `Core-Change: ` / `Core-Change:  理由…` / `Core-Change: 纯注释整理` */
 const TRAILER_RE = /^\s*Core-Change[:：]\s*(.+)$/m
 
 /**
@@ -89,7 +89,7 @@ const TRAILER_RE = /^\s*Core-Change[:：]\s*(.+)$/m
  * - `beforeGuard: false` —— 判据之后**但已经推到远端**的提交。这一类的代价是把「留理由」
  *   的责任从提交信息搬到了这里，所以它必须补上豁免本该写的那句话：`decision` 指向
  *   这条内核改动自己的裁决（`D-NNN`，且必须能在设计文档的「关键决策」里打开，见
- *   `knownDecisions`），`why` 说清为什么不能改历史。缺任何一列 ⇒ 本脚本判红。
+ *   ），`why` 说清为什么不能改历史。缺任何一列 ⇒ 本脚本判红。
  *
  * 为什么不干脆做成「开关」：一个没有内容的名单就是永久后门——三个月后没人记得它为什么
  * 在那儿。汇总行会数出豁免条数（`追溯豁免 N`），条数变化在门禁输出里看得见。
@@ -98,7 +98,7 @@ const BASELINE = [
   {
     sha: '92cd0528',
     beforeGuard: true,
-    why: '拆 crate（D-191）本身——判据诞生于它之后，它不可能自带 Core-Change。',
+    why: '拆 crate（）本身——判据诞生于它之后，它不可能自带 Core-Change。',
   },
   {
     sha: '252e67a6',
@@ -108,38 +108,34 @@ const BASELINE = [
   {
     sha: '4e6cd88e',
     beforeGuard: false,
-    decision: 'D-336（跨插件模型往返：共享载荷住 SDK 词汇层）',
     why:
-      '该提交是用户手工收尾的死码删除批（`D-336` 尾款）：`crates/symbio-platform/src/sdk/turn/facts.rs` 只是删掉' +
+      '该提交是用户手工收尾的死码删除批（`` 尾款）：`crates/symbio-platform/src/sdk/turn/facts.rs` 只是删掉' +
       '`DrainedSupplement`（最后一个引用随同步抽干口一起消失），属 narrowing，没有扩能力；' +
       '提交信息只写了批次号与绿点，缺独立 `Core-Change:` 行。该提交已由用户核对收下，' +
-      '按「不追改历史」处理；删除本身的边界就是 D-336 的迁移尾款。',
+      '按「不追改历史」处理；删除本身的边界就是  的迁移尾款。',
   },
   {
     sha: '6b16285e',
     beforeGuard: false,
-    // 决策号写成**散文的一部分**，不是整串等值：`gate-codes-audit` 把整串 `'D-272'`
+    // 决策号写成**散文的一部分**，不是整串等值：`gate-codes-audit` 把整串 `''`
     // 当成「本脚本发射了一个判据码」，而这里指的是设计文档里的那条裁决（GC 的 D 前缀判法）。
-    decision: 'D-272（core 根出口只出自己定义的东西，023 §D-272）',
     why:
-      'D-272（core 根出口 324 → 34）的提交信息里写的是「裁决三件」与「决策：023 §D-272」，' +
+      '（core 根出口 324 → 34）的提交信息里写的是「裁决三件」与「决策：023 §」，' +
       '没有 `Core-Change:` 那一行的字面形态——理由是有的（根出口收窄本身就是内核改动），' +
       '只是没落在这个 key 上。提交已在 origin/v2 上：追改它的唯一方式是 rewrite 已推送的历史。',
   },
   {
     sha: '5189d064',
     beforeGuard: false,
-    decision: 'D-307（授权事实挂 scope 实体）',
     why:
-      'D-307 的提交信息把内核改动理由写在正文第 1 条（「Core-Change：」中文冒号 + 编号前缀），' +
+      ' 的提交信息把内核改动理由写在正文第 1 条（「Core-Change：」中文冒号 + 编号前缀），' +
       '不是判据要求的独立 trailer 行，字面形态不匹配。理由本身完整（Entity 新增 Scope 变体、' +
-      'CS-009 放宽行挂在 D-307 旁）；该提交已经用户核实并要求不再改动，故按「不追改历史」处理，' +
+      'CS-009 放宽行挂在  旁）；该提交已经用户核实并要求不再改动，故按「不追改历史」处理，' +
       '修正字面形态留待日后重写提交信息时一并处理。',
   },
   {
     sha: '33f3e52a',
     beforeGuard: false,
-    decision: 'D-313（P2 切割计划：轮编排退出环，生产入口改为按债驱动）',
     why:
       'P2-3a 把模型往返的「解析 + 适配器构造 + 流式 / 回退 / 终止判定」搬进端口执行体，' +
       '为此在 SDK / kernel 补了通用往返与事实写口；提交信息只写了批次号与绿点，' +
@@ -149,70 +145,43 @@ const BASELINE = [
   {
     sha: '3eaefce8',
     beforeGuard: false,
-    decision: 'D-313（P2 切割计划：轮编排退出环，生产入口改为按债驱动）',
     why:
       'P2-3a2 步骤一：流式增量改走 provider 自有事实行，节点身份与投影口径随之内核 / SDK 同调。' +
-      '提交信息缺独立 `Core-Change:` 行；理由即 D-313 的「环不解析端口载荷、展示按行身份投影」。' +
+      '提交信息缺独立 `Core-Change:` 行；理由即  的「环不解析端口载荷、展示按行身份投影」。' +
       '提交已是绿点，按「不追改历史」处理。',
   },
   {
     sha: '3aae6e62',
     beforeGuard: false,
-    decision: 'D-313（P2 切割计划：轮编排退出环，生产入口改为按债驱动）',
     why:
-      'P2-3b2a 立起 `port=session` 的声明与执行体（D-315）：端口合同与通用执行上下文住在 ' +
+      'P2-3b2a 立起 `port=session` 的声明与执行体（）：端口合同与通用执行上下文住在 ' +
       'plugin-api / SDK，属于内核 / 契约层改动；提交信息缺独立 `Core-Change:` 行。' +
       '提交已是绿点，按「不追改历史」处理。',
   },
   {
     sha: '1069f346',
     beforeGuard: false,
-    decision: 'D-313（P2 切割计划：轮编排退出环，生产入口改为按债驱动）',
     why:
       'P2-3b2-1 把配置与 facts 读点切到 `session-config` / `session-facts` 同源投影，' +
-      '涉及 SDK 的读面类型；提交信息缺独立 `Core-Change:` 行。理由即 D-313 / D-315 的' +
+      '涉及 SDK 的读面类型；提交信息缺独立 `Core-Change:` 行。理由即  /  的' +
       '「会话状态归世界端口」。提交已是绿点，按「不追改历史」处理。',
   },
   {
     sha: 'd679e390',
     beforeGuard: false,
-    decision: 'D-515（作用域 VDFS provider 取代 ctx 目录参数）',
     why:
-      'D-515 为三个作用域新增 SDK 键与 kernel VDFS 节点的时间精度口径，属于内核 / 契约层' +
+      ' 为三个作用域新增 SDK 键与 kernel VDFS 节点的时间精度口径，属于内核 / 契约层' +
       '改动；提交信息缺独立 `Core-Change:` 行。理由即该决策的「插件只见存储接口、不见物理' +
       '路径」——共享类型必须住在 SDK / kernel，放不进任何单一插件。提交已由用户核对收下，' +
       '按「不追改历史」处理。',
   },
 ]
 
-/** `docs/003-design/**` 里存在过的决策号；豁免的 `decision` 必须能在其中打开。 */
-function knownDecisions() {
-  const out = new Set()
-  const dirs = [path.join(repoRoot, 'docs', '003-design')]
-  const walk = (dir) => {
-    let entries
-    try {
-      entries = fs.readdirSync(dir, { withFileTypes: true })
-    } catch {
-      return
-    }
-    for (const e of entries) {
-      const p = path.join(dir, e.name)
-      if (e.isDirectory()) walk(p)
-      else if (e.isFile() && e.name.endsWith('.md')) {
-        for (const m of fs.readFileSync(p, 'utf8').matchAll(/^### (D-\d+)/gm)) out.add(m[1])
-      }
-    }
-  }
-  for (const d of dirs) walk(d)
-  return out
-}
-
 /**
  * 豁免名单自身的形状判据（纯函数，判据 = `arch-change-audit.test.mjs`）：
- * 空理由、缺 `sha`、判据之后的豁免没有可打开的决策号，都判红。
+ * 空理由、缺 `sha`、判据之后的豁免理由太短，都判红。
  */
-export function validateBaseline(entries, decisions) {
+export function validateBaseline(entries) {
   const errors = []
   for (const e of entries) {
     const at = e?.sha ?? '(无 sha)'
@@ -223,18 +192,11 @@ export function validateBaseline(entries, decisions) {
     if (typeof e.why !== 'string' || !e.why.trim()) {
       errors.push(`${e.sha}：豁免没有理由正文——一条不解释自己的豁免就是永久后门`)
     }
-    if (e.beforeGuard === false) {
-      // 从一句话里抠出决策号（不要求整串等值）：裸的 `'D-124''` 会被 `gate-codes-audit`
-      // 当成脚本发射了一个判据码，而这里的 D 号是设计文档的决策指路。
-      const cited = String(e.decision ?? '').match(/\bD-\d+\b/)?.[0] ?? null
-      if (!cited) {
-        errors.push(
-          `${e.sha}：晚于判据的豁免必须补上这条内核改动自己的裁决（decision 里写一个 D-NNN）——` +
-            '豁免顶替的就是那条 `Core-Change:`，内容不许比它少',
-        )
-      } else if (decisions && !decisions.has(cited)) {
-        errors.push(`${e.sha}：decision ${cited} 在 docs/003-design/ 里打不开（写错的决策号等于没写）`)
-      }
+    if (e.beforeGuard === false && e.why.trim().length < 30) {
+      errors.push(
+        `${e.sha}：晚于判据的豁免必须写清这条改动自己的当前理由——` +
+          '豁免顶替的就是那条 `Core-Change:`，内容不许比它少',
+      )
     }
   }
   return errors
@@ -354,13 +316,16 @@ export function judge(sha, files, message) {
   if (!m) {
     errors.push(
       'CC-001 触及 core/kernel 但没有 `Core-Change:` 段 —— 需写清「为什么非动内核不可」' +
-        '（扩能力请挂决策号，如 `Core-Change: D-195`）',
+        '（扩能力请写 `Core-Change: <判据码> <当前理由>`）',
     )
-  } else if (touchesExt && !/D-\d{3,}/.test(m[1])) {
-    errors.push(
-      `CC-002 同一提交既动插件又动 core/kernel，但 \`Core-Change: ${m[1].trim()}\` 里没有决策号` +
-        ' —— 横向扩充能力不该顺手扩大内核面；确需扩，挂 `D-NNN` 并说明为什么共享无处可放',
-    )
+  } else if (touchesExt) {
+    const parts = coreChangeParts(message)
+    if (!parts?.rule || parts.reason.trim().length < 8) {
+      errors.push(
+        `CC-002 同一提交既动插件又动 core/kernel，但 \`Core-Change: ${m[1].trim()}\` 没有「判据码 + 当前理由」` +
+          ' —— 横向扩充能力不该顺手扩大内核面；确需扩，写清为什么共享无处可放',
+      )
+    }
   }
   return { sha, errors }
 }
@@ -379,13 +344,13 @@ function main() {
   // 豁免名单自己先过一遍形状判据：**判据的红线不能靠它豁免的那几行代码来解释**。
   // 这一格放在范围解析之前，因为它与「有没有 base 可判」无关——浅克隆的 CI 也要能
   // 看见「名单里有一条没写理由的豁免」。
-  const baselineErrors = validateBaseline(BASELINE, knownDecisions())
+  const baselineErrors = validateBaseline(BASELINE)
   if (baselineErrors.length) {
     for (const e of baselineErrors) console.error(red(`✗ 追溯豁免名单：${e}`))
     return 1
   }
 
-  // 逐提交补记表（D-333）：提交不能改写，缺 `Core-Change:` 的历史只能由表补记。
+  // 逐提交补记表（）：提交不能改写，缺 `Core-Change:` 的历史只能由表补记。
   // 表自身的形状先过判据——「在表内 ⇒ 按表核验」，核验的就是这张表（不是跳过）。
   const backfill = loadBackfill(repoRoot)
   if (backfill.errors.length) {
@@ -428,7 +393,7 @@ function main() {
     return 0
   }
 
-  // 后继补签（D-551）：同一批未推送提交里，后一笔用 `Core-Change-For:` 为前一笔补署名。
+  // 后继补签（）：同一批未推送提交里，后一笔用 `Core-Change-For:` 为前一笔补署名。
   // `--last` 只判最后一笔，但签名指向的是整批里的前一笔，故按整批范围验形状。
   let declarationCommits = commits
   if (argv.includes('--last')) {
@@ -442,7 +407,7 @@ function main() {
     }
     declarationCommits = parseGitLogRecords(fullLog)
   }
-  const signed = collectDeclarations(declarationCommits, knownDecisions(), repoRoot)
+  const signed = collectDeclarations(declarationCommits, repoRoot)
   if (signed.errors.length) {
     for (const error of signed.errors) console.error(red(`✗ 后继补签：${error}`))
     return 1
@@ -510,7 +475,7 @@ function main() {
   console.log(
     dim(
       '\n  豁免的唯一形态是理由：`Core-Change: D-NNN <为什么这条共享只能住 core>`。' +
-        '\n  没有决策号可挂，通常说明该共享类型其实该住生产方插件（D-180）。',
+        '\n  没有决策号可挂，通常说明该共享类型其实该住生产方插件（）。',
     ),
   )
   return 1

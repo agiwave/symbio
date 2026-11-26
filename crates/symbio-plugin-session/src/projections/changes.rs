@@ -1,6 +1,6 @@
 //! 工作目录的变更账：从 `artifact.added` 折出「本会话改过哪些文件」。
 //!
-//! ## 为什么它是纯投影而不是一件新事实（[D-169]）
+//! ## 为什么它是纯投影而不是一件新事实
 //!
 //! 工作目录的真实内容由文件系统持有。再写一条 `file.*` 事实，只是给本体加一份影子：
 //! 影子与本体之间没有机制强制一致，而不一致时两边都自证正确。变更的**来源**本来就是
@@ -15,7 +15,7 @@
 //! ## 口径
 //!
 //! - 只认 `success: true` 且**带 `file_op`** 的产物：那个字段由写族工具声明的行为
-//!   交出来（`symbio_plugin_vdfs::behavior::FileChange`，DE-025 D-207），取值是
+//!   交出来（`symbio_plugin_vdfs::behavior::FileChange`，DE-025 ），取值是
 //!   [`FileOp::as_str`] 的四个判别词；词表本身住 `symbio_plugin_api::effects`。本模块**不认识任何工具名**——改一个工具名
 //!   不影响这里一行，而新出现的写工具（MCP / shell）只要声明同一个行为就能进账；
 //! - 路径取**定稿参数** `args.path`——工具收到什么就记什么，不去反推结果文本；
@@ -34,7 +34,7 @@
 //! （`FsWatcher` → `VdfsChange`），不入这条账。本账**不承诺重建旧内容**：它记的是
 //! 「谁在哪一轮改过这个路径」，不是写入前的全文。
 //!
-//! [D-169]: ../../../../docs/003-design/001-核心架构.md "DE-001-核心架构"
+//! : ../../../../docs/003-design/001-核心架构.md "DE-001-核心架构"
 
 use symbio_platform::kernel::event::Event;
 use symbio_platform::kernel::projection::Projection;

@@ -985,7 +985,7 @@ export function useVdfs(opts: UseVdfsOptions) {
   // 「导入整包」不在这里：它是**详情页上的一条动作**（由定义声明、经
   // `DetailAction.pack` 表明载荷是一个本地文件），由 `runPackAction` 执行。
   // 曾经它被表达成类型的第二种「入口形态」，于是前端要先问「选哪种方式」，
-  // 还得为类型补上 `source` / `import` 两个与呈现无关的字段（见 D-029）。
+  // 还得为类型补上 `source` / `import` 两个与呈现无关的字段。
 
   /**
    * 当前目录可接受的新建类型（至多一个；`undefined` = 该目录不可新建）。

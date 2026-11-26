@@ -54,7 +54,7 @@ fn ledger_accumulates_cost_per_principal() {
 /// 未记账的主体在书里**没有那一行**：折叠不负责把它折成零账。
 ///
 /// 「这一格没记过」是读方的口径（闸门读成 0，出口读成空表），不是本视图的缺席态——
-/// 缺席态只有四个，都在读口那一侧回答（`D-284`）。
+/// 缺席态只有四个，都在读口那一侧回答。
 #[test]
 fn an_unbilled_principal_has_no_row() {
     let v = ledger(&[billed("e0", "session/a", 300, 10)], i64::MAX);

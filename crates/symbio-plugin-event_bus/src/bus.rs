@@ -1,4 +1,4 @@
-//! 事件总线的**投递实现**（`D-487` 随订阅声明化从 `symbio-sdk/src/event_bus` 随迁）。
+//! 事件总线的**投递实现**（ 随订阅声明化从 `symbio-sdk/src/event_bus` 随迁）。
 //!
 //! 本插件是「总线」身份的本体：订阅登记表、扇出投递、慢消费者处置与 resync 补送
 //! 都住这里——它们与内核语法、sdk 的其它机制没有共享面；住在 sdk 只会让每个插件
@@ -6,7 +6,7 @@
 //! 与发布端口（`EventBusPublisher` + `submit_event_bus_sink!`），本模块在 crate 根
 //! 一行声明进来（`plugin.rs` 末尾）。
 //!
-//! 判据（`D-487`）：把一次「函数调用」（`event_bus_register_subscriber` 的特权后门）
+//! 判据：把一次「函数调用」（`event_bus_register_subscriber` 的特权后门）
 //! 改成一次「声明」（发布端口）+ 一条协议路径（`event_bus/subscribe` 路由）——
 //! 前端、CLI、网关、子智能体转播桥走**同一条**订阅路径，服务臂随迁移净减。
 
@@ -21,7 +21,7 @@ use tokio::sync::mpsc;
 use {symbio_plugin_api::plugin_info, symbio_plugin_api::plugin_warn};
 
 /// resync 标记重试次数 × 间隔（20 × 100ms = 2s）——与已退役的转写流（`session/stream`
-/// ，2026-09-23 随 D-025 一起删）同量级。
+///，2026-09-23  一起删）同量级。
 const RESYNC_RETRY: usize = 20;
 const RESYNC_RETRY_INTERVAL: Duration = Duration::from_millis(100);
 
@@ -31,7 +31,7 @@ const RESYNC_RETRY_INTERVAL: Duration = Duration::from_millis(100);
 /// 「有这件事」，不在于「发生了多少次」。5s 一次足以定位。
 const SLOW_WARN_THROTTLE: Duration = Duration::from_secs(5);
 
-/// 事件 Bus 订阅者容器（本插件私有——订阅表随 `D-487` 归插件本体）。
+/// 事件 Bus 订阅者容器（本插件私有——订阅表归插件本体）。
 ///
 /// Key 是 `connection_id`（每个前端连接一个），Value 是它的发送端。
 pub(crate) static SUBSCRIBERS: LazyLock<DashMap<String, mpsc::Sender<PluginFrame>>> =
@@ -159,7 +159,7 @@ fn warn_slow_once(id: &str) {
 ///
 /// **无论补送成功与否都不摘除订阅**——这是与已退役的转写流的有意差异：
 /// 它有**流内帧序号**（`NodeEvent.seq`），摘除后消费端能靠跳号自愈；本频道没有
-/// 序号（D-025：顺序是节点属性），摘除即永久失联。
+/// 序号（顺序是节点属性），摘除即永久失联。
 /// 因此这里宁可让一个卡死的订阅者留在表里（每次变更限流告警一次，可观测），
 /// 也不做那个不可逆的动作。
 fn schedule_resync(kind: &str, id: String, tx: mpsc::Sender<PluginFrame>) {

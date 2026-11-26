@@ -1,4 +1,4 @@
-// arch-shape-allow CS-004 tool ×1: 用途=wire 词汇（chat 样式标签 "tool"，标记一次工具调用）；不是插件引用=它是消息节点的展示协议词，与插件目录名无关，内核不因此认识任何插件实现；依据=D-303；登记=2026-11-03
+// arch-shape-allow CS-004 tool ×1: 用途=wire 词汇（chat 样式标签 "tool"，标记一次工具调用）；不是插件引用=它是消息节点的展示协议词，与插件目录名无关，内核不因此认识任何插件实现；依据=消息节点的 tool 样式标签已在生产消息载荷中出现，删除会破坏历史回放；登记=2026-11-03
 
 use crate::kernel::chat::principal::Principal;
 use crate::kernel::present::ReadingSection;
@@ -22,10 +22,10 @@ pub enum NodeRole {
 }
 
 /// 节点**形状**——五值闭集（`body` / `notice` / `skeleton` / `interaction` / `typing`），
-/// 是前端呈现的**唯一分派轴**（[D-070 §决策 3]）。这五值是**纯 UI 形状**概念
+/// 是前端呈现的**唯一分派轴**。这五值是**纯 UI 形状**概念
 /// （展开叶 / 折叠叶 / 容器 / 交互 / 占位），不含任何业务。同 shape 内的业务变体
 /// （run/tool/reasoning/compression…）走 `meta.style_tag`，**只在后端作业务判据**，
-/// 前端从不读它——业务差异呈现靠 `title`/`icon`/`actions` 数据（[D-070 §决策 2]）。
+/// 前端从不读它——业务差异呈现靠 `title`/`icon`/`actions` 数据。
 ///
 /// 消费方按 [`ChatNode`] 上的**后端谓词**（`is_run` / `is_tool_call` / `is_reasoning` /
 /// `is_text` / `is_compression` / `is_interaction`）判节点，而不是按变体名 match——
@@ -35,7 +35,7 @@ pub enum NodeRole {
 /// **不在本枚举**：它们只存在于存量 VDFS 属性里，经 [`legacy_shape_to_style_tag`]
 /// 在 `message_of_node`（宿主的读边界）一次性折叠成新形态 + `style_tag` 注入。
 ///
-/// 决策依据：[D-070 §决策 1 / 3]。
+/// 决策依据：。
 #[derive(Debug, Clone, Copy, Serialize, Deserialize, PartialEq, Eq, Hash)]
 #[serde(rename_all = "snake_case")]
 #[derive(Default)]
@@ -49,7 +49,7 @@ pub enum NodeKind {
     /// 不需要知道这坨叫思考还是压缩（业务区分只在后端 `style_tag` 注记 + 数据）。
     Notice,
     /// 组合骨架 / 容器：递归渲染 `children`。`run`（一整轮）、`tool`（一次工具调用）、
-    /// `sub_agent` 全在这一格——前端一律当容器，不认 tool/turn（[D-070 §决策 1]）。
+    /// `sub_agent` 全在这一格——前端一律当容器，不认 tool/turn。
     Skeleton,
     /// 等待用户回应（`ask_user` 提问或工具执行前确认）
     Interaction,
@@ -57,7 +57,7 @@ pub enum NodeKind {
     Typing,
 }
 
-/// **旧 wire 词 → 目标形状 + style_tag**（[D-070 §决策 3 / 6]）。
+/// **旧 wire 词 → 目标形状 + style_tag**。
 ///
 /// 消费点是 `message_of_node`：VDFS `attributes.type` 存的是**当时的 wire 词**——历史数据里
 /// 有 `"text"` / `"reasoning"` / `"turn"` / `"tool_call"` / `"user_prompt"` / `"compression"`
@@ -76,7 +76,7 @@ pub fn legacy_shape_to_style_tag(word: &str) -> Option<(NodeKind, Option<&'stati
         "typing" => (NodeKind::Typing, None),
         // 旧词——折成新形态 + 对应 style_tag。
         "text" => (NodeKind::Body, None),
-        // [D-070 §决策 3]：reasoning 归 `Notice`（折叠叶），与 compression 同格——
+        //：reasoning 归 `Notice`（折叠叶），与 compression 同格——
         // 前端渲染二者完全一样，style_tag 只是后端业务注记。
         "reasoning" => (NodeKind::Notice, Some(CHAT_STYLE_TAG_REASONING)),
         "tool_call" => (NodeKind::Skeleton, Some(CHAT_STYLE_TAG_TOOL)),
@@ -86,7 +86,7 @@ pub fn legacy_shape_to_style_tag(word: &str) -> Option<(NodeKind, Option<&'stati
     })
 }
 
-/// **style_tag 词表**（[D-070 §决策 3]）——同一 shape 下的**后端业务注记**。
+/// **style_tag 词表**——同一 shape 下的**后端业务注记**。
 ///
 /// 它**不再是前端呈现分派轴**：前端只按 `NodeKind` 五值 + `title`/`icon`/`actions`
 /// 数据渲染，从不 `switch(style_tag)`。本词表住在 `meta` 里，只服务后端业务判据
@@ -153,7 +153,7 @@ impl NodeStatus {
 
     /// [`Self::as_str`] 的逆：状态词 → 枚举。未知词返回 `None`。
     ///
-    /// 存在的理由与 `as_str` 是同一条的另一半：VDFS 变更**不带载荷**（D-025），
+    /// 存在的理由与 `as_str` 是同一条的另一半：VDFS 变更**不带载荷**，
     /// 消费端拿到 `<sid>/message/<mid>` 的 `updated` 后只能回读**节点**
     /// （`stat`），而节点上承载状态的是那个**词**。把它解析回枚举若在每个消费端
     /// 各手写一次 match，词表就又有了第二份定义。
@@ -250,7 +250,7 @@ pub struct ChatNode {
     #[serde(skip_serializing_if = "Option::is_none")]
     pub parent_id: Option<String>,
 
-    /// **存量反序列化落点**（[D-147](../../../../../docs/003-design/001-核心架构.md#d-147-身份只写一份principal-是权威role-只留反序列化落点 "DE-001-核心架构")）——
+    /// **存量反序列化落点**——
     /// 不是身份的第二份表达：身份的唯一权威是 [`Self::principal`]，读侧折叠
     /// [`Self::node_role`] 也以主体为先，这一格只在**主体缺席**时兜底。
     ///
@@ -271,13 +271,13 @@ pub struct ChatNode {
     #[serde(skip_serializing)]
     pub role: Option<NodeRole>,
 
-    /// **这条发言是谁说的**（跨栈身份字段）：主体地址（`{kind, id, title?}`，[D-069 §决策 1]）。
+    /// **这条发言是谁说的**（跨栈身份字段）：主体地址（`{kind, id, title?}`）。
     ///
     /// `None` = 尚未标身份（历史消息、未接入的写方）——可见域判据把它当**可见**：
     /// 缺身份是「还没接线」，不是「不让人看」。反过来把 `None` 判成不可见会让
     /// 所有存量消息从视图里消失，那是拿接线覆盖旧行为（DE-038 §4 平凡值要求逐字一致）。
     ///
-    /// **读侧兼容**（[D-069 §决策 6]）：wire 上历史 `messages.json` 里的
+    /// **读侧兼容**：wire 上历史 `messages.json` 里的
     /// 裸字符串（`"agent:main"` / `"user"` / `"session/main"`）由 [`Principal::deserialize`]
     /// 一次性映射成结构体；写侧一律构造 `Principal`，序列化只出对象形态。
     #[serde(default, skip_serializing_if = "Option::is_none")]
@@ -331,7 +331,7 @@ pub struct ChatNode {
     #[serde(skip_serializing_if = "Option::is_none")]
     pub error: Option<String>,
 
-    /// 呈现标题（[D-070 §决策 2 / 3]）：后端在构造节点时填的**面向用户显示文本**
+    /// 呈现标题：后端在构造节点时填的**面向用户显示文本**
     /// （思考="思考过程" / 压缩="上下文压缩" / 工具=工具名 / 轮=智能体名）。
     /// 前端**照数据显示**，不再按业务类型查表生成——这是"前端不懂业务"的落点之一。
     #[serde(skip_serializing_if = "Option::is_none")]
@@ -342,14 +342,14 @@ pub struct ChatNode {
     #[serde(skip_serializing_if = "Option::is_none")]
     pub icon: Option<String>,
 
-    /// 本节点**可发起的恢复动作**（[D-070 §决策 3]）：后端算好「这个节点现在
+    /// 本节点**可发起的恢复动作**：后端算好「这个节点现在
     /// 能重试 / 审批 / 补参 / 回答 / 重跑压缩」中的哪几种，随节点下发。前端只做
     /// 「列表里有 `retry` 就画重试按钮」的**数据渲染**，不再按业务类型（tool/compression/run）
     /// 反推该发哪种动作——那是前端最后一处业务耦合，本字段把它搬回后端。
     #[serde(default, skip_serializing_if = "Option::is_none")]
     pub actions: Option<Vec<ResumeAction>>,
 
-    /// 本节点的**读数片段**（[D-111](../../../../symbio-plugin-session/README.md#d-111-消息读数由交付出口装配压缩与记忆的事实行离开前端 "crates/symbio-plugin-session/src/README")）：已由产者排好版的
+    /// 本节点的**读数片段**：已由产者排好版的
     /// 若干行（标签 + 值），前端**逐行排版**、不认任何业务词——压缩「压到哪儿了 / 什么触发的 /
     /// 压掉几条」这类交代原先由前端读 `meta` 数字自己拼，口径因此住在两端。
     ///
@@ -357,7 +357,7 @@ pub struct ChatNode {
     ///
     /// [`ReadingSection`] 是只读指标读数的宿主方言（`present/reading`），已在两侧镜像并由
     /// `protocol-mirror-audit` D 组看守；给同一个概念起第二个名字是换名不是机制化
-    /// （D-070 §决策 3 反对的正是这个）。
+    /// （ 3 反对的正是这个）。
     ///
     /// ## 为什么不落存储
     ///
@@ -453,11 +453,11 @@ pub struct ChatNode {
 pub enum ResumeAction {
     /// LLM 失败重试：以靶子节点为**同一问题的另一支**重走 LLM 请求。
     ///
-    /// 「删除整棵子树并重跑」，靶子是**任一骨架节点**（[D-070 §决策 1]）——
+    /// 「删除整棵子树并重跑」，靶子是**任一骨架节点**——
     /// 动词不绑某一格业务：一轮响应与一次工具调用都是骨架，都能当靶子。
     ///
     /// 那一支**不删**：重跑成功时新旧两支并存为同一分支组（`scope.branch`），
-    /// 默认读新的一支，旧的随时切回去还在（[D-173](../../../../../docs/003-design/001-核心架构.md "DE-001-核心架构")）。删除式重跑的代价是「用户
+    /// 默认读新的一支，旧的随时切回去还在。删除式重跑的代价是「用户
     /// 点错了重试，上一次尝试的全部现场没了」——而那次尝试往往正是他要回头看的东西
     /// （超时？哪个工具挂了？）。
     RetrySubtree,
@@ -524,7 +524,7 @@ impl ChatNode {
         self
     }
 
-    /// 归属折叠判据：**唯一读入口**（[D-147](../../../../../docs/003-design/001-核心架构.md#d-147-身份只写一份principal-是权威role-只留反序列化落点 "DE-001-核心架构") 的落点）。
+    /// 归属折叠判据：**唯一读入口**（落点）。
     ///
     /// 优先级是「**主体在先、存量格兜底**」：`principal.kind` 是身份的权威，
     /// `role` 只在主体缺席时才有话事权（历史数据、读边界折进来的外来形状）。
@@ -557,7 +557,7 @@ impl ChatNode {
         self.role.clone()
     }
 
-    /// 读 `meta.style_tag`（wire 层的呈现变体词，[D-070 §决策 3]）。
+    /// 读 `meta.style_tag`（wire 层的呈现变体词）。
     pub fn style_tag(&self) -> Option<&str> {
         self.meta
             .as_ref()

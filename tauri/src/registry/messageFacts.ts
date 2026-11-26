@@ -26,7 +26,7 @@
  * 这也是机制审计（`scripts/audits/mechanism-audit.mjs` M-001）的判定依据：`components/` 下
  * 不允许出现对后端 meta 字段的直接读取。
  *
- * 口径提醒：随 [D-111](../../../crates/symbio-plugin-session/README.md#d-111-消息读数由交付出口装配压缩与记忆的事实行离开前端 "crates/symbio-plugin-session/src/README")，「那几个数怎么说」
+ * 口径提醒：随，「那几个数怎么说」
  * （压缩水位 / 触发来源 / token 单位）**不在这里**——那是交付出口的读数行 `node.stats`，
  * 本层只留「这条节点是不是压缩产物」这类形状判定。
  */
@@ -77,7 +77,7 @@ import type { MessagePrompt, MessagePromptKind } from '@/schemas/message_prompt'
 export { messageRoleOf }
 
 /**
- * 节点的**生效形态**（[D-070 §决策 3]）：wire 五值 `NodeKind`。
+ * 节点的**生效形态**：wire 五值 `NodeKind`。
  *
  * 这是分派轴的**唯一读入口**。它只做一件事——把 `node.type` 归一到闭集五值（历史
  * 业务旧词经 `nodeKindOf` 一次性折叠，`run`/`tool`→`skeleton`、`reasoning`/`compression`→
@@ -105,7 +105,7 @@ export const isContentKind = (kind: NodeKind): boolean =>
   kind === NODE_KIND_BODY || kind === NODE_KIND_NOTICE
 
 /**
- * 该节点交给渲染器的子流（[D-423]：递归判据 = 有无子，与形态无关）。
+ * 该节点交给渲染器的子流（递归判据 = 有无子，与形态无关）。
  *
  * 剔掉合成的 typing 占位：它是派生节点、不是内容，等待态由各渲染器自己的
  * 在途信号呈现（骨架的 `SkeletonPending` / 面板的兜底行）。分派器与渲染器
@@ -154,7 +154,7 @@ export function agentNameOf(
 // ==================== principal 前缀 → 身份呈现（[] 独立表） ====================
 //
 // 「这条发言是谁说的」的可视化——与「这条是什么形态」（`TYPE_PRESENTATION`）正交：
-// 前者按**可路由地址的命名空间**（`<ns>/<name>`，[D-069 §决策 1]）分派，后者按
+// 前者按**可路由地址的命名空间**（`<ns>/<name>`）分派，后者按
 // 形态分派。命名空间比 `kind` 更细（`vdfs/write` 与 `web/fetch` 同为 tool，但图标
 // / 标签不同），所以主键是命名空间、`kind` 只是兜底——「kind 不参与主键」。
 //
@@ -174,7 +174,7 @@ export interface PrincipalPresentation {
 
 /**
  * 命名空间 → 身份呈现。键与后端 `AGENT_NAMESPACES` / `Principal::tool_principal`
- * 合成的地址段、[D-069] 登记的主体行对齐（`vdfs` / `web` / `local` 是插件归属，
+ * 合成的地址段、 登记的主体行对齐（`vdfs` / `web` / `local` 是插件归属，
  * `mcp` / `agent` / `legacy` 是后端合成的工具地址段，`person` / `system` 是概念命名空间，
  * `session` 是本机 agent）。
  */
@@ -190,7 +190,7 @@ const PRINCIPAL_NS_PRESENTATION: Readonly<Record<string, PrincipalPresentation>>
   legacy: { icon: '🔧', tone: 'tool', label: '工具' },
 }
 
-/** 族兜底表：命名空间未登记时按 `principal.kind` 取（[D-069] 四族）。 */
+/** 族兜底表：命名空间未登记时按 `principal.kind` 取（ 四族）。 */
 const PRINCIPAL_KIND_PRESENTATION: Readonly<Record<PrincipalKind, PrincipalPresentation>> = {
   [PRINCIPAL_KIND_PERSON]: { icon: '👤', tone: 'person', label: '用户' },
   [PRINCIPAL_KIND_AGENT]: { icon: '🤖', tone: 'agent', label: '智能体' },
@@ -293,7 +293,7 @@ export interface MessageFacets {
  *
  * @param node      消息节点
  * @param hasParent 是否**作为子节点被渲染**（结构事实，不是父的形态）。
- *   递归由分派器按「有无子」普遍施加（[D-423]），任何形态都可能当容器，
+ *   递归由分派器按「有无子」普遍施加，任何形态都可能当容器，
  *   因此上下文判据只问「有没有渲染父」，不再问「父是不是 skeleton」。
  */
 export function facetsOf(node: ChatNode, hasParent = false): MessageFacets {
@@ -426,7 +426,7 @@ export function messageScopeRoot(node: Pick<ChatNode, 'meta'>): string | null {
  * 一个节点所在**分支组**的读数（后端 `meta.branch` 的唯一读点）。
  *
  * 后端把「同一个问题有几支答复、现在读第几支」折成事实投影盖在成员根节点上
- * （[D-173](../../../docs/003-design/001-核心架构.md "DE-001-核心架构")）；
+ *；
  * 这一层把它读成**数据**，组件只问「第几支 / 共几支 / 前后是谁」，
  * 不认识 `candidates` 里那些 id 的含义——切换动作把目标候选原样交回后端，
  * 后端按它认人。
@@ -487,7 +487,7 @@ export function messageBranchNeighbor(
 /**
  * 节点是否携带某个可用恢复动作（纯数据判据的唯一读法）。
  *
- * `actions` 由后端在交互面派生（[D-070 §决策 3]），前端不再按业务类型 / `recoverable`
+ * `actions` 由后端在交互面派生，前端不再按业务类型 / `recoverable`
  * 反推「能不能重试」——「有对应动词即有入口，没有即不画」。`actions` 缺席（历史数据、
  * 前端合成节点）一律 `false`：合成节点本就无可重试语义。
  */
@@ -498,7 +498,7 @@ function hasAction(actions: ResumeAction[] | undefined, action: ResumeAction): b
 /**
  * 工具失败能否**就地重试**（resume action=`retry`）。
  *
- * 判据已是**纯数据**：后端在交互面（[D-070 §决策 3]）把「这条节点能发
+ * 判据已是**纯数据**：后端在交互面把「这条节点能发
  * 哪种恢复动词」折成 `actions` 列表随节点下发，前端只读「有 `retry` 就画重试」。
  * 不再从业务类型（工具 / 可恢复标记）反推——那是本模块最后一处业务耦合。
  */
@@ -545,7 +545,7 @@ export type MessageRetryAction = Extract<
 /**
  * 失败重试的分派结果（resume 的 `action` + `targetId`）。
  *
- * 三个粒度，**粒度由后端下发的 `actions` 决定**（[D-070 §决策 3]）：
+ * 三个粒度，**粒度由后端下发的 `actions` 决定**：
  * - `retry`            —— 只重跑**这一个工具**（删除该工具的失败结果 → 原参数重新执行）；
  * - `retry_subtree`       —— 重跑**整轮**（删除响应子树 → 重新走 LLM 请求）；
  * - `retry_compaction` —— 重跑**这一次压缩**（删除失败压缩节点 → 重新压缩）。

@@ -1,7 +1,7 @@
-//! 主体规格的**数据面**：`ActorSpec` 五字段、模式闭集、作用域（DE-023 D-188 C2b）
+//! 主体规格的**数据面**：`ActorSpec` 五字段、模式闭集、作用域（DE-023  C2b）
 //!
 //! 这里只有形状，没有授权读法：`trivial`（平凡值）与 `can_*`（能力位判定）读的是
-//! 本机**部署表**（`authz` / `governance`），它们不是语法而是宿主事实（D-099），
+//! 本机**部署表**（`authz` / `governance`），它们不是语法而是宿主事实，
 //! 因此留在 `crate::sdk::actors` 作为自由函数（`trivial_actor_spec` /
 //! `actor_can_assign_work` …），不进内核。
 
@@ -19,7 +19,7 @@ pub enum Pattern {
     Translator,
 }
 
-/// 作用域（[DE-001 §8](../../../../docs/003-design/001-核心架构.md "DE-001-核心架构")）。
+/// 作用域（[DE-001 §9](../../../../docs/003-design/001-核心架构.md "DE-001-核心架构")）。
 ///
 /// `root` 是**一等输入**，不是"没有子智能体"的特例（推论：
 /// 不出现 `if (children.is_empty())` 分支）。

@@ -2,7 +2,7 @@
 // （摘要 Notice + 本轮终答），重建面从这份快照开始折。
 import './_selfrun.mjs';
 //
-// ## 触发机制（D-336）
+// ## 触发机制
 //
 // `compact` 插件按 `model:<uid>` 收束载荷里的实测水位判债：阈值 = 0.7 × provider 上限。
 // e2e 的 mock 恒报 `prompt_tokens: 64`（见 `mock-llm.mjs`），因此上限取 80

@@ -37,7 +37,7 @@ function cleanFiles() {
     [`${SRC}/effects.rs`]: rustLines(10),
     [`${SRC}/port.rs`]: rustLines(5),
     [`${SRC}/other.rs`]: rustLines(3),
-    [DOC]: '### D-399 夹具决策\n',
+    [DOC]: '###  夹具决策\n',
   }
 }
 
@@ -46,10 +46,10 @@ function cleanBaseline() {
     note: 'fixture',
     crate: SRC,
     files: [
-      { path: 'effects.rs', lines: 10, adr: 'D-399' },
-      { path: 'port.rs', lines: 5, adr: 'D-399' },
+      { path: 'effects.rs', lines: 10, why: '夹具：行数逐项只许降' },
+      { path: 'port.rs', lines: 5, why: '夹具：行数逐项只许降' },
     ],
-    total: { lines: 18, adr: 'D-399' },
+    total: { lines: 18, why: '夹具：合计是逐项之和，只许降不许涨' },
   }
 }
 
@@ -130,15 +130,15 @@ test('FA-002：删了行却没同批下调基线 ⇒ 红（防「删 N 行再加
   }
 })
 
-test('FA-003：adr 打不开、登记的文件不在生产里 ⇒ 两条都红', () => {
+test('FA-003：当前理由为空、登记的文件不在生产里 ⇒ 两条都红', () => {
   const baseline = cleanBaseline()
-  baseline.files[0].adr = 'D-998'
+  baseline.files[0].why = ''
   baseline.files[1].path = 'ghost.rs'
   const box = sandbox(cleanFiles(), baseline)
   try {
     const { status, out } = run(box.root)
     assert.equal(status, 1, out)
-    assert.match(out, /FA-003.*effects\.rs.*D-998 不存在/)
+    assert.match(out, /FA-003.*effects\.rs.*缺少当前理由 why/)
     assert.match(out, /FA-003.*ghost\.rs.*没有这个生产文件/)
   } finally {
     box.cleanup()
@@ -152,10 +152,10 @@ test('退役条目：文件已删、lines 钉 0 ⇒ 通过（等效收紧，不�
   baseline.files[0] = {
     path: 'effects.rs',
     lines: 0,
-    adr: 'D-399',
+    why: '夹具：整份实现已迁出，行数钉到 0',
     retired: 'crates/symbio-platform/src/sdk/plugin/effects.rs',
   }
-  baseline.total = { lines: 8, adr: 'D-399' }
+  baseline.total = { lines: 8, why: '夹具：合计是逐项之和，只许降不许涨' }
   const box = sandbox(files, baseline)
   try {
     const { status, out } = run(box.root)
@@ -171,7 +171,7 @@ test('退役条目：文件又出现 ⇒ 红（退役没做完或实现长回来
   baseline.files[0] = {
     path: 'effects.rs',
     lines: 0,
-    adr: 'D-399',
+    why: '夹具：整份实现已迁出，行数钉到 0',
     retired: 'crates/symbio-platform/src/sdk/plugin/effects.rs',
   }
   const box = sandbox(cleanFiles(), baseline)
@@ -188,8 +188,8 @@ test('退役条目：lines 不是 0 或新家为空 ⇒ 红（退役不留下限
   const files = cleanFiles()
   delete files[`${SRC}/effects.rs`]
   const baseline = cleanBaseline()
-  baseline.files[0] = { path: 'effects.rs', lines: 3, adr: 'D-399', retired: ' ' }
-  baseline.total = { lines: 8, adr: 'D-399' }
+  baseline.files[0] = { path: 'effects.rs', lines: 3, why: '夹具：整份实现已迁出，行数钉到 0', retired: ' ' }
+  baseline.total = { lines: 8, why: '夹具：合计是逐项之和，只许降不许涨' }
   const box = sandbox(files, baseline)
   try {
     const { status, out } = run(box.root)
@@ -215,7 +215,7 @@ test('测试代码不计：*.test.rs 再长也不进读数', () => {
   }
 })
 
-test('测试设施不计：cfg(test) / test-fixtures 门控的 testkit 目录不进读数（D-563）', () => {
+test('测试设施不计：cfg(test) / test-fixtures 门控的 testkit 目录不进读数（）', () => {
   const files = cleanFiles()
   files[`${SRC}/lib.rs`] = '#[cfg(any(test, feature = "test-fixtures"))]\npub mod testkit;\n'
   files[`${SRC}/testkit/mod.rs`] = `mod stubs;\n${rustLines(4_999)}`
@@ -230,7 +230,7 @@ test('测试设施不计：cfg(test) / test-fixtures 门控的 testkit 目录不
   }
 })
 
-test('生产声明不计豁免：无条件公开的 testkit 模块仍进入读数（D-563）', () => {
+test('生产声明不计豁免：无条件公开的 testkit 模块仍进入读数（）', () => {
   const files = cleanFiles()
   files[`${SRC}/lib.rs`] = 'pub mod testkit;\n'
   files[`${SRC}/testkit/mod.rs`] = rustLines(5)
@@ -244,7 +244,7 @@ test('生产声明不计豁免：无条件公开的 testkit 模块仍进入读�
   }
 })
 
-test('清单镜像不计：描述符声明的生成物再长也不进读数（D-470）', () => {
+test('清单镜像不计：描述符声明的生成物再长也不进读数（）', () => {
   const files = cleanFiles()
   files['scripts/facts/mirror.mjs'] = "const OUT_REL = 'crates/symbio-plugin-api/src/routes.rs'\n"
   files[`${SRC}/routes.rs`] = rustLines(500)
@@ -258,7 +258,7 @@ test('清单镜像不计：描述符声明的生成物再长也不进读数（D-
   }
 })
 
-test('清单镜像不计只认描述符：同一份文件没有声明时照旧计件（D-470）', () => {
+test('清单镜像不计只认描述符：同一份文件没有声明时照旧计件（）', () => {
   const files = cleanFiles()
   files[`${SRC}/routes.rs`] = rustLines(500)
   const box = sandbox(files)
@@ -284,7 +284,7 @@ test('基线缺失 ⇒ 退 2（读不出不许当 0 行通过）', () => {
 })
 
 test('crate 目录缺失 ⇒ 退 2', () => {
-  const files = { [DOC]: '### D-399 夹具决策\n' }
+  const files = { [DOC]: '###  夹具决策\n' }
   const box = sandbox(files)
   try {
     const { status, out } = run(box.root)

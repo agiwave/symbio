@@ -7,14 +7,14 @@
  *
  * 拆分期最贵的走样不是「搬得慢」，而是**红绿不再说明任何事**：一次提交里既搬走
  * 一条能力、又顺手在 `loop` 加一行 `Decl`，端到端用例照旧全绿，于是没人知道那条
- * 用例证明的是「搬运可行」还是「新机制在兜底」。D-247 因此把提交分成两类，本判据
+ * 用例证明的是「搬运可行」还是「新机制在兜底」。 因此把提交分成两类，本判据
  * 判的就是**这两类各自有没有越界**。
  *
  * | 类别 | 怎么认 | 判什么 |
  * |---|---|---|
- * | **迁移批次** | 提交正文里一行 `Migration: <批次>` | 机制面（`sdk` / `kernel` / `plugin-api`）的**净变化**：非生成 `.rs` 的机制行「新增 − 删除」**不得为正**（净零 / 净减皆合法，`D-404`）；`loop` / `session` 没有新增**带能力名**的源码行（绑定切换可以是通用胶水，为某条能力新加的行不行）；且至少删掉一行旧实现 |
+ * | **迁移批次** | 提交正文里一行 `Migration: <批次>` | 机制面（`sdk` / `kernel` / `plugin-api`）的**净变化**：非生成 `.rs` 的机制行「新增 − 删除」**不得为正**（净零 / 净减皆合法，``）；`loop` / `session` 没有新增**带能力名**的源码行（绑定切换可以是通用胶水，为某条能力新加的行不行）；且至少删掉一行旧实现 |
  * | **搬迁批次** | 同一 `Migration:` 段里 `from: <path> (<n>)` / `to: <path> (<n>)`，且净变化 ≤ 0 | `to` 新增行 ≤ `from` 删除行（净增即红，不许借搬迁名义加面）；两侧行数与 diff 实际相符；`from` 在 `plugin-api` 且该模块**有扩展层消费方**时，`plugin-api` 必须仍有 `pub use` 把该模块转出（否则扩展插件多一条依赖边，E-009）。**净零既不记欠账也不抵账，净减才按迁移抵 1 笔** |
- * | **架构补件** | 在架构面新增 `pub` 项，且没有 `Migration:` | 引用一条**能打开**的 `### D-NNN`；新增的非注释代码不含插件 id 字符串、不含工具名 |
+ * | **架构补件** | 在架构面新增 `pub` 项，且没有 `Migration:` | `Core-Change: <判据码> <当前理由>` 非空；新增的非注释代码不含插件 id 字符串、不含工具名 |
  *
  * 三类之外（只改注释、只删架构面、只动文档）不判——判据不假装能判它没定义的东西。
  *
@@ -33,12 +33,12 @@
  *   另一半归 `seal` 的 `Gap::Duplicate{Name,Event,Fact,View,Actor,Port}`
  *   （`crates/symbio-platform/src/kernel/decl/ring.rs`）：同名声明在装载期红，
  *   不在这里按名字再判一遍（SC-006 的教训：同一形状两个 owner）。
- * - **EX-007（D-247）**：夹带、定制、反向拆分三条失败形态——机制面**零新增**是「反向拆分」
- *   与「夹带」的机械面（`D-283`：删除行不算夹带，旧实现住在机制面的那一批要靠它搬）；
+ * - **EX-007（）**：夹带、定制、反向拆分三条失败形态——机制面**零新增**是「反向拆分」
+ *   与「夹带」的机械面（``：删除行不算夹带，旧实现住在机制面的那一批要靠它搬）；
  *   补件的决策号与通用性判「定制」。语义是否真的通用（不是把
  *   一条能力改名成 trait）由 review 判，脚本只保证「写着能力名 / 工具名」无法通过。
  *
- * ## 搬迁的量法是「净变化」，不是「逐树新增」（D-404）
+ * ## 搬迁的量法是「净变化」，不是「逐树新增」（）
  *
  * 逐树新增把每一次搬迁都判红：`--no-renames` 的 diff 把「搬走一份实现」写成
  * 「旧文件全删 + 新文件全增」，于是 `sdk` 侧看起来凭空多了几百行——字没变、面没宽，
@@ -47,14 +47,14 @@
  *
  * 净零的搬迁（`from` 删多少、`to` 就增多少）单独记一类 `relocation`：它**不记欠账，
  * 也不抵账**；只有净减才算一次迁移、抵 1 笔。这样「欠账笔数因为换了口径而自己消失」
- * 就不可能发生（`D-404` §3）。
+ * 就不可能发生（`` §3）。
  *
  * 接线行（`use` / `mod` 声明）两边都不计：搬家的合法形态是「实现在新家 + 旧家留一行
  * 转发 + 宿主模块树加一行 `pub mod`」，把这三行算成加面，净零搬迁永远差几行。
  *
  * 口径不追溯：`NET_GUARD` 之前的提交按旧口径判（与 `BEFORE_GUARD` 同一条纪律）。
  *
- * ## 搬家不算新增面（D-279）
+ * ## 搬家不算新增面（）
  *
  * 机制面**收缩**时（把一个 crate 并进另一棵树），`--no-renames` 的 diff 会说「旧文件全删
  * + 新文件全增」，于是「补件不许带能力名」把本来就在机制面上的行判成新通道：一行
@@ -63,11 +63,11 @@
  * 所以同一行若来自本提交**删掉的文件**，它是搬家（`movedLines`）。
  *
  * 限定「文件被删掉」而不是「提交里出现过同样的删除行」：后者会把「从 `loop` 删掉一条
- * 定制分支、同一行加进 `sdk`」也算搬家，而那是 D-247 反向拆分要拦的形态。
+ * 定制分支、同一行加进 `sdk`」也算搬家，而那是  反向拆分要拦的形态。
  *
- * 同一把尺在迁移侧的形状是 **D-283**：判的是「面变宽了没有」，所以迁移批在机制面
+ * 同一把尺在迁移侧的形状是 ****：判的是「面变宽了没有」，所以迁移批在机制面
  * 不许有**新增行**，而**删除行**照放——`S8` 那六行折叠今天就住在 `sdk/projection/` 里，
- * 「旧实现删除与绑定切换同提交」（`D-245`）落到它们身上必然是删机制面的文件。
+ * 「旧实现删除与绑定切换同提交」（``）落到它们身上必然是删机制面的文件。
  * 一条要求「diff = 0」的判据会把整段 `S8` 变成措辞游戏：要么拆成三个提交（中间那个
  * 让 `PP-003` 判红），要么不写 `Migration:`（让 `EX-003` 判不到）。
  *
@@ -75,15 +75,15 @@
  *
  * - 把「有 `Migration:`」当成「不用判」⇒ 只要写上 trailer 就能夹带，判据变装饰；
  * - 机制面判成「diff = 0」⇒ 折叠长在 `sdk` 的那批（`S8` 六行）搬不动，只能拆提交或
- *   省 trailer（`D-283`）；
+ *   省 trailer（``）；
  * - 只判新增、不判删除 ⇒ 插件落地而旧实现留着（两份同时生效）照样绿；
  * - 注释里的工具名 / 插件 id 被算成代码 ⇒ 补件几乎每条都红，豁免写满之后没人再看；
- * - 决策号只做正则不查存在 ⇒ 拼一个不存在的 `D-999` 就能进架构；
- * - 搬迁按「逐树新增」判 ⇒ 每一次搬迁都红，判据把架构变干净这件事本身拦下（`D-404`）；
+ * - 决策号只做正则不查存在 ⇒ 拼一个不存在的 `` 就能进架构；
+ * - 搬迁按「逐树新增」判 ⇒ 每一次搬迁都红，判据把架构变干净这件事本身拦下（``）；
  * - 搬迁按「净变化」判却不要 `from` / `to` 与行数 ⇒ 净增的那一行可以混在「删除更多」
  *   的搬迁里溜过去，借搬迁名义加面；
  * - 搬走 `plugin-api` 的实现却不留 `pub use`，而扩展插件还在用那条路径 ⇒ 被迫依赖 `sdk`，
- *   多一条依赖边（E-009）；零消费方的模块不判——门面上留空转转发会被 HS-003 判红（`D-416`）。
+ *   多一条依赖边（E-009）；零消费方的模块不判——门面上留空转转发会被 HS-003 判红（``）。
  *
  * 用法：
  * ```bash
@@ -98,7 +98,7 @@
 // 判据码命名空间（登记表 docs/004-ref/GATE_CODES.md 由这些行生成，判据见 gate-codes-audit.mjs）
 // @ns EX 能力全面拆分（名册处置与迁移边界）
 // @ns D 文档正文与链接
-// @codes EX-003 EX-007 D-403 D-404
+// @codes EX-003 EX-007  
 
 import fs from 'node:fs'
 import path from 'node:path'
@@ -111,10 +111,10 @@ import { pluginIds } from '../facts/_plugin-yml.mjs'
 import { backfillShas, loadBackfill } from '../core-change-backfill.mjs'
 import { collectDeclarations } from '../core-change-declarations.mjs'
 // 红 3 的前提是「扩展插件真在用这条门面路径」：消费方的唯一口径归 HS-003，这里借用它，
-// 不另写一份「谁在用 `symbio_plugin_api::X`」的扫描（D-416）。
+// 不另写一份「谁在用 `symbio_plugin_api::X`」的扫描（）。
 import { CONTROL_PLANE, collectConsumers } from './plugin-surface-audit.mjs'
 import {
-  gitOut, GIT_LOG_PRETTY, requiresRange, resolveRange, subjectOf, parseGitLogRecords,
+  gitOut, GIT_LOG_PRETTY, requiresRange, resolveRange, subjectOf, parseGitLogRecords, coreChangeParts,
 } from '../gate.d/_shared.mjs'
 
 const git = (args) => gitOut(args, { cwd: repoRoot })
@@ -123,8 +123,8 @@ const scriptDir = path.dirname(fileURLToPath(import.meta.url))
 const repoRoot = path.resolve(scriptDir, '..', '..')
 const argv = process.argv.slice(2)
 
-/** 机制面：迁移批次只许在这里收窄、不许变宽的树（`D-283`；补件才改它）。
- *  契约树随 `D-486` 加入——新 crate 不是棘轮盲区。 */
+/** 机制面：迁移批次只许在这里收窄、不许变宽的树（``；补件才改它）。
+ *  契约树随 `` 加入——新 crate 不是棘轮盲区。 */
 export const ARCH_TREES = [
   'crates/symbio-platform/src/sdk',
   'crates/symbio-platform/src/kernel',
@@ -150,7 +150,7 @@ const PLUGIN_API_TREES = ['crates/symbio-plugin-api']
 
 /**
  * 宿主运行时：驱动族唯一 runner 的持有者。它受保护但**不属**迁移批次的机制面
- * （`D-372` 的并集口径）：只进 `PROTECTED_TREES` 的并集，不进 `ARCH_TREES` / `CONTROL_TREES`。
+ * （`` 的并集口径）：只进 `PROTECTED_TREES` 的并集，不进 `ARCH_TREES` / `CONTROL_TREES`。
  */
 export const HOST_TREES = ['crates/symbio-runtime/src/host']
 
@@ -158,10 +158,10 @@ export const HOST_TREES = ['crates/symbio-runtime/src/host']
  * **受保护目录的唯一一份**：`EX-002`（新增能力只改自己目录）判的就是受保护树的
  * 非生成物指纹。`extension-locality-audit` 直接引用本常量，不再抄第二份——
  * 此前两条任务的 exit 与审计脚本各写一套（有的漏 `sdk`、有的漏
- * `plugin-api`），同一提交在三处得到不同结论（D-372）。
+ * `plugin-api`），同一提交在三处得到不同结论（）。
  *
  * 取**并集**而不是交集：任何一套旧口径里出现的树都算受保护。少一棵就留一条
- * 「加能力时顺手改这里」的路，而这条路的代价正是本判据要防的。`D-372` 的并集口径
+ * 「加能力时顺手改这里」的路，而这条路的代价正是本判据要防的。`` 的并集口径
  * 把 `symbio-host` 一并纳入：唯一 runner 的代码级硬约束拒绝第二个驱动，拒不了
  * 「加一行按能力名分支」。受保护树回答「加能力能不能碰」，机制面三棵树回答
  * 「迁移批次有没有新增行为」——两件事，`EX-007` 的判定面不变。
@@ -174,7 +174,7 @@ export const MIGRATION_RE = /^\s*Migration[:：]\s*(\S.*)$/m
 /** `Core-Change:` 段是补件引用的决策号所在处（与 `arch-change-audit` 同一格式）。 */
 const CORE_CHANGE_RE = /^\s*Core-Change[:：]\s*(.+)$/m
 
-/** 生成物：清单 / 装配的镜像，随能力包增删；它不是机制（D-247）。 */
+/** 生成物：清单 / 装配的镜像，随能力包增删；它不是机制（）。 */
 const GENERATED_RE = /\.gen\.rs$/
 
 /**
@@ -210,7 +210,7 @@ const GENERATED = generatedPaths(repoRoot)
  * 清单镜像的变化，不是机制增量——否则退役本身会把当年那些提交追溯判红。
  *
  * 只在文件于当前树**确已消失**时生效（`isRetiredGenerated`）：若同名文件被重新手写，
- * 它不再算生成物，判据照常扫它。退役决策见 `D-387`。
+ * 它不再算生成物，判据照常扫它。退役决策见 ``。
  */
 export const RETIRED_GENERATED = new Set(['crates/symbio-plugin-api/src/view_names.rs'])
 
@@ -229,11 +229,11 @@ const TEST_RE = /\.test\.rs$/
  */
 export const BEFORE_GUARD = {
   sha: '811b2e7d',
-  why: 'EX-002 落地时的 HEAD：迁移纪律（D-247）从此后的提交开始判，之前的不追溯（不重写历史）',
+  why: 'EX-002 落地时的 HEAD：迁移纪律（）从此后的提交开始判，之前的不追溯（不重写历史）',
 }
 
 /**
- * 口径起点：机制面从「逐树新增」改为「总量净变化」（`D-404`）。
+ * 口径起点：机制面从「逐树新增」改为「总量净变化」（``）。
  *
  * 判据变更同样不追溯：此 sha **之前**的提交按旧口径判，从它的子提交起才按净变化判。
  * 少了这一条，改口径那天会把历史上所有跨树搬迁按新规则重判一遍——而它们当年是按
@@ -243,11 +243,11 @@ export const BEFORE_GUARD = {
  */
 export const NET_GUARD = {
   sha: 'b08197b3',
-  why: 'EX-007 口径改为「ARCH_TREES 总量净变化」前的最后一个提交（D-404）：此前按旧口径，此后按净变化判搬迁',
+  why: 'EX-007 口径改为「ARCH_TREES 总量净变化」前的最后一个提交（）：此前按旧口径，此后按净变化判搬迁',
 }
 
 /**
- * 补件的正向证据：给内核 `EventDecl` 加宿主写口的那次提交（D-296）。
+ * 补件的正向证据：给内核 `EventDecl` 加宿主写口的那次提交（）。
  *
  * 为什么不取 `709ee583`（给 `plugin-api` 加前置判断端口）：判定面是 `sdk` / `kernel`，
  * `plugin-api` 是插件面契约、不算补件——夹具必须落在判定面之内，否则「正向证据」
@@ -255,11 +255,11 @@ export const NET_GUARD = {
  */
 export const FIXTURE = {
   sha: '89490914',
-  why: '事件声明的宿主写口（D-296）：在 kernel 新增公开项、挂一条能打开的决策，新增面不含插件 id 与工具名',
+  why: '事件声明的宿主写口（）：在 kernel 新增公开项、挂一条能打开的决策，新增面不含插件 id 与工具名',
 }
 
 /**
- * 补件次数的告警阈值（D-269 §5.3）。
+ * 补件次数的告警阈值（ §5.3）。
  *
  * 它不是棘轮：计数随「判据起点..HEAD」的范围变化，拿它当基线会在换基线时假红。
  * 但它必须刺眼——**补件次数是设计缺口的读数**。阈值取 2：一次补件可以是真的位置缺失，
@@ -268,7 +268,7 @@ export const FIXTURE = {
 export const SUPPLEMENT_ALARM = 2
 
 /**
- * 累计「补件 : 迁移」的付账读数（D-372）。
+ * 累计「补件 : 迁移」的付账读数（）。
  *
  * 判据落地那天的存量 `stock` 是**欠账本金**：从那天起，每多一个补件必须由一次
  * 迁移抵账。`debt > 0` ⇒ 红。不直接拿「比值 ≤ 某数」当阈值——范围基线一变计数
@@ -289,12 +289,12 @@ export function supplementRatioReading({ supplements, migrations, stock }) {
 }
 
 /**
- * 累计欠账的递减台阶（D-375）。
+ * 累计欠账的递减台阶（）。
  *
  * 起算日建账 6 笔（21 − 15）。此后每个检查点把上限压 1，日期一过而上限没达到 ⇒ 红；
  * 最后一个检查点就是硬期限，上限 0——`2026-11-25` 之后任何欠账即红。
  * 到期后只有两种合法结局：追平（欠账 0，台阶表冻结），或另裁一条新决策并指名它换来了
- * 什么（新的到期日与代价）。**不许把检查点往后加来「续期」**——那会让判据永远绿（D-372）。
+ * 什么（新的到期日与代价）。**不许把检查点往后加来「续期」**——那会让判据永远绿（）。
  *
  * 为什么是台阶而不是每日线性：线性在宽限期内多数日子算出同一个 `allowed`，报错只能说
  * 「还差一点」；台阶把「每批该还多少」写成日期上的义务，每个检查点至少抵 1 笔，
@@ -333,7 +333,7 @@ export function debtAllowance({ today, initialDebt, schedule = DEBT_SCHEDULE }) 
 }
 
 /**
- * 到期豁免（`D-375` §5 的「另裁一条新决策」路径）。
+ * 到期豁免（`` §5 的「另裁一条新决策」路径）。
  *
  * 豁免**不改判据、不改计数口径**，只把 `EX-007` 的绝对欠账线推迟到 `through`：
  * 到期后照常按台阶判红，续期必须另裁一条决策并写明代价。
@@ -342,7 +342,7 @@ export function debtAllowance({ today, initialDebt, schedule = DEBT_SCHEDULE }) 
  */
 export const DEBT_EXEMPTIONS = [
   // `DEBT_EXEMPTIONS` 当前为空：豁免只在有对象、有期限时登记，收口即撤下，不留空壳
-  // （D-403 的裁决与收口注记见 DE-054）。
+  // （ 的裁决与收口注记见 DE-054）。
 ]
 
 /** 当前仍生效的到期豁免（`null` = 没有）。判定见 `DEBT_EXEMPTIONS` 的注释。 */
@@ -352,7 +352,6 @@ export function activeDebtExemption({ today, decisions, exemptions = DEBT_EXEMPT
       (e) =>
         // `through` 是**失效日**（含当天）；日期比较走共享原语，不在这里另写一份。
         exemptionActive({ expires: e.through, today }) &&
-        decisions.has(String(e.decision ?? '')) &&
         String(e.reason ?? '').replace(/\s+/g, '').length >= 8,
     ) ?? null
   )
@@ -362,7 +361,7 @@ export function activeDebtExemption({ today, decisions, exemptions = DEBT_EXEMPT
  * 台阶表自身的判据：日期严格递增、每点至少降 1、末点压到 0。
  *
  * 它挡的是「把台阶改成平的」这类沉默放宽——表一旦不再递减，绝对线就退回本金线，
- * 与 D-372 的增量线完全重合，等于没有期限。读不出形状就判红，不静默跳过。
+ * 与  的增量线完全重合，等于没有期限。读不出形状就判红，不静默跳过。
  */
 export function validateDebtSchedule(schedule = DEBT_SCHEDULE, initialDebt = 6) {
   const errors = []
@@ -448,7 +447,7 @@ function relocationLineKey(raw) {
 }
 
 /**
- * 搬家行（D-279 的教训）：本提交里**整份文件被删掉**的那些行。
+ * 搬家行（ 的教训）：本提交里**整份文件被删掉**的那些行。
  *
  * 机制面收缩——把一个 crate 并进另一棵树——在 `--no-renames` 的 diff 里是「旧文件全删
  * + 新文件全增」。这时 EX-007 的「补件不许带能力名」会把**本来就在机制面上的那几行**
@@ -458,10 +457,10 @@ function relocationLineKey(raw) {
  *
  * 从其它 crate 迁入平台 SDK 时，`symbio_platform::…` 改写成 `crate::…`；只在
  * 「平台外的删除侧含 symbio_platform」时登记等价 key，避免把自引用改写误判成
- * 新通道（D-564）。平台内或门面的 `crate::…` 指向自己，不能借此配对。
+ * 新通道（）。平台内或门面的 `crate::…` 指向自己，不能借此配对。
  *
  * 为什么限定「文件被删掉」，而不是「提交里出现过同样的删除行」：后者会把「从 `loop`
- * 删掉一条定制分支、同一行加进 `sdk`」也算搬家，而那是 D-247 反向拆分要拦的形态
+ * 删掉一条定制分支、同一行加进 `sdk`」也算搬家，而那是  反向拆分要拦的形态
  * （把定制通道塞进机制面）。只有文件整体消失，那一行才轮不到继续当通道。
  */
 export function movedLines(patch) {
@@ -519,13 +518,13 @@ function pubItemShape(raw) {
  * `plugin-api` 的改动不算补件：那是插件面的通用契约，不改内核的公开面与语义。
  * 只看**新增的非注释行**：注释里提一句 `pub fn` 不是机制。
  *
- * 同名公开项在本次提交里也从**机制面**删掉了，就不是新增（`D-437`）：那次改动把一个
+ * 同名公开项在本次提交里也从**机制面**删掉了，就不是新增（``）：那次改动把一个
  * 契约拆成两半——一半留在原地、一半搬去插件——剩下那半在 diff 里整份是「新增」。
  * 按行判会把一次净收窄（−369 行机制源码）读成六个新公开项，于是提交者只能挂一个与
  * 本意无关的 `Core-Change`，而「补件次数是设计缺口的读数」这一格从此虚高。
  * 只拿机制面的删除来抵：真正的补件是「插件里的口子搬进内核」，那确实让内核的面变宽。
  *
- * 改名同样不算新增（`D-437` 的实现补齐）：`pubItemName` 的注释早就写着
+ * 改名同样不算新增（`` 的实现补齐）：`pubItemName` 的注释早就写着
  * 「换签名、拆文件、**改名**都是把同一行重写一遍」，但同名抵消只认得出「名字相同」，
  * 认不出「同形状、换了词」的改名（turn→scope）。于是纯粹的改名被记成补件，机制面
  * 一寸没宽、欠账却 +1。判据的既有口径是「面有没有变宽」，改名没有变宽——本条让实现
@@ -618,7 +617,7 @@ const BARE_LITERAL_LINE = /^\s*"[^"]*"\s*[,;]?\s*$/
  * 留一行转发，都是搬家的附带，不构成机制新增。
  *
  * `pub use` 必须一起不算：搬迁的合法形态就是「实现进 `sdk` + `plugin-api` 留一行转发」，
- * 若把转发行算成新增，净零搬迁会被记成净增 1 行而永远判红（`D-404` 红 3 的另一半）。
+ * 若把转发行算成新增，净零搬迁会被记成净增 1 行而永远判红（`` 红 3 的另一半）。
  */
 const USE_ONLY_LINE = /^\s*(?:pub(?:\s*\(\s*[^)]*\s*\))?\s+)?use\s[^;]+;\s*$/
 /**
@@ -665,7 +664,7 @@ export function mechanismLineCountFromSource(source, changedLines) {
 }
 
 /**
- * 机制面的**净变化**（`D-404` 的口径）：`ARCH_TREES` 内非生成 `.rs` 的机制行，
+ * 机制面的**净变化**（`` 的口径）：`ARCH_TREES` 内非生成 `.rs` 的机制行，
  * 新增条数 − 删除条数。为正才是变宽；净零是搬迁；净减是收窄。
  *
  * 只数**删得掉的行**：注释与 `use` 行两边都不计——它们随符号改名 / 搬家而必然重写，
@@ -718,7 +717,7 @@ export function parseRelocationHeader(message) {
 /**
  * 路径所属的树；不在 `crates/` 下则返回路径本身。
  *
- * 树是**机制面里能互相搬东西的最小单位**：平台合并（D-556）之前是 crate 根，之后平台的
+ * 树是**机制面里能互相搬东西的最小单位**：平台合并（）之前是 crate 根，之后平台的
  * 四臂同住一个 crate，树取到臂——否则 `kernel → sdk` 搬一块实现会被读成「同树内删了
  * 又加」，EX-004 的搬迁证据就少一类。历史路径先折算（合并前的提交写的是旧 crate 根）。
  */
@@ -745,13 +744,13 @@ export function crossTreeMoves(patch) {
   // 不含标识符的行在每个文件里都有；把它们算成「跨树搬过去的一份面」，会让任何一笔
   // 「删一个大文件 + 改另一个文件」的提交凭空多出十几行搬迁记录，于是提交者只能
   // 去写一条假的 `from` / `to` 才过得了门——判据逼人撒谎，比漏判更糟。
-  // D-404 要判的是「一块实现有没有被搬到别处」，而一块实现必然带着名字。
+  //  要判的是「一块实现有没有被搬到别处」，而一块实现必然带着名字。
   const carriesName = (code) => /[A-Za-z_]/.test(code)
   // 判据要的是「一块实现被搬到别处」，而一块实现的开头一定是一个**项声明**。
   // 只带名字的赋值行不算：`reads: &[],` / `writes: &[]` 这类字段初始化在几十个
   // 构造点里各写一遍，删一处、加一处（字段从执行体上移到行）就长得像「跨树搬迁」，
   // 提交者于是只能补一条与自己意思无关的 `from` / `to`——同 `carriesName` 那条的
-  // 理由（`D-437`）：判据逼人撒谎，比漏判更糟。
+  // 理由（``）：判据逼人撒谎，比漏判更糟。
   const isItemLine = (code) => ITEM_LINE_RE.test(code)
   const removedLines = new Map() // 行文本 -> 它被删所在的树集合
   for (const f of patch) {
@@ -814,7 +813,7 @@ function extensionConsumers(root) {
  * 红 3 要防的是「扩展插件被迫多依赖 sdk」：只有真有插件在写 `symbio_plugin_api::<模块名>`
  * （或引用模块里的公开项）时，缺转出行才会造出那条边。零消费方的模块（如只服务报表读口与
  * 诊断列的 `ViewUnavailable`）在门面上留一行转发，恰好是 HS-003 判红的空转条目——两条判据
- * 不能互相逼出对方禁止的形状（`D-416`）。搬走的文件内容就在 `removed` 里，公开项名从那里读。
+ * 不能互相逼出对方禁止的形状（``）。搬走的文件内容就在 `removed` 里，公开项名从那里读。
  */
 function hasExtensionConsumers(file, stem, root) {
   const used = extensionConsumers(root)
@@ -851,14 +850,14 @@ export function classifyCommit({ message, patch, net = true }) {
     return 'migration'
   }
   // 跨树搬家先判：它本来就会在 `to` 侧显示成「新增公开项」，按补件判只会逼人补一个
-  // 与本意无关的决策号；缺声明要红在「没写搬迁声明」，不是「没写补件理由」（D-404 红 2）。
+  // 与本意无关的决策号；缺声明要红在「没写搬迁声明」，不是「没写补件理由」（ 红 2）。
   if (net && crossTreeMoves(patch).count > 0) return 'relocation'
   if (mechanismAdditions(patch).length > 0) return 'supplement'
   return null
 }
 
 /**
- * 搬迁批次的判定（`D-404` 的三条红线）。
+ * 搬迁批次的判定（`` 的三条红线）。
  *
  * 只在 `NET_GUARD` 之后的提交上跑：之前的历史是按旧口径通过的，重判等于要求重写历史。
  */
@@ -872,7 +871,7 @@ export function relocationErrors({ sha, message, patch }) {
     if (moves.count > 0) {
       errors.push(
         `EX-007 本提交跨树搬了 ${moves.count} 行机制面源码却没有 \`Migration:\` 段（如 ${moves.samples[0]}）` +
-          ' —— 搬迁必须显式声明，否则与「在机制面新增一行」在 diff 里无法区分（D-404）',
+          ' —— 搬迁必须显式声明，否则与「在机制面新增一行」在 diff 里无法区分（）',
       )
     }
     return { errors }
@@ -881,7 +880,7 @@ export function relocationErrors({ sha, message, patch }) {
   if (moves.count > 0 && !header.complete) {
     errors.push(
       `EX-007 本提交跨树搬了 ${moves.count} 行机制面源码，但 \`Migration:\` 段没写 \`from: <path> (<行数>)\` / \`to: <path> (<行数>)\`` +
-        ' —— 没有两侧行数就无法判「净增」（D-404 红 2）',
+        ' —— 没有两侧行数就无法判「净增」（ 红 2）',
     )
     return { errors }
   }
@@ -894,22 +893,22 @@ export function relocationErrors({ sha, message, patch }) {
     const toFile = patch.find((f) => f.path === pair.to.path)
     if (!fromFile) {
       errors.push(
-        `EX-007 \`from:\` 指的 \`${pair.from.path}\` 不在本提交的 diff 里 —— 行数无法核验（D-404 红 2）`,
+        `EX-007 \`from:\` 指的 \`${pair.from.path}\` 不在本提交的 diff 里 —— 行数无法核验（ 红 2）`,
       )
     } else if (fromFile.removed.length !== pair.from.lines) {
       errors.push(
         `EX-007 \`from:\` 写了 ${pair.from.lines} 行，实际从 \`${pair.from.path}\` 删了 ${fromFile.removed.length} 行` +
-          ' —— 行数写错就等于没写（D-404 红 2）',
+          ' —— 行数写错就等于没写（ 红 2）',
       )
     }
     if (!toFile) {
       errors.push(
-        `EX-007 \`to:\` 指的 \`${pair.to.path}\` 不在本提交的 diff 里 —— 行数无法核验（D-404 红 2）`,
+        `EX-007 \`to:\` 指的 \`${pair.to.path}\` 不在本提交的 diff 里 —— 行数无法核验（ 红 2）`,
       )
     } else if (toFile.added.length !== pair.to.lines) {
       errors.push(
         `EX-007 \`to:\` 写了 ${pair.to.lines} 行，实际往 \`${pair.to.path}\` 加了 ${toFile.added.length} 行` +
-          ' —— 行数写错就等于没写（D-404 红 2）',
+          ' —— 行数写错就等于没写（ 红 2）',
       )
     }
   }
@@ -924,7 +923,7 @@ export function relocationErrors({ sha, message, patch }) {
     if (source === null) {
       if (file[side].length === 0) return 0
       errors.push(
-        `EX-007 读不出 ${revision} 的 \`${file.path}\`，无法核验搬迁机制行（D-404 红 1）`,
+        `EX-007 读不出 ${revision} 的 \`${file.path}\`，无法核验搬迁机制行（ 红 1）`,
       )
       return 0
     }
@@ -939,7 +938,7 @@ export function relocationErrors({ sha, message, patch }) {
     if (grew > 0) {
       errors.push(
         `EX-007 \`${pair.to.path}\` 比 \`${pair.from.path}\` 多搬了 ${grew} 行机制面源码` +
-          ' —— 不许借搬迁名义在机制面加面（D-404 红 1）',
+          ' —— 不许借搬迁名义在机制面加面（ 红 1）',
       )
     }
   }
@@ -949,7 +948,7 @@ export function relocationErrors({ sha, message, patch }) {
   if (total.net > 0) {
     errors.push(
       `EX-007 机制面净增 ${total.net} 行（新增 ${total.added} / 删除 ${total.removed}）` +
-        ' —— 搬迁必须是净零或净减，多出来的机制增量拆成带 `### D-NNN` 的独立补件提交（D-404 红 1）',
+        ' —— 搬迁必须是净零或净减，多出来的机制增量拆成带 `### D-NNN` 的独立补件提交（ 红 1）',
     )
   }
 
@@ -976,7 +975,7 @@ export function relocationErrors({ sha, message, patch }) {
     if (!reexported) {
       errors.push(
         `E-009 从 \`plugin-api\` 搬走了 \`${pair.from.path}\`，却没有在同一文件树里留 \`pub use\` 把 \`${stem}\` 转出` +
-          ' —— 扩展插件只许依赖 `plugin-api`，缺这行转发它们就得多依赖 `sdk`（D-404 红 3）',
+          ' —— 扩展插件只许依赖 `plugin-api`，缺这行转发它们就得多依赖 `sdk`（ 红 3）',
       )
     }
   }
@@ -987,10 +986,10 @@ export function relocationErrors({ sha, message, patch }) {
 /**
  * 迁移批次的判定（EX-003 的「同提交删除」+ EX-007 的两条 containment）。
  *
- * 机制面判的是**净变化**（`D-404`）：迁移与搬迁都可能把实现从这棵树搬到那棵树，
+ * 机制面判的是**净变化**（``）：迁移与搬迁都可能把实现从这棵树搬到那棵树，
  * 逐树看新增必然把搬迁判成变宽。判「新增行数 − 删除行数」：为正才是变宽；净零 / 净减
  * 都合法。`S8` 那六行折叠住在 `sdk/projection/`，「搬走 = 同一提交删掉旧实现」
- * （`D-245`）落到它们身上必然是删机制面的文件——判「diff = 0」会把这族的删除半边
+ * （``）落到它们身上必然是删机制面的文件——判「diff = 0」会把这族的删除半边
  * 也拦下，于是整段只能拆提交（中间那个让 `PP-003` 判红）或不写 `Migration:`
  * （让 `EX-003` 判不到），两条都是把判据变成措辞游戏。
  *
@@ -1013,7 +1012,7 @@ export function migrationErrors({
       errors.push(
         `EX-007 迁移提交在机制面净增了 ${delta} 行源码（新增 ${added} / 删除 ${removed}；` +
           `${wider.map((f) => `\`${f.path}\` +${f.added - f.removed}`).join(' / ')}）` +
-          ' —— 机制面只许收窄：净增的机制增量要拆成带 `### D-NNN` 的独立补件提交；搬迁必须是净零或净减（D-247 / D-404）',
+          ' —— 机制面只许收窄：净增的机制增量要拆成带 `### D-NNN` 的独立补件提交；搬迁必须是净零或净减（ / ）',
       )
     }
   } else {
@@ -1029,7 +1028,7 @@ export function migrationErrors({
     if (archAdded.length) {
       errors.push(
         `EX-007 迁移提交在机制面新增了源码（${archAdded.map((f) => `\`${f.path}\``).join(' / ')}）` +
-          ' —— 机制面只许收窄：迁移批次在 sdk / kernel / plugin-api 不许有新增行，确有机制增量就拆成带 `### D-NNN` 的独立补件提交（D-247 / D-283）',
+          ' —— 机制面只许收窄：迁移批次在 sdk / kernel / plugin-api 不许有新增行，确有机制增量就拆成带 `### D-NNN` 的独立补件提交（ / ）',
       )
     }
   }
@@ -1059,7 +1058,7 @@ export function migrationErrors({
   const deletions = oldImplementation.reduce((n, f) => n + f.removed.length, 0)
   if (deletions === 0) {
     errors.push(
-      'EX-003 迁移提交没有删除旧实现所在受保护树的非测试源码——插件落地与旧实现删除必须同提交（D-245 / D-553），否则两份实现同时生效',
+      'EX-003 迁移提交没有删除旧实现所在受保护树的非测试源码——插件落地与旧实现删除必须同提交（ / ），否则两份实现同时生效',
     )
   }
 
@@ -1067,32 +1066,26 @@ export function migrationErrors({
 }
 
 /**
- * 补件的判定（EX-007 的决策号与通用性）。
+ * 补件的判定（EX-007 的理由与通用性）。
  *
- * 决策号取 `Core-Change:` 段；没有这一段（只动 `plugin-api` 的补件不要求它）则取
- * 整条信息里任意一个 `D-NNN`。**必须能打开**：拼一个不存在的号等于没写。
+ * 理由取 `Core-Change: <判据码> <当前理由>`：规则码形状合法、理由非空，说清哪条能力
+ * 因缺它而迁不动、它服务哪些能力。只动 `plugin-api` 的补件不要求这一段。
  */
 export function supplementErrors({
   sha,
   message,
   patch,
-  decisions,
   pluginIds: ids = [],
   toolNames = [],
   moved = new Map(),
 }) {
   const errors = []
   const text = String(message ?? '')
-  const trailer = text.match(CORE_CHANGE_RE)
-  const scope = trailer ? trailer[1] : text
-  const cited = [...scope.matchAll(/\bD-\d{3,}\b/g)].map((m) => m[0])
-  if (cited.length === 0) {
+  const parts = coreChangeParts(text)
+  if (!parts?.rule || parts.reason.length < 8) {
     errors.push(
-      'EX-007 补件没有决策号 —— 架构增量必须挂一条 `Core-Change: D-NNN`，说清哪条能力因缺它而迁不动、它服务哪些能力',
-    )
-  } else if (!cited.some((d) => decisions.has(d))) {
-    errors.push(
-      `EX-007 补件引用的决策号在 docs/003-design/ 里打不开（${[...new Set(cited)].join(' / ')}）—— 写错的号等于没写`,
+      'EX-007 补件没有「判据码 + 当前理由」—— 架构增量必须挂一条 `Core-Change: <规则码> <理由>`，' +
+        '说清哪条能力因缺它而迁不动、它服务哪些能力',
     )
   }
 
@@ -1116,7 +1109,7 @@ export function supplementErrors({
   if (offenders.length) {
     errors.push(
       `EX-007 补件不是通用的（${offenders.length} 处带能力名 / 工具名，如 ${describeHit(offenders[0])}）` +
-        ' —— 补件至少服务一条真实能力，但不是为某一条能力定制的通道（D-247）',
+        ' —— 补件至少服务一条真实能力，但不是为某一条能力定制的通道（）',
     )
   }
 
@@ -1136,28 +1129,6 @@ export function validateBeforeGuard(entry) {
     errors.push(`${entry?.sha ?? '(无 sha)'}：判据起点没有理由——不解释起点的豁免就是永久后门`)
   }
   return errors
-}
-
-/** `docs/003-design/` 里存在的决策号（与 arch-change-audit 同一口径）。 */
-export function knownDecisions(root) {
-  const out = new Set()
-  const walk = (dir) => {
-    let entries
-    try {
-      entries = fs.readdirSync(dir, { withFileTypes: true })
-    } catch {
-      return
-    }
-    for (const e of entries) {
-      const p = path.join(dir, e.name)
-      if (e.isDirectory()) walk(p)
-      else if (e.isFile() && e.name.endsWith('.md')) {
-        for (const m of fs.readFileSync(p, 'utf8').matchAll(/^### (D-\d+)/gm)) out.add(m[1])
-      }
-    }
-  }
-  walk(path.join(root, 'docs', '003-design'))
-  return out
 }
 
 
@@ -1202,7 +1173,7 @@ function reportFailures(bad) {
   )
 }
 
-function judgeCommit({ sha, message, patch, decisions, ids, tools, net = true }) {
+function judgeCommit({ sha, message, patch, ids, tools, net = true }) {
   const kind = classifyCommit({ message, patch, net })
   if (kind === 'migration') {
     const errors = migrationErrors({ sha, message, patch, pluginIds: ids, toolNames: tools, net }).errors
@@ -1226,7 +1197,7 @@ function judgeCommit({ sha, message, patch, decisions, ids, tools, net = true })
       sha,
       subject: subjectOf(message),
       kind,
-      errors: supplementErrors({ sha, message, patch, decisions, pluginIds: ids, toolNames: tools, moved })
+      errors: supplementErrors({ sha, message, patch, pluginIds: ids, toolNames: tools, moved })
         .errors,
     }
   }
@@ -1250,13 +1221,7 @@ function main() {
     return 1
   }
 
-  const decisions = knownDecisions(repoRoot)
-  if (decisions.size === 0) {
-    console.error(red('✗ capability-migration-audit：docs/003-design/ 里一个 `### D-NNN` 都读不到——补件的资格线没有输入'))
-    return 1
-  }
-
-  // 逐提交补记表（D-333）：与 `arch-change-audit` 共用同一张表与同一套形状判据。
+  // 逐提交补记表（）：与 `arch-change-audit` 共用同一张表与同一套形状判据。
   // 表只补历史提交的署名，不退役 EX-007：表外的提交缺决策号照样红。
   const backfill = loadBackfill(repoRoot)
   if (backfill.errors.length) {
@@ -1282,7 +1247,6 @@ function main() {
     sha: FIXTURE.sha,
     message: fixtureMsg,
     patch: fixturePatch,
-    decisions,
     ids,
     tools,
   })
@@ -1326,7 +1290,7 @@ function main() {
   const forward = new Set(forwardOut.split('\n').filter(Boolean))
   const commits = parseGitLogRecords(log).filter((c) => forward.has(c.sha))
 
-  // 后继补签（D-551）：后继提交可为同批前一笔缺的补件决策号签名；签名形状先判。
+  // 后继补签（）：后继提交可为同批前一笔缺的补件决策号签名；签名形状先判。
   // `--last` 只判最后一笔，签名却指向整批里的前一笔，故按整批范围验形状。
   let declarationCommits = commits
   if (argv.includes('--last')) {
@@ -1340,7 +1304,7 @@ function main() {
     }
     declarationCommits = parseGitLogRecords(fullLog)
   }
-  const declaredSignatures = collectDeclarations(declarationCommits, decisions, repoRoot)
+  const declaredSignatures = collectDeclarations(declarationCommits, repoRoot)
   if (declaredSignatures.errors.length) {
     for (const error of declaredSignatures.errors) {
       console.error(red(`✗ 后继补签：${error}`))
@@ -1349,7 +1313,7 @@ function main() {
   }
   const DECLARED = declaredSignatures.declarations
 
-  // 口径分界（D-404）：`NET_GUARD` 之后的提交才按「净变化」判；之前的按旧口径（逐树新增）。
+  // 口径分界（）：`NET_GUARD` 之后的提交才按「净变化」判；之前的按旧口径（逐树新增）。
   const netOut = git(['rev-list', `${NET_GUARD.sha}..HEAD`])
   if (netOut === null) {
     console.error(red(`✗ capability-migration-audit：读不出口径起点之后的提交（${NET_GUARD.sha}..HEAD）`))
@@ -1359,7 +1323,7 @@ function main() {
 
   const bad = []
   /**
-   * 不追溯名单：`ARCH_TREES` 从旧 core 扩到 `symbio-sdk` 之后（D-279），
+   * 不追溯名单：`ARCH_TREES` 从旧 core 扩到 `symbio-sdk` 之后（），
    * 那几批把域搬进 SDK 的提交会被**按新范围重新判一遍**——它们当年在旧范围下通过，
    * 而现在「新增的 sdk 文件」看起来像架构补件。
    *
@@ -1368,23 +1332,23 @@ function main() {
    *
    * 为什么 `movedLines` 接不住这两条：那是**复制式**搬迁——原文件没有消失，而是被改成
    * 一行转发（`pub use symbio_platform::sdk::<域>::*;`）。diff 里它既不是删除、也不是同一行搬家，
-   * 所以 sdk 侧看起来是全新的面。D-279 那种「整份文件搬走」由 `movedLines` 接住，
+   * 所以 sdk 侧看起来是全新的面。 那种「整份文件搬走」由 `movedLines` 接住，
    * 这一种只能靠名单——两种形状的区别就是「旧文件还在不在」。
    *
-   * D-259 的那笔迁移在本轮复核里**已不再被命中**（那三域搬的行不带插件 id / 工具名），
-   * 故删除：一条打不中的豁免不是保险，是多一条没人复核的后门（D-280）。
+   *  的那笔迁移在本轮复核里**已不再被命中**（那三域搬的行不带插件 id / 工具名），
+   * 故删除：一条打不中的豁免不是保险，是多一条没人复核的后门（）。
    */
   const GRANDFATHERED = new Map([
-    ['7d2811b9', 'D-258 第一批：7 个域搬进 SDK，原文件留转发桩（复制式搬迁，不是搬家）'],
-    ['09906cbb', 'D-258 第三批：agent / embedding 两域，同上'],
-    ['1069f346', 'D-313 P2-3b2-1：配置 / facts 读点切到 session 端口同源投影（补件随 P2 批次绿点，缺 Core-Change 行；不追改历史）'],
-    ['5c7586a2', 'D-556 / D-557：平台四臂与运行时物理合并，Core-Change 已署名；历史路径别名启用后重判出缺 Migration 段，不追改既有提交'],
+    ['7d2811b9', ' 第一批：7 个域搬进 SDK，原文件留转发桩（复制式搬迁，不是搬家）'],
+    ['09906cbb', ' 第三批：agent / embedding 两域，同上'],
+    ['1069f346', ' P2-3b2-1：配置 / facts 读点切到 session 端口同源投影（补件随 P2 批次绿点，缺 Core-Change 行；不追改历史）'],
+    ['5c7586a2', ' / ：平台四臂与运行时物理合并，Core-Change 已署名；历史路径别名启用后重判出缺 Migration 段，不追改既有提交'],
   ])
   let migrations = 0
   let relocations = 0
   let supplements = 0
   let declarationUses = 0
-  /** 逐笔账：欠账明细要能点到具体提交（`D-403`），不能只印总数。 */
+  /** 逐笔账：欠账明细要能点到具体提交（``），不能只印总数。 */
   const ledger = []
   for (const c of commits) {
     if (!touchesAuditedTree(c.files)) continue
@@ -1397,15 +1361,14 @@ function main() {
       sha: c.sha,
       message: c.message,
       patch,
-      decisions,
-      ids,
+        ids,
       tools,
       net: netCommits.has(c.sha),
     })
     if (r.kind === 'migration') migrations += 1
     if (r.kind === 'relocation') relocations += 1
     if (r.kind === 'supplement') supplements += 1
-    // 净零搬迁也进账本：它不记欠账、不抵账，但读数要解释得清「这笔为什么不算」（D-404 §3）。
+    // 净零搬迁也进账本：它不记欠账、不抵账，但读数要解释得清「这笔为什么不算」（ §3）。
     if (r.kind) ledger.push({ sha: r.sha.slice(0, 8), subject: r.subject, kind: r.kind })
     if (r.errors.length && GRANDFATHERED.has(r.sha.slice(0, 8))) continue
     if (r.errors.length && BACKFILLED_EX.has(r.sha.slice(0, 8))) continue
@@ -1427,7 +1390,7 @@ function main() {
     ),
   )
 
-  // ── 累计付账线（D-372）：补件必须由迁移抵账，欠账不许变大 ──
+  // ── 累计付账线（）：补件必须由迁移抵账，欠账不许变大 ──
   const stock =
     BASELINE.capabilitySupplements !== undefined && BASELINE.capabilityMigrations !== undefined
       ? { supplements: BASELINE.capabilitySupplements, migrations: BASELINE.capabilityMigrations }
@@ -1455,7 +1418,7 @@ function main() {
       `；自本判据起 补件 ${signed(reading.dSupp)} / 迁移 ${signed(reading.dMig)}（欠账 ${signed(reading.debt)}）`,
   )
 
-  // ── 绝对欠账的期限线（D-375）：增量线只拦新债，旧债按台阶还清 ──
+  // ── 绝对欠账的期限线（）：增量线只拦新债，旧债按台阶还清 ──
   const absoluteDebt = supplements - migrations
   const allowance = debtAllowance({ today: todayIso(), initialDebt })
   const nextText = allowance.next
@@ -1466,7 +1429,7 @@ function main() {
     `  · 累计欠账 ${absoluteDebt} 笔（补件 ${supplements} − 迁移 ${migrations}）；` +
       `今日（${allowance.today}）允许 ≤${allowance.allowed}，${nextText}`,
   )
-  // 欠账明细（D-403）：按提交顺序把最早的补件配给迁移，剩下未被抵掉的补件就是欠账——
+  // 欠账明细（）：按提交顺序把最早的补件配给迁移，剩下未被抵掉的补件就是欠账——
   // 豁免必须能逐笔复核，不能只印一个总数。
   const supplementsSeen = ledger.filter((e) => e.kind === 'supplement')
   const migrationsSeen = ledger.filter((e) => e.kind === 'migration').length
@@ -1475,7 +1438,7 @@ function main() {
     console.log(`  · 欠账明细（${unpaid.length} 笔补件尚未被迁移抵掉，按提交顺序）：`)
     for (const e of unpaid) console.log(dim(`    - ${e.sha} ${e.subject}`))
   }
-  const exemption = activeDebtExemption({ today: allowance.today, decisions })
+  const exemption = activeDebtExemption({ today: allowance.today })
   if (absoluteDebt > allowance.allowed) {
     if (exemption) {
       console.log(
@@ -1490,7 +1453,7 @@ function main() {
         red(
           `✗ EX-007 累计欠账 ${absoluteDebt} 笔 > 今日（${allowance.today}）允许 ≤${allowance.allowed}：` +
             '欠账按台阶递减，每个检查点至少抵 1 笔迁移；' +
-            `${allowance.deadline} 必须归零，到期仍欠即红（D-375）`,
+            `${allowance.deadline} 必须归零，到期仍欠即红（）`,
         ),
       )
       return 1
@@ -1511,7 +1474,7 @@ function main() {
         red(
           `✗ EX-007 累计补件/迁移比恶化：自本判据起新增补件 ${reading.dSupp} 个、迁移 ${reading.dMig} 个` +
             `（欠账 +${reading.debt}）—— 补件必须与迁移同批或由既有迁移抵账；` +
-            '只补不搬等于每个能力都在拓宽机制面（D-372）',
+            '只补不搬等于每个能力都在拓宽机制面（）',
         ),
       )
       return 1
@@ -1524,13 +1487,13 @@ function main() {
       dim('  ⊘ 还没有迁移批次（S6 起生效）：本轮的读数只是「补件夹具成立」，不证明任何一批拆得动'),
     )
   }
-  // 补件次数是**设计缺口的读数**（D-269 §5.3）：不设棘轮（范围一变计数就变，基线会假红），
+  // 补件次数是**设计缺口的读数**（ §5.3）：不设棘轮（范围一变计数就变，基线会假红），
   // 但它必须刺眼——补件与迁移批次同数，说明每一批都在补架构，而不是在搬能力。
   if (supplements >= SUPPLEMENT_ALARM) {
     console.log(
       yellow(
         `  △ 本段补件 ${supplements} 次 / 迁移批次 ${migrations} 个：补件次数是**设计缺口**的读数` +
-          '（D-269 §5.3）。每一条先过 §5.1 的两条准入（不提能力名 ∧ ≥2 条能力要用），' +
+          '（ §5.3）。每一条先过 §5.1 的两条准入（不提能力名 ∧ ≥2 条能力要用），' +
           '过不了的记进 §5.2 缺口账、结论写「留控制面」，不改架构。',
       ),
     )

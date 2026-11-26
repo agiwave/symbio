@@ -411,7 +411,7 @@ test('S-013 accepts zero WalkBuilder constructions or every construction pinned'
     encoding: 'utf8',
     timeout: 30000,
   })
-  // D-515 后 content_search / codebase_search 都改走 VDFS 递归遍历，真实仓库
+  //  后 content_search / codebase_search 都改走 VDFS 递归遍历，真实仓库
   // 里 WalkBuilder 构造点已归零——两种通过消息都接受：零处（现状）或「有构造
   // 点且都钉了遍历序」（若将来有合理引入）。只要有一处没钉，S-013 会报 ERROR，
   // 这里自然跟着红。
@@ -605,7 +605,7 @@ test('S-015 真实仓库零处（存量已全部迁完）', () => {
 
 // ── S-016: 停机原因单形状 ────────────────────────────────────────────
 // 判据扫 `crates/symbio-plugin-loop/src` 下全部 `.rs`：停机格只在这个 crate 里出生。
-// 原先写死的三个 `turn_runner/*.rs` 随旧引擎退役都不存在了，判据恒绿（`D-280`）——
+// 原先写死的三个 `turn_runner/*.rs` 随旧引擎退役都不存在了，判据恒绿（``）——
 // 下面第一条新用例钉的正是「扫描面为空必须判红」。
 const S016_TARGET = 'crates/symbio-plugin-loop/src/ring/settle.rs'
 // 别的 crate 的别的格子：`why` 在那里合法（没有竞争的 `reason` 字段），不该被卷进来。
@@ -698,7 +698,7 @@ test('S-016 真实仓库：零违例，且扫描面非空', () => {
     timeout: SCAN_TIMEOUT_MS,
   })
   assert.match(r.stdout, /S-016 通过/, '真仓里不许有已退役的停机原因形状')
-  // 「读空即全绿」的 dogfood 断言（`D-280`）：必须真的读到文件。原文写死三个
+  // 「读空即全绿」的 dogfood 断言（``）：必须真的读到文件。原文写死三个
   // `turn_runner/*.rs`，那些文件退役后判据一个字都没读过、恒绿——单看「通过」
   // 是看不出来的，所以这里连**读了几份**一起钉。
   const m = r.stdout.match(/plugin-loop\/src` 下 (\d+) 份 \.rs/)

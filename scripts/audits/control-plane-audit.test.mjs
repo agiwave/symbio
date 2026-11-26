@@ -80,8 +80,7 @@ function audit(files, { baselineFrom = files, withBaseline = true, mutate } = {}
   return withTempTree({}, (root) => {
     if (withBaseline) {
       const b = printBaseline(baselineFrom)
-      b.mechanism.adr = 'D-234'
-      b.mechanism.reason = '夹具：机制面冻结在干净形状上（决策锚只为让 CP-006 的输入完整）'
+      b.mechanism.why = '夹具：机制面冻结在干净形状上，当前理由非空'
       if (mutate) mutate(b)
       files[BASELINE_REL] = JSON.stringify(b, null, 2)
     }
@@ -137,7 +136,7 @@ pub(crate) const EVENTS: &[EventDecl] = &[
 ];
 `
 
-const DECL_DOC = '## 关键决策\n\n### D-234 夹具决策\n\n机制面基线挂在这条决策上。\n'
+const DECL_DOC = '## 关键决策\n\n###  夹具决策\n\n机制面基线挂在这条决策上。\n'
 
 /** 词汇家（生成物）：CP-004 的世界名集合只能从这里取。 */
 const EVENTS_SRC = `//! 夹具：词汇层生成物（各 owner 声明经生成器投影，请勿手改）。
@@ -308,12 +307,12 @@ test('CP-006：基线指向一个不存在的机制面文件 ⇒ 红（陈旧基
   )
 })
 
-test('CP-006：基线里的决策号不存在 ⇒ 红（不许匿名冻结）', () => {
+test('CP-006：基线里没有当前理由 ⇒ 红（不许匿名冻结）', () => {
   const files = cleanTree()
   assertRed(
     audit(files, {
       mutate: (b) => {
-        b.mechanism.adr = 'D-999'
+        b.mechanism.why = ''
       },
     }),
     'CP-006',

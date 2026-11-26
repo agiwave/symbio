@@ -1,4 +1,4 @@
-//! 单轮 LLM 的**共享帧原语**与 id 原语；类型面已迁入 `symbio-kernel`（D-188 C2b）。
+//! 单轮 LLM 的**共享帧原语**与 id 原语；类型面已迁入 `symbio-kernel`（ C2b）。
 
 use crate::kernel::chat::chat_node::{ChatNode, NodeStatus};
 use crate::kernel::exec::ExecEventSink;

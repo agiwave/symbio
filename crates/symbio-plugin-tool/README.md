@@ -22,15 +22,15 @@ impl: done
 |---|---|---|
 | 端口 | `tool`（执行 / 路由 / 结果提取） | 环按端口名解析提供者 |
 | 债 | **一调用一笔**：键 `tool:{request_id}:{call_id}` | 只问「有没有 `tool.call.requested` 这条标记」，不读 `tool.requested` 的 `calls[]` |
-| 事实 | `artifact.added`（本次调用产物）、`authz.granted`（授权草稿）、`tool.calls.done`（调用收束） | 名字经 `shared_events` 投影；`artifact.added` 由本插件端口写出（`after_port`），`tool.calls.done` 由簿记行写出（D-508） |
+| 事实 | `artifact.added`（本次调用产物）、`authz.granted`（授权草稿）、`tool.calls.done`（调用收束） | 名字经 `shared_events` 投影；`artifact.added` 由本插件端口写出（`after_port`），`tool.calls.done` 由簿记行写出 |
 
 ## 五个执行体内部的判据
 
 | 文件 | 判什么 |
 |---|---|
 | `breaker` | 时延 / 预算熔断：环**不判快慢**，只把中性输入（授权结论 / 已耗 / 申请 / 总预算）随债交过来；判定、「熔断中不发」与那条 `control × opened` 事实都由执行体自己落 |
-| `result_guard` | L0 单次结果守卫：超 token 预算时把全文写进 `SESSION_VDFS` 下的会话存档目录（取回地址是会话地址面 `<根>/session/<sid>/tool_archives/<file>`，根名由 vdfs 插件静态声明、运行期取得，用 `vdfs_read` 分段读取），正文做 head/tail 摘要（前 60% + 后 40%，尾部通常是结论/错误），中间插占位说明；存档按修改时间保留最新 20 份（D-528） |
-| `round_done` | `tool.calls.done` 的簿记行：收尾是**投影**，不是执行体的最后一步——工具端口当圈没人认领（`after_port`）即补写边界事实，不等驱动收束（D-508；逐 attempt 的终局由端口状态承担） |
+| `result_guard` | L0 单次结果守卫：超 token 预算时把全文写进 `SESSION_VDFS` 下的会话存档目录（取回地址是会话地址面 `<根>/session/<sid>/tool_archives/<file>`，根名由 vdfs 插件静态声明、运行期取得，用 `vdfs_read` 分段读取），正文做 head/tail 摘要（前 60% + 后 40%，尾部通常是结论/错误），中间插占位说明；存档按修改时间保留最新 20 份 |
+| `round_done` | `tool.calls.done` 的簿记行：收尾是**投影**，不是执行体的最后一步——工具端口当圈没人认领（`after_port`）即补写边界事实，不等驱动收束；逐 attempt 的终局由端口状态承担 |
 | `debt` | 债键与恢复：**恢复按 `call_id` 一对一**，同一请求的多张卡各欠各的恢复（不再「一次恢复消费整批」），且与首派行同 id ⇒ 收束落在同一 `(port, id, attempt)` 上，`attempt` 不加、不开新债 |
 
 「这批调用齐了」**不写在任何进程的收尾语句里**：执行体中途死掉也不会有「永久未完成」——

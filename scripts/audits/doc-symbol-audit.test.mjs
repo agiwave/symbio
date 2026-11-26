@@ -57,13 +57,13 @@ auditCase('整词边界：`register_option` 不因 `register_option_field` 存�
 
 auditCase('有效指认通过（exit 0）', () => audit({ ...RS, 'README.md': '桶名见 `symbio_platform::sdk::PLUGIN_PAYLOAD_KEY`。\n' }), 0, [/doc-symbol-audit 通过/])
 
-// ── 决策段与现行正文同一条判据（`D-483`：冻结表已撤下）──────────────────
+// ── 决策段与现行正文同一条判据（``：冻结表已撤下）──────────────────
 // 决策段此前整段跳过（悬空锚点是盲区），后来按登记表冻结（表是第二个豁免面）。
 // 两者都已退场：决策正文按现行代码判，历史用普通文字记名。
 auditCase('决策正文的悬空 .rs::符号锚点照常判红（D-005）', () => audit({
     ...RS,
-    'README.md': '# R\n\n### D-100 裁决\n\n证据 `crates/nope/gone.rs::removed`。\n',
-  }), 1, [/D-005 README\.md:5/, /crates\/nope\/gone\.rs::removed/])
+    'docs/a.md': '# R\n\n###  裁决\n\n证据 `gone::removed`。\n',
+  }), 1, [/D-005 docs\/a\.md:5/, /gone::removed/])
 
 test('单段反引号词：代码里没有同族时不是符号指认（exit 0）', () => {
   const r = audit({ ...RS, 'README.md': '旧名 `GONE_WORD` 已不再使用。\n' })

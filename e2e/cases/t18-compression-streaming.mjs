@@ -4,7 +4,7 @@ import './_selfrun.mjs';
 //
 // ## 本用例钉的是什么
 //
-// 压缩现在是两行债（D-336）：`compact-summarize`（端口 `model.assist`）取摘要，
+// 压缩现在是两行债：`compact-summarize`（端口 `model.assist`）取摘要，
 // `compact-write`（端口 `compact`）落 `session.consolidated`。故障注入点因此必须是
 // **`model.assist` 那次问答**——注在「压缩请求」上是注空（新形态没有独立的压缩请求，
 // 摘要走 `model.assist`，与主请求同形，按 system 里的压缩指令识别）。
@@ -26,7 +26,7 @@ import './_selfrun.mjs';
 // ⇒ 第一轮越线、欠一次摘要。失败按**真实 provider 的超窗错误**注入：HTTP 400 +
 // `maximum context length`——它不是可重试状态，因此**一次派发只对应一次请求**（500
 // 会被 HTTP 层退避重试 4 次，用它计量会把一次派发数成 5 次，抑制就测不出来）。
-// `compact-write` 拿不到摘要 ⇒ **失败是产物**（D-402）：落带原因分类的 `failed` 事实
+// `compact-write` 拿不到摘要 ⇒ **失败是产物**：落带原因分类的 `failed` 事实
 // （超窗归 `non_retryable_context_length`），读面折出 `Failed` 压缩叶，重试入口可达。
 // 两行债的 id 按**前缀指纹**派生（最旧未压事实 + 上限 + 代），同一前缀失败过就收束在
 // 同一把键上——其后轮次不再重付。
@@ -148,7 +148,7 @@ export default defineCase('T18 压缩失败纪律：model.assist 失败不落事
     const f = assistantFailed[0];
     assertEq(f.payload?.class, 'non_retryable', 'HTTP 400 超窗的失败类别');
     assert(String(f.payload?.reason ?? '').length > 0, 'failed 事实应带非空原因（reason）');
-    assert(compactFailed.length >= 1, `压缩失败要有产物（D-402）；实际 failed id: ${failed.map((e) => e.event_id).join(', ')}`);
+    assert(compactFailed.length >= 1, `压缩失败要有产物；实际 failed id: ${failed.map((e) => e.event_id).join(', ')}`);
     const c = compactFailed[0];
     assertEq(
       c.payload?.failure_class,

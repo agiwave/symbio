@@ -15,7 +15,7 @@
 //! 本域自此只留**值类型为通用词汇**（`String` / `Value` / `Vec<String>`）的键——
 //! 那些键没有「原生域」可回，机制（[`SymbioKey`] trait）是它们唯一的家。
 //! 先例：`TURN_DISPATCH`（值类型 `TurnDispatch`）本就住 `turn` 域。
-//! 判据见 D-095。
+//! 判据。
 //!
 //! ## 命名：两种形态，互不重叠
 //!
@@ -36,10 +36,10 @@
 //! 本域**只收上下文键**。跨进程 / 跨文件的字面量按「它描述什么」归各自的域——
 //! 插件 id 归装配方（`crates/symbio-platform/src/deploy/mod.rs`），路由地址归 `crate::sdk::routes`，
 //! 遍历端点归 `plugin::traverse`，
-//! 嵌入服务 id 归 `embedding::ids`，信封载荷键归 `plugin`。判据见 D-095。
+//! 嵌入服务 id 归 `embedding::ids`，信封载荷键归 `plugin`。判据。
 
 // 机制 trait 是内核词汇：本模块只借来定义键类型（`impl SymbioKey`），**不转出**
-// ——内核符号只保留 `crate::kernel::keys::SymbioKey` 一条路径（DE-018 的 D-419）。
+// ——内核符号只保留 `crate::kernel::keys::SymbioKey` 一条路径（DE-018 的 ）。
 use crate::kernel::keys::SymbioKey;
 
 macro_rules! define_string_key {
@@ -82,7 +82,7 @@ macro_rules! define_string_key {
     };
 }
 
-// 作用域 VDFS provider 键（D-515）：值是进程内 trait object，无字符串 / JSON 形态，
+// 作用域 VDFS provider 键：值是进程内 trait object，无字符串 / JSON 形态，
 // 与 `PLUGIN_PARENT` 同一纪律（`WIRE = false`）。三个键把「目录字符串」换成
 // 「绑定作用域根的虚拟文件系统视图」——插件只经 `VdfsProvider::dispatch` 读写，
 // 不再各自 `Path::join` 物理路径；存储后端因此可替换（磁盘 / 内存 / 网络）。
@@ -111,11 +111,11 @@ define_string_key!(PathKey, PATH, "path");
 define_string_key!(WorkdirKey, WORKDIR, "workdir");
 define_string_key!(AgentIdKey, AGENT_ID, "agent_id");
 define_string_key!(SessionIdKey, SESSION_ID, "session_id");
-// 会话级插件数据目录（D-513）：由会话插件按自己的唯一存储布局解析，宿主随本轮基础
+// 会话级插件数据目录：由会话插件按自己的唯一存储布局解析，宿主随本轮基础
 // 上下文统一递给插件。能力插件只读这个目录存取自己的会话数据（记忆文件是首例），
-// **不得**拿它拼事实源路径或重新打开 WAL（D-084 / FB-002）。
+// **不得**拿它拼事实源路径或重新打开 WAL（ / FB-002）。
 define_string_key!(SessionDirKey, SESSION_DIR, "session_dir");
-// 三个作用域存储视图（D-515）：分别对应 agent_dir / work_dir / session_dir。
+// 三个作用域存储视图：分别对应 agent_dir / work_dir / session_dir。
 // 它们取代 WORKDIR / SESSION_DIR 在插件侧的消费面；后两者仍是对外协议键
 // （metadata / CLI / 前端头），只是插件不再拿它们拼物理路径。
 define_vdfs_key!(AgentVdfsKey, AGENT_VDFS, "agent_vdfs_provider");
@@ -147,12 +147,12 @@ impl SymbioKey for VdfsCallerKey {
     }
 }
 pub const VDFS_CALLER: VdfsCallerKey = VdfsCallerKey;
-// 入站请求的**来源主体**（DE-001 §12.2 跨体承诺的「向谁宣告」）：调用方经请求
+// 入站请求的**来源主体**（DE-001 §12 跨体承诺的「向谁宣告」）：调用方经请求
 // `metadata.source_principal` 声明「这条消息是谁发的」（完整主体名，如
 // `agent:main`）；网关 `build_ctx` 把 metadata 落进 ctx，会话插件的收件箱入队口
 // 取走它随条目寄存，轮末 `record_derived` 用它做 `commitment.*` 的 `to`。
 // 缺省（同机直呼 / 心跳等无来源声明的路径）⇒ 本机用户——与接线前写死的常量
-// 逐字一致（D-067：`to` 从调用点常量变成数据）。
+// 逐字一致（`to` 从调用点常量变成数据）。
 define_string_key!(SourcePrincipalKey, SOURCE_PRINCIPAL, "source_principal");
 // 请求链路 id：同一条链上的多次请求共用它，把跨插件的日志串回一条线。
 // 线上形态 = 请求 `metadata.trace_id`，因此读它的地方就是读 metadata 的地方
@@ -176,9 +176,9 @@ define_string_key!(ProviderIdKey, PROVIDER_ID, "provider_id");
 // 会话执行风险等级阈值：low / medium / high（与 agent_id 同级别：随 chat_send 传输 + session.metadata 持久化）
 define_string_key!(RiskLevelKey, RISK_LEVEL, "risk_level");
 // 跨会话工具授权清单（JSON：能力名 → 允许的最高风险档）：与会话阈值同一份配置解析点
-// 落进 ctx，审批闸门与授权级联都读它（D-170）。
+// 落进 ctx，审批闸门与授权级联都读它。
 define_string_key!(ApprovalGrantsKey, APPROVAL_GRANTS, "approval_grants");
-// 会话选中的沙箱档案 id（裁决 B / D-531）：取代原会话级 MODE / RISK_LEVEL 选项——
+// 会话选中的沙箱档案 id（裁决 B / ）：取代原会话级 MODE / RISK_LEVEL 选项——
 // 用户只在会话里选一个沙箱，审批阈值与模式由沙箱引擎按这个 id 从自己的配置表里解析。
 // 与 provider_id 同为「会话选择」，随 chat 请求 / metadata 走 req>metadata>默认 回退链。
 define_string_key!(SandboxIdKey, SANDBOX_ID, "sandbox_id");
@@ -204,7 +204,7 @@ define_string_key!(
 
 // 注：插件域的两个键不在本域——`PLUGIN_DIR`（值类型 `PluginDir`）随值搬去
 // `crate::sdk::plugin::dir`；`PARENT` 改名 `PLUGIN_PARENT`（值类型
-// `Option<Weak<dyn Plugin>>`）随值搬去 `crate::sdk::plugin`。判据同 D-095 根因一。
+// `Option<Weak<dyn Plugin>>`）随值搬去 `crate::sdk::plugin`。判据同  根因一。
 // `CONFIG` 与 trait 同行（契约面），已在 `crate::kernel::keys`。
 
 /// 必需插件清单 Key —— **构造者**告诉容器「哪些插件即使没有目录也要补出来」
@@ -240,7 +240,7 @@ pub const REQUIRED_PLUGINS: RequiredPluginsKey = RequiredPluginsKey;
 // （`CAPABILITY_VISITOR` / `OPTION_VISITOR` / `CONFIGURABLE_VISITOR`）随值类型
 // `Arc<dyn Registry>` 搬去 `crate::sdk::capability::collect`；错误桶键
 // `CAPABILITY_ERRORS`（值类型带 `CapabilityError`）搬去 `crate::sdk::capability::error`。
-// 判据同 D-095 根因一：键与值同住，`keys` 只留机制与通用词汇键。
+// 判据同  根因一：键与值同住，`keys` 只留机制与通用词汇键。
 
 // ==================== 主体名 ====================
 // 判定用的主体名与实际写入的主体名各写一份字符串会漂，故只在这里定义一次（与上面的协议键

@@ -3,17 +3,17 @@
 //! 事实源：各插件自己目录里的 `PLUGIN.yml` 的 `shared_events:` 行（**owner** 导出给
 //! 别的插件命名的那几条事件名）与 owner 自己的 `EventDecl` 表（格位）；同清单的
 //! `shared_event_ports:` 行（`<事件名>=<端口名>`）投影成 `port_of_fact`——消费端口
-//! 产物的行据此带 `after_port`（D-376），机制层不手抄这条映射。加一条跨插件
+//! 产物的行据此带 `after_port`（），机制层不手抄这条映射。加一条跨插件
 //! 事件 = 在 owner 自己的清单里登记一行，并在 owner 的 `EventDecl` 里给它格位；内核与
 //! core 的文件零 diff。手改本文件会被 `gen-facts --check` 判红。
 //!
 //! # 口径（展开见 `docs/003-design/024-能力横向扩充的通路.md`）
 //!
 //! - **本表只收跨插件消费的名字**。单消费方的名字由那个插件自己声明，不进这里。
-//! - **格位取自 owner 的声明**：写闸问的是「这个名字落在哪一格」（DE-024 D-197），所以这里
+//! - **格位取自 owner 的声明**：写闸问的是「这个名字落在哪一格」（DE-024 ），所以这里
 //!   连 `EventDecl` 一起投影一份 `SHARED_EVENTS`——链接了本 crate 的每个进程都认识它，
 //!   不必把 owner 插件也链进同一个二进制（那正是 E-009 禁掉的那条边）。
-//! - **内核不认识业务事件名**（DE-024 D-203 / D-204）：内核的两张表只留封闭语法——Entity×Verb
+//! - **内核不认识业务事件名**（DE-024  / ）：内核的两张表只留封闭语法——Entity×Verb
 //!   网格与协议五格。名字要跨插件就登记进清单，不要回内核加行（CS-005 / CS-007）。
 //! - **角色跟着投影**：`FactRole` 是 owner 交给守卫的陈述；跨插件共享的名字若只投影
 //!   「名字 + 格位」，读角色的守卫（`FinalizesScope` / `StopsScope` / …）在只链接本 crate
@@ -140,7 +140,7 @@ pub const EVENT_USER_MESSAGE: &str = "user.message";
 ///
 /// 每一行的格位与角色都来自 owner 自己的 `EventDecl`；链接了本 crate 的每个进程
 /// 都认识这些名字，不必把 owner 插件链进同一个二进制——那正是 E-009 禁掉的边
-/// （DE-024 D-204）。
+/// （DE-024 ）。
 ///
 /// 角色必须一起投影：守卫判「这一轮答完了」「这一轮停了」读的是 `FactRole`，
 /// 只投影名字 + 格位会让那两条判据静默失效（闸门不报错，只是不再拦）。
@@ -178,7 +178,7 @@ pub const SHARED_EVENTS: &[EventDecl] = &[
 
 /// 共享事件由哪个端口写出（owner 的 `PLUGIN.yml` 的 `shared_event_ports:` 行）。
 ///
-/// 消费端口产物的声明行据此带 `after_port`（D-376）。映射随 owner 的清单走，
+/// 消费端口产物的声明行据此带 `after_port`（）。映射随 owner 的清单走，
 /// 机制层不再手抄「哪个世界名归哪个端口」——那会让世界名在门面上有第二个 owner。
 pub fn port_of_fact(fact: &str) -> Option<&'static str> {
     match fact {

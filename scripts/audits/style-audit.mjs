@@ -330,7 +330,7 @@ function extractBindingClasses(expr, usages, prefixes) {
   };
   // 动态拼接前缀：'risk-' + x / `tag-${x}`
   const addPrefixes = (text) => {
-    for (const s of text.matchAll(/'([a-zA-Z][\w-]*-)'|`([a-zA-Z][\w-]*-)(?:\$\{|)/g)) {
+    for (const s of text.matchAll(/'([a-zA-Z][\w-]*-)'|`([a-zA-Z][\w-]*-)\$\{/g)) {
       const p = s[1] ?? s[2];
       if (p) prefixes.add(p);
     }

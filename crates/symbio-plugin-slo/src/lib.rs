@@ -1,9 +1,9 @@
-//! 时延分层能力包 —— **按派发档折叠的三列读数**（名册 #13，DE-016 §8.2 / DE-008 §3.1）。
+//! 时延分层能力包 —— **按派发档折叠的三列读数**（名册 #13，DE-016 §8.2 / DE-008 §2.1）。
 //!
 //! | 面 | 用在哪 | 谁读 |
 //! |---|---|---|
-//! | 视图（`ViewDecl` + `shared_views`） | `slo.latency` / `slo.fallback` / `slo.span` 三列按档折叠 | 任何按名字读的插件（`D-221`） |
-//! | 多片合并（`ViewDecl::agg`） | N 份单片读数 → 实例级的分位数 / 率 / 中位数 | 实例级聚合列的读方（`D-281`） |
+//! | 视图（`ViewDecl` + `shared_views`） | `slo.latency` / `slo.fallback` / `slo.span` 三列按档折叠 | 任何按名字读的插件 |
+//! | 多片合并（`ViewDecl::agg`） | N 份单片读数 → 实例级的分位数 / 率 / 中位数 | 实例级聚合列的读方 |
 //!
 //! 它**不产事实**：三列读的都是别人的格（`chat.assistant.final` 的 `cost_ms` 是信封字段，
 //! 档位读 `user.message` 的 `tier`）。所以 `PLUGIN.yml` 里没有 `shared_events`。

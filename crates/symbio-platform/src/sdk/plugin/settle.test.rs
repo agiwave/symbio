@@ -74,7 +74,7 @@ fn contributors_are_ordered_by_prio_then_owner() {
     assert_eq!(owners, ["tests/alpha", "tests/omega"]);
 }
 
-/// 草稿**不带信封**：轮号与时刻只在宿主落格那一刻成立（D-252）。
+/// 草稿**不带信封**：轮号与时刻只在宿主落格那一刻成立。
 ///
 /// 这里按宿主的落格写法走一遍——`draft_into_event` 只交主体与形状，`turn` / `ts` 由写方盖。
 #[test]
@@ -103,7 +103,7 @@ fn default_contribution_is_empty() {
 }
 
 /// 贡献者拿到的是纯值，而且**只有这一刻的值**：没有 store、没有句柄、没有轮号、
-/// 没有配置包（D-252 的两条否定在此钉住）。
+/// 没有配置包（两条否定在此钉住）。
 #[test]
 fn contribute_takes_pure_values() {
     let at = at();

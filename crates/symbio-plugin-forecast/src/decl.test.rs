@@ -3,7 +3,7 @@
 //! 本 crate 的测试二进制只链接它自己的声明表，任务插件不在场 ⇒ 夹具补上
 //! `task.opened` / `task.asserted` 的两条 `EventDecl`（与 `task` 生产装配里交的同形）。
 //! 不补的后果不是「少几个测试」：`seal` 会把视图 `reads` 判成 `UnknownFact`，整张表
-//! 失败（`D-282` 的第二种读法要求名字在事件表上）。夹具只在 `cfg(test)` 生效。
+//! 失败（第二种读法要求名字在事件表上）。夹具只在 `cfg(test)` 生效。
 
 use super::*;
 use serde_json::json;
@@ -93,7 +93,7 @@ fn the_view_reads_only_shared_task_events() {
     }
 }
 
-/// `D-282` 的第二种读法：事件没有 `FactDecl` ⇒ 装载期把它们登记进报告名单，
+///  的第二种读法：事件没有 `FactDecl` ⇒ 装载期把它们登记进报告名单，
 /// 而不是静默跳过、也不是判成缺口。
 #[test]
 fn reads_on_event_only_cells_are_reported_once() {

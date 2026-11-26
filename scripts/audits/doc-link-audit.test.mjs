@@ -50,8 +50,8 @@ test('失效链接 → 失败（默认即失败，不再需要 --strict）', () 
 
 auditCase('docs/ 条目里的失效链接照判（迁入 docs/ 后不再单列扫描根，D-001 不适用豁免）', () => audit({
     'docs/a.md': '# A\n',
-    'docs/003-design/002-架构总览.md': '# D-001\n\n见 [兄弟](./D-999.md)。\n',
-  }), 1, [/docs\/003-design\/002-架构总览\.md/, /D-999\.md/])
+    'docs/003-design/002-架构总览.md': '# D-001\n\n见 [兄弟](./.md)。\n',
+  }), 1, [/docs\/003-design\/002-架构总览\.md/, /\.md/])
 
 test('散文体检不碰 docs/：条目的处理过程天生记历史、引用当时存在的路径', () => {
   // D-004（变更史词）与 D-006（反引号路径存在性）在 docs/ 下都会判，
@@ -116,7 +116,7 @@ test('外链 / 空目标一律跳过（不是失效链接）；纯锚点归 D-00
   assert.match(r.stdout, /D-007 站内锚点：判定 1 条，失效 0 条/)
 })
 
-test('docs/archive/ 不再整体豁免：归档层已退役，其中的失效链接照常判（D-494）', () => {
+test('docs/archive/ 不再整体豁免：归档层已退役，其中的失效链接照常判（）', () => {
   const r = audit({ 'docs/archive/old.md': '[当年的兄弟文档](./gone.md)\n' })
   assert.equal(r.status, 1, r.stdout)
 })
@@ -176,13 +176,13 @@ test('D-017：行内豁免必须带理由（写在上一行也生效）', () => 
   assert.equal(audit({ 'docs/a.md': '# A\n\n<!-- doc-link-allow D-017:   -->\n判据 `gone.rs::removed`。\n' }).status, 1)
 })
 
-// ── 决策段与现行正文同一条判据（`D-483`：冻结表已按退役条件撤下）─────────
+// ── 决策段与现行正文同一条判据（``：冻结表已按退役条件撤下）─────────
 // 决策正文的旧锚点曾经由 DE-052 的登记表冻结；表空撤下之后，决策段不再有豁免面。
 // 历史叙述的合法写法是**普通文字**（不加反引号），不是「反引号 + 登记行」。
-auditCase('决策正文的悬空锚点照常判红（没有冻结面）', () => audit({ 'docs/a.md': '# A\n\n### D-100 裁决\n\n证据 `gone.rs::removed`。\n' }), 1, [/gone\.rs::removed/])
+auditCase('决策正文的悬空锚点照常判红（没有冻结面）', () => audit({ 'docs/a.md': '# A\n\n###  裁决\n\n证据 `gone.rs::removed`。\n' }), 1, [/gone\.rs::removed/])
 
 test('历史锚点写成普通文字 ⇒ 不是证据锚点，不判（裁决时点的文件名用叙述形态记名）', () => {
-  const r = audit({ 'docs/a.md': '# A\n\n### D-100 裁决\n\n证据是裁决时点的 gone.rs::removed（已随退场删除）。\n' })
+  const r = audit({ 'docs/a.md': '# A\n\n###  裁决\n\n证据是裁决时点的 gone.rs::removed（已随退场删除）。\n' })
   assert.equal(r.status, 0, r.stdout)
 })
 
@@ -214,7 +214,7 @@ test('D-002：已落地的实施方案留在活跃目录 → 失败', () => {
   assert.equal(r.status, 1)
 })
 
-auditCase('D-002：没有归档这个去处——同样的内容放进 docs/archive/ 也判滞留（D-494）', () => audit({
+auditCase('D-002：没有归档这个去处——同样的内容放进 docs/archive/ 也判滞留（）', () => audit({
     'docs/archive/review.md': REVIEW_DOC,
     'docs/archive/plan.md': IMPLEMENTED_DOC,
   }), 1, [/滞留 2 篇/])
@@ -277,7 +277,7 @@ test('D-003：examples/ 不判（是示例包内容，不是项目文档）', ()
   assert.equal(audit({ 'examples/pkg/docs/big.md': longDoc(LIMIT + 100) }).status, 0)
 })
 
-test('D-003：docs/archive/ 也判（归档层退役后没有「当时形态」的豁免，D-494）', () => {
+test('D-003：docs/archive/ 也判（归档层退役后没有「当时形态」的豁免，）', () => {
   assert.equal(audit({ 'docs/archive/big.md': longDoc(2000) }).status, 1)
 })
 
@@ -285,26 +285,6 @@ test('D-003：docs/archive/ 也判（归档层退役后没有「当时形态」�
 // 起因是四篇裁决文档（`048` 散文 10 行 / 全文 1001、`045` 22/1001、`054` 11/1001）
 // 卡在余量 1 行上——它们的正文几乎全是只追加的决策账，加一条裁决就必须先拆篇，
 // 而「按编号追加的账」没有正当的切分点。下面三条钉住新口径与它的边界。
-const ledgerDoc = (prose, block) =>
-  ['# 裁决账', ...Array(prose - 1).fill('散文'), ...block].join('\n') + '\n'
-/** 一个 `### D-001` 决策块：块内每一行都算决策账。 */
-const block = (n) => ['### D-001 一条裁决', ...Array(n - 1).fill('这条裁决的理由。')]
-
-test('D-003：决策账不计入预算（散文 900 + 决策账 400 > 上限 → 通过）', () => {
-  const r = audit({ 'docs/ledger.md': ledgerDoc(900, block(400)) })
-  assert.equal(r.status, 0, r.stdout)
-})
-
-auditCase('D-003：散文仍照判（散文超上限，哪怕同时有决策账 → 失败）', () => audit({ 'docs/fat.md': ledgerDoc(LIMIT + 1, block(400)) }), 1, [/散文/, /决策账/])
-
-test('D-003：决策块在下一个一至三级标题处结束 ⇒ 账后的正文照样算散文', () => {
-  // 边界：`### D-NNN` 拥有的是它自己那一节，不是它之后的整篇——账后面接一大段散文，
-  // 那段仍受预算约束。四级子标题留在块内（`####` 是那一条裁决自己的分节，见 018/022）。
-  const after = ['### D-001 一条裁决', ...Array(9).fill('这条裁决的理由。'), '## 附注']
-  const r = audit({ 'docs/after.md': ledgerDoc(10, [...after, ...Array(LIMIT + 5).fill('账后的正文。')]) })
-  assert.equal(r.status, 1, r.stdout)
-})
-
 // ── D-004：变更史不得混入活跃文档 ───────────────────────────────────────
 test('D-004：正文出现变更史叙述 → 失败（报出文件:行号）', () => {
   const r = audit({ 'docs/a.md': '# A\n\n## 决策\n\n这条路径曾经走的是另一条路。\n' })
@@ -428,7 +408,7 @@ test('D-006：双根解析——相对当前文件命中即通过', () => {
 test('D-006：双根解析——相对仓库根命中即通过（模块 README 引用系统文档的写法）', () => {
   assert.equal(
     audit({
-      'crates/symbio-plugin-foo/src/README.md': '# Foo\n\n见 `D-000-架构决策汇总.md`。\n',
+      'crates/symbio-plugin-foo/src/README.md': '# Foo\n\n见 `-架构决策汇总.md`。\n',
       'docs/003-design/README.md': '# 索引\n',
     }).status,
     0,
@@ -482,7 +462,7 @@ test('D-006：豁免理由为空 → 仍失败（同 D-002 / D-004 的口径）'
   assert.equal(r.status, 1)
 })
 
-test('D-006：docs/archive/ 也判（历史只归 git log，死路径没有豁免档，D-494）', () => {
+test('D-006：docs/archive/ 也判（历史只归 git log，死路径没有豁免档，）', () => {
   assert.equal(audit({ 'docs/archive/old.md': '# 旧\n\n见 `docs/gone.md`。\n' }).status, 1)
 })
 
@@ -498,7 +478,7 @@ auditCase('D-007：锚点指向真实标题 → 通过', () => audit({
   }), 0, [/D-007 站内锚点：判定 1 条，失效 0 条/])
 
 test('D-007：slug 算法钉住真实形状——加粗 / 反引号 / 全角括号 / —— / + 全被丢，空格逐个转 -', () => {
-  // 标题取自 `D-000-架构决策汇总.md` D-020 的真实形状：`EventSink`（出）后**无空格**，
+  // 标题取自 `-架构决策汇总.md` D-020 的真实形状：`EventSink`（出）后**无空格**，
   // 而 `+ ` 那个空格才产生连字符 ⇒ `eventsink出-abortsignal入`。
   const heading =
     '## D-020: 执行期与传输层**分离**——`EventSink`（出）+ `AbortSignal`（入）取代 `PluginChannel` 的双职责'
@@ -510,16 +490,15 @@ test('D-007：slug 算法钉住真实形状——加粗 / 反引号 / 全角括�
   assert.equal(r.status, 0, r.stdout)
 })
 
-test('D-007：` 是 ` 两侧的空格各产生一个连字符（漏了就红——这正是真仓库 3 处失效的形态）', () => {
-  // 标题取自 D-025：`顺序是**节点属性**；`delta` 是 `updated` 的**传输形态**`
-  const heading = '## D-025: 顺序是**节点属性**；`delta` 是 `updated` 的**传输形态**'
+test('D-007：两侧空格各产生一个连字符（漏了就红）', () => {
+  const heading = '## 顺序是节点属性 delta 是 updated 的传输形态'
   const r = audit({
     'docs/decisions/session.md': `# 会话与执行\n\n${heading}\n`,
-    'docs/good.md': '[025-good](./decisions/session.md#d-025-顺序是节点属性delta-是-updated-的传输形态)\n',
-    'docs/README.md': '[025-bad](./decisions/session.md#d-025-顺序是节点属性delta-是updated的传输形态)\n',
+    'docs/good.md': '[good](./decisions/session.md#顺序是节点属性-delta-是-updated-的传输形态)\n',
+    'docs/README.md': '[bad](./decisions/session.md#顺序是节点属性delta是updated的传输形态)\n',
   })
-  expectAudit(r, 1, [/README\.md.*#d-025-顺序是节点属性delta-是updated的传输形态/s])
-  assert.doesNotMatch(r.stdout, /good\.md/)
+  expectAudit(r, 1, [/README\.md.*#顺序是节点属性delta是updated的传输形态/s])
+  assert.doesNotMatch(r.stdout, /✗ .*good\.md/)
 })
 
 test('D-007：纯锚点 `#x` 查本文件的标题（这类链接 D-001 与 D-006 都看不见）', () => {
@@ -566,7 +545,7 @@ test('D-007：目标文件不存在时只报 D-001，锚点不重复报', () => 
   assert.match(r.stdout, /D-007 站内锚点：判定 0 条，失效 0 条/)
 })
 
-test('D-007：docs/archive/ 作为源文件也受查（没有历史快照豁免，D-494）', () => {
+test('D-007：docs/archive/ 作为源文件也受查（没有历史快照豁免，）', () => {
   const r = audit({
     'docs/archive/old.md': '[坏锚](#不存在)\n\n## 真标题\n',
     'docs/README.md': '[归档](./archive/old.md#真标题)\n',
@@ -624,7 +603,7 @@ test('D-013：URL 协议段不误判（`https://` 的 `s:/` 不是盘符）', ()
   assert.equal(r.status, 0, r.stdout)
 })
 
-test('D-013：docs/archive/ 也判（本机绝对路径没有历史豁免，D-494）', () => {
+test('D-013：docs/archive/ 也判（本机绝对路径没有历史豁免，）', () => {
   const r = audit({
     'docs/a.md': '# A\n',
     'docs/archive/old.md': '当时在 D:\\Bing\\symbio 下跑。\n',
@@ -689,8 +668,8 @@ test('D-018：`[[编号|标题]]` 双括号引用不误报（机制接管，不�
   assert.equal(r.status, 0, r.stdout)
 })
 
-test('D-018：方括号里没有仓内路径的一律不判（`[D-102]` / `[文字]` 不可能是丢地址）', () => {
-  const r = audit({ 'docs/a.md': '# A\n\n见 [D-102] 与 [文字] 与 `[docs/nope.md]`。\n' })
+test('D-018：方括号里没有仓内路径的一律不判（`[]` / `[文字]` 不可能是丢地址）', () => {
+  const r = audit({ 'docs/a.md': '# A\n\n见 [] 与 [文字] 与 `[docs/nope.md]`。\n' })
   assert.equal(r.status, 0, r.stdout)
 })
 

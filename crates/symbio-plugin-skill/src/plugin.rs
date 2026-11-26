@@ -28,7 +28,7 @@ pub struct SkillPlugin {
     config: Arc<RwLock<SkillConfig>>,
     /// 本插件自己的目录（构造时由父插件经 `PLUGIN_DIR` 告知）
     dir: PluginDir,
-    /// 配置文档（D-427）：设置页据此列出 `<根>/skill/PLUGIN.yml`。
+    /// 配置文档：设置页据此列出 `<根>/skill/PLUGIN.yml`。
     config_file: PluginConfigFile,
 }
 
@@ -53,7 +53,7 @@ impl SkillPlugin {
         // 自己的目录由父插件经 `PLUGIN_DIR` 告知——先取它，再用它推作用域根。
         let dir = plugin_dir_from_ctx(&*ctx, PLUGIN_ID_SKILL);
 
-        // 配置真源是**本插件自己的目录**（D-427）：`<根>/skill/PLUGIN.yml`。
+        // 配置真源是**本插件自己的目录**：`<根>/skill/PLUGIN.yml`。
         // 未发布产品、无存量配置需兼容（SP-003 §6），不再回退读请求注入的
         // `ctx.config()`：缺席即用出厂值。默认值只有 `SkillConfig::default()` 一份，
         // 不再在装配处复制一份路径表——那两份此前就漂过一次（少一条作用域级目录）。
@@ -127,7 +127,7 @@ impl SkillPlugin {
         let mut physical_dirs: Vec<String> = Vec::new();
         for d in dirs {
             let p = Path::new(&d);
-            // D-515：能表达成作用域相对地址的目录一律走 provider——插件不再直读文件。
+            //：能表达成作用域相对地址的目录一律走 provider——插件不再直读文件。
             // 作用域根与本插件目录同源（`<root>/skill` 的上一级），先试 agent 再试 workspace。
             if let (Some(root), Some(provider)) = (&scope_root, &agent_vdfs) {
                 if let Some(rel) = relative_to(root, p) {
@@ -339,7 +339,7 @@ impl VdfsProvider for SkillPlugin {
                     // ——差别只在草稿没有内容，且此时**多出一条「导入整包」动作**
                     // （[`VDFS_ACTION_IMPORT`]，见 `detail::skill_detail_definition`）。
                     // 导入**不是类型里的字段**：类型只说「这类东西落成后长什么样」
-                    // （见 D-029）。
+                    //。
                     //
                     // `ext = skill` 是**呈现扩展名**（`id_of` 按它剥地址后缀），落成后
                     // 的节点 `ext = form`——两者不同，故显式声明 `node_ext` 与详情定义。
@@ -555,7 +555,7 @@ impl Plugin for SkillPlugin {
                     .await;
             }
         }
-        // 本轮配置快照贡献（D-427）：编译开关的真源在本插件的 PLUGIN.yml，
+        // 本轮配置快照贡献：编译开关的真源在本插件的 PLUGIN.yml，
         // 由本插件交值；宿主只按 owner 合并，不认识键名。
         let compile_enabled = self.config.read().await.skill_compile_enabled;
         symbio_plugin_api::capability_announce_config_snapshot(
@@ -577,7 +577,7 @@ fn config_definition() -> DetailDefinition {
             "skill_compile_enabled",
             "启用技能编译",
             "关掉后不编译新技能（已编译的仍可执行）；卸载本插件同样让这一格\
-             缺席，读方按出厂值收敛（D-427）",
+             缺席，读方按出厂值收敛",
             d.skill_compile_enabled,
         )],
     )

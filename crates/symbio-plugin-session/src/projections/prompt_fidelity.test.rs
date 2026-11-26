@@ -18,13 +18,13 @@ use symbio_platform::sdk::test_fixtures::{
     EVENT_MESSAGE_EDITED, EVENT_MESSAGE_REMOVED, EVENT_USER_MESSAGE, MESSAGE,
 };
 
-/// 一条**送进模型的行**（判据比的只有 role / text / tool 三格，D-448）。
+/// 一条**送进模型的行**（判据比的只有 role / text / tool 三格）。
 ///
 /// ⚠️ 这里原先构造 `llm::PromptMessage`，注释写着「那条路上 `tool` 消息还带着
-/// `tool_call_id`，用投影条目会少验一样东西」。那句话在 D-448 收窄比较面之后**已经
+/// `tool_call_id`，用投影条目会少验一样东西」。那句话在  收窄比较面之后**已经
 /// 是假的**：`verify` 从不读 `tool_call_id`（谁合成调用 id 是 `plugin-model` 的规则，
 /// 本文件也在注释里写着「不冒充它」）。替身比判据宽不增加任何覆盖，只让判据**看起来**
-/// 验得更多——那是 S-003 那类「判据的形状说它查了」的假象（D-452）。
+/// 验得更多——那是 S-003 那类「判据的形状说它查了」的假象。
 fn entry(role: &str, text: &str, tool: Option<&str>) -> TranscriptEntry {
     TranscriptEntry {
         role: role.to_string(),
@@ -37,7 +37,7 @@ fn entry(role: &str, text: &str, tool: Option<&str>) -> TranscriptEntry {
 /// 请求包里的行：转写条目按 `exclude_from_context` 过滤后即为「送出去的那批」。
 ///
 /// 过滤留在这里而**不进** `verify`：它是**组包规则**。判据自己再滤一遍，就等于把
-/// 「送出去什么」从组包侧搬进判据侧——组包漏滤时判据也就查不出来了（D-452）。
+/// 「送出去什么」从组包侧搬进判据侧——组包漏滤时判据也就查不出来了。
 fn request_messages(view: &TranscriptView) -> Vec<TranscriptEntry> {
     view.entries
         .iter()
@@ -434,7 +434,7 @@ fn a_snapshot_entry_missing_from_the_prompt_is_reported() {
     );
 }
 
-// ── 分支的读法（D-173）：未选中支**按设计**不在请求包里 ──────────────────
+// ── 分支的读法：未选中支**按设计**不在请求包里 ──────────────────
 //
 // 判据与投影必须认同一份折法（`branch::unselected_roots`）。这一节钉的是判据那一侧：
 // 它若自己算一遍读法，重试过的会话就会每次请求报一串「丢事实」——恒红的守卫与没有

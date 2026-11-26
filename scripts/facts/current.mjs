@@ -129,7 +129,7 @@ function extractToolNames(t, consts) {
 }
 
 /** 核心 trait 白名单：只统计真正定义插件形态的 trait */
-// 契约 trait 白名单（D-437 之后 `ModelProvider` 不在其中：它归 model 插件私有，
+// 契约 trait 白名单（ 之后 `ModelProvider` 不在其中：它归 model 插件私有，
 // 不再是「插件实现的内核契约」）。
 const CORE_TRAITS = ["Plugin", "VdfsProvider", "Capability", "ConfigurableVisitor"];
 
@@ -303,7 +303,7 @@ function pluginProductionSources(root) {
  * 结构事实的输入契约：**读不到就是「这一格坏了」，不是「这一格是 0」**。
  *
  * 生成物是「改代码即变」的投影，它的可信度上界是「输入确实被读到」。此前的写法是
- * `catch { return [] }`：D-191 把 CLI 拆成独立 crate（`crates/symbio-cli/`）之后，`cliSurface()`
+ * `catch { return [] }`： 把 CLI 拆成独立 crate（`crates/symbio-cli/`）之后，`cliSurface()`
  * 的路径没跟着改，CLI 面被**确定性地**投影成 0/0/0，而 `gen-facts --check` 只比对
  * 「生成结果 == 当前文件」，于是本地与 CI 同样全绿——`DE-017` 命名过这种失效
  * （「读空即全绿」），它的第二种形态不依赖任何开关，比漏写 `--ci` 更隐蔽。
@@ -371,10 +371,10 @@ function tauriViews() {
   // 只数 `routes: [ … ]` 数组里的记录：`{` 必须紧跟 `[` 或 `,`。
   // 早先只写 `\{\s*(?:path|redirect)`，把导航守卫的 `return { path: await
   // coldStartPath(), replace: true }` 也算成一条 route——投影因此多 1 条，
-  // 且和「其余为旧地址 redirect」这句硬编码措辞互相背书（那条 redirect 早按 D-149 删了）。
+  // 且和「其余为旧地址 redirect」这句硬编码措辞互相背书（那条 redirect 早按  删了）。
   const routes = [...txt.matchAll(/(?:^|[[,])\s*\{\s*(?:path|redirect)\s*:/gm)].length;
   const comps = [...new Set([...txt.matchAll(/component:\s*([A-Za-z]\w*)/g)].map((g) => g[1]))];
-  // `redirect:` 只在兜底那条上出现一次；旧地址的兼容 redirect 已按 D-149 删除，
+  // `redirect:` 只在兜底那条上出现一次；旧地址的兼容 redirect 已按  删除，
   // 所以这一格是**量出来的**，不是「其余都是旧地址」这句推论。
   const redirects = [...txt.matchAll(/\bredirect:/g)].length;
   if (routes === 0 || comps.length === 0) {
@@ -567,7 +567,7 @@ function render() {
   L.push("> - **自有路由** = `async fn route()` 体内 `match` 臂的字符串（臂是**相对路径**，");
   L.push(">   容器已剥掉首段，故地址前缀是**插件目录名**——容器按目录名建实例表并按它分发；");
   L.push(">   `PluginMeta` 首参不参与路由——它只是**出厂 id**，");
-  L.push(">   插件**身份**取自 `PLUGIN.yml`（见 [D-032](../003-design/002-架构总览.md#d-032-插件身份归-pluginymlpluginmeta-从元信息降为出厂自述 'DE-002-架构总览')）。");
+  L.push(">   插件**身份**取自 `PLUGIN.yml`（见 " + refLink('DE-002-架构总览', '003-design/002-架构总览.md') + "）。");
   L.push(">   本格只报**条数**（插件视角）；逐条地址与职责见 §2.3（路由视角）。");
   L.push(">   标「（动态）」的是按运行期规则分发、无法静态枚举的——它们只在本格出现。");
   L.push(">   路由契约（调用方 / 返回类型）见 " + refLink('RE-003-ROUTES', '003-ROUTES.md') + "。");

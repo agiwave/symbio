@@ -9,7 +9,7 @@
  * 于是「新增一种呈现形态」的完整代价是：
  *   1. wire 侧：后端枚举 + 前端 `NODE_KINDS` 各加一值（闭集跨栈批次）；若只是既有五值的
  *      呈现变体（思考 vs 压缩、整轮 vs 工具），**前端零改动**——后端在交付出口把它折成
- * `title` / `icon` / `actions` 数据即可（D-070 §决策 3）；
+ * `title` / `icon` / `actions` 数据即可（ 3）；
  *   2. `messagePresentation.ts` 的 `TYPE_PRESENTATION` 加一行（仅当新增的是第六个形态）、
  *      文案表加一行；
  *   3. `messageRenderers.ts` 加一行注册。

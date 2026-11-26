@@ -27,7 +27,7 @@ fn codebase_search_is_registered() {
     );
 }
 
-/// 工具没有第二条执行面（`D-466`）：按工具名走 `route` 一律 `NotFound`。
+/// 工具没有第二条执行面：按工具名走 `route` 一律 `NotFound`。
 ///
 /// 「判闸 + 造 `PortExecContext` + 执行 + 拆信封」只发生在 `port.tool` 的逐调用簿记里；
 /// 本插件的 `route` 只剩父容器转发与 `NotFound`。有人把工具执行接回 `route`，

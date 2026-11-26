@@ -100,7 +100,7 @@ npm test
 ### Clippy 检查
 
 ```bash
-# 与门禁 scripts/gate.d/10-backend.mjs 保持同一条命令（dead_code 由 D-331/SD-001 台账单独管）
+# 与门禁 scripts/gate.d/10-backend.mjs 保持同一条命令（dead_code 由 SD-001 台账单独管）
 cargo clippy --all-targets --workspace -- -D warnings -A dead_code
 # 期望: 0 warnings。`dead_code` 一族被让开，因为「待接入能力」必然暂未被调用；
 # 新增死码仍由 session-dead-code-audit 按台账判红，不是放宽。

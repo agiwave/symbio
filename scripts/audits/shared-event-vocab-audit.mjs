@@ -4,14 +4,14 @@
  *
  * ## 它判什么
  *
- * `shared_events` 这条正道（DE-024 D-204）开通之后，「两个插件同时消费一条名字 ⇒ 只能住
+ * `shared_events` 这条正道（DE-024 ）开通之后，「两个插件同时消费一条名字 ⇒ 只能住
  * 内核」（E-009 的旧推论）不再有说服力：名字有 owner，格位有声明，共享面是清单的投影。
  * 于是CS-005 只数条数的那两格多了一个同伴——本判据逐条核**清单上的每一行**：
  *
  * | 编号 | 判什么 | 它拦的是哪一种腐烂 |
  * |---|---|---|
  * | CS-007 | 清单上每条名字：① 除 owner 外**至少一个**插件在生产代码里引用它；② 内核 `event/mod.rs` / `CELLS` 上不许再有它 | 清单变成第二张内核表：登记一条没人用的名字、或者登记完忘了把内核那一行删掉，两处都留着就是两个 owner |
- * | CS-011 | `FactRole` 的四档**每档都有生产居住者**（插件生产源码里的 `FactRole::<档>`） | 判据读角色、角色来自 owner 的 `EventDecl.roles`；owner 删掉那一行不会报错，只让那道守卫从「拒绝」变成「看不见」（DE-024 D-203） |
+ * | CS-011 | `FactRole` 的四档**每档都有生产居住者**（插件生产源码里的 `FactRole::<档>`） | 判据读角色、角色来自 owner 的 `EventDecl.roles`；owner 删掉那一行不会报错，只让那道守卫从「拒绝」变成「看不见」（DE-024 ） |
  *
  * 名字**形状**（`<域>.<事实>`）、owner 有没有为它提交带格位的 `EventDecl`、以及「一条名字
  * 两个 owner」由生成器 `parseEventList` / `collectSharedEvents` 抛错拦住（读不懂的清单连
@@ -22,7 +22,7 @@
  * 分叉只会表现为「生成物有这条、判据说没有」。
  *
  * 另有一类**只报数不判红**：内核表上仍是 ≥2 插件消费的名字。它们是该走的存量，不是
- * 该拦的违规——拦了就是把「还没迁完」写成「不许迁」，与 D-203 的裁决三正相反。
+ * 该拦的违规——拦了就是把「还没迁完」写成「不许迁」，与  的裁决三正相反。
  *
  * 用法：node scripts/audits/shared-event-vocab-audit.mjs [--root=<目录>]
  * 退出码：1 = 有违规；2 = 范围读不出（缺内核表 / 缺插件清单）。
@@ -55,7 +55,7 @@ const notes = []
  * 内核表上的业务名字（`event/mod.rs` 的常量值 + 若还在的 `CELLS` 行名）。
  *
  * `event/mod.rs` 必须在（协议五格住那儿，缺了就是范围读不出）；`grid.rs` 已随
- * DE-024 D-203 归零批退役，**缺席是目标态**：它不在 ⇒ 没有 `CELLS` 行可数；它若
+ * DE-024  归零批退役，**缺席是目标态**：它不在 ⇒ 没有 `CELLS` 行可数；它若
  * 回来 ⇒ 照数，下面那条「还挂在 `CELLS` 上」的判据会逐名点红。判据不靠一张已删
  * 文件的形状活着。
  */
@@ -118,7 +118,7 @@ function productionPluginSources(root) {
   return out
 }
 
-/** 四档角色各被哪些生产文件持有（`DE-024` D-203 的居住账）。 */
+/** 四档角色各被哪些生产文件持有（`DE-024`  的居住账）。 */
 function roleResidents(root) {
   const roles = ['FinalizesScope', 'StopsScope', 'DeclaresBudget', 'CountsRework']
   const residents = new Map(roles.map((r) => [r, []]))
@@ -160,7 +160,7 @@ for (const row of rows) {
   if (kernel.has(row.name)) {
     fail(
       `${row.name} 还挂在内核 \`event/mod.rs\` / \`CELLS\` 上——跨插件名字的唯一登记口是清单，` +
-        '内核表再留一行就是让 CS-005 的数字替它遮掩（DE-024 D-204）',
+        '内核表再留一行就是让 CS-005 的数字替它遮掩（DE-024 ）',
     )
   }
   row.consumers = consumers
@@ -174,12 +174,12 @@ for (const name of kernel) {
   if (consumers.length >= 2) {
     notes.push(
       `内核表上的「${name}」被 ${consumers.join(' / ')} 同时消费，却还没走 \`shared_events\` 这条正道` +
-        '（随各自读方迁出时同批退役，DE-024 D-203 / D-204）',
+        '（随各自读方迁出时同批退役，DE-024  / ）',
     )
   }
 }
 
-// ---- CS-011：四档守卫角色每档都要有生产居住者（DE-024 D-203）----
+// ---- CS-011：四档守卫角色每档都要有生产居住者（DE-024 ）----
 // 判据空转的经典形态：角色表少一行不报错，只让那道守卫从「拒绝」变成「看不见」。
 // 装配期判不了（只链接部分插件的用例会假红，见 `assemble_declarations` 的说明），
 // 所以判在整仓这一面：生产声明里缺一档就红。

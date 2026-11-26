@@ -83,7 +83,7 @@ test('plugin_undisablable: true ⇒ 进不可停用集', () => {
   )
 })
 
-test('plugin_optional: true ⇒ 进可选集、不进核心集（D-520）', () => {
+test('plugin_optional: true ⇒ 进可选集、不进核心集（）', () => {
   withRepo(
     { beta: 'plugin_id: beta\nplugin_comment: 乙\nplugin_assembly: sub_agent\nplugin_order: 20\nplugin_optional: true\n' },
     (root) => {
@@ -106,7 +106,7 @@ test('未声明 plugin_optional ⇒ 进核心集（默认装配且不可删除�
   })
 })
 
-test('插件自行声明 plugin_required ⇒ 抛错（必装由系统写死，D-522）', () => {
+test('插件自行声明 plugin_required ⇒ 抛错（必装由系统写死，）', () => {
   assert.throws(
     () =>
       withRepo(

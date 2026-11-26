@@ -7,7 +7,6 @@
 //! 不认识 `transcripts/wal-archive`。那些是**一种磁盘布局**的细节，而只有会话需要
 //! 这种布局 ⇒ 细节住在使用方。分层判据收成编译边界：core 不再导出本类型，
 //! 任何别的插件想拿 WAL 去自己开一个事实源，**写不出来**
-//! （[D-083](../../../../docs/003-design/001-核心架构.md "DE-001-核心架构")）。
 //!
 //! `Store` trait 冻结之后换实现**零接口改动**：调用方把
 //! `EventStore` 换成 `EventWalStore`，其余代码一行不动
@@ -76,11 +75,11 @@ use symbio_platform::kernel::event::{Event, EventDecl, EventEnvelope as _, Seq};
 use symbio_platform::kernel::store::{AppendError, Store, StoreInvariant};
 use symbio_platform::sdk::invariants::provenance_violation;
 
-/// 判据的**词汇面**：认识某个名字的那张表说了算（DE-024 D-203）。
+/// 判据的**词汇面**：认识某个名字的那张表说了算（DE-024 ）。
 ///
 /// 三份表按「谁先认识这个名字」排：本实例挂的装配表 → 进程装配表（插件经
 /// `submit_declarations!` 交来的事件行）→ **跨插件共享表**（各插件清单 `shared_events`
-/// 的生成物，DE-024 D-204）。顺序不能反：一个新插件声明了同名事件时，冻结表才是
+/// 的生成物，DE-024 ）。顺序不能反：一个新插件声明了同名事件时，冻结表才是
 /// owner 的陈述；共享表答的是「这条名字在别人的二进制里也叫这个」。格位与角色
 /// **取自同一张表**——不出现「格位在冻结表、角色在另一张表」的两侧各读一半。
 ///
@@ -110,7 +109,7 @@ impl<'a> Vocab<'a> {
         if let Some(table) = self.process.filter(|t| known(t)) {
             return Some(table);
         }
-        // 跨插件共享表：owner 清单 `shared_events` 的生成物（DE-024 D-204）。它不是
+        // 跨插件共享表：owner 清单 `shared_events` 的生成物（DE-024 ）。它不是
         // 降级——格位来自 owner 自己的 `EventDecl`，只是这个二进制没链那个 owner 插件
         // （E-009 禁那条边），所以经生成物答题。
         let shared: &'a [EventDecl] = symbio_plugin_api::events::SHARED_EVENTS;
@@ -134,7 +133,7 @@ impl<'a> Vocab<'a> {
     }
 }
 
-/// 持久化 Store（`store = wal`，[DE-001 §8](../../../../docs/003-design/001-核心架构.md "DE-001-核心架构") 参数表取值）。
+/// 持久化 Store（`store = wal`，[DE-001 §9](../../../../docs/003-design/001-核心架构.md "DE-001-核心架构") 参数表取值）。
 ///
 /// **信封是具体的 `Event`**：写侧闸门要读 `entity` / `verb` / `turn` / `produced_by`
 /// 才能判 I1 / I2，而泛型参数上只有
@@ -157,11 +156,11 @@ pub struct WalStore {
     /// 一个实例看到的是它 open 时重放到的世界（别人的 `append` 不会改变这里的 live），
     /// 别人的归档因此同样不出现在这里——这不是新增的近似，是同一个近似。
     archived: RwLock<Option<Vec<Event>>>,
-    /// 装配期冻结表（DE-024 D-198 / D-199）：写闸先问它，未命中再问进程装配表与
+    /// 装配期冻结表（DE-024 ）：写闸先问它，未命中再问进程装配表与
     /// 共享表。
     ///
     /// 注入点有两个：生产路径在 [`crate::store::Store::facts`] **打开事实源之前**
-    /// 先封声明表（缺口即装载期硬错，D-396），再把冻结表挂到这里；用例可以用
+    /// 先封声明表（缺口即装载期硬错），再把冻结表挂到这里；用例可以用
     /// [`WalStore::with_declarations`] 挂一张小表。`None` 不表示「没有网格」——
     /// 写闸仍会问全局装配表；三份表都不认识 ⇒ 网格之外（fail-closed）。
     declarations: Option<Arc<Frozen>>,
@@ -195,7 +194,7 @@ impl WalInner {
     fn gate(&self, event: &Event, vocab: &Vocab) -> Result<(), AppendError> {
         // **先判名字与格位是否同源，再判事实之间的关系**：坐标本身错位时，
         // 后面每条判定的输入都是错位的——所以这一臂排在最前，且它不需要任何索引。
-        // 三份词汇表的取舍顺序见 [`Vocab`]（DE-024 D-199 / D-203）。
+        // 三份词汇表的取舍顺序见 [`Vocab`]（DE-024 ）。
         let given = (event.entity, event.verb);
         let declared = vocab.cell(&event.kind);
         if declared != Some(given) {
@@ -386,7 +385,7 @@ impl WalStore {
         }
     }
 
-    /// 挂上装配期冻结表（DE-024 D-198）：写闸先问它，未命中再回退。
+    /// 挂上装配期冻结表（DE-024 ）：写闸先问它，未命中再回退。
     ///
     /// 生产入口在 [`crate::store::Store::facts`]；用例用一张小表验证「写闸读的是
     /// 声明，不是内核常量」——本方法因此是 `pub`（`EventWalStore` 本身仍只
@@ -401,7 +400,7 @@ impl WalStore {
     /// 由 `EVENT_SESSION_CONSOLIDATED`
     /// 的写方调用（压缩成功之后）：快照**取代**了它之前的一切，那些事件对 live 读侧
     /// 不再有意义（读侧要的是「当前有效的历史」），而它们仍然**不可删**（审计 / 回溯）。
-    /// 于是「上下文压缩」与「WAL 无界增长」由同一个机制解决（D-053 决策 6）。
+    /// 于是「上下文压缩」与「WAL 无界增长」由同一个机制解决（ 决策 6）。
     ///
     /// ## 返回值
     ///
@@ -425,7 +424,7 @@ impl WalStore {
     /// ## 段与段之间不重叠
     ///
     /// 归档段**只装被取代的前缀**，不装尾部。于是「全部归档段（按号序拼接）+
-    /// live」恰好等于完整事件史，**逐条不重不漏**——这是 D-053「零回退损失」
+    /// live」恰好等于完整事件史，**逐条不重不漏**——这是 「零回退损失」
     /// 的可执行依据：回退时把各段与 live 依次拼接即得原 WAL。
     /// （若归档段改成复制整份世界，则相邻段的尾部会重复，拼接就不再是无损还原。）
     ///
@@ -438,9 +437,9 @@ impl WalStore {
     ///
     /// ## 归档段保留策略：**不自动删除**
     ///
-    /// 归档段是「回退零损失」的依据（D-053）：它们不参与常规读，
+    /// 归档段是「回退零损失」的依据：它们不参与常规读，
     /// 但必须还在。删除策略要单独定——那是在决定「哪些事实可以不再可回溯」，
-    /// 与 D-049「事实是发生过什么」直接相关，不该顺手做。
+    /// 与 「事实是发生过什么」直接相关，不该顺手做。
     pub fn archive_before(&self, cut: Seq) -> std::io::Result<Option<usize>> {
         let mut inner = self.inner.write().expect("WalStore 锁中毒");
         if self.writer.is_none() {

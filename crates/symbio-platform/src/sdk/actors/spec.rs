@@ -1,14 +1,14 @@
 //! 主体规格的**授权读法**：平凡值、模式派生与能力位判定（宿主侧自由函数）
 //!
-//! `ActorSpec` / `Pattern` / `Scope` 的数据面已随 D-188 C2b 住 `crate::kernel::actors`；
+//! `ActorSpec` / `Pattern` / `Scope` 的数据面已 C2b 住 `crate::kernel::actors`；
 //! 本模块只剩三个读本机**部署表**的动作：平凡值构造（`trivial_actor_spec`）、模式派生
 //! （`pattern_for_principal`）与能力位判定（`actor_can_*`）。
 //!
 //! ## 为什么是自由函数而不是方法
 //!
 //! 两条约束同时成立：宿主 crate 不能为内核类型写固有 `impl`（orphan 规则），而
-//! `authz` / `governance` 是**部署表**而不是语法（D-099），不能进内核
-//! （[DE-023 D-188](../../../../../docs/003-design/023-内核边界与扩展局部性.md "DE-023-内核边界与扩展局部性")）。
+//! `authz` / `governance` 是**部署表**而不是语法，不能进内核
+//! （[DE-023 ](../../../../../docs/003-design/023-内核边界与扩展局部性.md "DE-023-内核边界与扩展局部性")）。
 //! 于是「数据在核内、读法在宿主」只能以自由函数表达——判的对象（规格）与构造的来源
 //! （表行）仍是单一链条，只是链条跨了 crate 边界。
 
@@ -25,7 +25,7 @@ use crate::kernel::actors::Scope;
 /// 其余 ⇒ [`Pattern::Decider`]。判据问的是矩阵谓词本身（`can_reply` /
 /// `can_produce_artifact`），调用方不抄能力名清单。
 ///
-/// 为什么住在 core 而不是内核：`authz` 是部署表（D-099），主体派生不该散进插件层
+/// 为什么住在 core 而不是内核：`authz` 是部署表，主体派生不该散进插件层
 /// （no-direct-call-audit 的 NDC-001 同一条纪律——插件层只见谓词结果，不见主体类型名）。
 pub fn pattern_for_principal(principal: &str) -> Pattern {
     let matrix = crate::sdk::authz::production_matrix();

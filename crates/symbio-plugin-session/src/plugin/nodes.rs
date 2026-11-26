@@ -321,14 +321,14 @@ fn cursor_id(before: &str) -> Option<&str> {
 //
 // 会话在 VDFS 上**保持叶子**（`ext = session`，点击进聊天详情，语义不变）；
 // 其内部结构（转写 / 子会话 / 工作目录树）作为**会话同名目录**挂在会话之下；
-// 会话记忆已随 D-513 归 memory 插件，地址 `<根>/memory/SESSION.md`：
+// 会话记忆已 归 memory 插件，地址 `<根>/memory/SESSION.md`
 //
 //   <id>                  → 会话叶子（聊天详情）
 //   <id>/message[/<mid>]   → 转写列表 / 单条消息（**列表项**）
 //   <id>/inbox[/<iid>]     → 收件箱（待消费用户消息，写即入队）
 //   <id>/subsession[/<sub>]→ 子会话清单 / 单个子会话（查看 · 删除）
 //   <id>/workdir[/<rel>]   → 工作目录树（文件可查看 / 编辑）
-//   <id>/tool_archives[/<f>]→ 工具结果超限存档（只读取回，D-528）
+//   <id>/tool_archives[/<f>]→ 工具结果超限存档（只读取回）
 //
 // **路径段一律 ASCII，中文只出现在 `title`（展示名）上**：地址要能安全地进 URL、
 // 命令行、日志与文件名，不受编码 / 输入法 / 大小写折叠的影响。标识由 `kind`
@@ -375,12 +375,12 @@ pub(crate) fn message_dir_path(session_id: &str) -> String {
 ///
 /// 收件箱是**待消费的用户消息队列**：往里写一条 = 入队，被消费（跑一轮）时消息
 /// 才落库进转写。因此它同时是「跨空间发消息」的入口——子智能体空间没有调用方
-/// 替它调 `chat/send`，它的会话由自己消费这个队列而自驱动（见 D-026）。
+/// 替它调 `chat/send`，它的会话由自己消费这个队列而自驱动。
 ///
 /// 与会话内部其它集合同构：`<sid>/<集合段>/<项 id>`，身份就是末段。
-/// 名字住 `plugin-api` 的词汇面（D-364），`agent` / `heartbeat` / `telegram` 共用同一常量。
+/// 名字住 `plugin-api` 的词汇面，`agent` / `heartbeat` / `telegram` 共用同一常量。
 pub(crate) use symbio_plugin_api::vocab::SEG_INBOX;
-// 工具结果存档路径段（D-528）：字面量就写在这里。它是数据目录名（不含 `.` / `/`），
+// 工具结果存档路径段：字面量就写在这里。它是数据目录名（不含 `.` / `/`），
 // 不是挂载根名（S-010 不约束），也不另立 const——`tool` 写入端持有 `ARCHIVE_REL_DIR`
 // 那一份；两侧各写一份 const 会被 SV-001② 判成同值的两个家。
 
@@ -406,7 +406,7 @@ pub(crate) fn inbox_item_path(session_id: &str, iid: &str) -> String {
 /// 工具结果存档目录的**展示名**（`title`）。只影响 UI，不参与寻址。
 pub(crate) const TITLE_TOOL_ARCHIVES: &str = "工具存档";
 
-/// 工具结果存档目录节点（`list` 与 `stat` 共用同一份形状，D-528）。
+/// 工具结果存档目录节点（`list` 与 `stat` 共用同一份形状）。
 ///
 /// 它是**内部机制**（超限工具结果的全文存档，供模型按需取回），不是用户要浏览的
 /// 资源，因此 `hidden`——只影响清单；`vdfs_read` 按 `<sid>/tool_archives/<file>`
@@ -488,8 +488,8 @@ pub(crate) fn parse_inbox_message(raw: &str) -> VdfsResult<cm::ChatNode> {
 /// 声明的**词汇**是共享的（写方心跳调度插件与读方本写臂分属两个插件，
 /// 故键名与 kind 住在 core 的 `event` 域）；声明的**后果**是存储所有者的写窗口纪律
 /// （先把事实源那四格落进，落成了才入队）。两者都在这条写臂上收口，见
-/// [D-076](../../../symbio-plugin-heartbeat/README.md#d-076-心跳片的八个宿主触点逐条落位调度随片走触发事实落进收件箱写臂 "crates/symbio-plugin-heartbeat/src/README") #4 与
-/// [D-077](../../../symbio-plugin-heartbeat/README.md#d-077-心跳片的落点定为一层的插件目录卸载单位与第二个消费单位都由它给出 "crates/symbio-plugin-heartbeat/src/README") 后果段。
+///  #4 与
+///  后果段。
 ///
 /// ## 不认识的 `kind` 报 `Invalid`，而不是当没看见
 ///
@@ -497,7 +497,7 @@ pub(crate) fn parse_inbox_message(raw: &str) -> VdfsResult<cm::ChatNode> {
 /// ——事实源里少那四格，而没有任何一处会因此变红。`meta` 是自由 JSON，键名拼错编译器
 /// 管不到，所以判据只能写在这里。
 ///
-/// ## 认哪些 kind 由**产出方**说了算（DE-025 D-211）
+/// ## 认哪些 kind 由**产出方**说了算（DE-025 ）
 ///
 /// 登记表是 `symbio_platform::kernel::event::EVENT_TRIGGER_KINDS`（各插件 `PLUGIN.yml` 的 `trigger_kinds:`
 /// 的投影）。本函数只判**成员资格**：加一种触发方式 = 产出方在自己目录里加一行，
@@ -573,7 +573,7 @@ pub(crate) enum VdfsSessionPath<'a> {
     SubSession { id: &'a str, sub: &'a str },
     /// `<id>/workdir[/<rel>]`：工作目录树；`rel` 空 = 工作目录根
     Workdir { id: &'a str, rel: &'a str },
-    /// `<id>/tool_archives[/<file>]`：工具结果存档（只读取回，D-528）；
+    /// `<id>/tool_archives[/<file>]`工具结果存档（只读取回）；
     /// `rel` 空 = 存档目录根
     ToolArchives { id: &'a str, rel: &'a str },
 }
@@ -635,7 +635,7 @@ pub(crate) fn parse_session_path(path: &str) -> VdfsResult<VdfsSessionPath<'_>> 
 
 /// 会话内部的虚拟子目录（工作目录按会话是否声明 workdir 决定是否出现）。
 ///
-/// 会话记忆已随 D-513 归 `memory` 插件，地址是 `<根>/memory/SESSION.md`，
+/// 会话记忆已 归 `memory` 插件，地址是 `<根>/memory/SESSION.md`，
 /// 不再作为会话内部集合段出现在这里。
 ///
 /// 每个目录节点各由**自己的段所属模块**构造（[`messages_dir_node`] /
@@ -722,7 +722,7 @@ pub(crate) fn message_node(m: &cm::ChatNode) -> VdfsNode {
     n.updated_at = m.timestamp;
     n.description = message_preview(m);
     for (k, v) in [
-        // 身份只写 `principal`（D-147）：`role` 已退出 wire（[`ChatNode`] 上
+        // 身份只写 `principal``role` 已退出 wire（[`ChatNode`] 上
         // `skip_serializing`），属性表不再补第二份。`message_of_node` 仍认这条
         // 老属性，服务的是尚未重写的存量节点。
         ("type", json!(m.msg_type)),
@@ -865,7 +865,7 @@ pub(crate) fn session_content(
     // 整条替换、从不改写 `parent_id`，投影叠在其上仍正确。
     crate::config::flatten_whole_tree(&mut messages, mode);
     // 呈现派生：会话叶子读是前端交互出口，交付前按形状算出 title/icon，
-    // 并把压缩 / 记忆那几个数字排成读数行（[D-111](../../README.md#d-111-消息读数由交付出口装配压缩与记忆的事实行离开前端 "crates/symbio-plugin-session/src/README")）。
+    // 并把压缩 / 记忆那几个数字排成读数行。
     let messages: Vec<cm::ChatNode> = messages.into_iter().map(present_message).collect();
     let payload = json!({
         "id": session.id,

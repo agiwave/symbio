@@ -30,9 +30,9 @@ created: 2026-07-20
 | 轴 | 现状 |
 |---|---|
 | 沙箱执行 | 无默认沙箱（最大的安全缺口）；审批与熔断不等于隔离 |
-| 计算机 / 浏览器自动化 | 整轴缺失，场景草案按 D-157 未承诺 |
-| 深度研究 | 整轴缺失，场景草案按 D-157 未承诺 |
-| A2A 互操作 | 未接（D-092 / D-098：尚无真实对端） |
+| 计算机 / 浏览器自动化 | 整轴缺失，场景草案未承诺 |
+| 深度研究 | 整轴缺失，场景草案未承诺 |
+| A2A 互操作 | 未接，尚无真实对端 |
 | 记忆质量评测 | 召回按字面重合、不是语义相似；缺质量评测与自编辑策略 |
 | 发布 | 尚未发布任何版本；安装路径只有开发模式和本地编译 |
 
@@ -97,7 +97,7 @@ node e2e/run-tests.mjs # 端到端：mock LLM / MCP / HTTP，不需要真 API Ke
 symbio/
 ├── crates/ # Rust：symbio-platform（语法 / ABI / 机制 / 装配四臂）· symbio-runtime（运行时）· symbio-plugin-api（门面）· 插件与 provider 各一 crate · symbio-cli
 ├── tauri/ # Vue 3 桌面端（src-tauri = 3 命令的薄适配层）
-├── docs/ # 系统级文档（目标 / 场景 / 计划 / 架构 / 参考 / 指南 / 规范 / 任务 / 决策；历史只在 git log）
+├── docs/ # 系统级文档（目标 / 场景 / 架构 / 参考 / 指南 / 规范 / 任务；历史只在 git log）
 ├── e2e/ # 端到端用例（mock LLM / MCP / HTTP + 网关 WS）
 ├── examples/ # Agent 示例包
 └── scripts/ # 事实表生成、判据审计与门禁
@@ -112,7 +112,7 @@ symbio/
 | | |
 | --- | --- |
 | **入门** | [快速上手](docs/006-guide/006-QUICK_START.md "GU-006-QUICK_START") · [系统地图](docs/003-design/004-系统地图.md "DE-004-系统地图") · [产品目标](docs/001-goal/001-产品目标.md "GO-001-产品目标") · [场景](docs/002-scene/README.md "SC-000-场景汇总") |
-| **架构** | [总览](docs/003-design/002-架构总览.md "DE-002-架构总览") · [数据流](docs/003-design/003-数据流与调用链.md "DE-003-数据流与调用链") · [协议](docs/003-design/005-协议规范.md "DE-005-协议规范") · [决策记录](docs/003-design/README.md "DE-000-设计总览") |
+| **架构** | [总览](docs/003-design/002-架构总览.md "DE-002-架构总览") · [数据流](docs/003-design/003-数据流与调用链.md "DE-003-数据流与调用链") · [协议](docs/003-design/005-协议规范.md "DE-005-协议规范") · [设计规范](docs/003-design/README.md "DE-000-设计总览") |
 | **参考** | [事实表](docs/004-ref/006-当前事实表.md "RE-006-当前事实表") · [路由](docs/004-ref/003-ROUTES.md "RE-003-ROUTES") · [错误码](docs/004-ref/002-ERROR_CODES.md "RE-002-ERROR_CODES") · [配置](docs/004-ref/001-CONFIGURATION.md "RE-001-CONFIGURATION") |
 | **开发** | [插件开发](docs/006-guide/005-PLUGIN_DEVELOPMENT.md "GU-005-PLUGIN_DEVELOPMENT") · [排障](docs/006-guide/007-TROUBLESHOOTING.md "GU-007-TROUBLESHOOTING") · [文档中心与登记](docs/README.md "docs/README") · [贡献指南](CONTRIBUTING.md "CONTRIBUTING") |
 | **设计** | [VDFS](docs/003-design/010-VDFS前端页面规范.md "DE-010-VDFS前端页面规范") · [Agent 目录](docs/003-design/011-Agent目录规范.md "DE-011-Agent目录规范") · [上下文压缩](crates/symbio-plugin-session/src/docs/101-context-compression-design.md "DE-101-context-compression-design") · [目标架构 v2](docs/003-design/002-架构总览.md "DE-002-架构总览") |

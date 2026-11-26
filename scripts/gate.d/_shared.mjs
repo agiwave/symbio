@@ -31,7 +31,7 @@ const REPO_ROOT = path.resolve(SHARED_DIR, '..', '..')
  * VdfsChange 信封 = `{path, data?}`、操作枚举整个退役——信封构造
  *      守卫（`bare` 无载荷 / `with_data` 带载荷 / 无 `change` 键）、门面原样透传、
  *      transcript 四帧生命周期（首帧全量副本 / delta 窄载荷 / removed 状态帧 /
- *      运行态随节点视图）。`transcript_stream` 已随 D-025 退役，908 中相关
+ *      运行态随节点视图）。`transcript_stream` 已随  退役，908 中相关
  *      用例随之删除，由 VDFS 变更通道的新用例接替。
  * 908：流式链路评审 A–D 批的回归锚点——`event_bus` 满通道语义（不摘除订阅 /
  *      `Closed` 才摘除 / resync 标记形状 / 满通道后标记必达）与**扇出不复制载荷**
@@ -65,21 +65,21 @@ export const BASELINE = {
   //   当前 2152 = `cargo test --workspace` 的本地求和。逐次增减的归属见
   //   `git log -S'rustTests'` 与各提交的「门禁：」段——**这里不记变更史**：原先 147 行
   //   「A → B」注释里只有最后一条会被 `baselineWaivers` 读到（Map 按键覆盖），其余是死重量。
-  // baseline-allow rustTests: 2152 → 2153（+1，D-555）——新增 host 进程内执行体的 duplex 协议回归用例；host 不再派生 __worker 子进程，同一 WorkerLine / inbox / epoch 语义由进程内执行体承担。纯新增判据。
+  // baseline-allow rustTests: 2152 → 2153（+1，）——新增 host 进程内执行体的 duplex 协议回归用例；host 不再派生 __worker 子进程，同一 WorkerLine / inbox / epoch 语义由进程内执行体承担。纯新增判据。
   rustTests: 2153,
   kernelRustTests: 131,
 
   // baseline-allow ciRustTestsTotal: CI 侧同一口径（同一条 `cargo test --workspace`、同一批
   //   目标），当前 2242。逐次折算的归属同样归 `git log`——理由同上一条，不在这里记变更史。
-  // baseline-allow ciRustTestsTotal: 2264 → 2257（-7，D-513）——会话记忆迁归 memory 插件，
+  // baseline-allow ciRustTestsTotal: 2264 → 2257（-7，）——会话记忆迁归 memory 插件，
   //   session 侧的会话记忆判据随旧实现退役（`session/memory` 单测、session 配置记忆闸门、
   //   plugin 收集期 / VDFS / 节点 / 变更投递里钉旧地址与旧闸门的用例）；同一条链路改由
   //   memory 侧 `session.test.rs` / `plugin.test.rs` / `vdfs.test.rs` 按新落位（`SESSION.md`，
   //   `ctx[SESSION_DIR]`）钉住，净 -7。覆盖没有丢，是换了承担者。非侵蚀。
-  // baseline-allow ciRustTestsTotal: 2286 → 2288（+2，D-520 后续修复）——新增两条判据用例：
+  // baseline-allow ciRustTestsTotal: 2286 → 2288（+2， 后续修复）——新增两条判据用例：
   //   composite/vdfs.test.rs 钉「有目录但未挂载的插件也能卸载」（删除按目录存在判，不被已挂载实例表挡成「目录不存在」）；
   //   plugin_manager/plugin.test.rs 钉「残留目录的可选插件仍进市场」（装配按挂载实例判，不被历史目录占满）。非侵蚀。
-  // baseline-allow ciRustTestsTotal: 2288 → 2285（-3，D-520 交互重构）——删掉 4 条旧「market 是 VDFS 节点」的判据用例（节点置顶 / 读正文 / 非可选校验 / 市场写转发），新增 1 条「根写带 create 意图」用例；候选过滤判据 3 条保留。交互改为「添加插件页面」后旧节点语义退役，覆盖由根目录自述与草稿保存用例承担，非侵蚀。
+  // baseline-allow ciRustTestsTotal: 2288 → 2285（-3， 交互重构）——删掉 4 条旧「market 是 VDFS 节点」的判据用例（节点置顶 / 读正文 / 非可选校验 / 市场写转发），新增 1 条「根写带 create 意图」用例；候选过滤判据 3 条保留。交互改为「添加插件页面」后旧节点语义退役，覆盖由根目录自述与草稿保存用例承担，非侵蚀。
   // baseline-allow ciRustTestsTotal: 2296 → 2295（-1）——删除与项目无关的验收夹具 crate
   //   symbio-demo-probe（自述「不是生产插件，不进装配清单」）及其唯一的 demo 端口往返测试；
   //   同时清掉它在 obligation-ring-accept 里的端口漂移项与 host 侧专属便利构造器 base_context。
@@ -90,25 +90,25 @@ export const BASELINE = {
   // baseline-allow ciRustTestsTotal: 2308 → 2309（+1）——subagent 列表节点显式无状态守门用例：
   //   静态配置节点显式 VDFS_STATUS_NONE，避免前端按缺省 active 画误导性绿点。非侵蚀：
   //   纯展示面回归断言，与沙箱无关（沙箱改动已整体回滚）。
-  // baseline-allow ciRustTestsTotal: 2313 → 2319（+6，D-531）——symbio-plugin-sandbox 六条判据用例：
+  // baseline-allow ciRustTestsTotal: 2313 → 2319（+6，）——symbio-plugin-sandbox 六条判据用例：
   //   缺席放行 / 白名单裁决 / 仅拦显式配置工具 / 多事实全过 / 配置构造注册表 / traverse 发布句柄。
   //   SDK 侧沙箱四测（缺席降级 / 发布可见 / 二次发布拒绝 / 开放事实词表）此前已在 2313 内计入。
   //   非侵蚀：纯新增判据，覆盖横切句柄的发布—消费闭环。
-  // baseline-allow ciRustTestsTotal: 2577 → 2599（+22，D-550）——容器落点与凭证出口新增
+  // baseline-allow ciRustTestsTotal: 2577 → 2599（+22，）——容器落点与凭证出口新增
   //   22 条判据：broker 7（fencing / 取消 / 凭证注入 / 输入与配置拒绝 / 错误不外泄 / 头过滤）、
   //   shim 6（target / 分片 / 背压 / 端到端 / 截断 / 断连取消）、container 9（镜像与摘要、
   //   workdir 与凭证、UID 权限、安全上限、投影脱敏与符号链接、目标路由）。非侵蚀：全是新增用例。
-  // baseline-allow ciRustTestsTotal: 2601 → 2603（+2，D-555）——新增两条判据：host 执行体
+  // baseline-allow ciRustTestsTotal: 2601 → 2603（+2，）——新增两条判据：host 执行体
   // duplex 帧协议往返，以及监督者不把 host 帧回灌总线 / 不转给另一 host 执行体。纯新增判据。
-  // baseline-allow ciRustTestsTotal: 2603 → 2604（+1，D-562）——新增根工厂每次调用返回独立实例的回归。
+  // baseline-allow ciRustTestsTotal: 2603 → 2604（+1，）——新增根工厂每次调用返回独立实例的回归。
   ciRustTestsTotal: 2604,
   cliRustTests: 23,
   tauriRustTests: 5,
   // doc-link-allow D-010: 下一行是退役文件的历史叙述（已把这两个文件删掉），不是入链
-  // baseline-allow vitestFiles: （`76324817`，D-063 会话呈现合流）退役 `tauri/src/schemas/conversation_line.ts` 与其 185 行 spec `tauri/src/schemas/__tests__/conversation_line.spec.ts`（整文件删除 ⇒ 测试文件 55→54）。被测对象随「对话/工作分栏退役」消失，判据随之下沉：新形态由 `e2e/cases/t24-panel-split.mjs` 与 `crates/symbio-plugin-loop/src/context/conversation_view.rs` 侧覆盖，不是丢掉覆盖。
+  // baseline-allow vitestFiles: （`76324817`， 会话呈现合流）退役 `tauri/src/schemas/conversation_line.ts` 与其 185 行 spec `tauri/src/schemas/__tests__/conversation_line.spec.ts`（整文件删除 ⇒ 测试文件 55→54）。被测对象随「对话/工作分栏退役」消失，判据随之下沉：新形态由 `e2e/cases/t24-panel-split.mjs` 与 `crates/symbio-plugin-loop/src/context/conversation_view.rs` 侧覆盖，不是丢掉覆盖。
   // baseline-allow vitestTests: 上述 spec 的用例 + `tauri/src/stores/__tests__/appearance.spec.ts` 随分栏退役收窄的那部分，合计 856→838（-18）。`appearance` 的其余行为仍由该 spec 的保留用例守着（只删了分栏相关的那一段），非侵蚀。
-  // baseline-allow vitestTests: D-111 净删 6 条（894→888）——删的是**已不存在的被测对象**：`registry/messageTypes` 的 `messageCompactionStats` / `messageMemoryStats` / `compactionTriggerLabel` / `formatTokens` 四条前端口径随裁决迁到交付出口（那 6 条逐个断言的正是这四个函数的取值与格式化）。覆盖没有丢，是换了承担者：同一口径现在由 Rust 侧 `crates/symbio-plugin-session/src/stats_reading.test.rs` 7 条判据钉（四行齐全 / 失败路径报「当前水位」不补 0 / 无数字出行即消失 / 压缩产物两行 / 非压缩的 notice 不误读 / token 单位只有一处 / 未知触发词原样透出），前端只留「有行就逐行排版」的渲染判据（`MessageNode.spec.ts` 那三条改吃 `stats` 行，条数不变）。非侵蚀。
-  // baseline-allow vitestTests: 1002 → 1003（+1，D-147 / D-149）——新增的是**判据用例**，不是补回覆盖：
+  // baseline-allow vitestTests:  净删 6 条（894→888）——删的是**已不存在的被测对象**：`registry/messageTypes` 的 `messageCompactionStats` / `messageMemoryStats` / `compactionTriggerLabel` / `formatTokens` 四条前端口径随裁决迁到交付出口（那 6 条逐个断言的正是这四个函数的取值与格式化）。覆盖没有丢，是换了承担者：同一口径现在由 Rust 侧 `crates/symbio-plugin-session/src/stats_reading.test.rs` 7 条判据钉（四行齐全 / 失败路径报「当前水位」不补 0 / 无数字出行即消失 / 压缩产物两行 / 非压缩的 notice 不误读 / token 单位只有一处 / 未知触发词原样透出），前端只留「有行就逐行排版」的渲染判据（`MessageNode.spec.ts` 那三条改吃 `stats` 行，条数不变）。非侵蚀。
+  // baseline-allow vitestTests: 1002 → 1003（+1， / ）——新增的是**判据用例**，不是补回覆盖：
   // 折叠顺序反转后「主体优先 / 残留格兜底 / 旧形态不再归一」三组各要一条断言，
   // 由 8 条变 9 条（原「历史裸字符串一路通吃」那条拆成地址归一 + 旧形态不归一，净 +1）。
   // baseline-allow vitestTests: 1003 → 1024（+21，折叠骨架按需重取）——新增的是判据用例：
@@ -125,30 +125,30 @@ export const BASELINE = {
   // baseline-allow e2eCases: 读通道禁令（e2e 不得读任何内部存储文件——`messages.json` / `v2-events.wal` / `session.json` 一并禁）下删 3 个用例：t33 熔断（存储层判据，已由 `wal.test.rs` / `active.test.rs` 覆盖）、t40（断言全为 WAL 白盒入格，可见效果已由 t29 记忆召回 / t35 技能编译覆盖）、t43（messages-json-is-rebuildable，判据「真源已换、缓存可弃」已下沉 `store/tests.rs`，且 messages.json 已停写）。45 → 42，非侵蚀：三条的判据都下沉到了 Rust 侧，不是丢掉覆盖。
   // 增 t76（召回可见域）。
   // 增 t99（工具端口三路径：装行执行 / 不装行让位 / 缺行响亮失败并落事实）。
-  // baseline-allow e2eCases: 96 → 91（D-332）——`60cedd50`（B2 环侧编排退场，D-318）删 5 条
+  // baseline-allow e2eCases: 96 → 91（）——`60cedd50`（B2 环侧编排退场，）删 5 条
   // 引擎绑定的 e2e 用例（这些用例的接线点随旧 engine 一起消失，留着只会测不到东西）。后续随
   // 新义务环接入**只会回升**：B 类能力每接回一组，对应的 e2e 用例重新落地。
-  // baseline-allow e2eCases: 91 → 90（D-318）——`346b3134` 整例退役 t41 技能快路：
+  // baseline-allow e2eCases: 91 → 90（）——`346b3134` 整例退役 t41 技能快路：
   // 它唯一独有的断言依赖 `session.skill_fast_path`，该快路已随 B2 退场，没有生产事实可断；
   // 能力断言由 t35-skill-compile 承接（退役口径见 2026-11-04 一次性盘点，历史在 `git log`）。
   // 收紧基线，不是放松。
-  // baseline-allow e2eCases: 97 → 88（D-395）——9 条整例退役（t89/t91/t93/t94/t98/t100/t101/
+  // baseline-allow e2eCases: 97 → 88（）——9 条整例退役（t89/t91/t93/t94/t98/t100/t101/
   // t102/t103），它们钉的是被撤回的专用验证包；判据对象随实现一起消失，通用扩展面由
   // `t96-glossary-extension.mjs` 承接。非侵蚀。
   e2eCases: 96,
-  // 累计「补件 : 迁移」的**欠账本金**（D-372，`capability-migration-audit` 的付账线）。
+  // 累计「补件 : 迁移」的**欠账本金**（，`capability-migration-audit` 的付账线）。
   // 不是「比值上限」：范围基线一变计数就变，比值当阈值会假红。这里记的是判据落地当天的
   // 存量按脚本每轮重算，不手抄。文档里的手写读数
   // 的**旧尺**读数（同一范围新尺读 7），与今天不可比；口径与拆分见 `capability-migration-audit`
-  // 的计数规则与 `D-372`。
+  // 的计数规则与 ``。
   // 增量线只问「从这天起欠账有没有变大」——新增一个补件必须由一次迁移抵账，`debt > 0` 即红。
-  // 绝对欠账 6 笔按 D-375 的检查点递减、2026-11-25 归零；台阶表在审计脚本的
+  // 绝对欠账 6 笔按  的检查点递减、2026-11-25 归零；台阶表在审计脚本的
   // `DEBT_SCHEDULE`，不在这里复制一份。
   // 两格是 floor 棘轮（`35-baseline` 守）：只许在**欠账为 0** 时随实测上移（等价于把窗口
   // 前移，判据结果不变）；欠账不为 0 时改大是**豁免**，必须先有决策。
   capabilitySupplements: 21,
   capabilityMigrations: 15,
-  // 换述读数（D-097）：`recall_eval.rs` 的第四个数字带着一组新断言——指纹锁、
+  // 换述读数（）：`recall_eval.rs` 的第四个数字带着一组新断言——指纹锁、
   // 每条换述必须真的换了措辞、依赖度定义域、54 条换述逐条验「承重」（换成无关问句
   // 读数必须精确上抬 1/(n·m)）、以及时间兜底案上读数不动。224 → 235，全是**新增判据**，
   // 没有一条是为了让数字变大而写的：删掉任何一条，对应那半句结论就没有守卫了。
@@ -182,7 +182,7 @@ export const BASELINE = {
   // kernel.rs」后，各加一处 `expect` 把「内核返回的下标/id 必来自本切片」钉成显式
   // 约定（解析层与内核的输入约定若破，这里当场响而不是静默错位）——四条理由同构、
   // 均为穷尽性不变量，已按 PN-001 登记在 mod.rs。基线随之 79 → 83。
-  // baseline-allow panicSites: D-387 的报表登记判据改用 Result（不 panic），这里是撤销上一笔的临时上调，不是放松。
+  // baseline-allow panicSites:  的报表登记判据改用 Result（不 panic），这里是撤销上一笔的临时上调，不是放松。
   panicSites: 83,
 }
 
@@ -361,6 +361,43 @@ export function exemptionActive({ expires, today }) {
   const t = String(today ?? '')
   if (!/^\d{4}-\d{2}-\d{2}$/.test(e) || !/^\d{4}-\d{2}-\d{2}$/.test(t)) return false
   return e >= t
+}
+
+/** 临时豁免的统一形状：规则、当前理由、责任人、失效日与清除动作缺一不可。 */
+export function exemptionRecordErrors(record, { today = new Date().toISOString().slice(0, 10) } = {}) {
+  if (!record || typeof record !== 'object' || Array.isArray(record)) return ['必须是结构化对象']
+  const errors = []
+  if (typeof record.rule !== 'string' || !/^[A-Z]{1,4}-\d{3}$/.test(record.rule.trim())) {
+    errors.push('rule 必须是判据码')
+  }
+  if (typeof record.reason !== 'string' || !record.reason.trim()) errors.push('reason 不可为空')
+  if (typeof record.owner !== 'string' || !record.owner.trim()) errors.push('owner 不可为空')
+  if (!/^\d{4}-\d{2}-\d{2}$/.test(String(record.expires ?? ''))) {
+    errors.push('expires 必须是 YYYY-MM-DD')
+  } else if (!exemptionActive({ expires: record.expires, today })) {
+    errors.push('expires 已失效')
+  }
+  if (typeof record.clears !== 'string' || !record.clears.trim()) errors.push('clears 不可为空')
+  return errors
+}
+
+/** `Core-Change` 自身必须同时给出判据码与非空当前理由。 */
+export function coreChangeParts(message) {
+  const match = String(message ?? '').match(/^\s*Core-Change[:：]\s*(.+)$/m)
+  if (!match) return null
+  const parts = /^([A-Z]{1,4}-\d{3})\s+(\S.*)$/.exec(match[1].trim())
+  if (!parts) return { rule: null, reason: '', value: match[1].trim() }
+  return { rule: parts[1], reason: parts[2].trim(), value: match[1].trim() }
+}
+
+/** commit SHA 或 task/spec 登记号；不把架构决策号当作生命周期目标。 */
+export function registrationTarget(raw) {
+  const target = String(raw ?? '').trim()
+  if (/^[0-9a-f]{7,40}$/.test(target)) return { target, kind: 'sha' }
+  if (/^(?:T|SP)-\d{3,}$/.test(target)) {
+    return { target, kind: target.startsWith('T-') ? 'task' : 'spec' }
+  }
+  return null
 }
 
 export function baselineWaivers(text) {
@@ -912,8 +949,8 @@ export async function autoChain(ctx, { label, steps }) {
 
 // ── 历史路径别名：读 git 历史的判据从这里把旧路径折算回现在的树 ─────────────
 //
-// 平台合并（kernel / sdk / contract / deploy → `symbio-platform`，D-556）与运行时合并
-// （server + host → `symbio-runtime`，D-557）之后，**历史提交里的路径永远是旧的**。按当前
+// 平台合并（kernel / sdk / contract / deploy → `symbio-platform`，）与运行时合并
+// （server + host → `symbio-runtime`，）之后，**历史提交里的路径永远是旧的**。按当前
 // 树名去匹配历史提交的文件清单，合并前的每一个提交都会落出判定面——判据对历史静默失明，
 // 而它自己不红。
 //
@@ -944,7 +981,7 @@ export const LEGACY_TREES = Object.freeze([
   // 部署驱动入口：从装配方 `symbio` 搬进 host
   ['crates/symbio/src/drive.rs/', 'crates/symbio-runtime/src/host/entry.rs/'],
   ['crates/symbio/src/drive.test.rs/', 'crates/symbio-runtime/src/host/entry.test.rs/'],
-  // 会话投影实现：平台 → session（D-561）。逐文件别名，不能把仍留在 SDK 的
+  // 会话投影实现：平台 → session（）。逐文件别名，不能把仍留在 SDK 的
   // `vocab` 一起折算走；无尾斜杠表示整文件相等匹配。
   ...['branch', 'elision', 'mutations', 'prompt_fidelity', 'transcript'].flatMap((name) => [
     [`crates/symbio-platform/src/sdk/projection/${name}.rs`, `crates/symbio-plugin-session/src/projections/${name}.rs`],
@@ -994,7 +1031,7 @@ export function legacyPathspecs(trees) {
 //
 //     // @gate guard     本体静态跑得出（带 `--strict`）+ 同名回归测试
 //     // @gate weekly    同 guard，但执行方是 `62-weekly`（周档阶段）：风格性 / 布局性 /
-//     //                 低频漂移判据，每周核一次即可，不必每轮提交都判（D-496）
+//     //                 低频漂移判据，每周核一次即可，不必每轮提交都判（）
 //     // @gate report    只跑本体（退出码恒 0，结论要人工复核）
 //     // @gate test      只跑回归测试（本体要运行时输入 / 由别的阶段执行 / 根本没有本体）
 //     // @gate lib       只被引用，门禁不跑它
@@ -1163,16 +1200,16 @@ export function gensDeclarations(root) {
 // 与 `@gate` / `@gens` 同构的第三类自声明：一份守卫在头注释里用一行自述**生命周期**——
 //   // @state live                     在役（缺省即此值，不写也行）
 //   // @state redundant: <承继判据码>   已被更强的判据覆盖，不再执行，壳留到下一批删
-//   // @state retired: D-NNN <理由>     正式退役，退役挂在一条能打开的裁决上
+//   // @state retired: <sha|T-NNN|SP-NNN> <理由>  正式退役，目标可回指提交或登记条目
 // 缺省 = live 是刻意的：57 份在役脚本一行都不用改——状态字只为**离场**的判据而写，
 // 它与 `@gate`（这条判据跑不跑）正交：`@gate off` 是「现在不跑」，`@state` 回答
-// 「还需要存在吗」。D-492 的豁免到期管「暂时不拦我」，三者合起来才是完整生命周期。
+// 「还需要存在吗」。 的豁免到期管「暂时不拦我」，三者合起来才是完整生命周期。
 
 /**
  * 读一份源码的 `@state` 声明。
  * 返回 `{ state: 'live' }`（缺省与显式同值）/ `{ state: 'redundant', successor }` /
- * `{ state: 'retired', decision, reason }` / `{ error, detail }`。
- * 错误闭集：`duplicate` / `unknown` / `bad-shape` / `empty-arg` / `retired-needs-decision`。
+ * `{ state: 'retired', target, targetKind, reason }` / `{ error, detail }`。
+ * 错误闭集：`duplicate` / `unknown` / `bad-shape` / `empty-arg` / `retired-needs-target`。
  * 只看前 80 行（与 `gateDeclOf` 同口径）：掉进正文的「声明」读的人看不见，也不该算。
  */
 export function stateDeclOf(text) {
@@ -1194,11 +1231,12 @@ export function stateDeclOf(text) {
   }
   if (arg.trim() === '') return { error: 'empty-arg', detail: hits[0] }
   if (kind.toLowerCase() === 'redundant') return { state: 'redundant', successor: arg.trim() }
-  // retired: `D-NNN <非空理由>`——裁决号是退役的署名点，没有它「退役」就只是一个开关。
-  // 号段与 `decision-anchors.mjs` 的 ANCHOR_RE 同为三位（四位号在锚点登记表里打不开）。
-  const pm = /^(D-\d{3}a?)\s+(.+)$/.exec(arg.trim())
-  if (!pm) return { error: 'retired-needs-decision', detail: hits[0] }
-  return { state: 'retired', decision: pm[1], reason: pm[2] }
+  // retired: `<sha|T-NNN|SP-NNN> <非空理由>`——目标必须是可打开的既有记录，没有它「退役」就只是一个开关。
+  const pm = /^(\S+)\s+(.+)$/.exec(arg.trim())
+  if (!pm) return { error: 'retired-needs-target', detail: hits[0] }
+  const registered = registrationTarget(pm[1])
+  if (!registered || !pm[2].trim()) return { error: 'retired-needs-target', detail: hits[0] }
+  return { state: 'retired', target: registered.target, targetKind: registered.kind, reason: pm[2].trim() }
 }
 
 /**

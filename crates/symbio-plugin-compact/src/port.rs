@@ -1,4 +1,4 @@
-//! `compact` 端口的执行面：**读回摘要，落压缩快照**（D-336 的第二行）。
+//! `compact` 端口的执行面：**读回摘要，落压缩快照**（第二行）。
 //!
 //! 摘要不由本端口取——那是 `model.assist` 的事（执行体归端口提供方）。本端口只做
 //! 世界侧的那一半：
@@ -11,7 +11,7 @@
 //!
 //! 水位（阈值 0.7 × provider 上限）在 `debt.rs` 申报时判：没超就不欠这两行，本执行体
 //! 压根不会被派发。执行体拿不到可信摘要（`model.assist` 失败 / 空转写）⇒ **失败是产物**
-//! （D-402）：落一条带原因分类的 `failed` 事实，读面据此折出 `Failed` 压缩叶，重试入口
+//! 落一条带原因分类的 `failed` 事实，读面据此折出 `Failed` 压缩叶，重试入口
 //! 因此可达；不再返回成功、不再让压缩节点恒 `Completed`。
 //!
 //! ## 压出来的快照
@@ -41,7 +41,7 @@ pub(crate) const COMPACT_PORT: &str = "compact";
 
 /// 事实种类：**已有种类**，声明 owner 是
 /// `crates/symbio-plugin-session/src/declarations.rs`。本 crate 只写、不声明；
-/// 名字由 owner 的清单生成到 `plugin-api`，本 crate import 同一常量（D-364）。
+/// 名字由 owner 的清单生成到 `plugin-api`，本 crate import 同一常量。
 pub(crate) use symbio_plugin_api::events::EVENT_SESSION_CONSOLIDATED as SESSION_CONSOLIDATED;
 
 pub(crate) struct CompactPort;
@@ -65,7 +65,7 @@ struct CompactExecutor;
 #[async_trait]
 impl PortExecutor for CompactExecutor {
     async fn execute(&self, ctx: PortExecContext, input: PortInput) -> PortOutcome {
-        // 压缩前的通知由**执行体**发出（环不按事件名调钩子，DE-048 D-312）——与工具端口
+        // 压缩前的通知由**执行体**发出（环不按事件名调钩子，DE-048 ）——与工具端口
         // 同一手法：父插件引用从调用方 ctx 取。**不拦**：压缩由债源按水位触发，拦下只会
         // 让上下文继续涨到不可用；`PreCompact` 在这里是通知语义，`should_proceed = false`
         // 不改变本轮行为（要拦就该在债源那一侧裁「不欠这笔」，不是在这里假装成功）。
@@ -84,7 +84,7 @@ impl PortExecutor for CompactExecutor {
         let after_port = str_of(&input.payload, "after_port");
         let after_id = str_of(&input.payload, "after_id");
         let Some(summary) = summary_of(&facts, &final_id, &after_port) else {
-            // 摘要那笔没交回正文（失败 / 空转写）：失败是产物（D-402），不拿成功冒充。
+            // 摘要那笔没交回正文（失败 / 空转写）：失败是产物，不拿成功冒充。
             return summary_failed(
                 &input.payload,
                 &facts,
@@ -134,7 +134,7 @@ impl PortExecutor for CompactExecutor {
     }
 }
 
-/// 拿不到摘要时的产物：一条带原因分类的失败（D-402 ①）。
+/// 拿不到摘要时的产物：一条带原因分类的失败。
 ///
 /// 载荷必须带上**读出与重试要用的全部材料**：失败压缩节点的身份（`compression_id`）、
 /// 原因分类（`failure_class`）、给展示面的正文（`text`），以及失败时那段切片的边界
@@ -157,7 +157,7 @@ fn summary_failed(
         .map(|(_, reason)| reason)
         .unwrap_or_else(|| "摘要服务没有交回正文".to_string());
     // 失败节点的身份按**前缀指纹**（含重试纪元）派生：读面把 `message.removed`
-    // 当作永久隐藏，重试若沿用旧身份，重建出的节点永远不可见（D-402 ③）。
+    // 当作永久隐藏，重试若沿用旧身份，重建出的节点永远不可见。
     let fingerprint = str_of(input, "fingerprint");
     let compression_id = if fingerprint.is_empty() {
         format!("compression:{final_id}")

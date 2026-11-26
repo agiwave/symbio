@@ -39,7 +39,7 @@
  *     暂存文件的 `06-facts-write` 那句注释改成人话，这个生成阶段就从判定里消失、判据空转。
  *   - **GW-006**（阶段不空转）每个 `gate.d/*.mjs` 在本机**物化一次 `tasks()`**，产出 0 个检查项
  *     又没声明 `mayBeEmpty: '<一句理由>'` ⇒ 红。治的是「阶段还在、判据没了」：`50-msrv` 写死了
- *     D-191 之前那两个顶层目录，拆成 crate 之后路径不存在，于是每轮产出 0 项、
+ *      之前那两个顶层目录，拆成 crate 之后路径不存在，于是每轮产出 0 项、
  *     汇总表上**一行都没有**，与「跑过了、全绿」完全同形，而 CI 那个 msrv job 一直绿——
  *     `rust-version` 重新变回没人验证的一句话。`gate.mjs::runStage` 在真跑那轮有同一条运行时判定
  *     （0 项且无声明 ⇒ 记失败），本条的价值是**不用等一轮七分钟的门禁**才发现。
@@ -56,7 +56,7 @@
  *     按序数排序执行，谁都不点名生成器。所以「加了生成器却没进链」只能在本条判——
  *     序数撞车 / 模式名拼错 / 声明了却不在物化出的任务里（枚举写窄的同一形状）。
  *     反向也判：某个阶段跑了它却没声明，那一步就不在机制的账上。
- *   - **GW-009**（判据生命周期）头注释里一行 `// @state live|redundant: <承继判据码>|retired: D-NNN <理由>`
+ *   - **GW-009**（判据生命周期）头注释里一行 `// @state live|redundant: <承继判据码>|retired: <sha|T-NNN|SP-NNN> <理由>`
  *     是判据给**生命周期**的自声明（读法只有一处：`gate.d/_shared.mjs::stateDeclarations`，
  *     缺省即 `live`，在役脚本一行不写——状态字只为离场的判据而写）。离场判据必须：
  *     ① `@gate off`（退场的判据不再跑）；② 不出现在任何物化出的任务表里（含它自己的
@@ -80,7 +80,6 @@ import path from 'node:path'
 import { pathToFileURL, fileURLToPath } from 'node:url'
 import { green, red } from '../color.mjs'
 import { gateDeclarations, gensDeclarations, scriptFilesOf, stateDeclarations } from '../gate.d/_shared.mjs'
-import { hasDecisionAnchor } from '../decision-anchors.mjs'
 
 const scriptDir = path.dirname(fileURLToPath(import.meta.url))
 const rootArg = process.argv.find((a) => a.startsWith('--root='))
@@ -340,10 +339,8 @@ const runNotDeclared = [
 // GW-009：`@state` 生命周期状态字 ↔ 接线 / 任务表。
 // 读法只有一处：`gate.d/_shared.mjs::stateDeclarations`（缺省即 live，所以 `entries`
 // 只有离场判据——redundant / retired）。三个半句都是对账：状态字对 `@gate`
-// （off 才算真的不跑）、对**物化出的任务表**（不跑还得不占着对账面）、对裁决账
-// （retired 的 D-NNN 要能在登记面打开）。`--root`（夹具）时锚点面收窄到夹具自己的
-// `docs/`，与真仓的三个登记根同语义。
-const DOCS_ROOT = rootArg ? path.join(REPO_ROOT, 'docs') : null
+// （off 才算真的不跑）、对**物化出的任务表**（不跑还得不占着对账面）。retired 目标
+// 必须是 commit SHA 或 task/spec 登记号，形状由 stateDeclOf 统一校验。
 const state = stateDeclarations(REPO_ROOT) ?? { entries: [], problems: [] }
 const stateErrors = state.problems.map((p) => ({
   rel: p.rel,
@@ -355,10 +352,6 @@ const stateBucketOf = new Map(decl.entries.map((e) => [e.name, e.bucket]))
 const stateRunAnywhere = new Set([...strictRun, ...testedRun, ...weeklyRan, ...stepsRan, ...checksRan])
 const stateNotOff = state.entries.filter((e) => stateBucketOf.get(e.name) !== 'off')
 const stateStillRun = state.entries.filter((e) => stateRunAnywhere.has(e.name))
-const stateAnchorMissing = state.entries.filter(
-  (e) => e.state === 'retired' && !hasDecisionAnchor(e.decision.slice(2), REPO_ROOT, DOCS_ROOT),
-)
-
 let errors = 0
 for (const p of undeclared) {
   errors++
@@ -600,16 +593,6 @@ for (const e of stateStillRun) {
     ),
   )
 }
-for (const e of stateAnchorMissing) {
-  errors++
-  console.log(
-    red(
-      `[ERROR] GW-009 scripts/${e.rel} 自述 \`@state retired: ${e.decision}\`，但裁决 \`${e.decision}\` 的 \`### ${e.decision}\` 锚点在登记面打不开 ⇒ ` +
-        `退役必须有名有姓地挂在一条设计裁决上（头注释 GW-009 条记的教训：退场不等于留壳）`,
-    ),
-  )
-}
-
 if (errors) {
   console.log(
     `gate-wiring-audit 未通过：${errors} 处接线失效（${decl.entries.length} 份声明 / ` +
@@ -624,6 +607,6 @@ console.log(
       `${guards.length} 条守卫（30-docs）${countOf('weekly')} 条周档（62-weekly）全部被跑到；生成链 ${gensWriterDecl.length} 步与复核 ${gensCheckerDecl.length} 步` +
       `（@gens 声明 ↔ 物化任务双向对账）；生成阶段 ${lastRegen ? lastRegen.file : '（无）'} 先于只读复核 ` +
       `${recheckStages.map((m) => m.file).join(' / ') || '（无）'}；${stages.length} 个阶段物化出 ${totalTasks} 项，无空转阶段；` +
-      `离场判据 ${state.entries.length} 条（@state ↔ off / 任务表 / 裁决账三向对账）`,
+      `离场判据 ${state.entries.length} 条（@state ↔ off / 任务表 / 退役目标形状对账）`,
   ),
 )

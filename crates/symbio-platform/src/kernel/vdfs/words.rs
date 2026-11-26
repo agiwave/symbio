@@ -161,8 +161,8 @@ pub const VDFS_ACTION_SWITCH_BRANCH: &str = "switch_branch";
 /// 节点动作标识：**重试另一支**（写操作，落在那一支的轮锚——用户消息节点上）。
 ///
 /// 入参无（`{}`）：动作自己从落点读出问题与旧支，不需要调用方再给一份内容。
-/// 它落一条 `scope.branch{of, into}`（[D-173] 立的目标事实：新旧两支并存、
-/// 默认读新的一支）并由会话复开一轮，**不是**在这里重跑模型（[D-358]）。
+/// 它落一条 `scope.branch{of, into}`（ 立的目标事实：新旧两支并存、
+/// 默认读新的一支）并由会话复开一轮，**不是**在这里重跑模型。
 ///
 /// 与 [`VDFS_ACTION_SWITCH_BRANCH`] 是一对：那条只改读法、不开轮；这条开轮、
 /// 不改任何既有节点。词形与 `ResumeAction` 的 snake_case 逐字相同（§4 的词表
@@ -173,7 +173,7 @@ pub const VDFS_ACTION_RETRY_SUBTREE: &str = "retry_subtree";
 ///
 /// 入参无（`{}`）。它落一条 `message.removed`（目标就是该节点），把失败产物从读面
 /// 丢掉；压缩债源据此换一把带纪元的前缀指纹，不欠水位也重跑失败时那段切片
-/// （[D-402]）。词形与 `ResumeAction` 的 snake_case 逐字相同（§4 的词表是一条）。
+/// 词形与 `ResumeAction` 的 snake_case 逐字相同（§4 的词表是一条）。
 pub const VDFS_ACTION_RETRY_COMPACTION: &str = "retry_compaction";
 
 // ==================== 插件容器的注册表动词 ====================

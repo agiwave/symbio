@@ -1,5 +1,5 @@
-//! `agent_run` 的**效果与前置判断**：一次委托就是一次跨主体立约（DE-025 D-207），
-//! 而被收回 `assign.work` 的主体派不活（D-219）。
+//! `agent_run` 的**效果与前置判断**：一次委托就是一次跨主体立约（DE-025 ），
+//! 而被收回 `assign.work` 的主体派不活。
 //!
 //! ## 为什么它住这里，而不是 `loop` 的工具执行层
 //!
@@ -34,7 +34,7 @@ use symbio_plugin_api::effects::{
     BeforeDecision, BeforeRefusal, BeforeRequest, EffectCall, FactDraft, ToolBehavior,
 };
 
-/// 立约行为的名字。**由本 crate 自报**（D-363）：`agent_run` 在自己的
+/// 立约行为的名字。**由本 crate 自报**：`agent_run` 在自己的
 /// `CapabilityMeta.behaviors` 里声明同一个常量，宿主只做收集。
 pub(crate) const DELEGATION_PROMISE: &str = "delegation_promise";
 
@@ -47,7 +47,7 @@ pub struct DelegationPromise;
 impl ToolBehavior for DelegationPromise {
     fn owner(&self) -> &'static str {
         // 与本插件的 `plugin_id` 同一串：owner 序即装配序。工具随 `agent_run`
-        // 迁入 session（承诺事件的 owner 也跟着写方走，D-389 同一条纪律）。
+        // 迁入 session（承诺事件的 owner 也跟着写方走 同一条纪律）。
         "session"
     }
 
@@ -82,7 +82,7 @@ impl ToolBehavior for DelegationPromise {
     }
 }
 
-/// 承诺面词汇表（DE-024 D-203 / D-206）：本插件写 `commitment.*` 四格里的三格，
+/// 承诺面词汇表（DE-024 ）：本插件写 `commitment.*` 四格里的三格，
 /// 名字的 owner 是 `crates/symbio-plugin-loop`（它声明格位与角色），本插件经清单生成物取用
 /// ——E-009 禁兄弟插件依赖，故不引用 loop 的 `control_decl`。
 ///
@@ -105,7 +105,7 @@ symbio_plugin_api::submit_behavior!(DelegationPromise);
 /// 「`agent_run` 受淘汰管辖」是**本能力的声明**（`CapabilityMeta.behaviors` 上的
 /// `assign.work`），判断读的也是本能力的语义（派活）。住在宿主时，这段逻辑按工具名
 /// 分支；搬进来之后，宿主只交批首读好的结论（`BeforeRequest`），连 `agent_run` 这个
-/// 名字都不认识（DE-025 D-219）。
+/// 名字都不认识（DE-025 ）。
 ///
 /// ## 出口
 ///

@@ -470,7 +470,7 @@ async fn load_skills_normal_dir_starts_with_dot_is_hidden() {
     assert!(skills.is_empty(), "整目录名以 . 开头应被跳过");
 }
 
-/// D-515：技能目录可经作用域 provider 加载——插件只认相对地址，不再直读物理路径。
+/// 技能目录可经作用域 provider 加载——插件只认相对地址，不再直读物理路径。
 #[tokio::test]
 async fn load_skills_from_scope_uses_relative_addresses() {
     let tmp = TempDir::new().unwrap();

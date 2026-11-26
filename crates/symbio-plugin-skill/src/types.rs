@@ -39,7 +39,7 @@ pub struct SkillConfig {
     #[serde(default = "default_true")]
     pub report_token_estimate: bool,
 
-    /// 技能编译开关（D-427：本能力自持，出厂 `false`）。
+    /// 技能编译开关（本能力自持，出厂 `false`）。
     ///
     /// 此前由 `SessionConfig::skill_compile_enabled` 代管、轮首投影成
     /// `session.config` 一格；现在真源在本插件的 `PLUGIN.yml`，开轮收集期由本插件

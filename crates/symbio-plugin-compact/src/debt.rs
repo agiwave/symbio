@@ -1,4 +1,4 @@
-//! 压缩债：**两行**（D-336），身份全部从事实派生（禁计数），永不读数值载荷。
+//! 压缩债：**两行**，身份全部从事实派生（禁计数），永不读数值载荷。
 //!
 //! | 行 | 端口 | 执行体在哪 | 做什么 |
 //! |---|---|---|---|
@@ -8,7 +8,7 @@
 //! ## 为什么必须两行
 //!
 //! 执行体归**端口提供方**：`model.assist` 的执行体不认识 `session.consolidated`，
-//! 本插件的执行体不调模型。一行做完等于让模型插件写会话世界的事实（D-336 裁决 2）。
+//! 本插件的执行体不调模型。一行做完等于让模型插件写会话世界的事实（ 裁决 2）。
 //!
 //! ## 四谓词
 //!
@@ -24,9 +24,9 @@
 //! 一行都不欠，`model.assist` 不会被派发——阈值住插件内，且不拿每轮一次白问去换。
 //!
 //! 行的载荷只带身份与**切片边界**（`root_id` / `final_id` / 切片两端事实 id /
-//! `keep_from`）：摘要正文仍从事实读，世界语义仍归本插件（D-336 / D-401）。
+//! `keep_from`）：摘要正文仍从事实读，世界语义仍归本插件。
 //!
-//! ## 跨轮失败记忆：按「前缀指纹」寻址，不另存状态（D-402）
+//! ## 跨轮失败记忆：按「前缀指纹」寻址，不另存状态
 //!
 //! 两行债的 id 不再按 `user_id` 派生（那样每轮都换一把键，同一份前缀每轮重新欠一次
 //! 注定失败的往返）。指纹 = **最旧未压事实 id + provider 上限 + 代**（**上一轮及更早**
@@ -34,7 +34,7 @@
 //! 键自然换一把；失败不换代 ⇒ 跨轮仍是同一把键，债源读 `closing()` 看到它已收束
 //! （Ok / Failed）就不再欠。记忆本身是环的收束事实，本插件不持有运行期状态。
 //!
-//! 失败产物的**重试**（D-402 ③）：`retry_compaction` 落一条 `message.removed` 指向
+//! 失败产物的**重试**：`retry_compaction` 落一条 `message.removed` 指向
 //! 失败压缩节点；债源看到该节点的最新一次移除，就把指纹换成带重试纪元的键，并沿用
 //! 失败载荷里那段切片（`from` / `to` / `truncate` / `keep_from` / `split`）重跑。
 
@@ -80,7 +80,7 @@ const SUMMARIZE_ROW: &str = "compact-summarize";
 /// 另一行债的名字。
 const WRITE_ROW: &str = "compact-write";
 
-/// 一次性问答端口的名字（数据）：名字住 `plugin-api` 的词汇面（D-364），
+/// 一次性问答端口的名字（数据）：名字住 `plugin-api` 的词汇面，
 /// 提供者 `model` 与本消费方 import 同一常量。
 pub(crate) use symbio_plugin_api::vocab::PORT_MODEL_ASSIST as ASSIST_PORT;
 
@@ -116,7 +116,7 @@ impl DebtSource for CompactDebts {
             .map(|(id, _)| id.to_string())
             .unwrap_or_default();
         let base = format!("{}|{}|{}", plan.from, limit, generation);
-        // 沿「失败 → 显式重试」链走到当前这一笔（D-402 ②③）：
+        // 沿「失败 → 显式重试」链走到当前这一笔（③）：
         // - 尚未收束 ⇒ 就是它欠；
         // - 收 `Ok` ⇒ 这一代压过了；
         // - 收 `Failed` 且失败节点没被删过 ⇒ 判过死，不每轮重付；
@@ -205,8 +205,8 @@ const MAX_RETRY_EPOCHS: usize = 16;
 /// 返回 `(债键, 上一笔失败载荷)`：
 /// - 这一笔尚无收束 ⇒ 返回它（首笔或刚换过纪元）；
 /// - 收到 `Ok` ⇒ 这一代已压过，不欠；
-/// - 收到 `Failed` 但失败节点**没被删过** ⇒ 判过死，不每轮重付（D-402 ②）；
-/// - 收到 `Failed` 且节点被删过 ⇒ 以该移除为纪元继续向前（D-402 ③）。
+/// - 收到 `Failed` 但失败节点**没被删过** ⇒ 判过死，不每轮重付；
+/// - 收到 `Failed` 且节点被删过 ⇒ 以该移除为纪元继续向前。
 fn current_owe(facts: &DebtFacts, base: &str) -> Option<(String, Option<Value>)> {
     let mut key = base.to_string();
     let mut failed = None;
@@ -393,7 +393,7 @@ pub(crate) fn compact_debt_rows() -> Vec<CapabilityRow> {
 /// 本轮水位：`(request_tokens, limit_tokens)`。数据来自 `model:<uid>` 的
 /// **收束载荷**（provider 实测），缺任一项 ⇒ 没有可信水位（宁可少压，不拿猜测去压）。
 ///
-/// **已知项（D-336）**：`context.request_tokens` / `limit_tokens` 由 model 执行体写，
+/// **已知项**：`context.request_tokens` / `limit_tokens` 由 model 执行体写，
 /// 不是 SDK 共享类型；当前唯一消费者是本插件。第二个插件需要同一字段时必须先把它
 /// 提升为 SDK 共享类型，不许各自猜载荷形状。
 fn watermark(facts: &DebtFacts, user_id: &str) -> Option<(u64, u64)> {

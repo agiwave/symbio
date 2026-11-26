@@ -68,7 +68,7 @@ pub struct SessionPlugin {
     ///
     /// 存储的 `OnceCell` **住在手柄上**而不是插件上：后台任务里的两个调用方
     /// （`TranscriptSink` / `WorkingGuard`）拿它而不是整个插件
-    /// （[D-075](../../../docs/003-design/002-架构总览.md#d-075-卸载能力先于目录分离session-切分立三条前置会话记忆与存储留守 "DE-002-架构总览") 前置 P2），而「卸载后任务还在收尾」
+    /// （ 前置 P2），而「卸载后任务还在收尾」
     /// 恰恰需要这份存储比插件活得更久。
     pub(crate) convergence: Convergence,
     /// 工作目录监听管理器（目录树场景的实时数据变更通知）
@@ -243,7 +243,7 @@ impl SessionPlugin {
 
     // Session 存储目录是**本插件自己的目录**，在 `new` 里由父插件经 `PLUGIN_DIR`
     // 告知的 `PluginDir` 一次定下并交给 `Convergence` / `remember_storage_dir`。
-    // 这里不再保留 `storage_dir()` 门面：D-513 后生产侧没有第二个调用点，
+    // 这里不再保留 `storage_dir()` 门面： 后生产侧没有第二个调用点，
     // 留着只会让人以为可以再从插件上反查一遍全局布局。
 
     /// 获取（或初始化）存储后端。全局单例，首次调用时创建。
@@ -290,7 +290,7 @@ impl SessionPlugin {
         ));
         let port_bindings = port_bindings.map(|bindings| Arc::new(bindings.fresh()));
         let store = self.get_store().await?;
-        // 开面播种（D-340）：会话尚无事实时，把部署级已裁决的 `verdict.asserted`
+        // 开面播种：会话尚无事实时，把部署级已裁决的 `verdict.asserted`
         // 复制进本会话事实流。只在**这一处**开面调用，运行期不追发；跨会话索引
         // 不随 `DriveTarget` / `PortExecContext` / 执行体出现。
         store
@@ -383,7 +383,7 @@ impl Plugin for SessionPlugin {
         Some(self)
     }
 
-    /// 停机（[D-075](../../../docs/003-design/002-架构总览.md#d-075-卸载能力先于目录分离session-切分立三条前置会话记忆与存储留守 "DE-002-架构总览") 的前置 P1）：目录监听在这里交出资源。
+    /// 停机（前置 P1）：目录监听在这里交出资源。
     async fn stop(self: Arc<Self>, _reason: PluginStopReason) -> Result<(), PluginError> {
         // 目录监听：watcher 一 drop 事件流即断（OS 句柄随之内核回收）
         self.workdir_watches.close_all();
@@ -404,14 +404,14 @@ impl Plugin for SessionPlugin {
         // 「算出一份 Data 载荷再统一包信封」的路径了——会话与消息的数据面
         // 全在 VDFS 上，这里只剩编排 / 控制。
         //
-        // `chat/send` / `chat/abort` 已随 D-066 退役：输入面双轨（inbox 地址
+        // `chat/send` / `chat/abort` 已 退役：输入面双轨（inbox 地址
         // 写入 vs 两条全局路由）收为单轨，全部消费方改走地址面——
         // 发消息 = `vdfs/write <会话地址>/inbox`，恢复 = `action(<消息地址>, <动作词>)`，
-        // 中止 = `action(<会话地址>, "abort")`。裁决见 D-066。
+        // 中止 = `action(<会话地址>, "abort")`。裁决。
         match path {
             // 控制：把某个工具的永久放行上限抬到这次的风险档（只抬不降）。
             // 写的是本插件的全局配置（`<homedir>/session/PLUGIN.yml`），不是会话
-            // metadata——「永久」按定义要跨会话（D-170）。
+            // metadata——「永久」按定义要跨会话。
             "grant" => return self.handle_grant(ctx).await,
             // 读数：本会话 v2 事实源的四列（时延 / 兜底 / 成本 / 断点）。
             // 纯计算、零副作用——既不落盘也不碰消息。
@@ -421,7 +421,7 @@ impl Plugin for SessionPlugin {
             "consume" => return self.handle_consume(ctx).await,
             // 投影：把该 seq 对应的终答事实折成消息节点并收束本轮。
             "project" => return self.handle_project(ctx).await,
-            // 读数：本会话改过哪些文件（D-169：`artifact.added` 的一条投影，不是新事实族）。
+            // 读数：本会话改过哪些文件（`artifact.added` 的一条投影，不是新事实族）。
             // 同样是纯计算、零副作用。
             "changes" => return self.handle_changes(ctx).await,
             // worker 启动闸门：恢复持久化委派链的身份行，再打开事实源写句柄。
@@ -461,7 +461,7 @@ impl Plugin for SessionPlugin {
             }
         }
         // 能力收集（available_tools）：心跳那条随调度搬进了
-        // 独立的心跳调度插件（[D-077](../../symbio-plugin-heartbeat/README.md#d-077-心跳片的落点定为一层的插件目录卸载单位与第二个消费单位都由它给出 "crates/symbio-plugin-heartbeat/src/README")）；
+        // 独立的心跳调度插件；
         // 现在贡献的 LLM 可见工具是 `agent_run`（子智能体委托）。
         // VDFS 挂载点由容器从 `get_vfs_provider` 派生（目录名 = 实例名）。
         if let Some(visitor) = ctx.get(symbio_plugin_api::CAPABILITY_VISITOR) {
@@ -476,7 +476,7 @@ impl Plugin for SessionPlugin {
             // enum 候选经**本作用域容器**的 VDFS 视图列 agent 挂载点
             // （[`Self::agent_id_candidates`]）；子智能体插件缺席（最小装配 / 测试）
             // 时清单为空，工具照常注册。
-            // 注册走 `register_tool` 唯一收口（D-440 ③）。`risk` 传 `None`——本工具
+            // 注册走 `register_tool` 唯一收口。`risk` 传 `None`——本工具
             // 没有参数级风险覆写，静态缺省档（`meta.effective_risk()`）就是它的风险回答。
             let agent_run = crate::tools::subagent::AgentRunCapability::new(
                 ctx.get(symbio_plugin_api::WORKDIR),
@@ -507,7 +507,7 @@ impl Plugin for SessionPlugin {
             )
             .await;
 
-            // 三层文件记忆（智能体 / 工作区 / 会话）归 memory 插件（D-513）：
+            // 三层文件记忆（智能体 / 工作区 / 会话）归 memory 插件：
             // 谁能读写它，谁负责注入它。本插件只解析并递出 `SESSION_DIR`，
             // 不认识记忆文件，也不再注册 `session-memory` 段。
             // 首响的运行时债表（`session.opening`）：装载期只挂「这一族归谁申报」，
@@ -539,7 +539,7 @@ impl Plugin for SessionPlugin {
                         as Arc<dyn symbio_plugin_api::debt::DebtSource>,
                 ))
                 .await;
-            // 终止写方（`session.terminated`，D-367）：宿主在驱动前后把同一份只读
+            // 终止写方（`session.terminated`）：宿主在驱动前后把同一份只读
             // 投影交给它；谓词「终答 ∧ 无未还债」成立就落一条收束事实。
             for row in crate::termination::rows() {
                 visitor.put(row).await;
@@ -565,7 +565,7 @@ symbio_plugin_api::submit_object_creator!(PLUGIN_ID_SESSION, SessionPlugin::buil
 /// `conation_enabled`（自主层）这两个**高阶能力**的开关曾长期只躺在配置文件里，
 /// 前端设置页根本没有它们的控件，正是这条判据要防的形态。
 ///
-/// ## 能力开关不在这张表里（D-427）
+/// ## 能力开关不在这张表里
 ///
 /// `classify_enabled` / `compose_enabled` / `conation_enabled` /
 /// `skill_compile_enabled` / `readyset_cap` 的真源与表单项都随能力包走了，

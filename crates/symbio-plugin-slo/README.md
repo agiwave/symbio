@@ -10,13 +10,13 @@ impl: done
 # 时延分层能力包（slo）
 
 按**派发档**折三列读数：时延、兜底率、时域跨度。名册 #13，口径见 `DE-016 §8.2` /
-`DE-008 §3.1`。
+`DE-008 §2.1`。
 
 ## 它交什么
 
 | 面 | 交出物 | 谁读 |
 |---|---|---|
-| 视图 | `slo.latency` / `slo.fallback` / `slo.span` | 任何按名字读的插件（`D-221`）；对外经 `submit_reports!` 登记 |
+| 视图 | `slo.latency` / `slo.fallback` / `slo.span` | 任何按名字读的插件；对外经 `submit_reports!` 登记 |
 | 多片合并 | `ViewDecl::agg`：N 份单片读数 → 实例级分位数 / 率 / 中位数 | 实例级聚合列的读方 |
 | 事实 / 工具 / 路由 / 配置 | **无** | — |
 
@@ -46,5 +46,5 @@ impl: done
 ## 关联
 
 - 时延分层的口径：`docs/003-design/016-工程落地与验证.md` §8.2
-- 报表登记就是公开（无第二份视图名清单）：`crates/symbio-plugin-api/src/reports.rs`（`D-387`）
-- 多片合并的裁决：`D-281`；同形状无第二读者的读数包：`crates/symbio-plugin-forecast/README.md`
+- 报表登记就是公开（无第二份视图名清单）：`crates/symbio-plugin-api/src/reports.rs`
+- 多片合并：`ViewDecl::agg`；同形状无第二读者的读数包：`crates/symbio-plugin-forecast/README.md`

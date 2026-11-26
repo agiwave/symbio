@@ -10,7 +10,7 @@ deps: [DE-016-工程落地与验证]
 # SLO 校准基线
 
 > 对应 [DE-016 §8](../003-design/016-工程落地与验证.md "DE-016-工程落地与验证") 的告示：「所有百分比与毫秒数都是初值」，
-> 以及 [DE-016 §7.3](../003-design/016-工程落地与验证.md "DE-016-工程落地与验证") 里由本文闭合的两条：时延只有预算断言、成本只有参数。
+> 以及 [DE-016 §7.2](../003-design/016-工程落地与验证.md "DE-016-工程落地与验证") 里由本文闭合的两条：时延只有预算断言、成本只有参数。
 > 本文是**当前基线值与口径的唯一 owner**：每次校准改写这里的值，历次读数的历史归 `git log`。
 
 ## 1. 埋点设施
@@ -64,8 +64,7 @@ deps: [DE-016-工程落地与验证]
 3. **P99 出自跑量后的扫描**（[DE-016 §8.2](../003-design/016-工程落地与验证.md "DE-016-工程落地与验证") 的承诺）：跑量后从事件日志
  扫描（final 事件自带 `cost_ms`，扫描器无需埋点设施——数据已经在事实源里）。
  **扫描口就是生产读数口**，职责分两处——跨会话**聚合口径**
- 归能力包 `slo` 的 `ViewDecl::agg`（`crates/symbio-plugin-slo/src/decl.rs::latency_merged`，
-  `D-281`），**扫描 + 落成读数**落在 `session/stats` 的实例级聚合列 `fleet`
+ 归能力包 `slo` 的 `ViewDecl::agg`（`crates/symbio-plugin-slo/src/decl.rs::latency_merged`），**扫描 + 落成读数**落在 `session/stats` 的实例级聚合列 `fleet`
  （`crates/symbio-plugin-session/src/stats_reading.rs::fleet_reading`，落点由 `ReportDecl::fleet` 登记），
  出口行排版在 `crates/symbio-plugin-slo/src/decl.rs::tiers_fleet`。
  e2e `t28-session-stats` 实跑该列，`stats.test.rs` 的 fleet 判据守住扫描边界 ⇒ **CI 出真数**；
@@ -95,7 +94,7 @@ deps: [DE-016-工程落地与验证]
 DE-016 §8.2 第三列（兜底率上限 <1%/3%/5%/5%）的**测量口径**落地：
 
 - **`slo.fallback` 视图**：turn 档位 = `turn.dispatch` 载荷 `tier`
- （`crates/symbio-platform/src/kernel/adapters.rs::LatencyTier::name`，`D-282` 是档位的唯一来源）
+ （`crates/symbio-platform/src/kernel/adapters.rs::LatencyTier::name`，档位的唯一来源）
  ——「装配进哪一档」是数据，写进事实源；
  兜底 = `chat.assistant.fallback`（`turn × closed`）按 turn 号归档；
 - **缺失/未知档位进 `unspecified` 桶**——可观测，不静默归类；
@@ -107,7 +106,7 @@ DE-016 §8.2 第三列（兜底率上限 <1%/3%/5%/5%）的**测量口径**落�
 
 用 `target/release/symbio-cli.exe` 对**本机 LMStudio 端点**
 （`lfm2.5-24b-a2b-apex`，`127.0.0.1:1234`，`openai_chat`）跑真实会话，
-样本取每轮 `chat.assistant.final` 的顶层 `cost_ms`（adapter 边界实测，D-044 的唯一输入）。
+样本取每轮 `chat.assistant.final` 的顶层 `cost_ms`（adapter 边界实测，是成本台账的唯一输入）。
 
 | 会话 | 路径 | `cost_ms` |
 |---|---|---:|
@@ -124,7 +123,7 @@ DE-016 §8.2 第三列（兜底率上限 <1%/3%/5%/5%）的**测量口径**落�
   **全部落在深度档 60000ms 内**，最差样本余量 36%。
 - 分路径看：快路 / 单句 2–6s，带工具与召回的完整轮 7–38s——与「模型延迟是主导项、
   工具往返叠加其上」的归因一致（§4 / §5.5）。
-- **快路样本读得到的前提**是 `Answered` 轮的收束格带 `cost_ms`（DE-016 的 D-135）；
+- **快路样本读得到的前提**是 `Answered` 轮的收束格带 `cost_ms`（口径见 [DE-016](../003-design/016-工程落地与验证.md "DE-016-工程落地与验证")）；
   否则这类轮次在台账与 SLO 里整类缺席，`cli-t82-cost2` 的 5867ms 就是快路的量级代表
   （WAL 同一事件带 `dialog.reason = from_context` 与措辞往返的 `reasoning`）。
 

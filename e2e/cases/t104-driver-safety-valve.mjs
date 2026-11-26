@@ -1,5 +1,5 @@
 import './_selfrun.mjs';
-// T104 驱动安全阀出口的**反向**用例（`D-393`）。
+// T104 驱动安全阀出口的**反向**用例。
 //
 // 两条安全阀（`Exhausted` / `Stalled`）原先只有 `eprintln!` 一个出口：CLI 的 stderr
 // 就是调用面的读数，但 Tauri / gateway 这类没有控制台的宿主读不到。出口落成一条

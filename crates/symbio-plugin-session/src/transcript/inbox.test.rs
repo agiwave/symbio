@@ -3,14 +3,14 @@
 //! ## 这里**不**测"跑一轮"
 //!
 //! 真跑一轮要整棵树（能力收集 + 模型 provider），那是 e2e 的活（`e2e/cases/t15-*.mjs`）。
-//! 本文件锁的是队列本身的规则：顺序、身份、两种取消的分界与**忙则排队**——D-026 的
-//! 核心承诺。抢占（挂起在跑任务）的判定面已删（`D-388`），不在本文件判。
+//! 本文件锁的是队列本身的规则：顺序、身份、两种取消的分界与**忙则排队**—— 的
+//! 核心承诺。抢占（挂起在跑任务）的判定面已删，不在本文件判。
 
 use super::*;
 use crate::plugin::SessionConfig;
 use symbio_platform::sdk::chat::session_chat;
 
-/// 身份写 `principal`（D-147）：夹具模仿的是**落库面**的消息，`role` 只是读侧残留格。
+/// 身份写 `principal`夹具模仿的是**落库面**的消息，`role` 只是读侧残留格。
 fn principal_for(role: cm::NodeRole) -> symbio_platform::kernel::chat::principal::Principal {
     use symbio_platform::kernel::chat::principal::Principal;
     match role {

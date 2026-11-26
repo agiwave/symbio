@@ -10,7 +10,7 @@ use crate::sdk::projection::vocab::CommitmentVocab;
 /// 违约不是异常通道：`broken` 与 `released` 是同一格（`commitment × closed`）
 /// 的两个名字，违约必须带 `why`（可观测，DE-038 §5）。
 ///
-/// 四个格名由调用方在构造期交进来（`CommitmentVocab`，DE-024 D-203）：本域只留
+/// 四个格名由调用方在构造期交进来（`CommitmentVocab`，DE-024 ）：本域只留
 /// 「立约 → 了结 → 告知」的形状，拼写归 owner（`crates/symbio-plugin-loop` 的清单）。
 #[derive(Debug, Clone, Copy)]
 pub struct CommitmentKeeper {
@@ -78,7 +78,7 @@ impl CommitmentKeeper {
     }
 }
 
-/// `commitment.*` 一族的**运行时入口**（D-187 第 1 条
+/// `commitment.*` 一族的**运行时入口**（ 第 1 条
 /// NDC-001：定义域外不得提及主体类型名——提及即可持有，持有即可绕过事实源直连）。
 ///
 /// 返回**待入格的事件序列**：立约（`opened`）→ 了结（`released` / `broken`）→

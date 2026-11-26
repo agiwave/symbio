@@ -6,7 +6,7 @@ import './_selfrun.mjs';
 //
 // | 路径 | 装配 | 判据 |
 // |---|---|---|
-// | 不装 | 停用 local / web / mcp / skill / agent（工具贡献插件；agent 自 D-500 起不再贡献工具，停它钉的是「委托工具不随 agent 目录走」） | 纯对话照常跑完；工具面失去 local / web / skill 的工具、底座（vdfs）与**会话级原语**（agent_run）仍在 |
+// | 不装 | 停用 local / web / mcp / skill / agent（工具贡献插件；agent 自  起不再贡献工具，停它钉的是「委托工具不随 agent 目录走」） | 纯对话照常跑完；工具面失去 local / web / skill 的工具、底座（vdfs）与**会话级原语**（agent_run）仍在 |
 // | 缺失 | 同一装配，mock 强发一次对停用工具（`web_search`）的调用 | 响亮失败：错误文本落成工具结果子节点（meta.success=false）、父节点终态 completed，模型第二轮**看到错误**并照常收尾 |
 //
 // ## 为什么「缺失」不是「端口行缺席」
@@ -58,7 +58,7 @@ const GONE_TOOLS = [
   'read_skill', // skill
 ];
 
-/** 停用后**应仍在**工具面的会话级原语：agent_run 由 session 注册（D-500），
+/** 停用后**应仍在**工具面的会话级原语：agent_run 由 session 注册，
  *  子智能体插件只提供 `agent_id` 的取值域——目录缺席时 enum 为空，工具照常在。 */
 const STAYS_TOOLS = ['agent_run'];
 
@@ -169,7 +169,7 @@ export default defineCase(
         assert(!tools.includes(gone), `停用工具插件后 ${gone} 不该在工具面（实际: ${tools.join(',')}）`);
       }
       for (const stays of STAYS_TOOLS) {
-        assert(tools.includes(stays), `会话级原语 ${stays} 不随 子智能体插件停用消失（D-500；实际: ${tools.join(',')}）`);
+        assert(tools.includes(stays), `会话级原语 ${stays} 不随 子智能体插件停用消失（实际: ${tools.join(',')}）`);
       }
       // 下限防白绿：工具面整体变空意味着别的插件也丢了，而不是「停用生效」。
       assert(

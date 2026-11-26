@@ -35,7 +35,7 @@ import './_selfrun.mjs';
 // 这里取「e2e 直发」形态：经 gateway HTTP 边界（与 Tauri 前端同构的
 // `/api/v1/invoke`）发一条恢复请求。
 //
-// 入口形状（[D-066]）：恢复走**节点动作**——
+// 入口形状：恢复走**节点动作**——
 // `vdfs/action(<sid>/message/<target_id>, "answer", { answer })`。好处是不动
 // 生产代码，且验的正是**前端恢复走的同一条路**（`vdfs_provider` 的 resume 臂 →
 // `start_turn` 直连）；落点是目标消息自身（恢复就该「落在当时那条消息上」，
@@ -174,7 +174,7 @@ export default defineCase(
         // ── 第二幕：回填答案（恢复入口 = `action(<sid>/message/<target_id>, "answer")`）──
         //
         // 落点是提问所在的 tool_call 节点 id（稳定锚点）；`mode` 是**调用级**运行
-        // 选项，只有会话 metadata 里没有时才由它兜底（D-066 决策 2）。
+        // 选项，只有会话 metadata 里没有时才由它兜底（ 决策 2）。
         const inv = await resumeSession(
           api,
           SID,
@@ -224,7 +224,7 @@ export default defineCase(
             .join('\n');
         const reqs = await llm.requests();
         assertEq(reqs.length, 2, 'mock-llm 应收到两次请求（提问轮 + 恢复收尾轮）');
-        // ⚠️ 判据在**消息层**上：验「调用在」「结果在」「结果是 `tool` 角色」（D-048a）
+        // ⚠️ 判据在**消息层**上：验「调用在」「结果在」「结果是 `tool` 角色」
         // ——而不是「某个字符串出现过」。
         const secondMsgs = reqs[1].body.messages ?? [];
         const second = promptOf(reqs[1].body);

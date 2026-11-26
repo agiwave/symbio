@@ -200,7 +200,7 @@ pub fn call_params(ctx: &Arc<dyn PluginInvokeRequest>) -> VdfsParams {
 /// 父地址从请求里来，因此这里不需要知道根叫什么。
 ///
 /// **父地址的绝对锚点原样带走**：`/docs` 的子项还是 `/` 打头的地址，不会退化成
-/// 工作目录相对的写法（拼接规则全项目只有一份，见 core 的 `join_addr` 与 [D-172](../../../docs/003-design/009-VDFS规范.md#d-172-首段--是绝对锚点不是可折叠的分隔符docs-相对工作目录docs-是文件系统里的-docs "DE-009-VDFS规范")）。
+/// 工作目录相对的写法（拼接规则全项目只有一份，见 core 的 `join_addr` 与 ）。
 fn child_path(base: &str, name: &str) -> String {
     symbio_plugin_api::join_addr(base, name)
 }

@@ -3,7 +3,7 @@
  * schema-audit.mjs —— schemas 定义使用情况审计
  *
  * 范围：**只审前端镜像面**（`tauri/src/schemas`）。后端那半边（`symbio_sdk/schemas`）
- * 已随 D-087 退役——它的 owner 是 `core-export-audit` C-003，本脚本不再维护第二份口径。
+ * 已随  退役——它的 owner 是 `core-export-audit` C-003，本脚本不再维护第二份口径。
  *
  * 目标：
  *   1. 找出「未被引用」的前端 schema 文件（死文件）与「无人使用」的导出（死导出）
@@ -42,7 +42,7 @@ const ROOT = rootArg
 const rel = (p) => relative(ROOT, p).split(sep).join('/');
 
 // ---------- 后端 ----------
-// 后端半边**已退役**（D-087，2026-10-19）：`symbio_sdk/schemas/` 已拆成 chat / dialog /
+// 后端半边**已退役**（，2026-10-19）：`symbio_sdk/schemas/` 已拆成 chat / dialog /
 // present / turn，本脚本赖以工作的三个前提同时消失——①有一个叫 `schemas` 的目录可枚举；
 // ②引用写成 `schemas::a::b`；③`schemas/mod.rs` 是唯一的再出口。
 // 「某个契约定义有没有外部消费方」的判据**已经有人管**：`core-export-audit` C-003
@@ -55,7 +55,7 @@ const rel = (p) => relative(ROOT, p).split(sep).join('/');
 // 夹具造出 `symbio-sdk/src/schemas/`，把这份空转续了命（夹具非空、被测物扫 0 个文件，
 // 测试全绿）。判据本身不丢：`core-export-audit` C-003 是它的正式 owner。
 console.log('==================== 后端 schemas 审计 ====================\n');
-console.log('  ⊘ 后端半边已退役（D-087）：契约定义的消费方判据由 core-export-audit C-003 承接。\n');
+console.log('  ⊘ 后端半边已退役（）：契约定义的消费方判据由 core-export-audit C-003 承接。\n');
 
 // ---------- 前端 ----------
 const feFiles = walk(join(ROOT, 'tauri/src'), ['.ts', '.vue']);

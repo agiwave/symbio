@@ -303,7 +303,7 @@ const widen = (dir, exts, sink) => {
     if (exts.some((x) => e.name.endsWith(x))) sink.push(p)
   }
 }
-// Rust 侧「整仓」的取范围：D-191 拆 crate 后所有生产 .rs 都在 `crates/` 下
+// Rust 侧「整仓」的取范围： 拆 crate 后所有生产 .rs 都在 `crates/` 下
 // （core、内核、插件、provider、cli 各是一个 crate）；`tauri/src-tauri` 是壳侧。
 // 拆分前这里是 symbio/ 与 cli/ 两个根——那两条路径现在都不存在，`widen` 会静默
 // 返回空，于是 R-001 只剩 tauri 一份语料：**语料越小，越容易把活代码判成死代码**，
@@ -398,7 +398,7 @@ const R002_BASELINE = process.env.DEAD_CODE_R002_BASELINE
   ? Number(process.env.DEAD_CODE_R002_BASELINE)
   : 7
   // 7 = 全部为 C 类结构性承认（消费方在前端镜像 / 协议文档 / 审计脚本）。下调就在这里
-  // 写理由；上调不合法——新死码要么接上、要么删掉。2026-11-16 实测 7（D-505）：旧基线
+  // 写理由；上调不合法——新死码要么接上、要么删掉。2026-11-16 实测 7（）：旧基线
   // 8 的一格是已退场条目留下的余量，按「余量不白留给下一次」同批钉到实测。`TurnRunner` 族下沉时基线**未动**：
   // `ActorSpec` 的字段失去经 `TurnInput` 的顺带可达性后，处置是把它升为根 `pub use` +
   // `core-export-audit` C-003 的单消费方豁免（1 个生产消费方 `crates/symbio-plugin-session`，

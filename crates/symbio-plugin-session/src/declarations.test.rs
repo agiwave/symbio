@@ -5,7 +5,7 @@
 //! 插件自己的单元测试二进制**只链接本 crate**：装配表里只有内核协议五格与本插件
 //! 声明的事件（`system.*` / `session.*` / 自 `loop` 移交过来的对话面），而协议事实的
 //! 归宿行住在 `crates/symbio-plugin-loop`——不在这里，就没有行读它们，
-//! `seal` 判据 7 报 `OrphanFact`，整张表失败（D-198「失败是整体失败」），写闸于是
+//! `seal` 判据 7 报 `OrphanFact`，整张表失败（「失败是整体失败」），写闸于是
 //! 退到共享表。`system.*` 由本插件声明，不在共享表里 ⇒ 写不进去。
 //!
 //! 夹具补的正是**完整进程里由 loop 提供的那一半**：五条自读行让协议事实有归宿，
@@ -33,8 +33,8 @@ use symbio_platform::kernel::event::{
 
 use super::{EVENT_SESSION_SETTLED, EVENT_SYSTEM_HEALTH, EVENT_SYSTEM_TRIGGERED};
 
-/// 技能观测的**格位**夹具：owner 是 `crates/symbio-plugin-skill`（`D-262`），它的折叠也住
-/// 在那里（`D-286`），而这条名字除 owner 之外没有生产读方 ⇒ 不在清单生成物里（`CS-007`）。
+/// 技能观测的**格位**夹具：owner 是 `crates/symbio-plugin-skill`，它的折叠也住
+/// 在那里，而这条名字除 owner 之外没有生产读方 ⇒ 不在清单生成物里（`CS-007`）。
 ///
 /// 写闸只认声明过的格位（fail-closed：三份表都不认识的名字答 `OffGrid`），而 `stats` 的
 /// 校准列用例要**把真实观测写进环里**才试得出「owner 不在本进程」这一种缺席。所以这里补

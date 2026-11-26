@@ -67,7 +67,7 @@ fn answer_resolves_only_when_it_follows_the_card() {
     assert!(waits_for_user(&[answer(1, "c1"), card(2, "c1")]));
 }
 
-/// 批准结论与答复同权（D-368）：批准之后不再算「停在卡片上」。
+/// 批准结论与答复同权：批准之后不再算「停在卡片上」。
 #[test]
 fn approved_card_is_resolved() {
     assert!(!waits_for_user(&[card(1, "c1"), granted(2, "c1")]));

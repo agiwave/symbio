@@ -73,7 +73,7 @@ async fn writes_then_reads_back_relative_address() {
         panic!("应为 Read 响应");
     };
     assert_eq!(c.text.as_deref(), Some("hello"));
-    // `docs` 与 `/docs` 是两个位置：首部 `/` 是绝对锚点，落点不在工作目录里（D-172）
+    // `docs` 与 `/docs` 是两个位置：首部 `/` 是绝对锚点，落点不在工作目录里
     let anchored = fs
         .dispatch(&ctx, "/symbio-anchor-probe-a7c1.txt", VdfsRequest::Read)
         .await;

@@ -35,7 +35,7 @@ impl: done
 
 进入 `<根>/plugin_manager` 第一眼就是**已安装插件列表**（条目按容器给的 `order`），
 界面分区垫后。**清单里没有市场节点**：市场是「添加插件」打开的一张页面，不是又一个
-插件条目（D-520）。把市场塞回清单，它就会排在同名的几十项之后，用户根本滚不到：
+插件条目。把市场塞回清单，它就会排在同名的几十项之后，用户根本滚不到：
 
 - 条目来自容器的注册表（`Action(plugins)`，见 `composite/vdfs.rs`），**含没有 VDFS 的
  与已停用的**——后者必须列出来，否则用户看不到自己刚停用的那个，也就永远点不回
@@ -87,7 +87,7 @@ impl: done
   点击安装抛 `save`，由通用草稿写入落到当前目录（= 容器根上的安装动词），
   前端因此不必知道容器根上的安装契约（`VDFS_PLUGIN_PROVIDER_FIELD` / `create`）。
 
-候选三判据（缺一不可，见 `market_candidates` 与 D-520）：
+候选三判据（缺一不可，见 `market_candidates`）：
 
 1. **可选**——`PLUGIN.yml` 声明 `plugin_optional: true`，即不在 `ASSEMBLY_CORE_PLUGINS` 内
    （核心插件默认加载且不可删除，不进市场）；
@@ -98,8 +98,7 @@ impl: done
    的按钮：工厂没链进本二进制，容器没有它的 creator，安装只会得到 NotFound。
 
 候选形状：`{ candidates: [{ name, provider, source, label }] }`，挂在 `new_type.schema`
-上随目录自述下发。`source` 目前恒为 `builtin`——它是**未来外部插件的呈现位**：D-407 仍
-暂缓进程外插件协议，本期市场只做「编译期已链接插件的运行期装卸」，先把入口和契约立住。
+上随目录自述下发。`source` 目前恒为 `builtin`——它是**未来外部插件的呈现位**：进程外插件协议仍暂缓，本期市场只做「编译期已链接插件的运行期装卸」，先把入口和契约立住。
 
 「只装可选插件」由**候选过滤**保证（上面三条判据），不再在 `write` 上重复校验：市场的
 草稿保存直接转成容器根上的 `Write { create: true }`，由容器执行真正的挂载；本构建是否
@@ -114,7 +113,7 @@ impl: done
 ## 界面分区（`appearance` / `about`，归属 `ui_prefs`）
 
 - 清单在 `UI_SECTIONS` 中登记（`id` / `label` / `body`），由 `impl VdfsProvider` 的 `list`
-  产出；节点的 `kind` 是 `ui_prefs`——归属与数据权威都在那个插件（D-521），但入口仍挂在
+  产出；节点的 `kind` 是 `ui_prefs`——归属与数据权威都在那个插件，但入口仍挂在
   本插件清单里，用户操作路径不变。
 - `appearance` 有正文（`body = ui_prefs/PLUGIN.yml`）：`vdfs/read` / `vdfs/write` 转发到
   容器根下的这份配置文档，`access = rw`。`about` 没有用户数据，正文恒空（`access = r`），
@@ -122,7 +121,7 @@ impl: done
 - 前端按 `ext` 直接渲染专属面板（`registry/vdfsTypes.ts` 的 `appearance` / `about`
   渲染器）；外观面板把偏好对象序列化成 JSON 写回，工作台原样落盘。
 - localStorage 只做**首屏快照 + 离线降级**：`main.ts` 在挂载前同步应用主题这条路径不能
-  改成异步 VDFS 读取（D-521）。
+  改成异步 VDFS 读取。
 - 分区节点显式声明 `status = none`：静态分区没有「运行中 / 就绪」可言，不清掉节点
   `status` 的缺省就会在列表里画一个绿点——那是个不存在的信息。
 - 原 `plugin_manager/config/get` / `plugin_manager/config/set`（以及更早的
@@ -132,7 +131,7 @@ impl: done
 ## 关联
 
 - 核心 / 可选插件清单：`crates/symbio-platform/src/deploy/mod.rs` 的 `ASSEMBLY_CORE_PLUGINS` /
-  `ASSEMBLY_OPTIONAL_PLUGINS`（由 `scripts/facts/assembly.mjs` 从 `PLUGIN.yml` 投影生成，D-520）
+  `ASSEMBLY_OPTIONAL_PLUGINS`（由 `scripts/facts/assembly.mjs` 从 `PLUGIN.yml` 投影生成）
 - 装配判据与运行期增删：`crates/symbio-plugin-composite/src/registry.rs`
 - 注册表动词（根上的 `Action(plugins|enable|disable)` / `Write` / `Delete`）：
  `crates/symbio-plugin-composite/src/vdfs.rs`

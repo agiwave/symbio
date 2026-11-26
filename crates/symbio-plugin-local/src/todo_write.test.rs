@@ -1,6 +1,6 @@
 //! `todo_write` 的合并语义与作用域边界。
 //!
-//! 工具内存是**进程作用域**（D-133）：这里钉的是「同一 key 内怎么合并」与
+//! 工具内存是**进程作用域**：这里钉的是「同一 key 内怎么合并」与
 //! 「不同 key 互不相干」；跨进程的持久真相是 `task.*` 事实，由 `symbio-plugin-task`
 //! 从事实快照重建，不在本文件的范围。
 
@@ -66,7 +66,7 @@ async fn merge_updates_by_id_and_appends_unseen_ids() {
 #[tokio::test]
 async fn a_fresh_key_starts_empty() {
     // 进程作用域的边界：换一个 key（= 另一个会话 / 进程重启后的同会话）拿不到
-    // 上一份内存清单。持久状态在 `task.*` 事实里，不在工具里（D-133）。
+    // 上一份内存清单。持久状态在 `task.*` 事实里，不在工具里。
     let tool = TodoWriteTool;
     tool.execute_inner(
         &args(json!([{ "id": "a", "content": "旧会话的任务" }]), false),

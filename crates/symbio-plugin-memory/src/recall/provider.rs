@@ -1,4 +1,4 @@
-//! 召回段的上下文 provider（DE-025 D-208 / D-215 / D-220）。
+//! 召回段的上下文 provider（DE-025 ）。
 //!
 //! ## 为什么它在能力包里
 //!
@@ -8,7 +8,7 @@
 //!
 //! 判定（哪些条目可见、哪些技能被摘掉）在宿主的轮首召回里已经做完：会话插件
 //! 把**收放之后**的切片交给 `retrieve_all`，再把读数落成一格 `session.recall` 事实。
-//! provider 拿不到会话存储（纯函数，DE-025 D-084），所以它从 [`ContextRequest::facts`]
+//! provider 拿不到会话存储（纯函数，DE-025 ），所以它从 [`ContextRequest::facts`]
 //! 按名字读那一格——读的是**已判过的值**，无权改判，也不需要看见 `Retrieval` 结构本身。
 //!
 //! [`ContextRequest::recall`] 仍优先：宿主若已把读数直接递进来，就用递进来的值。
@@ -19,7 +19,7 @@ use symbio_plugin_api::context::{
 use symbio_plugin_api::events::EVENT_SESSION_RECALL;
 use symbio_plugin_api::Event;
 
-/// 段优先级（D-243）：预算放不下时先丢谁，数大者先留。
+/// 段优先级：预算放不下时先丢谁，数大者先留。
 ///
 /// 召回是**背景事实**：丢了它，模型不知道自己此前做过什么，本轮每一步都要重新试错。
 const RECALL_PRIO: u8 = 90;

@@ -1,4 +1,4 @@
-//! 轮首检索面的判据：owner 序合并、`degraded` 取任一、空是合法结局（DE-026 D-264）。
+//! 轮首检索面的判据：owner 序合并、`degraded` 取任一、空是合法结局（DE-026 ）。
 
 use super::*;
 
@@ -19,7 +19,7 @@ impl Retriever for Alpha {
     }
 
     fn retrieve(&self, at: &RetrievalRequest<'_>) -> Option<Retrieval> {
-        // 读到的只是两个值：切片给条数、发言决定有没有语义维——都交不回句柄（D-252 的形状）。
+        // 读到的只是两个值：切片给条数、发言决定有没有语义维——都交不回句柄（形状）。
         // 返回的次序**就是包内判据的结论**：宿主不再排第二遍。
         let _used_query = at.query.is_some();
         Some(Retrieval {
@@ -105,7 +105,7 @@ fn no_entries_at_all_yields_none() {
         }
     }
     // 只验这条实现自身的形状：`retrieve_all` 走的是进程内全体提交者，
-    // 上面两条测试夹具必有产出，空集路径在能力包的随迁用例里逐字钉（D-264 第 5 条）。
+    // 上面两条测试夹具必有产出，空集路径在能力包的随迁用例里逐字钉（ 第 5 条）。
     assert!(Empty
         .retrieve(&at(&[], None))
         .is_some_and(|r| r.entries.is_empty()));

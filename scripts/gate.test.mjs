@@ -380,7 +380,7 @@ test('★ 失败项：日志末几行与相对路径直接印在汇总里（不�
 test('★ 阶段本轮产出 0 项 ⇒ 判红：空转必须在汇总表上占一行（GW-006 的运行时那一半）', () => {
   // 静态那半在 `gate-wiring-audit`（1s 就能看到）；这里钉的是**真跑那轮**：
   // 一个不产出检查项的阶段原先在输出里**一行都没有**，与「跑过了、全绿」同形——
-  // `50-msrv` 就是靠这个形状空转了整段 D-191 之后的时间，而 CI 的 msrv job 一直绿。
+  // `50-msrv` 就是靠这个形状空转了整段  之后的时间，而 CI 的 msrv job 一直绿。
   const empty = withStageDir({
     'zz-empty.mjs':
       `export default { id: 'zz-empty', title: '空转阶段演示（测试注入，勿留）', tasks: () => [] }\n`,
@@ -541,13 +541,13 @@ test('★ 阶段级并发必须连成**一批**：中间夹一个串行阶段就
   // 这条断言同时是那条前移的**回归钉**：谁把生成挪回 verify，批连续性判据里
   // verify 会连同它自己的 `parallel` 一起红。
   assert.ok(stages[idx('verify')]?.parallel, 'verify 必须标 parallel 并连进主批——它与 docs 的 mod.rs 竞态已随生成前移消掉')
-  // rustdoc 阶段**已废弃**（D-274）：`cargo doc --no-deps --workspace` 一次 core
+  // rustdoc 阶段**已废弃**（）：`cargo doc --no-deps --workspace` 一次 core
   // 改动实测 4m04s，而 backend 整阶段（clippy + 测试构建 + 测试运行）合计不到 1m5s
   // ——它一项就比其余全部贵 4 倍，守的却只是文档里的断链。判据降级成一条命令
-  // （写在 D-274 里），不再进任何一轮门禁。
+  // （写在  里），不再进任何一轮门禁。
   // 这条断言钉的是**不许悄悄加回来**：真有第二个消费者（比如开始发 rustdoc），
   // 先写决策、再改这条，而不是让一个 4 分钟的阶段重新长回关键路径。
-  assert.equal(idx('rustdoc'), -1, 'rustdoc 阶段已废弃（D-274）；要恢复先用决策推翻它')
+  assert.equal(idx('rustdoc'), -1, 'rustdoc 阶段已废弃（）；要恢复先用决策推翻它')
 })
 
 test('★ 每个阶段都必须在 CI 里有一个点名它的 job：不许出现「只在本地跑」的守卫', async () => {
@@ -555,11 +555,11 @@ test('★ 每个阶段都必须在 CI 里有一个点名它的 job：不许出�
   // job 若没点名它，它就成了一条「推上去也没人跑」的守卫。
   //
   // 这条判据原先是**专为 rustdoc 写的**（「跑 backend 的 job 必须同时点名 rustdoc」）。
-  // D-274 废弃 rustdoc 之后，专钉失效了，但那个失效形态还在——所以改成对**全部阶段**
+  //  废弃 rustdoc 之后，专钉失效了，但那个失效形态还在——所以改成对**全部阶段**
   // 成立的通用判据：`gate.d/*.mjs` 声明的每个 id 都得在某个 workflow 的门禁调用里出现
   // （`--only=` 直写，或 `--preset=` 档位展开后含它）。
   // 加阶段而漏进 CI，这条当场红；这是它比「点名 rustdoc」更强的地方。
-  // 扫**全部** workflow 文件而不是只读 ci.yml：周档（D-496）是独立 workflow
+  // 扫**全部** workflow 文件而不是只读 ci.yml：周档（）是独立 workflow
   // （`.github/workflows/weekly.yml`，schedule 只在默认分支生效，加进 ci.yml 会触发
   // 全部 job），「点名」的合法地址从第一天起就不止一个文件。
   const wfDir = path.join(repoRoot, '.github', 'workflows')
@@ -663,7 +663,7 @@ test('★ 并发度随机器能力单调：核多不降、内存少要降、机�
     at(8, { busy: 0.9 }).io < at(8, { busy: 0.1 }).io,
     '启动时负载 90% 必须降并发——「同一台机器不同时段」也是「不同性能的电脑」',
   )
-  // D-509：e2e 按时序判据的竞争窗口定，8 核给 4 路（不是核数−1）。
+  // ：e2e 按时序判据的竞争窗口定，8 核给 4 路（不是核数−1）。
   assert.equal(at(8).e2e, 4, '8 核 e2e 应按每两核一路给 4 路')
 })
 
@@ -672,7 +672,7 @@ test('★ 32 核机器上不许仍然只开 8 路', () => {
   assert.ok(big.cpu > 8, `32 核机器 cpu 并发只有 ${big.cpu}——上限 8 是旧机器的核数，不是性质`)
   assert.ok(big.io > 8, `32 核机器 io 并发只有 ${big.io}`)
   // e2e 的上限取两者较小：**用例结构**上限（要真等生产定时器的那几条，见
-  // `e2e-order.mjs::CONCURRENCY_CEILING`）与**每两核一路**（D-509：时序判据的
+  // `e2e-order.mjs::CONCURRENCY_CEILING`）与**每两核一路**（：时序判据的
   // 竞争窗口，8 核 7 路的实测见 DE-016）。核数涨到结构上限后不再涨；
   // 核数低的机器按每两核一路收。
   assert.equal(big.e2e, CONCURRENCY_CEILING, '核数足够多时 e2e 上限回到结构常量')

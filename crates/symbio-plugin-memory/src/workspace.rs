@@ -74,7 +74,7 @@ pub const MEMORY_DESCRIPTION: &str =
 
 /// 由工作区作用域 provider 构造记忆门面（`None` = 没选工作区）。
 ///
-/// D-515：作用域闸门从「目录字符串是否为空」改为「provider 是否存在」——
+/// 作用域闸门从「目录字符串是否为空」改为「provider 是否存在」——
 /// 两者等价，但后者不再让插件认识物理目录。两道容量闸门仍在此注入。
 pub fn store(
     provider: Option<symbio_plugin_api::DynVdfsProvider>,

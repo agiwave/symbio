@@ -1,6 +1,6 @@
 //! `session/changes` —— 本会话「改过哪些文件」的只读出口。
 //!
-//! ## 它是一条投影的出口，不是新事实族（[D-169]）
+//! ## 它是一条投影的出口，不是新事实族
 //!
 //! 变更账由本插件的投影 `projections::changes::workdir_changes` 从 `artifact.added` 折出（写侧为什么
 //! 不该另立 `file.*` 见该投影的模块文档）。本文件只做两件事：**取数**（本会话快照）
@@ -30,7 +30,7 @@
 //! 与 `session/stats` 同一道：声明了读方身份且看不到本会话内容 ⇒ **空清单**
 //! （`readable: false` + 空行 = 有源但不给你看，不是「没改过」）。
 //!
-//! [D-169]: ../../../../docs/003-design/001-核心架构.md "DE-001-核心架构"
+//! : ../../../../docs/003-design/001-核心架构.md "DE-001-核心架构"
 
 use crate::declarations::MESSAGE_VOCAB;
 use std::sync::Arc;

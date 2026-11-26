@@ -60,7 +60,7 @@ fn function_call_args_are_not_extracted_incrementally() {
     assert!(feed_chunked(ext.as_mut(), line, 1).is_empty());
 }
 
-/// D-444：Gemini 的 tools 包在 `functionDeclarations` 里，name 同样按装配期别名表取；
+/// Gemini 的 tools 包在 `functionDeclarations` 里，name 同样按装配期别名表取；
 /// 空别名表回退 canonical 名本身（老夹具兼容）。
 #[test]
 fn function_declarations_use_alias_table_and_fall_back_to_canonical_name() {

@@ -198,7 +198,7 @@ fn prepared_request_carries_exactly_one_system_message() {
     );
 }
 
-/// D-444：下行 tools 清单的 function name 按装配期别名表取，命中用别名；
+/// 下行 tools 清单的 function name 按装配期别名表取，命中用别名；
 /// 空别名表回退 canonical 名本身（老夹具 / 空工具集兼容），其它字段与顺序不变。
 #[test]
 fn tools_use_alias_table_and_fall_back_to_canonical_name() {

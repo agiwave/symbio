@@ -66,7 +66,7 @@ const ROOT = rootArg
  * - 其余**可选插件**（`crates/symbio-platform/src/deploy/mod.rs` 的 `ASSEMBLY_OPTIONAL_PLUGINS`）
  *   按「清理完毕一个、纳入一个」分批加入：能力由插件各自的自述文档描述，名字不应
  *   出现在系统文档或其它插件目录——否则「可选能力」被写成「系统必备」，删装一个
- *   插件就要同步一堆与机制无关的措辞（与 subagent 改名同病，见 D-522 / PI-001）。
+ *   插件就要同步一堆与机制无关的措辞（与 subagent 改名同病，见  / PI-001）。
  *   分批纳入保证每批提交时门禁都是绿的；不得在清理完成前提前加入。
  */
 export const IDENTITIES = [
@@ -101,7 +101,7 @@ export const FILE_EXEMPTIONS = {
   'docs/003-design/README.md': '插件自述文档的索引表（文档在哪，不是系统描述插件能力）',
   'docs/004-ref/006-当前事实表.md': '本地门禁生成链从 PLUGIN.yml 投影的生成物',
   'docs/004-ref/010-机制强制等级清单.md': 'ME-003 要求执行方指向真实代码锚点（文件路径+符号），必须是具体代码位置',
-  // D-525 D 类权威表：表里的 `crates/symbio-plugin-<id>/src/x.rs::symbol` 是其它判据的
+  //  D 类权威表：表里的 `crates/symbio-plugin-<id>/src/x.rs::symbol` 是其它判据的
   // 判据数据源（capability-ledger-audit 的 EX-006 / doc-symbol-audit 的符号校验），必须
   // 写真实 crate 锚点——抹掉身份等于把判据数据源删掉（与 ME-003 白名单同一性质）。
   'docs/003-design/008-能力注册表与能力坐标系.md': 'capability-ledger-audit 的能力名册（EX-006 锚点列必须是真实 crate 路径+符号）',
@@ -147,28 +147,11 @@ function walk(dir, out, prefix = '') {
   return true
 }
 
-/** Markdown 里 D-NNN 历史决策正文的行号集合（跳过它，D-004 不改写历史）。 */
-function decisionBodyLines(lines) {
-  const skip = new Set()
-  let inDecision = false
-  for (let i = 0; i < lines.length; i++) {
-    const t = lines[i].trim()
-    if (/^###\s+D-\d+/.test(t)) {
-      inDecision = true
-      skip.add(i)
-      continue
-    }
-    if (inDecision && /^(##|###)\s/.test(t)) inDecision = false
-    if (inDecision) skip.add(i)
-  }
-  return skip
-}
-
 /**
  * 行内是否只有白名单位置（链接依赖 / use / README 索引链接 / 审计功能常量 /
  * 指向插件自述文档的链接）。
  *
- * D-525 要求「能力描述迁到插件自述文档，系统文档只留指向它的链接」——这类链接的
+ *  要求「能力描述迁到插件自述文档，系统文档只留指向它的链接」——这类链接的
  * 目标路径天然含插件身份（`<id>/README.md`），但它是「文档在哪」，与 README 索引
  * 同一性质，不是「系统描述插件能力」。只豁免**Markdown 链接目标**里的路径，
  * 链接文字与正文措辞照常判——否则一句「由 symbio-plugin-x 实现」也能塞进链接蒙混过关。
@@ -179,11 +162,11 @@ function isExemptLine(rel, line) {
   if (/lib\.rs$/.test(rel) && rel === 'crates/symbio/src/lib.rs') return /^\s*use\s+symbio_plugin_/.test(line.trim())
   if (/agent-ownership-audit/.test(rel)) return /AGENT_REL|const\s|path\.join/.test(line)
   if (rel.endsWith('plugin-entry-audit.test.mjs')) return true // 夹具整份豁免（文件级已列，这里冗余保险）
-  // 指向插件自述文档的链接（含 D-NNN 历史决策锚点）是「文档在哪」：D-525 A 类迁移后
+  // 指向插件自述文档的链接（含 D-NNN 历史决策锚点）是「文档在哪」： A 类迁移后
   // 系统文档只留链接、D-004 决策正文不改写，这类链接的目标路径天然含插件身份。
   // 只抠 Markdown 链接的 `](...)` 目标，链接显示文字与裸正文照常判——防止把
   // 「由 symbio-plugin-x 实现」塞进链接蒙混过关。对 .md 与源码注释一视同仁：
-  // D-076 / D-077 这类历史决策锚点大量写在 Rust 文档注释里（如 [D-077](…#d-077-…)）。
+  //  /  这类历史决策锚点大量写在 Rust 文档注释里（如 [](…#d-077-…)）。
   const withLinksStripped = line.replace(/\[[^\]]*\]\(([^)]*)\)/g, (_m, target) => {
     return IDENTITIES.some((id) => target.includes(`symbio-plugin-${id}`)) ? '](<plugin-doc>)' : `](${target})`
   })
@@ -206,9 +189,8 @@ export function audit({ root = ROOT } = {}) {
     if (isOwnCrate(rel) || FILE_EXEMPTIONS[rel]) continue
     const abs = path.join(root, rel)
     const lines = fs.readFileSync(abs, 'utf8').split(/\r?\n/)
-    const skip = rel.endsWith('.md') ? decisionBodyLines(lines) : new Set()
     for (let i = 0; i < lines.length; i++) {
-      if (skip.has(i) || isExemptLine(rel, lines[i])) continue
+      if (isExemptLine(rel, lines[i])) continue
       const line = lines[i]
       for (const id of IDENTITIES) {
         for (const re of patterns(id)) {

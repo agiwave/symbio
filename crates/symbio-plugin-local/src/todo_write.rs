@@ -15,9 +15,9 @@ use symbio_plugin_api::{
 use tokio::sync::{OnceCell, RwLock};
 
 /// 任务表行为名：本 crate 是**声明方**，实现（以及名字的登记）在
-/// `symbio-plugin-task`（D-363）。
+/// `symbio-plugin-task`。
 ///
-/// 名字住 `plugin-api` 的词汇面，两侧 import 同一常量（D-364）；插件之间仍不互相依赖
+/// 名字住 `plugin-api` 的词汇面，两侧 import 同一常量；插件之间仍不互相依赖
 /// （E-009）。
 use symbio_plugin_api::vocab::BEHAVIOR_TASK_TABLE as TASK_TABLE;
 
@@ -120,7 +120,7 @@ impl TodoWriteTool {
 
         // 回显策略：**只回确认，不回全量清单**。
         // 全量清单对当轮推理是重复（输入参数里刚写过一遍）；更早的调用在请求体里
-        // 保持原样（D-078：请求体是事实的纯投影，不做骨架化改写），因此工具结果
+        // 保持原样（请求体是事实的纯投影，不做骨架化改写），因此工具结果
         // 本身无需再背一份副本——清单的"唯一有效状态"由本次调用的参数承担。
         let summary = args.get("summary").and_then(|v| v.as_str()).unwrap_or("");
         let message = if summary.is_empty() {

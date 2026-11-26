@@ -23,7 +23,7 @@
  * | SC-003 | 档案表里的**思考字段名**在协议层被当作 delta 读字段 | 整行解析与前缀提取必须认同一份名单，抄第二份的代价是前缀截断重复/吃字 |
  * | SC-004 | **供应商名**字面量出现在 `if` 式判据（`==` / `contains` / `starts_with` …） | 「这家网关要特殊处理」是数据（落档案表），不是分支；`match` 臂不判——那是别名的登记表 |
  * | SC-005 | 豁免注释**悬空**（写了 `special-case-allow` 而那一行没有命中） | 登记了而代码没了，等于这条判据对那一处永久失效（`panic-audit` 的 PN-003 同族） |
- * | SC-006 | 工具名以**字面量**出现在 `core` / `kernel` / `loop` / `session` 的**非测试代码**（不限于比较位置） | 这四棵树是「加能力不该动」的架构面；能力名落进去，要么是按名分流，要么是新能力在逼架构记住它。D-212 的反向判据 |
+ * | SC-006 | 工具名以**字面量**出现在 `sdk` / `kernel` / `contract` / `loop` / `session` 的**非测试代码**（不限于比较位置） | 这些树是「加能力不该动」的架构面；能力名落进去，要么是按名分流，要么是新能力在逼架构记住它 |
  *
  * ## 为什么 SC-001…004 不用数字基线，用**逐处理由**
  *
@@ -36,17 +36,15 @@
  * 今天这四条的存量都是 **0**：工具名判定早换成了能力自声明，供应商差异收成了档案表。
  * 也就是说它们不是「清账清单」，是**从地板起**的防回流线。
  *
- * ## 为什么 SC-006 反向：逐处基线，每处挂一条决策
+ * ## 为什么 SC-006 反向：逐处基线，每处写明当前理由
  *
- * 四棵树里「工具名一次都不出现」在迁移期做不到——存量只有一处（会话写臂读
- * `heartbeat.include_history`，那是心跳插件的 metadata 命名空间，D-076 #5），
- * 但判据不能为它开一个「比较位置」的例外。故 SC-006 用**逐处基线**
+ * 架构面里「工具名一次都不出现」在迁移期做不到——存量是会话写臂读取
+ * 心跳插件的 metadata 命名空间。故 SC-006 用**逐处基线**
  * （`scripts/baselines/tool-names.json`：文件 + 工具名 + 处数），并且：
  *
  * - 新出现的名字 / 位置 ⇒ 红（不在基线里就没有额度）；
  * - 基线里记了而代码里少了 ⇒ 红（基线只许降，清掉的行必须从账上划掉）；
- * - 每一条基线、每一条代码内豁免都必须挂**能打开的** `### D-NNN`——指向不存在的决策
- *   的豁免不算豁免（与 CS-002 / PTS-004 同一条资格线）。
+ * - 每一条基线、每一条代码内豁免都必须写明**为什么当前仍需要保留**。
  *
  * ## 判据自身的失效形态（回归测试钉的就是这几条）
  *
@@ -59,7 +57,7 @@
  * 用法：
  *   node scripts/audits/plugin-special-case-audit.mjs
  *   node scripts/audits/plugin-special-case-audit.mjs SESSION_ROOT=<dir> PROTOCOLS_ROOT=<dir> \
- *     CORE_ROOT=<dir> KERNEL_ROOT=<dir> LOOP_ROOT=<dir> SC006_BASELINE=<file> DOCS_ROOT=<dir> REL_ROOT=<dir>
+ *     CORE_ROOT=<dir> KERNEL_ROOT=<dir> LOOP_ROOT=<dir> SC006_BASELINE=<file> REL_ROOT=<dir>
  *
  * 退出码：0 = 通过；1 = 发现违规（含判据失效）。
  * 平台无关（纯 Node，不依赖 bash / ripgrep），带回归测试（plugin-special-case-audit.test.mjs）。
@@ -74,7 +72,6 @@ import fs from 'node:fs'
 import path from 'node:path'
 import { fileURLToPath } from 'node:url'
 import { red, green, yellow } from '../color.mjs'
-import { hasDecisionAnchor as anchorExists } from '../decision-anchors.mjs'
 import { blankComments as blankSourceComments, blankTestModules } from '../rust-scan.mjs'
 import { toolFacts } from '../facts/_capability.mjs'
 import { walkFiles } from '../fs-walk.mjs'
@@ -101,8 +98,7 @@ const DEFAULT_PROTOCOLS = path.join('crates', 'symbio-plugin-model', 'src', 'pro
 const MSG_ROOTS = [
   // 架构层是平台的中性三臂（`symbio-platform`：sdk 宿主机制与策略 / kernel 封闭语法 /
   // contract 形状）。deploy 臂是装配常量（`PLUGIN_ID_*` / `ROUTE_*`），它按职责就认识
-  // 插件身份，不在内。D-279 之前这里还有一棵 core，它是 sdk 搬迁后的残余——工具名
-  // 落进残余不再说明任何事情。
+  // 插件身份，不在内。已退役的 core 残余树也不在扫描范围内。
   ['sdk', path.join('crates', 'symbio-platform', 'src', 'sdk')],
   ['kernel', path.join('crates', 'symbio-platform', 'src', 'kernel')],
   ['contract', path.join('crates', 'symbio-platform', 'src', 'contract')],
@@ -194,17 +190,10 @@ function profileKeys(protocolsRoot) {
 }
 
 /**
- * 决策条目是否存在：历史裁决是设计文档里的 `### D-NNN`，判定决策 kind 的裁决是
- * 单文档 front-matter 的 `id`。扫描口径（根目录集合、跳过目录、两种身份形态）住
- * `decision-anchors.mjs`——本审计与 CS-002 / PP-005 判的是同一句话，抄一份早晚两边不一致。
- */
-const decisionExists = (id, docsRoot) => anchorExists(id, repoRoot, docsRoot)
-
-/**
- * SC-006 逐处基线：`{ "<仓库相对路径>": { "<工具名>": { count, adr, reason } } }`。
+ * SC-006 逐处基线：`{ "<仓库相对路径>": { "<工具名>": { count, why | reason } } }`。
  *
- * 基线是**数据**，判据住本文件；`adr` 必须是一条能打开的 `### D-NNN`（资格由审计判，
- * 与本函数无关）。形状读不出 ⇒ `fatal`：没有处数上限的基线等于没有判据。
+ * 基线是**数据**，判据住本文件；每条必须写明当前 `why` 或 `reason`。
+ * 形状读不出 ⇒ `fatal`：没有处数上限的基线等于没有判据。
  */
 function loadSc006Baseline(file) {
   let text
@@ -236,8 +225,9 @@ function loadSc006Baseline(file) {
       }
       cells.set(`${rel}|${tool}`, {
         count: cell.count,
-        adr: typeof cell.adr === 'string' ? cell.adr : '',
-        reason: typeof cell.reason === 'string' ? cell.reason : '',
+        why: typeof cell.why === 'string' && cell.why.trim()
+          ? cell.why.trim()
+          : typeof cell.reason === 'string' ? cell.reason.trim() : '',
       })
     }
   }
@@ -253,7 +243,7 @@ function loadSc006Baseline(file) {
  * `toolFacts` 给出。
  */
 function audit(sessionRoot, protocolsRoot, toolsRoot, opts) {
-  const { msgRoots, baselineFile, docsRoot, relRoot } = opts
+  const { msgRoots, baselineFile, relRoot } = opts
   const violations = []
   const allowed = new Map() // `${code}|${file}:${line}` → 理由
   const usedAllows = new Set()
@@ -359,10 +349,10 @@ function audit(sessionRoot, protocolsRoot, toolsRoot, opts) {
     })
   }
 
-  // ── SC-006 工具名字面量落在架构面（core / kernel / loop / session）────
+  // ── SC-006 工具名字面量落在架构面 ───────────────────────────────────
   //
   // 与 SC-001 的分工：SC-001 只判**比较位置**（按名分流），SC-006 判**出现**——
-  // 这四棵树是「加能力不该动」的面，能力名哪怕只是被记下来（日志、默认值、配置键），
+  // 这些树是「加能力不该动」的面，能力名哪怕只是被记下来（日志、默认值、配置键），
   // 也说明某条通用链路开始认识某个具体能力。测试文件与内联测试模块都不算。
   const occurrences = []
   for (const { label, dir } of msgRoots) {
@@ -407,34 +397,12 @@ function audit(sessionRoot, protocolsRoot, toolsRoot, opts) {
   }
 
   // SC-006 的豁免在**计数之前**扣掉：基线记的是「还欠着几处」，一处被就地豁免了，
-  // 账上就不该再占额度。资格线比另外四条严——理由里必须有一条能打开的 `### D-NNN`
-  // （D-212：能力名进架构面，只有决策能开这个口）。
+  // 账上就不该再占额度。豁免理由必须解释这处名字为何仍须留在架构面。
   const waivedOcc = new Set()
   let sc006Inline = 0
   for (const a of allows) {
     if (a.code !== 'SC-006') continue
     const here = `${a.rel}:${a.line}`
-    const adr = /D-(\d{3}a?)/.exec(a.reason)
-    if (!adr) {
-      violations.push({
-        code: 'SC-006',
-        key: here,
-        text:
-          `SC-006 的豁免没有挂决策：${a.reason}\n` +
-          '        能力名进架构面只有一种合法理由，即一条写下来的裁决——写成 `// special-case-allow SC-006: D-NNN 理由`',
-      })
-      continue
-    }
-    if (!decisionExists(adr[1], docsRoot)) {
-      violations.push({
-        code: 'SC-006',
-        key: here,
-        text:
-          `SC-006 的豁免引用了 D-${adr[1]}，但设计文档里没有 \`### D-${adr[1]}\` 条目\n` +
-          '        指向不存在的决策的豁免不算豁免（与 CS-002 / PTS-004 同一条资格线）',
-      })
-      continue
-    }
     const idx = occurrences.findIndex(
       (o, k) =>
         !waivedOcc.has(k) && o.rel === a.rel && (o.line === a.line || o.line === a.line - 1),
@@ -499,8 +467,8 @@ function audit(sessionRoot, protocolsRoot, toolsRoot, opts) {
         key: `${o.rel}:${o.line}`,
         text:
           `工具名 \`${o.tool}\` 出现在 ${o.where} 的非测试代码：${o.text}\n` +
-          '        工具的身份归注册表，判动作读它自声明的行为（D-212）。' +
-          '这四棵树是「加能力不该动」的架构面；确实需要留一处的，写进 `scripts/baselines/tool-names.json` 并挂一条能打开的决策',
+          '        工具的身份归注册表，判动作读它自声明的行为。' +
+          '这些树是「加能力不该动」的架构面；确实需要留一处的，写进 `scripts/baselines/tool-names.json` 并写明当前理由',
       })
     }
   }
@@ -515,27 +483,11 @@ function audit(sessionRoot, protocolsRoot, toolsRoot, opts) {
           '        基线只许降——把这一行改小或删掉，别让已经清掉的存量继续占额度',
       })
     }
-    if (!cell.reason) {
+    if (!cell.why) {
       violations.push({
         code: 'SC-006',
         key,
         text: `SC-006 基线 \`${key}\` 没有理由——没有理由的存量等于没登记`,
-      })
-    }
-    const adr = /D-(\d{3}a?)/.exec(cell.adr)
-    if (!adr) {
-      violations.push({
-        code: 'SC-006',
-        key,
-        text: `SC-006 基线 \`${key}\` 没有挂决策——每一处存量都必须有一条能打开的 \`### D-NNN\``,
-      })
-    } else if (!decisionExists(adr[1], docsRoot)) {
-      violations.push({
-        code: 'SC-006',
-        key,
-        text:
-          `SC-006 基线 \`${key}\` 引用了 D-${adr[1]}，但设计文档里没有 \`### D-${adr[1]}\` 条目\n` +
-          '        指向不存在的决策的豁免不算豁免（与 CS-002 / PTS-004 同一条资格线）',
       })
     }
   }
@@ -563,7 +515,6 @@ const relRoot = path.resolve(arg('REL_ROOT') ?? repoRoot)
 const sessionRoot = path.resolve(arg('SESSION_ROOT') ?? path.join(repoRoot, DEFAULT_SESSION))
 const protocolsRoot = path.resolve(arg('PROTOCOLS_ROOT') ?? path.join(repoRoot, DEFAULT_PROTOCOLS))
 const toolsRoot = path.resolve(arg('TOOLS_ROOT') ?? repoRoot)
-const docsRoot = arg('DOCS_ROOT') ? path.resolve(arg('DOCS_ROOT')) : null
 const baselineFile = path.resolve(arg('SC006_BASELINE') ?? path.join(repoRoot, SC006_BASELINE_REL))
 const msgRoots = MSG_ROOTS.map(([label, rel]) => ({
   label,
@@ -580,11 +531,6 @@ for (const [label, dir] of [
     process.exit(1)
   }
 }
-if (docsRoot && !fs.existsSync(docsRoot)) {
-  console.error(red(`✗ DOCS_ROOT 不存在：${docsRoot}`))
-  process.exit(1)
-}
-
 const {
   violations,
   allowed,
@@ -592,7 +538,7 @@ const {
   baselineCells = 0,
   inlineWaived = 0,
   fatal,
-} = audit(sessionRoot, protocolsRoot, toolsRoot, { msgRoots, baselineFile, docsRoot, relRoot })
+} = audit(sessionRoot, protocolsRoot, toolsRoot, { msgRoots, baselineFile, relRoot })
 if (fatal) {
   // 判据失效与「全部通过」在日志里长得一样，宁红不静默（`panic-audit` 的同一条教训）
   console.error(red(`✗ 插件层特判审计：${fatal} ⇒ 本项失去判据`))

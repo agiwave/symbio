@@ -16,7 +16,7 @@ fn skill_config_default_values() {
     assert_eq!(cfg.max_skills, 20);
     assert_eq!(cfg.max_body_chars, 8000);
     assert!(cfg.report_token_estimate);
-    assert!(!cfg.skill_compile_enabled, "D-427：编译开关出厂关");
+    assert!(!cfg.skill_compile_enabled, "编译开关出厂关");
 }
 
 /// SkillConfig JSON 反序列化使用默认值

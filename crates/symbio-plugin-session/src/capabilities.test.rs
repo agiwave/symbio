@@ -158,7 +158,7 @@ impl Plugin for DuplicatePortParent {
             for id in ["a", "b"] {
                 let provider: Arc<dyn symbio_plugin_api::port::PortProvider> =
                     Arc::new(FixturePort { id });
-                // 登记走装配期容器（D-468）：同端口第二次登记当场落错误桶。
+                // 登记走装配期容器：同端口第二次登记当场落错误桶。
                 symbio_plugin_api::port::register_ports(&ctx, provider.as_ref()).await;
             }
         }

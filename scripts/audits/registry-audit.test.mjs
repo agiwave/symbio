@@ -1041,7 +1041,7 @@ test('RG-033：退场档只剩锚点与指向——正文超预算即红，activ
   })
   assert.deepEqual(errsOf(active), [], 'active 文档不受退场预算约束')
 
-  // 反向二：退场但只剩锚点与指向 ⇒ 绿（这正是 D-145 的终态形状）
+  // 反向二：退场但只剩锚点与指向 ⇒ 绿（这正是  的终态形状）
   const short = caseRoot({
     'docs/003-design/001-a.md': docDoc('docs/003-design/001-a.md', {
       kind: 'design',

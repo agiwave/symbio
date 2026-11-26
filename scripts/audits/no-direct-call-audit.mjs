@@ -1,6 +1,6 @@
 #!/usr/bin/env node
 /**
- * no-direct-call-audit — 无直连静态扫描（[DE-001 §5](../../docs/003-design/001-核心架构.md "DE-001-核心架构")
+ * no-direct-call-audit — 无直连静态扫描（[DE-001 §6](../../docs/003-design/001-核心架构.md "DE-001-核心架构")
  * 不变量 I1「任意两主体无直连」的可执行判据）。
  *
  * ## 规则（I1 的直接推论：任意两主体无直连——一切经事实源）
@@ -52,10 +52,10 @@ const PRINCIPALS = ['Decider', 'Reasoner', 'RecallTranslator', 'CommitmentKeeper
 const DEFINITION_DIRS = ['symbio-platform/src/sdk/actors/']
 /**
  * 另外两处合法出口：
- *  - sdk 臂根重导出（平台合并后是 `sdk/mod.rs`，D-556）；
+ *  - sdk 臂根重导出（平台合并后是 `sdk/mod.rs`，）；
  *  - **主体模式的枚举定义**：`Pattern { Decider, Reasoner, … }` 是封闭语法里的
- *    变体**声明**，不是对主体类型的指称（D-189 同一条理由，只是那处剥的是
- *    `Pattern::Decider` 的用法形态，枚举体本身剥不掉）。它随 D-188 C2b 住在内核。
+ *    变体**声明**，不是对主体类型的指称（ 同一条理由，只是那处剥的是
+ *    `Pattern::Decider` 的用法形态，枚举体本身剥不掉）。它随  C2b 住在内核。
  */
 const ALLOWED_FILES = new Set(['symbio-platform/src/sdk/mod.rs', 'symbio-platform/src/sdk/actors/mod.rs', 'symbio-platform/src/kernel/actors.rs'])
 
@@ -70,7 +70,7 @@ const WORD_RES = PRINCIPALS.map((p) => new RegExp(`\\b${p}\\b`))
  * 封闭语法枚举的变体名不算提及主体：`Pattern::Decider` 是 `symbio-kernel` 的
  * **语法变体**（`ActorSpec.pattern` 的取值），不是主体类型的指称——语义上它只说
  * 「按裁决者档位跑」，不产生任何到主体对象的边。把它按主体名判红会把「声明一个
- * 档位」误读成「持有主体」（D-189）。
+ * 档位」误读成「持有主体」（）。
  */
 const SYNTAX_VARIANT_RE = new RegExp(`\\bPattern\\s*::\\s*(?:${PRINCIPALS.join('|')})\\b`, 'g')
 

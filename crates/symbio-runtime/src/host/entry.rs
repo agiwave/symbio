@@ -18,7 +18,7 @@
 //!
 //! 每个 `HostDrive` 绑一份部署根：能力收集从这份根出发，会话的 `session_id` 只用来
 //! 取上下文身份。实例按根缓存，`MainDriveEntry` 与插件 `drive_entry` 拿到的是同一个
-//! 节点——`settled` 等的那份与 `kick` 写的那份必须是同一个（D-359 的 t29 根因）。
+//! 节点——`settled` 等的那份与 `kick` 写的那份必须是同一个（ t29 根因）。
 
 use std::future::Future;
 use std::pin::Pin;

@@ -38,7 +38,7 @@ fn user_turn_debt_derives_its_identity_from_the_input_fact() {
     assert_eq!(reply.payload["provider"], "p");
     assert_eq!(
         reply.payload["principal"], "session/main",
-        "会话主体随驱动请求而来，不再写死 user（D-339）"
+        "会话主体随驱动请求而来，不再写死 user"
     );
     // 时序只按**端口**表达：不写兄弟插件的行名，也不拼债 id（`after` 为空）。
     // 该端口没人认领 ⇒ 前提已了（缺席即收束）。
@@ -83,7 +83,7 @@ fn tool_result_adds_a_second_row_with_its_own_identity() {
     assert_eq!(
         after_tools.after_port.as_deref(),
         Some(PLUGIN_ROW),
-        "完成行与进度行都是 plugin_row 债：等这个端口这一圈跑完，汇报才早于下一轮模型往返（D-510）"
+        "完成行与进度行都是 plugin_row 债：等这个端口这一圈跑完，汇报才早于下一轮模型往返"
     );
 }
 
@@ -92,7 +92,7 @@ fn continuation_waits_for_this_rounds_call_set_not_the_whole_port() {
     let mut facts = DebtFacts::default();
     facts.note_fact(EVENT_USER_MESSAGE, "u-1");
     facts.note_fact(EVENT_TOOL_REQUESTED, "tool.requested:m1");
-    // 模型在派发请求时按 `calls[]` 一次落齐的逐笔标记（D-378）。
+    // 模型在派发请求时按 `calls[]` 一次落齐的逐笔标记。
     for call_id in ["c1", "c2"] {
         let marker_id = format!("tool.call.requested:tool.requested:m1:{call_id}");
         facts.note_fact_payload(
@@ -115,7 +115,7 @@ fn continuation_waits_for_this_rounds_call_set_not_the_whole_port() {
             ]
             .as_slice()
         ),
-        "只认本次请求的那两笔调用：同端口上一笔迟归的旧债不该拖住这轮续跑（D-446）"
+        "只认本次请求的那两笔调用：同端口上一笔迟归的旧债不该拖住这轮续跑"
     );
 }
 

@@ -1,5 +1,5 @@
 import './_selfrun.mjs';
-// T105 同一轮两次提问：消息面必须恰好两张 tool_call 卡（D-382 的出口判据）。
+// T105 同一轮两次提问：消息面必须恰好两张 tool_call 卡（出口判据）。
 //
 // ## 本用例钉的是什么
 //
@@ -254,7 +254,7 @@ export default defineCase(
         await waitFor(
           async () => {
             const msgs = await readSessionMessages(api, SID);
-            // 第二张待答卡的节点 id 由调用 id 派生（`{call_id}-result`，DE-048 D-312）；
+            // 第二张待答卡的节点 id 由调用 id 派生（`{call_id}-result`，DE-048 ）；
             // 它在消息面可见即投影已到，**不看它挂在谁下面**——那正是要断言的形状。
             return (msgs ?? []).some(
               (m) => m.id === 'call_ask_2-result' && m.status === 'waiting_user_action',

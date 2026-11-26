@@ -3,14 +3,14 @@
  *
  * 这条守卫的失效形态都是「看起来在判」：
  *
- * - 有 `Migration:` 就放行 ⇒ 写上 trailer 即可在架构面夹带，D-247 的两类分家作废；
+ * - 有 `Migration:` 就放行 ⇒ 写上 trailer 即可在架构面夹带， 的两类分家作废；
  * - 只判新增、不判删除 ⇒ 插件落地而旧实现留着（两份同时生效）照样绿；
  * - 只认 `*.gen.rs` ⇒ `plugin-api` 的 `events.rs` / `routes.rs` 被当成
  *   机制增量，补件几乎条条假红，豁免写满之后没人再看；
- * - 决策号只判形状不查存在 ⇒ 拼一个 `D-999` 就能进架构；
+ * - 决策号只判形状不查存在 ⇒ 拼一个 `` 就能进架构；
  * - 注释里的插件 id / 工具名算成代码 ⇒ 「补件不是通用的」这条判据自伤；
  * - 按行判「跨树搬了一行」/「新增了一个公开项」⇒ `}` 在每个文件里都有、拆文件时
- *   保留的那半整份是「新增」，一次净收窄会被读成十几个补件（`D-437`）——
+ *   保留的那半整份是「新增」，一次净收窄会被读成十几个补件（``）——
  *   判据逼提交者写假的 `from` / `to`，比漏判更糟。
  *
  * 本文件逐条注入并断言红，另有一条真仓冒烟证明读 git 那一半也真的在跑。
@@ -80,7 +80,6 @@ function patchText(files) {
 }
 
 const patchOf = (files) => parsePatch(patchText(files))
-const decisions = new Set(['D-219', 'D-220', 'D-207'])
 
 // ── parsePatch ────────────────────────────────────────────────────────────
 
@@ -171,7 +170,7 @@ test('classifyCommit：Migration trailer 一律是迁移批次（不因新增公
 
 test('classifyCommit：没有 trailer、但在架构面新增公开项 ⇒ 补件', () => {
   const patch = patchOf([{ path: CORE, added: ['pub fn port() {}'], removed: [] }])
-  assert.equal(classifyCommit({ message: 'feat: 加一条端口\n\nCore-Change: D-219', patch }), 'supplement')
+  assert.equal(classifyCommit({ message: 'feat: 加一条端口\n\nCore-Change: EX-007 共享类型只能住机制层', patch }), 'supplement')
 })
 
 test('classifyCommit：只改注释的架构面改动两类都不是', () => {
@@ -264,7 +263,7 @@ test('migrationErrors：控制面新增一行只有字符串字面量（日志�
   )
 })
 
-test('migrationErrors：折叠整文件搬出机制面、落进能力包 ⇒ 绿（D-283 判的是变宽）', () => {
+test('migrationErrors：折叠整文件搬出机制面、落进能力包 ⇒ 绿（ 判的是变宽）', () => {
   assert.deepEqual(
     mig([
       { path: 'crates/symbio-platform/src/sdk/projection/cost.rs', added: [], removed: ['pub fn cost_ledger() {}'] },
@@ -334,7 +333,7 @@ test('migrationErrors：迁移中改测试与 .gen.rs 不判（断言与镜像�
   )
 })
 
-// ── 搬迁口径：净变化（D-404）─────────────────────────────────────────────
+// ── 搬迁口径：净变化（）─────────────────────────────────────────────
 
 const API_TEXT = 'crates/symbio-plugin-api/src/text.rs'
 const SDK_TEXT = 'crates/symbio-platform/src/sdk/text.rs'
@@ -389,7 +388,7 @@ test('parseRelocationHeader：两侧都写才算完整；缺一侧不算；多�
 test('migrationPathspecs：迁移到控制面之外的 owner 插件时也读取 to 侧', () => {
   const from = 'crates/symbio-platform/src/sdk/projection/task_vocab.rs'
   const to = 'crates/symbio-plugin-task/src/decl.rs'
-  const specs = migrationPathspecs(`Migration: D-565\nfrom: ${from} (30)\nto: ${to} (12)`)
+  const specs = migrationPathspecs(`Migration: \nfrom: ${from} (30)\nto: ${to} (12)`)
   assert.deepEqual(specs, [`:(literal)${from}`, `:(literal)${to}`])
   assert.deepEqual(migrationPathspecs('普通提交'), [])
 })
@@ -456,10 +455,10 @@ test('relocationErrors 红 3：搬走 plugin-api 实现却不留 `pub use` ⇒ E
   assert.ok(errors.some((e) => /E-009/.test(e) && /pub use/.test(e)), errors.join('\n'))
 })
 
-test('relocationErrors 红 3：零扩展消费方的模块搬走不要求空转转发（D-416）', () => {
+test('relocationErrors 红 3：零扩展消费方的模块搬走不要求空转转发（）', () => {
   const from = 'crates/symbio-plugin-api/src/zz_fixture.rs'
   const to = 'crates/symbio-platform/src/sdk/zz_fixture.rs'
-  const message = `feat: 搬内部枚举进 sdk\n\nMigration: D-416\nfrom: ${from} (1)\nto: ${to} (1)`
+  const message = `feat: 搬内部枚举进 sdk\n\nMigration: \nfrom: ${from} (1)\nto: ${to} (1)`
   const files = [
     { path: from, removed: ['pub fn helper() {}'], added: [] },
     { path: to, added: ['pub fn helper() {}'], removed: [] },
@@ -475,7 +474,7 @@ test('crossTreeMoves：同树内删了又加不算搬家', () => {
   assert.equal(crossTreeMoves(same).count, 0)
 })
 
-test('crossTreeMoves：只含括号 / 标点的行不算跨树搬迁（D-437）', () => {
+test('crossTreeMoves：只含括号 / 标点的行不算跨树搬迁（）', () => {
   // `}` / `);` / `},` 在每个文件里都有。把它们算成「跨树搬过去的一份面」，任何一笔
   // 「删掉一个文件 + 改另一个文件」的提交都会凭空多出十几行搬迁记录，于是提交者只能
   // 写一条假的 `from` / `to` 才过得了门——判据逼人撒谎，比漏判更糟。
@@ -497,7 +496,7 @@ test('crossTreeMoves：带名字的行仍然算搬迁（收窄只针对空壳行
 test('crossTreeMoves：只有名字的字段初始化不算搬迁（`reads: &[],` 不是一块实现）', () => {
   // 字段从执行体上移到行时，`reads: &[],` 在几十个构造点里各写一遍：删一处（执行体侧）、
   // 加一处（行侧）在 diff 里就是「跨树搬了一行」。它既不是声明也不是实现块，按搬迁判
-  // 只会逼提交者补一条与自己意思无关的 `from` / `to`（同 `}` / `);` 那条，`D-437`）。
+  // 只会逼提交者补一条与自己意思无关的 `from` / `to`（同 `}` / `);` 那条，``）。
   const p = patchOf([
     { path: 'crates/symbio-platform/src/kernel/decl/mod.rs', removed: ['    reads: &[],'], added: [] },
     { path: 'crates/symbio-platform/src/sdk/declarations.test.rs', added: ['        reads: &[],'], removed: [] },
@@ -596,38 +595,37 @@ const supp = (message, files, { moved } = {}) =>
     sha: 'x',
     message,
     patch: patchOf(files),
-    decisions,
     pluginIds: ['notes', 'local'],
     toolNames: ['todo_write', 'content_search'],
     moved,
   }).errors
 
-test('supplementErrors：决策号存在且新增面通用 ⇒ 绿', () => {
+test('supplementErrors：规则码 + 当前理由齐全且新增面通用 ⇒ 绿', () => {
   assert.deepEqual(
-    supp('feat: 端口\n\nCore-Change: D-219', [{ path: CORE, added: ['pub fn port() {}'], removed: [] }]),
+    supp('feat: 端口\n\nCore-Change: EX-007 共享类型只能住机制层', [{ path: CORE, added: ['pub fn port() {}'], removed: [] }]),
     [],
   )
 })
 
-test('supplementErrors：没有决策号 ⇒ 红', () => {
+test('supplementErrors：没有规则码 + 当前理由 ⇒ 红', () => {
   const [e] = supp('feat: 加了个口子', [{ path: CORE, added: ['pub fn port() {}'], removed: [] }])
-  assert.match(e, /没有决策号/)
+  assert.match(e, /没有「判据码 \+ 当前理由」/)
 })
 
-test('supplementErrors：决策号打不开 ⇒ 红（写错的号等于没写）', () => {
-  const [e] = supp('feat: 端口\n\nCore-Change: D-999', [{ path: CORE, added: ['pub fn port() {}'], removed: [] }])
-  assert.match(e, /打不开/)
+test('supplementErrors：当前理由太短 ⇒ 红（理由不能是空壳）', () => {
+  const [e] = supp('feat: 端口\n\nCore-Change: EX-007 补一下', [{ path: CORE, added: ['pub fn port() {}'], removed: [] }])
+  assert.match(e, /没有「判据码 \+ 当前理由」/)
 })
 
-test('supplementErrors：`Core-Change:` 段之外的决策号不顶用', () => {
-  const [e] = supp('feat: 端口（D-219 讨论过）\n\nCore-Change: D-999', [
+test('supplementErrors：`Core-Change:` 段之外的说法不顶用', () => {
+  const [e] = supp('feat: 端口（讨论过，理由充分）', [
     { path: CORE, added: ['pub fn port() {}'], removed: [] },
   ])
-  assert.match(e, /打不开/)
+  assert.match(e, /没有「判据码 \+ 当前理由」/)
 })
 
 test('supplementErrors：新增面写死插件 id ⇒ 红', () => {
-  const [e] = supp('feat: 端口\n\nCore-Change: D-219', [
+  const [e] = supp('feat: 端口\n\nCore-Change: EX-007 共享类型只能住机制层', [
     { path: CORE, added: ['if meta == "notes" { return }'], removed: [] },
   ])
   assert.match(e, /不是通用的/)
@@ -635,7 +633,7 @@ test('supplementErrors：新增面写死插件 id ⇒ 红', () => {
 })
 
 test('supplementErrors：新增面写死工具名 ⇒ 红', () => {
-  const [e] = supp('feat: 端口\n\nCore-Change: D-219', [
+  const [e] = supp('feat: 端口\n\nCore-Change: EX-007 共享类型只能住机制层', [
     { path: CORE, added: ['tool: "local/todo_write".into(),'], removed: [] },
   ])
   assert.match(e, /todo_write/)
@@ -690,7 +688,7 @@ test('capabilityNameHits：通用枚举声明不放行其它插件映射', () =>
 
 test('supplementErrors：注释里提到插件 id 与工具名 ⇒ 绿（判的是代码）', () => {
   assert.deepEqual(
-    supp('feat: 端口\n\nCore-Change: D-219', [
+    supp('feat: 端口\n\nCore-Change: EX-007 共享类型只能住机制层', [
       { path: CORE, added: ['// notes 的 todo_write 曾经在这里分支，已迁走', '/// `"local"` 只是举例', 'pub fn port() {}'], removed: [] },
     ]),
     [],
@@ -699,7 +697,7 @@ test('supplementErrors：注释里提到插件 id 与工具名 ⇒ 绿（判的�
 
 test('supplementErrors：生成物里的插件 id 不算补件定制', () => {
   assert.deepEqual(
-    supp('feat: 端口\n\nCore-Change: D-219', [
+    supp('feat: 端口\n\nCore-Change: EX-007 共享类型只能住机制层', [
       { path: 'crates/symbio-plugin-api/src/events.rs', added: ['const X: &str = "notes.recent";'], removed: [] },
       { path: CORE, added: ['pub fn port() {}'], removed: [] },
     ]),
@@ -707,7 +705,7 @@ test('supplementErrors：生成物里的插件 id 不算补件定制', () => {
   )
 })
 
-test('supplementErrors：搬家行不算补件定制（D-279）', () => {
+test('supplementErrors：搬家行不算补件定制（）', () => {
   // 机制面收缩时的真实形状：一条带插件 id 的常量（本仓是 `SKILL_TAG = "skill"`）
   // 从 core 搬进 sdk。`--no-renames` 的 diff 说「旧文件全删 + 新文件全增」，
   // 那一行字没变、面也没变宽。夹具里把 id 换成本文件的 `notes`，道理相同。
@@ -715,10 +713,10 @@ test('supplementErrors：搬家行不算补件定制（D-279）', () => {
   const moved = movedLines(
     patchOf([{ path: 'crates/symbio-platform/src/sdk/actors/skill.rs', deleted: true, removed: [line] }]),
   )
-  assert.deepEqual(supp('feat: 搬迁\n\nCore-Change: D-219', [{ path: CORE, added: [line], removed: [] }], { moved }), [])
+  assert.deepEqual(supp('feat: 搬迁\n\nCore-Change: EX-007 共享类型只能住机制层', [{ path: CORE, added: [line], removed: [] }], { moved }), [])
 })
 
-test('supplementErrors：迁入平台后的 crate 自引用改写仍算搬家（D-564）', () => {
+test('supplementErrors：迁入平台后的 crate 自引用改写仍算搬家（）', () => {
   const moved = movedLines(
     patchOf([
       {
@@ -731,11 +729,10 @@ test('supplementErrors：迁入平台后的 crate 自引用改写仍算搬家（
   assert.deepEqual(
     supplementErrors({
       sha: 'x',
-      message: 'refactor: 收集器归位\n\nCore-Change: D-219',
+      message: 'refactor: 收集器归位\n\nCore-Change: EX-007 共享类型只能住机制层',
       patch: patchOf([
         { path: CORE, added: ['crate::sdk::capability::capability_report_error(ctx, "tool", error).await;'], removed: [] },
       ]),
-      decisions,
       pluginIds: ['tool'],
       moved,
     }).errors,
@@ -755,18 +752,17 @@ test('supplementErrors：未整文件删除的同类改写仍是新增定制', (
   )
   const [e] = supplementErrors({
     sha: 'x',
-    message: 'refactor: 收集器归位\n\nCore-Change: D-219',
+    message: 'refactor: 收集器归位\n\nCore-Change: EX-007 共享类型只能住机制层',
     patch: patchOf([
       { path: CORE, added: ['crate::sdk::capability::capability_report_error(ctx, "tool", error).await;'], removed: [] },
     ]),
-    decisions,
     pluginIds: ['tool'],
     moved,
   }).errors
   assert.match(e, /不是通用的/)
 })
 
-test('supplementErrors：平台自引用改写按同一 key 只抵一次（D-564）', () => {
+test('supplementErrors：平台自引用改写按同一 key 只抵一次（）', () => {
   const moved = movedLines(
     patchOf([
       {
@@ -778,7 +774,7 @@ test('supplementErrors：平台自引用改写按同一 key 只抵一次（D-564
   )
   const errors = supplementErrors({
     sha: 'x',
-    message: 'refactor: 收集器归位\n\nCore-Change: D-219',
+    message: 'refactor: 收集器归位\n\nCore-Change: EX-007 共享类型只能住机制层',
     patch: patchOf([
       {
         path: CORE,
@@ -789,7 +785,6 @@ test('supplementErrors：平台自引用改写按同一 key 只抵一次（D-564
         removed: [],
       },
     ]),
-    decisions,
     pluginIds: ['tool'],
     moved,
   }).errors
@@ -797,7 +792,7 @@ test('supplementErrors：平台自引用改写按同一 key 只抵一次（D-564
   assert.match(errors[0], /不是通用的/)
 })
 
-test('supplementErrors：门面删除侧的 crate 自引用不与平台新增行配对（D-564）', () => {
+test('supplementErrors：门面删除侧的 crate 自引用不与平台新增行配对（）', () => {
   const moved = movedLines(
     patchOf([
       {
@@ -809,7 +804,7 @@ test('supplementErrors：门面删除侧的 crate 自引用不与平台新增行
   )
   const [e] = supplementErrors({
     sha: 'x',
-    message: 'refactor: 收集器归位\n\nCore-Change: D-219',
+    message: 'refactor: 收集器归位\n\nCore-Change: EX-007 共享类型只能住机制层',
     patch: patchOf([
       {
         path: CORE,
@@ -817,7 +812,6 @@ test('supplementErrors：门面删除侧的 crate 自引用不与平台新增行
         removed: [],
       },
     ]),
-    decisions,
     pluginIds: ['tool'],
     moved,
   }).errors
@@ -830,7 +824,7 @@ test('supplementErrors：搬家豁免只抵一次（同一行新增两处仍红�
     patchOf([{ path: 'crates/symbio-platform/src/sdk/actors/skill.rs', deleted: true, removed: [line] }]),
   )
   const errors = supp(
-    'feat: 搬迁\n\nCore-Change: D-219',
+    'feat: 搬迁\n\nCore-Change: EX-007 共享类型只能住机制层',
     [{ path: CORE, added: [line, line], removed: [] }],
     { moved },
   )
@@ -838,11 +832,11 @@ test('supplementErrors：搬家豁免只抵一次（同一行新增两处仍红�
   assert.match(errors[0], /不是通用的/)
 })
 
-test('supplementErrors：从 loop 删掉同一行再加进 sdk ⇒ 仍红（反向拆分，D-247）', () => {
+test('supplementErrors：从 loop 删掉同一行再加进 sdk ⇒ 仍红（反向拆分，）', () => {
   // 文件没被删掉，只是删了一行：那不是搬家，是把定制通道塞进机制面。
   const line = 'if meta == "notes" { return }'
   const moved = movedLines(patchOf([{ path: LOOP, added: [], removed: [line] }]))
-  const [e] = supp('feat: 端口\n\nCore-Change: D-219', [{ path: CORE, added: [line], removed: [] }], { moved })
+  const [e] = supp('feat: 端口\n\nCore-Change: EX-007 共享类型只能住机制层', [{ path: CORE, added: [line], removed: [] }], { moved })
   assert.match(e, /不是通用的/)
 })
 
@@ -871,7 +865,7 @@ test('常量：起点与夹具各自带理由，且不是同一个提交', () =>
   assert.notEqual(FIXTURE.sha, BEFORE_GUARD.sha)
 })
 
-// ── 累计付账线（D-372）────────────────────────────────────────────────────
+// ── 累计付账线（）────────────────────────────────────────────────────
 
 test('supplementRatioReading：欠账按「新增补件 − 新增迁移」算，不按比值算', () => {
   const stock = { supplements: 21, migrations: 15 }
@@ -895,7 +889,7 @@ test('supplementRatioReading：没有迁移时比值为 ∞（不是 NaN）', ()
   assert.equal(supplementRatioReading({ supplements: 3, migrations: 0, stock: { supplements: 0, migrations: 0 } }).ratio, Infinity)
 })
 
-// ── 绝对欠账的期限与台阶（D-375）──────────────────────────────────────────
+// ── 绝对欠账的期限与台阶（）──────────────────────────────────────────
 
 test('debtAllowance：起算日宽限到本金，检查点当天降档，末点归零', () => {
   const initialDebt = 6
@@ -945,31 +939,30 @@ test('validateDebtSchedule：真表合法；平台阶 / 末点非 0 / 日期倒�
   assert.match(validateDebtSchedule(back, 6).join('；'), /严格递增/)
 })
 
-// ── 到期豁免（D-403）──────────────────────────────────────────────────────
+// ── 到期豁免（）──────────────────────────────────────────────────────
 
 test('activeDebtExemption：期限当天仍有效、次日失效', () => {
-  const decisions = new Set(['D-403'])
-  const entry = { decision: 'D-403', through: '2026-11-12', reason: '欠账 7 来自 T-053 待搬' }
-  assert.equal(activeDebtExemption({ today: '2026-11-09', decisions, exemptions: [entry] }), entry)
-  assert.equal(activeDebtExemption({ today: '2026-11-12', decisions, exemptions: [entry] }), entry)
-  assert.equal(activeDebtExemption({ today: '2026-11-13', decisions, exemptions: [entry] }), null)
+  
+  const entry = { decision: '', through: '2026-11-12', reason: '欠账 7 来自 T-053 待搬' }
+  assert.equal(activeDebtExemption({ today: '2026-11-09', exemptions: [entry] }), entry)
+  assert.equal(activeDebtExemption({ today: '2026-11-12', exemptions: [entry] }), entry)
+  assert.equal(activeDebtExemption({ today: '2026-11-13', exemptions: [entry] }), null)
 })
 
-test('activeDebtExemption：决策号打不开或理由为空 ⇒ 不生效（匿名豁免等于没写）', () => {
-  const entry = { decision: 'D-403', through: '2026-11-12', reason: '欠账 7 来自 T-053 待搬' }
-  assert.equal(activeDebtExemption({ today: '2026-11-09', decisions: new Set(), exemptions: [entry] }), null)
+test('activeDebtExemption：理由为空 ⇒ 不生效（匿名豁免等于没写）', () => {
+  const entry = { decision: '', through: '2026-11-12', reason: '欠账 7 来自 T-053 待搬' }
+  assert.equal(activeDebtExemption({ today: '2026-11-09', exemptions: [{ ...entry, reason: '  ' }] }), null)
   assert.equal(
     activeDebtExemption({
       today: '2026-11-09',
-      decisions: new Set(['D-403']),
       exemptions: [{ ...entry, reason: '  ' }],
     }),
     null,
   )
 })
 
-test('DEBT_EXEMPTIONS：真仓条目有决策号 / 可读日期 / 非空理由', () => {
-  // 空表合法（欠账清零后豁免撤下，D-403 收口）；有条目则每条必须形状合规。
+test('DEBT_EXEMPTIONS：真仓条目有可读日期 / 非空理由', () => {
+  // 空表合法（欠账清零后豁免撤下， 收口）；有条目则每条必须形状合规。
   for (const e of DEBT_EXEMPTIONS) {
     assert.match(e.decision, /^D-\d+$/)
     assert.match(e.through, /^\d{4}-\d{2}-\d{2}$/)

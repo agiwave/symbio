@@ -14,24 +14,24 @@
  *
  * | 生成物 | 真源 |
  * |---|---|
- * | `MECHANISMS` | [DE-001 §8 权威参数表](../../docs/003-design/001-核心架构.md "DE-001-核心架构") 的「参数键」列 |
- * | `DOMAINS` | DE-001 §8 的「取值域」列——读法写在那张表下面，`↳ §N` 的集合去那一节读 |
- * | `DIMENSIONS` / `AXES` / `AXIS_POLARITIES` | [DE-008 §2 五维表 / §3 五轴表（末两列是极性）](../../docs/003-design/008-能力注册表与能力坐标系.md "DE-008-能力注册表与能力坐标系") |
- * | `LEVEL_MAX` / `TIER_MAX` / `TIER_CORES` | DE-008 §3.1 刻度表（**列数** = 等级格数）/ §3.2 天梯表 |
- * | `OVERLAP_LIMIT` / `DECLARED_OVERLAP` | DE-008 §3.3 共线上限与登记表 |
+ * | `MECHANISMS` | [DE-001 §9 权威参数表](../../docs/003-design/001-核心架构.md "DE-001-核心架构") 的「参数键」列 |
+ * | `DOMAINS` | DE-001 §9 的「取值域」列——读法写在那张表下面，`↳ §N` 的集合去那一节读 |
+ * | `DIMENSIONS` / `AXES` / `AXIS_POLARITIES` | [DE-008 §1 五维表 / §3 五轴表（末两列是极性）](../../docs/003-design/008-能力注册表与能力坐标系.md "DE-008-能力注册表与能力坐标系") |
+ * | `LEVEL_MAX` / `TIER_MAX` / `TIER_CORES` | DE-008 §2.1 刻度表（**列数** = 等级格数）/ §3.2 天梯表 |
+ * | `OVERLAP_LIMIT` / `DECLARED_OVERLAP` | DE-008 §2.3 共线上限与登记表 |
  * | `CAPABILITIES` / `KINDS` | DE-008 §6.1 能力名册（七列）与类型闭集表 |
- * | `DECLARED_*` | DE-008 §2「条数」列、§6.2 生长位表、§7 社交能力表——**是被验的声明** |
- * | `PSEUDO` | DE-008 §5 伪高阶表的「说法」列 |
+ * | `DECLARED_*` | DE-008 §1「条数」列、§6.2 生长位表、§7 社交能力表——**是被验的声明** |
+ * | `PSEUDO` | DE-008 §4 伪高阶表的「说法」列 |
  * | `STAGE_CLAIMS` | [DE-030 阶梯总表](../../docs/003-design/030-能力阶梯总览.md "DE-030-能力阶梯总览") |
  * | `STAGE_DOCS` | 每阶 `1(2N)N-*.md`（–133）§3 的 ```capability-assign``` 块 + §4 的加粗平凡值行 |
  * | `COGNITIVE_DEMANDS` | [DE-040 §1 需求表](../../docs/003-design/040-个人认知体系注入.md "DE-040-个人认知体系注入")——全仓唯一一份认知体系需求清单 |
  *
- * **顶层键 vs 子键**：`projection.param` 在 §8 里与顶层键同列一张表，但 DE-001 §8 自己写明
+ * **顶层键 vs 子键**：`projection.param` 在 §9 里与顶层键同列一张表，但 DE-001 §9 自己写明
  * 「它不是第 11 个机制键，是 `projection` 的子键」。判据因此是形状而非名单：
  * 键名带 `.` 且首段本身也是一个登记的键 ⇒ 子键。这条规则同时终结了「机制键 10 还是 11」
  * 的口径分歧，因为它把答案交给了表本身。
  *
- * **取值域**：§8 的「取值域」列是**形态列表**，生成器据此核对每阶 §3 赋值、§4 退路口
+ * **取值域**：§9 的「取值域」列是**形态列表**，生成器据此核对每阶 §3 赋值、§4 退路口
  * 与认知需求落点的**取值**——越界即抛。「0 值域扩展」由此是个算出来的结论，而不是一个恒为假的标志位。
  * 表里写 `*` 的键（`principal` = 身份是数据、`actor.budget_ms` = 数值参数）是**开放值域**：
  * 不判取值，且程序把这件事报出来。同一条判据在生成物里有一份 Rust 镜像（`facts` 的
@@ -75,19 +75,24 @@ const read = (rel) => fs.readFileSync(path.join(repoRoot, rel), 'utf8')
 const KEY_RE = /^[a-z][a-z0-9_]*(\.[a-z][a-z0-9_]*)*$/
 
 /**
- * DE-001 §8 → `{ all: 全部参数键（含子键）, top: 顶层机制键 }`。
+ * DE-001 §9 → `{ all: 全部参数键（含子键）, top: 顶层机制键 }`。
  *
  * `top` 的判据是**子键规则**：`X.Y` 且 `X` 也在表里 ⇒ `X.Y` 是 `X` 的子键，不另计一个机制。
  * 名单会漂移（谁记得 `projection.param` 算不算），规则不会。
  */
 export function mechanismsOf(archMd) {
   const table = tableWithHeader(archMd, '参数键')
-  if (!table) throw new Error(`${ARCH_REL}：找不到「参数键」表头的那张表——DE-001 §8 的表头改了？`)
-  if (table.header.length < 4 || plain(table.header[2]) !== '平凡值') {
-    throw new Error(`${ARCH_REL} §8：表头不是「参数键 / 取值域 / 平凡值 / 用于」四列，实际是 ${table.header.join(' | ')}`)
+  if (!table) throw new Error(`${ARCH_REL}：找不到「参数键」表头的那张表——DE-001 §9 的表头改了？`)
+  const cols = table.header.map(plain)
+  const shapeOk =
+    cols.length >= 3 && cols[0] === '参数键' && cols[1].includes('取值域') && cols.some((c) => c.includes('平凡值'))
+  if (!shapeOk) {
+    throw new Error(
+      `${ARCH_REL} §9：表头缺「参数键 / 取值域 / 平凡值」这三列（列序不限，中间可夹用途之类），实际是 ${cols.join(' | ')}`,
+    )
   }
   const all = table.rows.map((r) => plain(r[0])).filter((k) => KEY_RE.test(k))
-  if (all.length === 0) throw new Error(`${ARCH_REL} §8：表里没有解析出任何参数键`)
+  if (all.length === 0) throw new Error(`${ARCH_REL} §9：表里没有解析出任何参数键`)
   const known = new Set(all)
   const top = all.filter((k) => !(k.includes('.') && known.has(k.split('.')[0])))
   return { all, top }
@@ -95,7 +100,7 @@ export function mechanismsOf(archMd) {
 
 /**
  * 一个键的取值域：**形态匹配**，`<…>` 是通配段（`child:<id>` 匹配任何 `child:x`）。
- * 只支持「通配段在末尾」与「通配段被字面量夹住」两种形状——§8 用不到更多，
+ * 只支持「通配段在末尾」与「通配段被字面量夹住」两种形状——§9 用不到更多，
  * 出现第三种就让它匹配失败（红），而不是静默按字面比。
  */
 export function formMatches(form, value) {
@@ -121,8 +126,8 @@ function sectionOf(md, headingRe, label, where) {
 }
 
 /**
- * `↳ §N` 指向的那张网格表：表头是「实体 × 动词」，实体在首列、动词在首行。
- * 值域由网格自己拥有——加一格事件不必动 §8，这正是 [DE-001 §6] 说的「维护一张有限网格，
+ * `↳ §N` 指向的那张网格表：首列表头写「实体」（或「实体 × 动词」），首行其余格是动词。
+ * 值域由网格自己拥有——加一格事件不必动 §9，这正是 [DE-001 §7] 说的「维护一张有限网格，
  * 不维护会膨胀的名字列表」。
  */
 function gridOf(archMd, secNo, role) {
@@ -131,7 +136,7 @@ function gridOf(archMd, secNo, role) {
   const lines = sec.split(/\r?\n/)
   for (let i = 0; i < lines.length; i++) {
     const head = cellsOf(lines[i])
-    if (!head || !head[0].includes('实体') || !head[0].includes('动词')) continue
+    if (!head || !head[0].includes('实体') || head.length < 2) continue
     const sep = cellsOf(lines[i + 1] || '')
     if (!sep || !isSeparator(sep)) continue
     const rows = []
@@ -148,15 +153,15 @@ function gridOf(archMd, secNo, role) {
 }
 
 /**
- * DE-001 §8 的「取值域」列 → 每个键的值域。读法（`/` 分隔的形态 · `<…>` 通配段 · `*` 开放值域 ·
- * `↳ §N 角色` 去另一张表读）权威说明在 DE-001 §8 表下那条注里，这里是它的实现。
+ * DE-001 §9 的「取值域」列 → 每个键的值域。读法（`/` 分隔的形态 · `<…>` 通配段 · `*` 开放值域 ·
+ * `↳ §N 角色` 去另一张表读）权威说明在 DE-001 §9 表下那条注里，这里是它的实现。
  *
  * 读不懂一律抛错。「`…`」（省略号）这种过去的写法**故意不再合法**：它等于宣布
  * 「这一格的集合不完备」，而值域不完备时「0 值域扩展」就无从判起。
  */
 export function domainsOf(archMd) {
   const table = tableWithHeader(archMd, '参数键')
-  if (!table) throw new Error(`${ARCH_REL} §8：找不到参数表`)
+  if (!table) throw new Error(`${ARCH_REL} §9：找不到参数表`)
   const domains = new Map()
   for (const row of table.rows) {
     const key = plain(row[0])
@@ -174,17 +179,17 @@ export function domainsOf(archMd) {
       const m = s.match(/^`([^`]+)`(.*)$/)
       if (!m) {
         throw new Error(
-          `${ARCH_REL} §8：\`${key}\` 的取值域有一节不是反引号形态：\`${s}\`` +
+          `${ARCH_REL} §9：\`${key}\` 的取值域有一节不是反引号形态：\`${s}\`` +
             '（形态之间用 `/` 分隔；开放值域写成 `` `*` ``；`（…）` 注解里不能出现 `/`，那是分隔符）',
         )
       }
       const note = m[2].trim()
       if (note && !/^（[^）]*）$/.test(note)) {
-        throw new Error(`${ARCH_REL} §8：\`${key}\` 的形态 \`${m[1]}\` 后面跟着读不懂的东西：${note}`)
+        throw new Error(`${ARCH_REL} §9：\`${key}\` 的形态 \`${m[1]}\` 后面跟着读不懂的东西：${note}`)
       }
       if (m[1].startsWith('↳')) {
         throw new Error(
-          `${ARCH_REL} §8：\`${key}\` 的出处写法读不出来：\`${m[1]}\`——只能是 \`↳ §N 实体\` 或 \`↳ §N 动词\``,
+          `${ARCH_REL} §9：\`${key}\` 的出处写法读不出来：\`${m[1]}\`——只能是 \`↳ §N 实体\` 或 \`↳ §N 动词\``,
         )
       }
       if (m[1] === '*') {
@@ -194,10 +199,10 @@ export function domainsOf(archMd) {
       forms.push(m[1])
     }
     if (open && forms.length) {
-      throw new Error(`${ARCH_REL} §8：\`${key}\` 的取值域既写了 \`*\`（开放）又列了形态——开放就整个开放`)
+      throw new Error(`${ARCH_REL} §9：\`${key}\` 的取值域既写了 \`*\`（开放）又列了形态——开放就整个开放`)
     }
     if (!open && !forms.length) {
-      throw new Error(`${ARCH_REL} §8：\`${key}\` 的取值域读不出任何形态：\`${cell}\``)
+      throw new Error(`${ARCH_REL} §9：\`${key}\` 的取值域读不出任何形态：\`${cell}\``)
     }
     domains.set(key, { key, forms, open })
   }
@@ -205,15 +210,15 @@ export function domainsOf(archMd) {
 }
 
 /**
- * 赋值 `key = value` 是否落在 §8 声明的值域内。三条放行路径：
+ * 赋值 `key = value` 是否落在 §9 声明的值域内。三条放行路径：
  * ① 该键是开放值域；② 值匹配该键的某个形态；③ **带子键参数的取值**——
  * `projection = recall:tag=judgment` 合法的条件是「`recall` 是 `projection` 的取值」
  * **且**「`recall:tag=judgment` 是 `projection.param` 的取值」。
- * ③ 不是给投影开的特例：判据是「§8 里登记了 `key.*` 这一行」，谁有子键谁可用。
+ * ③ 不是给投影开的特例：判据是「§9 里登记了 `key.*` 这一行」，谁有子键谁可用。
  */
 export function inDomain(domains, key, value) {
   const d = domains.get(key)
-  if (!d) throw new Error(`§8 里没有 \`${key}\` 这一行——无法判它的取值`)
+  if (!d) throw new Error(`§9 里没有 \`${key}\` 这一行——无法判它的取值`)
   if (d.open) return true
   if (d.forms.some((f) => formMatches(f, value))) return true
   for (const [sub, sd] of domains) {
@@ -229,7 +234,7 @@ function assertValue(domains, key, value, where) {
   if (inDomain(domains, key, value)) return
   const d = domains.get(key)
   throw new Error(
-    `${where}：\`${key} = ${value}\` 越出 DE-001 §8 声明的取值域（${d.forms.join(' / ')}）——` +
+    `${where}：\`${key} = ${value}\` 越出 DE-001 §9 声明的取值域（${d.forms.join(' / ')}）——` +
       '这就是**值域扩展**：要么这一行漏登记了它，要么这一处真的需要扩值域，后者走 DE-016 §3 的 ADR',
   )
 }
@@ -257,72 +262,72 @@ export function frameOf(frameMd) {
     if (!Number.isInteger(n)) throw new Error(`${FRAME_REL}：${where} 读不出整数：\`${s}\``)
     return n
   }
-  /** 反引号里那一个 token（§3 的「要求的性质 / 禁止的性质」两列） */
+  /** 反引号里那一个 token（§2 的「要求的性质 / 禁止的性质」两列） */
   const token = (cell, where) => {
     const m = (cell || '').match(/`([^`]+)`/)
     if (!m) throw new Error(`${FRAME_REL}：${where} 不是反引号形态——这两格是**极性**，必须写成 \`token\``)
     return m[1]
   }
 
-  const dims = table('维度', /^## 2\./, '§2 五维表')
+  const dims = table('维度', /^## 1\./, '§1 五维表')
   if (dims.header.length < 4) {
-    throw new Error(`${FRAME_REL} §2：五维表不足四列（维度 / 回答 / 内涵 / 条数），实际 ${dims.header.length} 列`)
+    throw new Error(`${FRAME_REL} §1：五维表不足四列（维度 / 回答 / 内涵 / 条数），实际 ${dims.header.length} 列`)
   }
   const dimensions = dims.rows.map((r) => plain(r[0]).split(/\s+/)[0])
-  const dimCounts = dims.rows.map((r, i) => [dimensions[i], int(plain(r[3]), `§2「${dimensions[i]}」的条数`)])
+  const dimCounts = dims.rows.map((r, i) => [dimensions[i], int(plain(r[3]), `§1「${dimensions[i]}」的条数`)])
 
-  // §3 五轴表：末两列是**极性**（要求 / 禁止），不是描述。判据见 DE-008 §3——
+  // §2 五轴表：末两列是**极性**（要求 / 禁止），不是描述。判据见 DE-008 §1——
   // 两轴的要求与禁止完全相同 ⇒ 同一条轴；A 的要求命中 B 的禁止 ⇒ 互相抵消。
-  const axesTable = table('轴', /^## 3\./, '§3 五轴表')
+  const axesTable = table('轴', /^## 2\./, '§2 五轴表')
   if (axesTable.header.length !== 5) {
     throw new Error(
-      `${FRAME_REL} §3：五轴表必须是「轴 / 低阶 / 高阶 / 要求的性质 / 禁止的性质」五列，实际 ${axesTable.header.join(' | ')}`,
+      `${FRAME_REL} §2：五轴表必须是「轴 / 低阶 / 高阶 / 要求的性质 / 禁止的性质」五列，实际 ${axesTable.header.join(' | ')}`,
     )
   }
   const axes = axesTable.rows.map((r) => plain(r[0]))
   const polarities = axesTable.rows.map((r) => ({
     axis: plain(r[0]),
-    requires: token(r[3], `§3「${plain(r[0])}」要求的性质`),
-    forbids: token(r[4], `§3「${plain(r[0])}」禁止的性质`),
+    requires: token(r[3], `§2「${plain(r[0])}」要求的性质`),
+    forbids: token(r[4], `§2「${plain(r[0])}」禁止的性质`),
   }))
 
-  // §3.1 刻度表：列数 = 等级数。刻度的格数是**算出来的**，程序不写死「四级」——
+  // §2.1 刻度表：列数 = 等级数。刻度的格数是**算出来的**，程序不写死「四级」——
   // 刻度加一级而程序上限不动，断言会以「越界等级」把新一级漏在判据之外。
-  const rubric = table('轴', /^### 3\.1/, '§3.1 五轴刻度表')
+  const rubric = table('轴', /^### 2\.1/, '§2.1 五轴刻度表')
   const levelMax = rubric.header.length - 1
-  if (levelMax < 2) throw new Error(`${FRAME_REL} §3.1：刻度表只有 ${levelMax} 级（表头 ${rubric.header.join(' | ')}）`)
+  if (levelMax < 2) throw new Error(`${FRAME_REL} §2.1：刻度表只有 ${levelMax} 级（表头 ${rubric.header.join(' | ')}）`)
   const rubricAxes = rubric.rows.map((r) => plain(r[0]))
   const missingRubric = axes.filter((a) => !rubricAxes.includes(a))
   if (missingRubric.length) {
-    throw new Error(`${FRAME_REL} §3.1：刻度表少了 ${missingRubric.join(', ')}——每条轴都要有刻度，缺一条那条轴就没有刻度`)
+    throw new Error(`${FRAME_REL} §2.1：刻度表少了 ${missingRubric.join(', ')}——每条轴都要有刻度，缺一条那条轴就没有刻度`)
   }
 
-  // §3.2 天梯表：「核心能力」列必须逐条对应名册里**该级**的行，故按顿号切开带走。
-  const tierTable = table('级', /^### 3\.2/, '§3.2 天梯表')
-  if (!tierTable.rows.length) throw new Error(`${FRAME_REL} §3.2：天梯表没有行`)
+  // §2.2 天梯表：「核心能力」列必须逐条对应名册里**该级**的行，故按顿号切开带走。
+  const tierTable = table('级', /^### 2\.2/, '§2.2 天梯表')
+  if (!tierTable.rows.length) throw new Error(`${FRAME_REL} §2.2：天梯表没有行`)
   const tierCores = tierTable.rows.map((r) => ({
-    tier: int(plain(r[0]).replace(/^T/i, ''), '§3.2 的天梯级'),
+    tier: int(plain(r[0]).replace(/^T/i, ''), '§2.2 的天梯级'),
     names: plain(r[2])
       .split(/[、,]/)
       .map((s) => s.trim())
       .filter(Boolean),
   }))
-  if (tierCores.some((t) => !t.names.length)) throw new Error(`${FRAME_REL} §3.2：有一级的「核心能力」列是空的`)
+  if (tierCores.some((t) => !t.names.length)) throw new Error(`${FRAME_REL} §2.2：有一级的「核心能力」列是空的`)
 
-  // §3.3 共线登记：上限写在正文里（`超限上限 = N`），逐条登记写在表里。
-  const overlapSec = section(/^### 3\.3/, '§3.3 共线上限与登记')
+  // §2.3 共线登记：上限写在正文里（`超限上限 = N`），逐条登记写在表里。
+  const overlapSec = section(/^### 2\.3/, '§2.3 共线上限与登记')
   const limitMatch = overlapSec.match(/超限上限\s*=\s*\*{0,2}(\d+)/)
   if (!limitMatch) {
-    throw new Error(`${FRAME_REL} §3.3：读不出「超限上限 = N」——上限是判断，必须写出来（不写等于没有上限）`)
+    throw new Error(`${FRAME_REL} §2.3：读不出「超限上限 = N」——上限是判断，必须写出来（不写等于没有上限）`)
   }
-  const overlapLimit = int(limitMatch[1], '§3.3 的超限上限')
-  const overlap = table('轴对', /^### 3\.3/, '§3.3 共线登记表').rows.map((r) => {
+  const overlapLimit = int(limitMatch[1], '§2.3 的超限上限')
+  const overlap = table('轴对', /^### 2\.3/, '§2.3 共线登记表').rows.map((r) => {
     const parts = plain(r[0]).split('×').map((x) => x.trim())
-    if (parts.length !== 2) throw new Error(`${FRAME_REL} §3.3：轴对必须写成「轴 × 轴」，实际 \`${r[0]}\``)
+    if (parts.length !== 2) throw new Error(`${FRAME_REL} §2.3：轴对必须写成「轴 × 轴」，实际 \`${r[0]}\``)
     if (axes.indexOf(parts[0]) < 0 || axes.indexOf(parts[1]) < 0) {
-      throw new Error(`${FRAME_REL} §3.3：\`${r[0]}\` 里有一条不是 §3 的轴`)
+      throw new Error(`${FRAME_REL} §2.3：\`${r[0]}\` 里有一条不是 §2 的轴`)
     }
-    return [parts[0], parts[1], int(plain(r[1]), `§3.3「${plain(r[0])}」的阶数`)]
+    return [parts[0], parts[1], int(plain(r[1]), `§2.3「${plain(r[0])}」的阶数`)]
   })
 
   // §6.1 名册：七列（+ 可选的第八列「锚点」+ 可选的第九列「实现状态」）。「落点」把
@@ -381,13 +386,13 @@ export function frameOf(frameMd) {
     }
   })
 
-  const pseudo = table('说法', /^## 5\./, '§5 伪高阶表').rows.map((r) => plain(r[0]))
+  const pseudo = table('现象', /^## 4\./, '§4 伪高阶表').rows.map((r) => plain(r[0]))
   const growth = table('空格', /^### 6\.2/, '§6.2 生长位表').rows.map((r) => {
     const parts = plain(r[0]).split('×').map((x) => x.trim())
     if (parts.length !== 2) throw new Error(`${FRAME_REL} §6.2：空格必须写成「维 × 轴」，实际 \`${r[0]}\``)
     return parts
   })
-  const social = table('能力', /^## 7\./, '§7 社会性表').rows.map((r) => [plain(r[0]), plain(r[1])])
+  const social = table('能力', /^### 6\.3/, '§6.3 社会性表').rows.map((r) => [plain(r[0]), plain(r[1])])
 
   return {
     dimensions,
@@ -430,26 +435,30 @@ export function assignsOf(stageMd, where) {
 }
 
 /**
- * 一阶的 §4 表 → 本阶的退路口 `(键, 平凡值)`。
+ * 一阶的「平凡值与回退」表 → 本阶的退路口 `(键, 平凡值)`。
  *
  * 只认**平凡值单元格带 `**`** 的那一行；先按机制表（`mechanisms`）滤掉不是机制键的行
- * （的 `ConationPolicy.enabled` 是策略字段，不是机制键，它加粗是因为那一行是「欲」
- * 的开关说明——不是阶梯的退路口）。0 行或 >1 行都抛错：退路口是每阶唯一的一处。
+ * （策略字段不是机制键，它加粗只是开关说明，不是阶梯的退路口）。0 行或 >1 行都抛错：
+ * 退路口是每阶唯一的一处。
  */
 export function fallbackOf(stageMd, mechanisms, where) {
-  // 只在 §4 那一节里找：文档里 `| 参数 | … |` 开头的表不止一张（的 §3.1 也有一张），
-  // 而「退路口」是 §4 定义的，按节限定比按出现顺序猜稳。
-  const heading = stageMd.split(/\r?\n/).findIndex((l) => /^## 4\./.test(l))
-  if (heading < 0) throw new Error(`${where}：没有「## 4. 平凡值与回退」这一节`)
+  // 按**小节标题**定位，不写死节号：阶梯文档里「能力阶梯赋值 / 平凡值与回退」的编号随
+  // 内容多少而变，按节号猜会把上一节的表读成本阶的退路口。
+  const heading = stageMd.split(/\r?\n/).findIndex((l) => /^##\s+\d+\.\s*平凡值/.test(l))
+  if (heading < 0) throw new Error(`${where}：没有「平凡值与回退」这一节`)
   const table = tableWithHeader(stageMd, '参数', { fromLine: heading })
-  if (!table) throw new Error(`${where}：§4 里找不到「参数 / 完整值 / 平凡值」表`)
+  if (!table) throw new Error(`${where}：「平凡值与回退」一节里找不到首列为「参数」的表`)
+  const col = table.header.findIndex((h) => plain(h).includes('平凡值'))
+  if (col < 0) {
+    throw new Error(`${where}：退路口表的表头读不出「平凡值」列，实际 ${table.header.join(' | ')}`)
+  }
   const rows = table.rows
-    .map((r) => ({ key: plain(r[0]), trivial: (r[2] || '').trim() }))
+    .map((r) => ({ key: plain(r[0]), trivial: (r[col] || '').trim() }))
     .filter((x) => mechanisms.includes(x.key))
   const bolded = rows.filter((x) => x.trivial.includes('**'))
   if (bolded.length !== 1) {
     throw new Error(
-      `${where}：§4 里平凡值加粗的机制键行应有且只有 1 行（那是本阶的退路口），实际 ${bolded.length} 行：` +
+      `${where}：「平凡值与回退」里平凡值加粗的机制键行应有且只有 1 行（那是本阶的退路口），实际 ${bolded.length} 行：` +
         `${rows.map((x) => x.key).join(', ')}`,
     )
   }
@@ -460,7 +469,7 @@ export function fallbackOf(stageMd, mechanisms, where) {
  * DE-040 §2 的需求映射表 → 认知体系的 16 条需求（`(键, 取值)` 向量 + 归属阶段）。
  *
  * 这张表**是全仓唯一一份**这份清单的地方：此前它抄在 `cognitive_fit.rs` 里，程序拿着
- * 手填的 `extends_domain` 标志宣布「无需扩值域」，而没有任何东西把它的取值与 §8 对过。
+ * 手填的 `extends_domain` 标志宣布「无需扩值域」，而没有任何东西把它的取值与 §9 对过。
  * 落点格只认两种写法——逐项 `` `键 = 取值` ``，或以 `—` 开头说明这条需求**不占参数面**。
  * 第三种写法（漏了反引号、把赋值写成散文）一律抛错：静默少验一条需求，比不验更坏。
  */
@@ -559,17 +568,17 @@ export function buildFacts({ archMd, frameMd, ladderMd, stageMds, dirEntries }) 
     }
     for (const [k, v] of assigns) {
       if (!all.includes(k)) {
-        throw new Error(`${where}：赋值块用了不在 DE-001 §8 参数表里的键 \`${k}\`——新增机制键要走 ADR，不是走文档笔误`)
+        throw new Error(`${where}：赋值块用了不在 DE-001 §9 参数表里的键 \`${k}\`——新增机制键要走 ADR，不是走文档笔误`)
       }
       assertValue(domains, k, v, where)
     }
     const fallback = fallbackOf(md, top, where)
-    assertValue(domains, fallback[0], fallback[1], `${where} §4 退路口`)
+    assertValue(domains, fallback[0], fallback[1], `${where} 平凡值与回退`)
     return { id, file, assigns, fallback }
   })
 
-  // 认知体系的需求清单：同一套判据（键 ∈ §8、取值 ∈ §8 的值域）套到**外部体系**提出的
-  // 需求上。M8 立这条判据时就是在这里撞出标注与 §8 不符的（M9）。
+  // 认知体系的需求清单：同一套判据（键 ∈ §9、取值 ∈ §9 的值域）套到**外部体系**提出的
+  // 需求上。M8 立这条判据时就是在这里撞出标注与 §9 不符的（M9）。
   const s10 = files.find((f) => f.id === 'S10')
   if (!s10) throw new Error(`${STAGE_DIR_REL}：没有 S10 阶文档——认知体系需求映射表的 owner 不见了`)
   const s10Md = stageMds.S10
@@ -579,7 +588,7 @@ export function buildFacts({ archMd, frameMd, ladderMd, stageMds, dirEntries }) 
   for (const d of demands) {
     for (const [k, v] of d.assignments) {
       if (!all.includes(k)) {
-        throw new Error(`${s10Where} §2 ${d.id}：落点用了不在 DE-001 §8 参数表里的键 \`${k}\`——新增机制键要走 ADR，不是走文档笔误`)
+        throw new Error(`${s10Where} §2 ${d.id}：落点用了不在 DE-001 §9 参数表里的键 \`${k}\`——新增机制键要走 ADR，不是走文档笔误`)
       }
       assertValue(domains, k, v, `${s10Where} §2 ${d.id}`)
     }
@@ -588,21 +597,21 @@ export function buildFacts({ archMd, frameMd, ladderMd, stageMds, dirEntries }) 
   const rs = (s) => `"${String(s).replace(/\\/g, '\\\\').replace(/"/g, '\\"')}"`
   const out = []
   out.push('// 生成物：由 `scripts/gens/gen-verify-facts.mjs` 从 docs/003-design（核心架构 / 坐标系 / 能力阶梯）抽取，**不要手改**。')
-  out.push('// 要改这些数据就改文档（DE-001 §8 / 02 坐标系 / 阶梯总表 / 各阶 §3·§4 / DE-040 §2），再重跑生成脚本。')
+  out.push('// 要改这些数据就改文档（DE-001 §9 / 02 坐标系 / 阶梯总表 / 各阶 §3·§4 / DE-040 §2），再重跑生成脚本。')
   out.push('//')
   out.push('// 每个 verify 程序都是一个**独立的 crate**，各自只 `use` 下面的一部分；')
   out.push('// 没被某个程序读到的那些不是死码，是另一个程序在读。这里判死码只会制造噪音，')
-  out.push('// 所以整模块关掉这条 lint。模块里唯一的逻辑是 §8 取值域语法的 Rust 镜像（`in_domain`）——')
+  out.push('// 所以整模块关掉这条 lint。模块里唯一的逻辑是 §9 取值域语法的 Rust 镜像（`in_domain`）——')
   out.push('// 它必须只有一份：判据抄进第二个程序，同一个输入就可能只翻红一处。')
   out.push('#![allow(dead_code)]')
   out.push('')
-  out.push('/// DE-001 §8 的顶层机制键（`projection.param` 这类子键不计，判据见生成器注释）')
+  out.push('/// DE-001 §9 的顶层机制键（`projection.param` 这类子键不计，判据见生成器注释）')
   out.push(`pub const MECHANISMS: &[&str] = &[${top.map((k) => `\n    ${rs(k)},`).join('')}\n];`)
   out.push('')
-  out.push('/// DE-001 §8 参数表里登记的全部键（含子键）——赋值块的合法词表')
+  out.push('/// DE-001 §9 参数表里登记的全部键（含子键）——赋值块的合法词表')
   out.push(`pub const PARAM_KEYS: &[&str] = &[${all.map((k) => `\n    ${rs(k)},`).join('')}\n];`)
   out.push('')
-  out.push('/// DE-001 §8 一行的**取值域**。`open` = 表里写成 `*` 的开放值域（数据，不判取值）；')
+  out.push('/// DE-001 §9 一行的**取值域**。`open` = 表里写成 `*` 的开放值域（数据，不判取值）；')
   out.push('/// `forms` 里的 `<…>` 是通配段（`child:<id>` 匹配任何 `child:x`），标了 `↳ §N` 的')
   out.push('/// 集合已由生成器从那张表读成逐项形态。')
   out.push(`pub struct Domain {
@@ -621,13 +630,13 @@ export function buildFacts({ archMd, frameMd, ladderMd, stageMds, dirEntries }) 
     .join('')
   out.push(`pub const DOMAINS: &[Domain] = &[${domainLiterals}\n];`)
   out.push('')
-  out.push(`/// DE-001 §8 取值域语法的 Rust 镜像（本生成物里唯一的逻辑，供各 verify 程序共用——
+  out.push(`/// DE-001 §9 取值域语法的 Rust 镜像（本生成物里唯一的逻辑，供各 verify 程序共用——
 /// 判据抄两份，同一个输入就可能只翻红一处）。三条放行路径：
-/// ① 键是**开放值域**（§8 那格写 \`*\`，如 \`principal\` = 身份是数据）；
+/// ① 键是**开放值域**（§9 那格写 \`*\`，如 \`principal\` = 身份是数据）；
 /// ② 值匹配该键的某个形态（\`<…>\` 是通配段：\`child:<id>\` 匹配任何 \`child:x\`）；
 /// ③ **带子键参数的取值**——\`projection = recall:tag=judgment\` 合法的条件是「\`recall\`
 ///    是 \`projection\` 的取值」**且**「整串是 \`projection.*\` 某个子键的取值」。
-/// ③ 的判据是「§8 里登记了 \`key.*\` 这一行」，不是「这一格恰好叫 projection」。
+/// ③ 的判据是「§9 里登记了 \`key.*\` 这一行」，不是「这一格恰好叫 projection」。
 pub fn form_matches(form: &str, v: &str) -> bool {
     match (form.find('<'), form.find('>')) {
         (Some(i), Some(j)) if j > i => {
@@ -639,13 +648,13 @@ pub fn form_matches(form: &str, v: &str) -> bool {
     }
 }
 
-/// §8 里这个键的值域行。键没登记时返回 \`None\`——那不是越界**取值**，是越界**键**，
+/// §9 里这个键的值域行。键没登记时返回 \`None\`——那不是越界**取值**，是越界**键**，
 /// 由调用方按自己问的那个问题分辨（同一处红不该有两种说法）。
 pub fn domain_of(key: &str) -> Option<&'static Domain> {
     DOMAINS.iter().find(|d| d.key == key)
 }
 
-/// 赋值 \`key = value\` 是否落在 DE-001 §8 声明的值域内；键没登记 ⇒ 判不了 ⇒ false。
+/// 赋值 \`key = value\` 是否落在 DE-001 §9 声明的值域内；键没登记 ⇒ 判不了 ⇒ false。
 pub fn in_domain(key: &str, value: &str) -> bool {
     let Some(d) = domain_of(key) else { return false };
     if d.open || d.forms.iter().any(|f| form_matches(f, value)) {
@@ -660,13 +669,13 @@ pub fn in_domain(key: &str, value: &str) -> bool {
         })
 }`)
   out.push('')
-  out.push('/// DE-008 §2 的五维（名册「维」列的合法取值）')
+  out.push('/// DE-008 §1 的五维（名册「维」列的合法取值）')
   out.push(`pub const DIMENSIONS: &[&str] = &[${frame.dimensions.map((k) => `\n    ${rs(k)},`).join('')}\n];`)
   out.push('')
-  out.push('/// DE-008 §3 的五轴（名册「轴」列的合法取值）')
+  out.push('/// DE-008 §2 的五轴（名册「轴」列的合法取值）')
   out.push(`pub const AXES: &[&str] = &[${frame.axes.map((k) => `\n    ${rs(k)},`).join('')}\n];`)
   out.push('')
-  out.push('/// DE-008 §3 每条轴的**极性**：它要求什么性质、禁止什么性质。判据（`axis_orthogonality.rs`）：')
+  out.push('/// DE-008 §2 每条轴的**极性**：它要求什么性质、禁止什么性质。判据（`axis_orthogonality.rs`）：')
   out.push('/// 要求与禁止都相同 ⇒ 同一条轴（必须合并）；A 的要求命中 B 的禁止 ⇒ 两条轴互相抵消。')
   out.push('#[derive(Clone, Copy)]')
   out.push(`pub struct AxisPolarity {
@@ -683,7 +692,7 @@ pub fn in_domain(key: &str, value: &str) -> bool {
     )
     .join('')}\n];`)
   out.push('')
-  out.push('/// DE-008 §3.1 刻度表的**列数** = 等级的格数（L1..Ln）。名册「等级」列的上界取自这里，')
+  out.push('/// DE-008 §2.1 刻度表的**列数** = 等级的格数（L1..Ln）。名册「等级」列的上界取自这里，')
   out.push('/// 程序不写死「四级」——刻度加一级而判据不动，新一级就静默落在判据之外。')
   out.push(`pub const LEVEL_MAX: usize = ${frame.levelMax};`)
   out.push('')
@@ -695,7 +704,7 @@ pub fn in_domain(key: &str, value: &str) -> bool {
     .map((s) => `\n    ${rs(s)},`)
     .join('')}\n];`)
   out.push('')
-  out.push('/// DE-008 §3.2 天梯每一级的「核心能力」——必须逐条是名册里**该级**的行')
+  out.push('/// DE-008 §2.2 天梯每一级的「核心能力」——必须逐条是名册里**该级**的行')
   out.push(`pub struct TierCore {
     pub tier: usize,
     pub names: &'static [&'static str],
@@ -708,15 +717,15 @@ pub fn in_domain(key: &str, value: &str) -> bool {
     )
     .join('')}\n];`)
   out.push('')
-  out.push('/// DE-008 §3.3 的共线规则：同一对轴在多少阶里同时被抬起算**超限**（上限是判断，写在文档里）')
+  out.push('/// DE-008 §2.3 的共线规则：同一对轴在多少阶里同时被抬起算**超限**（上限是判断，写在文档里）')
   out.push(`pub const OVERLAP_LIMIT: usize = ${frame.overlapLimit};`)
   out.push('')
-  out.push('/// DE-008 §3.3 登记的超限轴对与它声明的阶数——**声明**，与程序算出的同集合才对')
+  out.push('/// DE-008 §2.3 登记的超限轴对与它声明的阶数——**声明**，与程序算出的同集合才对')
   out.push(`pub const DECLARED_OVERLAP: &[(&str, &str, usize)] = &[${frame.overlap
     .map(([a, b, n]) => `\n    (${rs(a)}, ${rs(b)}, ${n}),`)
     .join('')}\n];`)
   out.push('')
-  out.push('/// DE-008 §3.1 天梯的最高级——名册「天梯」列的取值上界')
+  out.push('/// DE-008 §2.1 天梯的最高级——名册「天梯」列的取值上界')
   out.push(`pub const TIER_MAX: usize = ${frame.tierMax};`)
   out.push('')
   out.push('/// DE-008 §6.1 名册的一行——坐标系审计的**输入**（全仓唯一一份能力名册就在文档里）')
@@ -746,12 +755,12 @@ pub fn in_domain(key: &str, value: &str) -> bool {
     )
     .join('')}\n];`)
   out.push('')
-  out.push('/// DE-008 §2「条数」列的**声明**——由名册算出后被验的结论，不是输入')
+  out.push('/// DE-008 §1「条数」列的**声明**——由名册算出后被验的结论，不是输入')
   out.push(`pub const DECLARED_DIM_COUNTS: &[(&str, usize)] = &[${frame.dimCounts
     .map(([d, n]) => `\n    (${rs(d)}, ${n}),`)
     .join('')}\n];`)
   out.push('')
-  out.push('/// DE-008 §5 表里的伪高阶说法——词表本体在文档，程序不再抄第二份')
+  out.push('/// DE-008 §4 表里的伪高阶说法——词表本体在文档，程序不再抄第二份')
   out.push(`pub const PSEUDO: &[&str] = &[${frame.pseudo.map((k) => `\n    ${rs(k)},`).join('')}\n];`)
   out.push('')
   out.push('/// DE-008 §6.2 声明的空格子（生长位）——必须与名册算出的空格子**同集合**')
@@ -759,7 +768,7 @@ pub fn in_domain(key: &str, value: &str) -> bool {
     .map(([d, a]) => `\n    (${rs(d)}, ${rs(a)}),`)
     .join('')}\n];`)
   out.push('')
-  out.push('/// DE-008 §7 声明的社会性能力（名 → 提升的轴）——名册里那些行的声明')
+  out.push('/// DE-008 §6.3 声明的社会性能力（名 → 提升的轴）——名册里那些行的声明')
   out.push(`pub const DECLARED_SOCIAL: &[(&str, &str)] = &[${frame.social
     .map(([n, a]) => `\n    (${rs(n)}, ${rs(a)}),`)
     .join('')}\n];`)
@@ -807,7 +816,7 @@ pub fn in_domain(key: &str, value: &str) -> bool {
 pub struct CognitiveDemand {
     pub id: &'static str,
     pub name: &'static str,
-    /// 落在 DE-001 §8 的哪些\`(键, 取值)\`上；**空 = 这条需求不占参数面**（文档里以 \`—\` 写明）
+    /// 落在 DE-001 §9 的哪些\`(键, 取值)\`上；**空 = 这条需求不占参数面**（文档里以 \`—\` 写明）
     pub assignments: &'static [(&'static str, &'static str)],
     /// 这条需求的落点在哪一阶——认知体系横跨多阶，不是单独一阶
     pub stage: &'static str,
@@ -866,7 +875,7 @@ if (MAIN) {
     } else {
       console.error(
         `gen-verify-facts --check: ${OUT_REL} 已与文档不一致。\n` +
-          '  改了 DE-001 §8 / 02 坐标系 / 阶梯总表 / 各阶 §3·§4 就要重跑 `node scripts/gens/gen-verify-facts.mjs`——\n' +
+          '  改了 DE-001 §9 / 02 坐标系 / 阶梯总表 / 各阶 §3·§4 就要重跑 `node scripts/gens/gen-verify-facts.mjs`——\n' +
           '  让 verify 程序继续吃旧数据，它验的就还是旧计划（绿灯是假的）。',
       )
       process.exit(1)

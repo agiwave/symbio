@@ -87,7 +87,6 @@ pub(crate) fn ensure_required(args: &Value, field: &str) -> Result<(), PluginErr
 /// `super::super::physical` 的 `join_target`）。这份文案要说清的是**两件事各自的写法**：
 /// 相对段从工作目录起算（`.` 是工作目录根）、首部的 `/` 是操作系统的绝对锚点
 /// （`/docs` ≠ `docs`）。裁决与后果见
-/// [D-172](../../../../docs/003-design/009-VDFS规范.md#d-172-首段--是绝对锚点不是可折叠的分隔符docs-相对工作目录docs-是文件系统里的-docs "DE-009-VDFS规范")。
 ///
 /// **不要再把这段文字抄进 schema**：`path` 参数只写 [`PATH_SHORT`] 一句短话，
 /// 重复出现由 `e2e/cases/t46-prompt-shape-baseline.mjs` 判红（同一段 ≥200 B 的
@@ -120,7 +119,7 @@ pub fn tool(
         risk: Some(risk),
         // 行为名**显式**给（空集也要写）：`vdfs_write` 一族声明 `file_change`，
         // 其余工具一个都不声明。省略字段就退化成「默认无行为」，而默认值正是
-        // 「忘了声明」与「确定不要」不可分的那种形状（DE-025 D-210）。
+        // 「忘了声明」与「确定不要」不可分的那种形状（DE-025 ）。
         behaviors,
     }
 }

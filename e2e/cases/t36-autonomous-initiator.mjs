@@ -85,7 +85,7 @@ import {
  *
  * ## 为什么最后还要**主动等第二个 tick**
  *
- * 「同一条长目标只开一次」的去重判据归能力包 `conation`（`D-269` 站位表），会话的单测二进制
+ * 「同一条长目标只开一次」的去重判据归能力包 `conation`（ 站位表），会话的单测二进制
  * 里没有 owner ⇒ 那一条在原处**不可能**成立（详见用例里那段的注释）。判据挪到这里：
  * 第一次表达与第二次表达之间隔着一次调度，只有真跑两轮才看得见「没重开」。
  * 它给本用例加约 15s（一个 tick），这是判据搬家的价格，不是可以省的余量。
@@ -434,7 +434,7 @@ export default defineCase(
         `第二次表达同一条目标 ⇒ **不得**再开一格（去重判据读的是能力包的 declared；实际: ${JSON.stringify(afterSecond)}）`,
       );
 
-      // 跨会话合并（`ViewDecl::agg`，D-281）：`fleet.axes.conation` 是能力包交的**汇总**，
+      // 跨会话合并（`ViewDecl::agg`）：`fleet.axes.conation` 是能力包交的**汇总**，
       // 不是本插件算的。这里证两件事——那一格在真实装配里**有值**（agg 接上了），
       // 且率是从汇总的分子分母重算的（不是把各会话的率再平均一遍：那是第二份口径）。
       const fleetConation = (await statsOf(SID_OK))?.fleet?.axes?.conation ?? null;

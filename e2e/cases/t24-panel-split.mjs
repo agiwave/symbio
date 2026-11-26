@@ -1,5 +1,5 @@
 import './_selfrun.mjs';
-// T24 呈现分界锚（立锚，D-063 裁决呈现合流后仍有效）：
+// T24 呈现分界锚（呈现合流后仍有效）：
 // 对话线与工作线是**同一份转写的两个读法**（读分界由本用例钉住；呈现已合流单列）。
 //
 // ## 本用例钉的是什么
@@ -7,7 +7,7 @@ import './_selfrun.mjs';
 // 后端 `conversation_view` 纯函数（对话线投影，对话面插件的请求上下文消费方）赖以
 // 成立的四个真实形状前提，继续用真实转写验证（呈现怎么摆不影响这四个锚——它们钉的是
 // **数据层**），分界规则是**纯函数**
-// （Rust `session/context/conversation_view.rs`；前端镜像已随 D-063 的呈现合流退役，
+// （Rust `session/context/conversation_view.rs`；前端镜像已随呈现合流退役，
 // 规则的单测穷举回到后端 `conversation_view.test.rs` 一处）。
 //
 // 那些单测喂的是**人造**转写。本用例补的是另一半：**真实**转写的形状是否还
@@ -19,7 +19,7 @@ import './_selfrun.mjs';
 //
 // | 锚 | 断言 | 它守住什么 |
 // |---|---|---|
-// | ① | 末轮**回答**的 `parent_id` 非空，父节点是**根级**用户消息节点（D-335：用户消息即轮） | 「位置不参与判定」是**必须**的——回答不在根级，按根级切会把它整个漏掉 |
+// | ① | 末轮**回答**的 `parent_id` 非空，父节点是**根级**用户消息节点（用户消息即轮） | 「位置不参与判定」是**必须**的——回答不在根级，按根级切会把它整个漏掉 |
 // | ② | 至少一条**汇报**是根级 `assistant` 文本 | 助手说的话有**两种**位置：汇报在根级、回答在轮锚（用户消息节点）之下，两条都得认 |
 // | ③ | 存在 `role = tool` 且 `type = text` 的节点 | 「看角色」这一条不可省——工具结果就是文本节点 |
 // | ④ | 存在 `role = assistant` 且 `type ∈ {tool_call, reasoning}` 的节点 | 「看类型」这一条不可省——工作节点的角色与助手**相同** |
@@ -35,9 +35,9 @@ import './_selfrun.mjs';
 // （数据"没来"与"被滤掉"长得一样）。因此这里断言同一份流里**既有**用户问句帧**也有**
 // `tool_call` 帧。
 //
-// ## 为什么只有一条线（D-063）
+// ## 为什么只有一条线
 //
-// 会话里只有**一条**实际会话线程（收件箱 FIFO + 单写者 + 单转写，见 D-063 §2.1），
+// 会话里只有**一条**实际会话线程（收件箱 FIFO + 单写者 + 单转写），
 // 呈现也合流为一个显示区域（「对话 / 工作」分栏已退役）；本用例钉的是**后端事实**，
 // 一条线即可。
 import {
@@ -114,7 +114,7 @@ const SESSION = {
   progress_max_per_turn: 5,
 };
 
-/** 对话面各归自己的插件（D-427）：判决关、措辞开 */
+/** 对话面各归自己的插件：判决关、措辞开 */
 const DIALOG = {
   classify: { classify_enabled: false },
   compose: { compose_enabled: true },
@@ -172,7 +172,7 @@ export default defineCase(
       const roots = msgs.filter((m) => m.parent_id == null);
       const byId = new Map(msgs.map((m) => [m.id, m]));
 
-      // ── 形状锚 ①：回答挂在**本轮用户消息节点**之下，不在根级（D-335：Turn 不作为可见节点）──
+      // ── 形状锚 ①：回答挂在**本轮用户消息节点**之下，不在根级（Turn 不作为可见节点）──
       const answer = msgs.find((m) => textOf(m) === ANSWER);
       assert(answer, `末轮正文 ${ANSWER} 应落库`);
       assert(
@@ -220,7 +220,7 @@ export default defineCase(
         '工具结果挂在 tool_call 之下（不在根级）——位置同样挡不住它',
       );
 
-      // ── 形状锚 ④：「看类型」不可省——工作节点的角色与助手相同（D-335：无独立 turn 节点）──
+      // ── 形状锚 ④：「看类型」不可省——工作节点的角色与助手相同（无独立 turn 节点）──
       for (const t of ['tool_call', 'reasoning']) {
         const same = msgs.filter((m) => typeOf(m) === t);
         assert(same.length >= 1, `真实转写里应出现 ${t} 节点`);
@@ -269,9 +269,9 @@ export default defineCase(
       // ── 实时面同构：两个面板读同一份流，工作节点也在这份流上 ──
       const frames = realtime.messages();
       assert(frames.length >= 3, `实时面应收到消息帧（实得 ${frames.length} 条）`);
-      // 轮占位（D-425）是**在飞标记**，不是轮节点：它带着 `meta.placeholder` 的
+      // 轮占位是**在飞标记**，不是轮节点：它带着 `meta.placeholder` 的
       // 带内标记、只活在流通道、从不落库。`msgTypeOf` 把一切非工具骨架折回旧词
-      // `turn`，因此比对形状时先摘掉它——D-335 的判据仍然针对**无标记**的轮节点。
+      // `turn`，因此比对形状时先摘掉它—— 的判据仍然针对**无标记**的轮节点。
       const isPlaceholder = (d) => d?.meta?.placeholder === true;
       const frameTypes = new Set(
         frames
@@ -284,14 +284,14 @@ export default defineCase(
         `实时面应含 tool_call 帧（实得 ${[...frameTypes].join('/')}）——` +
           '工作面板读的就是这份流；缺了它工作面板会空掉且没有错误信号',
       );
-      // D-335：实时面没有独立的 turn 组合节点——轮锚是那条用户消息帧（紧接下一句断言）。
+      //：实时面没有独立的 turn 组合节点——轮锚是那条用户消息帧（紧接下一句断言）。
       assert(
         !frameTypes.has('turn'),
-        `D-335：实时面不应出现独立 turn 节点（实得 ${[...frameTypes].join('/')}）`,
+        `实时面不应出现独立 turn 节点（实得 ${[...frameTypes].join('/')}）`,
       );
       assert(
         frames.some((f) => isPlaceholder(f.data)),
-        'D-425：本轮在飞时应下发过带标记的轮占位（首段内容的等待窗口）',
+        '本轮在飞时应下发过带标记的轮占位（首段内容的等待窗口）',
       );
       const hasUserFrame = frames.some((f) => msgRoleOf(f.data) === 'user');
       assert(hasUserFrame, '实时面应含用户消息帧（对话面板的另一半）');

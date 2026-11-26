@@ -719,7 +719,7 @@ watch(sessionError, (now) => {
   background: var(--color-chat-bg);
 }
 
-/* 消息区：单列的滚动容器（完整时间轴直排，D-063 的呈现合流定案）。
+/* 消息区：单列的滚动容器（完整时间轴直排 的呈现合流定案）。
    间距、缩进、卡片内边距这套纵向节奏在列容器上定义一次
    （下游 MessageNode 经 CSS 继承复用）。 */
 .chat-body {

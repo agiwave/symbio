@@ -31,7 +31,7 @@ fn store_at(workdir: Option<&str>, write_max_bytes: usize, inject_max_bytes: usi
     fixture::at(path, write_max_bytes, inject_max_bytes)
 }
 
-/// 落位：工作区根目录的 `MEMORY.md`（三层统一物理名，D-527）
+/// 落位：工作区根目录的 `MEMORY.md`（三层统一物理名）
 #[tokio::test]
 async fn memory_is_the_workspace_root_memory_file() {
     let path = memory_path("/w");

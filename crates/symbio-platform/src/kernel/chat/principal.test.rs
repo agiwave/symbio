@@ -1,4 +1,4 @@
-//! Principal 与 PrincipalKind 的判据钉死（[D-069 §决策]）。
+//! Principal 与 PrincipalKind 的判据钉死。
 
 use super::*;
 
@@ -48,7 +48,7 @@ fn is_agent_covers_only_agent_kind() {
     assert!(!PrincipalKind::System.is_agent());
 }
 
-/// **旧形态一次性映射**（[D-069 §决策 6]）——历史 `messages.json` 里的 principal
+/// **旧形态一次性映射**——历史 `messages.json` 里的 principal
 /// 字符串读进协议时都从 `from_legacy` 走，读侧别名与 kind 归属**唯一入口**。
 #[test]
 fn from_legacy_maps_all_known_shapes() {
@@ -165,7 +165,7 @@ fn tool_principal_maps_wire_tool_names() {
     assert_eq!(Principal::tool_principal("  ").kind, PrincipalKind::Tool);
 }
 
-/// **工具命名空间是部署事实，不是写死的匹配臂**（DE-025 D-211）。
+/// **工具命名空间是部署事实，不是写死的匹配臂**（DE-025 ）。
 ///
 /// 登记表 `TOOL_NAMESPACES` 由各插件 `PLUGIN.yml` 的 `tool_namespace:` 生成：
 /// 加一个带工具的插件 = 在自己目录里写一行，这里的判据证明那条声明真的生效

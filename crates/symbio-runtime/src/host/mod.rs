@@ -105,7 +105,7 @@ impl Host {
         sink: ExecEventSink,
     ) -> Result<DriveReport, String> {
         let gathered = self.gather(base, session_id, provider).await?;
-        // 会话主体只从开面时唯一设置的 `AGENT_ID` 载体来（D-339）。载体不在就显式失败，
+        // 会话主体只从开面时唯一设置的 `AGENT_ID` 载体来。载体不在就显式失败，
         // 不用 `principal_of(None)` 默认派生 `session/main`；载体在但值为空 = 会话
         // **确实没有绑定智能体**，其主体定义就是 `session/main`（`principal_of` 的语义）。
         let principal = {
@@ -123,7 +123,7 @@ impl Host {
         gathered
             .ctx
             .set(symbio_platform::kernel::exec::EVENT_SINK, sink.clone());
-        // 入站来源主体（D-067）：宿主从本轮 ctx 取好——`metadata.source_principal` 由
+        // 入站来源主体：宿主从本轮 ctx 取好——`metadata.source_principal` 由
         // 网关落 ctx、收件箱写口随会话轮装配挂回来。缺席 = 本机用户发起，效果面
         // 回落会话身份；这一格的解析是宿主的事，不往下推给扩展插件。
         let source = gathered
@@ -152,7 +152,7 @@ impl Host {
             principal,
             handles,
         });
-        // 簿记写方：驱动**前后**各给同一份只读投影（D-367）。前一次让「开轮前已落
+        // 簿记写方：驱动**前后**各给同一份只读投影。前一次让「开轮前已落
         // 的事实」有机会成立谓词；后一次带宿主的 `NoDebt` 结论。终止事实落进同一
         // 事实源，环下一圈经同一投影读回——环零知识，宿主不替它判。
         let support_handle = Arc::clone(&support);
@@ -177,7 +177,7 @@ impl Host {
         ctx.set(SESSION_ID, session_id.to_string());
         let workdir = base.get(WORKDIR).unwrap_or_default();
         ctx.set(WORKDIR, workdir.clone());
-        // 三个作用域 VDFS provider（D-515）：gather 收集链与 drive 驱动链同址注入，
+        // 三个作用域 VDFS provider：gather 收集链与 drive 驱动链同址注入，
         // 插件在 traverse 里读到的存储面与执行期一致。
         let agent_dir = symbio_providers::agent_home_root();
         let work_dir = (!workdir.is_empty()).then(|| PathBuf::from(&workdir));
@@ -201,7 +201,7 @@ impl Host {
         );
         ctx.set(PORT_BINDINGS, Arc::clone(&bindings));
         symbio_platform::sdk::capability::capability_init_error_bucket(&ctx);
-        // 沙箱句柄共享槽（D-531）：traverse 前建槽，sandbox 插件在 traverse 里按
+        // 沙箱句柄共享槽：traverse 前建槽，sandbox 插件在 traverse 里按
         // `ctx[SANDBOX_ID]` 绑定并发布引擎；traverse 后从同一槽读出，解析审批参数。
         symbio_plugin_api::sandbox_init_slot(&ctx);
 
@@ -226,7 +226,7 @@ impl Host {
         }
 
         // 执行视图与 session 侧的描述视图由**同一次装配收集**的结果读出：端口集是
-        // 插件在 traverse 里申报进容器的绑定（D-468），不是能力表的行。快照对冲突
+        // 插件在 traverse 里申报进容器的绑定，不是能力表的行。快照对冲突
         // **整份失败**——同一端口两个 owner 是装配错误，不先到者胜、不静默顶掉。
         let snapshot = bindings
             .snapshot()
@@ -256,7 +256,7 @@ impl Host {
         let runner = runner.ok_or_else(|| "drive 族没有任何提供者".to_string())?;
 
         // 簿记写方是按行收集的**数据**：宿主不认插件名，也不给某个内置写方开旁路
-        // （D-367）。一个写方都没有时，前后两次观察都是空转。
+        //。一个写方都没有时，前后两次观察都是空转。
         let mut writers: Vec<Arc<dyn TerminationWriter>> = Vec::new();
         for row in manager.list(TERMINATION_FAMILY).await {
             let Some(payload) = row.payload::<TerminationPayload>() else {
@@ -291,7 +291,7 @@ struct HostDriveSupport {
     projection: Mutex<Projection>,
     /// 本轮计划的事实快照：`rows()` 刷新一次后缓存，`exists*` 复用同一份。
     ///
-    /// 计划的一致性读面（`D-343`）：`rows()` 与 `exists*` 若各刷一次，两次读之间
+    /// 计划的一致性读面：`rows()` 与 `exists*` 若各刷一次，两次读之间
     /// 落格的事实会让判据分叉（如 `session.config` 让债表判「没有」而选债判「有」）。
     plan: Mutex<Option<Arc<Vec<DriveFact>>>>,
     source: Arc<dyn FactSource>,
@@ -299,7 +299,7 @@ struct HostDriveSupport {
     sources: Vec<Arc<dyn DeclaredDebtSource>>,
     session_id: String,
     provider: Option<String>,
-    /// 本会话主体（开面时从 `agent_id` 解析，随债表请求下传；D-339）。
+    /// 本会话主体（开面时从 `agent_id` 解析，随债表请求下传）。
     principal: String,
     /// 交给执行体的不透明句柄束（宿主装配，环原样转交）。
     handles: PortExecHandles,
@@ -371,7 +371,7 @@ impl DriveSupport for HostDriveSupport {
         // 协议事实与世界事实同源：都落事实源（同一写口、同一读面）。
         // 不做旁路去重：重复投递由事实源按 `event_id` 幂等吸收。
         //
-        // **拒收必须留痕**（D-396）：`Duplicate` 是幂等吸收，不算拒收；其余失败
+        // **拒收必须留痕**：`Duplicate` 是幂等吸收，不算拒收；其余失败
         //（`OffGrid` / `Invariant` / 非写者 / I/O）若静默吞掉，环会拿着一条假「已落」
         // 继续派发，债务永不收束——t46 的哑故障正是从这里开始的。
         let kind = fact.kind.clone();
@@ -407,7 +407,7 @@ impl DriveSupport for HostDriveSupport {
             provider: self.provider.clone(),
             principal: self.principal.clone(),
         };
-        // 一轮计划只刷新一次：这份快照同时喂给债表与随后的 `exists*`（`D-343`）。
+        // 一轮计划只刷新一次：这份快照同时喂给债表与随后的 `exists*`。
         let snapshot = Arc::new(self.facts());
         *self
             .plan
@@ -444,7 +444,7 @@ impl DriveSupport for HostDriveSupport {
         self.executors.get(port).cloned()
     }
 
-    /// 读**本轮计划**的快照（`D-343`）：与 `rows()` 同一份，不再各自刷新。
+    /// 读**本轮计划**的快照：与 `rows()` 同一份，不再各自刷新。
     fn exists(&self, kind: &str) -> bool {
         self.plan_facts().iter().any(|fact| fact.kind == kind)
     }
@@ -503,7 +503,7 @@ impl PortFactReader for HostReader {
         self.source.facts().into_iter().map(event_to_fact).collect()
     }
 
-    /// 事件原样（含入库 `seq`）：行执行体的 `RowRequest` 与区间判断读它（D-338）。
+    /// 事件原样（含入库 `seq`）：行执行体的 `RowRequest` 与区间判断读它。
     fn events(&self) -> Vec<symbio_platform::kernel::event::Event> {
         self.source.facts()
     }
@@ -514,7 +514,7 @@ struct WorldWriter {
     source: Arc<dyn FactSource>,
 }
 
-/// 事件声明给出的落格归属主体（D-339）。
+/// 事件声明给出的落格归属主体。
 ///
 /// 先查冻结表；只链接了部分插件的用例再查共享词汇表。两处都没有说明这条事实
 /// 在声明期就没有归属——写口**拒绝在落账时猜一个默认值**。
@@ -529,8 +529,8 @@ fn declared_owner(kind: &str) -> &'static str {
                 .map(|event| event.owner)
         })
         .unwrap_or_else(|| {
-            // panic-allow crates/symbio-runtime/src/host/mod.rs::declared_owner: 写口拒绝在落账时猜归属——声明表里查不到的 kind 说明声明期就漏了，静默落一条无主事实比崩掉更难查（D-339）。
-            panic!("事实 `{kind}` 没有声明归属主体：写口拒绝在落账时猜默认值（D-339）")
+            // panic-allow crates/symbio-runtime/src/host/mod.rs::declared_owner: 写口拒绝在落账时猜归属——声明表里查不到的 kind 说明声明期就漏了，静默落一条无主事实比崩掉更难查。
+            panic!("事实 `{kind}` 没有声明归属主体：写口拒绝在落账时猜默认值")
         })
 }
 
@@ -546,7 +546,7 @@ impl PortFactWriter for WorldWriter {
 
     /// 归属位由机制侧从**声明表**取得后交来（`Frozen::event_writer` 按草稿的 kind 查
     /// 声明主体），写口只按它落行——**不读草稿里的任何归属暗示**：`FactDraft` 没有
-    /// `actor` 字段，行为也无权指定归属（DE-026 D-252）。
+    /// `actor` 字段，行为也无权指定归属（DE-026 ）。
     async fn emit_owned(&self, owner: &str, facts: Vec<FactDraft>) {
         for fact in facts {
             let mut draft = fact;
@@ -572,7 +572,7 @@ impl PortFactWriter for WorldWriter {
     }
 }
 
-/// 把同一份只读投影交给全部簿记写方，并按声明表落回它们交回的草稿（D-367）。
+/// 把同一份只读投影交给全部簿记写方，并按声明表落回它们交回的草稿。
 ///
 /// 这里只有两件事：**读投影**、**按声明写**。宿主不解释谓词，也不给任何写方
 /// 开「直接落一条业务事实」的后门——草稿的 owner 仍由 [`declared_owner`] 从事件
@@ -602,7 +602,7 @@ async fn observe_termination(
     }
 }
 
-/// 五事实与全种类事实身份 → 申报方读的窄视图（`D-343`：只读本轮计划那一份快照）。
+/// 五事实与全种类事实身份 → 申报方读的窄视图（只读本轮计划那一份快照）。
 fn declared_facts(facts: &[DriveFact]) -> DebtFacts {
     let mut out = DebtFacts::default();
     for fact in facts {
@@ -619,7 +619,7 @@ fn declared_facts(facts: &[DriveFact]) -> DebtFacts {
         // 世界事实的投影端口位为空（协议事实的端口位由 `ring:` 身份还原）。
         if fact.key.port.is_empty() {
             out.note_fact(&fact.kind, &fact.key.id);
-            // 载荷只读副本：申报方要拿「在等」事实里的提示正文构造请求（D-338）。
+            // 载荷只读副本：申报方要拿「在等」事实里的提示正文构造请求。
             out.note_fact_payload(&fact.kind, &fact.key.id, fact.payload.clone());
         }
     }
@@ -706,7 +706,7 @@ fn ring_port_of(event_id: &str) -> String {
     };
     // 端口位是 `rest` 的第一个段（`ring:{port}:{id}:…`），不是第二个；`id` 自身可含
     // `:`，只能从右定界（见 [`ring_key_of`]）。端口名含 `:` 会在注册期被拒绝
-    // （`check_port_name` 的注册期校验，D-336），所以这里没有歧义。
+    // （`check_port_name` 的注册期校验），所以这里没有歧义。
     rest.split(':').next().unwrap_or_default().to_string()
 }
 

@@ -405,7 +405,7 @@ describe('facetsOf：props → facets 的唯一实现', () => {
     ).toBe(false)
   })
 
-  it('工具返回 = tool 角色 + body 形态 + 有渲染父（[D-423]：父是什么形态不再参与判定）', () => {
+  it('工具返回 = tool 角色 + body 形态 + 有渲染父（父是什么形态不再参与判定）', () => {
     const node = {
       id: 'r',
       type: NODE_KIND_BODY,
@@ -427,7 +427,7 @@ describe('facetsOf：props → facets 的唯一实现', () => {
     expect(facetsOf({ id: 'x', type: NODE_KIND_BODY }, false).responseText).toBe(false)
   })
 
-  it('生产形状：轮的根是用户 body 节点，其助手正文子节点必须直排（[D-335] / [D-423]）', () => {
+  it('生产形状：轮的根是用户 body 节点，其助手正文子节点必须直排（ / ）', () => {
     // root_id = 用户消息事实 id；rebuild 折出的骨架与它同 id 被并掉，
     // 于是根是 body/person，模型正文挂在它下面。父不再是 skeleton——
     // 旧判据在这里转假，正文会带着一整行折叠头画出来。
@@ -601,7 +601,7 @@ describe('messageRetryTargetOf：重试分派（动作由后端 actions 决定�
  * 压缩失败能否重试 —— 纯数据判据：后端下发 `retry_compaction` 才给入口。
  *
  * 「只要失败就给入口、不按 `failure_kind` 分档」这条业务决定已上移到后端 `derive_actions`
- * （[D-070 §决策 3]），前端只认动词是否存在。
+ *，前端只认动词是否存在。
  */
 describe('canRetryCompaction：压缩失败的重试入口（读后端 actions）', () => {
   it('后端下发 retry_compaction + 失败 → 给入口', () => {

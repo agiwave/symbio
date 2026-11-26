@@ -782,7 +782,7 @@ impl Plugin for ModelPlugin {
         Some(self)
     }
 
-    /// `project_tools`：本轮工具名的协议投影（`D-469`）。
+    /// `project_tools`本轮工具名的协议投影。
     ///
     /// 配置的读写在 VDFS 上（`<根>/model/<id>` 的详情表单，以及节点动作
     /// `set-default`），跨条目状态写自己的 `<本插件目录>/PLUGIN.yml`；本路由只回答
@@ -798,7 +798,7 @@ impl Plugin for ModelPlugin {
         let path = ctx.get(symbio_plugin_api::PATH).unwrap_or_default();
         let path = path.strip_prefix('/').unwrap_or(&path);
         match path {
-            // 本轮工具名的协议投影：哪些能见、各自叫什么、谁因碰撞退出（D-469）
+            // 本轮工具名的协议投影：哪些能见、各自叫什么、谁因碰撞退出
             "project_tools" => {
                 let request: Value = ctx.payload()?;
                 let names = request
@@ -917,7 +917,7 @@ impl Plugin for ModelPlugin {
             // 「生效者必然是目录里的一员」由此是结构而不是纪律——生效位长在目录行上：
             // 生效 provider 不在目录里（未启用 / 协议工厂不可用）⇒ 没有任何行带位
             // ⇒ 会话报「未找到可用的 Model Provider」，而不是替它挑一个别的。
-            // 行里只剩**目录事实**（id + 生效位，`D-437`）：执行对象留在下面的
+            // 行里只剩**目录事实**（id + 生效位）：执行对象留在下面的
             // `ModelPort` 手里。行不再是「一个能跑的 provider」，因此表的读者
             // 不会顺手拿到一次调用能力。
             for provider in &available {
@@ -927,7 +927,7 @@ impl Plugin for ModelPlugin {
                     .await;
             }
 
-            // 世界端口（D-298）：生效者在目录里 ⇒ 注册 `port.model` 提供者行（解析与
+            // 世界端口：生效者在目录里 ⇒ 注册 `port.model` 提供者行（解析与
             // 适配器构造收进 `ModelPort`，环只按端口名取）。生效者缺席 ⇒ 不注册——
             // 环在调用点拿到缺席读数，落失败事实并中止，不在这里猜一个别的。
             if let Some(active) = available
@@ -940,9 +940,9 @@ impl Plugin for ModelPlugin {
                     available.clone(),
                 ));
                 symbio_plugin_api::port::register_ports(&ctx, port.as_ref()).await;
-                // 一次性问答（D-336）：同一生效者，独立端口成员 `model.assist`；
+                // 一次性问答：同一生效者，独立端口成员 `model.assist`；
                 // 提问方的指令随行载荷进，本插件不认识它的世界语义。偏好 provider
-                // 从行载荷取（D-348），全集随端口带过去供按 id 解析。
+                // 从行载荷取，全集随端口带过去供按 id 解析。
                 let assist = Arc::new(super::assist::AssistPort::new(active, available));
                 symbio_plugin_api::port::register_ports(&ctx, assist.as_ref()).await;
             }

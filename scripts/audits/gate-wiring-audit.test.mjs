@@ -329,7 +329,7 @@ auditCase('GW-005 阶段文件读不进（语法错）⇒ 红，不再静默按�
 auditCase('GW-005 没有生成阶段也没有复核 ⇒ 不判（空表不制造义务）', () => run([{ name: '10-a.mjs', body: PLAIN('a') }, { name: '20-b.mjs', body: PLAIN('b') }]), 0, [/生成阶段 （无）/])
 
 // ── GW-006 · 阶段不空转（本轮产出 0 项就判红）──────────────────────────────
-// 治的是「阶段还在、判据没了」：`50-msrv` 写死了 D-191 之前那两个顶层目录，拆成 crate 之后
+// 治的是「阶段还在、判据没了」：`50-msrv` 写死了  之前那两个顶层目录，拆成 crate 之后
 // 路径不存在 ⇒ 每轮产出 0 项、汇总表上一行都没有，与「全绿」同形，
 // 而 CI 的 msrv job 一直绿。所以下面第 1 条就是这个形状的最小复刻。
 
@@ -433,19 +433,18 @@ test('GW-008 一份 write 一份 check、序数不同 ⇒ 绿（没有阶段文�
   assert.doesNotMatch(r.stdout, /GW-008/)
 })
 
-// ── GW-009 · 判据生命周期（@state 状态字 ↔ off / 任务表 / 裁决账）────────
+// ── GW-009 · 判据生命周期（@state 状态字 ↔ off / 任务表 / 退役目标）────────
 // 状态字读法在 `gate.d/_shared.mjs::stateDeclarations`（缺省即 live，entries 只有离场判据）。
-// 夹具里 `--root=` 传入 ⇒ 裁决号锚点面收窄到夹具自己的 `docs/`，与真仓同语义。
+// retired 的目标形状（commit SHA / T-NNN / SP-NNN）由 `stateDeclOf` 统一校验，GW-009 只做对账。
 
 /** 一份在役守卫的默认夹具，供各用例叠加离场脚本。 */
 const GREEN_BASE = { 'grep-check': 'guard' }
 
-auditCase('GW-009 retired 状态字 + 能打开的裁决 + off + 不在任何任务表 ⇒ 绿', () => audit({
+auditCase('GW-009 retired 状态字 + 可打开的历史提交 + off + 不在任何任务表 ⇒ 绿', () => audit({
     scripts: GREEN_BASE,
     tests: ['grep-check'],
     extra: {
-      'scripts/old-check.mjs': '// @gate off\n// @state retired: D-123 判的是迁走前的旧形状\n',
-      'docs/design.md': '### D-123 退役裁决\n',
+      'scripts/old-check.mjs': '// @gate off\n// @state retired: a1b2c3d 判的是迁走前的旧形状\n',
     },
   }), 0, [/离场判据 1 条/])
 
@@ -460,14 +459,13 @@ test('GW-009 redundant 状态字 + 非空承继者 + off ⇒ 绿（壳留到下�
   assert.equal(r.status, 0, r.stdout + r.stderr)
 })
 
-auditCase('GW-009 retired 的裁决打不开 ⇒ 红（退役必须挂在一条设计裁决上）', () => audit({
+auditCase('GW-009 retired 的目标不是可打开的记录 ⇒ 红（架构判例号不能当署名）', () => audit({
     scripts: GREEN_BASE,
     tests: ['grep-check'],
     extra: {
-      'scripts/old-check.mjs': '// @gate off\n// @state retired: D-123 理由\n',
-      'docs/design.md': '### D-120 另一条裁决\n',
+      'scripts/old-check.mjs': '// @gate off\n// @state retired: 判例123 判的是迁走前的旧形状\n',
     },
-  }), 1, [/GW-009 scripts\/old-check\.mjs 自述 `@state retired: D-123`.*锚点在登记面打不开/])
+  }), 1, [/GW-009 scripts\/old-check\.mjs 的 `@state` 声明不合格（retired-needs-target/])
 
 auditCase('GW-009 状态字拼错 ⇒ 红（闭集之外没有第四种状态）', () => audit({
     scripts: GREEN_BASE,
@@ -481,14 +479,14 @@ auditCase('GW-009 两条 @state 声明 ⇒ 红（在不在役没有答案）', (
     extra: { 'scripts/old-check.mjs': '// @gate off\n// @state live\n// @state redundant: GW-001\n' },
   }), 1, [/GW-009 scripts\/old-check\.mjs 的 `@state` 声明不合格（duplicate/])
 
-auditCase('GW-009 redundant / retired 缺参数 ⇒ 红（空指向与没有裁决号的退役）', () => audit({
+auditCase('GW-009 redundant / retired 缺参数 ⇒ 红（空指向与没有退役目标的退役）', () => audit({
     scripts: GREEN_BASE,
     tests: ['grep-check'],
     extra: {
       'scripts/a.mjs': '// @gate off\n// @state redundant:\n',
-      'scripts/b.mjs': '// @gate off\n// @state retired: D-123\n',
+      'scripts/b.mjs': '// @gate off\n// @state retired: 只有理由没有目标\n',
     },
-  }), 1, [/GW-009 scripts\/a\.mjs 的 `@state` 声明不合格（empty-arg/, /GW-009 scripts\/b\.mjs 的 `@state` 声明不合格（retired-needs-decision/])
+  }), 1, [/GW-009 scripts\/a\.mjs 的 `@state` 声明不合格（empty-arg/, /GW-009 scripts\/b\.mjs 的 `@state` 声明不合格（retired-needs-target/])
 
 auditCase('GW-009 自述退场、@gate 却还在跑 ⇒ 红（两行自述互相矛盾）', () => audit({
     scripts: GREEN_BASE,
@@ -500,7 +498,6 @@ auditCase('GW-009 退场判据（或它的测试）仍被任务表跑到 ⇒ 红
     scripts: GREEN_BASE,
     tests: ['grep-check', 'old-check'],
     extra: {
-      'scripts/old-check.mjs': '// @gate off\n// @state retired: D-123 判的是迁走前的旧形状\n',
-      'docs/design.md': '### D-123 退役裁决\n',
+      'scripts/old-check.mjs': '// @gate off\n// @state retired: a1b2c3d 判的是迁走前的旧形状\n',
     },
   }), 1, [/GW-009 scripts\/old-check\.mjs 自述 `@state retired`，却仍被物化出的任务表跑到/])

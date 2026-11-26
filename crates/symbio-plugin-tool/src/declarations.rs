@@ -1,4 +1,4 @@
-//! `port.tool` 的世界声明（DE-047 不变量 6 / D-303）。
+//! `port.tool` 的世界声明（DE-047 不变量 6 / ）。
 //!
 //! 端口名与租约参数随本插件提交：环不持有端口清单，只按端口名问冻结表
 //! （`Frozen::ports`）。加一个端口只改提供者的 `ports()`，不改环。
@@ -10,14 +10,14 @@ use super::port::TOOL;
 
 pub(crate) const OWNER: &str = "crates/symbio-plugin-tool";
 
-/// 工具侧的授权拒因：**本插件私有**（D-390）。
+/// 工具侧的授权拒因：**本插件私有**。
 ///
 /// 拆名前它与 model 的语音键拒因共用 `authz.denied`——一个名字两个写方。拆开后
 /// 本插件这份只描述「这一笔调用没放行」：它**不是停轮事实**，因此不带 `StopsScope`
 /// （C6 不再向它要 `reason`）。会话投影按格位 + 语音键认停，不按这个名字取。
 pub(crate) const EVENT_AUTHZ_DENIED: &str = "authz.denied";
 
-/// 熔断器落下的控制事实：**本插件私有**（D-389）。
+/// 熔断器落下的控制事实：**本插件私有**。
 ///
 /// 今天只有本插件的熔断写它，没有第二个插件在生产代码里按名字读它 ⇒ 不进
 /// `PLUGIN.yml` 的 `shared_events`，格位在本文件的 [`EVENTS`] 里登记。
@@ -27,15 +27,15 @@ pub(crate) const EVENT_TASK_CONTROLLED: &str = "task.controlled";
 ///
 /// `authz.granted` 的写方在本插件（`port.rs` 的授权草稿），会话按名字读回批准结论；
 /// 它登记在本插件 `PLUGIN.yml` 的 `shared_events` 里，消费方 import 生成常量
-/// （D-364）。`tool.calls.done` 是工具调用收束，session 的进度面按名字读；
+/// `tool.calls.done` 是工具调用收束，session 的进度面按名字读；
 /// `artifact.added` 是本次调用的产物格，被 model / 会话投影 / 转写多处按名字读。
 /// `authz.denied` / `task.controlled` 是单消费方私有名，只在本表登记。
 pub(crate) const EVENTS: &[EventDecl] = &[
-    // 授权结论：owner 随写方移交到本插件（D-389 批二）。格位照旧。
+    // 授权结论：owner 随写方移交到本插件（ 批二）。格位照旧。
     EventDecl::new("authz.granted", (Entity::Scope, Verb::Asserted)),
     EventDecl::new(EVENT_AUTHZ_DENIED, (Entity::Scope, Verb::Asserted)),
     EventDecl::new(EVENT_TASK_CONTROLLED, (Entity::Control, Verb::Opened)),
-    // 完成行自己写（D-508）：边界事实的落点必须早于下一轮模型往返的计划。
+    // 完成行自己写：边界事实的落点必须早于下一轮模型往返的计划。
     EventDecl::new("tool.calls.done", (Entity::Scope, Verb::Asserted)),
     // 产物格：载荷来自执行体交出的草稿，落行仍走宿主写口。
     EventDecl::host("artifact.added", (Entity::Artifact, Verb::Asserted)),
@@ -70,7 +70,7 @@ pub(crate) const FACTS: &[FactDecl] = &[FactDecl {
 
 /// 本插件服务的端口：**一次工具调用**。
 ///
-/// 上限是端口级的天花板，不是「每个调用都会重试」的承诺（D-138）：普通批次调用
+/// 上限是端口级的天花板，不是「每个调用都会重试」的承诺：普通批次调用
 /// 的等待方随草稿消失（`awaited = false`），只有唤醒调用能从事实重建等待方。
 pub(crate) static PORTS: &[PortDecl] = &[PortDecl {
     port: TOOL,
@@ -82,9 +82,9 @@ pub(crate) static PORTS: &[PortDecl] = &[PortDecl {
 }];
 
 /// 端口协议格的行由环的通用出口行（`await-port`）承接：端口名是运行时字符串，
-/// 不进声明表（D-440）。本插件只留产物格的归宿行。
+/// 不进声明表。本插件只留产物格的归宿行。
 static ROWS: &[Decl] = &[
-    // 产物格的**归宿行**（`owes` 被 `until` 同键覆盖 ⇒ 开不出账，不派发；`D-306`）。
+    // 产物格的**归宿行**（`owes` 被 `until` 同键覆盖 ⇒ 开不出账，不派发）。
     //
     // `artifact.added` 的读者是 model 的续接债与会话投影：它们不是环里的行前件，
     // 因此这张行只声明「这一格有人看护」，让装载期的不变量有一个落点。写成

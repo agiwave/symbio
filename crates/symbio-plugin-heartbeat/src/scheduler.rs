@@ -7,9 +7,9 @@
 //! ## 为什么每 tick 重新取清单（不缓存）
 //!
 //! 空闲判定要的是**磁盘侧的 `updated_at`**，而它是回合内每条消息落盘持续推进的那一格。
-//! 缓存清单等于把 `metadata.heartbeat` 抄成第二份 owner——[D-076](README.md#d-076-心跳片的八个宿主触点逐条落位调度随片走触发事实落进收件箱写臂 "crates/symbio-plugin-heartbeat/src/README")
+//! 缓存清单等于把 `metadata.heartbeat` 抄成第二份 owner——
 //! #5 要避免的正是这个形态。代价（每 tick 一次全项目 options 广播）已在
-//! [D-077](README.md#d-077-心跳片的落点定为一层的插件目录卸载单位与第二个消费单位都由它给出 "crates/symbio-plugin-heartbeat/src/README") 后果段**认下并命名**，当前保持现状。
+//!  后果段**认下并命名**，当前保持现状。
 //!
 //! ## 触发失败为什么不写锚点
 //!
@@ -44,7 +44,7 @@ const JITTER_SECS: u64 = 30;
 
 /// 收件箱段名（地址契约 `<会话>/inbox` 的一段）。
 ///
-/// 名字住 `plugin-api` 的词汇面（D-364）：跨插件共用的地址段只有一个住处。
+/// 名字住 `plugin-api` 的词汇面：跨插件共用的地址段只有一个住处。
 /// 拼错的表现为「消息进不去队列」，不会静默错乱。
 use symbio_plugin_api::vocab::SEG_INBOX;
 
@@ -130,7 +130,7 @@ pub(crate) fn due(view: &SessionView, anchor: Option<i64>, now: i64) -> Option<i
 ///
 /// - `meta.heartbeat = true`：给**前端**区分展示用（这条是自动发的）；
 /// - `meta.trigger = {kind, idle_ms}`：给**会话写臂**就地消费的触发声明
-///   （[D-076](README.md#d-076-心跳片的八个宿主触点逐条落位调度随片走触发事实落进收件箱写臂 "crates/symbio-plugin-heartbeat/src/README") 的标记落法）。它由写臂在入队前
+///   （标记落法）。它由写臂在入队前
 ///   折叠成事实源里的四格，**不要求活到转写**——两片各归各的消费者，不合成一个。
 ///
 /// 消息 id 带触发时刻的毫秒（`hb_<sid>_<毫秒>`），同一会话的两次心跳消息因此天然不同 id。
@@ -199,7 +199,7 @@ impl HeartbeatPlugin {
             return;
         };
         // 经容器取数需要一个宿主态来承载本轮的访客表（`empty()` 在容器转发下当场失败，
-        // 见 D-077 裁决三）。这里给的是「无前端会话、无配置」的那个宿主。
+        //  裁决三）。这里给的是「无前端会话、无配置」的那个宿主。
         let req: Arc<dyn PluginInvokeRequest> =
             Arc::new(PluginSimpleRequest::new(self.parent_handle(), None));
         let vctx = vdfs_context(&req);
@@ -247,7 +247,7 @@ impl HeartbeatPlugin {
         }
     }
 
-    /// 开一轮 = 向 `<会话>/inbox` 写一次（写臂负责落格与入队，见 `D-076` #4）。
+    /// 开一轮 = 向 `<会话>/inbox` 写一次（写臂负责落格与入队，#4）。
     async fn fire_once(
         &self,
         provider: &DynVdfsProvider,

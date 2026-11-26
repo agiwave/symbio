@@ -1,9 +1,9 @@
-//! 会话插件的事件声明（DE-024 D-197 / D-201）。
+//! 会话插件的事件声明（DE-024 ）。
 //!
 //! 本插件拥有 `system.*`（定时触发与健康自检）：名字、格位与声明同在这里，写方与读方
 //! 都从本模块取名字——内核不再为它们保留常量。
 //!
-//! **`conation.expressed` 的 owner 是主动性能力包**（站位见 `D-269`）：
+//! **`conation.expressed` 的 owner 是主动性能力包**（站位见 ）：
 //! 本插件只剩写方（自主触发的落格）。名字因此取自清单生成物
 //! `symbio_plugin_api::events`——与任务族同一条通路，不是兄弟插件、也不是内核代答。
 //!
@@ -36,19 +36,19 @@ pub(crate) const EVENT_CHAT_ASSISTANT_PROGRESS: &str = "chat.assistant.progress"
 pub(crate) const EVENT_CHAT_ASSISTANT_REPORTED: &str = "chat.assistant.reported";
 
 /// `message.removed` 与 `session.consolidated` 被 `model` / `compact` 按名字读，
-/// 因此进 `PLUGIN.yml` 的 `shared_events`；消费方 import 生成常量（D-364）。
+/// 因此进 `PLUGIN.yml` 的 `shared_events`；消费方 import 生成常量。
 pub(crate) use symbio_plugin_api::events::{EVENT_MESSAGE_REMOVED, EVENT_SESSION_CONSOLIDATED};
 
 /// 用户点切换器时的断言；同样只有本插件读写（`commands` 落格、折叠读回）。
 pub(crate) const EVENT_SCOPE_BRANCH_SELECTED: &str = "scope.branch_selected";
 
-/// 收束完成的断言：`session.close-scope` 行在终答之后落它，行据此关账（D-250 / D-252）。
+/// 收束完成的断言：`session.close-scope` 行在终答之后落它，行据此关账。
 ///
 /// 载荷只有 `root_id`：与 `chat.assistant.final` 的键**同名字段、同取值**，
 /// 债键才能对上（`Key` 按字段名比）。
 pub(crate) const EVENT_SESSION_SETTLED: &str = "session.settled";
 
-/// 一个 scope 算完的断言（D-367）：终答已落 **且** 宿主报告 `NoDebt` 时，由本插件的
+/// 一个 scope 算完的断言：终答已落 **且** 宿主报告 `NoDebt` 时，由本插件的
 /// 簿记写方落它。与 `session.settled` 的区别是判据来源：`settled` 只问「收束贡献落完
 /// 没有」，`terminated` 问「这一轮还有没有未还的债」——后者由宿主交回的 `exhausted`
 /// 给出，写方不自行判环。
@@ -60,44 +60,44 @@ pub(crate) const EVENT_SESSION_TERMINATED: &str = "session.terminated";
 pub(crate) const EVENT_SESSION_RECALL: &str = symbio_plugin_api::events::EVENT_SESSION_RECALL;
 
 /// 收束行：终答落格之后，把能力交出的收束贡献（任务调度 / 记忆编码 …）落成事实。
-/// 实现见 `close_turn`（行注册表按名解析，`D-306`）。
+/// 实现见 `close_turn`（行注册表按名解析）。
 pub(crate) const SESSION_CLOSE_SCOPE: &str = "session.close-scope";
 
 /// 终止事实的**归宿行**（开不出账）：只给 `session.terminated` 一个声明期读方
 /// （`OrphanFact`），不参与派发。实际写方是宿主侧簿记写方（`termination.rs`）。
 ///
 /// 首响（`chat.assistant.opening`）没有同形的归宿行：它的 `FactDecl` 一并退场了
-/// （`D-346`）。理由见下面 `FACTS` 的注释——格位由 `EventDecl` 声明，形状只在
+/// 理由见下面 `FACTS` 的注释——格位由 `EventDecl` 声明，形状只在
 /// 「视图 / 行按字段读」时才需要 `FactDecl` 那一份；首响两样都没有。
 pub(crate) const SESSION_TERMINATED_SEAT: &str = "session.terminated-seat";
 
-// 读方侧的视图名别名已全部退场：八列都改报表登记之后（`D-387`），读者按 `slot` 取
+// 读方侧的视图名别名已全部退场：八列都改报表登记之后，读者按 `slot` 取
 // 整条读数，名字住在 owner 的 `ReportDecl.views` 里，本插件不再持有任何视图名。
 // 生成物 `view_names.rs` 已清空（`memory.live` 也转成了报表），它随 `views-rs.mjs`
-// 在 Q3 收尾一起退役（`D-387` 的实施顺序第 6 步）。
+// 在 Q3 收尾一起退役（实施顺序第 6 步）。
 
 pub(crate) const OWNER: &str = "crates/symbio-plugin-session";
 
 pub(crate) const EVENTS: &[EventDecl] = &[
     EventDecl::new(EVENT_SYSTEM_TRIGGERED, (Entity::System, Verb::Opened)),
     EventDecl::new(EVENT_SYSTEM_HEALTH, (Entity::System, Verb::Progressed)),
-    // ── 消息列表的变更与收束（DE-024 D-203 归零批）──
+    // ── 消息列表的变更与收束（DE-024  归零批）──
     //
     // 五条的写方全在本插件（`message_events` 与
     // `orchestrator::consolidate`），读方是 core 的折叠（`mutations` /
     // `prompt_fidelity` / `transcript` / `rebuild` / `branch`）——两个插件都调那些
     // 折叠 ⇒ owner 是写方（本插件），消费面经清单 `shared_events` 投影。
     //
-    // 格位按 D-053 / D-054 的闭集四格登记：开 / 改 / 删 / 巩固。
+    // 格位 的闭集四格登记：开 / 改 / 删 / 巩固。
     EventDecl::new("message.added", (Entity::Message, Verb::Opened)),
     EventDecl::new("message.edited", (Entity::Message, Verb::Asserted)),
     EventDecl::new("message.removed", (Entity::Message, Verb::Closed)),
     EventDecl::new("session.consolidated", (Entity::Message, Verb::Progressed)),
-    // ── 承诺面四格（owner 跟着写方走，D-389 同一条纪律）──
+    // ── 承诺面四格（owner 跟着写方走 同一条纪律）──
     //
     // 写方在本插件的 `tools::behavior`（`agent_run` 的委派以 `commitment_events`
     // 成格）。所有者原先是环（`crates/symbio-plugin-loop`），随工具迁入 子智能体插件
-    // （D-389 批二），再随委托工具迁回本插件——委托是会话级原语，写方在这里。
+    // （ 批二），再随委托工具迁回本插件——委托是会话级原语，写方在这里。
     // `asserted` 不在共享表（单消费方，见上方 `EVENT_COMMITMENT_ASSERTED`）。
     EventDecl::new("commitment.asserted", (Entity::Commitment, Verb::Asserted)),
     EventDecl::new("commitment.broken", (Entity::Commitment, Verb::Closed)),
@@ -112,7 +112,7 @@ pub(crate) const EVENTS: &[EventDecl] = &[
     EventDecl::new("user.answer", (Entity::Scope, Verb::Asserted)),
     // 收束完成：`session.close-scope` 落完能力贡献之后写它，行据此关账。
     EventDecl::new(EVENT_SESSION_SETTLED, (Entity::Scope, Verb::Progressed)),
-    // 一个 scope 算完：终答 ∧ 无未还债（后者由宿主的 `NoDebt` 交回，D-367）。
+    // 一个 scope 算完：终答 ∧ 无未还债（后者由宿主的 `NoDebt` 交回）。
     EventDecl::new(EVENT_SESSION_TERMINATED, (Entity::Scope, Verb::Closed)),
     // 轮首召回读数：本插件（事实源的 owner）把跨会话可见切片折成的一格读数。
     // 写方是 `consume_inbox_turn`，读方是 `symbio-plugin-memory` 的 `RecallProvider`
@@ -140,14 +140,14 @@ pub(crate) const EVENTS: &[EventDecl] = &[
         (Entity::Scope, Verb::Opened),
         &[FactRole::DeclaresBudget],
     ),
-    // ── 自 `loop` 的临时词汇表移交（D-389）──
+    // ── 自 `loop` 的临时词汇表移交──
     //
     // 写方全在本插件（`plugin/turn` 的开轮处与 `commands`），读方按名字取清单生成常量
     // （`model` 的隐藏分支、`slo` 的档位、能力包读 `session.config`）。格位 / 载荷原样
     // 照抄，迁移只改归属。
     EventDecl::new("session.config", (Entity::Scope, Verb::Asserted)),
     EventDecl::new("scope.branch", (Entity::Scope, Verb::Asserted)),
-    // 幕级派发格（D-223 / D-262 / D-282）：载荷 `tier` / `budget_ms` / `principal` /
+    // 幕级派发格：载荷 `tier` / `budget_ms` / `principal` /
     // `root_id`，是档位的唯一来源，也是 `C5` 读预算的那一格（`DeclaresBudget`）。
     EventDecl::with_roles(
         "scope.dispatch",
@@ -156,7 +156,7 @@ pub(crate) const EVENTS: &[EventDecl] = &[
     ),
 ];
 
-/// 收束行（D-250 / D-252）：终答落格之后，把能力交出的收束贡献落成事实。
+/// 收束行：终答落格之后，把能力交出的收束贡献落成事实。
 ///
 /// `owes` 与 `until` 同键（`root_id`）：一有终答就欠一笔，落 `session.settled` 即还清。
 /// 没有这一行，`task.ready` / `task.assigned`（就绪视图的输入）永远不会在收束时落格。
@@ -177,7 +177,7 @@ pub(crate) const ROWS: &[Decl] = &[
         }],
         unless: &[],
     },
-    // 首响格**没有**归宿行（`D-346`）：它不再登记 `FactDecl`，`OrphanFact` 也就无从
+    // 首响格**没有**归宿行：它不再登记 `FactDecl`，`OrphanFact` 也就无从
     // 提起。首响的债由 `OpeningDebts` 在运行时按开关申报（见 `opening.rs`），
     // 与这张静态表无关。
     // 终止格的归宿（`owes` 被 `until` 覆盖 ⇒ 开不出账）：写方是宿主侧簿记写方，不在债表里；
@@ -202,7 +202,7 @@ pub(crate) const ROWS: &[Decl] = &[
 
 /// 本插件声明的事实形状：`session.*` 两条，以及随 `chat.*` 词汇移交过来的终答格一条。
 ///
-/// ## 什么时候才登记 `FactDecl`（`D-346`）
+/// ## 什么时候才登记 `FactDecl`
 ///
 /// `FactDecl` 的用处只有两个：给**视图的 `reads`** 校验字段（`UndeclaredField`），
 /// 给**行模式的 `eq` / `key`** 校验字段（`seal` 的行检查）。两条都不沾的格，登记只
@@ -214,7 +214,7 @@ pub(crate) const ROWS: &[Decl] = &[
 /// `chat.assistant.reported` 是**对话面节点**，形状由 `EventDecl` 的格位加重建折法
 /// （`ChatVocab`）决定，没有任何视图或行按字段读它们的载荷，两者都不登记。
 ///
-/// 线只有一条，两份都在同一边（`D-346`）：登记 `FactDecl` 会连带要求一条归宿行，
+/// 线只有一条，两份都在同一边：登记 `FactDecl` 会连带要求一条归宿行，
 /// 而归宿行只为「声明期查得到看护人」存在——两样都不买，就两样都不登记。
 pub(crate) const FACTS: &[FactDecl] = &[
     FactDecl {
@@ -244,7 +244,7 @@ pub(crate) const FACTS: &[FactDecl] = &[
     },
 ];
 
-/// 对话面 / 消息面 / 承诺面的三张词汇表（DE-024 D-203 归零批）。
+/// 对话面 / 消息面 / 承诺面的三张词汇表（DE-024  归零批）。
 ///
 /// 折叠（`transcript` / `rebuild` / `prompt_fidelity` / `branch` / `mutations` /
 /// `slo` / `commitment_records` …）住在 core，两个插件都调它，所以拼写只能来自
@@ -254,7 +254,7 @@ pub(crate) const FACTS: &[FactDecl] = &[
 /// （写方 `tools::behavior` 随委托工具迁入）；任务族
 /// 五条已随能力迁到 `crates/symbio-plugin-task`——拼写同样只从清单生成物取。
 ///
-/// 发言拒因**不占字段**：那两条事实已按写方拆成各 owner 的私有名（D-390），
+/// 发言拒因**不占字段**：那两条事实已按写方拆成各 owner 的私有名，
 /// 会话按 `ChatVocab::denies_speech`（格位 + 语音键）认停，不读名字。
 ///
 /// `model_port` 是**端口名**，不属事件清单：它从共享词汇面
@@ -263,7 +263,7 @@ pub(crate) const FACTS: &[FactDecl] = &[
 /// ## 为什么是三张而不是一张
 ///
 /// 按**面**切开，每张表的大小就是那个折叠算法真正的依赖：`commitment_records` 只认承诺
-/// 四条，`changes` 只认产物一条。交一张 20 字段的合并表会把耦合面说宽（DE-024 D-206）。
+/// 四条，`changes` 只认产物一条。交一张 20 字段的合并表会把耦合面说宽（DE-024 ）。
 pub(crate) const CHAT_VOCAB: symbio_platform::sdk::projection::vocab::ChatVocab =
     symbio_platform::sdk::projection::vocab::ChatVocab {
         user_message: symbio_plugin_api::events::EVENT_USER_MESSAGE,
@@ -291,7 +291,7 @@ pub(crate) const MESSAGE_VOCAB: symbio_platform::sdk::projection::vocab::Message
     };
 
 /// 承诺面（4 条）：本插件只剩 `commitment_records`（承诺列）一个消费方——声誉列改按
-/// 名字读台账后，那条折叠搬进了声誉能力包，它的词汇面也跟着走（`D-288`）。
+/// 名字读台账后，那条折叠搬进了声誉能力包，它的词汇面也跟着走。
 ///
 /// 四格里三条走共享表（声誉读 `opened` / `released` / `broken`）；`commitment.asserted`
 /// 的读方目前只有本插件与 sdk 机制层（声誉明确「自报不进账」）——单消费方的名字随

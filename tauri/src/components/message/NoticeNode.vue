@@ -15,7 +15,7 @@
     （动效与标题都由注册表按形态给出，本组件不判断）。
 
   「水位怎么单位、触发叫什么词、压掉几条」都不在本组件——它们由后端在交付出口排成
-  `stats.rows` 逐行下发（[D-111](../../../symbio/src/plugins/session/README.md#d-111-消息读数由交付出口装配压缩与记忆的事实行离开前端)），本组件只做「有行就逐行排版」。
+  `stats.rows` 逐行下发，本组件只做「有行就逐行排版」。
   仍要读 `meta` 的字段一律经 `registry/messageTypes` 的谓词，组件不碰后端字段名。
 -->
 <template>
@@ -85,7 +85,7 @@ const { text, rendered } = useMessageContent(
 )
 
 /**
- * 后端排好的**事实行**（`node.stats.rows`，[D-111](../../../../crates/symbio-plugin-session/README.md#d-111-消息读数由交付出口装配压缩与记忆的事实行离开前端 "symbio/src/plugins/session/README")）。
+ * 后端排好的**事实行**（`node.stats.rows`）。
  *
  * 空数组 = 这个节点没有可报的数，折叠体因此只是一块正文——本组件不问它是什么业务，
  * 也不做数值格式化（单位与精度在产者那一侧定，见 `schemas/reading.ts`）。

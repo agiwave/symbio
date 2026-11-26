@@ -453,7 +453,7 @@ impl TelegramPlugin {
         //
         // 中断语义（`latest_version`）要求并发：同一 chat 的后来者把版本推高，前一轮
         // 据此放弃回复；串行 `await` 下那条判定恒不成立。
-        // 同一会话的两轮由收件箱**单写者 FIFO** 串行（D-064），因此并发不会让
+        // 同一会话的两轮由收件箱**单写者 FIFO** 串行，因此并发不会让
         // 两轮交错写同一条转写。
         let latest = Arc::clone(latest_version);
         let text = text.to_string();
@@ -644,7 +644,7 @@ impl Plugin for TelegramPlugin {
         // 顺带声明「本插件有一份配置文档」（设置页据此列出并指路）
         symbio_plugin_api::capability_announce_configurable(&ctx, &self.config_file).await;
 
-        // 世界端口（DE-048 D-302）：把 `notify` 的执行面挂进装配期容器。绑定由
+        // 世界端口（DE-048 ）：把 `notify` 的执行面挂进装配期容器。绑定由
         // `register_ports` 按提供者申报的端口名登记——加端口只改提供者的 `ports()`，
         // 不改注册面、不改环。
         if ctx.get(symbio_plugin_api::CAPABILITY_VISITOR).is_some() {

@@ -3,7 +3,7 @@ import './_selfrun.mjs';
 //
 // ## 本用例钉的是「一条读数能力真的只靠自己目录落地」
 //
-// 名册 #34「未来预测」（`docs/003-design/026-能力拆分与影响类.md` §2.3）是 `D-294`
+// 名册 #34「未来预测」（`docs/003-design/026-能力拆分与影响类.md` §2.3）是
 // 首条准入能力的落地：`crates/symbio-plugin-forecast` 只折**任务插件的事实**，不新增
 // 事实、工具或端口，`kernel` / `sdk` / `loop` / `session` 一行都不动。视图已收回插件
 // 私有，e2e 只钉事实落格；折叠由 owner 的 `decl.test.rs` 覆盖。
@@ -120,7 +120,7 @@ export default defineCase(
       assertEq(asserted[0]?.payload?.task_id, 't3', '终态的是 t3');
 
       // ── 部署面：本批「视图收回私有」的判据 ──────────────────────────────
-      // 事实在轮末写口落格（D-213），公开表由 `session/stats` 遍历清单生成；
+      // 事实在轮末写口落格，公开表由 `session/stats` 遍历清单生成；
       // 这里只断言 `forecast.remaining` 已不在公开表里，不读它的值。
       const api = startLongLivedCli({
         homedir: hd.homedir,

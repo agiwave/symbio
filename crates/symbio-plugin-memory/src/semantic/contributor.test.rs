@@ -107,7 +107,7 @@ fn the_anchor_points_at_the_turn_opening() {
     );
     assert_eq!(
         out[0].fact.key, "recalled-77",
-        "幂等键的词干由宿主算（D-252），能力只拼 user_seq"
+        "幂等键的词干由宿主算，能力只拼 user_seq"
     );
 }
 

@@ -42,10 +42,10 @@ fn protocol_rows() -> &'static [Decl] {
     Box::leak(out.into_boxed_slice())
 }
 
-/// `session.config` 的格位夹具：完整进程由会话插件交（D-427 贡献键的载体），
-/// 本二进制不链接它 ⇒ `task.readyset` 读 `readyset_cap`（`D-490`）会报
+/// `session.config` 的格位夹具：完整进程由会话插件交（ 贡献键的载体），
+/// 本二进制不链接它 ⇒ `task.readyset` 读 `readyset_cap`会报
 /// `UnknownFact`。它只有事件格位、没有事实声明 ⇒ 视图 reads 冻结为
-/// assertion read（`D-282`），字段形状无从校验也不必校验。
+/// assertion read，字段形状无从校验也不必校验。
 const HARNESS_EVENTS: &[symbio_plugin_api::EventDecl] = &[symbio_plugin_api::EventDecl::new(
     symbio_plugin_api::events::EVENT_SESSION_CONFIG,
     (Entity::Scope, symbio_plugin_api::Verb::Asserted),
@@ -68,7 +68,7 @@ symbio_plugin_api::submit_declarations!(
 );
 
 /// 本 crate 交的表在装配后能按名字解析，且返工角色留在 `task.rework_created` 上——
-/// 后者是 `rework_bounded` 唯一认它的依据（D-203：读侧不抄名字）。
+/// 后者是 `rework_bounded` 唯一认它的依据（读侧不抄名字）。
 #[test]
 fn the_task_event_resolves_through_the_process_assembly() {
     let frozen =
@@ -84,7 +84,7 @@ fn the_task_event_resolves_through_the_process_assembly() {
     ));
 }
 
-/// 就绪集报表（`D-387`）：`slot` 已登记、没有跨会话合并的轴。
+/// 就绪集报表：`slot` 已登记、没有跨会话合并的轴。
 #[test]
 fn the_readyset_report_is_registered_without_a_fleet_axis() {
     let reports = symbio_plugin_api::reports::reports().expect("登记表应合法");
@@ -102,7 +102,7 @@ fn the_readyset_report_is_registered_without_a_fleet_axis() {
 
 /// 容量由读者经 `ReportCtx::cap` 交，owner 套上并报出**生效**值（`cap = 0` 按 1）。
 ///
-/// 这是「容量随配置事实走」（`D-490`）在报表这一侧的落点：求值口已按事实里的容量
+/// 这是「容量随配置事实走」在报表这一侧的落点：求值口已按事实里的容量
 /// 截断并报出生效容量，报表出口**透传**（截几笔、按什么序都是 owner 一处算）；
 /// 视图缺席时交文档写的空形状（出厂容量）。
 #[test]

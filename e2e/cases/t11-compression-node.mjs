@@ -1,5 +1,5 @@
 // T11 压缩的现行形态：压缩落一条 `session.consolidated` 事实（载荷里是压缩 Notice
-// + 本轮终答），重建面从这份快照开始折；轮次以用户消息节点为锚（D-335），
+// + 本轮终答），重建面从这份快照开始折；轮次以用户消息节点为锚，
 // 实时面上没有独立的 Turn / 压缩节点。
 import './_selfrun.mjs';
 //
@@ -9,7 +9,7 @@ import './_selfrun.mjs';
 //   载荷 `messages` 首节点是 `notice` + `meta.style_tag = compression`（正文 = 摘要），
 //   其后是本轮终答；实时面（`event_bus` 的 `vdfs` 频道 + `vdfs/watch`）不出现
 //   `compression` 帧。
-// - **D-335：Turn 不是独立可见节点**：一轮的可见锚是用户消息节点，收束看它的终答
+// - **：Turn 不是独立可见节点**：一轮的可见锚是用户消息节点，收束看它的终答
 //   （assistant 正文到达终态）。
 // - **落盘同源**：生产读出口读回的历史里有压缩节点、被压掉的前缀已不在。
 //
@@ -104,7 +104,7 @@ export default defineCase('T11 压缩的现行形态：session.consolidated 落�
     // 会话先建出来：收件箱是会话内部的集合，会话不在就没有它可写
     await createSession(cli, 'e2e-t11', { workdir: hd.workdir });
 
-    // D-335：一轮的可见终态落在终答节点上（assistant 正文到达终态），不数 Turn 节点。
+    //：一轮的可见终态落在终答节点上（assistant 正文到达终态），不数 Turn 节点。
     // 按 id 合并各帧后再判（`role` 只在携带它的那几帧里，终态帧未必重复带）。
     const doneTurns = () => {
       const merged = new Map();

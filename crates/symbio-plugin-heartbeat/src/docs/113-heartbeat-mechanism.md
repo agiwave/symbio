@@ -13,7 +13,7 @@ impl: done
 
 ## 概述
 
-心跳 = 会话空闲超过阈值后，自动以「心跳提示词」注入一轮用户消息，驱动 agent 无人工介入地执行周期任务。由四部分组成（切出为独立插件的判据见 [D-077](../../README.md "crates/symbio-plugin-heartbeat/README")）：
+心跳 = 会话空闲超过阈值后，自动以「心跳提示词」注入一轮用户消息，驱动 agent 无人工介入地执行周期任务。由四部分组成：
 
 1. **调度器**（`crates/symbio-plugin-heartbeat/src/scheduler.rs`）：每 15s 经地址面读一次会话清单（`vdfs/list(session)`），对「已启用 + 空闲满阈值」的会话向 `vdfs/write(session/<id>/inbox)` 写一条带触发声明的消息。
 2. **设置工具**（`crates/symbio-plugin-heartbeat/src/tool.rs`）：agent 在对话中可调用 `heartbeat` 工具对本会话 set/get/cancel，读写走 `stat` / `write(session/<id>)`。
@@ -29,7 +29,7 @@ impl: done
 3. **触发即重置**：**成功**触发的那一刻写入锚点，作为防热循环下限（即使回合零写盘也不会 15s 连发）。失败不写——失败都是暂时的（会话正被写 / 无事实源），压着原锚点等下个 tick 重试，按整段 interval 推迟等于把一次本可成功的触发白白睡掉。
 4. **重启追赶**：锚点首次见到某会话时回退 `session.updated_at` —— 进程重启或新进程接入同一 store 时，按磁盘时间戳补触发已空闲的会话。这也是「每个进程都扫描全部会话」的设计根源：无需专职守护，任何存活进程都能兜底。`updated_at` 缺失则**不触发**（「不知道它活动过」不能读成「它一直空闲」）。
 5. **抖动防雪崩**：每会话固定 jitter = `hash(session_id) % 30s`（确定性，不是随机——同一会话每次求得的抖动要稳定），避免多会话在同一 tick 齐触发。
-6. **先落事实，再开轮**：调度器只答「什么时候该开一轮」。这一次开轮**是系统自己发起的**这件事，先落成事实源里的四格（触发 / 自检 / 欲 / 闸门放行才长任务），落成了才入队；运行参数（`mode` / `include_history`）由服务端按会话自己的数据推导。两者都住在会话那一侧：`crates/symbio-plugin-session/src/transcript/autonomous.rs`（`request_autonomous_round`），入口是收件箱写臂识别 `meta.trigger`（`crates/symbio-plugin-session/src/plugin/nodes.rs::trigger_declaration`），归属与逐口裁决见 [D-076](../../README.md "crates/symbio-plugin-heartbeat/README")。**落格失败 ⇒ `Conflict` 且连队列都不碰**：一条永远跑不起来的队首会把后面的用户消息一起堵死。
+6. **先落事实，再开轮**：调度器只答「什么时候该开一轮」。这一次开轮**是系统自己发起的**这件事，先落成事实源里的四格（触发 / 自检 / 欲 / 闸门放行才长任务），落成了才入队；运行参数（`mode` / `include_history`）由服务端按会话自己的数据推导。两者都住在会话那一侧：`crates/symbio-plugin-session/src/transcript/autonomous.rs`（`request_autonomous_round`），入口是收件箱写臂识别 `meta.trigger`（`crates/symbio-plugin-session/src/plugin/nodes.rs::trigger_declaration`），归属见 [DE-018-模块架构](../../../../docs/003-design/018-模块架构.md "DE-018-模块架构")。**落格失败 ⇒ `Conflict` 且连队列都不碰**：一条永远跑不起来的队首会把后面的用户消息一起堵死。
 
 ## 调度细节
 
@@ -37,7 +37,7 @@ impl: done
 - 实际触发节奏 = `interval + tick 粒度 + jitter`（如 30s 间隔实测 ≈ 36-50s 一跳）。
 - 心跳消息：id `hb_<sid>_<毫秒>`，`meta.heartbeat = true`（给前端）+ `meta.trigger`（给写臂的触发声明），以心跳提示词作为用户消息进入正常回合管线（工具调用、事件、持久化与普通消息完全一致）。
 - 配置持久化于 `session.json` 的 `metadata.heartbeat`；工具写回会刷新 `updated_at`（写配置即视为活动）。
-- 每 tick 的成本 = 一次 `list(session)`（含 schema 广播）+ 一次容器子树广播，量级与前端点一次会话列表相同；**不为省它缓存清单**（那会造出第二份 `metadata.heartbeat` 副本），裁决与省法都记在 [D-077](../../README.md "crates/symbio-plugin-heartbeat/README") 后果段。
+- 每 tick 的成本 = 一次 `list(session)`（含 schema 广播）+ 一次容器子树广播，量级与前端点一次会话列表相同；**不为省它缓存清单**（缓存会造出第二份 `metadata.heartbeat` 副本）。
 
 ## heartbeat 工具 API
 

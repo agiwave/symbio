@@ -15,7 +15,7 @@ use std::sync::Arc;
 use symbio_platform::kernel::chat::chat_node::{ChatNode, MessageContent, NodeKind, NodeRole};
 use tokio::sync::RwLock;
 
-/// 身份写 `principal`（D-147）：夹具模仿的是**落库面**的消息，`role` 只是读侧残留格。
+/// 身份写 `principal`夹具模仿的是**落库面**的消息，`role` 只是读侧残留格。
 fn principal_for(role: NodeRole) -> symbio_platform::kernel::chat::principal::Principal {
     use symbio_platform::kernel::chat::principal::Principal;
     match role {
@@ -80,7 +80,7 @@ fn make_archive(dir: &Path, name: &str) -> PathBuf {
 /// 审计 A3 契约：`replace_messages` 整体重写消息列表时**不删任何存档文件**。
 ///
 /// 存档的磁盘回收唯一归口 `tool` 插件 L0 守卫的滚动淘汰（会话作用域的
-/// `ARCHIVE_KEEP`，按 mtime，D-528）。写入路径历史上会删"失去引用"的孤儿存档，
+/// `ARCHIVE_KEEP`，按 mtimeD-528）。写入路径历史上会删"失去引用"的孤儿存档，
 /// 代价是把不可信的消息 meta 变成删除动作的输入（需要额外的路径逃逸校验），
 /// 且与滚动保留职责重叠；本测试锁定"只改消息、不动文件"的新契约。
 ///
@@ -339,7 +339,7 @@ async fn prune_reports_nothing_when_it_removes_nothing() {
 /// 旧实现在淘汰旧轮消息时按 `meta.archive_path` 物理删除 L0 存档，既把不可信的
 /// 消息 meta 当删除依据，又与 `tool` 插件 L0 守卫的会话作用域滚动保留职责冲突
 /// （被淘汰的"旧轮"消息往往持有最新存档，反而被误删）。文件回收统一归口守卫
-/// 自身的滚动淘汰（D-528），写入路径不删文件。
+/// 自身的滚动淘汰，写入路径不删文件。
 #[tokio::test]
 async fn prune_drops_nodes_but_never_deletes_archive_files() {
     let (session, dir, _tmp) = setup_with_config(SessionConfig {
@@ -370,7 +370,7 @@ async fn prune_drops_nodes_but_never_deletes_archive_files() {
 
 /// 回归：`context_messages = 0` 走完整 `append_messages` 链路也不得失败。
 ///
-/// 切主后（D-049）正文的真源是事实投影，`append_messages` 交回的**权威副本**
+/// 切主后正文的真源是事实投影，`append_messages` 交回的**权威副本**
 /// 就是写边界机制（窗口/裁剪/补号）的可观测面——持久判据另由 `apply_*` 与
 /// `store` 测试钉。本判据只看「0 = 不限制」：回执里窗口外的工具结果仍在。
 #[tokio::test]
@@ -604,7 +604,7 @@ async fn max_messages_zero_means_unlimited() {
 /// 2. 跨次追加**严格递增**：若新消息拿到比已有消息小的号，前端的顺序锚点就会
 ///    把新消息排到旧消息之前（“刚发的跑到中间去”）。
 ///
-/// 切主后（D-049）正文的真源是事实投影：**只有落了事实的节点才进投影**，跨次
+/// 切主后正文的真源是事实投影：**只有落了事实的节点才进投影**，跨次
 /// 递增的「已有水位」也由投影供。所以本判据走生产路径（`apply` 的 Born{Here}
 /// ——事实先落、再折列表、回包带存储号）：「读回存储」那半归 `apply_*` +
 /// `store` 冷重建，这里盯写边界当场交出的那份。
@@ -904,7 +904,7 @@ fn assign_seq_places_trailing_run_after_last_existing() {
     assert_eq!(msgs[1].seq, Some(6));
 }
 
-// ── `apply`：唯一写入口（D-054 决策 2 + 3）──────────────
+// ── `apply`唯一写入口（ 决策 2 + 3）──────────────
 
 use super::super::paths::V2_WAL_FILE;
 use symbio_platform::kernel::event::{Event, Seq};

@@ -12,14 +12,14 @@
 //! 的注册循环上（`SecureToolWrapper`），结果就是「风险是宣传语、执行无人读」：
 //! `vdfs_delete` 声明 `risk=High`，实测直接删。
 //!
-//! ## 判定与执行同体（`D-385` / `D-440` ③-A）
+//! ## 判定与执行同体（ /  ③-A）
 //!
 //! 闸门不再是一个裹在能力外面的装饰器，而是**端口执行体的第一段**：[`GatedExecutor`]
 //! 先判 [`approval_gate`]，拦下就交回停等载荷（普通结果形态，派发侧的 pending 机制
 //! 照常工作），放行才拆信封落到内层。判定只有 [`approval_gate`] 一份——装饰器、
 //! 自由函数、端口桥三层合一后，再没有第二处「值得复制的判定」。
 //!
-//! 工具直接 `impl PortExecutor`（`D-440` ③ 终态）：风险函数在 `register_tool`
+//! 工具直接 `impl PortExecutor`（ ③ 终态）：风险函数在 `register_tool`
 //! 注册时给出，内层执行体就是工具自己，本模块只保留判定与执行体形状。
 
 use std::sync::Arc;
@@ -90,7 +90,7 @@ pub fn threshold_from_ctx(ctx: &Arc<dyn PluginInvokeRequest>) -> CapabilityRiskL
 
 /// 从 `ctx[APPROVAL_GRANTS]` 读跨会话的永久放行清单；缺席 = 空清单。
 ///
-/// 与会话阈值同一份配置解析点落进 ctx（D-170 决策 2）：清单与阈值是同一件策略的
+/// 与会话阈值同一份配置解析点落进 ctx（ 决策 2）：清单与阈值是同一件策略的
 /// 两级（按工具 / 按会话），各从一处读才不会出现「阈值取这边、清单取那边」。
 pub fn grants_from_ctx(ctx: &Arc<dyn PluginInvokeRequest>) -> ApprovalGrants {
     ctx.get(APPROVAL_GRANTS)
@@ -128,7 +128,7 @@ pub fn approval_gate(
     approval_gate_inner(ctx, meta, risk, args, None)
 }
 
-/// 带**工具声明事实**的闸门入口（`D-531` 能力约束接入）。
+/// 带**工具声明事实**的闸门入口（ 能力约束接入）。
 ///
 /// `facts_of` 由工具在注册时交出（只有工具知道自己的参数语义）；闸门把它产出的
 /// 事实交给沙箱做两件事：命中 deny 规则直接拒绝；命中带风险档的 allow 规则则
@@ -214,7 +214,7 @@ fn approval_gate_inner(
     ctx.set_raw(TRUSTED_APPROVED, Arc::new(is_approved.to_string()));
 
     // 清单按**能力名**（canonical name）记：`meta.name` 就是注册名，线上名只是它
-    // 的协议投影（D-170 决策 4）。
+    // 的协议投影（ 决策 4）。
     let grant = grants_from_ctx(ctx).ceiling(&meta.name);
     let needs = tool_risk
         .approval_basis(threshold, is_approved, grant)
@@ -270,7 +270,7 @@ fn confirm_prompt_payload(
     })
 }
 
-/// 端口执行体形态的审批闸门（`D-440` ③）：**判定是执行的第一段**。
+/// 端口执行体形态的审批闸门（ ③）：**判定是执行的第一段**。
 ///
 /// `meta` 与 `risk` 在注册收口处取好快照，`inner` 是被裹的内层执行体
 /// （工具自己的 `PortExecutor`）。`execute` 先判 [`approval_gate`]：拦下 ⇒

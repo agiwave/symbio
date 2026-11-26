@@ -18,7 +18,7 @@ use symbio_platform::kernel::chat::chat_node::{MessageContent, NodeKind, NodeRol
 use symbio_platform::kernel::event::{Entity, Event, Verb};
 use symbio_plugin_api::{events, PRINCIPAL_USER};
 
-/// 身份写 `principal`（D-147）：夹具/载荷模仿的是**落库面**，而重建产物同样
+/// 身份写 `principal`夹具/载荷模仿的是**落库面**，而重建产物同样
 /// 只带主体；`role` 只是反序列化落点，不是写侧的身份来源。
 fn principal_for(role: NodeRole) -> symbio_platform::kernel::chat::principal::Principal {
     use symbio_platform::kernel::chat::principal::Principal;
@@ -98,7 +98,7 @@ fn shapes(msgs: &[symbio_platform::kernel::chat::chat_node::ChatNode]) -> Vec<Sh
     msgs.iter().map(shape).collect()
 }
 
-/// 压缩失败格（D-402 ①）：只认 `failed` 格 + `stamp.failure = compression`。
+/// 压缩失败格：只认 `failed` 格 + `stamp.failure = compression`。
 fn compression_failed_event(id: &str, compression_id: &str, ts: i64) -> Event {
     Event::pending(id, "failed", Entity::Scope, Verb::Asserted, "session/main")
         .with_ts(ts)
@@ -422,7 +422,7 @@ fn fallback_carries_the_failure_reason_onto_the_turn_node() {
 
     let got = rebuild(&events, &CHAT, &MESSAGE);
     // 生产形状：`root_id` 就是用户消息事实 id，骨架被「同 id 只认首次」并进用户
-    // 节点——失败状态与原因必须一并移交，否则读面看到的是一轮没有交代的失败（D-381）。
+    // 节点——失败状态与原因必须一并移交，否则读面看到的是一轮没有交代的失败。
     assert!(
         !got.iter()
             .any(|m| m.id == "u-node" && m.msg_type == Some(NodeKind::Skeleton)),
@@ -453,7 +453,7 @@ fn fallback_carries_the_failure_reason_onto_the_turn_node() {
     );
 }
 
-/// 中止轮的终态落在**轮根**上（`D-435`）。
+/// 中止轮的终态落在**轮根**上。
 ///
 /// 中止没有错误信息（它不是失败），所以「有没有 `error`」不能当移交的判据——中止轮
 /// 若把它们一起跳过，读面看到的是一轮没有任何终态的对话：与「还在跑」同形，也与
@@ -654,7 +654,7 @@ fn tool_calls_reference_does_not_duplicate_the_card() {
     assert_eq!(calls, 1, "同一张工具卡只能有一份，实得 {calls}");
 }
 
-// ── ②b 卡的身份与存在性来自派发清单（D-382）────────────────────────────
+// ── ②b 卡的身份与存在性来自派发清单────────────────────────────
 
 /// 派发清单（`tool.requested`）的**生产形状**：每条调用自带 `{ id, node_id, name, arguments }`。
 ///
@@ -808,7 +808,7 @@ fn rebuild_is_deterministic() {
     );
 }
 
-/// 答话轮收束格 + 思考事实：与 work 轮**同一条**折叠路径（`D-435`）。
+/// 答话轮收束格 + 思考事实：与 work 轮**同一条**折叠路径。
 ///
 /// 生成产线（`from_context`）的模型推理经 `WordingReply` 带回、随收束格入格
 /// ——重建必须复刻它，否则普通答话轮的 Reason 节点重启后消失（AMD MiMo
@@ -858,7 +858,7 @@ fn answered_turn_folds_into_the_same_tree_as_a_work_turn() {
     assert_eq!(meta["reason"], "from_context");
 }
 
-/// 两个产出点交的两份载荷，折出的是**同一棵树**（`D-482` 的出口判据）。
+/// 两个产出点交的两份载荷，折出的是**同一棵树**（出口判据）。
 ///
 /// 左栏是模型端口的形状（`port.rs::outcome_payload`：带 `text_id` / `truncated` /
 /// `calls[]`），右栏是答话行的形状（`answer.rs::answer_step`：没有 `text_id`，
@@ -973,7 +973,7 @@ fn reported_mirrors_the_persisted_shape() {
     assert_eq!(meta["exclude_from_context"], serde_json::json!(true));
 }
 
-/// 首响挂**轮根**（`D-426`）：`parent_id` 取载荷 `root_id`，与工具卡 / 正文同级。
+/// 首响挂**轮根**：`parent_id` 取载荷 `root_id`，与工具卡 / 正文同级。
 ///
 /// 根级会让结构轴递归把它排到整轮子树之后——开场白从「第一声」变成「轮末补的一句」。
 #[test]
@@ -1148,7 +1148,7 @@ fn text_content_is_plain_text() {
     assert!(matches!(msgs[0].content, Some(MessageContent::Text(_))));
 }
 
-// ── ⑥ 变更格：编辑 / 删除（D-053）──────────────────────────
+// ── ⑥ 变更格：编辑 / 删除──────────────────────────
 
 /// 一条 `message.edited`：载荷由**写侧同一条序列化路径**造出来
 /// （`serde_json::to_value(&msg)` 再包一层 `{"message": …}`，见
@@ -1337,7 +1337,7 @@ fn snapshot_event(msgs: Vec<symbio_platform::kernel::chat::chat_node::ChatNode>)
     }))
 }
 
-/// 带 `keep_from` 的 `session.consolidated`（D-401）：只压最旧前缀。
+/// 带 `keep_from` 的 `session.consolidated`只压最旧前缀。
 fn snapshot_event_keeping(
     msgs: Vec<symbio_platform::kernel::chat::chat_node::ChatNode>,
     keep_from: &str,
@@ -1395,7 +1395,7 @@ fn a_snapshot_rebases_the_prefix() {
     );
 }
 
-/// 带 `keep_from` 的快照（D-401）：只取代**最旧前缀**，后缀从该事实起接着折。
+/// 带 `keep_from` 的快照：只取代**最旧前缀**，后缀从该事实起接着折。
 ///
 /// 这是「压一半」的读形状：若读面仍从快照下标之后折，被保留的后缀会整段消失——
 /// 而快照只含一条摘要，没有任何东西会红。
@@ -1554,7 +1554,7 @@ fn seq_is_renumbered_monotonically_across_the_snapshot_boundary() {
     assert_eq!(seqs, vec![1, 2, 3], "从 1 起重发，跨快照边界仍单调");
 }
 
-// ── ⑦ 诞生格：`message.added`（D-054）─────────────────
+// ── ⑦ 诞生格：`message.added`─────────────────
 
 /// 一条 `message.added`：载荷 = 完整 `ChatNode` 列表（写侧 `message_events::added`
 /// 直给，同一条序列化路径——手写 JSON 会钉住我抄的那份）。

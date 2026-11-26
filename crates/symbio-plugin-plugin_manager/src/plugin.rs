@@ -69,7 +69,7 @@ use symbio_plugin_api::{
 };
 
 /// 配置型插件的专属入口（固定清单）：节点挂在本插件清单里，**归属与数据权威**归
-/// `ui_prefs`（D-521）。
+/// `ui_prefs`。
 ///
 /// 「一项 = 一个插件」：ui_prefs 是配置型插件，它没有自己的资源域，界面上只以这一项
 /// 出现——点进去就是它的配置（外观 + 提示音）。因此列表里**不再重复列出 ui_prefs 的
@@ -114,7 +114,7 @@ fn section_node(s: &SectionSpec) -> VdfsNode {
 /// `new_type.schema` 下发，安装写回当前目录（= 容器根上的安装动词）。
 const MARKET_EXT: &str = "market";
 
-/// 候选 = 声明为可选 ∧ 当前未装配（没有挂载实例）∧ 本构建确实链接了该工厂（D-520）。
+/// 候选 = 声明为可选 ∧ 当前未装配（没有挂载实例）∧ 本构建确实链接了该工厂。
 ///
 /// 「未装配」按**挂载实例**判，不按目录存在判：历史 homedir 会残留旧版默认装配留下的
 /// 可选插件目录，那些目录既没挂上也不在跑，不该把市场占满到「一个都没有」——从市场
@@ -430,7 +430,7 @@ impl PluginManagerPlugin {
     /// `new_type` 指向市场页面（`ext` / `node_ext` 均为 `market`），候选随 `schema`
     /// 下发。草稿据此渲染市场面板；用户选中一个插件后写回本目录，由根上的 `Write`
     /// 转发到容器安装。不转发容器的通用安装表单——那是「选一个插件工厂」的空下拉，
-    /// 既不是市场，也不会给出候选（D-520）。
+    /// 既不是市场，也不会给出候选。
     async fn root_node(&self, ctx: &VdfsContext) -> VdfsNode {
         let mut n = VdfsNode::dir("", "插件管理", VdfsAccess::LIST);
         n.description = Some("本智能体已安装的插件；点右上角「新建」从插件市场添加".to_string());
@@ -457,9 +457,9 @@ impl PluginManagerPlugin {
     /// 清单 = 各插件的条目 + 配置型插件的专属入口。
     ///
     /// 市场不作为节点出现在清单里——它是「添加插件」打开的一张页面，不是又一个
-    /// 插件条目（D-520）。配置型插件 `ui_prefs` 也不作为普通条目出现：它没有资源域，
+    /// 插件条目。配置型插件 `ui_prefs` 也不作为普通条目出现：它没有资源域，
     /// 界面上只以 [`UI_SECTIONS`] 的那一项（「界面」）出现，点进去就是它的配置——
-    /// 「一项 = 一个插件」，不重复（D-521）。
+    /// 「一项 = 一个插件」，不重复。
     async fn list_items(&self, ctx: &VdfsContext) -> VdfsResult<Vec<VdfsItem>> {
         let entries = self.entries(ctx).await?;
         let configs = Self::config_entries(ctx).await;
@@ -695,7 +695,7 @@ impl VdfsProvider for PluginManagerPlugin {
 
         let name = leaf(path)?;
 
-        // 配置型插件的专属入口：归属 ui_prefs，读写转发到它的配置文档（D-521）。
+        // 配置型插件的专属入口：归属 ui_prefs，读写转发到它的配置文档。
         if let Some(s) = section_of(name) {
             return match req {
                 VdfsRequest::Stat => Ok(VdfsResponse::Stat(section_node(s))),

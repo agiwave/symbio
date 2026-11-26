@@ -1,12 +1,12 @@
 //! 本插件写、别的插件按名字消费的事实词汇。
 //!
-//! 只登记**跨插件消费**的名字（DE-024 D-197 / D-201）：`tool.requested` 由模型执行体
+//! 只登记**跨插件消费**的名字（DE-024 ）：`tool.requested` 由模型执行体
 //! 写（一次一轮一条，载荷 = 本轮调用清单），`plugin-tool` 的债表按这个名字问「有没有
 //! 这条事实」，不读载荷。`tool.call.requested` 是逐笔债的标记：同一出口按 `calls[]`
-//! 落 N 条，`plugin-tool` 的债表按名字逐条取（D-378）。单消费方的 `tool.calls.done`
+//! 落 N 条，`plugin-tool` 的债表按名字逐条取。单消费方的 `tool.calls.done`
 //! 归工具插件自己声明，不进这里。
 //!
-//! 例外是**私有名**：本插件的语音键拒因 `model.speech.denied`（D-390）也只在本表
+//! 例外是**私有名**：本插件的语音键拒因 `model.speech.denied`也只在本表
 //! 登记，但它不进 `PLUGIN.yml` 的 `shared_events`——没有第二个插件按名字读它，
 //! 会话按格位 + 载荷的语音键认停（`ChatVocab::denies_speech`）。
 //!
@@ -19,7 +19,7 @@ use symbio_plugin_api::{Entity, EventDecl, FactRole, Verb};
 /// 本插件的 owner 标识（声明表用；与清单里的目录同源）。
 pub(crate) const OWNER: &str = "crates/symbio-plugin-model";
 
-/// 模型侧的语音键拒因：**本插件私有**（D-390）。
+/// 模型侧的语音键拒因：**本插件私有**。
 ///
 /// 拆名前它与工具侧的授权拒因共用 `authz.denied`。拆开后它只描述「本轮终答被
 /// 写侧闸拒」——这**是一次停轮**（不落 `final`，轮照样了结），因此带 `StopsScope`
@@ -43,7 +43,7 @@ fn submitted_declarations() -> symbio_plugin_api::PluginDeclarations<'static> {
     symbio_plugin_api::PluginDeclarations {
         events: EVENTS,
         facts: &[],
-        // 两本账的视图（`D-461`）：本插件写 `response.usage` / `response.spend`，
+        // 两本账的视图：本插件写 `response.usage` / `response.spend`，
         // 折叠也在这里；会话的读数出口按 `slot` 收，不认识它们的形状。
         views: crate::ledger::VIEWS,
         // 端口声明仍在环侧（步二搬走）；本插件先只交事实名。

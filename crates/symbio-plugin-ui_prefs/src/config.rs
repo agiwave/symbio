@@ -8,7 +8,7 @@
 //!
 //! `theme = light` / `font_size = medium` / 提示音全开 / `volume = 0.6` 与前端
 //! `stores/appearance.ts`、`stores/soundSettings.ts`、`services/completionChime.ts` 的
-//! 缺省一致。前端仍保留一份 localStorage 快照作首屏同步与离线降级（见 D-521），
+//! 缺省一致。前端仍保留一份 localStorage 快照作首屏同步与离线降级，
 //! 这里的值是**对齐后的权威**：两边不一致时以本配置为准。
 
 use symbio_plugin_api::{DetailDefinition, DetailField, DetailOption, DetailSection};

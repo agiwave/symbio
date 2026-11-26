@@ -13,7 +13,7 @@ impl: done
 
 ## 定位
 
-此前「外观」是 `plugin_manager` 的自有分区，数据在前端 localStorage，后端没有归属。本插件把这些数据接成配置文档 `<根>/ui_prefs/PLUGIN.yml`，由 `PluginConfigMount` 提供读写、校验与落盘；前端 localStorage 退为**首屏快照 + 离线降级**（D-521）。
+此前「外观」是 `plugin_manager` 的自有分区，数据在前端 localStorage，后端没有归属。本插件把这些数据接成配置文档 `<根>/ui_prefs/PLUGIN.yml`，由 `PluginConfigMount` 提供读写、校验与落盘；前端 localStorage 退为**首屏快照 + 离线降级**。
 
 - 入口：插件管理 →「外观」分区（读写转发到本插件）
 - 不声明 `configurable`：避免 `ui_prefs` 条目里出现第二张通用外观表单

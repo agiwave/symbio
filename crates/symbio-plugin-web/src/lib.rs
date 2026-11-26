@@ -9,6 +9,6 @@ mod web_config;
 mod web_fetch;
 mod web_search;
 
-/// 探针端口（仅测试编译）：钉住「新增一个世界端口 = 0 个架构改动」（D-394 / PTS-007）。
+/// 探针端口（仅测试编译）：钉住「新增一个世界端口 = 0 个架构改动」（ / PTS-007）。
 #[cfg(test)]
 mod probe;

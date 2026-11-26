@@ -20,10 +20,10 @@ symbio-platform = { path = "../symbio-platform" }
 # 而 `Arc<T>: Deserialize` 在 serde 里是 opt-in 的。开启后 `PluginFrame` 才能继续
 # `derive(Deserialize)`——Tauri 命令参数与 gateway 的 WS 入帧都依赖它。
 # 副作用仅限「反序列化 `Rc/Arc` 不保留共享身份」，本仓从不依赖该身份。
-# 语法臂的来源（D-255）：门面按来源分臂导出（语法 / 服务 / 契约 / 部署常量），语法直接来自内核——
+# 语法臂的来源：门面按来源分臂导出（语法 / 服务 / 契约 / 部署常量），语法直接来自内核——
 # 内核的直接依赖只有 6 个，插件要共享类型时走的就该是这条边，而不是 core 的平铺。
-# 插件可依赖的宿主机制层（D-258）：门面的服务臂从这里取，core 从此不在插件的依赖图里
-# 插件 ABI 的契约层（DE-023 的 D-486 五层规划）：纯形状、零运行时状态，依赖只有 kernel +
+# 插件可依赖的宿主机制层：门面的服务臂从这里取，core 从此不在插件的依赖图里
+# 插件 ABI 的契约层（DE-023 的  五层规划）：纯形状、零运行时状态，依赖只有 kernel +
 # serde——它的 Cargo.toml 就是「插件 ABI 有多重」的答案，出现第二个运行时依赖即触发复核
 
 serde = { workspace = true, features = ["derive", "rc"] }

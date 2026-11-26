@@ -111,7 +111,7 @@ pub fn cap_skills(mut merged: Vec<Skill>, budget: LoadBudget) -> Vec<Skill> {
     merged
 }
 
-/// 从作用域 VDFS 加载一个技能目录（D-515）。
+/// 从作用域 VDFS 加载一个技能目录。
 ///
 /// `rel_root` 是 provider 根下的相对地址（如 `skill` / `skills` / `.symbio/skills`）。
 /// 目录不存在 = 这里没有技能（正常降级，不是错误）；读取失败的单条 SKILL.md

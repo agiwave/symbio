@@ -108,7 +108,7 @@ async fn missing_file_reads_as_empty_not_as_error() {
 }
 
 /// 最小 provider：任何请求都报「节点不存在」，专门验证「没写过 = 空串」的读语义。
-/// 回归自 D-515：曾把 NotFound 当错误往外抛，导致每次首次读取都进收集期错误桶、
+/// 回归自：曾把 NotFound 当错误往外抛，导致每次首次读取都进收集期错误桶、
 /// 工作区腿的空内容提示永远出不来。
 struct NotFoundProvider;
 

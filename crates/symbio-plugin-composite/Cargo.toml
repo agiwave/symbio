@@ -32,12 +32,12 @@ tracing = { workspace = true }
 symbio-plugin-api = { path = "../symbio-plugin-api", features = ["test-fixtures"] }
 symbio-platform = { path = "../symbio-platform" }
 # 与 owner 插件同一处境：这几条用例要的是**一整棵装配树**，而每个插件的
-# 工厂注册（`inventory`）只存在于它自己的 crate 里。crate 化（D-191）之后单 crate 的
+# 工厂注册（`inventory`）只存在于它自己的 crate 里。crate 化之后单 crate 的
 # 测试二进制里没有兄弟插件的注册 ⇒ 装配返回 None。宿主门面把全部插件 `pub use` 进来，
 # 挂成 dev-dependency 即补齐注册表（dev 成环 Cargo 允许）。
 symbio = { path = "../symbio" }
 # 容器测试要扮演一次「轮次派发」才能验证路由转发，那批符号属于**控制面**的容器概念
-# （`TurnSpec` / `TurnDispatch` / …），不在扩展层门面的白名单里（D-253）——测试面直接
+# （`TurnSpec` / `TurnDispatch` / …），不在扩展层门面的白名单里——测试面直接
 # 取 core，与 EX-008 对 `*.test.rs` 不判是同一条纪律。
 tempfile = { workspace = true }
 # 测试用：tokio 时间控制（start_paused / advance）

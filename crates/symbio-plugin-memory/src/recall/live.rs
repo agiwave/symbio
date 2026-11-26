@@ -1,23 +1,23 @@
 //! **活集折叠**：`memory.encoded` ∪ `memory.consolidated` − 被 `memory.forgotten` 排除的源
-//! （DE-026 D-264 / D-268）。
+//! （DE-026 ）。
 //!
 //! ## 一副折叠，两个读者
 //!
 //! | 读者 | 怎么读 | 为什么 |
 //! |---|---|---|
 //! | 检索（本包内） | 直接调 [`live`] | 检索是包内的判据，不必绕一圈声明 |
-//! | 巩固（本包内） | 直接调 [`live`] | 格位是债（D-268 订正），执行体与折叠同在一个 crate |
-//! | `memory` 报表（跨插件） | 按名字读声明视图 `memory.live`（`eval` = [`memory_live`]） | 报表按名字取，不抄口径（D-387 Q3） |
+//! | 巩固（本包内） | 直接调 [`live`] | 格位是债（ 订正），执行体与折叠同在一个 crate |
+//! | `memory` 报表（跨插件） | 按名字读声明视图 `memory.live`（`eval` = [`memory_live`]） | 报表按名字取，不抄口径（ Q3） |
 //!
 //! 几条路走同一个函数：`memory_live` 只是把 [`live`] 的输出序列化成 JSON，没有第二份
-//! 折叠逻辑。这正是 `D-267`「记忆一个所有者」的兑现——若记忆真是四个 crate，这副折叠
+//! 折叠逻辑。这正是 「记忆一个所有者」的兑现——若记忆真是四个 crate，这副折叠
 //! 就得跨 crate，那时只能靠声明视图；现在它是同一个 crate 里的一个函数 + 一张声明。
 //!
 //! ## 四条口径（每条都对应一条既有验收）
 //!
 //! - **as-of**：`ts > now` 的事件一概不见（C12：后台巩固不得污染在途决策）；
 //! - **排除式遗忘**：`memory.forgotten` 不是删除，是折叠不再包含它 `produced_by` 指的
-//!   那条源——Log 永不删，遗忘可撤销、可审计（DE-001 §9.3）；
+//!   那条源——Log 永不删，遗忘可撤销、可审计（DE-001 §10）；
 //! - **巩固产物同样可召回**：`memory.consolidated` 也是一条记忆，只是 `generation > 0`；
 //! - **认知归属人**：只折 `actor == PRINCIPAL_USER` 的那些——记忆事件的 actor 是**认知
 //!   归属人**，不是跑轮主体（跨主体收放是读侧闸的事，见 `loop` 的可见域预过滤）。
@@ -72,7 +72,7 @@ pub(crate) fn live(events: &[Event], now: i64) -> Vec<LiveEntry> {
             EVENT_MEMORY_FORGOTTEN => {
                 // 排除边读的是**信封**字段 `produced_by`（不是载荷）：`ViewDecl.reads`
                 // 只收 `(事实名, 载荷字段)`，所以依赖图少一条「视图依赖遗忘事实」的边。
-                // 缺口登记在 DE-026 D-268，不开 `reads` 的口子（那是架构改动）。
+                // 缺口登记在 DE-026，不开 `reads` 的口子（那是架构改动）。
                 if let Some(target) = e.produced_by {
                     forgotten.push(target);
                 }

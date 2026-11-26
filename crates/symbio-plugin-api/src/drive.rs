@@ -24,7 +24,7 @@ pub const DRIVE_CLOSING_FAILED: &str = "failed";
 
 /// 环协议里「已派发」的事实名（机制词汇，不是世界词）：执行体已拿到这一笔。
 ///
-/// 依赖方读它来钉**首派次序**——等收束会把挂起的一笔当成堵点（`D-378`）。
+/// 依赖方读它来钉**首派次序**——等收束会把挂起的一笔当成堵点。
 pub const DRIVE_SENT: &str = "sent";
 
 /// 驱动执行者所在的唯一 `multi` 族（与 `port` / `debt` 同一手法：族是值，加族不改内核）。
@@ -98,7 +98,7 @@ pub struct DriveFact {
     pub key: DriveKey,
     /// 载荷：宿主原样保存，不解释内容。
     pub payload: Value,
-    /// 记账时刻（毫秒）。环的「现在」取本字段的最大值（`D-376`），不另读墙钟。
+    /// 记账时刻（毫秒）。环的「现在」取本字段的最大值，不另读墙钟。
     pub at_ms: u64,
     /// 收束事实携带的应答承载（只传递，不读世界字段）。
     pub reply: Option<PortReply>,
@@ -154,7 +154,7 @@ pub struct DriveRow {
     pub when_id: Option<(String, String)>,
     /// 排除条件：该事实已存在 ⇒ 本行不欠（与 `when` 同一条读面）。
     pub unless: Option<Unless>,
-    /// 该端口的债全部还清才欠；作用域见 [`crate::debt::NoOpenScope`]（D-446）。
+    /// 该端口的债全部还清才欠；作用域见 [`crate::debt::NoOpenScope`]。
     pub when_no_open: Option<crate::debt::NoOpenScope>,
     /// 前提（读债状态）：该端口**这一轮**还有人认领（可派发 / 在飞 / 挂起）⇒ 本行
     /// 不进计划；没人认领 ⇒ 前提已了（**缺席即收束**）。与 [`Self::when_no_open`]
@@ -178,7 +178,7 @@ pub struct DriveRow {
 ///
 /// 写方是驱动入口（宿主装配层，`crates/symbio-runtime/src/host/entry.rs::drain`）：两条出口在
 /// CLI 上有 stderr，但在没有控制台的宿主（Tauri / gateway）里没有读者。把出口落成
-/// 事实后，非 CLI 宿主经 VDFS 订阅面直接可见（`D-393`）。
+/// 事实后，非 CLI 宿主经 VDFS 订阅面直接可见。
 ///
 /// 它不是世界词：不在任何插件的 `shared_events` 里，读方按名字取这一条机制记录，
 /// 不参与选债 / 派发 / 配对。

@@ -1,7 +1,7 @@
 //! 世界端口的收集面：端口名校验、装配期的收集容器，以及提供者 / 执行体的通用契约
-//! （`DE-047` I-6，D-445 / D-468）。
+//! （`DE-047` I-6D-445 / ）。
 //!
-//! ## 端口集是装配期的收集结果，不是能力行（D-468）
+//! ## 端口集是装配期的收集结果，不是能力行
 //!
 //! 端口由活插件在自己的 `traverse` 里申报（[`register_ports`]），写进本次装配的
 //! [`PortBindings`] 容器；容器挂在 ctx 上（[`PORT_BINDINGS`]），装配方读快照折执行体表。
@@ -43,17 +43,17 @@ use crate::sdk::plugin::effects::FactDraft;
 ///
 /// 事件 id 形如 `ring:{port}:{id}:{attempt}:{kind}`，端口位是首个字段；端口名一旦
 /// 含 `:`，解析会把端口位截断（`model:assist` 会被读成 `model`），事实键与债键对不上。
-/// 这里 **fail-closed**：注册期直接拒绝，不转义、不猜（D-336「已知编码风险」）。
+/// 这里 **fail-closed**：注册期直接拒绝，不转义、不猜（「已知编码风险」）。
 const PORT_NAME_RESERVED: &[char] = &[':'];
 
 /// 端口名校验：种进事件 id 之前就把保留字符挡在注册期。
 pub fn check_port_name(port: &str) {
     if let Some(ch) = port.chars().find(|ch| PORT_NAME_RESERVED.contains(ch)) {
-        // panic-allow crates/symbio-platform/src/sdk/capability/port.rs::check_port_name: 注册期 fail-closed——含保留字符的端口名会让环事件 id 的端口位被截断，注册当场拒绝；带病启动比崩掉更难诊断（D-336）。
+        // panic-allow crates/symbio-platform/src/sdk/capability/port.rs::check_port_name: 注册期 fail-closed——含保留字符的端口名会让环事件 id 的端口位被截断，注册当场拒绝；带病启动比崩掉更难诊断。
         panic!(
             "端口名 {port:?} 含有环事件 id 的保留字符 {ch:?}，端口注册失败。\
              事件 id 是 `ring:{{port}}:{{id}}:{{attempt}}:{{kind}}`，端口位按 `:` 定界；\
-             命名端口时请避开保留集 {PORT_NAME_RESERVED:?}（D-336）。"
+             命名端口时请避开保留集 {PORT_NAME_RESERVED:?}。"
         );
     }
 }
@@ -65,7 +65,7 @@ type Entry = Result<Binding, String>;
 /// 一次装配收集到的全部条目。
 type Entries = BTreeMap<String, Entry>;
 
-/// 一次装配的端口收集容器（D-468）。
+/// 一次装配的端口收集容器。
 ///
 /// 条目是 `Ok((提供者 id, 执行体))` 或 `Err(冲突说明)`：一条被拒的键**不会**被后来的
 /// 登记救回来——同一端口两个 owner 是装配错误，不是覆盖问题。
@@ -171,7 +171,7 @@ impl PortBindings {
     }
 }
 
-/// 端口收集容器的 ctx 槽（D-468）：一次装配一个实例，装配方读快照折执行体表。
+/// 端口收集容器的 ctx 槽：一次装配一个实例，装配方读快照折执行体表。
 pub struct PortBindingsKey;
 impl SymbioKey for PortBindingsKey {
     type Value = Arc<PortBindings>;
@@ -188,7 +188,7 @@ impl SymbioKey for PortBindingsKey {
 }
 pub const PORT_BINDINGS: PortBindingsKey = PortBindingsKey;
 
-/// 作用域前缀槽（D-468）：子 Agent 的作用域给每个端口名加同一个前缀。
+/// 作用域前缀槽：子 Agent 的作用域给每个端口名加同一个前缀。
 ///
 /// **端口名与工具名同源**：作用域里工具行被改名为 `agent_<id>_<name>`，端口名必须用
 /// 同一个前缀——否则派发按前缀名查不到绑定。前缀为空（系统树）⇒ 端口名原样。
@@ -213,7 +213,7 @@ pub fn scoped_port_name(ctx: &Arc<dyn PluginInvokeRequest>, port: &str) -> Strin
     format!("{}{port}", ctx.get(PORT_SCOPE).unwrap_or_default())
 }
 
-/// 活插件在 `traverse` 里申报自己的端口（D-468）。
+/// 活插件在 `traverse` 里申报自己的端口。
 ///
 /// 容器缺席（夹具 / 内部请求没有装收集）时静默跳过：没有容器就没有端口集，那不是
 /// 装配错误，与 `CAPABILITY_VISITOR` 缺席同一条口径。登记错误写进既有能力错误桶，
@@ -226,7 +226,7 @@ pub async fn register_ports(ctx: &Arc<dyn PluginInvokeRequest>, provider: &dyn P
         .ports()
         .into_iter()
         .map(|port| {
-            // 端口名先进事件 id：非法名在这里 fail-closed（D-336）。
+            // 端口名先进事件 id：非法名在这里 fail-closed。
             let name = scoped_port_name(ctx, &port);
             check_port_name(&name);
             name
@@ -239,14 +239,14 @@ pub async fn register_ports(ctx: &Arc<dyn PluginInvokeRequest>, provider: &dyn P
 }
 
 // ============================================================
-// 注册面与执行契约（自 plugin-api 搬入，D-440 ②；门面只留转发）。
+// 注册面与执行契约（自 plugin-api 搬入；门面只留转发）。
 // ============================================================
 
 /// 一个世界端口的提供者：申报端口名与提供者 id，并交出通用执行面。
 ///
 /// 声明位（`ports` / `provider_id`）供表造行、消费方判缺席与判重；执行面
 /// （[`Self::executor`]）是**唯一**的环 ↔ provider 合同——`Arc<dyn PortProvider>`
-/// 在 Rust 里跨转型不出去，执行面必须以方法形式落在这里（D-298 的形式成立）。
+/// 在 Rust 里跨转型不出去，执行面必须以方法形式落在这里（形式成立）。
 ///
 /// 方法名与类型都**不具名任何世界**（`DE-047` I-6.2）：端口名是数据，载荷是通用的
 /// [`PortInput`] / [`PortOutcome`]，能力位是 [`PortCapabilities`]。
@@ -312,7 +312,7 @@ pub trait PortFactReader: Send + Sync + 'static {
     /// 本会话的事实（读面在打开时就绑定了会话身份）。
     fn facts(&self) -> Vec<PortFact>;
 
-    /// 事件原样（含入库 `seq`）：行执行体按它构造 `RowRequest`（D-338）。
+    /// 事件原样（含入库 `seq`）：行执行体按它构造 `RowRequest`。
     ///
     /// 默认空：只实现 `facts()` 的宿主仍可工作，读不到 `seq` 的行按「无区间」自处。
     fn events(&self) -> Vec<crate::kernel::event::Event> {
@@ -320,9 +320,9 @@ pub trait PortFactReader: Send + Sync + 'static {
     }
 }
 
-/// 一笔债的执行上下文（`DE-047` I-6.5 / D-305 裁决一）：命名不带世界词。
+/// 一笔债的执行上下文（`DE-047` I-6.5 /  裁决一）：命名不带世界词。
 ///
-/// **不含租约截止**（D-370）：租约是环的簿记（落在 `sent{deadline_ms}`），不是执行体的
+/// **不含租约截止**：租约是环的簿记（落在 `sent{deadline_ms}`），不是执行体的
 /// 预算；执行体各自持有自己的超时常数。
 #[derive(Clone)]
 pub struct PortExecContext {
@@ -332,7 +332,7 @@ pub struct PortExecContext {
     pub idempotency_key: String,
     /// 增量出口（`capabilities.streaming` 为真时使用）。
     pub sink: ExecEventSink,
-    /// 事实草稿出口（D-305 裁决一）：provider 执行期间可追加事实，宿主唯一写口按
+    /// 事实草稿出口（ 裁决一）：provider 执行期间可追加事实，宿主唯一写口按
     /// 幂等键落行；环不解析、不识别落下的行。
     pub emit: PortFactEmit,
     /// 调用方 ctx（提供者据此读能力表）；`None` = 无。
@@ -348,7 +348,7 @@ pub struct PortExecContext {
     pub scratch_dir: Option<PathBuf>,
     /// 事实读面（宿主实现）：执行体按需读本可见域的事实；`None` = 无。
     pub reader: Option<Arc<dyn PortFactReader>>,
-    /// 入站来源主体（D-067）：**宿主**从本轮 ctx 取好并解析完（缺席 ⇒ 会话身份），
+    /// 入站来源主体：**宿主**从本轮 ctx 取好并解析完（缺席 ⇒ 会话身份），
     /// 环只原样转交。效果面拿它填 `EffectEnv.source`——承诺的 `to` 是数据，不是
     /// 让扩展插件自己去读某个 ctx 键。
     pub source: String,
@@ -357,7 +357,7 @@ pub struct PortExecContext {
 /// 宿主交给执行体的**不透明句柄束**：环只原样转交，不读取、不解释其中任何字段。
 ///
 /// 这几个值不是环的知识——`ctx` 里装什么、`scratch_dir` 指向哪里、`sink` 把帧送去
-/// 何处，都由宿主决定、由执行体自用（`D-316`）。环只保证「宿主给的，原样到达」。
+/// 何处，都由宿主决定、由执行体自用。环只保证「宿主给的，原样到达」。
 #[derive(Clone)]
 pub struct PortExecHandles {
     /// 调用方上下文（提供者据此读能力表 / 上游）；`None` = 无。
@@ -384,7 +384,7 @@ impl Default for PortExecHandles {
     }
 }
 
-/// provider 执行一笔债期间追加事实草稿的通用出口（`DE-048` D-305 裁决一）。
+/// provider 执行一笔债期间追加事实草稿的通用出口（`DE-048`  裁决一）。
 ///
 /// 形状与 [`ExecEventSink`] 同族：**生产者只写，去处由宿主决定**。命名的「事实」
 /// 是通用的记账单位（[`FactDraft`]），不是某个世界的事件词。
@@ -398,7 +398,7 @@ pub trait PortFactWriter: Send + Sync + 'static {
     ///
     /// `owner` **只从声明表来**：机制侧按草稿的 `kind` 查出格的申报方
     /// （`Frozen::event_owner`），再交给写口。它**不从草稿来**——`FactDraft` 的信封
-    /// 三格（轮号 / 归属 / 时刻）归宿主，行为无权指定（DE-026 D-252）；给草稿加
+    /// 三格（轮号 / 归属 / 时刻）归宿主，行为无权指定（DE-026 ）；给草稿加
     /// `actor` 字段会把这条分界重新打开。
     ///
     /// 缺省实现丢弃归属、退化为 [`PortFactWriter::emit`]（只读夹具与内部请求仍可工作）。
@@ -460,7 +460,7 @@ pub enum PortErrorClass {
 }
 
 /// 执行体交回的**应答承载**（中性契约）：环只按序追加、按 `links` 配对，
-/// **不读其中的世界字段**——消息怎么组装是执行体的私事（D-319 / D-446 ②）。
+/// **不读其中的世界字段**——消息怎么组装是执行体的私事。
 ///
 /// 通用端口不认识模型协议：`messages` 是**不透明值**，不是模型侧的消息类型或任何
 /// 角色 / 调用 id 形状。结果先成为事实，模型插件自己把事实投影成模型消息；
@@ -473,7 +473,7 @@ pub struct PortReply {
     pub links: Vec<(String, String)>,
 }
 
-/// 一次派发的**授权结论**（D-385）：执行体自判、环不代填。
+/// 一次派发的**授权结论**：执行体自判、环不代填。
 ///
 /// 它没有「未表态」的变体，也没有 `Default`：任何 [`PortExecutor`] 都必须选一个变体
 /// 才能交回 [`PortOutcome`]，漏判在类型上不可表达。环不构造它，也不解释它的理由。
@@ -505,7 +505,7 @@ impl AuthzVerdict {
 /// 一笔债的产出（`DE-047` I-6.2）：授权结论、事实草稿、错误与应答承载。
 #[derive(Debug, Clone)]
 pub struct PortOutcome {
-    /// 执行体自判的授权结论（D-385）；环只读这一格决定是否落它交来的事实。
+    /// 执行体自判的授权结论；环只读这一格决定是否落它交来的事实。
     pub authz: AuthzVerdict,
     /// 要写到行上的事实草稿（每项是一个 JSON 对象，字段由端口插件声明）。
     pub facts: Vec<Value>,
@@ -581,11 +581,11 @@ pub struct PendingPrompt {
 }
 
 /// 执行体交回**主结果值**的约定键：`facts` 里带这个键的项是调用方要的纯值，其余
-/// 事实是端口插件自己声明的世界事实。（`D-440` ②：工具行执行体的结果经它交回，
+/// 事实是端口插件自己声明的世界事实。（ ②：工具行执行体的结果经它交回，
 /// 派发侧按名取出后继续自己的编排。）
 pub const RESULT_KEY: &str = "result";
 
-/// 工具世界的通用出口换算（`D-440` ③）：**工具结果本身**（任意 JSON）或
+/// 工具世界的通用出口换算（ ③）：**工具结果本身**（任意 JSON）或
 /// 工具错误 ⇒ [`PortOutcome`]。
 ///
 /// 这是「信封 ↔ 结果」换算的唯一收口：执行体内部按工具自己的形状干活，出口
@@ -604,7 +604,7 @@ pub fn port_result(result: Result<Value, crate::kernel::plugin::PluginError>) ->
     }
 }
 
-/// 端口执行体的**缺上下文守卫**（`D-493`）：没有调用方上下文 ⇒ 非重试失败。
+/// 端口执行体的**缺上下文守卫**：没有调用方上下文 ⇒ 非重试失败。
 ///
 /// 这条判断此前在 17 个工具端口的 `impl PortExecutor::execute` 里各抄一份，连失败文案
 /// 一起——改一句文案要改 17 处，漏一处就出现两种说法。它和 [`port_result`] 同址，因为

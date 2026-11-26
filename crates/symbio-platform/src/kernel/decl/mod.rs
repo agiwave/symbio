@@ -27,7 +27,7 @@
 //! 一条事实可以同时出现在两张表里（义务环要它的字段，网格要它的格位），但**两张表的
 //! 登记口分开**：事实未必进环，进环的事实才需要字段声明。
 //!
-//! 名字 → 格位的唯一来源是 [`EventDecl`]（DE-024 D-197）：内核只声明协议五格，业务
+//! 名字 → 格位的唯一来源是 [`EventDecl`]（DE-024 ）：内核只声明协议五格，业务
 //! 事件由 owner 插件声明。写闸只问装配表与共享表，两者都不认识 ⇒ 网格之外（fail-closed）。
 //!
 //! ## `port` 是载荷字段，不是信封字段
@@ -39,7 +39,7 @@
 //! ## 视图 `eval` 的签名就是隔离
 //!
 //! `fn(&[Event], i64) -> Value`：拿不到写口，也拿不到别的视图；`now` 是入参而不是
-//! 视图自己读时钟，同一份日志重放两次必须得到同一结果（`now` 只读事实，见 [DE-047](../../../../../docs/003-design/047-义务环判据与归属推导.md "DE-047-义务环判据与归属推导") D-376）。
+//! 视图自己读时钟，同一份日志重放两次必须得到同一结果（`now` 只读事实，见 [DE-047](../../../../../docs/003-design/047-义务环判据与归属推导.md "DE-047-义务环判据与归属推导") ）。
 //! 视图互不可见（TC-2）因此落在类型上，不落在纪律上。
 //!
 //! ## 声明归谁
@@ -49,7 +49,7 @@
 //! `crates/symbio-plugin-loop/src/control_decl.rs` 声明，经 [`Builder::declare`] 交进来；内核不认识
 //! 那些名字。新增一个视图、一个控制面事实、一处字段，改的是插件文件，不是本模块。
 //!
-//! **owner 就是「谁把这张表交进 `Builder`」**（DE-023 D-178）：`declare` 的第一个
+//! **owner 就是「谁把这张表交进 `Builder`」**（DE-023 ）：`declare` 的第一个
 //! 参数是 owner 标识，`Frozen` 逐条记下 `fact_owner` / `view_owner`。它不是
 //! `FactDecl` / `ViewDecl` 上的字段——声明形状不因登记而变宽，也不存在「声明里的
 //! owner 与装载方不一致」这种可漂的第二事实。
@@ -57,7 +57,7 @@
 //! 插件交进来的声明仍受同一条资格约束：某一行以它为 `owes` / `until` / `unless`，
 //! 或某条**被行用到的**视图读它（TC-3 的声明面封闭）。只在审计 / SLO 投影里读的断言格
 //! 不进控制面表——`scope.dispatch` 是现例：它的读方是 core 的预算判据（按
-//! `declares_budget` 角色读它，DE-024 D-203），表里没有一行以它为前件或出口。
+//! `declares_budget` 角色读它，DE-024 ），表里没有一行以它为前件或出口。
 //!
 //! ## 生产接线
 //!
@@ -121,11 +121,11 @@ pub struct ViewDecl {
     ///
     /// 这一格只约束**环内窗口求值**（[`Frozen::eval`] 超界回 `None`，切片长度由
     /// [`Frozen::scan_bound`] 回答），不是跨插件读口的许可：读侧按调用方给的切片
-    /// 全量折（`D-284`）。
+    /// 全量折。
     pub cost: u32,
     /// 求值函数：**只有事实切片与时间戳**——没有写口、没有别的视图、没有时钟。
     pub eval: fn(&[Event], i64) -> serde_json::Value,
-    /// **多片合并**：N 份 `eval` 的产物 → 一份汇总（`D-281`）。
+    /// **多片合并**：N 份 `eval` 的产物 → 一份汇总。
     ///
     /// ## 它补的是哪一格
     ///
@@ -146,7 +146,7 @@ pub struct ViewDecl {
     pub agg: Option<fn(&[serde_json::Value]) -> serde_json::Value>,
 }
 
-/// 视图读了一条**只有事件格位、没有事实声明**的断言格（DE-024 D-282）。
+/// 视图读了一条**只有事件格位、没有事实声明**的断言格（DE-024 ）。
 ///
 /// ## 为什么这是报告而不是缺口
 ///
@@ -189,7 +189,7 @@ pub struct AssertionRead {
 /// `ActorDecl` 只持有静态可查的四样——「一个 `by` 一个动作」由绑定表与冻结表同时保证。
 /// 执行体的可调用面住在**注册它的插件**里（`submit_row!` / `RowHandler`），环在派发期
 /// 按 `by` 解析；把 `run` 画进声明表，`BoxFuture<'static, …>` 借不到本轮草稿，还会把
-/// 运行期依赖钉进冻结表。裁决见 D-119。
+/// 运行期依赖钉进冻结表。裁决。
 ///
 /// 与 `actors::ActorSpec` 无关：那里的 actor 是**主体**（人格 / 推理），这里的
 /// actor 是**执行体**（表里一个名字对应一次动作）。方案用同一个词，此处不改名。
@@ -201,7 +201,7 @@ pub struct ActorDecl {
     pub mode: LatencyTier,
     /// 写的**事实名**（写入封闭与第 6 条收口检查的对象）。
     ///
-    /// 读面不在这里：前件是**行**的属性（`Decl.reads`，D-306 裁决一）。执行体是一段
+    /// 读面不在这里：前件是**行**的属性（`Decl.reads` 裁决一）。执行体是一段
     /// 可复用的代码，同一段代码替两行干活时，两行的前件本来就不一样；把读面挂在
     /// 执行体上，等于让「这一行要等什么」只能精确到「这组行一共要等什么」。
     pub writes: &'static [&'static str],
@@ -211,7 +211,7 @@ pub struct ActorDecl {
 ///
 /// 这是插件与内核之间**唯一**的扩展口（[`Builder::declare`]）。声明住在插件里，
 /// 内核只负责聚合、校验、冻结。`actors` 是 `Vec` 而不是静态切片：执行体的 `run`
-/// 绑定住在插件自己的绑定表里，装载期只投影出静态可查的四样（D-119）。
+/// 绑定住在插件自己的绑定表里，装载期只投影出静态可查的四样。
 pub struct PluginDeclarations<'a> {
     /// 事件名 → 格位。业务事件与协议事件都在这里；加名字不动内核。
     pub events: &'static [EventDecl],
@@ -225,7 +225,7 @@ pub struct PluginDeclarations<'a> {
 /// 内核自己交出的声明（协议五格）的 owner 标识。
 ///
 /// 与插件 owner（如 `"crates/symbio-plugin-loop"`）同处一个命名空间：`Frozen` 的 owner 清单里
-/// 没有第二种来源，问「这一条归谁」永远只有一个答案（DE-023 D-178）。
+/// 没有第二种来源，问「这一条归谁」永远只有一个答案（DE-023 ）。
 pub const KERNEL_OWNER: &str = "kernel";
 
 /// 本模块用例搭小世界时的 owner（`Builder::empty` 之后的直接 `fact` / `view`）。
@@ -255,7 +255,7 @@ pub struct Builder {
     rows: Vec<Decl>,
     /// 事件名 → 交表方。
     event_owners: HashMap<&'static str, &'static str>,
-    /// 事实名 → 交表方（DE-023 D-178 的 owner 清单）。
+    /// 事实名 → 交表方（DE-023  的 owner 清单）。
     fact_owners: HashMap<&'static str, &'static str>,
     /// 视图名 → 交表方。
     view_owners: HashMap<&'static str, &'static str>,
@@ -287,7 +287,7 @@ impl Builder {
         }
     }
 
-    /// 一次装入一个插件的全部声明；`owner` 是**交表方**的标识（DE-023 D-178）。
+    /// 一次装入一个插件的全部声明；`owner` 是**交表方**的标识（DE-023 ）。
     ///
     /// 同一个 owner 可以分多次交（例如测试夹具先交事实、再交视图），但一个名字只能
     /// 出现一次——重名由 `seal` 判红，owner 清单因此逐条唯一。
@@ -342,7 +342,7 @@ impl Builder {
 
     /// 冻结并跑装载期全部检查。通过 ⇒ [`Frozen`]（只读）；失败 ⇒ 全部缺口。
     ///
-    /// `row_writes` 是**行级写入归属**（D-248）：共享执行体（通用行执行体，D-241）的
+    /// `row_writes` 是**行级写入归属**：共享执行体（通用行执行体）的
     /// 多行各自声明写哪些格，而 `ActorDecl.writes` 只有执行体级的并集，表达不了
     /// 「这一行写这一格、那一行写另一格」。名单是冻结的**输入**，不是第二个注册口
     /// ——装载仍然只有「`declare` → `seal`」两个动作。没有逐行名单的行按并集判。
@@ -400,7 +400,7 @@ impl Builder {
             }
             // §3.4 第 5 条（写入封闭）的声明侧：执行体的账本不许含引擎独占的格子。
             // 「实际写入 ⊆ `writes`」那一半在运行期对账，判定输入是日志尾段而不是
-            // 执行体交回的陈述（D-123 决策 1–2）。
+            // 执行体交回的陈述（ 决策 1–2）。
             for fact in a.writes {
                 if ENGINE_ONLY_CELLS.contains(fact) {
                     gaps.push(Gap::ActorWritesEngineCell {
@@ -436,12 +436,12 @@ impl Builder {
         }
 
         // 视图读了「只有事件格位、没有事实声明」的断言格：报告项，随表冻结一次
-        // （`D-282`）。它不是缺口——名字由 `EventDecl` 保证拼对，只是字段无从校验。
+        //。它不是缺口——名字由 `EventDecl` 保证拼对，只是字段无从校验。
         let mut assertion_reads: Vec<AssertionRead> = Vec::new();
         for v in &self.views {
             for &(fact, field) in v.reads {
                 match self.facts.iter().find(|f| f.name == fact) {
-                    // 名字在事件表上、只是没有事实声明 ⇒ **报告**，不是缺口（`D-282`）：
+                    // 名字在事件表上、只是没有事实声明 ⇒ **报告**，不是缺口：
                     // 判据 3 的输入（`FactDecl.fields`）缺席，不是它说「字段错了」。
                     None if event_names.contains(fact) => assertion_reads.push(AssertionRead {
                         view: v.name,
@@ -468,7 +468,7 @@ impl Builder {
             }
         }
 
-        // D-339：事件的落格归属主体是声明格。空值说明注册口被改坏了——此时让写口
+        //：事件的落格归属主体是声明格。空值说明注册口被改坏了——此时让写口
         // 在落账时猜默认值，只会把「归属」变成静默失效；装配期就判红。
         for event in &self.events {
             if event.owner.trim().is_empty() {
@@ -501,7 +501,7 @@ impl Builder {
         // 第 4 条是**报告**不是缺口：静态只能判「可能同时命中」，裁决归环。
         // 名单随表冻结一次，读侧（装载日志与用例）只问表，不再自己算第二遍。
         let overlaps = overlaps(&frozen.rows, &frozen);
-        // owner 清单与表同源（DE-023 D-178）：`event` / `fact` / `view` 写入时逐条登记，
+        // owner 清单与表同源（DE-023 ）：`event` / `fact` / `view` 写入时逐条登记，
         // 这里钉住「表里有几条，清单就有几条」——不成立只能是注册口被改坏了。
         assert_eq!(frozen.event_owners.len(), frozen.events.len());
         assert_eq!(frozen.fact_owners.len(), frozen.facts.len());
@@ -536,14 +536,14 @@ pub struct Frozen {
     actors: Vec<ActorDecl>,
     ports: Vec<PortDecl>,
     rows: Vec<Decl>,
-    /// 事件 / 事实 / 视图的 owner 清单（DE-023 D-178）：与六张表同源，冻结后只读。
+    /// 事件 / 事实 / 视图的 owner 清单（DE-023 ）：与六张表同源，冻结后只读。
     event_owners: HashMap<&'static str, &'static str>,
     fact_owners: HashMap<&'static str, &'static str>,
     view_owners: HashMap<&'static str, &'static str>,
     /// §3.4 第 4 条的报告（可能同时命中的行对）。**不是缺口**——冻结成功才存在，
     /// 装载入口把它打成人读的日志，用例钉住名单。
     overlaps: Vec<Overlap>,
-    /// 视图读了「只有事件格位、没有事实声明」的断言格（`D-282`）。**不是缺口**，
+    /// 视图读了「只有事件格位、没有事实声明」的断言格。**不是缺口**，
     /// 同一条通道：装载入口打日志，用例钉住名单。
     assertion_reads: Vec<AssertionRead>,
 }
@@ -551,12 +551,12 @@ pub struct Frozen {
 impl Frozen {
     /// 判据的**词汇面**：全部事件名、格位与角色（协议五格 + 各 owner 插件交来的业务事件）。
     ///
-    /// core 的守卫拿它问「这条名字扮演什么角色」，从此不抄名字（DE-024 D-203）。
+    /// core 的守卫拿它问「这条名字扮演什么角色」，从此不抄名字（DE-024 ）。
     pub fn events(&self) -> &[EventDecl] {
         &self.events
     }
 
-    /// 这个名字落在哪一格。`None` = 冻结表里没有它 ⇒ 网格之外（DE-024 D-199）；
+    /// 这个名字落在哪一格。`None` = 冻结表里没有它 ⇒ 网格之外（DE-024 ）；
     /// 写闸没有第三份表可问。
     pub fn event_cell(&self, name: &str) -> Option<Cell> {
         self.events.iter().find(|e| e.name == name).map(|e| e.cell)
@@ -570,7 +570,7 @@ impl Frozen {
     /// 这个名字是不是**宿主写口**：行表之外、由宿主代码直接落格的事实。
     ///
     /// 装载期的「前件有生产者」判据把它与执行体的 `writes`、引擎独占格算作同一档；
-    /// 没有这一格，`user.message` 这类开轮事实会被误报成孤儿前件（D-296）。
+    /// 没有这一格，`user.message` 这类开轮事实会被误报成孤儿前件。
     pub fn host_written(&self, name: &str) -> bool {
         self.events.iter().any(|e| e.name == name && e.host)
     }
@@ -582,7 +582,7 @@ impl Frozen {
     }
 
     /// 这个事件名的**落格归属主体**（信封 `actor`）。`@principal` 由会话装配在
-    /// 落格时解析成该会话主体（D-339）；写口不再有运行期默认值。
+    /// 落格时解析成该会话主体；写口不再有运行期默认值。
     pub fn event_writer(&self, name: &str) -> Option<&'static str> {
         self.events.iter().find(|e| e.name == name).map(|e| e.owner)
     }
@@ -616,7 +616,7 @@ impl Frozen {
         &self.overlaps
     }
 
-    /// 视图读了「只有事件格位、没有事实声明」的断言格（`D-282`）。
+    /// 视图读了「只有事件格位、没有事实声明」的断言格。
     ///
     /// 报告项，不是缺口：名字由 [`EventDecl`] 保证拼对，字段却无 `FactDecl` 可校验。
     /// 装载入口把它打成人读的日志；用例拿它钉住「哪几条读法今天没有声明可查」。
@@ -640,7 +640,7 @@ impl Frozen {
 
     /// 这一条视图归谁。口径同 [`Frozen::fact_owner`]。
     ///
-    /// 生产消费者是装配期的报表出口对账（`D-465`）：`ReportDecl.owner` 是短名，
+    /// 生产消费者是装配期的报表出口对账：`ReportDecl.owner` 是短名，
     /// 这里出的值是交表方的标识，两边由 `reports::owner_short` 归一再比。
     pub fn view_owner(&self, name: &str) -> Option<&'static str> {
         self.view_owners.get(name).copied()
@@ -695,12 +695,12 @@ impl Frozen {
 //
 // 名字住在 `event/mod.rs` 的事件名字表（`PROTOCOL_EVENTS`）。
 //
-// `via` 是**这一次往返是谁的**（D-122 决策 2）：这一轮自己的模型往返**不带**
+// `via` 是**这一次往返是谁的**（ 决策 2）：这一轮自己的模型往返**不带**
 // 它，判决 / 措辞 / 摘要那些内部往返带它。判据侧靠「有没有 `via`」把两类分开——
 // 内部往返的应答 `calls` 为空（它不带工具），若混进「本轮最近一次模型应答」的口径，
 // 一条判决往返就会被读成「这一轮答完了」。
 //
-// `row` 是**这一笔债走该端口的哪一条行契约**（D-315）：一个端口可以有多条行
+// `row` 是**这一笔债走该端口的哪一条行契约**：一个端口可以有多条行
 // （`session-config` / `session-call` / `session-call-unit` / `session-facts`），
 // 环只按行名配对，不解释行名属于哪个世界；行名由端口所属插件声明（I-6.3）。
 const PROTOCOL_FIELDS: &[&str] = &["port", "id", "attempt", "via", "row"];
@@ -717,7 +717,7 @@ const ENGINE_ONLY_CELLS: &[&str] = &[EVENT_SENT, EVENT_RESPONSE, EVENT_FAILED, E
 
 // `response` 比请求多两类字段：
 //
-// 1. **交回的工具调用**（D-117）：创建行 `open-tools` 的展开源——一个
+// 1. **交回的工具调用**：创建行 `open-tools` 的展开源——一个
 //    `response(port=model)` 的 `calls` 数组逐元素开债，元素键与随后的
 //    `request(port=tool)` 同 id。其它端口的应答不带这个字段（缺席即空集合）。
 // 2. **这一轮说了什么**（见 `OUTPUT_FIELDS`）：正文 / 思考与它们的节点身份。
@@ -757,7 +757,7 @@ const RESPONSE_FIELDS: &[&str] = &[
 // `awaited` 是**逐次尝试**的属性，不是端口属性：同一个端口里，普通批次调用
 // 崩溃后没有等待方（草稿随进程消失），唤醒调用却能由 `wake_batch` 从事实重建。
 // 租约看护只对 `awaited = true` 的那几次尝试重试——否则会造出一条永远没人派发的
-// `request`（D-138）。
+// `request`。
 const SENT_FIELDS: &[&str] = &[
     "port",
     "id",
@@ -768,7 +768,7 @@ const SENT_FIELDS: &[&str] = &[
 ];
 
 // 协议五格的事件名与格位。名字常量仍住 `event/mod.rs`（协议族是内核语法的闭集，
-// DE-024 D-203 裁决三把它留在语法里），格位在此与 `FactDecl` 并列声明——`seal`
+// DE-024  裁决三把它留在语法里），格位在此与 `FactDecl` 并列声明——`seal`
 // 因此能判「协议事实都有事件行」。
 //
 // 五条都落 `turn × asserted`：它们是「关于这一轮的断言」，不是开轮 / 收束。业务事件
@@ -803,7 +803,7 @@ const PROTOCOL_FACTS: &[FactDecl] = &[
         expand: &["calls"],
         fields: RESPONSE_FIELDS,
     },
-    // `failed` 与其它协议格同形，**带 `attempt`**（D-138）：它关的是「这一次尝试
+    // `failed` 与其它协议格同形，**带 `attempt`**：它关的是「这一次尝试
     // 失败」；「这笔调用不再重试」由「没有后继 `request`」表达，不由键的粒度表达。
     //
     // 这样 `dispatch-<port>` / `await-<port>` / `lease` 才能按 `(port, id, attempt)`
@@ -837,7 +837,7 @@ const PROTOCOL_FACTS: &[FactDecl] = &[
     },
     // 尝试级否定：租约看护者落的「这一次作废、换一次」。
     // 与 `failed` 的边界：`failed` 是一次尝试的终局，`retry` 是「这次不算数」；
-    // 两者都只关同一次尝试（D-138）。
+    // 两者都只关同一次尝试。
     FactDecl {
         name: EVENT_RETRY,
         port: Some("port"),

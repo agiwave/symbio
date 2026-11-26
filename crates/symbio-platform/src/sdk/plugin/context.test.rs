@@ -162,7 +162,7 @@ fn live_inputs_carry_the_collected_values() {
 
 /// 段身份是宿主词汇：`KNOWN` 里的名字互不相同，且都是 `snake_case` 线格式。
 ///
-/// 与 `behaviors` 的收集面同一条判据（D-363）——但段名仍是一张显式清单：
+/// 与 `behaviors` 的收集面同一条判据——但段名仍是一张显式清单：
 /// 逐名列出，加一个段要在这里写一行。
 #[test]
 fn known_slots_are_unique_and_snake_case() {

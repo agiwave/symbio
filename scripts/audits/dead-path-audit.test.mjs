@@ -3,7 +3,7 @@
  *
  * 一个只会亮绿灯的守卫等于没有守卫。逐条注入真实违规并断言脚本变红：
  *   ① 干净夹具 → exit 0（写出来的 crate 名都在）；
- *   ② 代码里引用一个不存在的 crate → exit 1（DR-001）——D-279 那 186 处的形状；
+ *   ② 代码里引用一个不存在的 crate → exit 1（DR-001）—— 那 186 处的形状；
  *   ③ 文档里只有一个**文件路径**指向不存在的 crate → exit 1（同一条，另一种形态）；
  *   ④ 拼错真实 crate 名（kernel → kernal）→ exit 1 —— 判据不问「是不是删掉的」，问「打不打得开」；
  *   ⑤ 决策记录里出现旧名且没有历史标记 → exit 1（DR-002）——把过去写成现在；
@@ -11,7 +11,7 @@
  *   ⑦ 文件级 `dead-path-history:` 标记 → exit 0 —— 决策正文的合理粒度；
  *   ⑧ 行内 `dead-path-allow:` → exit 0 —— 承认通道，且**空理由不算**（⑨）；
  *   ⑨ `dead-path-allow:` 后没写理由 → 仍 exit 1 —— 空理由等于没承认；
- *   ⑩ 缺 `crates/` → exit 2 —— 范围读不出必须红（DR-003，D-280）。
+ *   ⑩ 缺 `crates/` → exit 2 —— 范围读不出必须红（DR-003，）。
  *
  * 用法：node --test scripts/audits/dead-path-audit.test.mjs
  */
@@ -105,7 +105,7 @@ test('⑤ 决策记录里出现旧名且无历史标记 ⇒ 红（DR-002）', ()
 
 test('⑥ 同一行带「当时」⇒ 绿（写明了是历史）', () => {
   const root = fixture({
-    'docs/003-design/001-x.md': '# x\n\n当时路径是 `symbio_gone::Thing`，D-279 之后并成两层。\n',
+    'docs/003-design/001-x.md': '# x\n\n当时路径是 `symbio_gone::Thing`， 之后并成两层。\n',
   })
   try {
     const r = runOn(root)

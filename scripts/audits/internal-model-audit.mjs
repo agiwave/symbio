@@ -5,8 +5,8 @@
  * ## 为什么需要它
  *
  * 这笔判据起于「档位闸门只有一个挂点」的年代：闸门挂在 `LlmAdapter::generate(&FullModel, …)`
- * 上，而 `ModelProvider::round_trip` 对**所有插件**开放，直调它就绕过闸门。`D-437` 把
- * `ModelProvider` 退进 model 插件（模块私有），`D-438` 又让 `LlmAdapter` 整块退场——
+ * 上，而 `ModelProvider::round_trip` 对**所有插件**开放，直调它就绕过闸门。`` 把
+ * `ModelProvider` 退进 model 插件（模块私有），`` 又让 `LlmAdapter` 整块退场——
  * 跨 crate 直调**已经不可能**，这条口径因此换了个锚点：
  *
  * **模型往返只许有一个执行体**（`crates/symbio-plugin-model/src/port.rs` 的 `ModelExecutor`），
@@ -23,7 +23,7 @@
  * | IM-001 | 生产代码里 `\.round_trip\(` 未带豁免标记 | 新增一个绕过点必须当场写理由；只写代码不写理由，执行体的边界就没人说得清 |
  * | IM-002 | 豁免标记**空理由**（`// internal-model-allow IM-001:` 后面没字） | 写了像登记、实际不算 ⇒ 不单独报出来的话，人以为已经登记过 |
  * | IM-003 | 豁免标记**悬空**（本行与下一行都没有对应调用点） | 代码搬走而标记还在 ⇒ 判据对这一处永久失效（`plugin-special-case-audit` 的 SC-005 同族） |
- * | IM-004 | 登记的形状与 [D-106](../../crates/symbio-plugin-model/README.md "D-106-模型消费端口归一") 决策 2 的定义不符 | D-106 重述了「内部请求」的**形状**（tools 空切片 + `silent()` 出口 + 就地构造 system prompt + 调用方中止）；只有第一条能机械核，就核这一条——声明悄悄腐烂时门禁变红，而不是烂在文档里 |
+ * | IM-004 | 登记的形状与 [](../../crates/symbio-plugin-model/README.md "-模型消费端口归一") 决策 2 的定义不符 |  重述了「内部请求」的**形状**（tools 空切片 + `silent()` 出口 + 就地构造 system prompt + 调用方中止）；只有第一条能机械核，就核这一条——声明悄悄腐烂时门禁变红，而不是烂在文档里 |
  *
  * ## 为什么逐处豁免，不用数字基线
  *
@@ -184,7 +184,7 @@ export function audit(srcRoot) {
       })
       continue
     }
-    // ④ IM-004 形状判据：D-106 决策 2 定义的「内部请求」四条里，`tools` 空切片
+    // ④ IM-004 形状判据： 决策 2 定义的「内部请求」四条里，`tools` 空切片
     //    是唯一能机械核的一条（其余三条要跨函数读）。内部请求点必须是 `&[]`；
     //    闸门本体（`/gate`）必须**转发**调用方的工具集，而不是自己造一个空的。
     const args = callArgs(site.stem, site.offset)
@@ -195,7 +195,7 @@ export function audit(srcRoot) {
         code: 'IM-004',
         key,
         text:
-          `登记的形状与 D-106 决策 2 不符（tools 实参 = ${tokens(tools)}）：\n        ${site.text}\n` +
+          `登记的形状与  决策 2 不符（tools 实参 = ${tokens(tools)}）：\n        ${site.text}\n` +
           (allowed.get(key).gate
             ? '        闸门本体要**透传**调用方的工具集；自己造一个空的说明它不再是闸门'
             : '        内部请求必须把 tools 传空切片——不空就不是内部请求，得重新裁'),

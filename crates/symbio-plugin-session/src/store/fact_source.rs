@@ -39,7 +39,7 @@ pub(crate) struct SessionFactSource {
     wal: Arc<WalStore>,
     /// 会话身份：驱动收口据此踢对应会话（事实源本身就是会话边界）。
     session_id: String,
-    /// 会话级插件数据目录（D-513）：打开时由 `SessionStore` 按唯一布局解析，随驱动目标
+    /// 会话级插件数据目录：打开时由 `SessionStore` 按唯一布局解析，随驱动目标
     /// 交给宿主，再由宿主挂进本轮 ctx 的 `SESSION_DIR`。它不是事实源目录。
     session_dir: Option<PathBuf>,
     /// 会话 metadata 的工作目录：`append` 不携带运行选项，驱动收口把它带进工具上下文。
@@ -49,13 +49,13 @@ pub(crate) struct SessionFactSource {
     /// 会话运行参数（`mode` / `risk_level` / `provider_id`）：随驱动目标交回，
     /// `append` 不再反查 metadata。
     params: SessionParams,
-    /// Agent 权限作用域（D-153）：由**收集方**（轮装配 `collect_capabilities` 之后）
+    /// Agent 权限作用域：由**收集方**（轮装配 `collect_capabilities` 之后）
     /// 发布，`append` 时随驱动目标带进本轮 ctx。`None` = 本会话没选中 Agent。
     ///
     /// 不放在 `params` 里：它不是 metadata 的静态选项，而是收集期才得到的运行期
     /// 事实；打开那一刻还没人发布。
     agent_scope: Arc<RwLock<Option<symbio_plugin_api::AgentScope>>>,
-    /// 本轮入站来源主体（D-067）：由开轮写方从收件箱条目的 `params` 发布，`append`
+    /// 本轮入站来源主体：由开轮写方从收件箱条目的 `params` 发布，`append`
     /// 时随驱动目标带进本轮 ctx。`None` = 本机用户发起（工具侧回落会话身份）。
     source_principal: Arc<RwLock<Option<String>>>,
     /// 在途 Turn 的中止信号：**不是本事实源的私有状态**——它只引用会话状态里的
@@ -143,7 +143,7 @@ impl SessionFactSource {
         tokio::task::block_in_place(|| drain.land_merged_sync(&handle));
     }
 
-    /// 事实落格即投影（`D-424` / `D-425`，见 `transcript::live` 模块头）：把刚落格的事实与
+    /// 事实落格即投影（ /，见 `transcript::live` 模块头）：把刚落格的事实与
     /// 它的配对事实折成节点，**同步**交给转写唯一写入点——终态节点来自同一份 `rebuild`；
     /// 面向读者的模型派发额外发一个**临时轮骨架**（内容未到时的可见形态，只走流通道）。
     ///
@@ -180,7 +180,7 @@ impl SessionFactSource {
 
 impl FactSource for SessionFactSource {
     fn append(&self, actor: Principal, draft: FactDraft) -> Result<u64, String> {
-        // D-339：`@principal` 是声明期的会话归属哨兵，由**会话装配**在落格时解析成
+        //：`@principal` 是声明期的会话归属哨兵，由**会话装配**在落格时解析成
         // 本会话主体（`session/main` / `session/arbiter` / `session/worker` 由此得到）。
         // 载体缺失（metadata 读不到）就显式失败——不回落主体；载体在而值为空是
         // 「会话确实没有绑定智能体」，其主体定义就是 `session/main`。
@@ -209,7 +209,7 @@ impl FactSource for SessionFactSource {
             .map(|seq| seq.value())
             .map_err(|e| format!("{e:?}"))?;
 
-        // **落格即投影**（D-424）：终态节点由投影器在此刻折出（见 `transcript::live`）。
+        // **落格即投影**：终态节点由投影器在此刻折出（见 `transcript::live`）。
         if let Some(mut event) = stored {
             // 投影副本不是入库信封：号直接写字段，不借 `Store` 的赋号/兜底纪律。
             event.seq = Some(Seq::new(seq));
@@ -223,7 +223,7 @@ impl FactSource for SessionFactSource {
         }
 
         // **取代格**：压缩快照一落进 live，被它取代的前缀就不该再留在 live 段
-        // （[D-053] 决策 6）。归档段保留「零回退损失」，而读面（`Store::range`）
+        // （ 决策 6）。归档段保留「零回退损失」，而读面（`Store::range`）
         // 本就含归档段——这一步只换 live 段起点，不改变谁能读到什么。
         //
         // 归档失败不动摇已落格的事实（事实已入库，重建面本来就按快照换基），

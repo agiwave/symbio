@@ -15,7 +15,7 @@ use super::*;
 use std::path::PathBuf;
 use std::sync::atomic::{AtomicUsize, Ordering};
 
-/// 把临时目录绑成工作区作用域 provider（D-515：索引缓存只认相对地址）。
+/// 把临时目录绑成工作区作用域 provider（索引缓存只认相对地址）。
 fn provider_in(dir: &std::path::Path) -> DynVdfsProvider {
     Arc::new(symbio_providers::ScopeDirVdfs::at(dir.to_path_buf()))
 }
@@ -381,7 +381,7 @@ async fn corrupt_index_file_loads_as_none() {
 /// 那条约定，也是"索引不会把自己索引进去"（`.symbio` 是隐藏目录，会被 VDFS 遍历跳过）的前提
 #[test]
 fn index_lives_under_the_workspace_dot_symbio() {
-    // D-515：落位约定收在常量里——常量既是 provider 的相对地址，也是工作区内的路径。
+    //：落位约定收在常量里——常量既是 provider 的相对地址，也是工作区内的路径。
     assert!(INDEX_REL_PATH.starts_with(".symbio/cache/"));
     assert!(INDEX_REL_PATH.ends_with(".bin"));
     // `.bin` 不在 SOURCE_EXTS 里 —— 第二重保险
@@ -552,7 +552,7 @@ async fn valid_regex_and_empty_result_carry_no_notice() {
     std::fs::remove_dir_all(&dir).ok();
 }
 
-// ==================== 排序口径（D-109）====================
+// ==================== 排序口径====================
 
 /// 构造一个只有一个块的文件用于平手测试
 fn tied_chunk(start_line: usize) -> Chunk {

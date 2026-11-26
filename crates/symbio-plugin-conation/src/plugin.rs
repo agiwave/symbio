@@ -25,7 +25,7 @@ use crate::port::ConationPort;
 pub const PLUGIN_TITLE: &str = "目标自生成";
 
 pub struct ConationPlugin {
-    /// 本能力自己的配置（D-427）：真源在 `<根>/conation/PLUGIN.yml`。
+    /// 本能力自己的配置：真源在 `<根>/conation/PLUGIN.yml`。
     config: ConationConfig,
     config_file: PluginConfigFile,
 }
@@ -92,7 +92,7 @@ impl Plugin for ConationPlugin {
             let provider: Arc<dyn PortProvider> = Arc::new(ConationPort);
             symbio_plugin_api::register_ports(&ctx, provider.as_ref()).await;
         }
-        // 本轮配置快照贡献（D-427）：真源是本插件自己的 PLUGIN.yml，宿主只按 owner
+        // 本轮配置快照贡献：真源是本插件自己的 PLUGIN.yml，宿主只按 owner
         // 合并。挂载即贡献，卸载即缺席 ⇒ 读方按出厂值 false 收敛。
         symbio_plugin_api::capability_announce_config_snapshot(
             &ctx,
@@ -113,7 +113,7 @@ fn config_definition() -> DetailDefinition {
             "conation_enabled",
             "启用自主层升格",
             "关掉后『欲』只入格不升格；卸载本插件同样让这一格缺席，读方按出厂值\
-             收敛（D-427）",
+             收敛",
             d.conation_enabled,
         )],
     )

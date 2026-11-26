@@ -1,7 +1,7 @@
 /**
  * dynamic-port-registration-audit 回归测试
  *
- * 判据面（DPR-001…004，见 D-445 / D-447 ③）：四类动态注册反例形状——`<port:…>` 行名
+ * 判据面（DPR-001…004，见  /  ③）：四类动态注册反例形状——`<port:…>` 行名
  * 反推、裸 `executors.insert(` 覆盖、裸 `list(TOOL)` 全量投影、`p2.route(` 宿主路由回落
  * ——都不许出现在生产代码里。这一族守卫最危险的失效是**假绿**：一句「已删除」的注释
  * 就当守卫在、扫不到输入就当通过。所以夹具钉：
@@ -40,7 +40,7 @@ const TOOL_PORT_TEST = 'crates/symbio-plugin-tool/src/port.test.rs'
 function cleanFiles() {
   return {
     [PORT_RS]: [
-      '/// 装配期判重（D-445 ③）：按行上的端口键分组，同键多绑定落错误。',
+      '/// 装配期判重（ ③）：按行上的端口键分组，同键多绑定落错误。',
       'pub fn capability_port_check(rows: &[Row]) {',
       '    let mut groups: BTreeMap<String, Vec<String>> = BTreeMap::new();',
       '    for row in rows {',
@@ -127,7 +127,7 @@ test('DPR-001：capability_port_check 里出现 strip_prefix("<port:") 反推 �
 test('DPR-002：host 折执行体表出现裸 executors.insert( ⇒ 红（已有 owners.insert 冲突检查也不豁免）', () => {
   const files = cleanFiles()
   // HOST_LIB 里已经有 `owners.insert` 的按端口键冲突检查；这一条证明「冲突检查是承接体，
-  // 不是保留裸 insert 的许可」——D-445 ③ 的原话是「不 insert 覆盖」。
+  // 不是保留裸 insert 的许可」—— ③ 的原话是「不 insert 覆盖」。
   files[HOST_LIB] += 'fn stray() { executors.insert(port, executor); }\n'
   const box = sandbox(files)
   try {
@@ -174,7 +174,7 @@ test('DPR-004：工具派发出现 p2.route( 未命中回落 ⇒ 红并点名 �
 test('注释叙述不算违规：doc comment 里写「反推已删除」、无真实代码 ⇒ 通过', () => {
   const files = cleanFiles()
   files[PORT_RS] = [
-    '/// 迁移说明：`strip_prefix("<port:")` 那层行名反推已退场（D-445 ③）。',
+    '/// 迁移说明：`strip_prefix("<port:")` 那层行名反推已退场（ ③）。',
     'pub fn capability_port_check(rows: &[Row]) {}',
     '',
   ].join('\n')

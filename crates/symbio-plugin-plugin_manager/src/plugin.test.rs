@@ -104,7 +104,7 @@ impl VdfsProvider for FakeRegistry {
             }
             VdfsRequest::Stat => {
                 // 容器根只提供注册表条目与安装动词；「添加插件」的页面（new_type）
-                // 由 plugin_manager 自己声明，不再转发容器的通用安装表单（D-520）
+                // 由 plugin_manager 自己声明，不再转发容器的通用安装表单
                 Ok(VdfsResponse::Stat(VdfsNode::dir(
                     "",
                     "系统",
@@ -272,7 +272,7 @@ async fn root_declares_market_new_type_with_candidates() {
 ///
 /// 「进管理页先看已装插件」：市场是「添加插件」打开的一张页面（根上的 `new_type`），
 /// 不是清单里的又一项。把市场放回清单会重新引入「市场排在长列表末尾、入口看不见」
-/// 的旧问题（D-520）。
+/// 的旧问题。
 ///
 /// 「一项 = 一个插件」：ui_prefs 的普通条目被过滤，只留「界面」一项；「关于」不是
 /// 插件，已从清单移除。
@@ -645,7 +645,7 @@ async fn ui_entry_is_leaf_belonging_to_ui_prefs() {
     let p = plugin_without_registry();
     let s = stat(&p, &vctx(), "appearance").await;
     assert!(!s.is_dir(), "入口是叶子文档");
-    assert_eq!(s.kind, PLUGIN_ID_UI_PREFS, "节点归属 ui_prefs（D-521）");
+    assert_eq!(s.kind, PLUGIN_ID_UI_PREFS, "节点归属 ui_prefs");
     assert_eq!(s.status, VDFS_STATUS_NONE, "静态入口没有「运行中」可言");
     assert_eq!(s.access, VdfsAccess::READ_WRITE, "有后端正文，可读写");
     assert_eq!(s.title, "界面");
@@ -662,7 +662,7 @@ async fn ui_entry_is_leaf_belonging_to_ui_prefs() {
         .is_err());
 }
 
-/// 界面入口的读写转发到 ui_prefs 的配置文档（D-521）
+/// 界面入口的读写转发到 ui_prefs 的配置文档
 #[tokio::test]
 async fn appearance_read_write_forward_to_ui_prefs() {
     let fake = Arc::new(
@@ -767,7 +767,7 @@ async fn ctx_with_configs() -> VdfsContext {
     vdfs_context(&host)
 }
 
-// ==================== 插件市场（D-520） ====================
+// ==================== 插件市场 ====================
 
 /// 候选判据一、二：声明可选、当前未装配（按挂载实例，不按目录存在）
 #[test]

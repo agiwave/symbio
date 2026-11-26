@@ -10,7 +10,7 @@ use crate::kernel::capability::{family, CapabilityMeta, CapabilityRow};
 use crate::kernel::plugin::{PluginInvokeRequest, PluginInvokeRequestExt, PluginSimpleRequest};
 use crate::sdk::capability::{CAPABILITY_VISITOR, CONFIGURABLE_VISITOR, OPTION_VISITOR};
 
-/// 只为「跨键可见」准备的一行：测试只看它进没进表（行是纯数据，`D-440` ③）。
+/// 只为「跨键可见」准备的一行：测试只看它进没进表（行是纯数据， ③）。
 fn marker_row(name: &str) -> CapabilityRow {
     CapabilityRow::tool(CapabilityMeta {
         name: name.to_string(),

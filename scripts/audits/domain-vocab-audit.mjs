@@ -4,7 +4,7 @@
  *
  * ## 它治什么
  *
- * [D-087](../../docs/003-design/001-核心架构.md "D-087") 把 `schemas/` 拆成
+ * [](../../docs/003-design/001-核心架构.md "") 把 `schemas/` 拆成
  * `chat` / `dialog` / `present` / `turn` 四个域，并给出两条**可执行**的判据：
  *
  * 1. `schemas` 目录不再存在——它是「暂时没处放」的同义词，重新长出来意味着分类失败；
@@ -12,10 +12,10 @@
  *    （把 `node_build` 放回 `chat` 就会造成 `chat ⇄ llm`）。环不会让编译器报错，
  *    只会让「改一个域要改另一个域、再改回来」慢慢变成常态。
  *
- * 第二条是本脚本真正的内容：没有任何别的门禁判**依赖方向**。D-087 §2 那张图当时是
+ * 第二条是本脚本真正的内容：没有任何别的门禁判**依赖方向**。 §2 那张图当时是
  * 人工核对的，人工核对的东西会在下一次搬家时失效。
  *
- * ## 判据的对象是 `symbio-sdk`（D-279）
+ * ## 判据的对象是 `symbio-sdk`（）
  *
  * 它原判旧 core。20 个域搬进 `symbio-sdk` 之后，core 只剩两个模块，图上的节点
  * 与边都跟着走了——**判据必须跟着对象走**，否则它会像 2026-11 那次一样：路径不在了，
@@ -42,7 +42,7 @@
  * |---|---|---|
  * | V-001 | `symbio-sdk/src/schemas/` 不存在 | 它是被拆掉的杂物抽屉；回来 = 分类失败 |
  * | V-002 | 域间依赖图无环 | 拆分形状的唯一承重理由；环不会让编译器报错 |
- * | V-003 | 平台四臂的依赖只许 `sdk → kernel/contract`、`contract → kernel` | D-556 把四个 crate 合成一个，cargo 依赖图不再免费保证 kernel 不认识宿主；这条补回同一个保证 |
+ * | V-003 | 平台四臂的依赖只许 `sdk → kernel/contract`、`contract → kernel` |  把四个 crate 合成一个，cargo 依赖图不再免费保证 kernel 不认识宿主；这条补回同一个保证 |
  *
  * 其余输出是**报告**（每域体量、边数明细），不判失败：它们是下一次决策的输入，不是
  * 本次的红线——一份只会误报的守卫最后一定被喂豁免喂到失效。
@@ -71,7 +71,7 @@ const defaultRoot = path.resolve(scriptDir, '..', '..')
 const rootArg = process.argv.find((a) => a.startsWith('--root='))
 const ROOT = rootArg ? path.resolve(rootArg.slice('--root='.length)) : defaultRoot
 
-/** 判据面：`symbio-sdk` 的 `src`。读不出 ⇒ 非 0 退出，不许「0 处违规」（D-280）。 */
+/** 判据面：`symbio-sdk` 的 `src`。读不出 ⇒ 非 0 退出，不许「0 处违规」（）。 */
 const SRC_REL = 'crates/symbio-platform/src/sdk'
 const SRC_DIR = path.join(ROOT, SRC_REL)
 
@@ -91,11 +91,11 @@ try {
     .map((e) => e.name)
     .sort()
 } catch {
-  console.error(red(`✗ 范围读不出：${SRC_REL} 不存在—— 判据没有输入，宁红不静默（D-280）`))
+  console.error(red(`✗ 范围读不出：${SRC_REL} 不存在—— 判据没有输入，宁红不静默（）`))
   process.exit(2)
 }
 if (domains.length === 0) {
-  console.error(red(`✗ 范围读不出：${SRC_REL} 下一个域目录都没有—— 判据没有输入（D-280）`))
+  console.error(red(`✗ 范围读不出：${SRC_REL} 下一个域目录都没有—— 判据没有输入（）`))
   process.exit(2)
 }
 const domainSet = new Set(domains)
@@ -109,7 +109,7 @@ if (fs.existsSync(schemasDir)) {
   report(
     'V-001',
     'symbio-sdk/src/schemas/',
-    '这个目录已被 D-087 拆成 chat / dialog / present / turn —— 它重新出现意味着' +
+    '这个目录已被  拆成 chat / dialog / present / turn —— 它重新出现意味着' +
       '又出现了「暂时没处放」的东西，请按「它描述什么」找域，而不是新建一个抽屉',
   )
 }
@@ -134,7 +134,7 @@ function* prodFiles(dir) {
   }
 }
 
-// sdk 臂是平台 crate 下的一个模块（D-556）：域内的跨域路径是 `crate::sdk::<域>::…`。
+// sdk 臂是平台 crate 下的一个模块（）：域内的跨域路径是 `crate::sdk::<域>::…`。
 // 裸 `crate::<域>` 是合并前的写法，现在指不到任何域——不认它，免得判据靠旧形态活着。
 const PATH_RE = /\bcrate::sdk::([A-Za-z_][A-Za-z0-9_]*)/g
 
@@ -144,7 +144,7 @@ for (const domain of domains) {
     const src = stripComments(fs.readFileSync(file, 'utf8'))
     const rel = path.relative(ROOT, file).replace(/\\/g, '/')
     for (const m of src.matchAll(PATH_RE)) {
-      // sdk 臂是平台 crate 下的一个模块（D-556），域内路径是 `crate::sdk::<域>::…`；
+      // sdk 臂是平台 crate 下的一个模块（），域内路径是 `crate::sdk::<域>::…`；
       // 只认域名的第一段：`crate::sdk::actors::control` 与 `crate::sdk::actors` 同一条边。
       if (domainSet.has(m[1])) addEdge(domain, m[1], rel)
     }
@@ -206,17 +206,17 @@ const cyclic = sccs.filter((c) => c.length > 1).map((c) => c.join('|')).sort()
 /**
  * 已登记的回边族（只许降）。每一条都要写清「为什么现在拆不动」。
  *
- * 基线在 D-279 搬迁后**重新实测**：此前那张表是按 core 的 20 个域 + `crate::symbio_platform::sdk::`
- * 路径口径量出来的，而那个路径前缀随 crate 一起消失了——也就是说 V-002 在 D-258…D-279
- * 之间一直扫到 0 条边、报「无新增环」（D-280 记的空转绿第二例）。改指 sdk 后第一次跑出
+ * 基线在  搬迁后**重新实测**：此前那张表是按 core 的 20 个域 + `crate::symbio_platform::sdk::`
+ * 路径口径量出来的，而那个路径前缀随 crate 一起消失了——也就是说 V-002 在 …
+ * 之间一直扫到 0 条边、报「无新增环」（ 记的空转绿第二例）。改指 sdk 后第一次跑出
  * 的环族才是真值。
  */
 const DEFAULT_BASELINE = [
-  // 空表。最后一条登记项 `adapters|projection` 在 D-279 的重新实测里已不复存在
+  // 空表。最后一条登记项 `adapters|projection` 在  的重新实测里已不复存在
   // （`adapters` 不再引用 `projection`，那条 `fallback` 读档位统计的边随搬迁断掉了）——
   // 环族 1 → **0**，按「只许降」把它从基线里删掉。此后出现任何环族都是新环。
   //
-  // 历史（保留为反例）：2026-10-20 拆掉的八域族（D-095）曾是
+  // 历史（保留为反例）：2026-10-20 拆掉的八域族（）曾是
   // plugin ⇄ keys ⇄ vdfs ⇄ chat/present ⇄ capability ⇄ llm ⇄ exec ⇄ event_bus。
   // 根因是 **`keys` 的键值类型指向各域的类型**（键必须能装 `Arc<dyn Capability>`），
   // 而各域又用键取上下文——「万能胶」型的环。三刀拆解：① 键与值同住；② Aborted 载荷
@@ -234,7 +234,7 @@ for (const c of cyclic) {
 
 // ── V-003：平台四臂的依赖方向 ────────────────────────────────────────────
 //
-// D-556 之前 kernel / sdk / contract / deploy 是四个 crate：在 kernel 里写
+//  之前 kernel / sdk / contract / deploy 是四个 crate：在 kernel 里写
 // 「依赖宿主 sdk crate」编译不过，依赖方向由 cargo 图免费守着。合成一个 crate 之后
 // 这条保证消失了——同样的写法换成 `use crate::sdk::…` 照样编译。这里把编译期的
 // 保证补成一条判据：只许 `sdk → kernel/contract`、`contract → kernel`；deploy
@@ -243,7 +243,7 @@ const ARM_DIR = path.resolve(SRC_DIR, '..')
 const ARM_ALLOWED = new Set(['sdk→kernel', 'sdk→contract', 'contract→kernel'])
 const ARMS = ['kernel', 'sdk', 'contract', 'deploy']
 if (!fs.existsSync(ARM_DIR)) {
-  console.error(red(`✗ 范围读不出：${path.relative(ROOT, ARM_DIR).replace(/\\/g, '/')} 不存在——臂间依赖没有输入（D-280）`))
+  console.error(red(`✗ 范围读不出：${path.relative(ROOT, ARM_DIR).replace(/\\/g, '/')} 不存在——臂间依赖没有输入（）`))
   process.exit(2)
 }
 const armHits = new Set()
@@ -258,7 +258,7 @@ for (const from of ARMS) {
       const rel = path.relative(ROOT, file).replace(/\\/g, '/')
       if (armHits.has(`${rel}:${from}→${to}`)) continue
       armHits.add(`${rel}:${from}→${to}`)
-      report('V-003', rel, `${from} 臂不得依赖 ${to} 臂（D-556 前由 cargo 依赖图保证，现在由本判据保证）`)
+      report('V-003', rel, `${from} 臂不得依赖 ${to} 臂（ 前由 cargo 依赖图保证，现在由本判据保证）`)
     }
   }
 }
@@ -295,7 +295,7 @@ console.log('')
 const codeNames = {
   'V-001': 'schemas 目录不存在（否定型：正例见回归测试）',
   'V-002': `域间依赖无新增环（基线 ${BASELINE.length} 族，只许降）`,
-  'V-003': '平台四臂只许 sdk → kernel/contract、contract → kernel（D-556）',
+  'V-003': '平台四臂只许 sdk → kernel/contract、contract → kernel（）',
 }
 for (const [code, name] of Object.entries(codeNames)) {
   const n = hits.get(code) ?? 0

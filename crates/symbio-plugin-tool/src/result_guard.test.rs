@@ -3,7 +3,7 @@
 //! 与实现**同级**分文件（约定：`X.rs` + `X.test.rs`，见 `CONTRIBUTING.md`）：
 //! `result_guard.rs` 只保留生产代码，测试全部放本文件。
 //!
-//! D-528 存档走 `SESSION_VDFS`（根 = 会话目录）：这里用 `ScopeDirVdfs` 绑一个临时根
+//!  存档走 `SESSION_VDFS`（根 = 会话目录）：这里用 `ScopeDirVdfs` 绑一个临时根
 //! 模拟会话作用域，既验证虚拟地址（提示词里印的那条），也验证它确实落到 provider 根下。
 
 use super::*;
@@ -182,7 +182,7 @@ async fn archive_lives_under_the_session_scope() {
     let _ = std::fs::remove_dir_all(&dir);
 }
 
-/// D-528：有会话 id 时，占位符印会话地址面虚拟地址，取回端与写入端同源。
+/// 有会话 id 时，占位符印会话地址面虚拟地址，取回端与写入端同源。
 #[tokio::test]
 async fn retrieval_address_uses_session_vaddr() {
     let dir = temp_dir("vaddr");

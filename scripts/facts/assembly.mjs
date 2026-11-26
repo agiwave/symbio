@@ -11,10 +11,10 @@
  * - `ASSEMBLY_SUB_AGENT_PLUGINS` ← `plugin_assembly: sub_agent`，按 `plugin_order`
  * - `ASSEMBLY_UNDISABLABLE_PLUGINS` ← `plugin_undisablable: true`
  * - `ASSEMBLY_CORE_PLUGINS` ← `sub_agent` 且**非** `plugin_optional`（默认装配，含可删项）
- * - `ASSEMBLY_OPTIONAL_PLUGINS` ← `sub_agent` 且 `plugin_optional: true`（插件市场候选，D-520）
+ * - `ASSEMBLY_OPTIONAL_PLUGINS` ← `sub_agent` 且 `plugin_optional: true`（插件市场候选，）
  * - `ASSEMBLY_REQUIRED_PLUGINS` ← 本文件写死的 [`REQUIRED_IDS`]（系统装配策略，不可删除的最小底座）
  *
- * 三档语义（D-522）：**必装**（`REQUIRED_IDS`，不可删）/ **默认内置可删**（core 里非
+ * 三档语义（）：**必装**（`REQUIRED_IDS`，不可删）/ **默认内置可删**（core 里非
  * 必装的那批，开箱即装、目录自动补出、但用户可删）/ **市场按需**（optional，不默认装配）。
  * 「默认装配」与「不可删除」是两件事：前者看是否在 core（决定 `ensure_required` 补目录），
  * 后者只看必装集（决定 `uninstall` 拒绝与 `PluginEntry.required`）。
@@ -26,7 +26,7 @@
  * 代价是加/减必装要动本文件——这正是「谁能改必装」应有的门槛。
  *
  * **加插件 = 建目录 + 写 `PLUGIN.yml` + 声明**；`assembly.rs` 与共享层零改动
- * （DE-023 D-181 / C5）。命中手改时，门禁 `gen-facts --check` 判红。
+ * （DE-023  / C5）。命中手改时，门禁 `gen-facts --check` 判红。
  *
  * ## 命名规则
  *
@@ -52,7 +52,7 @@ const WAIVER =
   "// dead-code-allow R-003: 插件 id / 装配清单是部署契约面，未用常量仍须存在（owner: scripts/facts/assembly.mjs 生成，每个插件目录的 PLUGIN.yml 是唯一声明处）";
 
 /**
- * 系统必装集 —— **装配策略写死在此，不来自任何插件的 `PLUGIN.yml`**（D-522）。
+ * 系统必装集 —— **装配策略写死在此，不来自任何插件的 `PLUGIN.yml`**（）。
  *
  * 判据：缺了它一次正常会话就跑不起来，或少了它整个界面无法再操作。逐个理由见注释；
  * 其余插件一律默认可删（core 里非本集）或市场可选（optional）。增删必装要改这里并经
@@ -105,7 +105,7 @@ function readPlugins(root) {
     if (optional && undisablable) {
       throw new Error(`${rel}：可选插件不默认加载，不能同时是界面底座（plugin_undisablable）`);
     }
-    // 必装不由插件声明（D-522）：若某个 PLUGIN.yml 残留 plugin_required，判红并要求删除——
+    // 必装不由插件声明（）：若某个 PLUGIN.yml 残留 plugin_required，判红并要求删除——
     // 否则「谁都能把自己标成必装」的后门还在，写死的策略就形同虚设。
     if ("plugin_required" in m) {
       throw new Error(`${rel}：plugin_required 已收口到装配策略（scripts/facts/assembly.mjs 的 REQUIRED_IDS），插件不得自行声明必装`);
@@ -146,7 +146,7 @@ function renderAssembly(root, requiredIds = REQUIRED_IDS) {
   const core = mounted.filter((p) => !p.optional);
   const optional = mounted.filter((p) => p.optional);
 
-  // 必装集来自系统写死的 REQUIRED_IDS，按子树装配序投影（D-522）。
+  // 必装集来自系统写死的 REQUIRED_IDS，按子树装配序投影（）。
   // 每条校验挡住「系统点了一个不存在 / 可选 / 非子树的插件为必装」——
   // 写死的策略一旦和插件事实脱节，宁可生成失败，也不产出一张骗人的必装表。
   const byId = new Map(mounted.map((p) => [p.id, p]));
@@ -190,7 +190,7 @@ function renderAssembly(root, requiredIds = REQUIRED_IDS) {
   }
   lines.push("];");
   lines.push("");
-  lines.push("/// **核心插件**——默认装配且不可删除。这是注入 `REQUIRED_PLUGINS` 的唯一清单（D-520）。");
+  lines.push("/// **核心插件**——默认装配且不可删除。这是注入 `REQUIRED_PLUGINS` 的唯一清单（）。");
   lines.push("#[rustfmt::skip]");
   lines.push("pub const ASSEMBLY_CORE_PLUGINS: &[&str] = &[");
   for (const p of core) {
@@ -198,7 +198,7 @@ function renderAssembly(root, requiredIds = REQUIRED_IDS) {
   }
   lines.push("];");
   lines.push("");
-  lines.push("/// **可选插件**——不默认装配，出现在插件市场里，安装后与核心插件同权（D-520）。");
+  lines.push("/// **可选插件**——不默认装配，出现在插件市场里，安装后与核心插件同权（）。");
   lines.push("#[rustfmt::skip]");
   lines.push("pub const ASSEMBLY_OPTIONAL_PLUGINS: &[&str] = &[");
   for (const p of optional) {

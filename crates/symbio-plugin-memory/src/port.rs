@@ -1,4 +1,4 @@
-//! `memory` 端口：**巩固债的执行体**（D-268 订正 / D-387 Q3）。
+//! `memory` 端口：**巩固债的执行体**（ 订正 /  Q3）。
 //!
 //! ## 为什么是端口
 //!
@@ -14,7 +14,7 @@
 //!
 //! ## 读面是计划期快照
 //!
-//! 读面由宿主在计划那一圈固定（`D-376`）：执行体读到的就是「判它欠」的那份事实，
+//! 读面由宿主在计划那一圈固定：执行体读到的就是「判它欠」的那份事实，
 //! 不会因为并发写入而看到半截新状态。
 
 use std::sync::Arc;
@@ -64,13 +64,13 @@ impl PortExecutor for MemoryPortExecutor {
         let Some(drafts) = crate::consolidate::merge_next(&events, tag, now) else {
             return PortOutcome::ok();
         };
-        // 草稿先缓冲在宿主写口，这一笔仍开着才一次性落格（`D-376`）。
+        // 草稿先缓冲在宿主写口，这一笔仍开着才一次性落格。
         ctx.emit.emit(drafts).await;
         PortOutcome::ok()
     }
 }
 
-/// 本插件的端口提供者（登记走 `register_ports`，D-468）。
+/// 本插件的端口提供者（登记走 `register_ports`）。
 pub(crate) fn memory_port_provider() -> Arc<dyn PortProvider> {
     Arc::new(MemoryPort)
 }

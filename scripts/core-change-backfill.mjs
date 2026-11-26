@@ -1,5 +1,5 @@
 /**
- * 逐提交补记表（D-333）：历史提交缺 `Core-Change:` 的**唯一读取与形状校验实现**。
+ * 逐提交补记表（）：历史提交缺 `Core-Change:` 的**唯一读取与形状校验实现**。
  *
  * `arch-change-audit`（CC-001）与 `capability-migration-audit`（EX-007）共用本模块：
  * 一张表、一个形状判据，两处各自只问「本判据的规则名有没有出现在行里」。
@@ -11,12 +11,10 @@
  *
  * 提交不能改写，所以缺失的 `Core-Change:` 只能由本表补记。形状判据（本模块）保证：
  *
- * - 每条都有 7–40 位提交号、非空 `change`（实际改了什么）、`decision`（那笔改动自己的
- *   裁决号）、`rules`（补记的是哪条判据，且只允许 CC-001 / EX-007）；
- * - `decision` 与表的 `authorized_by` 都能在现行文档里打开——写错的号等于没写；
- * - `authorized_by` 是**表级**的追加授权：新增行只能由一条新决策追加，那条决策必须改
- *   `authorized_by`，且每行的 `authorized_by` 必须与表级同值。判据保证两侧都能打开、
- *   同值；「这次追加是不是真有一条新裁决」超出脚本能判的范围，由 review 判。
+ * - 每条都有 7–40 位提交号、非空 `change`（实际改了什么）、非空 `why`（今天为什么
+ *   补记这条）、`rules`（补记的是哪条判据，且只允许 CC-001 / EX-007）；
+ * - `rule` 是建立本表的判据码，`why` 是本表存在的当前理由；两者都不是历史案例编号；
+ * - 表是既成事实的登记，不是授权：新增行要有当前理由，范围外的提交照旧判红。
  *
  * ## 为什么不让它变成「整条判据退役」
  *
@@ -25,35 +23,26 @@
  *
  * ## 使用边界：只登记既成事实，不承担授权
  *
- * `authorized_by` 是「追加这一行」的许可，**不是**被补记改动本身的授权——那笔改动的
- * 授权始终由它自己的 `decision` 与功能决策承担。因此：
+ * `why` 只是「今天为什么补记这一行」的当前理由，**不是**被补记改动本身的授权——
+ * 那笔改动的授权始终由功能判据与提交信息承担。因此：
  *
  * - **本地未推送的提交不得进本表**。同批后继提交用 `Core-Change-For:` 显式补签
- *   （D-551），不改写历史；混装（功能 + 格式化 / 重生成）先拆提交再提交。
+ *   （），不改写历史；混装（功能 + 格式化 / 重生成）先拆提交再提交。
  *   补记不是消红工具。
  * - 允许补记的只有三种：①判据生效前的历史提交；②已推送、改写会伤及他人历史；
  *   ③改动是纯格式 / 纯生成物且已无法与功能批分离（`change` 必须写明「混装带入」
  *   与「当时为何没拆」，不得写成正常授权）。
  * - 补记随提交存亡：所在提交被重写或回滚时，行必须一并删除；它不是永久豁免。
- * - 表级 `authorized_by` 只说明「谁批了这一行」，不应被读成「机制面改动是这条决策
- *   批的」。
  */
 // @gate test
 
 import fs from 'node:fs'
 import path from 'node:path'
-import { hasDecisionAnchor } from './decision-anchors.mjs'
 
 export const BACKFILL_REL = 'scripts/exemptions/core-change-backfill.json'
 export const BACKFILL_JUDGEMENTS = ['CC-001', 'EX-007']
 
 const SHA_RE = /^[0-9a-f]{7,40}$/
-const ADR_RE = /\bD-\d+\b/
-
-/** `D-NNN` 是否能在现行文档里打开（含模块 README 里的决策锚点）。 */
-function opensDecision(root, cited) {
-  return hasDecisionAnchor(cited.replace(/^D-/, ''), root)
-}
 
 /**
  * 补记表的形状判据（纯函数，判据 = `core-change-backfill.test.mjs`）。
@@ -62,19 +51,11 @@ function opensDecision(root, cited) {
 export function validateBackfill(table, root) {
   const errors = []
   if (!table || typeof table !== 'object') return ['补记表读不出（不是 JSON 对象）']
-  // 表的 `rule` 就是建立它的那条决策。不把号写成字符串常量：脚本里出现的 `D-\d+`
-  // 字面量会被 `gate-codes-audit`（GC-004）当成判据码输出，而决策号不是判据码。
-  const rule = String(table.rule ?? '').match(ADR_RE)?.[0] ?? null
-  if (!rule) {
-    errors.push('补记表缺 `rule`——它是建立本表的那条决策号')
-  } else if (!opensDecision(root, rule)) {
-    errors.push(`补记表的 rule ${rule} 在现行文档里打不开`)
+  if (!BACKFILL_JUDGEMENTS.includes(String(table.rule ?? ''))) {
+    errors.push(`补记表的 rule 必须是 ${BACKFILL_JUDGEMENTS.join(' / ')}`)
   }
-  const tableAuth = String(table.authorized_by ?? '').match(ADR_RE)?.[0] ?? null
-  if (!tableAuth) {
-    errors.push('补记表缺表级 `authorized_by`（新增行只能由一条新决策追加）')
-  } else if (!opensDecision(root, tableAuth)) {
-    errors.push(`表级 authorized_by ${tableAuth} 在现行文档里打不开`)
+  if (typeof table.why !== 'string' || table.why.trim().length < 10) {
+    errors.push('补记表缺当前理由 why——表存在的理由不是历史案例编号')
   }
   if (!Array.isArray(table.entries)) {
     errors.push('补记表缺 `entries` 数组')
@@ -92,11 +73,8 @@ export function validateBackfill(table, root) {
     if (typeof e.change !== 'string' || !e.change.trim()) {
       errors.push(`${at}：缺 \`change\`——不写「实际改了什么」的补记等于一张永久后门`)
     }
-    const cited = String(e.decision ?? '').match(ADR_RE)?.[0] ?? null
-    if (!cited) {
-      errors.push(`${at}：缺 \`decision\`（这笔改动自己的裁决号）`)
-    } else if (!opensDecision(root, cited)) {
-      errors.push(`${at}：decision ${cited} 在现行文档里打不开（写错的号等于没写）`)
+    if (typeof e.why !== 'string' || e.why.trim().length < 10) {
+      errors.push(`${at}：缺当前理由 why——不写「今天为什么补记」的条目等于一张永久后门`)
     }
     if (!Array.isArray(e.rules) || e.rules.length === 0) {
       errors.push(`${at}：\`rules\` 必须是非空数组（补记的是哪条判据）`)
@@ -106,14 +84,6 @@ export function validateBackfill(table, root) {
           errors.push(`${at}：\`rules\` 只允许 ${BACKFILL_JUDGEMENTS.join(' / ')}，读到了 \`${r}\``)
         }
       }
-    }
-    const rowAuth = String(e.authorized_by ?? '').match(ADR_RE)?.[0] ?? null
-    if (!rowAuth) {
-      errors.push(`${at}：缺 \`authorized_by\`（这一行由哪条决策批准补记）`)
-    } else if (tableAuth && rowAuth !== tableAuth) {
-      errors.push(`${at}：\`authorized_by\`=${rowAuth} 与表级 ${tableAuth} 不一致——追加必须同一条决策`)
-    } else if (!opensDecision(root, rowAuth)) {
-      errors.push(`${at}：authorized_by ${rowAuth} 在现行文档里打不开`)
     }
   }
   return errors

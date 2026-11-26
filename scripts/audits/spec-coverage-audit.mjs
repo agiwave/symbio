@@ -66,7 +66,7 @@ const BASELINE = process.env.SPEC_COVERAGE_BASELINE
       const [manual, missing] = process.env.SPEC_COVERAGE_BASELINE.split(':').map((n) => Number(n))
       return { manual, missing }
     })()
-  // manual = 1（SP-010 的 §2/§3）：2026-11-16 实测收到 1，旧基线 3 的两格余量按 D-505
+  // manual = 1（SP-010 的 §2/§3）：2026-11-16 实测收到 1，旧基线 3 的两格余量按 
   // 同批钉掉——余量留着，下一条人工判据就会免费占用一个本应判红的位置。
   : { manual: 1, missing: 0 }
 

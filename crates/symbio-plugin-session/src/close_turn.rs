@@ -1,4 +1,4 @@
-//! 收束行（D-250 / D-252）：终答落格之后，把能力交出的收束贡献落成事实。
+//! 收束行：终答落格之后，把能力交出的收束贡献落成事实。
 //!
 //! 贡献表由编译期 inventory（`settle::contributors()`）给出，本行只做三件事：
 //! 构造收束这一刻的 [`Settling`]（值）、逐条取出草稿、最后落一条 `session.settled`
@@ -115,7 +115,7 @@ impl RowHandler for CloseTurn {
 
         // 贡献者只交事实草稿：归属不在草稿里，也不在贡献者手里。`plugin_row` 执行体
         // 按**声明表**取 `Frozen::event_writer(kind)` 后走 `emit_owned`——贡献方无权
-        // 指定归属（DE-026 D-252 / D-339）。
+        // 指定归属（DE-026 ）。
         let mut facts: Vec<FactDraft> = contributors()
             .iter()
             .flat_map(|contributor| contributor.contribute(&at))

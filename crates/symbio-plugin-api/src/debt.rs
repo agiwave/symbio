@@ -21,7 +21,7 @@ pub struct DriveRequest {
     pub session_id: String,
     /// 选定的 provider 标识（可为空）。
     pub provider: Option<String>,
-    /// 本会话主体（开面时从 `agent_id` 经 `principal_of` 得到；D-339）。
+    /// 本会话主体（开面时从 `agent_id` 经 `principal_of` 得到）。
     ///
     /// 债表用它给请求载荷定归属，避免写死 `"user"` 让两套主体并存。
     pub principal: String,
@@ -46,7 +46,7 @@ pub struct DebtFacts {
     closings: Vec<(String, Closing, Value)>,
     attempts: Vec<(String, u32)>,
     identities: Vec<(String, String)>,
-    /// 事实身份 → 载荷（只供**构造请求**用；判定仍只看种类与身份，D-338）。
+    /// 事实身份 → 载荷（只供**构造请求**用；判定仍只看种类与身份）。
     payloads: Vec<(String, String, Value)>,
 }
 
@@ -65,7 +65,7 @@ impl DebtFacts {
 
     /// 记一条事实的载荷（只读副本；同一身份只留第一份）。
     ///
-    /// 申报方要拿「在等」事实里的提示正文构造请求载荷（D-338）；它不是判定位。
+    /// 申报方要拿「在等」事实里的提示正文构造请求载荷；它不是判定位。
     pub fn note_fact_payload(&mut self, kind: &str, id: &str, payload: Value) {
         if self
             .payloads
@@ -88,7 +88,7 @@ impl DebtFacts {
 
     /// 某**种类**的全部事实身份与载荷（按记入顺序）。
     ///
-    /// 机制事实只有一个种类名、行名在载荷里（D-338），申报方要按载荷挑出自己那行，
+    /// 机制事实只有一个种类名、行名在载荷里，申报方要按载荷挑出自己那行，
     /// 只能按种类取全集再筛；判定仍是种类 + 身份，不因载荷分叉出新的债。
     pub fn facts_of(&self, kind: &str) -> Vec<(&str, &Value)> {
         self.payloads
@@ -100,7 +100,7 @@ impl DebtFacts {
 
     /// 该种类**最后记入**的事实 id；没有 ⇒ `None`。
     ///
-    /// **口径（单实例，D-369）**：它回答的是「**当前计划所对的那一份**实例是谁」，
+    /// **口径（单实例）**：它回答的是「**当前计划所对的那一份**实例是谁」，
     /// 不是「同类事实的列表」。跨轮的多条不算——最新一条就是当前轮 / 当前这笔。
     /// 调用方只有在**同一时刻至多一份有效实例**时才可用它；若同类事实可能同时有多份
     /// 有效实例（两条待答复、两条请求同时在场），必须改用 [`Self::facts_of`] 逐条取，
@@ -196,7 +196,7 @@ pub struct DebtSpec {
     pub when_id: Option<(String, String)>,
     /// 排除条件：该事实已存在 ⇒ 本行不欠（与 `when` 同一条读面，按种类读）。
     pub unless: Option<Unless>,
-    /// 该端口的债全部还清才欠；作用域见 [`NoOpenScope`]（可只认「本次调用集合」，D-446）。
+    /// 该端口的债全部还清才欠；作用域见 [`NoOpenScope`]（可只认「本次调用集合」）。
     pub when_no_open: Option<NoOpenScope>,
     /// 前提（读债状态）：该端口**这一轮**还有人认领（可派发 / 在飞 / 挂起）⇒ 本行
     /// 不进计划；没人认领 ⇒ 前提已了（**缺席即收束**）。上一轮遗留的未收束债不算

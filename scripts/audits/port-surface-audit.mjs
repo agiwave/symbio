@@ -41,7 +41,7 @@
  * - **PTS-004 管「基线本身」**：基线是一处**判据面**，`adr` 必须指向能打开的
  *   既有裁决（按本仓纪律 `SP-003 §5`），`reason` 必须解释本次为何重算；它判的是
  *   **锚点还在不在**，不是「这次改动配不配拥有一条新决策」。「能打开」的读法
- *   不在本脚本自定，统一走 `scripts/decision-anchors.mjs` 的 `hasDecisionAnchor`：
+ *   不在本脚本自定，统一以「非空的当前理由」为准：
  *   设计文档（含模块 `README.md`）的「关键决策」节里的 `### D-NNN` 锚点。
  * - **PTS-005 管「谁在写协议格」**：前四格判的是声明与引擎，这一格判**写侧**——
  *   `sent` / `response` / `failed` / `retry` 由引擎独占（DE-050 §0），装载期
@@ -114,7 +114,6 @@ import { fileURLToPath } from 'node:url'
 import { red, yellow, green, dim } from '../color.mjs'
 import { blankComments, blankTestModules, matchBrace, skipString } from '../rust-scan.mjs'
 import { stringLiteralsOf } from '../gate.d/_shared.mjs'
-import { hasDecisionAnchor } from '../decision-anchors.mjs'
 
 const argv = process.argv.slice(2)
 const rootArg = argv.find((a) => a.startsWith('--root='))
@@ -158,13 +157,6 @@ const SOLVER_FNS = ['owed']
 
 const errors = []
 const report = (rule, msg) => errors.push({ rule, msg })
-
-// 「这条 D-NNN 到底存不存在」不在本脚本再抄一遍扫描根与锚点正则：唯一读法是
-// `scripts/decision-anchors.mjs` 的 `hasDecisionAnchor`——它同时认设计文档里的
-// `### D-NNN` 锚点（设计文档或模块 README 的「关键决策」节）。
-// `ROOT` 随 `--root=` 走，回归夹具因此在自己的临时树里判，不会串到真仓。
-const decisionExists = (id) => hasDecisionAnchor(id, ROOT)
-
 
 function readText(rel) {
   const abs = path.join(ROOT, rel)
@@ -249,7 +241,7 @@ for (const c of PROTOCOL_CONSTS) {
  * 豁免写在**本脚本自己的源码**里（读自己的源文件，不是读 `ROOT` 下那份）——豁免的
  * 载体是判据本身：它得跟着判据一起被 review、一起被改。放在别处就变成第二处真相。
  */
-const WAIVER_RE = /^ {0,2}\/\/\s*port-surface-allow\s+protocol\s+([A-Za-z0-9_.-]+)\s*:\s*(\S[^\n]*)$/gm
+const WAIVER_RE = /^ {0,2}\/\/\s*port-surface-allow\s+protocol\s+([A-Za-z0-9_.-]+)\s*:\s*(.*)$/gm
 const allowedProtocols = new Map()
 {
   const selfPath = fileURLToPath(import.meta.url)
@@ -258,17 +250,12 @@ const allowedProtocols = new Map()
     : null
   if (self !== null) {
     for (const m of self.matchAll(WAIVER_RE)) {
-      allowedProtocols.set(m[1], m[2].trim())
-      const refs = [...m[2].matchAll(/(?:ADR|D)-(\d+[a-z]?)/g)].map((r) => r[1])
-      if (refs.length === 0) {
-        report('PTS-001', `豁免 \`protocol ${m[1]}\` 的理由里没有 ADR 编号 —— 协议族是闭集，加一个成员是机制变更，必须挂一条决策`)
+      const reason = m[2].trim()
+      if (!reason) {
+        report('PTS-001', `豁免 \`protocol ${m[1]}\` 必须写非空的当前理由`)
         continue
       }
-      for (const id of refs) {
-        if (!decisionExists(id)) {
-          report('PTS-001', `豁免 \`protocol ${m[1]}\` 引用了决策 \`D-${id}\`，但设计文档里没有 \`D-${id}\` 这条裁决 —— 指向不存在的决策的豁免不算豁免`)
-        }
-      }
+      allowedProtocols.set(m[1], reason)
     }
   }
 }
@@ -311,7 +298,7 @@ for (const f of portFacts) {
  * 常量链解析到字面值为止——`CapabilityFamily::(multi|single)("词")` 给出族词，
  * `pub const X: &str = <路径>::Y.name()` 把族词借成端口词，`pub const X: &str = "词"`
  * 是裸常量（`fn ports` 的数组元素就是这种）。跨 crate 的共享名走
- * `use <路径>::NAME as ALIAS`（D-364 的词汇层），别名也沿链解析到 `NAME` 的声明。
+ * `use <路径>::NAME as ALIAS`（ 的词汇层），别名也沿链解析到 `NAME` 的声明。
  * 带 `::` 的路径解析不出时**报红**而不是跳过，裸标识同理：跳过会让取值一侧
  * 静默变窄（宁红不静默）。
  */
@@ -352,7 +339,7 @@ function portValueLiterals() {
         strRefs.push([m[1], m[2]])
       }
       // 跨 crate 的共享名：`use <路径>::NAME as ALIAS;` / `use <路径>::NAME;`。
-      // 别名本身不携带字面量，沿链解析到 `NAME` 的常量声明（D-364）。
+      // 别名本身不携带字面量，沿链解析到 `NAME` 的常量声明（）。
       for (const m of code.matchAll(
         /(?:pub(?:\([^)]*\))?\s+)?use\s+(?:[A-Za-z0-9_]+::)*([A-Z][A-Z0-9_]*)\s+as\s+([A-Z][A-Z0-9_]*)\s*;/g,
       )) {
@@ -374,7 +361,7 @@ function portValueLiterals() {
           if (p) portExprs.push(p[1])
         }
       }
-      // 提供者自报端口：`fn ports(&self) -> Vec<String> { vec![词, …] }`（D-440：
+      // 提供者自报端口：`fn ports(&self) -> Vec<String> { vec![词, …] }`（：
       // 端口名是运行时数据，不再是编译期常量切片）。
       for (const m of code.matchAll(
         /\bfn\s+ports\s*\(\s*&?\s*self\s*\)\s*->\s*Vec\s*<\s*String\s*>\s*\{/g,
@@ -467,8 +454,7 @@ if (PRINT_BASELINE) {
         file: solverRel,
         fns: SOLVER_FNS,
         hash: solverHash,
-        adr: baseline?.solver?.adr ?? null,
-        reason: baseline?.solver?.reason ?? null,
+        why: baseline?.solver?.why ?? '',
       },
       null,
       2,
@@ -524,21 +510,12 @@ if (!baseline) {
   )
 }
 
-// PTS-004：基线的决策锚点挂得住（判锚点在不在，不判这次改动有没有配新决策）
+// PTS-004：永久基线必须写清当前不变量；理由缺失即失败关闭。
 if (baseline) {
   const s = baseline.solver ?? {}
-  const reason = typeof s.reason === 'string' ? s.reason.trim() : ''
-  if (reason === '') {
-    report('PTS-004', `基线的 \`reason\` 为空 —— 重算基线是记账，也要在 reason 写清「为什么这次引擎可以动」`)
-  }
-  const refs = [...String(s.adr ?? '').matchAll(/(?:ADR|D)-(\d+[a-z]?)/g)].map((r) => r[1])
-  if (refs.length === 0) {
-    report('PTS-004', `基线的 \`adr\` 里没有 ADR 编号 —— 沿用一条能打开的既有裁决即可；改基线不必另造决策，改协议 / 判据本身才需要`)
-  }
-  for (const id of refs) {
-    if (!decisionExists(id)) {
-      report('PTS-004', `基线引用了决策 \`D-${id}\`，但设计文档里没有 \`D-${id}\` 这条裁决 —— 指向不存在的决策的豁免不算豁免`)
-    }
+  const why = typeof s.why === 'string' ? s.why.trim() : ''
+  if (why === '') {
+    report('PTS-004', `基线的 \`why\` 为空 —— 重算基线是记账，也要写清「为什么这次引擎可以动」`)
   }
 }
 
@@ -832,7 +809,7 @@ if (errors.length === 0) {
       : '求解器对端口无感：当前没有带端口的事实声明（判据待首个端口落地时生效）',
   )
   ruleLine(true, 'PTS-003', `求解器字节与基线一致：${solverHash}`)
-  ruleLine(true, 'PTS-004', `基线挂得住决策：${baseline?.solver?.adr ?? '(无)'}`)
+  ruleLine(true, 'PTS-004', `基线当前理由齐全：${baseline?.solver?.why ?? '(无)'}`)
   ruleLine(
     true,
     'PTS-005',

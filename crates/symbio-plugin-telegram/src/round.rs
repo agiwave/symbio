@@ -7,10 +7,10 @@
 //! （`payload.get::<session_chat::Response>()`），于是 `full_text` 恒空、用户永远
 //! 收到「无响应」——而 `if let Ok(..)` 把反序列化失败吞掉了，全程没有任何报错。
 //! 同一缺陷在 2026-09-22 修过一次（设计文档
-//! §4.9），后随实时面下沉 VDFS（D-025）而回归。
+//! §4.9），后随实时面下沉 VDFS而回归。
 //!
 //! 现在走**地址面**，答复从**实时面**取回——与 `cli` 和 `agent_run` 的转播桥
-//! 同一条通道（D-025「会话实时面只有一条」）：
+//! 同一条通道（「会话实时面只有一条」）：
 //!
 //! ```text
 //! vdfs/root                    → 根地址（唯一的「不给地址」入口）
@@ -23,7 +23,7 @@
 //! ## 运行选项为什么写成会话 metadata
 //!
 //! 收件箱入队走的是 `session_chat::Request::default()`——**地址写入不承载运行选项**
-//! （D-066）。因此「telegram 统一走 auto 模式」这条通道策略只能先落成**会话属性**，
+//! 因此「telegram 统一走 auto 模式」这条通道策略只能先落成**会话属性**，
 //! 而不是随每条消息携带。落法与 `cli` 的 `ensure_session` 同款：一次带 `create`
 //! 意图的 `vdfs/write` 同时覆盖「新建会话」与「改元数据」两种情形。
 //!
@@ -62,7 +62,7 @@ const ROUND_TIMEOUT: Duration = Duration::from_secs(900);
 
 /// 收件箱段名（地址契约 `<会话>/inbox` 的一段）。
 ///
-/// 名字住 `plugin-api` 的词汇面（D-364）：跨插件共用的地址段只有一个住处。
+/// 名字住 `plugin-api` 的词汇面：跨插件共用的地址段只有一个住处。
 /// 拼错表现为「消息进不去队列」，不会静默错乱。
 use symbio_plugin_api::vocab::SEG_INBOX;
 
@@ -138,7 +138,7 @@ pub(super) async fn run_turn(
 
     // ── ③ 开实时面（**先于入队**，否则首帧会丢）──
     //
-    // 与 `cli` / 前端 / `agent_run` 转播桥**同一条路径**（`D-487`）：经
+    // 与 `cli` / 前端 / `agent_run` 转播桥**同一条路径**：经
     // `event_bus/subscribe` 路由收件——「同进程所以走特权后门」的旧理由随该裁决
     // 撤销（登记表归插件本体，后门不再存在；路由同进程照样建 `PluginChannel`）。
     // 收件端 `bus_rx` 随本函数返回而 drop，投递端 `tx.closed()` 感知后由插件的
@@ -444,8 +444,8 @@ fn is_resync(frame: &PluginFrame) -> bool {
 /// `PATH` 取常量而非字面量：`set(PATH, "<字面量>")` 会让「路由改名」不产生任何编译
 /// 错误，只在运行期表现为「调用失败」——`plugin-entry-audit` E-003 拦的正是这个。
 /// 本插件用到的协议路径都住 `symbio_plugin_api::routes`（跨插件消费的操作由 vdfs
-/// 的 `PLUGIN.yml` 投影，D-364），这里不写第二遍字面量。
-/// 经协议路径建立事件总线订阅，交回**收件端**（`D-487`）。
+/// 的 `PLUGIN.yml` 投影），这里不写第二遍字面量。
+/// 经协议路径建立事件总线订阅，交回**收件端**。
 ///
 /// 与 `cli` / 前端 / `agent_run` 转播桥同一条 `event_bus/subscribe` 路由；
 /// 首个 `connected` 握手帧由收帧循环按「非 vdfs 变更帧」跳过。

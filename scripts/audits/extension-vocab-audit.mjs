@@ -1,13 +1,13 @@
 #!/usr/bin/env node
 /**
- * extension-vocab-audit — 扩展面不说容器词（EX-008，D-252）
+ * extension-vocab-audit — 扩展面不说容器词（EX-008，）
  *
  * ## 它治的病
  *
  * `turn`（轮 / 幕）是**宿主的容器概念**。它一旦出现在 `symbio-plugin-api` 的端口形状里
  * （类型名 / trait 名 / 枚举变体 / 字段名 / `pub fn` 形参），每个能力包就被迫认识宿主的
  * 时间单位：能力按 `turn` 算幂等键、按 `turn` 数调用，环的边界一变它就跟着错——
- * 已经退役的「幕」就是这样重新发给每张能力表的。D-252 的三条整改（端口只收不透明词干、
+ * 已经退役的「幕」就是这样重新发给每张能力表的。 的三条整改（端口只收不透明词干、
  * 开关走 `session.config` 事实、类型名去容器词）把存量清干净了；本判据防它长回来。
  *
  * 与 `arch-change-audit` / `EX-002` 互补：那两条判**提交的意图面**（这次改动留没留理由、
@@ -26,15 +26,15 @@
  * | `*.test.rs` | 不判——测试可以把宿主词汇摆上桌来断言「交不进去」 |
  * | 生成表 `events.rs` / `routes.rs`（豁免①） | 不判——它们是各插件 `PLUGIN.yml` 清单的镜像，`turn.*` / `Entity::Turn` 是控制面**声明的事实名**，不是端口形状（生成器 `gen-facts --check` 保证内容与清单一致） |
  *
- * D-252 的另两处有名豁免（② loop 的 `t{turn}` 词干生成、③ core 的 `Event.turn` 信封
+ *  的另两处有名豁免（② loop 的 `t{turn}` 词干生成、③ core 的 `Event.turn` 信封
  * 字段与 I1 / I3 不变量）**不在本判据的扫描范围内**——它们分别住在 `symbio-plugin-loop`
- * 与 `symbio-kernel`，本判据只扫扩展面。它们的名字登记在 D-252 里，不在这里复述成
+ * 与 `symbio-kernel`，本判据只扫扩展面。它们的名字登记在  里，不在这里复述成
  * 第二张表。
  *
  * 豁免通道（`EXEMPTIONS`）：**逐条** `{ path, token, why }`，路径与标识符都**精确等值**
  * （不是前缀、不是 glob），每条必须有理由正文。一条不解释自己的豁免就是永久后门，
- * 通配符在登记那一刻就被判红。现状 0 条：`D-253` 的两条「端口签名类型」随 `D-436`
- * 改名删除，`D-259` 的模块路径段随 `D-502`/B4 把 `symbio-sdk::turn` 目录搬成 `round`
+ * 通配符在登记那一刻就被判红。现状 0 条：`` 的两条「端口签名类型」随 ``
+ * 改名删除，`` 的模块路径段随 ``/B4 把 `symbio-sdk::turn` 目录搬成 `round`
  * 而失去对象，同步删除。豁免不是永久名单，被豁免的写法消失了条目就得消失。
  *
  * 用法：node scripts/audits/extension-vocab-audit.mjs [--root=<目录>]
@@ -60,12 +60,12 @@ const PLUGIN_API_SRC = 'crates/symbio-plugin-api/src'
 
 /**
  * 豁免①：生成表。文件头都写着「由 `scripts/facts/*.mjs` 生成，请勿手改」——它们
- * 是清单的镜像，容器词出现在那里是控制面声明的事实名（D-252 有名豁免①）。
+ * 是清单的镜像，容器词出现在那里是控制面声明的事实名（ 有名豁免①）。
  * **逐个文件名登记**，不写通配：新出现的生成表必须在这里留下名字，否则它连
  * 「我是生成物」都不声明就吃掉了豁免。
  */
 export const GENERATED_FILES = [
-  // scripts/facts/events-rs.mjs：PLUGIN.yml `shared_events` 的镜像（D-204）
+  // scripts/facts/events-rs.mjs：PLUGIN.yml `shared_events` 的镜像（）
   'events.rs',
   // scripts/facts/routes-rs.mjs：PLUGIN.yml `routes` 的镜像
   'routes.rs',
@@ -73,8 +73,8 @@ export const GENERATED_FILES = [
 
 /**
  * 逐条豁免：`{ path, token, why }`。`path` 是相对仓库根的精确路径，`token` 是精确
- * 标识符（含大小写），`why` 必须非空。现状 0 条（`D-502`/B4 把最后的模块路径段豁免清零）；
- * 出现新的豁免时它必须同时指向一条能打开的决策（D-252 的豁免在扫描范围之外，不需要条目）。
+ * 标识符（含大小写），`why` 必须非空。现状 0 条（``/B4 把最后的模块路径段豁免清零）；
+ * 出现新的豁免时它必须同时指向一条能打开的决策（ 的豁免在扫描范围之外，不需要条目）。
  */
 export const EXEMPTIONS = []
 
@@ -234,7 +234,7 @@ function run(root) {
       for (const token of findContainerWordTokens(line)) {
         if (isExempt(exemptions, rel, token)) continue
         errors.push(
-          `${rel}:${idx + 1}  标识符 \`${token}\` 带容器词——端口形状不得认识宿主的容器（D-252）：` +
+          `${rel}:${idx + 1}  标识符 \`${token}\` 带容器词——端口形状不得认识宿主的容器（）：` +
             '幂等只需要宿主给的不透明词干，开关走 `session.config` 事实；' +
             '确属生成事实名请把文件登记进 `GENERATED_FILES`，确属形状豁免请逐条写 `{ path, token, why }`',
         )

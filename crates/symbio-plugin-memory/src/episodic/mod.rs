@@ -21,7 +21,7 @@
 //! | [`contributor`] | 收束贡献：两条编码与同文去重 |
 //!
 //! 读侧（召回）自 L2b 起已搬回本 crate 的 [`crate::recall`]；巩固也在本包——
-//! 它的格位是 `memory-consolidate` 债（D-268 订正），申报在 [`crate::debt`]、
+//! 它的格位是 `memory-consolidate` 债（ 订正），申报在 [`crate::debt`]、
 //! 执行体在 [`crate::port`]，合并写口在 [`crate::consolidate`]。
 
 mod contributor;

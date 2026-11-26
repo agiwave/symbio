@@ -139,7 +139,7 @@ describe('isTextualRenderer / rendererReadsNodeText', () => {
     expect(onlyReads).toEqual(['form', 'appearance'])
   })
 
-  it('rendererPayloadIsText：只有外观面板的保存载荷是正文 JSON 文本（D-521）', () => {
+  it('rendererPayloadIsText：只有外观面板的保存载荷是正文 JSON 文本', () => {
     const all = [
       'dir', 'form', 'session', 'message', 'markdown', 'json', 'text',
       'appearance', 'market', 'fallback',

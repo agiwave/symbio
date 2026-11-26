@@ -15,7 +15,7 @@
  * | `LP-001` | loop 生产源码不得 import 端口**载荷类型**（只许端口名 / 事实行 / 债） | `crates/symbio-plugin-loop/src/**`（`.rs`，排除 `*.test.rs` 与 `test_support.rs`） |
  * | `LP-002` | `symbio-plugin-loop` 的 Cargo 清单不得依赖 provider / 插件 crate | `crates/symbio-plugin-loop/Cargo.toml` |
  * | `LP-003` | loop 生产源码不得出现世界语义词根（`batch` / `gate` / `llm` / `tool` / `model` / `Tool*` / `Model*` / `Turn*`）与硬编码端口行名 | 同上（现只剩 `ring/**` 与驱动层本体） |
- * | `LP-004` | 端口受理面（`sdk/src/capability/port.rs`，`D-440` ② 自 plugin-api 搬入）的 trait / 类型 / 方法名不得含世界词根（`llm` / `tool` / `model` / `batch` / `gate`） | `crates/symbio-platform/src/sdk/capability/port.rs` |
+ * | `LP-004` | 端口受理面（`sdk/src/capability/port.rs`，`` ② 自 plugin-api 搬入）的 trait / 类型 / 方法名不得含世界词根（`llm` / `tool` / `model` / `batch` / `gate`） | `crates/symbio-platform/src/sdk/capability/port.rs` |
  * | `LP-005` | `PortProvider` / `PortExecutor` 的签名只许通用行 / 值类型，具名世界载荷（`ToolCall*` / `LlmAdapter` / `ModelProvider` / `tool_batch`）入签名即红 | 同上 |
  *
  * 五个面都是**只许降的棘轮**：基线高于实测 ⇒ 红（收窄了却没在同批把基线下调）；
@@ -103,9 +103,9 @@ const INTERFACE_WORLD_ROOTS = new Set(['llm', 'tool', 'model', 'batch', 'gate'])
  *
  * 现在**为空**。这张表存在的理由不是「留个位置」：棘轮只数总数，判不出「同一个总数换了
  * 个词根」。曾经 4 格全在 `crates/symbio-plugin-loop/src/plugin_rows.rs`，全是同一个
- * 名字——`D-338` 行派发机制的回执值（只有 `Text` / `Failed` 两支，按 id 配对
+ * 名字——`` 行派发机制的回执值（只有 `Text` / `Failed` 两支，按 id 配对
  * `response` / `failed`，与谁答无关）；词根是「只有模型答得回来」那段时间留下的误名。
- * `D-476` 把它改名 `RowReply`，4 格一并消失，基线降到 0。
+ * `` 把它改名 `RowReply`，4 格一并消失，基线降到 0。
  *
  * 判法不变：实测命中**逐条** token 必须都在表内。表空着，所以命中的第一格就是「未归属」红
  * ——归零之后不再接受任何「先记账、后还账」的例外。
@@ -330,7 +330,7 @@ if (PRINT || WRITE) {
   const body = JSON.stringify(
     {
       note:
-        'LP-001…005 的存量棘轮（只许降）。五条自 2026-11-12 起全部为 0（LP-003 的 4 格随 D-476 改名清掉）：0 就是上限，任何新增即红。',
+        'LP-001…005 的存量棘轮（只许降）。五条自 2026-11-12 起全部为 0（LP-003 的 4 格随  改名清掉）：0 就是上限，任何新增即红。',
       lp001PayloadImports: measured.lp001,
       lp002ForbiddenDeps: measured.lp002,
       lp003WorldRoots: measured.lp003,
@@ -363,7 +363,7 @@ function ratchet(label, code, measuredMap, baselineMap) {
 }
 
 ratchet('载荷类型 import', 'LP-001', measured.lp001, base.lp001PayloadImports)
-// LP-003 已归零（`D-476` 改名）：`LP003_RESIDUAL` 为空，token 级守卫对命中的第一格就红。
+// LP-003 已归零（`` 改名）：`LP003_RESIDUAL` 为空，token 级守卫对命中的第一格就红。
 ratchet('世界语义词根', 'LP-003', measured.lp003, base.lp003WorldRoots)
 
 // LP-003 的 token 级守卫：每一格都必须落在 `LP003_RESIDUAL` 的归属里（现在没有归属）。

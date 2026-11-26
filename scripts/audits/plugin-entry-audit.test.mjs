@@ -440,7 +440,7 @@ test('E-007 不误报：`Weak`（向上引用父）', () => {
 })
 
 test('E-007 不误报：容器按名持有多个子实例（豁免认**容器形态**，不认某一种表）', () => {
-  // `composite.instances` 为保挂载序把 `HashMap` 换成 `IndexMap`（D-057），
+  // `composite.instances` 为保挂载序把 `HashMap` 换成 `IndexMap`（），
   // 豁免只列 `HashMap` 时它就被报成「按值持有兄弟插件」——一条判据拦住了它本该放行的形态。
   for (const map of ['HashMap', 'IndexMap', 'BTreeMap']) {
     const r = audit(withField(`instances: Arc<RwLock<${map}<String, Arc<dyn Plugin>>>>,`))
@@ -849,7 +849,7 @@ test('E-009 不误报：装配方 `crates/symbio` 聚合全部插件（inventory
 // 平台 crate（`symbio-platform`，kernel / sdk / contract / deploy 四臂）只许控制面直连：
 // 扩展层经门面取，直连等于绕开门面。dev / build 仍只判兄弟插件。`symbio-providers` 的
 // 三条准入条件由 providers 条件块实际检查。本条**没有例外**：原 session 的 sdk 冻结账
-// 随 D-558 退役，不再有按符号放行的出口。
+// 随  退役，不再有按符号放行的出口。
 
 test('E-009 命中：扩展层 [dependencies] 出现 `symbio-platform`（绕开门面直连平台）', () => {
   const r = audit({
@@ -1076,7 +1076,7 @@ test('E-012 不误报：注释里的示例声明（文档写了一条不存在�
 
 // ── E-013：`crates/symbio-plugin-loop/src/**` 的 import 根 ⊆ 闭族 ─────────────────────────
 //
-// D-083 §4 的闭族是枚举白名单；D-086 §9 把「import 根 ⊆ 闭族」列为切片判据。
+//  §4 的闭族是枚举白名单； §9 把「import 根 ⊆ 闭族」列为切片判据。
 // E-009 只拦兄弟插件，拦不住 `crate::providers` / 族外第三方 crate 这类族外根。
 const E013_HIT = /\[ERROR\]\s+E-013\s+crates\/symbio-plugin-loop\/src\//
 
@@ -1106,8 +1106,8 @@ test('E-013 不误报：宿主机制面 / 通用库 / 相对路径 / crate 根�
       'use std::sync::Arc;\n' +
       'use async_trait::async_trait;\n' +
       'use serde_json::Value;\n' +
-      // crate 化（D-191）之后宿主机制面是**外部 crate**：写法是 `use symbio_platform::sdk::…`，
-      // 不是 `crate::symbio_platform::sdk::…`（后者编译不过）；D-279 又删掉了 core 整棵，
+      // crate 化（）之后宿主机制面是**外部 crate**：写法是 `use symbio_platform::sdk::…`，
+      // 不是 `crate::symbio_platform::sdk::…`（后者编译不过）； 又删掉了 core 整棵，
       // `crate::<旧 core>` 同样已成死形态。
       'use symbio_platform::sdk::{Plugin, Store};\n' +
       'use symbio_platform::kernel::event::Event;\n' +

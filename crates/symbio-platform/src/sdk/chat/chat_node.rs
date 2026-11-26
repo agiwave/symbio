@@ -1,6 +1,6 @@
 //! 线格式节点的**类型面**已迁入 `symbio-kernel`；本文件保留宿主侧的转写地址与投影。
 //!
-//! 判据（D-188 C2b）：`ChatNode` 及同文件的值类型是 `ModelProvider` / 能力行的签名类型，
+//! 判据（ C2b）：`ChatNode` 及同文件的值类型是 `ModelProvider` / 能力行的签名类型，
 //! 住内核；`message_of_node` 与呈现派生依赖宿主地址 / 业务知识，留在这里。
 //! 一次性问答载荷与 `SEG_MESSAGES` 已迁入 `symbio-contract`（纯形状、≥2 扩展消费方、
 //! 零 sdk 内部读者）；`message_of_node` 依赖 keys 域的 `PRINCIPAL_*`（宿主地址知识），
@@ -8,7 +8,7 @@
 
 use serde_json::Value;
 
-// 内核词汇只供本域使用，不转出（D-420）：`crate::sdk::chat::chat_node::<内核符号>`
+// 内核词汇只供本域使用，不转出：`crate::sdk::chat::chat_node::<内核符号>`
 // 不留第二条路径。
 use crate::kernel::chat::chat_node::*;
 use crate::kernel::chat::principal::Principal;
@@ -21,7 +21,7 @@ use crate::kernel::chat::principal::Principal;
 // 真跨插件引用，违反插件独立原则（判据 `plugin-entry-audit` E-009）。
 //
 // 判据：一个符号该不该在 core，看**消费方是谁**——只要有一个消费方不是它所在
-// 的那个插件，它就不是那个插件的私事（与 D-023「准入判据 = 依赖方数量」同款）。
+// 的那个插件，它就不是那个插件的私事（与 「准入判据 = 依赖方数量」同款）。
 
 /// [`ChatNode`] 的**逆投影**：VDFS 节点 + 正文 ⇒ 一条消息。
 ///
@@ -86,7 +86,7 @@ pub fn message_of_node(node: &crate::kernel::vdfs::VdfsNode, text: String) -> Op
         }
     }
     let role: Option<NodeRole> = attr(&node.attributes, "role");
-    // 存量 `role` 属性在**逆投影**时折成主体（[D-147]）：新写方的属性表只有
+    // 存量 `role` 属性在**逆投影**时折成主体：新写方的属性表只有
     // `principal`，这一折只服务尚未重写的存量节点；折完仍回填 `role` 读法，
     // 让 `node_role()` 的「主体在先」与旧属性读法两边一致。
     let principal = attr::<Principal>(&node.attributes, "principal").or_else(|| {
@@ -110,7 +110,7 @@ pub fn message_of_node(node: &crate::kernel::vdfs::VdfsNode, text: String) -> Op
     })
 }
 
-/// 存量 `role` 属性 → 主体的**一次性别名**（[D-069 §决策 6]）。
+/// 存量 `role` 属性 → 主体的**一次性别名**。
 ///
 /// 判据与落库点 `attributed` 同一份：人归 `person/local`，工具归工具名合成的
 /// 真实地址，其余（助手 / 系统说明）归本机主智能体。只在

@@ -56,7 +56,7 @@ const rootArg = process.argv.find((a) => a.startsWith('--root='))
 const REPO_ROOT = rootArg ? path.resolve(rootArg.slice(7)) : path.resolve(scriptDir, '..', '..')
 
 const SKIP_DIRS = new Set(['node_modules', 'target', '.git', 'tmp', '.workbuddy-ai', '.symbio', 'archive', 'docs'])
-/** 生产源码根。D-191 拆 crate 后所有生产 .rs 都在 `crates/<crate>/` 下，一个根即覆盖全部；
+/** 生产源码根。 拆 crate 后所有生产 .rs 都在 `crates/<crate>/` 下，一个根即覆盖全部；
  *  内核 crate 也在其中，**不再单列**——`crates/symbio-platform/src/kernel` 是 `crates` 的子目录，
  *  并列两项会让内核文件被收集两遍（实测多算 4 个登记项 / 4 处 panic 面，把只减棘轮抬高）。
  *  收集后再按绝对路径去重，防止将来目录重新嵌套时同一个洞复发。 */

@@ -8,11 +8,11 @@
 //! ## 能力开关的默认值不在这里
 //!
 //! `classify_enabled` / `compose_enabled` / `conation_enabled` /
-//! `skill_compile_enabled` / `task_cap` 的出厂值随 D-427 迁到各自能力插件，
+//! `skill_compile_enabled` / `task_cap` 的出厂值 迁到各自能力插件，
 //! 由那里的 `config.test.rs` 钉住（`classify` / `compose` / `conation` / `skill` /
 //! `task` 各一条）。本文件只钉**仍归会话基底**的那几格：开场白、中途汇报、
 //! 建树策略——它们的实现体还在本插件里，翻默认值仍会改变用户可见行为。
-//! 记忆闸门已随 D-513 归 `memory` 插件，由那里的 `config.test.rs` 钉住。
+//! 记忆闸门已 归 `memory` 插件，由那里的 `config.test.rs` 钉住。
 
 use super::*;
 use symbio_platform::kernel::chat::chat_node::{NodeKind, CHAT_STYLE_TAG_RUN, CHAT_STYLE_TAG_TOOL};
@@ -53,7 +53,7 @@ fn progress_reporting_is_off_by_default_but_bounds_stay_meaningful() {
 /// 与 `progress_enabled` 同一条理由：机制化前端的 Typing 占位已接管「点发送后立刻有动静」
 /// 这一职责，那句模板旁白（"我先看一下" / "好，我来处理"）与执行过程信息重复。
 /// 关掉后本轮照旧进工具循环干活，只是不说这句；真实答复（`Answered`）不受影响——
-/// 那是 `compose_enabled` 管的另一句话（该开关已归 `compose` 插件，D-427）。
+/// 那是 `compose_enabled` 管的另一句话（该开关已归 `compose` 插件）。
 #[test]
 fn opening_remark_is_off_by_default() {
     let c = SessionConfig::default();
@@ -197,7 +197,7 @@ fn flatten_whole_tree_detaches_run_children_keeps_tool_results() {
     assert_eq!(marked_scope_root(&tree[4]), None);
 }
 
-/// D-335：Turn 并入用户消息节点后，读侧重建树里**没有** `Skeleton{run}`；
+/// Turn 并入用户消息节点后，读侧重建树里**没有** `Skeleton{run}`；
 /// 该轮的轮锚就是用户消息节点，flat 必须按它折叠（不能继续只认 `is_run()`）。
 #[test]
 fn flatten_whole_tree_detaches_children_of_user_turn_anchor() {

@@ -1,4 +1,4 @@
-//! `model.assist` 端口成员：**一次性问答**（D-336）。
+//! `model.assist` 端口成员：**一次性问答**。
 //!
 //! 与 `model` 端口分开是有判据的：`model` 是对话轮（带工具表、带会话历史、流式帧进
 //! 展示面）；`model.assist` 只把一份问答请求发出去、取回正文——不构对话、不带工具、
@@ -39,7 +39,7 @@ use symbio_plugin_api::{
 use crate::provider::ModelProvider;
 
 /// 一次性问答端口的名字（数据）：名字住 `plugin-api` 的词汇面，提供者与本端口共用
-/// 同一常量（D-364）。
+/// 同一常量。
 pub(crate) use symbio_plugin_api::vocab::PORT_MODEL_ASSIST as ASSIST_PORT;
 
 /// 提供者 id（与 `model` 端口的提供者区分）。
@@ -87,7 +87,7 @@ impl AssistExecutor {
     /// 偏好 provider 的解析：**只查这一次请求带进来的 id**。
     ///
     /// 命中 ⇒ 用那个条目；缺席 / 空串 / 查不到 ⇒ 回落会话选定的 `active`。
-    /// 「查不到」也算回落而不是失败：一个 typo 不该让问答整条消失（D-348）。
+    /// 「查不到」也算回落而不是失败：一个 typo 不该让问答整条消失。
     fn provider_for(&self, preferred: Option<&str>) -> Arc<dyn ModelProvider> {
         preferred
             .map(str::trim)
@@ -148,11 +148,11 @@ impl PortExecutor for AssistExecutor {
             match transcript_nodes(&facts, slice.as_ref()) {
                 Ok(nodes) => nodes,
                 // 切片端点在读面找不到 ⇒ 这一笔**响亮失败**，绝不退回整份转写：
-                // 那正是「请求装不下」的原始故障（D-401）。
+                // 那正是「请求装不下」的原始故障。
                 Err(error) => return PortOutcome::failed(PortErrorClass::NonRetryable, error),
             }
         } else {
-            // 身份写 `principal`（D-147 / S-014）：`role` 只是存量反序列化落点。
+            // 身份写 `principal`（ / S-014）：`role` 只是存量反序列化落点。
             vec![ChatNode {
                 id: llm_short_id(),
                 principal: Some(Principal::new(PrincipalKind::Person, "person/local")),
@@ -189,7 +189,7 @@ impl PortExecutor for AssistExecutor {
         // 能力方带进来的偏好优先；没带 / 取不到 ⇒ 会话选定（这一个端口实例的 active）。
         let provider = self.provider_for(request.provider.as_deref());
         match provider
-            // 一次性问答无工具表、不构对话轮 ⇒ 别名表为空（D-444 的装配期快照缺席）。
+            // 一次性问答无工具表、不构对话轮 ⇒ 别名表为空（装配期快照缺席）。
             // internal-model-allow IM-001: 问答端口是静默的一次性往返（无工具、无会话历史、不参与档位闸门）；走 `for_turn` 会把问答伪装成对话轮。
             .round_trip(
                 &request.system,

@@ -70,7 +70,7 @@ export const COMMON_REQUIRED = ['kind', 'id', 'title', 'status', 'created']
 export const COMMON_OPTIONAL = ['deps', 'parent', 'lists', 'projection']
 
 /**
- * 退场档文档的正文预算（行，RG-033 / D-145）：几十行足够写「裁决锚点 + 指向」。
+ * 退场档文档的正文预算（行，RG-033 / ）：几十行足够写「裁决锚点 + 指向」。
  *
  * 为什么按行数而不是按小节名判：小节名是自由文本，判不出「这段是设计还是指向」；
  * 行数是**它在承载多少东西**的代理，且不因改写措辞而失效。历史正文的正确去处是
@@ -457,7 +457,7 @@ export const SCAN_SKIP_DIRS = new Set([
 /**
  * 目录前缀豁免（相对仓根，以 `/` 结尾）。
  *
- * 历史上曾有归档目录；D-494 已裁定不设归档目录、历史只归 `git log`。
+ * 历史上曾有归档目录； 已裁定不设归档目录、历史只归 `git log`。
  * 这里保留前缀跳过仅为防止旧快照残留干扰扫描，不是现行归档机制。
  */
 export const SCAN_SKIP_PREFIXES = ['docs/archive/']
@@ -1065,7 +1065,7 @@ export function auditEntries(entries, root, projections = [], kinds = {}) {
         )
       }
     }
-    // RG-033：**退场档只剩锚点与指向**——退场文档的正文不得再承载设计（D-145）。
+    // RG-033：**退场档只剩锚点与指向**——退场文档的正文不得再承载设计（）。
     // 判据的形状：退场是「这篇不再算数」，历史在 `git log`；一份
     // 退场文档若还揣着几百行目标设计，读者会照它施工，而它已经不作数了——「retired」
     // 于是只剩一个标签。预算按行数判：留下的是裁决锚点与指向，几十行足够。
@@ -1078,7 +1078,7 @@ export function auditEntries(entries, root, projections = [], kinds = {}) {
           out.push(
             `${e.rel}：RG-033 退场档正文 ${lines} 行，超过 ${RETIRED_MAX_BODY_LINES} 行预算` +
               '——退场文档只留裁决锚点与指向：目标设计段删除、结论已并入谁写进 `reason`；' +
-              '历史归 `git log`（D-494）',
+              '历史归 `git log`（）',
           )
         }
       }
@@ -1444,7 +1444,7 @@ export function auditEntries(entries, root, projections = [], kinds = {}) {
 
   // ---- RG-018：序号字段与 id 两面对账 ----
   // kind README meta 声明 `serial: <字段名>` 时生效：`id` 是登记身份
-  // （`D-048a`），序号字段是序号本身（`048a`）——两者必须只差一个 `<前缀>-`
+  // （``），序号字段是序号本身（`048a`）——两者必须只差一个 `<前缀>-`
   // （存在的理由：文件名可改名 / 可手抄错，序号字段会与取代链、渲染列一起被机器读，
   // 它是序号的**数据面**，必须与身份严格对账）。
   for (const e of entries) {

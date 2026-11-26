@@ -45,7 +45,7 @@ use {
 /// **收集期作用域**（`vdfs` 单槽归根、`model` 单槽按收集方）而非清单内容——详见
 /// `ASSEMBLY_SUB_AGENT_PLUGINS` 的文档。
 ///
-/// 默认装配取**核心集**（D-520）：可选插件由 `plugin_optional` 声明，不进这张清单，
+/// 默认装配取**核心集**：可选插件由 `plugin_optional` 声明，不进这张清单，
 /// 因此不会在首次启动时被补出目录，而是出现在插件市场里等用户按需安装。这里仍无
 /// 第二份字面量——`SYSTEM_PLUGINS` 是核心集的纯别名。
 pub const SYSTEM_PLUGINS: &[&str] = symbio_plugin_api::ASSEMBLY_CORE_PLUGINS;
@@ -308,7 +308,7 @@ impl HomePlugin {
             self.add_instance_sync("worker".to_string(), Arc::clone(&worker));
             // 登记主部署的驱动根：业务插件都挂在 worker 下，插件 `drive_entry` 绑的也是它；
             // 宿主入口（`settled` / `kick`）经同一张表解析——绑 home 会造出第二份驱动，
-            // `settled` 等的那份永远空闲（t29 / D-365）。reload 重建后这里覆盖。
+            // `settled` 等的那份永远空闲（t29 / ）。reload 重建后这里覆盖。
             symbio_plugin_api::publish_deployment_root(worker);
             plugin_info!(
                 "home",

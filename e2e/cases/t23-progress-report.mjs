@@ -177,7 +177,7 @@ export default defineCase(
         providers: [{ id: PROVIDER_ID, config: providerConfig(llm.port) }],
         pluginConfigs: {
           gateway: gatewayConfig(port),
-          // 对话面：判决关、措辞开——D-427 之后它们各归自己的插件。
+          // 对话面：判决关、措辞开—— 之后它们各归自己的插件。
           classify: { classify_enabled: false },
           compose: { compose_enabled: true },
           session: sessionCfg,

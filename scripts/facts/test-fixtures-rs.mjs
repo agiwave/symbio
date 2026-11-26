@@ -6,7 +6,7 @@
  * `symbio-sdk` 在 `symbio-plugin-api` 的下层（api 依赖 sdk），core 的用例因此不能
  * 直接 import `symbio_plugin_api::events`。此前 `crates/symbio-platform/src/sdk/test_fixtures.rs`
  * 把这批事件名**手抄**了一遍：值一改就要改两处，而 SV-001 只扫插件 crate，看不见
- * 这一层（D-392）。
+ * 这一层（）。
  *
  * 现在夹具的**选面**（用哪些名字）仍由用例决定（下面的 `FIXTURE_EVENTS`），但每一条
  * **定义**（值 / 格位 / 角色 / host）都从 owner 的 `EventDecl` 投影——与
@@ -97,7 +97,7 @@ function declarations(root) {
       if (!row) {
         throw new Error(
           `test-fixtures-rs：夹具选了 ${JSON.stringify(name)}，但没有任何插件为它提交 ` +
-            '`EventDecl`——没有 owner 的名字不能进测试夹具（D-392）',
+            '`EventDecl`——没有 owner 的名字不能进测试夹具（）',
         )
       }
       if (!row.entity || !row.verb) {
@@ -132,7 +132,7 @@ export function render({ root }) {
     '//!',
     '//! ## 为什么它在 core 里，却不是 core 的词典',
     '//!',
-    '//! D-203 裁决三把业务事件名移出内核：名字只由 owner 声明，core 的折叠经**构造期形参**',
+    '//!  裁决三把业务事件名移出内核：名字只由 owner 声明，core 的折叠经**构造期形参**',
     '//! （[`ChatVocab`] / [`MessageVocab`] / [`CommitmentVocab`]）收下拼写，一行都不读。',
     '//! 生产拼写来自 `symbio_plugin_api::events`；core 不能依赖那个 crate——它反过来依赖 core。',
     '//! 所以夹具的拼写由生成器从**同一批 owner 声明**投影一份，只在 `#[cfg(test)]` /',
@@ -140,7 +140,7 @@ export function render({ root }) {
     '//!',
     '//! **本产物只供 `#[cfg(test)]` / `feature = "test-fixtures"` 使用，不进生产构建。**',
     '//! 生产拼写只有一个出口——`symbio_plugin_api::events`；若把本生成器改成「顺带产出生产',
-    '//! 常量」，它就成了第二词汇面，与 D-392 的单一源前提直接冲突。',
+    '//! 常量」，它就成了第二词汇面，与  的单一源前提直接冲突。',
     '//!',
     '//! 删掉本模块不影响任何生产代码；它也不参与 CS-005 / CS-006 / CS-007 的判定（那三条',
     '//! 判的是内核名字表与清单的消费方分布）。',

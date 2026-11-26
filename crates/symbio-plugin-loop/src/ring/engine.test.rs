@@ -22,7 +22,7 @@ use symbio_plugin_api::rows::PLUGIN_ROW;
 
 /// 测试宿主：事实在内存里，债表与执行体由测试给定。
 ///
-/// 克隆的是句柄：后台执行体经 `shared()` 拿到同一份账（`D-376`）。
+/// 克隆的是句柄：后台执行体经 `shared()` 拿到同一份账。
 #[derive(Clone)]
 struct TestCtx {
     facts: Arc<Mutex<Vec<Fact>>>,
@@ -99,7 +99,7 @@ impl TestCtx {
 
 impl DriveCtx for TestCtx {
     fn facts(&self) -> Vec<Fact> {
-        // 环的 now 只取自事实（`D-376`）：`.at(now)` 把时间推到 now = 在账上落一条
+        // 环的 now 只取自事实：`.at(now)` 把时间推到 now = 在账上落一条
         // 已收束的时钟事实，测试不靠墙钟也能模拟「时间过去了」。
         let mut facts = self.snapshot();
         if self.now > facts.iter().map(|f| f.at_ms).max().unwrap_or(0) {
@@ -379,7 +379,7 @@ async fn retryable_error_advances_the_lease() {
     assert_eq!(stub.seen().len(), 2);
 }
 
-/// 重试归属（D-442 / D-351）：多行共用同一个 `(port, id)` 时（工具端口的首派行
+/// 重试归属：多行共用同一个 `(port, id)` 时（工具端口的首派行
 /// 与恢复行），attempt 自增后由 `retry` 载荷的 `row` 指认谁来重跑——不是表序
 /// 先到先得。这里被指认的行排在表序之后 ⇒ 新 attempt 上重跑的是它，表序第一行
 /// 不再跟着重来。
@@ -416,7 +416,7 @@ async fn retry_follows_the_row_that_ran_not_table_order() {
     assert_eq!(seen[0].2, "p1:d:2");
 }
 
-/// 孤儿判死（D-442）：`retry` 指认的行这一圈没有任何源申报（行被删 / 触发事实
+/// 孤儿判死：`retry` 指认的行这一圈没有任何源申报（行被删 / 触发事实
 /// 消失）。没有 `sent` 就没有租约，这笔债留着只会悬挂——判死是唯一诚实的收束：
 /// 可见的失败优于不可见的停摆。
 #[tokio::test]
@@ -469,10 +469,10 @@ async fn non_retryable_error_lands_failed() {
     assert_eq!(last.payload["stamp"], json!({"role": "internal"}));
 }
 
-/// 授权拒绝（`D-385`）：执行体交 `Denied` ⇒ 它这一笔的草稿**一概不落**，落
+/// 授权拒绝：执行体交 `Denied` ⇒ 它这一笔的草稿**一概不落**，落
 /// `Failed(non_retryable)` 且理由非空。
 ///
-/// 这是 `D-385` 判据 3 的反例：类型化结论不是装饰——`Denied` 必须能在环里断掉
+/// 这是  判据 3 的反例：类型化结论不是装饰——`Denied` 必须能在环里断掉
 /// 产物通路，否则「忘了判」与「判了通过」在行为上没有区别。
 struct Denying;
 
@@ -679,7 +679,7 @@ async fn after_port_waits_for_a_claim_and_treats_absence_as_settled() {
     assert_eq!(report.outcome, DriveOutcome::NoDebt);
 }
 
-/// 本圈计划快照（D-343）还没看见回执，但债本身已派发未收束：这仍然是「有人在做
+/// 本圈计划快照还没看见回执，但债本身已派发未收束：这仍然是「有人在做
 /// 的活」，依赖方不许因为 `when` 的判定滞后就抢跑。
 #[tokio::test]
 async fn a_reported_open_debt_claims_its_port_even_when_when_looks_stale() {
@@ -1557,7 +1557,7 @@ impl PortExecutor for HungOnce {
     }
 }
 
-/// 租约真超时（`D-376`）：`sent` 在执行体返回**之前**落账；执行体挂死时 `expire`
+/// 租约真超时：`sent` 在执行体返回**之前**落账；执行体挂死时 `expire`
 /// 照样排得上并推进环；超时之后才回来的那一笔被 `(port, id, attempt)` 整笔吸收。
 #[tokio::test]
 async fn a_hung_executor_lets_expire_advance_and_drops_the_late_return() {
@@ -1637,7 +1637,7 @@ async fn a_hung_executor_lets_expire_advance_and_drops_the_late_return() {
     );
 }
 
-/// 同一份事实日志重放两次，结果逐字节相同（`D-376` 的确定性时钟判据）。
+/// 同一份事实日志重放两次，结果逐字节相同（确定性时钟判据）。
 ///
 /// 新事实的时间戳一律取日志里的「现在」（最晚 `at_ms`），不是进程时钟——若环
 /// 读墙钟，两次重放的时间戳就会漂，进而租约判定与落格序列都会不同。
@@ -1791,7 +1791,7 @@ fn declaration_world(cost: u32) -> Arc<Frozen> {
             rows: &rows,
         },
     );
-    // 这一行会开账，因此必须有人跑（`D-306`：谁执行由 `owes` 与行注册表派生）。
+    // 这一行会开账，因此必须有人跑（谁执行由 `owes` 与行注册表派生）。
     let row_writes: &'static [(&'static str, &'static [&'static str])] =
         Box::leak(vec![(SLICE_ROW, &[SLICE_SRC, SLICE_EXIT][..])].into_boxed_slice());
     b.seal(row_writes)

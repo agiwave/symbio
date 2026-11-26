@@ -2,7 +2,7 @@
 //!
 //! 排版细节不在这里判（[`super::section`] 的用例钉）：这里只断言「provider 在什么
 //! 情况下给段、给的哪一段」。这几条原来住 `loop` 的 `context/providers.test.rs`，
-//! 随 provider 一起搬来（DE-026 D-264）。
+//! 随 provider 一起搬来（DE-026 ）。
 
 use super::*;
 use symbio_plugin_api::context::{slots, Cadence, RecallFacts, RecallLine};

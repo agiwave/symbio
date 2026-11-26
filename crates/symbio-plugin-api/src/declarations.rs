@@ -5,12 +5,12 @@
 //! [`events::SHARED_EVENTS`]；三份表都不认识的名字按「网格之外」处理（fail-closed）。
 //!
 //! 回落表为什么不跟着搬：`events.rs` 是各 owner 声明经生成器投影的共享词汇面，而内核与
-//! sdk 的生产代码**零事件名字面量**（CS-008 / CP-004，`D-415`）。读法因此与生成物同住
+//! sdk 的生产代码**零事件名字面量**（CS-008 / CP-004）。读法因此与生成物同住
 //! 词汇层。
 
 use symbio_platform::kernel::event::{Entity, EventDecl, Verb};
 
-/// 判据的词汇面，**没有「内核表」这一档**（DE-024 D-203 裁决三）。
+/// 判据的词汇面，**没有「内核表」这一档**（DE-024  裁决三）。
 ///
 /// 冻结表缺席时用清单生成物 [`events::SHARED_EVENTS`]：它同样是 owner 交的
 /// （`PLUGIN.yml` 的 `shared_events`），只是范围窄——只有跨插件共享的那些名字。

@@ -147,7 +147,7 @@ fn progress_settles_completed() {
     );
 }
 
-// ==================== 驱动安全阀出口（`D-393`） ====================
+// ==================== 驱动安全阀出口 ====================
 
 /// 安全阀事实：写方是驱动入口，不是插件。
 fn stall(verdict: &str, outstanding: serde_json::Value) -> Event {

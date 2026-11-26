@@ -2,8 +2,8 @@
 //!
 //! ## 为什么本文件要交一份「宿主行」夹具
 //!
-//! 插件自己的测试二进制只链接本 crate：`memory.encoded` 的**事实形状**自 DE-026 D-263
-//! 起住情景记忆能力包（`crates/symbio-plugin-memory`）。不在这里 ⇒ `seal` 报
+//! 插件自己的测试二进制只链接本 crate：`memory.encoded` 的**事实形状**由情景记忆
+//! 能力包（`crates/symbio-plugin-memory`）提供。不在这里 ⇒ `seal` 报
 //! `OrphanFact` / `UnknownSource` / `UnknownFact` / `FactWithoutEvent`，
 //! 整张表失败（装载期检查）。夹具补的正是完整进程里由那个 owner 提供的那一半
 //! ——事实形状与归宿行。它与 notes 的同名夹具同形，只在 `cfg(test)` 生效。
@@ -25,15 +25,15 @@ use symbio_plugin_api::{Entity, Event, EventDecl, FactDecl, PluginDeclarations, 
 /// loop 拥有的事实格（本二进制不链接它 ⇒ 夹具补格位与载荷字段）。
 const HARNESS_EVENTS: &[EventDecl] = &[
     EventDecl::new(EVENT_MEMORY_ENCODED, (Entity::Memory, Verb::Opened)),
-    // `session.config` 的格位夹具：完整进程由会话插件交（`D-389` 移交时格位 /
+    // `session.config` 的格位夹具：完整进程由会话插件交（ 移交时格位 /
     // 载荷原样照抄），本二进制不链接它 ⇒ `skill.compile_switch` 读它会报
     // `UnknownFact`。它只有事件格位、没有事实声明 ⇒ 视图 reads 冻结为
-    // assertion read（`D-282`），字段形状无从校验也不必校验。
+    // assertion read，字段形状无从校验也不必校验。
     EventDecl::new(EVENT_SESSION_CONFIG, (Entity::Scope, Verb::Asserted)),
 ];
 
 const HARNESS_FACTS: &[FactDecl] = &[
-    // `memory.encoded` 的**形状**夹具：完整进程由情景记忆能力包申报（D-263），本
+    // `memory.encoded` 的**形状**夹具：完整进程由情景记忆能力包申报，本
     // 二进制不链接它——`skill.retreat` 读它的 `tag` / `skill_id`，缺形状会报
     // `UnknownFact`。字段表与该包 `decl.rs` 的申报同构。
     FactDecl {
@@ -67,7 +67,7 @@ fn harness_declarations() -> PluginDeclarations<'static> {
     }
 }
 
-/// `memory.encoded` 的归宿行夹具：完整进程由情景记忆能力包交（D-263），本二进制
+/// `memory.encoded` 的归宿行夹具：完整进程由情景记忆能力包交，本二进制
 /// 不链接它 ⇒ 缺行会报 `OrphanFact`。形状与那张行同构（有即闭合，eq 为空）。
 fn harness_encoded_sink_row() -> Decl {
     let pattern: &'static [Pattern] = Box::leak(Box::new([Pattern {
@@ -134,7 +134,7 @@ symbio_plugin_api::submit_declarations!(
 
 /// 本能力包自己的表先自证：事件 / 事实 / 视图 / 行四块都有内容。
 ///
-/// `memory.encoded` **不在**本包的 `FACTS` / `ROWS` 里（D-263）：形状的 owner 是
+/// `memory.encoded` **不在**本包的 `FACTS` / `ROWS` 里：形状的 owner 是
 /// 情景记忆能力包，本包只是 `tag:"skill"` 那半的一个写方——一处申报两个 owner，
 /// 完整进程的 `seal` 会报 `DuplicateFact`。
 #[test]
@@ -143,7 +143,7 @@ fn the_skill_package_submits_its_own_surfaces() {
     assert!(FACTS.iter().any(|f| f.name == EVENT_MEMORY_CALIBRATED));
     assert!(
         !FACTS.iter().any(|f| f.name == EVENT_MEMORY_ENCODED),
-        "编码事实的形状随记忆家族走，本包不再申报（D-263）"
+        "编码事实的形状随记忆家族走，本包不再申报"
     );
     assert!(
         !ROWS.iter().any(|r| r.name == EVENT_MEMORY_ENCODED),
@@ -173,7 +173,7 @@ fn the_retreat_view_is_sealed_under_this_owner() {
     assert_eq!(frozen.view_owner(SKILL_RETREAT), Some(OWNER));
 }
 
-/// 编译两视图（已编译数 / 开关）同样在冻结表里，owner 是本插件（`D-489`）。
+/// 编译两视图（已编译数 / 开关）同样在冻结表里，owner 是本插件。
 #[test]
 fn the_compile_views_are_sealed_under_this_owner() {
     let frozen =
@@ -184,7 +184,7 @@ fn the_compile_views_are_sealed_under_this_owner() {
     assert_eq!(frozen.view_owner(SKILL_COMPILE_SWITCH), Some(OWNER));
 }
 
-/// 已编译数只数 `tag:"skill"` 的编码事实——判据随口径一起回 owner（`D-489`）。
+/// 已编译数只数 `tag:"skill"` 的编码事实——判据随口径一起回 owner。
 ///
 /// 从 session 迁来时逐字保持原口径：按 `tag` 认，不按整格数；空事实源 ⇒ 有据的零。
 #[test]
@@ -217,7 +217,7 @@ fn compiled_count_only_counts_skill_tagged_facts() {
 }
 
 /// 开关读法只有一份（`contributor::compile_enabled`）：最后一条 `session.config`
-/// 的 `skill_compile_enabled`，缺省 `false`（出厂关，`D-427`）。
+/// 的 `skill_compile_enabled`，缺省 `false`（出厂关）。
 #[test]
 fn compile_switch_reads_the_latest_config_event() {
     let cfg = |id: &str, on: bool| {

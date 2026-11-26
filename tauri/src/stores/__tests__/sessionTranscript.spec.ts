@@ -200,7 +200,7 @@ describe('在途节点判据', () => {
   })
 })
 
-describe('dropUnselectedBranches：未选中支连同整棵子树一起让位（[D-173]）', () => {
+describe('dropUnselectedBranches：未选中支连同整棵子树一起让位', () => {
   /** 一条成员根：`selected` 决定它藏不藏。候选由夹具手写（读侧只认长度与下标）。 */
   const branch = (id: string, candidates: string[], index: number, selected: boolean) =>
     msg({

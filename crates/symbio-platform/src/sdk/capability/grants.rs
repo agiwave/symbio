@@ -1,4 +1,4 @@
-//! 跨会话的工具授权清单（审批卡第三档「永久放行」的存储形状，D-170）。
+//! 跨会话的工具授权清单（审批卡第三档「永久放行」的存储形状）。
 //!
 //! ## 为什么是「工具 → 风险上限」而不是布尔白名单
 //!
@@ -51,7 +51,7 @@ impl ApprovalGrants {
     /// 把某个工具的上限**抬**到 `level`（只抬不降），返回生效后的上限。
     ///
     /// 只抬不降与「本会话放行」同纪律：一次批准不该顺手收紧已有的授权
-    /// （撤销走配置文档本身，D-170 决策 5）。
+    /// （撤销走配置文档本身 决策 5）。
     pub fn raise(
         &mut self,
         tool: impl Into<String>,
@@ -95,7 +95,7 @@ impl<'de> Deserialize<'de> for ApprovalGrants {
     }
 }
 
-/// 宿主为一次已批准调用签发的短期一次性凭据（D-533）。
+/// 宿主为一次已批准调用签发的短期一次性凭据。
 #[derive(Debug, Clone)]
 pub struct ApprovalGrant {
     inner: Arc<GrantInner>,

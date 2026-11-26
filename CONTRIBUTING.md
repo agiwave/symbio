@@ -26,15 +26,13 @@ created: 2026-07-20
 | Node.js | ≥ 18 | 前端构建 |
 | Tauri CLI | 2.x | `cargo install tauri-cli --version "^2.0"` |
 | 平台 | Windows / macOS / Linux | Tauri 三平台均已配置 CI |
-| **系统库（仅 Linux）** | OpenSSL 开发包 + `pkg-config` | HTTP 出口的 TLS 走**平台原生栈**（[D-013](crates/symbio-plugin-model/README.md "crates/symbio-plugin-model/README")）：Windows = SChannel、macOS = Security.framework、**Linux = 系统 OpenSSL** ⇒ Debian/Ubuntu 装 `libssl-dev pkg-config`，RHEL/Fedora 装 `openssl-devel` |
+| **系统库（仅 Linux）** | OpenSSL 开发包 + `pkg-config` | HTTP 出口的 TLS 走**平台原生栈**：Windows = SChannel、macOS = Security.framework、**Linux = 系统 OpenSSL** ⇒ Debian/Ubuntu 装 `libssl-dev pkg-config`，RHEL/Fedora 装 `openssl-devel` |
 
 可选：使用 [rustup](https://rustup.rs/) 安装 Rust — `rust-toolchain.toml` 会自动激活对应的 channel 与组件。
 
 > **为什么只有 Linux 需要额外系统库**：TLS 后端是平台原生栈——Windows 用 SChannel、macOS 用
-> Security.framework，两者都是**纯 Rust FFI 绑定**（无 C 源、无需额外系统包）；只有 Linux 落到
-> 系统 OpenSSL，因此需要上面的开发包。Windows/macOS **无需 C/C++ 编译器**：最后一条 C 编译链
-> `onig_sys` 已随 `fastembed` 废弃、嵌入推理切到 `ort`（预编译二进制，[D-016](crates/symbio-plugin-model/README.md "crates/symbio-plugin-model/README")）
-> 退出依赖树；Linux 侧同理只剩编译 Rust 本身。
+> Security.framework，两者都是纯 Rust FFI 绑定；Linux 落到系统 OpenSSL，因此需要开发包。
+> 嵌入推理使用预编译的 `ort`，三平台都不需要为它安装 C/C++ 编译器。
 
 ---
 
@@ -154,7 +152,7 @@ MSRV 阶段会换编译器（`RUSTUP_TOOLCHAIN` 覆盖 `rust-toolchain.toml`）�
 [`gate-wiring-audit`](scripts/audits/gate-wiring-audit.mjs)
 （GW-*）判红——这是机制唯一的坏死方式：**枚举写窄了，判据静默不跑**。
 `weekly` 是判据的慢车道：风格性 / 布局性 / 低频漂移判据每周核一次即可（CI 的
-`weekly.yml` schedule 触发），准入标准见 DE-016 D-496——不是「嫌它烦就挪出去」。
+`weekly.yml` schedule 触发），准入标准见 [DE-016-工程落地与验证](docs/003-design/016-工程落地与验证.md "DE-016-工程落地与验证")。
 
 找不到某条机制 / 约定写在哪：`node scripts/doc-find.mjs <关键词>`（搜全仓 `*.md` 与源码
 `//!` / `///`）。项目文档是下沉的，**知识只写一处**；发现缺文档就补那一处，不要把摘要抄到别处。
@@ -221,7 +219,7 @@ CI 侧另有 `commit-msg-check` job，用 `--range` 把本次引入的提交逐�
  报红（门禁就是这么调的），提示语写明应下调哪一格。
  它的判据是**测试函数数**而非模块名：`#[test]` / `#[tokio::test]` 无论写在哪个模块、哪个文件都数；
  旧判据只认 `mod tests` 名字，于是 `turn.rs` 那种 `mod tool_call_tests { … }` 里的测试一个都数不到。
- 两者共同点：**余量只有两个出口**——容差内是一条限期提示（`BASELINE_GRACE`），超出容差即红（`D-492`）。所以「门禁通过」不再需要你逐个复跑脚本读警告：余量要算数的部分，门禁已经判了。
+ 两者共同点：**余量只有两个出口**——容差内是一条限期提示（`BASELINE_GRACE`），超出容差即红（）。所以「门禁通过」不再需要你逐个复跑脚本读警告：余量要算数的部分，门禁已经判了。
 改常量时**在常量旁写明原因**（`git log -S<常量名>` 能查到历次调整的判据）。
 - ⚠️ `.workbuddy-ai/` 被 gitignore：**不要提交、不要删除**。仓库另有 `.workbuddy/`（旧 harness 遗留）——以 `.workbuddy-ai/` 为准。
 
@@ -242,15 +240,10 @@ CI 侧另有 `commit-msg-check` job，用 `--range` 把本次引入的提交逐�
  这些要么属文档、要么属 `git log`——写进注释只会在下次改动时漏掉一处。
 - 文档**不要抄**代码签名与字段表：要清单就读定义（或它的 `//!` 头注释）。手抄的表必然漂移
  ——本仓库已数次出现「文档列的文件早已不存在」。
-- **过程文档不进仓**：一次性评审 / 迁移记录 / 已落地的实施方案写完即删，历史归 `git log`
- （本仓不设归档目录，D-494）；留在活跃目录会被 `node scripts/audits/doc-link-audit.mjs` 的 D-002 判红。
-- **活跃文档散文不得超过 1000 行**（D-003）：判据量的是**剥离 front-matter 后的正文、
- 再减去所有 `### D-NNN` 决策块**——决策账是只追加的定案记录，长度是项目史的读数，
- 读它的人按锚点跳（`decision-anchors` 是那条索引的唯一读法），不该被当成"该拆篇"的信号。
- 另：`docs/007-task/`、`docs/005-spec/` 两目录整目录不参与散文体检
- （短文与条文列表，长度不携带信号）。超限不是"需要解释的特例"，而是「内容该归
- 别人了」或「该拆篇了」的信号，按上面那张职责边界表处置。同一脚本的 D-004 另判**变更史残留**
- （「曾经 / 修订 / 后记 / 测试基线 A → B」），历史一律归 `git log`。
+- **过程文档不进仓**：一次性评审 / 迁移记录 / 已落地的实施方案写完即删，历史归 `git log`；
+ 留在活跃目录会被 `node scripts/audits/doc-link-audit.mjs` 的 D-002 判红。
+- **活跃文档正文不得超过 1000 行**：超限不是需要解释的特例，而是内容该归 owner 或该拆篇的信号。
+ 文档不设逐案例决策账，也不为决策块豁免篇幅；变更史残留由同一脚本的 D-004 判红。
  ```bash
  node scripts/audits/doc-link-audit.mjs # 文档体检（D 系判据），任一命中即失败
  ```
@@ -362,8 +355,8 @@ mod tests;
  scope 例：`agent` / `tauri/services` / `docs`。
 3. 推送后通过 PR 提交，CI 必须全绿。
 4. 至少 1 位 maintainer 审阅通过后可合入。
-5. 涉及架构变更的 PR：决策写进 [ADR 索引](docs/003-design/README.md "DE-000-设计总览")（一条 ADR），
- 「改了什么 / 为什么」写在提交信息里。
+5. 涉及架构变更的 PR：先更新最贴题的设计规范与跨模块约束，「改了什么 / 为什么」写在提交信息里；
+ 不为单个实现案例新增 ADR 或决策编号。
 
 ---
 

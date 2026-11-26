@@ -199,7 +199,7 @@ impl SessionPlugin {
                     //
                     // 落点与 `truncate`/`expand_skeleton` 同一个位置，语义却相反：那两个
                     // 改的是**节点**，这个只改**读法**——落一条 `scope.branch_selected`，
-                    // 不开轮、不产生消息（[D-173](../../../../docs/003-design/001-核心架构.md "DE-001-核心架构")）。
+                    // 不开轮、不产生消息。
                     //
                     // 必须排在下面的恢复 catch-all **之前**：`switch_branch` 不在
                     // `ResumeAction` 的词表里，掉进那一臂会被读成 `NotImplemented`——
@@ -222,7 +222,7 @@ impl SessionPlugin {
                     //
                     // 与 `switch_branch` 是一对，方向相反：那条只改读法、不开轮；这条
                     // 只开轮、不改既有节点。**动作 → 事实 → 环派发**：写侧落一条
-                    // `scope.branch{of, into}`（D-173 的目标事实），随后**复用写收件箱
+                    // `scope.branch{of, into}`（目标事实），随后**复用写收件箱
                     // 的那一个开轮单元**（`user.message` → `session.config`，由事实源
                     // 的写口踢驱动）——不另造第二种「开轮」接法，也不在这里重跑模型。
                     //
@@ -290,7 +290,7 @@ impl SessionPlugin {
                             })),
                         }))
                     }
-                    // ── 压缩失败重试（D-402 ③）──
+                    // ── 压缩失败重试──
                     //
                     // 动作落在**失败的压缩节点**（`mid`）上：只落一条 `message.removed`
                     // （目标就是该节点），不在这里重跑（恢复只能从事实进环）。读面因此

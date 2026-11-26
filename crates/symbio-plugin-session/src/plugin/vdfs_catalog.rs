@@ -46,7 +46,7 @@ impl SessionPlugin {
                 // schema**（运行期汇流，见 [`Self::session_schema`]）。它是本插件自述中
                 // 唯一动态的部分，因此随**根节点自述**一起给出（容器合成挂载点节点时
                 // 向本 provider 发一次 `Stat("")` 取走 `new_type`），而不是 trait 上的
-                // 另一个方法——见 D-030。
+                // 另一个方法——。
                 //
                 // ⚠️ 代价要认：`session_schema()` 会做一次全项目广播（options 收集，
                 // 含 agent 目录扫描），因此**列 / stat 会话挂载根**比 stat 某个会话贵。
@@ -342,7 +342,7 @@ impl SessionPlugin {
     }
 
     /// 工具结果存档（`<id>/tool_archives[/<file>]`）：超长工具结果的全文存档，
-    /// 只读取回（D-528）。
+    /// 只读取回。
     ///
     /// ## 为什么读段住在本插件
     ///

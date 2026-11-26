@@ -39,7 +39,7 @@ export const PRESETS = Object.freeze({
   e2e: ['e2e'],
   /** 文档 + 事实 + 基线（CI 的 docs & facts job）。 */
   'docs-facts': ['facts-write', 'docs', 'facts', 'baseline', 'baseline-scope'],
-  /** 周档：`@gate weekly` 桶（`weekly.yml` 的 schedule job；docs-facts 档位不含它，D-496）。 */
+  /** 周档：`@gate weekly` 桶（`weekly.yml` 的 schedule job；docs-facts 档位不含它，）。 */
   weekly: ['weekly'],
 })
 

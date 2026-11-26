@@ -1,4 +1,4 @@
-//! 任务族的事件声明（DE-024 D-197 / D-204 / D-206）与对外的那条视图（`D-289`）。
+//! 任务族的事件声明（DE-024 ）与对外的那条视图。
 //!
 //! 名字、格位与角色都在这里：写方（[`crate::task::TaskTable`] / 调度者）与读方
 //! （本包的 [`crate::readyset`] 折叠、core 的不变量判据 `acyclic_deps` / `rework_bounded`，
@@ -6,7 +6,7 @@
 //! `PLUGIN.yml` 的 `shared_events:` 投影进 `symbio_plugin_api::events`，
 //! 本插件**不要求别的插件链进来**。
 //!
-//! 就绪集折叠也在这里交出：算式住 owner，第二个读者按报表登记取（`D-221` / `D-387`），
+//! 就绪集折叠也在这里交出：算式住 owner，第二个读者按报表登记取（ / ），
 //! 本插件不认识任何兄弟插件。折叠不认端口形参，也不认识别人交来的表：[`TASK_VOCAB`]
 //! 就是它读的那五格。
 
@@ -35,7 +35,7 @@ pub(crate) const EVENT_TASK_PROGRESS: &str = "task.progress";
 pub(crate) const EVENT_TASK_READY: &str = "task.ready";
 
 /// 租约（调度者写）：与终态同落 `Task × Asserted`。原本经共享表供 `session` 的
-/// 自主程度列引用；`D-281` 之后外部消费方清零，名字随 owner 走（CS-007），
+/// 自主程度列引用； 之后外部消费方清零，名字随 owner 走（CS-007），
 /// `EventDecl` 仍住 [`EVENTS`]。
 pub(crate) const EVENT_TASK_ASSIGNED: &str = "task.assigned";
 
@@ -43,7 +43,7 @@ pub(crate) const EVENT_TASK_ASSIGNED: &str = "task.assigned";
 /// `task × asserted`（返工本身是一次质量判定的事实）。
 ///
 /// 写方 [`crate::task`]，读方是 core 的终止性判据——它经 `CountsRework` 角色
-/// 取这一格，不抄名字（DE-024 D-203）。
+/// 取这一格，不抄名字（DE-024 ）。
 pub(crate) const EVENT_TASK_REWORK_CREATED: &str = "task.rework_created";
 
 /// 任务族五格在本包内的词汇面；终态与租约同落 `Task × Asserted`，按算法角色命名。
@@ -55,8 +55,8 @@ pub(crate) struct TaskVocab<'a> {
     pub(crate) lease: &'a str,
 }
 
-/// 本插件交出**任务族**的拼写（DE-024 D-206）：就绪集折叠同包直接引用，不再走
-/// 跨 crate 的构造期形参（DE-045 `D-289`）。
+/// 本插件交出**任务族**的拼写（DE-024 ）：就绪集折叠同包直接引用，不再走
+/// 跨 crate 的构造期形参（DE-045 ）。
 pub(crate) const TASK_VOCAB: TaskVocab<'static> = TaskVocab {
     opened: EVENT_TASK_OPENED,
     progressed: EVENT_TASK_PROGRESS,
@@ -68,15 +68,15 @@ pub(crate) const TASK_VOCAB: TaskVocab<'static> = TaskVocab {
 /// owner —— 与目录名同形（`crates/symbio-plugin-task`），装配表按它排序与报缺口。
 pub(crate) const OWNER: &str = "crates/symbio-plugin-task";
 
-/// 对外可读的那条视图：就绪集（名册 #23，`D-289`）。
+/// 对外可读的那条视图：就绪集（名册 #23）。
 ///
-/// 读方按报表登记取（`D-387`）、不认识形状（`D-221`）。容量随配置事实走
-/// （`D-490`）：求值口从切片里的 `session.config` 读 `readyset_cap`（与调度段
+/// 读方按报表登记取、不认识形状。容量随配置事实走
+/// 求值口从切片里的 `session.config` 读 `readyset_cap`（与调度段
 /// 同一份单源读法，[`crate::task::readyset_cap`]），读方不带、也无法再带一份。
 pub(crate) const READYSET_VIEW: &str = "task.readyset";
 
 /// 扫描成本上界（事件条数）。它是环内窗口求值的预算；跨插件读口不查它——读侧按
-/// 调用方给的切片全量折（`D-284`）。
+/// 调用方给的切片全量折。
 ///
 /// 声明的上界必须与全仓**同一个值**（`seal` 的 `ViewCostMismatch`：切点只有一个），
 /// 所以这里不按「任务通常没几条」调小——调小会改整张表的切点。
@@ -87,7 +87,7 @@ pub(crate) const VIEWS: &[ViewDecl] = &[ViewDecl {
     ver: 1,
     // 折叠读的就是上面那五格的 `task_id`，外加开节点那条的 `depends_on` 与租约那条的
     // `until_ms`。任务族有 `EventDecl` 但没有 `FactDecl`（这一族不属于义务环），所以这
-    // 七对按 `D-282` 的第二种读法登记：名字由 `EventDecl` 保证拼对，字段无从校验——
+    // 七对按第二种读法登记：名字由 `EventDecl` 保证拼对，字段无从校验——
     // 装载期进 `Frozen::assertion_reads()` 的名单，不是静默跳过。
     reads: &[
         (EVENT_TASK_OPENED, "task_id"),
@@ -97,7 +97,7 @@ pub(crate) const VIEWS: &[ViewDecl] = &[ViewDecl {
         (EVENT_TASK_ASSERTED, "task_id"),
         (EVENT_TASK_ASSIGNED, "task_id"),
         (EVENT_TASK_ASSIGNED, "until_ms"),
-        // 容量的来源（`D-490`）：`session.config` 的贡献键与本包的调度段读同一格。
+        // 容量的来源：`session.config` 的贡献键与本包的调度段读同一格。
         // `session.config` 只有事件格位、没有事实声明 ⇒ 按第二种读法登记，装载期
         // 进 `assertion_reads()` 的名单（报告项，不是缺口）。
         (EVENT_SESSION_CONFIG, "readyset_cap"),
@@ -116,8 +116,8 @@ pub(crate) const EVENTS: &[EventDecl] = &[
     // ── 任务族 ──
     //
     // 这一族的写方与调度者都在本插件，读数被 `session` 的 `stats` 列消费——名字随
-    // owner 登记进清单（DE-024 D-204），折叠在本包里直接引用 [`TASK_VOCAB`] 的拼写
-    // （D-206 的构造期形参通道在 owner 这里退场，DE-045 `D-289`）。领域形状：任务图是
+    // owner 登记进清单（DE-024 ），折叠在本包里直接引用 [`TASK_VOCAB`] 的拼写
+    // （构造期形参通道在 owner 这里退场，DE-045 ）。领域形状：任务图是
     // `depends_on` 载荷字段（数据不是机制，C14 判无环），
     // 返工是新增一条事件而不是改历史（append-only 已提供撤销语义）。
     // 开任务：载荷 `{ task_id, depends_on, goal }`。
@@ -138,7 +138,7 @@ pub(crate) const EVENTS: &[EventDecl] = &[
     // （fail-closed）。租约不是锁原语：持有状态由投影从这格算出，到期由调度者判死。
     EventDecl::new(EVENT_TASK_ASSIGNED, (Entity::Task, Verb::Asserted)).owned(PRINCIPAL_SCHEDULER),
     // 返工轮：终止前提 2（`rework_bounded`）的计数对象。写方 [`crate::task`]，读方
-    // core 判据经角色取它（DE-024 D-203）。
+    // core 判据经角色取它（DE-024 ）。
     EventDecl::with_roles(
         EVENT_TASK_REWORK_CREATED,
         (Entity::Task, Verb::Asserted),
@@ -149,7 +149,7 @@ pub(crate) const EVENTS: &[EventDecl] = &[
 // 装配口的提交：宿主链接本 crate 即生效。本插件不认识也不依赖任何兄弟插件。
 symbio_plugin_api::submit_declarations!(OWNER, submitted_declarations);
 
-// 就绪集列的报表登记（`D-387`）：视图是 `task.readyset`，出口是 `{ ready, cap }`。
+// 就绪集列的报表登记：视图是 `task.readyset`，出口是 `{ ready, cap }`。
 //
 // 没有 `fleet`：就绪集是**当前**候选集，把两个会话的候选集并起来不是任何一个读数的
 // 口径（与 `memory.live` 同一族判断，见 [`VIEWS`] 的 `agg`）。
@@ -165,7 +165,7 @@ symbio_plugin_api::submit_reports!([ReportDecl {
 }]);
 
 /// 就绪集列的**排版**：owner 的求值口已按事实里的容量截断并报出生效容量
-/// （[`crate::readyset::readyset_value`]，`D-490`），本函数只透传；视图值缺席
+/// （[`crate::readyset::readyset_value`]），本函数只透传；视图值缺席
 /// （读方交的是 `Null` 占位）⇒ 交文档写的空形状（出厂容量）。
 fn readyset_report(views: &[Value], _ctx: &ReportCtx<'_>) -> Value {
     views

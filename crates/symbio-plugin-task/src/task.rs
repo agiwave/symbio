@@ -4,11 +4,11 @@
 //!
 //! | 消费方 | 形态 | 扩展面 |
 //! |---|---|---|
-//! | 读出口 `session/stats` 的 `readyset` 列 | 事实源读什么算什么 | 报表登记（`task.readyset`，`D-289` / `D-387`） |
+//! | 读出口 `session/stats` 的 `readyset` 列 | 事实源读什么算什么 | 报表登记（`task.readyset`， / ） |
 //! | 调度段 [`prompt_section`] | 请求视图置顶一段 `role=user` 的提示 | 上下文 provider（`context`） |
-//! | 收束调度 | 就绪集 → `task.ready` / `task.assigned` | 收束贡献（[`ScheduleContributor`]，D-250） |
+//! | 收束调度 | 就绪集 → `task.ready` / `task.assigned` | 收束贡献（[`ScheduleContributor`]） |
 //!
-//! 任务不是另开一份存储：任务就是事实源里的 `task.*` 事件（D-044 同族纪律）。清单本身
+//! 任务不是另开一份存储：任务就是事实源里的 `task.*` 事件（ 同族纪律）。清单本身
 //! （`local/todo_write`）是纯内存、会话作用域的；本模块只**转写观察到的声明**，
 //! 不自己维护任务图。
 //!
@@ -68,7 +68,7 @@ use crate::readyset::{ready_view, ReadySetView};
 // ==================== 声明态：任务表的输入形状 ====================
 //
 // 写侧（[`TaskTable`]）与落/读侧（本模块的折叠）同属本插件，没有第二个消费方。
-// `todo_write` 只声明行为名，不交记录类型——声明随效果端口走（DE-025 D-207 / D-214）。
+// `todo_write` 只声明行为名，不交记录类型——声明随效果端口走（DE-025 ）。
 
 /// 一项任务的声明态（一次 `todo_write` 调用里的一项）。
 #[derive(Debug, Clone)]
@@ -310,10 +310,10 @@ fn drafts(call: &EffectCall<'_>, items: &[TaskItem]) -> Vec<FactDraft> {
     out
 }
 
-/// 本行为管辖的名字。**由本 crate 自报**（D-363）：工具（`todo_write`）在
+/// 本行为管辖的名字。**由本 crate 自报**：工具（`todo_write`）在
 /// `CapabilityMeta.behaviors` 里声明同一个常量，宿主只做收集。
 ///
-/// 名字住 `plugin-api` 的词汇面（D-364），声明方 `symbio-plugin-local` 与本实现 import
+/// 名字住 `plugin-api` 的词汇面，声明方 `symbio-plugin-local` 与本实现 import
 /// 同一常量；插件之间仍不互相依赖（E-009）。
 pub(crate) use symbio_plugin_api::vocab::BEHAVIOR_TASK_TABLE as TASK_TABLE_BEHAVIOR;
 
@@ -365,7 +365,7 @@ fn declared_items(args: &serde_json::Value) -> Vec<TaskItem> {
 }
 
 /// 任务表的**效果与写侧判断**：一次成功的 `todo_write` 声明 → `task.*` 草稿
-/// （DE-025 D-207）；不持权威的主体连写都不许写（DE-033 §3 / D-219）。
+/// （DE-025 ）；不持权威的主体连写都不许写（DE-033 §3 / ）。
 ///
 /// ## 为什么实现住这里，而不是工具所在的那个插件
 ///
@@ -446,7 +446,7 @@ symbio_plugin_api::submit_behavior!(TaskTable);
 /// - 没有事实源 / 读不到 ⇒ `None`——请求里就少一段，不存在「空占位」；
 /// - 就绪集空 ⇒ `None`——依赖没闭合时给模型一个空的候选集只会诱导它瞎猜。
 ///
-/// `snapshot` 是本会话事实的**值**（[D-084](../../../docs/003-design/001-核心架构.md#d-084-能力模块公用基础协议上下文只递值事实只经引擎abcde-五类需要的唯一取得方式 "DE-001-核心架构")）：
+/// `snapshot` 是本会话事实的**值**：
 /// 读方不收路径、不开文件——枚举与读完在存储层，这里只投影。
 pub(crate) fn prompt_section(snapshot: &[Event], cap: usize) -> Option<String> {
     let ready = ready_view(snapshot, i64::MAX, cap).ready;
@@ -464,7 +464,7 @@ pub(crate) fn prompt_section(snapshot: &[Event], cap: usize) -> Option<String> {
     ))
 }
 
-// ==================== 调度策略（D-189：唯一生产消费方在本文件） ====================
+// ==================== 调度策略（唯一生产消费方在本文件） ====================
 
 /// 调度者的时延预算：反射档（`LatencyTier::Reflex`）——它是一次纯计算 + 几次落格。
 pub(crate) const SCHEDULE_BUDGET_MS: u64 = 80;
@@ -478,7 +478,7 @@ const LEASE_MS: i64 = 300_000;
 
 /// 调度者要落的一笔事实（**只描述，不构造 `Event`**）。
 ///
-/// 事件信封（`turn` / `ts` / 归属）由宿主写口统一盖章（DE-026 D-252）
+/// 事件信封（`turn` / `ts` / 归属）由宿主写口统一盖章（DE-026 ）
 /// ——调度者只回答「该有什么」，`produced_by` 是它自己的溯源声明。
 #[derive(Debug, Clone, PartialEq, Eq)]
 pub(crate) struct ScheduleFact {
@@ -511,7 +511,7 @@ pub(crate) struct ScheduleFact {
 /// ## 它不做什么
 ///
 /// 不做优先级与公平性（`readyset` 的打分参数）、不做抢占（今天没有抢占面，
-/// `D-388`）、不做验收
+/// ）、不做验收
 /// （`task.asserted` 归验证者）。它只回答一个问题：**这一刻该把哪几笔活交出去，
 /// 交给谁，租到什么时候**。
 pub(crate) struct ScheduleDecider;
@@ -680,7 +680,7 @@ fn ready_recorded(events: &[Event], task_id: &str) -> bool {
 
 /// 就绪集容量：读**本轮的配置事实**（`session.config` 载荷里的 `readyset_cap`）。
 ///
-/// 为什么走事实而不是端口形参（DE-026 D-252）：开关是宿主本轮决定并已落格的那件事，
+/// 为什么走事实而不是端口形参（DE-026 ）：开关是宿主本轮决定并已落格的那件事，
 /// 落格即成历史——同一份史回放必然得到同一个容量。把它做成端口的一格，等于每加一个
 /// 开关都要改一次扩展面，而端口就成了配置包的搬运工。
 ///
@@ -697,7 +697,7 @@ pub(crate) fn readyset_cap(history: &[Event]) -> usize {
         .unwrap_or(symbio_plugin_api::TASK_CAP)
 }
 
-/// 收束贡献：把就绪集交给调度者，落成 `task.ready` / `task.assigned`（D-250 / D-252）。
+/// 收束贡献：把就绪集交给调度者，落成 `task.ready` / `task.assigned`。
 ///
 /// ## 为什么是贡献而不是环上的债
 ///
@@ -707,7 +707,7 @@ pub(crate) fn readyset_cap(history: &[Event]) -> usize {
 /// ## 为什么住在收束时而不是在效果之后另开一个调用点
 ///
 /// 调度的输入是**本轮刚写完的任务表**：任务表的格在效果端口落完之后才在史里。
-/// 收束贡献端口按 `prio` 逐个询问，并且**每问一个之前重取一次史**（D-250），
+/// 收束贡献端口按 `prio` 逐个询问，并且**每问一个之前重取一次史**，
 /// 于是这里读到的 `history` 一定包含本轮新开的任务——不需要宿主为调度多写一行
 /// 分支，也不需要本插件持有 store。
 ///

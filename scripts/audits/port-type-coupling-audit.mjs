@@ -1,6 +1,6 @@
 #!/usr/bin/env node
 /**
- * port-type-coupling-audit — 通用端口契约不绑模型协议类型（D-447 ②）
+ * port-type-coupling-audit — 通用端口契约不绑模型协议类型（ ②）
  *
  * ## 它判什么
  *
@@ -13,9 +13,9 @@
  *
  * ## 为什么
  *
- * D-444 / D-446 把 `PortReply` 定成「不透明承载」：结果先成为事实、再投影成模型消息。
+ *  /  把 `PortReply` 定成「不透明承载」：结果先成为事实、再投影成模型消息。
  * 通用端口契约若出现 `PromptMessage`（模型侧消息类型）或 `needs_wording_generation`
- * （模型侧措辞判定），就反向依赖了模型协议——加一种模型协议要改共享层，D-440「端口名
+ * （模型侧措辞判定），就反向依赖了模型协议——加一种模型协议要改共享层，「端口名
  * 不进声明表」的零成本加端口随之作废。这条判据把「类型解绑」从散文落成可重跑的文本
  * 扫描，与 `loop-purity-audit` 同一立场：**不靠注释声明，只认真实代码行**。
  *
@@ -48,7 +48,7 @@
  *   「没什么可判 ⇒ 通过」。
  * - **当下状态**：`PromptMessage` 已从三个契约文件消除（并行解耦成果）；
  *   `sdk/dialog` 的 `needs_wording_generation` 仍在、但在本判据扫描面外（未闭合项）。
- *   按 D-447 ②「不为消红放宽判据」，判据边界不因某处绿 / 红而动。
+ *   按  ②「不为消红放宽判据」，判据边界不因某处绿 / 红而动。
  *
  * 用法：node scripts/audits/port-type-coupling-audit.mjs [--root=<仓库根>]
  * 退出码：0 = 通过；1 = 发现耦合或判据没有输入。
@@ -132,7 +132,7 @@ function main() {
   if (failures.length > 0) {
     console.log(red(`  ✗ port-type-coupling-audit 红：${failures.length} 处类型耦合 / 读不出`))
     for (const f of failures) console.log(red(`    ${f}`))
-    console.log(dim('    D-447 ②：模型协议类型 / 措辞判定不进通用端口契约；判据边界不因消红放宽。'))
+    console.log(dim('     ②：模型协议类型 / 措辞判定不进通用端口契约；判据边界不因消红放宽。'))
     process.exit(1)
   }
   console.log(

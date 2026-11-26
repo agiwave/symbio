@@ -140,7 +140,7 @@ async fn workdir_reaches_the_physical_layer() {
     assert_eq!(c.text.as_deref(), Some("hi"));
     assert!(rec.seen().is_empty(), "物理地址不该出现在虚拟层");
 
-    // 工作目录根：`.` 可列、不可读（`/` 已经不是它了 —— 见 D-172）
+    // 工作目录根：`.` 可列、不可读（`/` 已经不是它了 —— ）
     let items = vdfs.list(&ctx, ".").await.unwrap();
     assert_eq!(items[0].node.name, "hello.txt");
     assert!(matches!(
@@ -237,7 +237,7 @@ async fn missing_root_degrades_to_empty_virtual_layer() {
     assert!(items.is_empty(), "无容器 = 无资源类别，但仍是一棵合法的树");
 }
 
-// ── Agent 权限路径闸（D-153）──────────────────────────────────────────────
+// ── Agent 权限路径闸──────────────────────────────────────────────
 //
 // 判据落在 `ToolVdfs` 这一个入口上（九个工具共用），所以反向用例也只需要一条：
 // **越界必拒，且请求根本没有到 provider**（`seen` 空）——后者是「零副作用」的

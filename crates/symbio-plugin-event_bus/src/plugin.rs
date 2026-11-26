@@ -7,7 +7,7 @@
 //!
 //! 发布方在本进程里只有一个：vdfs 宿主的变更投递（`crates/symbio-plugin-vdfs/src/host.rs`，一切资源与
 //! 转写的实时变化都走它）。投递实现住 [`crate::bus`]（登记表 / 扇出 / 慢消费者处置 / resync
-//! 补送，`D-487` 随订阅声明化从 sdk 随迁），经 crate 根的 `submit_event_bus_sink!` 声明进
+//! 补送， 随订阅声明化从 sdk 随迁），经 crate 根的 `submit_event_bus_sink!` 声明进
 //! sdk 的发布端口——sdk 侧只有线上契约与端口 trait，不持有订阅者登记表。本插件因此不是
 //! 「按 `kind` 分流的路由器」——频道闭集、无服务端过滤，形状与判据见
 //! `symbio_plugin_api::event_bus` 的模块文档。
@@ -32,7 +32,7 @@
 //! 这里原本有一个 `kinds: Option<Vec<String>>`（「限定只接收某些 kind 的事件」），但
 //! **没有任何生产者发它**：而后端也只是把它丢掉。一个「看起来能用、实际被静默忽略」
 //! 的字段比没有更危险——下一个人会以为服务端过滤已生效，再去查「为什么事件还是全量
-//! 到达」。故零字段请求类型（原 `EventBusSubscribeRequest`）随 `D-487` 撤销：契约由
+//! 到达」。故零字段请求类型（原 `EventBusSubscribeRequest`）撤销：契约由
 //! `docs/003-design/005-协议规范.md` §事件总线频道与本注释承载，本路由忽略一切字段
 //! （旧客户端发 `{"kinds":["vdfs"]}` 仍然成功，只是没有过滤效果）。
 //!
@@ -69,7 +69,7 @@ impl EventBusPlugin {
         Arc::new(EventBusPlugin) as Arc<dyn Plugin>
     }
 
-    /// 发布端口工厂（`D-487`；满足 `submit_object_creator!` 协议）。
+    /// 发布端口工厂（满足 `submit_object_creator!` 协议）。
     ///
     /// `BusPublisher` 无状态（登记表是进程级静态），构造廉价——满足 creator 的隐含契约。
     pub fn build_publisher(_ctx: Arc<dyn PluginInvokeRequest>) -> Arc<dyn EventBusPublisher> {
@@ -99,7 +99,7 @@ impl EventBusPlugin {
         // 多留 2048 个槽位。
         let (peer, mine) = PluginChannel::pair(4096);
 
-        // 注册到本插件的订阅表（`D-487`：表归插件本体，sdk 不再持有）
+        // 注册到本插件的订阅表（表归插件本体，sdk 不再持有）
         let connection_id = Uuid::new_v4().to_string();
         bus::register_subscriber(connection_id.clone(), mine.tx.clone());
 
@@ -184,7 +184,7 @@ impl Plugin for EventBusPlugin {
 }
 
 symbio_plugin_api::submit_object_creator!(PLUGIN_ID_EVENT_BUS, EventBusPlugin::build, dyn Plugin);
-// 发布端口声明（`D-487`）：sdk 的 `EventBus::try_publish` 按 `EVENT_BUS_SINK` 装出
+// 发布端口声明：sdk 的 `EventBus::try_publish` 按 `EVENT_BUS_SINK` 装出
 // 本实现，投到本插件的订阅表（creator 的第四个类型族）。
 symbio_plugin_api::submit_object_creator!(
     EVENT_BUS_SINK,

@@ -1,4 +1,4 @@
-//! model 端口的世界提供者（D-298 M1）：解析与适配器构造收在 model 插件一侧。
+//! model 端口的世界提供者（ M1）：解析与适配器构造收在 model 插件一侧。
 //!
 //! 环（loop）只按端口名取——provider 怎么解析（严格查 `preferred` → 落回当次
 //! 生效者）、适配器怎么构造，都是这里的私事。`ModelPort` 在 traverse 里随能力
@@ -39,7 +39,7 @@ pub(crate) const MODEL_PORT: &str = "model";
 
 /// 压缩快照的事实种类：**已有种类**，声明 owner 是
 /// `crates/symbio-plugin-session/src/declarations.rs`。本 crate 只读、不声明；
-/// 名字由 owner 的清单生成到 `plugin-api`，本 crate import 同一常量（D-364）。
+/// 名字由 owner 的清单生成到 `plugin-api`，本 crate import 同一常量。
 ///
 /// `message.removed` 同理：owner 是 session，本 crate 只读。
 use symbio_plugin_api::events::{EVENT_MESSAGE_REMOVED, EVENT_SESSION_CONSOLIDATED};
@@ -72,7 +72,7 @@ impl PortProvider for ModelPort {
         self.active.provider_id()
     }
 
-    /// 通用执行面（`DE-048` D-305 裁决一）：一次往返的请求构造、流式帧、工具调用
+    /// 通用执行面（`DE-048`  裁决一）：一次往返的请求构造、流式帧、工具调用
     /// 累计、用量与计价、终止判定都在执行体里；环只把 `request` 载荷原样交进来。
     fn executor(&self) -> Option<Arc<dyn PortExecutor>> {
         Some(Arc::new(ModelExecutor {
@@ -93,7 +93,7 @@ struct RoundTripRequest {
     provider: Option<String>,
     #[serde(default)]
     root_id: String,
-    /// 记账与装配用的容器事实（`D-314`）：`response` 载荷的 `root_id` / `principal`、
+    /// 记账与装配用的容器事实：`response` 载荷的 `root_id` / `principal`、
     /// `calls` 的 `call_key` 都从这里取，环不再代装配。
     #[serde(default)]
     principal: String,
@@ -153,10 +153,10 @@ fn append_payload_nodes(messages: &mut Vec<PromptMessage>, payload: &serde_json:
 ///
 /// - system prompt / tools：最近一条 `session.config` 事实的同名字段（无则空）；
 /// - messages：`user.message`、本端口已落的 `response`、工具产物 `artifact.added`、
-///   以及轮内追加的 `message.added`（含 `elision` 的省略形态，D-249）。
+///   以及轮内追加的 `message.added`（含 `elision` 的省略形态）。
 ///
 /// 返回值第四格是本轮**第几次**模型请求（0 = 首幕）：`message.added` 与省略区间
-/// 都需要它之外的历史，而发言级上下文段只在首幕取一次（D-220 / D-252）。
+/// 都需要它之外的历史，而发言级上下文段只在首幕取一次。
 fn round_input(
     facts: &[PortFact],
     events: &[symbio_plugin_api::Event],
@@ -180,7 +180,7 @@ fn round_input(
         .and_then(|fact| fact.payload.get("tools"))
         .and_then(|value| serde_json::from_value::<Vec<CapabilityMeta>>(value.clone()).ok())
         .unwrap_or_default();
-    // 装配期下发的「canonical → wire」别名表（D-444）：缺字段 / 老夹具 ⇒ 空表，
+    // 装配期下发的「canonical → wire」别名表：缺字段 / 老夹具 ⇒ 空表，
     // 协议侧回退工具名本身。清单装配与四个协议读同一份数据。
     let tool_aliases = config
         .and_then(|fact| fact.payload.get("tool_aliases"))
@@ -204,7 +204,7 @@ fn round_input(
 
     // 被重试 / 切换换下的支：那些轮根下的产出不进请求包（转写里照留，切回去还在）。
     // 「哪一支是活的」是事实层判断，折法住在 `symbio_platform::kernel::event::branch`（DE-051
-    // D-362）：投影、请求包裁支、这里读的是同一个函数。「还在不在」的证据与转写投影
+    // ）：投影、请求包裁支、这里读的是同一个函数。「还在不在」的证据与转写投影
     // 同源（`message.removed`），两处对同一份历史因此得出同一组隐藏支。
     let removed = removed_ids(events, EVENT_MESSAGE_REMOVED);
     let hidden_branches = unselected_roots(
@@ -238,7 +238,7 @@ fn round_input(
     // 文本节点的身份。回灌只认第一格，否则同一句话在请求里出现两次（t46 基线第 7 条）。
     let mut seen_texts: HashSet<String> = HashSet::new();
     // 压缩快照：`session.consolidated` 的载荷是**整份消息列表**，取代它之前的一切
-    // （D-053 / D-336）。请求视图也必须从这份列表起折——少了这一步，压缩只改对话面、
+    //。请求视图也必须从这份列表起折——少了这一步，压缩只改对话面、
     // 模型仍读全量历史（同一段历史两个读法），而且水位只涨不落：每轮都欠一次压缩。
     let snapshot_at = facts.iter().rposition(|fact| {
         fact.kind == EVENT_SESSION_CONSOLIDATED
@@ -283,7 +283,7 @@ fn round_input(
                     }
                 }
             }
-            // 轮内追加的消息（D-249 的省略说明）：id 写的是它取代的区间，这里按
+            // 轮内追加的消息（省略说明）：id 写的是它取代的区间，这里按
             // 节点自己的身份回灌成一条普通消息——读侧不解释「为什么」。
             EVENT_MESSAGE_ADDED => append_payload_nodes(&mut messages, &fact.payload),
             EVENT_RESPONSE if is_reader_reply(&fact.payload) => {
@@ -426,7 +426,7 @@ fn first_text(seen: &mut HashSet<String>, fact: &PortFact) -> bool {
     seen.insert(id.to_string())
 }
 
-/// 装配侧取段（D-208 / D-220）：发言级段只在首幕取一次，请求级段每次请求都取。
+/// 装配侧取段：发言级段只在首幕取一次，请求级段每次请求都取。
 ///
 /// 段身份来自 provider 自己声明的 [`ContextSection::slot`]（宿主不拼名字）；
 /// 这里只做「空段过滤 + 按节奏追加」，判断仍留在 provider 侧。
@@ -472,7 +472,7 @@ const PER_MESSAGE_OVERHEAD: usize = 8;
 
 /// 估算本轮**已占用**的 token：历史消息 + 请求级固定开销（system prompt + 工具定义）。
 ///
-/// 与段成本的计量共用 `default_tokenizer()`——预算与成本必须同一把尺（D-243）；
+/// 与段成本的计量共用 `default_tokenizer()`——预算与成本必须同一把尺；
 /// 各算各的就会出现「水位说满了、段却以为自己还有空间」。
 fn estimate_prompt_tokens(
     system_prompt: &str,
@@ -484,7 +484,7 @@ fn estimate_prompt_tokens(
 
 /// 用**指定尺子**量一次请求的输入体量（system prompt + 工具定义 + 消息）。
 ///
-/// 为什么要能换尺子（`D-433`）：上面那条 D-243 说的是**预算与成本**必须同尺；
+/// 为什么要能换尺子：上面那条  说的是**预算与成本**必须同尺；
 /// 校准回灌的分母是唯一的例外，且必须例外——把校准后的读数当分母，观测比值就
 /// 依赖当前系数，不动点解是 √(真实比值) 而不是真实比值（自反馈偏差），
 /// 所以分母一律用未校准的 [`HeuristicTokenizer`]。
@@ -545,7 +545,7 @@ impl PortExecutor for ModelExecutor {
             Ok(request) => request,
             Err(error) => {
                 let why = format!("模型请求载荷不可读：{error}");
-                // 连载荷都读不出来，这一笔也必须收口（`failed` 由执行体落格，`D-314`）。
+                // 连载荷都读不出来，这一笔也必须收口（`failed` 由执行体落格）。
                 emit_outcome(
                     &exec.emit,
                     "failed-outcome".to_string(),
@@ -574,11 +574,11 @@ impl PortExecutor for ModelExecutor {
             .as_deref()
             .and_then(|id| self.catalog.iter().find(|p| p.provider_id() == id))
             .unwrap_or(&self.active);
-        // 请求构造归执行体（D-305 裁决一 / D-306 裁决二）：环交进的是**值**
+        // 请求构造归执行体（ 裁决一 /  裁决二）：环交进的是**值**
         // （`PromptMessage`），线格式在这里收口。
-        // 段注入（D-220 / D-252）：发言级段与请求级段都拼在**历史之前**、`role: system`。
+        // 段注入：发言级段与请求级段都拼在**历史之前**、`role: system`。
         //
-        // 段预算（D-243）：预算 = **配置上限** − 历史与固定开销。这里读 `max_context_tokens`
+        // 段预算：预算 = **配置上限** − 历史与固定开销。这里读 `max_context_tokens`
         // 而不是 `effective_context_tokens`：后者会发起上下文探测（四个并发 HTTP），
         // 每轮请求前多付一次出口往返，而预算只需要一个上界——旧环的 `context_limit`
         // 同样是配置值。服务端上报的较小上限由收束轮水位那一处 `effective` 承担读数。
@@ -616,7 +616,7 @@ impl PortExecutor for ModelExecutor {
         prompt.extend(messages);
         let wire = wire_messages(&prompt);
         let started = std::time::Instant::now();
-        // 流式增量是**瞬时帧**，不进事实表（`D-314` 两条通道）：provider 往 `env.sink()`
+        // 流式增量是**瞬时帧**，不进事实表（ 两条通道）：provider 往 `env.sink()`
         // 写帧，这一出口记下节点 id 与半截正文（供 `response` / `failed` 载荷使用），
         // 再原样转发给展示出口。丢帧不影响正确性——终稿以 `response` 为准。
         let rows = Arc::new(StreamRows::new(exec.sink.clone()));
@@ -631,11 +631,11 @@ impl PortExecutor for ModelExecutor {
             // 半截正文由 `rows.snapshot()` 留痕。工具侧的读方是同一个 `exec.abort`。
             _ = exec.abort.cancelled() => Err(PluginError::Aborted),
             result = provider
-                // internal-model-allow IM-001/gate: 端口执行体转发欠债行给的工具集（D-305 裁决一）。
+                // internal-model-allow IM-001/gate: 端口执行体转发欠债行给的工具集（ 裁决一）。
                 .round_trip(&system_prompt, &wire, &tools, &tool_aliases, &request.root_id, &env) => result,
         } {
             Ok(output) => {
-                // 校准回灌（`D-433`）：provider 报了实测**输入**用量，就把「实测 / 未校准
+                // 校准回灌：provider 报了实测**输入**用量，就把「实测 / 未校准
                 // 估算」交给进程内的 `CalibratedTokenizer`。断在这里校准永远停在初值 1.0，
                 // 未校准启发式对 CJK 的高估（实测约 31%）无人修正，压缩预检会把本可成功的
                 // 摘要请求误判成「注定超限」。缺席是正常的（协议或桩不保证给），不算缺陷；
@@ -653,7 +653,7 @@ impl PortExecutor for ModelExecutor {
                 } else {
                     world_kind = EVENT_RESPONSE;
                 }
-                // 应答承载（D-319）：assistant 正文 + 逐条 `tool_calls` 声明在这里组装，
+                // 应答承载：assistant 正文 + 逐条 `tool_calls` 声明在这里组装，
                 // 环只把 `messages` 按序追加、按 `links` 配对。id 取法与环侧旧实现同源
                 // （wire id → 节点 id → 合成 `call_<名>_<轮>_<序号>`）。
                 let mut messages: Vec<PromptMessage> = Vec::new();
@@ -697,7 +697,7 @@ impl PortExecutor for ModelExecutor {
                     }));
                 }
                 // 一次往返的终稿 → `response` 载荷：正文 / 思考、节点身份、终答折叠、
-                // 用量与工具调用集合展开都由执行体装配（`D-314`）。
+                // 用量与工具调用集合展开都由执行体装配。
                 let mut payload =
                     outcome_payload(&request, Some(&output), &rows.snapshot(), started, None);
                 // 上下文水位：收束轮才写（中途工具轮的请求体积不代表最终水位）。
@@ -752,7 +752,7 @@ impl PortExecutor for ModelExecutor {
                     PortOutcome {
                         facts: vec![payload],
                         error: None,
-                        // 中性承载（D-446 ②）：通用端口不认模型侧消息类型，模型插件
+                        // 中性承载：通用端口不认模型侧消息类型，模型插件
                         // 把自己的往返产物折成不透明值交给环，环只传递、不解释。
                         reply: PortReply {
                             messages: messages
@@ -803,7 +803,7 @@ impl PortExecutor for ModelExecutor {
                 }
             }
         };
-        // 收束闸 · 发言臂（D-067）：主体未持 `reply.*` ⇒ 不落 `chat.assistant.final`。
+        // 收束闸 · 发言臂：主体未持 `reply.*` ⇒ 不落 `chat.assistant.final`。
         // `session.close-scope` 以它为欠债来源（`Decl.owes.source`），不落它 ⇒ 本轮
         // 派生事实（记忆 / 任务 / 承诺）与 `session.settled` 都不产生——拒绝要落到
         // 收束层（t73）。答案仍经 `reply` 回给调用方：收束格是记录，不是呈现。
@@ -825,7 +825,7 @@ impl PortExecutor for ModelExecutor {
         let speech_denied = outcome.error.is_none()
             && world_kind == EVENT_CHAT_ASSISTANT_FINAL
             && !symbio_plugin_api::production_matrix().can_reply(&gate_principal);
-        // 账：`chat.assistant.final` / `response` / `failed` 由执行体经宿主写口落格（`D-314`）；
+        // 账：`chat.assistant.final` / `response` / `failed` 由执行体经宿主写口落格；
         // 信封（`verb`）由这里按事实种类给，键由 `emit_outcome` 按同一身份构造。
         if let Some(payload) = outcome.facts.first() {
             let kind = if outcome.error.is_none() {
@@ -837,7 +837,7 @@ impl PortExecutor for ModelExecutor {
                 // 拒绝也要留痕：读者按**格位 + 载荷的语音键**配对——`(Scope, Asserted)`
                 // 且 `key = chat.assistant.final`、`root_id` 归属本轮，把这一轮的答复挡在
                 // 对话面之外（`rebuild::denied_speech`）。名字是本插件私有的
-                // `model.speech.denied`（D-390），读者不按名字取。
+                // `model.speech.denied`，读者不按名字取。
                 emit_outcome(
                     &exec.emit,
                     format!("deny-{}-speech", request.root_id),
@@ -862,7 +862,7 @@ impl PortExecutor for ModelExecutor {
             }
         }
         // 工具轮的世界事实：`tool.requested` 是组织键（一轮一条），`tool.call.requested`
-        // 是逐笔债的标记（按 `calls[]` 一调用一条，D-378）。债表只问标记存在性，不读
+        // 是逐笔债的标记（按 `calls[]` 一调用一条）。债表只问标记存在性，不读
         // `tool.requested` 的载荷。身份取本次派发的幂等键（一轮一次，跨轮天然不同），
         // 标记键再拼 `call_id`——同一 `(request_id, call_id)` 重试由事实源按 `event_id`
         // 吸收，不会长出第二条。
@@ -903,7 +903,7 @@ impl PortExecutor for ModelExecutor {
     }
 }
 
-/// 执行体落协议事实的统一出口（`D-314`）：键与信封由这里构造，只交载荷。
+/// 执行体落协议事实的统一出口：键与信封由这里构造，只交载荷。
 async fn emit_outcome(
     emit: &PortFactEmit,
     key: String,
@@ -922,7 +922,7 @@ async fn emit_outcome(
     .await;
 }
 
-/// 一次请求的**未校准**启发式估算：校准回灌的分母（`D-433`）。
+/// 一次请求的**未校准**启发式估算：校准回灌的分母。
 ///
 /// 为什么用原始启发式而不是 [`default_tokenizer`] 的 `count()`：把校准后的值喂回去，
 /// 观测比值会依赖当前系数，数学上收敛到 √(真实比值) 而不是真实比值（自反馈偏差）。
@@ -951,7 +951,7 @@ fn context_watermark(output: &RoundOutput, limit: u32) -> Option<serde_json::Val
     }))
 }
 
-/// 一次往返写进 `response` / `failed` 的载荷（行契约归本插件，`D-314`）。
+/// 一次往返写进 `response` / `failed` 的载荷（行契约归本插件）。
 ///
 /// 键名与环侧 `output_fields` 同义：`text` / `text_id` / `reasoning` / `reasoning_id` /
 /// `answer` / `answer_id` / `truncated` / `principal` / `root_id`，外加本轮的工具调用
@@ -998,7 +998,7 @@ fn outcome_payload(
         .or_else(|| {
             (!reasoning.trim().is_empty()).then(|| format!("{}-reasoning", request.root_id))
         });
-    // 终答折叠归执行体（`D-314`）：有工具调用的轮次交付正文；收束轮按
+    // 终答折叠归执行体：有工具调用的轮次交付正文；收束轮按
     // 正文 → 截断则空 → 端口思考 → 流上思考 的顺序取值；失败轮交付半截正文。
     let answer = match output {
         Some(o) if !o.tool_calls.is_empty() => text.clone(),
@@ -1077,7 +1077,7 @@ fn outcome_payload(
     payload
 }
 
-/// 末轮答话的取值（`final_answer` 迁入执行体，`D-314`）：正文 → 截断则空 →
+/// 末轮答话的取值（`final_answer` 迁入执行体）：正文 → 截断则空 →
 /// 端口思考 → 流上思考。四条顺序都是判据，不是偏好。
 fn fold_answer(output: &RoundOutput, stream_reasoning: &str) -> String {
     if !output.text.trim().is_empty() {
@@ -1137,7 +1137,7 @@ fn dispatch_calls(
         .collect()
 }
 
-/// 执行体的流式读数与转发口（`D-314` 的「流」通道）。
+/// 执行体的流式读数与转发口（「流」通道）。
 ///
 /// provider 写出的每一帧是**瞬时帧**：本口记下正文 / 推理的节点 id 与（可能半截的）
 /// 正文，然后原样转发给展示出口——不进事实表、不参与重放、不写幂等键。记下的读数
@@ -1219,7 +1219,7 @@ impl ExecTranscriptWriter for StreamRows {
     }
 }
 
-/// 把最小消息形态翻成 provider 线格式（`D-305` 裁决一：请求构造归执行体）。
+/// 把最小消息形态翻成 provider 线格式（ 裁决一：请求构造归执行体）。
 ///
 /// 规则与 `ProviderLlmAdapter::generate_turn` 的线格式段落逐条同义：
 /// 同一次工具调用只发**最终**那条结果；本次请求里声明过的调用用树形骨架

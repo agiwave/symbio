@@ -1,6 +1,6 @@
 //! `tool_projection` 的判据：字符集换算 + 本轮暴露投影（碰撞整组退出）。
 //!
-//! 碰撞反例钉的是 `D-444` ②：两个身份映到同一 wire 时，**请求成形前**就让整组退出，
+//! 碰撞反例钉的是  ②：两个身份映到同一 wire 时，**请求成形前**就让整组退出，
 //! 并留下报因；不靠返回时「精确匹配优先」挑一个。
 
 use super::*;
@@ -105,7 +105,7 @@ fn collision_rejects_the_whole_group_and_reports_the_reason() {
     assert_eq!(projection.collisions[0].names, ["a.b", "a__b"]);
 }
 
-/// 无碰撞时别名表与清单同源、且保持注册顺序（D-057）。
+/// 无碰撞时别名表与清单同源、且保持注册顺序。
 #[test]
 fn aliases_come_from_the_same_exposure_set_in_registration_order() {
     let projection = project(&names(&["mcp.fs.read", "shell"]));
@@ -122,7 +122,7 @@ fn aliases_come_from_the_same_exposure_set_in_registration_order() {
     assert!(projection.collisions.is_empty());
 }
 
-/// 工具集变化后，**上一轮的 wire 名不得绑到新工具**（D-447 ③ 的第七类反例）。
+/// 工具集变化后，**上一轮的 wire 名不得绑到新工具**（第七类反例）。
 ///
 /// 误绑的形状：别名表按名字缓存、或派发侧按前缀匹配，于是 `mcp.fs.read` 下线、
 /// `mcp.fs.read_all` 上线之后，模型拿着上一轮那个 `mcp__fs__read` 仍能调到工具——

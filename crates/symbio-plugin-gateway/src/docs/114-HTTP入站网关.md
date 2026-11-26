@@ -187,7 +187,7 @@ Authorization: Bearer <token>
 - 往收件箱写消息（`vdfs/write <根>/session/<id>/inbox`）是 **fire-and-forget**：
  后台任务受理后**立即返回**，**不会**返回一个可以读流的 Session 通道。
  （该写入面上不存在同义的 `session/chat/send` 路由与 `handle_chat_send_oneoff`，
- 见 [D-066](../../../../docs/003-design/012-会话输入与地址.md "DE-012-会话输入与地址")。）
+ 见 [DE-012-会话输入与地址](../../../../docs/003-design/012-会话输入与地址.md "DE-012-会话输入与地址")。）
 - AI 的增量**不在**那条写入连接上。会话实时面——消息转写**与会话运行态**——
  是 **VDFS 变更**（`kind = "vdfs"`），落在会话子树 `<根>/session/<id>` 上
  （`<根>` 是对外展示根，运行期取回，不写字面量——见 `docs/004-ref/003-ROUTES.md`）。
@@ -229,7 +229,7 @@ Authorization: Bearer <token>
 
 > **为什么实时面是 `vdfs/watch`，不是另立一条流式协议**：订阅写进代码很容易，
 > 但代价是把**数据的属性**当成**传输的属性**——顺序是**节点属性**（`ChatNode.seq`），
-> 「追加」不是新的事件取值而是 `updated` 上的 `delta` 字段（[D-025](../../../../docs/003-design/005-协议规范.md "DE-005-协议规范")）。
+> 「追加」不是新的事件取值而是 `updated` 上的 `delta` 字段（[DE-005-协议规范](../../../../docs/003-design/005-协议规范.md "DE-005-协议规范")）。
 > 一旦另立 `session/stream` 这类订阅面，同一份顺序语义就要在传输层再实现一次，
 > 而第二个信源（运行态）还得再立一条。实时面因此只有 `vdfs/watch` 一条。
 
@@ -298,7 +298,7 @@ data: {"type":"bus_event","data":{"kind":"system","session_id":null,"data":{"eve
  根本走不到（§4.1）。
 - 审计：`trace_id` 随 `metadata` 透传进上下文，invoke 记入 tracing。
 - **HTTPS**：不做。策略：默认纯 HTTP + 回环绑定；远程/HTTPS 交由外部反代（Caddy / ssh tunnel / cloudflared）。
- 依赖不是阻碍——HTTP 出口的 TLS 走平台原生栈，不引入 C 编译（[D-013](../../../symbio-plugin-model/README.md "crates/symbio-plugin-model/README")）；若要让网关
+ 依赖不是阻碍——HTTP 出口的 TLS 走平台原生栈，不引入 C 编译；若要让网关
  自带 HTTPS，需另行设计证书配置面（签发方式 / 证书存放 / 与 `inbound_token` 的关系 / 绑定非回环时的
  取舍）——那是产品决策，不是依赖问题。
 
@@ -350,7 +350,7 @@ curl -H "Authorization: Bearer $T" -H "Idempotency-Key: $(uuidgen)" \
 | 开放接口 = 第三方可执行 shell / 写文件 | **高** | 默认关闭 + 回环绑定 + token + 只读模式（危险分级为预留层） |
 | 插件拿不到转发目标 / reload 后失效 | 中 | 构造期登记 `Weak` 父级（`parent.route`），reload 时网关实例随树重建 |
 | 端口占用 / 重启端口未释放 | 中 | `CancellationToken` + `abort` + 启动失败信息回写到设置页 |
-| ~~HTTPS 与"无 C 编译"冲突~~ **已消解** | 低 | 依赖不再是阻碍（[D-013](../../../symbio-plugin-model/README.md "crates/symbio-plugin-model/README")：TLS 已走平台原生栈）；现状仍默认回环 HTTP，TLS 交外部反代 |
+| ~~HTTPS 与"无 C 编译"冲突~~ **已消解** | 低 | 依赖不再是阻碍（TLS 已走平台原生栈）；现状仍默认回环 HTTP，TLS 交外部反代 |
 | 第三方以为连上 WS 就有 AI 流 | 中 | §5.3 显式设计 + SDK 内置"连接即自动订阅"默认行为 |
 | `chat/send` 无 `is_working` 守卫，多客户端并发互踩 | 低 | 文档声明需自行串行；预留方向：会话租约 |
 | 路由无注册表 → 文档漂移 | 低 | 预留方向：manifest 机制（§7） |

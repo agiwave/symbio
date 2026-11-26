@@ -2,7 +2,7 @@
   Appearance — 外观设置 editor（setting:appearance）
 
   主题 / 字体大小经 appearance store 即时生效并自动持久化（首屏快照），但权威值
-  来自 ui_prefs 的配置文档：读取时对齐，修改后写回（D-521）。
+  来自 ui_prefs 的配置文档：读取时对齐，修改后写回。
 
   ## 分区
 
@@ -199,7 +199,7 @@ import type { CompletionKind } from '@/schemas/vdfs'
 
 // 声明渲染器统一契约的**全量** props：页面恒传 node / data / testing /
 // mechanism-actions…，声明了才不会被透传到根 DOM（不需要 inheritAttrs 兜底）。
-// `data` 是 ui_prefs 下发的 JSON 正文（后端权威值，D-521）；store 保留为
+// `data` 是 ui_prefs 下发的 JSON 正文（后端权威值）；store 保留为
 // 首屏同步快照与离线降级——main.ts 在挂载前同步 apply()，这条路径不能改成异步读。
 const props = defineProps<VdfsRendererProps>()
 const emit = defineEmits<{ (e: 'save', payload: string): void }>()

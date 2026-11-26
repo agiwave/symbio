@@ -10,7 +10,7 @@
 //! 它返回 `NoDebt` / `Waiting` / `NeedsHuman` 就结束。`Waiting` 是**在飞**（某端口
 //! 已派发、应答未落），这条应答落地后由同一个入口再次触发，因此那一刻不算空闲；
 //! `NeedsHuman` 才把控制权交还（等答复 / 授权 / 超时唤醒）。两种「停」的分界见
-//! `docs/003-design/051-机制形状规格.md` §2（D-359）。
+//! `docs/003-design/051-机制形状规格.md` §2。
 //!
 //! ## 按根构造，不按入口构造
 //!
@@ -30,7 +30,7 @@
 //! `Host` 同一个 crate，「一个宿主拆成两半」的形状到此为止（P1 批一）。
 //!
 //! 对外的空闲查询 [`settled`] 也住在这一层：它只解析入口、转发给 [`HostDrive`]，
-//! 读的是本模块的 `KickState`，装配层不再留一份等待体（P1 批二 / `D-400`）。
+//! 读的是本模块的 `KickState`，装配层不再留一份等待体（P1 批二 / ）。
 
 use std::collections::HashMap;
 use std::future::Future;
@@ -69,12 +69,12 @@ pub struct FactWorld<'a> {
     /// 选定的 provider（会话 metadata 的 `provider_id`）；`None` = 模型侧默认。
     pub provider: Option<&'a str>,
     pub workdir: &'a str,
-    /// 会话级插件数据目录（D-513）：由会话插件随驱动目标交回，装配在这里挂进 ctx。
+    /// 会话级插件数据目录：由会话插件随驱动目标交回，装配在这里挂进 ctx。
     pub session_dir: Option<&'a str>,
     /// 会话主体来源（metadata 的 `agent_id`，空串 = 无绑定主体）。
     /// 由装配层随事实源带入，`drive_on_new_fact` 只在这里设一次 `AGENT_ID`。
     pub agent_id: &'a str,
-    /// 会话选中的沙箱档案 id（裁决 B / D-531）：前端选项栏呈现的唯一安全选项。
+    /// 会话选中的沙箱档案 id（裁决 B / ）：前端选项栏呈现的唯一安全选项。
     ///
     /// `append` 不携带运行选项，由事实源打开时取来；这里挂进本轮 ctx（`SANDBOX_ID`），
     /// 沙箱句柄按它解析出审批参数**覆盖** `MODE` / `RISK_LEVEL`。
@@ -83,10 +83,10 @@ pub struct FactWorld<'a> {
     pub mode: &'a str,
     /// 存量兼容的阈值回退值（见 `mode`）。
     pub risk_level: &'a str,
-    /// 本会话的 Agent 权限作用域（D-153）：由轮装配发布、随驱动目标带来。
+    /// 本会话的 Agent 权限作用域：由轮装配发布、随驱动目标带来。
     /// `None` = 本会话没选中 Agent（宿主态）；驱动只发布槽，不解析 manifest。
     pub agent_scope: Option<&'a symbio_platform::sdk::agent::AgentScope>,
-    /// 本轮入站来源主体（D-067）：本机用户发起时 `None`。
+    /// 本轮入站来源主体：本机用户发起时 `None`。
     pub source_principal: Option<&'a str>,
     /// 本轮的中止信号（`DE-047` 驱动级信号）：随事实源的交回值带来。
     /// `None` = 没有在途轮次；读方按「不会中止」处理（`ExecAbortSignal::of` 同一语义）。
@@ -120,7 +120,7 @@ pub fn open_fact_source(session_id: &str) -> Result<Arc<dyn FactSource>, String>
 ///
 /// 「这个会话还能不能推进」是**运行时的读数**，不是装配层的判断。装配层只回答
 /// 「主部署用哪个入口」；把等待体留在装配 crate 会让「状态在宿主、读数在装配」
-/// 重新分裂一次（P1 的原始病灶缩小一号，不是治好）。判据见 `D-400`。
+/// 重新分裂一次（P1 的原始病灶缩小一号，不是治好）。判据见。
 pub async fn settled(session_id: &str) {
     if let Some(entry) = declared_drive_entry() {
         entry.settled(session_id).await;
@@ -147,7 +147,7 @@ pub async fn drive_on_new_fact(
     }
     ctx.set(VDFS_CALLER, VdfsCaller::Model);
     ctx.set(WORKDIR, world.workdir.to_string());
-    // 会话级数据目录（D-513）：会话插件按唯一布局解析，宿主只递值；能力插件据此
+    // 会话级数据目录：会话插件按唯一布局解析，宿主只递值；能力插件据此
     // 存取自己的会话数据，不反向拼会话存储布局，也不拿它开事实源。
     if let Some(dir) = world.session_dir {
         ctx.set(SESSION_DIR, dir.to_string());
@@ -155,7 +155,7 @@ pub async fn drive_on_new_fact(
     // 会话主体的**唯一**装载点：值来自会话 metadata 的 `agent_id`，
     // 由事实源打开时取来。执行体只读，不再各自派生或回落。
     ctx.set(AGENT_ID, world.agent_id.to_string());
-    // 三个作用域 VDFS provider（D-515）：存储一律经 provider，插件不再各自拼物理路径。
+    // 三个作用域 VDFS provider：存储一律经 provider，插件不再各自拼物理路径。
     // 目录字符串仍是对外协议键（上方 WORKDIR / SESSION_DIR），但插件消费面换成 provider。
     let agent_dir = symbio_providers::agent_home_root();
     let work_dir = (!world.workdir.is_empty()).then(|| Path::new(world.workdir));
@@ -165,7 +165,7 @@ pub async fn drive_on_new_fact(
         work_dir,
         world.session_dir.map(Path::new),
     );
-    // 会话选中的沙箱 id 同址装配（裁决 B / D-531）：与 `workdir` / `agent_id` 同一来源
+    // 会话选中的沙箱 id 同址装配（裁决 B / ）：与 `workdir` / `agent_id` 同一来源
     // （会话 metadata）。沙箱插件在 gather 的 traverse 里按它绑定引擎；gather 后宿主
     // 经引擎的通用只读口解析出审批参数，再覆盖 `MODE` / `RISK_LEVEL`。
     if let Some(sandbox_id) = world.sandbox_id {
@@ -175,7 +175,7 @@ pub async fn drive_on_new_fact(
     // 值时覆盖这两个键。无沙箱装配 / 沙箱未配该项时保留这里的值，审批闸门照旧可读。
     ctx.set(MODE, world.mode.to_string());
     ctx.set(RISK_LEVEL, world.risk_level.to_string());
-    // 入站来源主体（D-067）：同址装配，工具侧 `EffectEnv.source` 只读它；
+    // 入站来源主体：同址装配，工具侧 `EffectEnv.source` 只读它；
     // 缺席 = 本机用户发起，执行体回落会话身份（不在这里补默认值就是「没声明」）。
     if let Some(source) = world.source_principal {
         ctx.set(SOURCE_PRINCIPAL, source.to_string());
@@ -189,7 +189,7 @@ pub async fn drive_on_new_fact(
     // 装配层 open 的同一句柄：宿主与插件上下文共享它，插件不自建 store。
     ctx.set(FACT_SOURCE, Arc::clone(&world.facts));
     let base: Arc<dyn PluginInvokeRequest> = Arc::new(ctx);
-    // Agent 权限作用域（D-153）：随轮带来，在这里挂进本轮 ctx。执行体（web / fs
+    // Agent 权限作用域：随轮带来，在这里挂进本轮 ctx。执行体（web / fs
     // 权限闸门、工具侧）只读 `AGENT_PERMS`；取不到就不发布槽 = 宿主态。
     if let Some(scope) = world.agent_scope {
         scope.publish(&base);
@@ -214,7 +214,7 @@ pub async fn drive_on_new_fact(
 /// 一份 [`HostDrive`]」不是约定，而是没有第二条构造路径。
 ///
 /// 这条约束是 t29 的根因修复：此前装配入口自己 `new` 了一份、`bind` 又
-/// `new` 一份，`settled` 读的那份永远空闲，等待形同虚设（D-359 因此在 CLI 路径上
+/// `new` 一份，`settled` 读的那份永远空闲，等待形同虚设（ 因此在 CLI 路径上
 /// 从未生效过）——「等哪一份」与「谁在通知」必须是同一个实例。
 mod host {
     use super::*;
@@ -456,7 +456,7 @@ async fn drain(root: &Arc<dyn Plugin>, target: &DriveTarget, state: &KickState) 
                 // 宿主装配层不链 `tracing`（插件日志宏在这里展开不出来），退回 stderr。
                 eprintln!("{notice}");
             }
-            // 两条安全阀同形落一条机制事实（`D-393`）：stderr 之外还得有读方。
+            // 两条安全阀同形落一条机制事实：stderr 之外还得有读方。
             record_stall(&target.session_id, agent_id, &report.outcome);
         }
         Err(e) => {
@@ -487,7 +487,7 @@ fn drive_notice(session_id: &str, outcome: &super::DriveOutcome) -> Option<Strin
     }
 }
 
-/// 安全阀出口落成**机制事实**（`D-393`）：CLI 有 stderr，但没有控制台的宿主
+/// 安全阀出口落成**机制事实**：CLI 有 stderr，但没有控制台的宿主
 /// （Tauri / gateway）读不到 `eprintln!`——出口落格后经 VDFS 订阅面可见。
 ///
 /// 走**只读开面**（`drive == None`）：这条事实是通知，不是环的输入。若经绑定驱动的

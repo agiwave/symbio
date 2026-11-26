@@ -3,7 +3,7 @@ import './_selfrun.mjs';
 //
 // ## 本用例钉的是什么
 //
-// [D-173](../../docs/003-design/001-核心架构.md "DE-001-核心架构") 的端到端半边。它把
+//  的端到端半边。它把
 // 「删除式重试」换成了「并存几支 + 一个选中态」，而这件事只有跑真轮次才看得见：
 //
 // | 要证的事 | 唯一能看见它的地方 |
@@ -17,7 +17,7 @@ import './_selfrun.mjs';
 // `projection/branch.test.rs` 与会话层的 `vdfs_provider.test.rs` 钉死；本用例不复刻
 // 判据，只对**真轮次产出的形状**取值。
 //
-// ## D-335：轮不是独立可见节点
+// ##：轮不是独立可见节点
 //
 // 一轮的可见锚是**用户消息节点**（其 id 即轮分组 id，`Skeleton{run}` 的 `meta.context`
 // 并入它）。所以首轮的判据是「恰有一个用户消息节点」，重试/切换的成员根也是它。
@@ -26,7 +26,7 @@ import './_selfrun.mjs';
 // ## 为什么重试与切换都经 gateway 节点动作，而不是 CLI stdin
 //
 // 两者的落点都是**那一支的轮骨架自身**（`<sid>/message/<root>`），与前端点箭头走的
-// 同一条 `vdfs/action`（[D-066] 之后没有第二条恢复入口）。CLI 的 stdin 只能发用户
+// 同一条 `vdfs/action`（ 之后没有第二条恢复入口）。CLI 的 stdin 只能发用户
 // 发言，发不出「对这条消息做点什么」。
 //
 // ## 为什么把对话面钉死（`DIALOG_FACE_OFF`）
@@ -70,7 +70,7 @@ const ANSWER_B = '乙的答案';
 const AFTER_B = '先按乙答的这支往下问';
 const AFTER_A = '再按甲答的这支往下问';
 
-/** 一支 = 带 `meta.branch` 标注的成员根节点（D-335：锚是用户消息节点，不是 Turn 骨架）。 */
+/** 一支 = 带 `meta.branch` 标注的成员根节点（锚是用户消息节点，不是 Turn 骨架）。 */
 const runsOf = (msgs) => (msgs ?? []).filter((m) => m.meta?.branch);
 
 /** 整份转写的正文串（认「哪一支的答复还在树里」用）。 */

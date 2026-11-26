@@ -1,4 +1,4 @@
-//! `compact` 执行面的判据：**只压到切片边界为止**（D-401）。
+//! `compact` 执行面的判据：**只压到切片边界为止**。
 //!
 //! 摘要正文由 `model.assist` 交回；这里钉的是落格形状：`keep_from` / `split` 必须
 //! 随快照事实一起落下，且「只压前缀」时快照里不能再补一份本轮终答（否则读面重复）。
@@ -150,7 +150,7 @@ async fn full_compaction_keeps_the_legacy_shape() {
     assert!(drafts[0].payload.get("keep_from").is_none());
 }
 
-/// 拿不到摘要 ⇒ **失败是产物**（D-402 ①）：原因分类、压缩节点身份、切片边界
+/// 拿不到摘要 ⇒ **失败是产物**：原因分类、压缩节点身份、切片边界
 /// 全部随失败事实交出，读面与重试都只用这一份材料。
 #[tokio::test]
 async fn a_missing_summary_fails_with_a_classified_fact() {
@@ -201,7 +201,7 @@ async fn a_missing_summary_fails_with_a_classified_fact() {
     assert_eq!(
         payload["compression_id"],
         json!("compression:u-0|1000|"),
-        "失败节点身份按前缀指纹派生（重试换纪元 ⇒ 换身份，D-402 ③）"
+        "失败节点身份按前缀指纹派生（重试换纪元 ⇒ 换身份）"
     );
     assert_eq!(payload["from"], json!("u-0"));
     assert_eq!(payload["to"], json!(final_id));

@@ -1,5 +1,5 @@
 //! `checkpoint` 投影（[DE-018 §4](../../../../docs/003-design/018-模块架构.md "DE-018-模块架构")：③ 加 checkpoint；
-//! [DE-001 §8](../../../../docs/003-design/001-核心架构.md "DE-001-核心架构") `projection = checkpoint`）。
+//! [DE-001 §9](../../../../docs/003-design/001-核心架构.md "DE-001-核心架构") `projection = checkpoint`）。
 //!
 //! **checkpoint 可序列化**（DE-035 §5 的 J3 条目：序列化失败有信号，无需额外强制）——
 //! 它是「断点」的数据形态：恢复 = 重放 WAL 到断点 seq 之后 + 投影纯函数，**不需要

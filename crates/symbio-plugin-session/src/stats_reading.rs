@@ -8,7 +8,7 @@
 //! 两条出口都在这里，因为它们要的是同一条纪律：
 //! - **`session/stats` 路由**：一份 [`ReadingPanel`]（`panel_of` 起）；
 //! - **消息节点交付**：一格 [`ReadingSection`]（[`present_message`] / [`notice_stats_of`]，
-//!   [D-111](README.md#d-111-消息读数由交付出口装配压缩与记忆的事实行离开前端 "crates/symbio-plugin-session/src/README")）——压缩与记忆那几条事实行原先由前端
+//!   ）——压缩与记忆那几条事实行原先由前端
 //!   读 `meta` 数字自己拼，口径住在两端；现在水位、触发词、token 单位都只在本文件出现一次。
 //!
 //! 三条纪律里最硬的一条在这里落地：**只调已有投影，不另写一份统计**
@@ -16,7 +16,7 @@
 //! 本文件里没有分位数 / 占比 / 累计的算式，只有取数、合并与排版（贴标签、定单位、挑语气）。
 //! 合并也不再是本插件的事：**一片怎么折**（`ViewDecl::eval`）与 **N 片怎么合**
 //! （`ViewDecl::agg`）都由 owner 交，本文件只做「逐片求值 → 把值交回去 → 原样装一格」
-//! （`D-281`）。同一份事实长出两套口径，读数与投影就会静默漂移，而两边都自称是 SLO。
+//! 同一份事实长出两套口径，读数与投影就会静默漂移，而两边都自称是 SLO。
 
 use crate::declarations::COMMITMENT_VOCAB;
 use symbio_platform::kernel::chat::chat_node as cm;
@@ -96,7 +96,7 @@ pub(super) fn commitments_reading(snapshot: &[Event]) -> serde_json::Value {
 /// 「会话目录长什么样、哪些事实源打得开」是存储层的布局知识
 /// （`SessionStore::deep_snapshots`：全会话含嵌套子会话，单个坏源跳过并出声）；
 /// 而「N 片怎么合成一片」是统计口径——后者必须单点，故由能力包的 `ViewDecl::agg` 交
-/// （`D-281`）。本函数只做「逐片求值 + 把值交回去」，不碰路径、不开文件，
+/// 本函数只做「逐片求值 + 把值交回去」，不碰路径、不开文件，
 /// 也不认识交回来的形状里有几个字段。
 ///
 /// ## 遍历的形状
@@ -107,7 +107,7 @@ pub(super) fn commitments_reading(snapshot: &[Event]) -> serde_json::Value {
 pub(super) fn fleet_reading(snapshots: &[Vec<Event>], ctx: &ReportCtx<'_>) -> serde_json::Value {
     let sessions = snapshots.len();
 
-    // 实例级落点全部来自**登记面**（`D-387` 的收尾，`D-488`）：owner 在
+    // 实例级落点全部来自**登记面**（收尾）：owner 在
     // `ReportDecl::fleet` 里声明叶路径（`by_tier` / `axes.span` …），本处按登记逐条
     // 求值、按登记落点写格——加一条实例级报表 = owner 登记，本文件不动，也不认识
     // 任何一个 slot 或落点。每条视图按 owner 的 `agg` 合并，再由 `fleet_render` 排版；
@@ -154,7 +154,7 @@ pub(super) fn fleet_reading(snapshots: &[Vec<Event>], ctx: &ReportCtx<'_>) -> se
 
 /// 把 owner 交的值写到**登记声明的叶路径**上（`by_tier` ⇒ 顶层一格；
 /// `axes.span` ⇒ `axes` 下的 `span` 格）。落点与键名都是 owner 起的
-/// （`D-387`），读方不抄第二份字面量。中间段一律对象：`fleet` 的登记判据
+///，读方不抄第二份字面量。中间段一律对象：`fleet` 的登记判据
 /// （`validate`）只放行非空叶路径，空串在装配期已红。
 fn insert_at_leaf(
     root: &mut serde_json::Map<String, serde_json::Value>,
@@ -214,9 +214,9 @@ pub(super) fn totals_of(fallback_rows: &serde_json::Value) -> (u64, u64) {
 /// 一条报表的实例级读数：逐片求值 → owner 的 `agg` 合并 → owner 的 `fleet_render` 排版。
 ///
 /// 与 [`symbio_plugin_api::reports::read_all`] 同一条「不认识形状」的纪律；区别只在合并：单片读数按
-/// `ViewDecl::eval` 求，N 片交 `ViewDecl::agg`，最后才交给 `fleet_render`（`D-387`：
+/// `ViewDecl::eval` 求，N 片交 `ViewDecl::agg`，最后才交给 `fleet_render`（
 /// `fleet_render` 是 `agg` 之后的排版，不是第三份口径）。报表由调用方从登记面交来
-/// （`D-488`），本函数不按名字查表。
+///，本函数不按名字查表。
 fn fleet_of(
     report: &symbio_plugin_api::reports::ReportDecl,
     snapshots: &[Vec<Event>],
@@ -246,7 +246,7 @@ fn fleet_of(
     Some(fleet_render(&merged, ctx))
 }
 
-/// 能力视图列：遍历**报表登记面**，逐条经 `symbio_plugin_api::reports` 求值（`D-387`）。
+/// 能力视图列：遍历**报表登记面**，逐条经 `symbio_plugin_api::reports` 求值。
 ///
 /// owner 在 `submit_reports!` 的 `views` 里列出的名字就是这一列的全部来源——加一条被
 /// 阅读的视图 = owner 登记，本文件不动。按名字的共享清单（`shared_views` /
@@ -285,7 +285,7 @@ pub(super) fn capability_views(snapshot: &[Event]) -> serde_json::Value {
 /// 一条视图读成一格：`{ owner, status, ver, value }` 或可诊断的缺席。
 ///
 /// 读口用 [`symbio_plugin_api::reports::read_view_with_ver`]：报表登记就是公开
-/// （`D-387`），读方不另过任何清单闸。
+///，读方不另过任何清单闸。
 fn view_entry(owner: &str, name: &str, snapshot: &[Event]) -> serde_json::Value {
     match symbio_plugin_api::reports::read_view_with_ver(name, snapshot) {
         Ok((ver, value)) => serde_json::json!({
@@ -454,7 +454,7 @@ pub(super) fn panel_of(stats: &SessionStats) -> ReadingPanel {
         bar: None,
     };
 
-    // 技能段按报表列取值（`D-489`）：开关与已编译数都是 skill 的报表
+    // 技能段按报表列取值：开关与已编译数都是 skill 的报表
     // （`slot = skill_compile_enabled` / `compiled_skills`）；owner 缺席 ⇒
     // 整段不出现（与实例级落点缺席同一条降级语义）。
     let skills = skill_section(stats);
@@ -483,7 +483,7 @@ pub(super) fn panel_of(stats: &SessionStats) -> ReadingPanel {
 /// 技能段：编译开关与已编译数并排——两种「零技能」靠这一行分辨（关着 = 配置选择，
 /// 开着但 0 条 = 本会话还没产出可编译的轨迹）。
 ///
-/// 两格的值按 `slot` 从报表列取（`D-489` 起都是 skill 的报表登记）：键是出品契约
+/// 两格的值按 `slot` 从报表列取（ 起都是 skill 的报表登记）：键是出品契约
 /// （`SV-003`），本处不认识形状、只搬运。owner 缺席（本进程没链接）⇒ 两格缺席 ⇒
 /// `None`——与实例级落点缺席同一条降级语义，不由读方替 owner 造形状。
 fn skill_section(stats: &SessionStats) -> Option<ReadingSection> {
@@ -505,7 +505,7 @@ fn skill_section(stats: &SessionStats) -> Option<ReadingSection> {
     })
 }
 
-/// 能力视图那一段（DE-025 D-221）：**清单有几条，段里就有几行**。
+/// 能力视图那一段（DE-025 ）：**清单有几条，段里就有几行**。
 ///
 /// 一行代表一条公开视图，值只有两类话：「可读 · vN」或「读不出来（原因词）」。
 /// 语义属于 owner，本段不解释载荷——它把完整值留在 `capability_views` 列里，
@@ -595,7 +595,7 @@ fn preview(value: &serde_json::Value) -> String {
 /// 金额只在同一币种内可加（兑换率不是事实源里的东西）。一个币种一行，
 /// 行数由账本的币种数决定；币种顺序由 `model` 那边 `by_currency` 的 BTreeMap 给。
 ///
-/// ## 入参为什么只是那两格报表（`D-452` / `D-461`）
+/// ## 入参为什么只是那两格报表（ / ）
 ///
 /// 本段只读 `usage` / `spend` 两个 `slot`，其余各列一概不碰。收成「整份读数」会让
 /// 判据的入参面比比较面宽，也会让测试必须造一份完整的 `SessionStats`——而入参
@@ -603,7 +603,7 @@ fn preview(value: &serde_json::Value) -> String {
 pub(super) fn usage_section(
     reports: &std::collections::BTreeMap<String, serde_json::Value>,
 ) -> Option<ReadingSection> {
-    // 两列是 `model` 的报表（`D-461`）：本插件按 `slot` 取，不持有也不重算它们的账。
+    // 两列是 `model` 的报表：本插件按 `slot` 取，不持有也不重算它们的账。
     // 取不到（没链接 owner / 登记表不合法）⇒ `Null` ⇒ 下面读成「一次实测都没有」，
     // 整段不出——与「有账但是零」由 `calls` 分辨，不在这里补数。
     const NULL: serde_json::Value = serde_json::Value::Null;
@@ -709,7 +709,7 @@ pub(super) fn usage_section(
     })
 }
 
-// ==================== 消息节点的读数（D-111） ====================
+// ==================== 消息节点的读数 ====================
 
 /// 会话把消息节点**交给前端**那一刻的呈现装配：core 的形状派生（`title`/`icon`/`actions`）
 /// 之后补上本域的读数行。

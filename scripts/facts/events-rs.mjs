@@ -6,7 +6,7 @@
  * 「一条事件名被两个插件同时消费」在过去只有两个去处：内核的 `event/mod.rs` 常量 +
  * `CELLS` 行，或者让两个插件各写一遍字面量。前者把内核当成语义字典（加能力 = 改架构），
  * 后者是同一个事实的两个 owner（改一次要动两处）。现在它是各插件 `PLUGIN.yml` 里
- * `shared_events:` 行的投影——**登记随 owner 的清单走，共享文件零 diff**（DE-024 D-204）。
+ * `shared_events:` 行的投影——**登记随 owner 的清单走，共享文件零 diff**（DE-024 ）。
  *
  * ## 事实源是清单，格位仍是声明
  *
@@ -18,7 +18,7 @@
  * ## 为什么不整表生成
  *
  * 只有**跨插件**消费的名字才需要共享。单消费方的名字随它自己的 owner 声明走（DE-024
- * D-197 / D-201），core 的判据读格子与角色、不读名字（D-203）。给没人共享的名字预置
+ *  / ），core 的判据读格子与角色、不读名字（）。给没人共享的名字预置
  * 一条共享常量，就是给下一轮留腐烂——与 `routes-rs` 同一条纪律，由 CS-007 判红。
  *
  * 由 `scripts/gens/gen-facts.mjs` 遍历 `scripts/facts/` 时调用，不要直接跑。
@@ -37,17 +37,17 @@ const HEADER = `//! 跨插件事件名常量 —— **由 \`scripts/facts/events
 //! 事实源：各插件自己目录里的 \`PLUGIN.yml\` 的 \`shared_events:\` 行（**owner** 导出给
 //! 别的插件命名的那几条事件名）与 owner 自己的 \`EventDecl\` 表（格位）；同清单的
 //! \`shared_event_ports:\` 行（\`<事件名>=<端口名>\`）投影成 \`port_of_fact\`——消费端口
-//! 产物的行据此带 \`after_port\`（D-376），机制层不手抄这条映射。加一条跨插件
+//! 产物的行据此带 \`after_port\`（），机制层不手抄这条映射。加一条跨插件
 //! 事件 = 在 owner 自己的清单里登记一行，并在 owner 的 \`EventDecl\` 里给它格位；内核与
 //! core 的文件零 diff。手改本文件会被 \`gen-facts --check\` 判红。
 //!
 //! # 口径（展开见 \`docs/003-design/024-能力横向扩充的通路.md\`）
 //!
 //! - **本表只收跨插件消费的名字**。单消费方的名字由那个插件自己声明，不进这里。
-//! - **格位取自 owner 的声明**：写闸问的是「这个名字落在哪一格」（DE-024 D-197），所以这里
+//! - **格位取自 owner 的声明**：写闸问的是「这个名字落在哪一格」（DE-024 ），所以这里
 //!   连 \`EventDecl\` 一起投影一份 \`SHARED_EVENTS\`——链接了本 crate 的每个进程都认识它，
 //!   不必把 owner 插件也链进同一个二进制（那正是 E-009 禁掉的那条边）。
-//! - **内核不认识业务事件名**（DE-024 D-203 / D-204）：内核的两张表只留封闭语法——Entity×Verb
+//! - **内核不认识业务事件名**（DE-024  / ）：内核的两张表只留封闭语法——Entity×Verb
 //!   网格与协议五格。名字要跨插件就登记进清单，不要回内核加行（CS-005 / CS-007）。
 //! - **角色跟着投影**：\`FactRole\` 是 owner 交给守卫的陈述；跨插件共享的名字若只投影
 //!   「名字 + 格位」，读角色的守卫（\`FinalizesScope\` / \`StopsScope\` / …）在只链接本 crate
@@ -104,7 +104,7 @@ const PORT_RE = /^[a-z][a-z0-9_]*(\.[a-z][a-z0-9_]*)*$/
  * `shared_event_ports: artifact.added=tool` → `Map { "artifact.added" → "tool" }`；缺键 ⇒ 空。
  *
  * 这条映射只回答「这条共享事实由哪个端口写出」，与 `shared_events` 的 owner 同一个来源
- * （owner 自己的清单）。它进生成物，是因为消费行要在计划层带 `after_port`（D-376）：
+ * （owner 自己的清单）。它进生成物，是因为消费行要在计划层带 `after_port`（）：
  * 机制层手抄一份「哪个世界名归哪个端口」会让世界名在门面上有了第二个 owner。
  */
 function parsePortList(raw, events, where) {
@@ -266,7 +266,7 @@ function portOfFactFn(rows) {
   const P = [
     '/// 共享事件由哪个端口写出（owner 的 `PLUGIN.yml` 的 `shared_event_ports:` 行）。',
     '///',
-    '/// 消费端口产物的声明行据此带 `after_port`（D-376）。映射随 owner 的清单走，',
+    '/// 消费端口产物的声明行据此带 `after_port`（）。映射随 owner 的清单走，',
     '/// 机制层不再手抄「哪个世界名归哪个端口」——那会让世界名在门面上有第二个 owner。',
     "pub fn port_of_fact(fact: &str) -> Option<&'static str> {",
     '    match fact {',
@@ -283,7 +283,7 @@ function portOfFactFn(rows) {
 /** 纯函数：声明清单 → 文件内容。导出给回归测试（测试不触发写盘）。 */
 export function render(rows) {
   const needsRoles = rows.some((r) => (r.roles ?? []).length > 0)
-  // 事件词汇是内核语法（Entity×Verb / EventDecl / FactRole）：D-272 之后按真实归属直取
+  // 事件词汇是内核语法（Entity×Verb / EventDecl / FactRole）： 之后按真实归属直取
   // `symbio_kernel`，不再经 core 根的第二份出口。
   const coreImports = needsRoles
     ? 'use symbio_platform::kernel::event::{Entity, EventDecl, FactRole, Verb};'
@@ -313,7 +313,7 @@ export function render(rows) {
   L.push('///')
   L.push('/// 每一行的格位与角色都来自 owner 自己的 `EventDecl`；链接了本 crate 的每个进程')
   L.push('/// 都认识这些名字，不必把 owner 插件链进同一个二进制——那正是 E-009 禁掉的边')
-  L.push('/// （DE-024 D-204）。')
+  L.push('/// （DE-024 ）。')
   L.push('///')
   L.push('/// 角色必须一起投影：守卫判「这一轮答完了」「这一轮停了」读的是 `FactRole`，')
   L.push('/// 只投影名字 + 格位会让那两条判据静默失效（闸门不报错，只是不再拦）。')

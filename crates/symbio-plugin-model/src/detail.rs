@@ -344,7 +344,7 @@ fn field(key: &str, label: &str, desc: &str, widget: &str) -> DetailField {
 /// 计价的**子定义**（`pricing` 字段的结构化子对象）。
 ///
 /// 单价是**每个 Provider 自己的配置**：同一个模型换一个端点 / 中转，价格就不一样，
-/// 所以不能按模型名内置一张价目表（DE-020 的 D-171）。币种留空 = 不折算金额——表单总会
+/// 所以不能按模型名内置一张价目表（DE-020 的 ）。币种留空 = 不折算金额——表单总会
 /// 提交一个对象键，`validate_manifest` 把「空币种 + 零单价」规范化回「未配置」，
 /// 不让「没填」冒充「明确免费」。
 fn pricing_definition() -> DetailDefinition {

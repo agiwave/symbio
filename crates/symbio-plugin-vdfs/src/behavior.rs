@@ -1,4 +1,4 @@
-//! `vdfs_*` 写族的**效果**：产物格补一句「这次写属于哪种动作」（DE-025 D-207）。
+//! `vdfs_*` 写族的**效果**：产物格补一句「这次写属于哪种动作」（DE-025 ）。
 //!
 //! ## 它替掉的是哪一段
 //!
@@ -13,7 +13,7 @@
 //! ## 为什么是**富化**而不是新格
 //!
 //! `artifact.added` 已经记下了这次调用（`tool` / `args` / `success` / 溯源），
-//! 变更清单折得出来（D-169：清单是纯投影，不该有第二个写点）。缺的只是「哪种动作」
+//! 变更清单折得出来（清单是纯投影，不该有第二个写点）。缺的只是「哪种动作」
 //! ——一个字段，不是一条事实。
 //!
 //! ## 只补成功的调用
@@ -25,7 +25,7 @@ use symbio_plugin_api::behaviors::Kind;
 use symbio_plugin_api::effects::FileOp;
 use symbio_plugin_api::effects::{EffectInput, ToolBehavior};
 
-/// 本行为管辖的名字。**由本 crate 自报**（D-363）：写族四个工具在
+/// 本行为管辖的名字。**由本 crate 自报**：写族四个工具在
 /// `CapabilityMeta.behaviors` 里声明同一个常量，宿主只做收集。
 pub(crate) const FILE_CHANGE: &str = "file_change";
 

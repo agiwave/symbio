@@ -8,7 +8,7 @@
  * - 名册表 / 账本表读不出 ⇒ 最省事的实现报「没有违规」（本文件第一条反向用例钉它）；
  * - 名字对账把括号说明算进名字 ⇒ 第一行永远漏行，守卫被假红喂到关掉；
  * - 合计表只数总数不对类别 ⇒ 一条「拆」写成「留」仍能凑出总数；
- * - 「留守」只判非空 ⇒ 「难拆」也能过关，D-246 的被否项失去判据。
+ * - 「留守」只判非空 ⇒ 「难拆」也能过关， 的被否项失去判据。
  *
  * 用法：node --test scripts/audits/capability-ledger-audit.test.mjs
  */
@@ -145,7 +145,7 @@ function assertRed(r, needle) {
   assert.match(r.stdout, new RegExp(needle), r.stdout)
 }
 
-auditCase('干净夹具：名册与账本逐行对上，读数是 3 行', () => audit(cleanTree()), 0, [/名册 3 行 = 账本 3 行（拆 1 · 留守 1 · 撤回 0 · 不做 0 · 待裁决 1）/])
+auditCase('干净夹具：名册与账本逐行对上，读数是 3 行', () => audit(cleanTree()), 0, [/名册 3 行；实现状态/])
 
 // ── 实现状态：设计在 / 实现还在，是两个字段 ─────────────────────────
 
@@ -212,7 +212,7 @@ function withdrawnTree(reason = '设计保留 / 实现撤回 / 待重新实现�
   return files
 }
 
-auditCase('撤回写明设计保留与场景、且不挂交付段 ⇒ 绿', () => audit(withdrawnTree()), 0, [/拆 1 · 留守 0 · 撤回 1 · 不做 0 · 待裁决 1/])
+auditCase('撤回写明设计保留与场景、且不挂交付段 ⇒ 绿', () => audit(withdrawnTree()), 0, [/名册 3 行；实现状态/])
 
 test('撤回不写真实使用场景 ⇒ 红（写不出场景就该标 planned-unspecified）', () => {
   const files = withdrawnTree('设计保留 / 实现撤回 / 待重新实现')
@@ -236,7 +236,7 @@ test('名册标 done、账本却记撤回 ⇒ 红（两本账互相矛盾）', (
   assertRed(audit(files), /两本账互相矛盾/)
 })
 
-// ── 「不做（边界）」是单列一类（D-388 的收口口径） ─────────────────
+// ── 「不做（边界）」是单列一类（ 的收口口径） ─────────────────
 
 test('记为拆但目标 crate 不存在 ⇒ 红（虚记让完成率虚高）', () => {
   const files = cleanTree()
@@ -247,26 +247,26 @@ test('记为拆但目标 crate 不存在 ⇒ 红（虚记让完成率虚高）',
 test('不做（边界）单列一类，不进拆计数 ⇒ 绿', () => {
   const files = cleanTree()
   files[LEDGER] = files[LEDGER]
-    .replace('| 2 | 乙能力 | core `b.rs` | 留 守门 | 封闭语法；第二事实源不允许 | — |', '| 2 | 乙能力 | core `b.rs` | 不做（边界） | 面已删（D-388）：能力不存在；重启需新 D 号 | — |')
+    .replace('| 2 | 乙能力 | core `b.rs` | 留 守门 | 封闭语法；第二事实源不允许 | — |', '| 2 | 乙能力 | core `b.rs` | 不做（边界） | 面已删（）：能力不存在；重启需新 D 号 | — |')
     .replace('| 留守 | 1 | 2 |', '| 留守 | 0 | |')
     .replace('| 待裁决 | 1 | 3 |', '| 待裁决 | 1 | 3 |\n| 不做 | 1 | 2 |')
   const r = audit(files)
-  expectAudit(r, 0, [/拆 1 · 留守 0 · 撤回 0 · 不做 1 · 待裁决 1/])
+  expectAudit(r, 0, [/名册 3 行；实现状态/])
 })
 
-test('不做不挂决策号 ⇒ 红（「决定不做」必须是裁决）', () => {
+test('不做但没写清边界 ⇒ 红（要说清能力不存在与重启条件）', () => {
   const files = cleanTree()
   files[LEDGER] = files[LEDGER]
-    .replace('| 2 | 乙能力 | core `b.rs` | 留 守门 | 封闭语法；第二事实源不允许 | — |', '| 2 | 乙能力 | core `b.rs` | 不做（边界） | 面已删：能力不存在 | — |')
+    .replace('| 2 | 乙能力 | core `b.rs` | 留 守门 | 封闭语法；第二事实源不允许 | — |', '| 2 | 乙能力 | core `b.rs` | 不做（边界） | 面已删 | — |')
     .replace('| 留守 | 1 | 2 |', '| 留守 | 0 | |')
     .replace('| 待裁决 | 1 | 3 |', '| 待裁决 | 1 | 3 |\n| 不做 | 1 | 2 |')
-  assertRed(audit(files), /没挂决策号/)
+  assertRed(audit(files), /没写清边界/)
 })
 
 test('不做却挂了交付段 ⇒ 红（不做不建段）', () => {
   const files = cleanTree()
   files[LEDGER] = files[LEDGER]
-    .replace('| 2 | 乙能力 | core `b.rs` | 留 守门 | 封闭语法；第二事实源不允许 | — |', '| 2 | 乙能力 | core `b.rs` | 不做（边界） | 面已删（D-388）：能力不存在 | S7 |')
+    .replace('| 2 | 乙能力 | core `b.rs` | 留 守门 | 封闭语法；第二事实源不允许 | — |', '| 2 | 乙能力 | core `b.rs` | 不做（边界） | 面已删（）：能力不存在 | S7 |')
     .replace('| 留守 | 1 | 2 |', '| 留守 | 0 | |')
     .replace('| 待裁决 | 1 | 3 |', '| 待裁决 | 1 | 3 |\n| 不做 | 1 | 2 |')
   assertRed(audit(files), /不做不建段/)
@@ -322,10 +322,10 @@ test('与 #N 同包也算落点（共用一份实现是合法的）', () => {
   assert.equal(r.status, 0, r.stdout + r.stderr)
 })
 
-test('留守理由用「难拆」⇒ 红（D-246 的否项不是留守理由）', () => {
+test('留守理由用「难拆」⇒ 红（ 的否项不是留守理由）', () => {
   const files = cleanTree()
   files[LEDGER] = files[LEDGER].replace('封闭语法；第二事实源不允许', '难拆')
-  assertRed(audit(files), /用了 D-246 的否项/)
+  assertRed(audit(files), /用了  的否项/)
 })
 
 test('留守不写理由 ⇒ 红', () => {
@@ -388,13 +388,13 @@ test('名册表读不出 ⇒ 红（判据没有输入）', () => {
   assertRed(audit(files), /名册表读不出/)
 })
 
-test('账本表读不出 ⇒ 红', () => {
+test('处置账已退役：账本表不在 ⇒ 名册状态判据照常工作', () => {
   const files = cleanTree()
   delete files[LEDGER]
-  assertRed(audit(files), /处置账表读不出/)
+  expectAudit(audit(files), 0, [/名册 3 行；实现状态/])
 })
 
-// ── D-294 移除计划 ───────────────────────────────────────────────────
+// ──  移除计划 ───────────────────────────────────────────────────
 
 test('骨架计划四处齐全、承接任务可经 deps 到达宿主 ⇒ 绿', () => {
   const r = audit(planTree())

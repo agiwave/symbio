@@ -5,7 +5,7 @@
 //! **没有可切换的存储后端**：会话只有一种落盘布局。为什么不做多后端选型
 //! （以及当初那个形状被推翻的两个前提），见 D-008——此处不复述。
 //!
-//! 无事实源的驻留方式已退场（D-329）：会话只有磁盘一种驻留，因为事实源是
+//! 无事实源的驻留方式已退场：会话只有磁盘一种驻留，因为事实源是
 //! 唯一真相——没有事实源的会话壳既读不到历史，也落不进格。
 //!
 //! | 驻留方式 | 构造 | 条目住在 |
@@ -17,7 +17,7 @@
 //! 会话的**权威事件流**也住本模块：JSONL 追加、跨进程写者令牌、被压缩取代的前缀
 //! 归档。它实现 core 的 `Store` 端口，而类型本身
 //! **只对本插件可见**——布局 / 锁文件 / 归档段是「会话怎么落事实」的实现细节，
-//! 不属于机制层（[D-083](../../../../docs/003-design/001-核心架构.md "DE-001-核心架构")）。
+//! 不属于机制层。
 //!
 //! ## 三段分工（判据：这一段错了谁会红）
 //!
@@ -86,7 +86,7 @@ pub(crate) const MESSAGES_FILE_NAME: &str = "messages.json";
 /// 会话主文件名（一个会话目录内的唯一真源）
 const SESSION_FILE: &str = "session.json";
 
-/// 会话存储：磁盘是唯一驻留（D-329）
+/// 会话存储：磁盘是唯一驻留
 pub struct SessionStore {
     /// 落盘根
     base_dir: PathBuf,
@@ -98,7 +98,7 @@ pub struct SessionStore {
     /// 会让 `head` 各自重放、写者令牌互斥 ⇒ 要么重复 seq，要么每次写都被拒。
     /// 缓存一次之后，所有引擎写方共享同一把内部锁，`head` 只有一份。
     facts: std::sync::Mutex<HashMap<String, Arc<EventWalStore>>>,
-    /// 每会话的 Agent 权限作用域槽（D-153）：轮装配在 `collect_capabilities`
+    /// 每会话的 Agent 权限作用域槽：轮装配在 `collect_capabilities`
     /// 之后发布，事实源在 `append` 时取走并随驱动目标交给驱动。
     ///
     /// 键的**存在**不代表已发布（值为 `None` = 本会话没选中 Agent ⇒ 宿主态）；
@@ -106,7 +106,7 @@ pub struct SessionStore {
     agent_scopes: std::sync::Mutex<
         HashMap<String, Arc<std::sync::RwLock<Option<symbio_plugin_api::AgentScope>>>>,
     >,
-    /// 每会话的**入站来源主体**槽（D-067）：开轮写方从收件箱条目的 `params` 发布，
+    /// 每会话的**入站来源主体**槽：开轮写方从收件箱条目的 `params` 发布，
     /// 事实源在 `append` 时取走并随驱动目标交给驱动（工具侧据此填 `EffectEnv.source`）。
     ///
     /// 值为 `None` = 本条消息没有外部来源（本机用户发起）⇒ 工具侧回落会话身份。
@@ -256,7 +256,7 @@ impl SessionStore {
             .await
             .map_err(|e| PluginError::InternalError(format!("创建会话目录失败: {e}")))?;
 
-        // 元数据落盘（[D-049]：**消息正文不再由 store 写**）：`v2-events.wal` 是
+        // 元数据落盘（**消息正文不再由 store 写**）：`v2-events.wal` 是
         // 会话消息的唯一事实源（由事实路径 `chat_session/write.rs` 入格），`messages.json`
         // 停写——它是 v1 遗留会话的唯一记录，只在「WAL 不在」时作回落读法被读。
         //

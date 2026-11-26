@@ -58,9 +58,9 @@ use crate::kernel::Event;
 /// 行级写入归属：`(行名, 该行执行时实际写入的事实名)`。
 ///
 /// `ActorDecl.writes` 是**执行体级**的并集——它回答「这个执行体可能写哪些格」，
-/// 装不下「共享它的每一行各自写哪些」。通用行执行体（D-241）让多行共用一条
+/// 装不下「共享它的每一行各自写哪些」。通用行执行体让多行共用一条
 /// `ActorDecl`，并集于是让每一行的出口都「可能被别的行写」：两行以上必然成假环。
-/// 装配方把实现声明的逐行名单交进来，依赖图与第 6 条按**这一行**的名单判（D-248）。
+/// 装配方把实现声明的逐行名单交进来，依赖图与第 6 条按**这一行**的名单判。
 pub type RowWrites = [(&'static str, &'static [&'static str])];
 
 /// 这一行的实际写入名单：有逐行声明就用它，否则为空。
@@ -102,7 +102,7 @@ pub struct Pattern {
 ///
 /// ## 它**不**声明自己归谁
 ///
-/// 行上没有「执行体」字段（`D-306` 裁决一）：`owes` 指向端口开启侧 ⇒ 环的通用受理
+/// 行上没有「执行体」字段（ 裁决一）：`owes` 指向端口开启侧 ⇒ 环的通用受理
 /// 入口；否则由行注册表回答（`rows::handler_for(row)`）。行能声明的只有「什么时候
 /// 欠」（`owes`）、「什么算还」（`until`）、「什么算不成立」（`unless`）与「可执行前
 /// 必须已经成立什么」（`reads`）——全是数据，没有一栏是「我是谁」。
@@ -118,7 +118,7 @@ pub struct Decl {
     ///
     /// 装载期逐个查名字能解析（事实或视图）且**有生产者**（`UnproducedPrecondition`）；
     /// 运行期每一项没有实例 ⇒ 这笔债 `blocked`（[`owed`]）。前件是**行**的属性而不是
-    /// 执行体的属性（`D-306` 裁决一：`ActorDecl::reads` 已删）——执行体是一段可复用的
+    /// 执行体的属性（ 裁决一：`ActorDecl::reads` 已删）——执行体是一段可复用的
     /// 代码，同一段代码替两行干活时，两行的前件本来就不一样。
     pub reads: &'static [&'static str],
     pub owes: Pattern,
@@ -135,7 +135,7 @@ pub struct Decl {
     pub expand: Option<(&'static str, &'static str)>,
     /// 任一命中（同键）即视为还清。
     pub until: &'static [Pattern],
-    /// 任一命中（同键）⇒ 这笔债**不成立**（`D-306` 裁决一：与 `until` 同键同效）。
+    /// 任一命中（同键）⇒ 这笔债**不成立**（ 裁决一：与 `until` 同键同效）。
     ///
     /// 旧语义「欠着但没人还」不再是可表达的态：没人还由「没有执行体」派生，装载期
     /// 就判红（`Gap::UnmannedRow`），而不是等到运行期把一笔债永远挂着。
@@ -172,7 +172,7 @@ pub struct PortDecl {
     pub max_attempts: u64,
     /// 端口**自报**的同时执行上限；`0` / `1` = 该端口自己选择串行。
     ///
-    /// **只有执行体可读、可用它限制自己的执行窗口**（DE-048 `D-311`）：这是插件自
+    /// **只有执行体可读、可用它限制自己的执行窗口**（DE-048 ）：这是插件自
     /// 声明的配置，不是环的调度依据。环不得读取本字段，也不得据此决定同时派几笔——
     /// 环的单位是债，一次一笔；并发、顺序、熔断全部在 provider 内部。
     pub concurrency: u16,
@@ -211,7 +211,7 @@ pub struct Debt<'a> {
     ///
     /// 存在，但这一圈还不能还。它与 `until` 命中的区别是「在等」与「没事」：前者
     /// 迟早会可还（前件会产出），后者已经还清。派生自 `reads`，不由声明的 `by`
-    /// 或任何布尔字段决定（`D-306` 裁决一）。
+    /// 或任何布尔字段决定（ 裁决一）。
     pub blocked: bool,
 }
 
@@ -381,7 +381,7 @@ fn scalar(value: Option<&Value>) -> Option<String> {
 ///
 /// 不开账的行不需要执行体：它为 `OrphanFact` 与「这条事实归本能力负责」而存在。
 /// 反过来，**会开账却没有执行体**是装载期红（`Gap::UnmannedRow`）：这一格没有声明位，
-/// 只由数据判（`D-306` 裁决一）。
+/// 只由数据判（ 裁决一）。
 fn may_open_debts(decl: &Decl) -> bool {
     !decl.until.iter().any(|u| covers(u, &decl.owes))
 }
@@ -395,12 +395,12 @@ fn covers(u: &Pattern, o: &Pattern) -> bool {
             .all(|(field, lit)| o.eq.iter().any(|(f, l)| f == field && l == lit))
 }
 
-/// 这一行的执行体——**派生**，行上没有这一栏（`D-306` 裁决一）。
+/// 这一行的执行体——**派生**，行上没有这一栏（ 裁决一）。
 #[derive(Debug, Clone, Copy)]
 enum Exec<'a> {
     /// 环的通用受理入口：`owes` 指向端口开启侧。选债 / 派发 / 等待 / 配对都由它做。
     Port,
-    /// 行注册表里的实现，以及它声明写的格（逐行，不是执行体并集，D-248）。
+    /// 行注册表里的实现，以及它声明写的格（逐行，不是执行体并集）。
     Row { writes: &'a [&'static str] },
 }
 
@@ -457,7 +457,7 @@ fn bound_port(decl: &Decl, frozen: &Frozen) -> Option<&'static str> {
 /// | 3 | 字段都在声明里 | [`check_rows`]（模式侧）+ `seal()` 的声明侧（视图 `reads` 与 `FactDecl` 自引用） | `UndeclaredPatternField` + `UndeclaredField` / `FactFieldUndeclared` |
 /// | 4 | 相交行对 | [`overlaps`]——**只报告，不红**（静态判不出「真的同时命中」） | `Overlap` |
 /// | 5 | 写入封闭 | `seal` 的声明侧（执行体不许声明引擎格）+ [`check_ports`]（端口有应答出口）；「实际写入 ⊆ `writes`」那一半要值返回账本，归 | `ActorWritesEngineCell` / `PortBeforeUndeclared` / `PortWithoutAnswerExit` |
-/// | 6 | 执行体收口 | [`check_rows`]（执行体由 `owes` + 行注册表派生，D-306） | `UnmannedRow` / `DuplicateDispatchRow` / `ActorCannotClose` |
+/// | 6 | 执行体收口 | [`check_rows`]（执行体由 `owes` + 行注册表派生） | `UnmannedRow` / `DuplicateDispatchRow` / `ActorCannotClose` |
 /// | 7 | 声明事实有归宿 | [`check_rows`] | `OrphanFact` |
 ///
 /// 除第 4 条（报告）以外，全部走同一个 `Err`：[`crate::kernel::decl::Builder::seal`] 是**唯一**的装载出口，
@@ -470,7 +470,7 @@ fn bound_port(decl: &Decl, frozen: &Frozen) -> Option<&'static str> {
 /// - [`Gap::OrphanFact`]：一个被声明的事实没有任何行**直接或经由视图**读到——
 ///   拼错名字的静默形态，也是旧 `Verdict::Unmanned` 那一档的可观测性替代物；
 /// - [`Gap::SinkRowOnPortFact`]：一条**不开账**的归宿行守着一个端口事实——端口事实
-///   必须由派发行接住，用归宿行接住就是给「本该派发」开后门（D-397）；
+///   必须由派发行接住，用归宿行接住就是给「本该派发」开后门；
 /// - [`Gap::ExpandKeyMissing`]：`expand` 的元素键字段不在 `owes.key` 里——元素
 ///   之间分不出谁是谁，`until` 无从按键还账；
 /// - [`Gap::UndeclaredExpand`]：`owes` 是事实，但它的 `expand` 列表字段没有写进
@@ -493,7 +493,7 @@ fn bound_port(decl: &Decl, frozen: &Frozen) -> Option<&'static str> {
 /// - [`Gap::UnknownRead`]：行级 `reads` 里的名字既不是事实也不是视图——它永远不成立，
 ///   这一行永远是 `blocked`，而没有任何东西会红；
 /// - [`Gap::UnproducedPrecondition`]：`owes` / `reads` 展开出的某个事实没有任何生产者
-///   （执行体名单、行级名单、引擎独占格、宿主写口四档都够不到它，D-296）——
+///   （执行体名单、行级名单、引擎独占格、宿主写口四档都够不到它）——
 ///   那一行永远不会开账，而运行期只表现为「这一步没发生」。
 ///
 /// 后两条不在 `check_rows` 的输入面上，由 [`check_ports`] 报（§3.4 第 5 条的
@@ -514,7 +514,7 @@ fn bound_port(decl: &Decl, frozen: &Frozen) -> Option<&'static str> {
 ///   [`Gap::DuplicateActor`] / [`Gap::DuplicatePort`]：同一张表里两个同名——按名字查找的
 ///   地方（写闸取格位、`by`、`port` 取值、视图求值）从此不确定查到的是哪一条；
 /// - [`Gap::FactWithoutEvent`]：插件声明的事实没有事件行——写闸取不到格位，运行期
-///   只能拒绝（没有任何回退表能替它补格位，DE-024 D-199）；
+///   只能拒绝（没有任何回退表能替它补格位，DE-024 ）；
 /// - [`Gap::NameCollision`]：事实名 / 事件名与视图名撞名——它们共用一个名字空间
 ///   （视图是合成事实）；
 /// - [`Gap::UnknownFact`] / [`Gap::UndeclaredField`]：视图 `reads` 引用了未声明的事实 /
@@ -540,7 +540,7 @@ pub enum Gap {
         row: &'static str,
     },
     /// 前件里的事实**没有任何生产者**：没有执行体声明写它、不是引擎独占格、
-    /// 也没有标成宿主写口（D-296）。
+    /// 也没有标成宿主写口。
     ///
     /// 判据只问「有没有人写」，不问「谁先谁后」：后阶段写、前阶段读是合法的反向
     /// 依赖（`continue-turn` 读的轮次格就比它晚写）。按阶段判先后会误伤这类形态，
@@ -560,7 +560,7 @@ pub enum Gap {
     },
     /// 一条**开不出账**的行守着一个**端口事实**（`FactDecl.port` 非空），而本表
     /// 登记了端口（会落 `before` ⇒ 产生债务）。端口事实是派发契约的输入，接住它的
-    /// 必须是受理行；用归宿行接住 = 把「本该派发」换成「没人派发但封闭性绿」（D-397）。
+    /// 必须是受理行；用归宿行接住 = 把「本该派发」换成「没人派发但封闭性绿」。
     SinkRowOnPortFact {
         row: &'static str,
         fact: &'static str,
@@ -606,7 +606,7 @@ pub enum Gap {
         name: &'static str,
     },
     /// 事件声明没有落格归属主体：写口只能在落账时猜一个默认值，而归属一旦靠猜
-    /// 就会静默失效（D-339）。装配期判红，启动即红。
+    /// 就会静默失效。装配期判红，启动即红。
     EventWithoutOwner {
         name: &'static str,
     },
@@ -694,7 +694,7 @@ fn exit_fact_names(source: &'static str, frozen: &Frozen) -> Vec<&'static str> {
     }
 }
 
-/// 前件的生产者集合：四档都算写出（D-296）。
+/// 前件的生产者集合：四档都算写出。
 ///
 /// - 行执行体：全部 `ActorDecl.writes` + 逐行名单（`seal(row_writes)`）；
 /// - 引擎独占格：`sent` / `response` / `failed` / `retry`；
@@ -736,7 +736,7 @@ pub fn check_rows(rows: &[Decl], frozen: &Frozen, row_writes: &RowWrites) -> Vec
         {
             gaps.push(Gap::KeyMismatch { row: decl.name });
         }
-        // 归宿行（不开账的行）**只许守不产生债务的格**（D-397）：
+        // 归宿行（不开账的行）**只许守不产生债务的格**：
         //
         // - 端口事实里只有**开启侧**（非 `ENGINE_ONLY_CELLS`，即 `request` 那一格）
         //   是派发契约的输入；`sent` / `response` / `failed` / `retry` 由引擎写，
@@ -821,7 +821,7 @@ pub fn check_rows(rows: &[Decl], frozen: &Frozen, row_writes: &RowWrites) -> Vec
                 }
             }
         }
-        // 行级 `reads` 的每个名字都要能在冻结表里解析（D-306 裁决一）：解析不到
+        // 行级 `reads` 的每个名字都要能在冻结表里解析（ 裁决一）：解析不到
         // ⇒ 前件永远不成立、这一行永远 `blocked`，而运行期只表现为「这一步没发生」。
         for name in decl.reads {
             if frozen.fact(name).is_none() && frozen.view(name).is_none() {
@@ -831,7 +831,7 @@ pub fn check_rows(rows: &[Decl], frozen: &Frozen, row_writes: &RowWrites) -> Vec
                 });
             }
         }
-        // 前件有生产者（D-296）：前件名展开成事实，逐个问四档里有没有人写。
+        // 前件有生产者：前件名展开成事实，逐个问四档里有没有人写。
         //
         // 前件有两处来源，都要查：`owes` 的源（实例存在才开账，它就是最直接的前件）
         // 与行级 `reads`。名字本身未声明时已经报了 `UnknownSource` / `UnknownRead`，
@@ -859,7 +859,7 @@ pub fn check_rows(rows: &[Decl], frozen: &Frozen, row_writes: &RowWrites) -> Vec
         }
         // 第 6 条（派生）：会开账的行必须有执行体，且执行体的写入够得到这一行的收口。
         //
-        // 「谁执行」不再是声明（`D-306` 裁决一）：`owes` 指向端口开启侧 ⇒ 环的通用
+        // 「谁执行」不再是声明（ 裁决一）：`owes` 指向端口开启侧 ⇒ 环的通用
         // 受理入口；否则行注册表里有实现 ⇒ 该实现；两者都没有 ⇒ 这一行永远没人跑。
         // 「这一行永远没人跑」没有声明位，只能由数据判——判红比漏放有价值：
         // 忘了 `submit_row!` 会在这里红，而不是在运行期静默空转。
@@ -928,7 +928,7 @@ pub fn check_rows(rows: &[Decl], frozen: &Frozen, row_writes: &RowWrites) -> Vec
             gaps.push(Gap::OrphanFact { fact: fact.name });
         }
     }
-    // 执行体那一侧不再有孤儿检查（`D-306` 裁决一）：执行体声明由注册表派生
+    // 执行体那一侧不再有孤儿检查（ 裁决一）：执行体声明由注册表派生
     // （`rows::declared_writes()` 的并集 + 端口受理口），没有「绑定表里写了一个没人
     // 派发的名字」这条路径了——旧的 `OrphanActor` 判的正是那种表内失配。
     gaps.extend(check_dependency_graph(rows, frozen, row_writes));
@@ -1136,7 +1136,7 @@ pub fn check_ports(rows: &[Decl], frozen: &Frozen, ports: &[PortDecl]) -> Vec<Ga
         for fact in [EVENT_RESPONSE, EVENT_FAILED] {
             let covered = port_field.is_some_and(|field| {
                 rows.iter().flat_map(|d| d.until).any(|p| {
-                    // `eq` 里没有端口约束的是**通用出口行**（D-440）：端口名是运行时
+                    // `eq` 里没有端口约束的是**通用出口行**：端口名是运行时
                     // 字符串，声明期不出现；它按键绑定收口，覆盖所有端口。带约束的
                     // 旧形状仍按字面量逐端口判，两种写法都算数。
                     p.source == fact

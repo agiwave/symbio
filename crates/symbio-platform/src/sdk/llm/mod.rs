@@ -5,24 +5,24 @@
 //! | 方向 | 形状 | 读者 | 住哪 |
 //! |---|---|---|---|
 //! | **请求** | `PromptMessage` / `PromptToolCall` | `classify` 造、`tool` 分发、`model` 消费（三个插件） | 本层 |
-//! | **产物** | `RoundOutput` / `RoundToolCallInfo` / `ModelFinishReason` / `ModelUsage` / `ModelSpend` | 只有 `model` | `crates/symbio-plugin-model/src/round.rs`（`D-439`） |
+//! | **产物** | `RoundOutput` / `RoundToolCallInfo` / `ModelFinishReason` / `ModelUsage` / `ModelSpend` | 只有 `model` | `crates/symbio-plugin-model/src/round.rs` |
 //!
-//! 判据是 `D-023` 的**依赖方数量**，不是「够不够底层」。产物那五个类型在
+//! 判据是  的**依赖方数量**，不是「够不够底层」。产物那五个类型在
 //! `port.model` 之前确实是两侧共用（会话侧直接持有 `RoundOutput`，甚至以
 //! `impl RoundOutput` 的形式在 loop 里有三个读方法）；端口落地后会话侧改读执行体
 //! 落下的**事实键**（`usage` / `spend` / `reason` / `truncated`），全仓再没有
-//! `impl RoundOutput`，于是它们退回插件内部——`D-438` 把它们放到本层时的那条理由，
+//! `impl RoundOutput`，于是它们退回插件内部—— 把它们放到本层时的那条理由，
 //! 是端口之前的形状。
 //!
-//! ## 请求词汇为什么在这里，而不是内核（`D-438`）
+//! ## 请求词汇为什么在这里，而不是内核
 //!
-//! 它们住内核的凭据原本只有一条：`D-188` C2b 说「封闭语法 trait 及其**签名类型**进
-//! 内核」，而 `ModelProvider` 的签名里全是它们。`D-437` 把那条 trait 退进 model 插件
+//! 它们住内核的凭据原本只有一条： C2b 说「封闭语法 trait 及其**签名类型**进
+//! 内核」，而 `ModelProvider` 的签名里全是它们。 把那条 trait 退进 model 插件
 //! 之后凭据就不存在了——内核里**没有任何生产代码**再读这些名字。按 `kernel/src/lib.rs`
 //! 抬头的判据（内核只装语法，**词汇**归 `symbio_sdk` 与各 owner），它们的归属是本层。
 //!
 //! 执行契约不在本层：`ModelProvider` 在 `crates/symbio-plugin-model/src/provider.rs`
-//! （模块私有，`D-437`），一次往返的执行面是 `port.model` 的执行体。
+//! （模块私有），一次往返的执行面是 `port.model` 的执行体。
 //!
 //! ## 帧原语为什么在这里
 //!
@@ -51,8 +51,8 @@ pub mod round;
 // `round` 是**子命名空间**，不是契约的对外地址：插件门面按符号取帧原语与 id 原语。
 // 这三个在本层根上转出一次，`crate::sdk::llm::round::…` 留给本 crate 内部与 core 的
 // 往返编排用。（名字取「一次往返」这个词而不是容器词：扩展面连内部路径都不用容器词，
-// EX-008 的路径段豁免因此只剩 `D-259` 那一条，见 `D-436`。）
+// EX-008 的路径段豁免因此只剩  那一条，见。）
 pub use round::{llm_emit_message, llm_removed_frame, llm_short_id};
 
-// 请求词汇（`PromptMessage` / `PromptToolCall`）已迁契约层（`D-486`）：sdk 内部不再
+// 请求词汇（`PromptMessage` / `PromptToolCall`）已迁契约层：sdk 内部不再
 // 读它们（projection 只有注释引用），门面的契约臂从 `crate::contract::llm` 直接转出。

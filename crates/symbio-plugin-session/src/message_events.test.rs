@@ -1,4 +1,4 @@
-//! 消息变更**写方**的判据（D-053）。
+//! 消息变更**写方**的判据。
 //!
 //! 写侧的失效形态与读侧相反：读侧是「折不出来」，写侧是**落不下去**——而且它
 //! **静默**（缓存照样写成功、用户照样看到「改好了」，事实源里却没有这一笔）。
@@ -186,7 +186,7 @@ fn a_missing_source_of_truth_lands_nothing_and_does_not_panic() {
     let _ = std::fs::remove_dir_all(&dir);
     std::fs::create_dir_all(&dir).expect("临时会话目录");
 
-    // 无锚是**豁免**而不是失败：这类会话的读侧回落 `messages.json`（D-049）。
+    // 无锚是**豁免**而不是失败：这类会话的读侧回落 `messages.json`。
     assert!(
         matches!(
             edited(&open_wal(&dir), &sid_of(&dir), &patched_user("u-1", "改")),

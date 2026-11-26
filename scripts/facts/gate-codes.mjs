@@ -93,12 +93,15 @@ function render() {
   L.push('|---|---|---|---|---|')
   for (const prefix of [...prefixes.keys()].sort()) {
     const { desc, files, codes } = prefixes.get(prefix)
-    const next = codes.size
-      ? `${prefix}-${String(Math.max(...[...codes].map(num)) + 1).padStart(3, '0')}`
-      : `${prefix}-001`
+    // D 命名空间的判据码已经冻结：历史判例号不再分配，只有判据码的既有取值继续有效。
+    const next = prefix === 'D'
+      ? '冻结（不再分配新号）'
+      : codes.size
+        ? `${prefix}-${String(Math.max(...[...codes].map(num)) + 1).padStart(3, '0')}`
+        : `${prefix}-001`
     const owners = [...files].sort().map((f) => '`' + f + '`').join(' · ')
     L.push(
-      `| **${prefix}** | ${desc} | ${owners} | ${formatRanges(prefix, codes)} | \`${next}\` |`,
+      `| **${prefix}** | ${desc}${prefix === 'D' ? '（判据码冻结，不再分配新号）' : ''} | ${owners} | ${formatRanges(prefix, codes)} | ${prefix === 'D' ? next : '\`' + next + '\`'} |`,
     )
   }
   L.push('')

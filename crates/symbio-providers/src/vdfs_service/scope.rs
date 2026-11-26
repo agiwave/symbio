@@ -1,9 +1,9 @@
-//! 作用域目录 provider —— 上下文三 provider 键（D-515）的**当前磁盘后端**。
+//! 作用域目录 provider —— 上下文三 provider 键的**当前磁盘后端**。
 //!
 //! `ScopeDirVdfs` 把一个固定目录当作 VDFS 子树根：调用方只给相对地址
 //! （`AGENTS.md`、`MEMORY.md`、`SKILL.md`…），本类型负责把地址落到根下，
 //! 并挡住 `..` 与绝对路径。插件只见 `dyn VdfsProvider`，因此后端换成内存 /
-//! 网络时插件无感——这正是 D-515 把「目录字符串」换成「存储接口」的收益。
+//! 网络时插件无感——这正是  把「目录字符串」换成「存储接口」的收益。
 //!
 //! ## 为什么不放 vdfs 插件的 `physical.rs`
 //!
@@ -257,7 +257,7 @@ impl VdfsProvider for ScopeDirVdfs {
                 match String::from_utf8(bytes.clone()) {
                     Ok(text) => Ok(VdfsResponse::Read(VdfsContent::text(text))),
                     // 二进制文件（索引缓存、图片…）按 b64 走 VdfsContent::binary。
-                    // 作用域存储若只能放文本，就挡住了 D-515 想覆盖的缓存类数据。
+                    // 作用域存储若只能放文本，就挡住了  想覆盖的缓存类数据。
                     Err(_) => {
                         let b64 = base64::engine::general_purpose::STANDARD.encode(&bytes);
                         Ok(VdfsResponse::Read(VdfsContent::binary(
@@ -336,7 +336,7 @@ impl VdfsProvider for ScopeDirVdfs {
     }
 }
 
-/// 把三个作用域 provider 挂进请求 ctx（D-515 的统一注入口）。
+/// 把三个作用域 provider 挂进请求 ctx（统一注入口）。
 ///
 /// 传 `None` 表示该作用域不存在（没选工作区 / 无会话 / 无选中 agent）——
 /// 插件读到 `None` 即降级，语义等同 `MemoryFile::absent`。

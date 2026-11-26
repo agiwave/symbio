@@ -4,7 +4,7 @@
 //!
 //! 声明表（事件 / 事实 / 视图 / 端口 / 执行体 / 行）若由某一个插件私有装载，别的插件
 //! 即使只想声明一个新事实或一条新视图，也只能改那个插件的文件——这就是「加能力要改
-//! 别人的模块」的剩余来源（DE-024 D-198）。
+//! 别人的模块」的剩余来源（DE-024 ）。
 //!
 //! 本模块把声明表变成**装配期产物**：
 //!
@@ -76,23 +76,23 @@ pub fn assemble_declarations() -> Result<Arc<Frozen>, Vec<Gap>> {
         builder.declare(d.owner, (d.make)());
     }
     // 逐行写入名单随装配一起交：共享执行体（`plugin_row`）的多行各自写哪一格只有
-    // 实现知道，执行体的并集表达不了（D-248）。冻结表与运行时对账因此同源。
+    // 实现知道，执行体的并集表达不了。冻结表与运行时对账因此同源。
     let row_writes = crate::sdk::plugin::rows::row_writes();
     // 「每一档守卫角色都有人住」由整仓判据 CS-011 判（`shared-event-vocab-audit`），
     // 不在这里判：本函数也会被**只链接了部分插件**的用例调到（session 的单测里没有
     // loop 的声明表），那种子集装配报红是假红。
     let frozen = builder.seal(&row_writes)?;
-    // D-339：`EventDecl::owner` 的第二态必须是登记过的具名主体。查表用的是**部署表**
+    //：`EventDecl::owner` 的第二态必须是登记过的具名主体。查表用的是**部署表**
     // （各插件 `PLUGIN.yml` 的 `principal_*` 行），因此在子集装配里同样成立——注册表
     // 不随链接了哪些插件变化。
     assert_owners_registered(&frozen);
-    // D-465：出口 owner 与折账 owner 对账。放在这里是因为**只有这里同时握着两张表**
+    //：出口 owner 与折账 owner 对账。放在这里是因为**只有这里同时握着两张表**
     // ——报表登记（inventory）与冻结声明表（本函数的产物）。
     assert_report_owners(&frozen);
     Ok(frozen)
 }
 
-/// 装配期的出口对账（`D-465`，`D-463` 第三级）：出这条列的人必须就是折这条账的人。
+/// 装配期的出口对账（ 第三级）：出这条列的人必须就是折这条账的人。
 ///
 /// ## 为什么是断言，不是一条 `Gap`
 ///
@@ -115,14 +115,10 @@ fn assert_report_owners(frozen: &Frozen) {
     };
     let errors =
         crate::sdk::plugin::reports::check_view_owners(reports, |name| frozen.view_owner(name));
-    assert!(
-        errors.is_empty(),
-        "报表出口对账失败（D-465）：{}",
-        errors.join("；")
-    );
+    assert!(errors.is_empty(), "报表出口对账失败：{}", errors.join("；"));
 }
 
-/// 装配期的归属校验（D-339）：`@principal` 之外，owner 必须能在主体注册表里查到。
+/// 装配期的归属校验：`@principal` 之外，owner 必须能在主体注册表里查到。
 ///
 /// 为什么放在这里而不是内核 `seal`：注册表是部署事实（`symbio-sdk` 的授权表），
 /// 内核不依赖 `symbio-sdk`；装配方同时看得见两张表，校验因此只有一处。
@@ -137,7 +133,7 @@ fn assert_owners_registered(frozen: &Frozen) {
         if owner == crate::kernel::event::OWNER_PRINCIPAL {
             continue;
         }
-        // 人的主体不在能力表里（发言不是「智能体的权威动作种类」，D-099），但它是
+        // 人的主体不在能力表里（发言不是「智能体的权威动作种类」），但它是
         // 登记过的主体常量——属第二态的合法值。
         if owner == crate::sdk::keys::PRINCIPAL_USER {
             continue;
@@ -145,7 +141,7 @@ fn assert_owners_registered(frozen: &Frozen) {
         assert!(
             matrix.is_deployed(owner),
             "事件 `{}` 的声明归属 `{}` 不在主体注册表里（各插件 PLUGIN.yml 的 `principal_*` 行）；\
-             装配期拒绝未登记的主体名（D-339）",
+             装配期拒绝未登记的主体名",
             event.name,
             owner
         );
@@ -175,7 +171,7 @@ pub fn sealed_declarations() -> Result<Arc<Frozen>, Vec<Gap>> {
 /// 冻结表的事件面：不复制表，只借出缓存里的那一份（与进程同寿）。
 ///
 /// 词汇读法（冻结表缺席时回落清单生成物）住 `symbio-plugin-api`：回落表是生成物，
-/// 而本 crate 的生产代码零事件名字面量（CS-008 / CP-004，`D-415`）。
+/// 而本 crate 的生产代码零事件名字面量（CS-008 / CP-004）。
 pub fn declared_vocab() -> Option<&'static [EventDecl]> {
     SEALED
         .get_or_init(seal_once)

@@ -1,5 +1,5 @@
 /**
- * extension-vocab-audit 回归测试 —— 证明它**会红**（EX-008，D-252）
+ * extension-vocab-audit 回归测试 —— 证明它**会红**（EX-008，）
  *
  * 一个只会亮绿灯的守卫等于没有守卫。注入真实违规并断言脚本变红：
  *   ① 干净夹具 → exit 0；
@@ -142,7 +142,7 @@ test('⑧ 精确豁免只豁免同名同格位的那一个 token，别的 token 
     },
     {
       EXTENSION_VOCAB_EXEMPTIONS: JSON.stringify([
-        { path: 'crates/symbio-plugin-api/src/effects.rs', token: 'turn', why: 'D-252 认下的存量' },
+        { path: 'crates/symbio-plugin-api/src/effects.rs', token: 'turn', why: ' 认下的存量' },
       ]),
     },
   )

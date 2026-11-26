@@ -4,10 +4,10 @@
   候选由后端随「添加插件」新建类型的 `schema` 下发（`{ candidates: [...] }`），
   本组件只负责呈现与发起安装，不持有第二份插件清单。它不是 VDFS 清单节点，而是一张
   草稿页：点击安装向宿主抛 `save`，由通用写入机制落到当前目录（= 容器安装动词），
-  成功后广播变更，列表与候选随之收敛（D-520）。
+  成功后广播变更，列表与候选随之收敛。
 
-  外部插件的形态仍由 D-407 暂缓；候选里的 `source` 字段是它与内置插件共用的呈现位，
-  这里不据此分叉出任何恒空分支（D-520）。
+  外部插件的形态仍由  暂缓；候选里的 `source` 字段是它与内置插件共用的呈现位，
+  这里不据此分叉出任何恒空分支。
 -->
 <template>
   <section class="market">
@@ -80,7 +80,7 @@ function sourceLabel(source: string): string {
  * 点安装 = 提交一张「新建插件」草稿：只抛载荷，写入由宿主统一处理。
  *
  * 成功后的列表刷新 / 关闭草稿都由 `useVdfs.write` 完成；失败原因走 `error` prop
- * 回到页面上，不在渲染器里再写一份 VDFS（D-520）。
+ * 回到页面上，不在渲染器里再写一份 VDFS。
  */
 function install(c: Candidate): void {
   emit('save', { [providerField.value]: c.provider })

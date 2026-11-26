@@ -111,7 +111,7 @@ fn load_reads_yaml_and_json() {
 }
 
 /// 权限清单的**线格式键是 `permissions`**，Rust 侧字段同名（执行面落地后从
-/// `declared_permissions` 改回，D-140 的两态之名）——两轮改名都不曾动过公开键。
+/// `declared_permissions` 改回 的两态之名）——两轮改名都不曾动过公开键。
 #[test]
 fn permissions_stay_on_the_wire_under_their_own_name() {
     let m: AgentManifest = serde_yaml_ng::from_str(

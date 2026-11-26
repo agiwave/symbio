@@ -12,9 +12,9 @@ import './_selfrun.mjs';
 // 「后端按根算子 BFS」与「前端按 `parent_id` 组装」是不是同一棵子树。真会话里
 // 跑一遍，两份才对得上；对不上时前端会重复渲染或丢内容，且只在长会话里现形。
 //
-// ## D-335 之后的形状（不是退役）
+// ##  之后的形状（不是退役）
 //
-// 「整轮骨架 ⊃ 工具骨架 ⊃ 工具结果」那两层已不存在：整轮骨架按 D-335 并入
+// 「整轮骨架 ⊃ 工具骨架 ⊃ 工具结果」那两层已不存在：整轮骨架 并入
 // **用户消息节点**（同 id 合并，读出的是 `body` 不是 `skeleton`）。剩下的折叠
 // 主体是**工具卡**（`skeleton` + `style_tag=tool`），它仍有可展开的后代——工具
 // 结果（一层）。所以能力还在，只是从两层变一层；本用例断言的是**懒展开确实
@@ -33,7 +33,7 @@ import './_selfrun.mjs';
 // 1. **懒展开确实发生**：折叠视图里有骨架、无后代内容；`expand_skeleton` 取回的
 //    正是被摘掉的那批（含结果正文），合并后与全量读一致。
 // 2. **depth="1" 只直接子**：工具卡当前只有一层，故与 `all` 同集——判据是
-//    「只回直接子」，不是「必须比 all 少」（D-335 之前才靠层数分道）。
+//    「只回直接子」，不是「必须比 all 少」（ 之前才靠层数分道）。
 // 3. **since_seq 增量**：只回 seq 更高的那批（窄帧序列的增量写法）。
 // 4. **非法入参有错误码**（判据 1）：`depth` 给了 `"2"`、`since_seq` 给了字符串
 //    ⇒ 被拒，**不静默按缺省返回整棵**——静默的后果是「以为只要直接子」的调用方
@@ -169,12 +169,12 @@ export default defineCase(
         const all = await readSessionMessages(cli, SID);
         assert(Array.isArray(all) && all.length > 0, `应读到转写（实际: ${JSON.stringify(all)?.slice(0, 300)}）`);
 
-        // ── 骨架仍在，但折叠主体只剩工具卡（D-335 把整轮骨架并入用户消息）──
+        // ── 骨架仍在，但折叠主体只剩工具卡（ 把整轮骨架并入用户消息）──
         const skeletons = all.filter((m) => m?.type === 'skeleton');
         assert(skeletons.length > 0, `转写里应有骨架（实际类型: ${all.map((m) => m?.type).join(',')}）`);
         assert(
           skeletons.every((s) => (s.meta?.style_tag ?? '') !== 'run'),
-          `整轮骨架按 D-335 并入用户消息节点，不应再有 run 骨架（实际: ${JSON.stringify(
+          `整轮骨架 并入用户消息节点，不应再有 run 骨架（实际: ${JSON.stringify(
             skeletons.map((s) => [s.id, s.meta?.style_tag ?? null]),
           )}）`,
         );
@@ -255,7 +255,7 @@ export default defineCase(
 
         // ── 判据 2：depth="1" 只回直接子 ────────────────────────────────────
         //
-        // D-335 之后工具卡只有一层，所以它与 `all` 同集——判据是「只回直接子」，
+        //  之后工具卡只有一层，所以它与 `all` 同集——判据是「只回直接子」，
         // 不是「必须比 all 少」。层数分道是整轮骨架还在时的事。
         const respOne = await expand({ depth: '1' });
         assertEq(respOne.status, 200, `depth="1" 应受理（${JSON.stringify(respOne.body)?.slice(0, 400)}）`);

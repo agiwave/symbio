@@ -63,7 +63,7 @@ const AGENT_MEM_ADDR = '.vdfsv2/vdfs/subagent/e2e-t57-agent/memory/MEMORY.md';
 const AGENT_INSTRUCTION_MARK = '【本智能体指令】';
 /** 根级【工作区记忆】段地址标记 */
 const ROOT_WS_ADDR = '.vdfsv2/vdfs/memory/WORKSPACE.md';
-/** 根级【会话记忆】段地址标记（D-513：会话记忆归 memory 插件） */
+/** 根级【会话记忆】段地址标记（会话记忆归 memory 插件） */
 const ROOT_SESS_ADDR = '.vdfsv2/vdfs/memory/SESSION.md';
 
 export default defineCase(
@@ -106,7 +106,7 @@ export default defineCase(
       assertEq(reqs.length, 2, '两轮各一次请求（对话面已关）');
 
       // ── ① 注册段全部送达（第一轮：尚无召回 ⇒ 前缀缺席是正确形态）────────
-      // D-513 后会话记忆归 memory 插件：与工作区腿同批注册（memory 的 traverse 位），
+      //  后会话记忆归 memory 插件：与工作区腿同批注册（memory 的 traverse 位），
       // 因此排在人格段**之前**（与 T46 的 prompt 形状基线同一口径）。
       assertSystemAssembly(
         reqs[0],

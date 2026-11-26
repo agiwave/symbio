@@ -124,7 +124,7 @@ impl Plugin for VdfsPlugin {
             // 封装 provider 持有本次广播的能力管理器；工具注册进同一个 visitor，
             // 执行时其中已注册好全部挂载 provider（容器同时注册的组合根供前端链路用）。
             let provider = Arc::new(ToolVdfs::new(visitor.clone()));
-            // 路径事实提取器（D-531）：VDFS 工具族的参数统一叫 `path`，工具自己
+            // 路径事实提取器：VDFS 工具族的参数统一叫 `path`，工具自己
             // 知道这是路径、翻成开放 kind 事实；沙箱按用户配的目录黑白名单裁决。
             // 沙箱不认识工具名，闸门不认识目录配置——两边只经 `vdfs_path` 对接。
             let path_facts: symbio_plugin_api::collectors::FactsOf = Arc::new(

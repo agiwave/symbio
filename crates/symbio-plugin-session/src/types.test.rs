@@ -6,7 +6,7 @@
 use super::*;
 use serde_json::json;
 
-/// 身份写 `principal`（D-147）：夹具模仿的是**落库面**的消息，`role` 只是读侧残留格。
+/// 身份写 `principal`夹具模仿的是**落库面**的消息，`role` 只是读侧残留格。
 fn principal_for(
     role: symbio_platform::kernel::chat::chat_node::NodeRole,
 ) -> symbio_platform::kernel::chat::principal::Principal {

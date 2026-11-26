@@ -19,7 +19,7 @@ use crate::config::TaskConfig;
 pub const PLUGIN_TITLE: &str = "任务";
 
 pub struct TaskPlugin {
-    /// 本能力自己的配置（D-427）：真源在 `<根>/task/PLUGIN.yml`。
+    /// 本能力自己的配置：真源在 `<根>/task/PLUGIN.yml`。
     config: TaskConfig,
     config_file: PluginConfigFile,
 }
@@ -76,7 +76,7 @@ impl Plugin for TaskPlugin {
         _path: String,
         ctx: Arc<dyn PluginInvokeRequest>,
     ) -> PluginInvokeResponse<PluginPayload> {
-        // 本轮配置快照贡献（D-427）：容量是本能力的知识，由本能力交值；宿主只按
+        // 本轮配置快照贡献：容量是本能力的知识，由本能力交值；宿主只按
         // owner 合并，不认识键名。卸载 ⇒ 该格缺席 ⇒ 读方按 TASK_CAP 收敛。
         symbio_plugin_api::capability_announce_config_snapshot(
             &ctx,
@@ -97,7 +97,7 @@ fn config_definition() -> DetailDefinition {
             "readyset_cap",
             "就绪集容量",
             "一轮最多派几笔就绪任务；卸载本插件同样让这一格缺席，读方按出厂值\
-             收敛（D-427）",
+             收敛",
             1.0,
             64.0,
             serde_json::json!(d.readyset_cap),

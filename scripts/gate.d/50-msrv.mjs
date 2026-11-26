@@ -11,7 +11,7 @@
 // ② 换编译器会让 cargo fingerprint 全部失效 ⇒ 用独立 CARGO_TARGET_DIR（按版本分
 //    目录），不污染日常构建缓存；与 backend 不争 `.cargo-lock`，所以本阶段可并发。
 //
-// ⚠️ 这一层曾经是**空转**的：jobs 写死了 D-191 之前那两个顶层目录（symbio 与 cli），
+// ⚠️ 这一层曾经是**空转**的：jobs 写死了  之前那两个顶层目录（symbio 与 cli），
 // 拆成 crate 之后路径不存在 ⇒ `jobs.length === 0` ⇒ 每轮只产出一条 `skipped`
 // （校准里连续 5 轮墙钟 0s），`rust-version` 又变回「没人验证的一句话」。所以判据
 // 现在从**仓里真实的声明**派生：路径搬了它跟着搬，加一个 crate 它自动多编一个。

@@ -29,7 +29,7 @@ fn vctx(workdir: Option<&str>, agent_dir: Option<&Path>) -> VdfsContext {
     vdfs_context(&ctx)
 }
 
-/// 构造同时带会话目录的 VDFS 调用上下文（D-513）
+/// 构造同时带会话目录的 VDFS 调用上下文
 fn vctx_with_session(session_dir: &str, agent_dir: Option<&Path>) -> VdfsContext {
     let ctx: Arc<dyn PluginInvokeRequest> = Arc::new(PluginSimpleRequest::new(None, None));
     ctx.set(SESSION_DIR, session_dir.to_string());
@@ -100,7 +100,7 @@ async fn root_lists_both_memory_files() {
     assert_eq!(nodes[1].node.kind, "workspace");
 }
 
-/// 有会话目录时列出第三份记忆，挂载名点明作用域（D-513）
+/// 有会话目录时列出第三份记忆，挂载名点明作用域
 #[tokio::test]
 async fn root_lists_session_memory_when_scope_is_supplied() {
     let tmp = TempDir::new().unwrap();
@@ -278,7 +278,7 @@ async fn workspace_file_roundtrips_to_the_physical_memory_file() {
         .unwrap();
     assert_eq!(content.text.as_deref(), Some("偏好中文 + 简洁"));
 
-    // 物理落点：工作区根的 MEMORY.md（三层统一，D-527），不是挂载名
+    // 物理落点：工作区根的 MEMORY.md（三层统一），不是挂载名
     assert_eq!(
         std::fs::read_to_string(ws.path().join(workspace::WORK_MEMORY_FILE)).unwrap(),
         "偏好中文 + 简洁",
@@ -450,7 +450,7 @@ async fn config_write_leaves_memory_and_disk_in_agreement() {
 }
 
 /// 配置文档**只存开关与闸门**，不含记忆正文：正文只在各自的 MEMORY.md 里。
-/// （D-527：稳定指令 AGENTS.md 归 setting，动态记忆与配置彻底分离。）
+/// （稳定指令 AGENTS.md 归 setting，动态记忆与配置彻底分离。）
 #[tokio::test]
 async fn config_document_never_carries_memory_body() {
     let tmp = TempDir::new().unwrap();

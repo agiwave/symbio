@@ -28,12 +28,12 @@
 //! 1. 校验目标 agent 目录存在、`working_dir` 合法；
 //! 2. `vdfs/write <会话地址>` 落子会话元数据（`parent_session_id` → 存储归档父会话
 //!    子目录、不进用户会话列表；`mode` / `risk_level` / `provider_id` 随本条落成
-//!    会话属性，[D-066]）；
+//!    会话属性）；
 //! 3. `vdfs/write <会话地址>/inbox` 发起本轮（输入面双轨已退役：`session/chat/send`
 //!    不再存在，而子会话不是本进程持有的会话实例，跨作用域写者只能走地址面；
 //!    该写入**受理即返回**，本轮在后台推进）；
 //! 4. 订阅子会话的实时面（**一条**：`event_bus` + `vdfs/watch <会话地址>`——
-//!    消息流式与会话运行态都在上面，见 D-025），把子会话过程经出口转播到
+//!    消息流式与会话运行态都在上面），把子会话过程经出口转播到
 //!    父视图（节点锚定到本工具调用之下）；
 //! 5. 子会话完成（idle 无待审批）→ 工具结果 = 最终文本（末尾附
 //!    `[subagent_session_id]`，供 LLM 后续续会话）；等待审批 → 工具以待审批
@@ -87,7 +87,7 @@ const NAME: &str = "agent_run";
 const KEY_PARENT_SESSION_ID: &str = "parent_session_id";
 /// 收件箱段名（地址契约 `<sid>/inbox` 的一段）。
 ///
-/// 名字住 `plugin-api` 的词汇面（D-364）：跨插件共用的地址段只有一个住处，
+/// 名字住 `plugin-api` 的词汇面：跨插件共用的地址段只有一个住处，
 /// 拼错表现为「消息进不去队列」，不会静默错乱。
 use symbio_plugin_api::vocab::{PORT_SESSION_SUBAGENT, SEG_INBOX};
 
@@ -240,7 +240,7 @@ impl AgentRunCapability {
     }
 }
 
-/// 工具即端口（`D-440` ③）：`execute` 只做「拆信封」——调用方上下文缺席时诚实失败，
+/// 工具即端口（ ③）：`execute` 只做「拆信封」——调用方上下文缺席时诚实失败，
 /// 否则从请求折出执行期环境，把载荷与信封交给 [`Self::run`]，出口统一经 `port_result`。
 #[async_trait::async_trait]
 impl PortExecutor for AgentRunCapability {
@@ -428,7 +428,7 @@ impl AgentRunCapability {
                 // `agent_id` / `workdir` 供 chat 编排回退链与详情展示。
                 // `sandbox_id` / `provider_id` 也随之落成会话属性——它们定义
                 // 「这个子会话怎么跑」，属**会话事实**而非消息属性
-                // （[D-066]：地址写入不承载运行选项，归属是会话 metadata）。
+                // （地址写入不承载运行选项，归属是会话 metadata）。
                 // 安全语义由沙箱承接（裁决 B）：子会话继承父会话的沙箱选择，
                 // 不再分别记 mode / risk_level。
                 let sid = uuid::Uuid::new_v4().to_string();
@@ -471,10 +471,10 @@ impl AgentRunCapability {
 
         // ── 订阅子会话的实时面（先于发起本轮，避免丢首帧）──
         //
-        // 与 CLI / 前端**同一条路径**（`D-487`：转播桥走 `event_bus/subscribe` 路由，
+        // 与 CLI / 前端**同一条路径**（转播桥走 `event_bus/subscribe` 路由，
         // 不再经登记表的特权后门）+ `vdfs/watch <会话地址>` 开闸，**两步缺一不可**
         // （只订阅 = 永不响的频道；只 watch = 没有收件人）。会话域的实时面**只有
-        // 这一条**（D-025）：
+        // 这一条**：
         //
         // - 消息流式 = `<sid>/message/<mid>` 的 `updated` + `delta`；
         // - 会话运行态 = `<sid>` 的 `updated`——**本轮结束的唯一判据**（一轮里根
@@ -502,7 +502,7 @@ impl AgentRunCapability {
 
         // ── 发起这一轮：发消息 = 写收件箱；恢复 = 对目标消息做动作 ──
         //
-        // `session/chat/send` 已随输入面双轨退役（[D-066]）。进程内入队
+        // `session/chat/send` 已随输入面双轨退役。进程内入队
         // 从此只剩**会话自己**那两条内部路径（收件箱写臂与它调的自主开轮）；一切跨作用域
         // 的写者——本工具建的子会话、CLI、telegram、心跳调度插件——都写地址面，
         // 因为它们都不持有（也不该持有）那个 `SessionPlugin` 实例。
@@ -510,7 +510,7 @@ impl AgentRunCapability {
         // `mode` / `risk_level` / `provider_id` 随**会话 metadata** 继承
         // （见上面 `register_subsession` 的 json）：它们是会话属性，解析链
         // `req > metadata > 默认` 的第二档已经给了答案，随行携带会让同一事实有两个
-        // owner（[D-066] 理由 1）。
+        // owner（ 理由 1）。
         let vctx = vdfs_context(&ctx);
         let rel = format!("{PLUGIN_ID_SESSION}/{child_session_id}");
         let started: Result<(), PluginError> = if let Some(executor) = subagent_executor {
@@ -1000,7 +1000,7 @@ struct RelayBridge {
 ///
 /// ## 一条通道，两类地址（与 `crates/symbio-cli/src/client.rs` 同构）
 ///
-/// 会话域的实时面只有一条（D-025），落点恒为**被变更节点自身的地址**：
+/// 会话域的实时面只有一条，落点恒为**被变更节点自身的地址**：
 ///
 /// - `<sid>` = **会话运行态**（容器节点）——本轮结束的唯一判据（一轮里根 Turn 会
 ///   多次定格，只有会话节点离开 `working` 才是整轮结束）。变更随 `data` 带全量节点
@@ -1017,7 +1017,7 @@ struct RelayBridge {
 ///
 /// 两类变更**不靠到达顺序**协作。旧版靠「同一条流 + 同一个 `seq` 计数器」推出
 /// 「读到不忙 ⇒ 本轮消息帧都已处理」；那条推理的前提（顺序是**传输**属性）已被
-/// D-025 纠正为「顺序是**节点**属性」（`ChatNode.seq` 决定显示顺序）。现在
+///  纠正为「顺序是**节点**属性」（`ChatNode.seq` 决定显示顺序）。现在
 /// 的收尾判据是会话节点的 `status` 本身——回读即得，与谁先到无关。
 ///
 /// ## 本桥是「子会话 → 父视图」的**唯一翻译点**
@@ -1364,7 +1364,7 @@ fn relay_anchor_of(ctx: &dyn PluginInvokeRequest) -> String {
 /// 以符合分型结构 `ToolCall(Assistant) → Turn(Tool)`，并能被 flatten 的
 /// `find_tool_result` 正确识别。
 ///
-/// **身份只有一份写**（[D-147](../../../../docs/003-design/001-核心架构.md#d-147-身份只写一份principal-是权威role-只留反序列化落点 "DE-001-核心架构")）：`node_role()`
+/// **身份只有一份写**：`node_role()`
 /// 以 `principal.kind` 为先，所以这里改完主体，折叠当场就读回 `Tool`——
 /// 不需要再往 `role` 格补一份，也就不存在「主体改写必须排在角色改写之后」这种
 /// 顺序纪律。两格都写时，顺序写反就会让 `role` 格永远补不上
@@ -1503,10 +1503,10 @@ async fn vdfs_watch(
     }
 }
 
-/// 经协议路径建立事件总线订阅，交回**收件端**（`D-487`）。
+/// 经协议路径建立事件总线订阅，交回**收件端**。
 ///
 /// 与 CLI / 前端 / 网关同一条 `event_bus/subscribe` 路由——转播桥不再经登记表的
-/// 特权后门（`event_bus_register_subscriber` 已随 `D-487` 从 sdk 撤销）。订阅的
+/// 特权后门（`event_bus_register_subscriber` 已从 sdk 撤销）。订阅的
 /// 摘除不需要本侧配对调用：收件端 drop ⇒ 投递端 `tx.closed()` ⇒ 插件清理任务
 /// 反注册；首个 `connected` 握手帧由转播循环按「非变更帧」跳过。
 async fn subscribe_bus_frames(

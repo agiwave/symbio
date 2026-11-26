@@ -19,7 +19,7 @@
 //! 这三类只会笼统报成「请求包不对」，而 275 行里找一格错位正是历史上两次事故
 //! （树形路径拼错、降级后恢复轮丢失）的现场。
 //!
-//! 三段都是**纯函数**（不含 IO），但**不下沉共享层**：判据是 D-023 的
+//! 三段都是**纯函数**（不含 IO），但**不下沉共享层**：判据是  的
 //! 依赖方数量——`flatten_chat_messages` 的四个调用点（anthropic / gemini /
 //! openai_chat / openai_responses）**同住 model 一个模块**，一个模块依赖的内容
 //! 一律留在该模块内；core 只放契约不放实现。第二个模块出现时再谈上提。
@@ -119,7 +119,7 @@ pub fn flatten_chat_messages(messages: &[ChatNode]) -> Vec<NativeMessage> {
 
 // ChatNode 的**构造**不在本插件：`llm_build_assistant_messages` /
 // `llm_build_tool_message` / `RoundStreamChildIds` / `RoundOutput::into_messages`
-// 生产上只有 session 一个消费方，已随 D-023 从 `symbio_plugin_api::llm::turn` 下沉到
+// 生产上只有 session 一个消费方，已 从 `symbio_plugin_api::llm::turn` 下沉到
 // `crates/symbio-plugin-loop/src/message_build.rs`。本文件是**读侧**（存储树 → 请求包），
 // 测试用同形状的本地 fixture（理由见 tests 模块文件头）。
 

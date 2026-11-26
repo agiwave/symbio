@@ -47,7 +47,7 @@ function cpBaseline() {
       file: 'crates/symbio-plugin-loop/src/ring.rs',
       hash: 'sha256:old',
       parts: ['drive loop body'],
-      adr: 'D-234',
+      adr: '',
       reason: '夹具：机制面冻结在干净形状上',
     },
     extension: { productionFiles: 47 },
@@ -60,8 +60,8 @@ const LEDGER_REL = 'scripts/baselines/plugin-api-loc.json'
 function ledger({ files, total = 5 } = {}) {
   return {
     note: '夹具：行数棘轮',
-    files: files ?? [{ path: 'effects.rs', lines: 2, adr: 'D-321' }],
-    total: { lines: total, adr: 'D-321' },
+    files: files ?? [{ path: 'effects.rs', lines: 2, adr: '' }],
+    total: { lines: total, adr: '' },
   }
 }
 
@@ -82,7 +82,7 @@ function audit({
       [LP_REL]: JSON.stringify(baseLp, null, 2),
       [CP_REL]: JSON.stringify(baseCp, null, 2),
       ...(ledgerBase === null ? {} : { [LEDGER_REL]: JSON.stringify(ledgerBase, null, 2) }),
-      'docs/003-design/048.md': '### D-321 撤销 D-320\n',
+      'docs/003-design/048.md': '###  撤销 \n',
     })
     spawnSync('git', ['init'], { cwd: root, encoding: 'utf8' })
     spawnSync('git', ['add', '-A'], { cwd: root, encoding: 'utf8' })
@@ -95,7 +95,7 @@ function audit({
     writeTree(root, {
       [LP_REL]: JSON.stringify(lp, null, 2),
       [CP_REL]: JSON.stringify(cp, null, 2),
-      'docs/003-design/048.md': '### D-321 撤销 D-320\n',
+      'docs/003-design/048.md': '###  撤销 \n',
     })
     if (ledgerNow !== null) {
       writeTree(root, { [LEDGER_REL]: JSON.stringify(ledgerNow, null, 2) })
@@ -158,10 +158,10 @@ test('BS-003：删除基线键而没有 allow ⇒ 红', () => {
   assertRed(r, 'BS-003')
 })
 
-test('BS-003：删除基线键并带 allow + D-321 ⇒ 绿', () => {
+test('BS-003：删除基线键并带 allow +  ⇒ 绿', () => {
   const lp = lpBaseline()
   delete lp.lp003WorldRoots['ring.rs']
-  lp['baseline-allow'] = ['lp003WorldRoots/ring.rs→(none) 该文件的世界词根已归零 D-321']
+  lp['baseline-allow'] = ['lp003WorldRoots/ring.rs→(none) 该文件的世界词根已归零 ']
   const r = audit({ lp })
   assert.equal(r.status, 0, r.stdout + r.stderr)
 })
@@ -178,7 +178,7 @@ test('BS-004：mechanism.hash 变了而没有 allow ⇒ 红', () => {
 test('BS-004：mechanism.hash 变了并带 allow ⇒ 绿', () => {
   const cp = cpBaseline()
   cp.mechanism.hash = 'sha256:new'
-  cp['baseline-allow'] = ['sha256:old→sha256:new 驱动循环体随 D-321 迁移，逻辑逐字未动 D-321']
+  cp['baseline-allow'] = ['sha256:old→sha256:new 驱动循环体随  迁移，逻辑逐字未动 ']
   const r = audit({ cp })
   assert.equal(r.status, 0, r.stdout + r.stderr)
 })
@@ -201,7 +201,7 @@ test('BS-005：allow 形状不对（缺理由 / 缺决策号）⇒ 红', () => {
 
 test('BS-005：allow 指向一个没发生的变更 ⇒ 红（空头豁免）', () => {
   const lp = lpBaseline()
-  lp['baseline-allow'] = ['x.rs→(none) 理由 D-321']
+  lp['baseline-allow'] = ['x.rs→(none) 理由 ']
   const r = audit({ lp })
   assertRed(r, 'BS-005')
 })
@@ -209,7 +209,7 @@ test('BS-005：allow 指向一个没发生的变更 ⇒ 红（空头豁免）', 
 test('BS-005：allow 引用一个不存在的决策 ⇒ 红（不许匿名豁免）', () => {
   const lp = lpBaseline()
   delete lp.lp003WorldRoots['ring.rs']
-  lp['baseline-allow'] = ['lp003WorldRoots/ring.rs→(none) 归零 D-999']
+  lp['baseline-allow'] = ['lp003WorldRoots/ring.rs→(none) 归零 ']
   const r = audit({ lp })
   assertRed(r, 'BS-005')
 })
@@ -217,7 +217,7 @@ test('BS-005：allow 引用一个不存在的决策 ⇒ 红（不许匿名豁免
 test('BS-005：allow 已落地（to 是当前机制面值）⇒ 红并报「请删除」', () => {
   const landed = cpBaseline()
   landed.mechanism.hash = 'sha256:new'
-  landed['baseline-allow'] = ['sha256:old→sha256:new 机制面迁移，三段语义未变 D-321']
+  landed['baseline-allow'] = ['sha256:old→sha256:new 机制面迁移，三段语义未变 ']
   // base 就是落地后的状态：本轮没有 diff 可命中，to 已等于当前 hash ⇒ 它是永久豁免，必须删。
   const r = audit({ cp: landed, baseCp: landed })
   assertRed(r, 'BS-005')
@@ -227,7 +227,7 @@ test('BS-005：allow 已落地（to 是当前机制面值）⇒ 红并报「请�
 test('BS-005：清债 allow 已落地（键在当前基线里确实不存在）⇒ 红并报「请删除」', () => {
   const landed = lpBaseline()
   delete landed.lp003WorldRoots['ring.rs']
-  landed['baseline-allow'] = ['lp003WorldRoots/ring.rs→(none) 该文件的世界词根已归零 D-321']
+  landed['baseline-allow'] = ['lp003WorldRoots/ring.rs→(none) 该文件的世界词根已归零 ']
   const r = audit({ lp: landed, baseLp: landed })
   assertRed(r, 'BS-005')
   assert.match(r.stdout + r.stderr, /已落地 allow，请删除/)
@@ -236,7 +236,7 @@ test('BS-005：清债 allow 已落地（键在当前基线里确实不存在）�
 test('BS-005：to 不等于当前值、相对 base 有变更并带 allow ⇒ 绿（在途豁免）', () => {
   const cp = cpBaseline()
   cp.mechanism.hash = 'sha256:new'
-  cp['baseline-allow'] = ['sha256:old→sha256:new 驱动循环体随 D-321 迁移 D-321']
+  cp['baseline-allow'] = ['sha256:old→sha256:new 驱动循环体随  迁移 ']
   // base 是旧值（`sha256:old`）：改动尚未落地 ⇒ 这条 allow 正在起作用。
   const r = audit({ cp })
   assert.equal(r.status, 0, r.stdout + r.stderr)
@@ -247,8 +247,8 @@ test('BS-005：to 不等于当前值、相对 base 有变更并带 allow ⇒ 绿
 test('BS-006：账本里新增一格（新文件）而没有 allow ⇒ 红', () => {
   const now = ledger({
     files: [
-      { path: 'effects.rs', lines: 2, adr: 'D-321' },
-      { path: 'new.rs', lines: 3, adr: 'D-321' },
+      { path: 'effects.rs', lines: 2, adr: '' },
+      { path: 'new.rs', lines: 3, adr: '' },
     ],
   })
   const r = audit({ ledgerBase: ledger(), ledgerNow: now })
@@ -256,15 +256,15 @@ test('BS-006：账本里新增一格（新文件）而没有 allow ⇒ 红', () 
   assert.match(r.stdout, /files@new\.rs\.lines/)
 })
 
-test('BS-006：新增一格并带 `(none)→<格>` allow + D-321 ⇒ 绿（新增是合法动作，但必须署名）', () => {
+test('BS-006：新增一格并带 `(none)→<格>` allow +  ⇒ 绿（新增是合法动作，但必须署名）', () => {
   const now = withAllow(
     ledger({
       files: [
-        { path: 'effects.rs', lines: 2, adr: 'D-321' },
-        { path: 'new.rs', lines: 3, adr: 'D-321' },
+        { path: 'effects.rs', lines: 2, adr: '' },
+        { path: 'new.rs', lines: 3, adr: '' },
       ],
     }),
-    ['(none)→files@new.rs.lines 新文件确实带行，登记存量 D-321'],
+    ['(none)→files@new.rs.lines 新文件确实带行，登记存量 '],
   )
   const r = audit({ ledgerBase: ledger(), ledgerNow: now })
   assert.equal(r.status, 0, r.stdout + r.stderr)
@@ -273,8 +273,8 @@ test('BS-006：新增一格并带 `(none)→<格>` allow + D-321 ⇒ 绿（新�
 test('BS-006：只有名字与署名的条目（零调用符号）新增也判红——条目本身就是一格', () => {
   const now = ledger({
     files: [
-      { path: 'effects.rs', lines: 2, adr: 'D-321' },
-      { path: 'ghost.rs', lines: 0, adr: 'D-321' },
+      { path: 'effects.rs', lines: 2, adr: '' },
+      { path: 'ghost.rs', lines: 0, adr: '' },
     ],
   })
   const r = audit({ ledgerBase: ledger(), ledgerNow: now })
@@ -290,8 +290,8 @@ test('BS-007：账本计数上调而没有 allow ⇒ 红', () => {
 })
 
 test('BS-007：指纹被改写而没有 allow ⇒ 红', () => {
-  const baseObj = { solver: { hash: 'sha256:aaaaaaaaaaaaaaaaaaaa', adr: 'D-321' } }
-  const nowObj = { solver: { hash: 'sha256:bbbbbbbbbbbbbbbbbbbb', adr: 'D-321' } }
+  const baseObj = { solver: { hash: 'sha256:aaaaaaaaaaaaaaaaaaaa', adr: '' } }
+  const nowObj = { solver: { hash: 'sha256:bbbbbbbbbbbbbbbbbbbb', adr: '' } }
   const r = audit({ ledgerBase: baseObj, ledgerNow: nowObj })
   assertRed(r, 'BS-007')
   assert.match(r.stdout, /指纹被改写/)
@@ -304,7 +304,7 @@ test('BS-003：从账本删掉一格而没有 allow ⇒ 红', () => {
 })
 
 test('BS-005：账本里的 allow 没有命中任何变更 ⇒ 红（空头豁免）', () => {
-  const now = withAllow(ledger(), ['(none)→files@ghost.rs.lines 幽灵条目 D-321'])
+  const now = withAllow(ledger(), ['(none)→files@ghost.rs.lines 幽灵条目 '])
   const r = audit({ ledgerBase: ledger(), ledgerNow: now })
   assertRed(r, 'BS-005')
 })

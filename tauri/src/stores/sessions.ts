@@ -272,7 +272,7 @@ export const useSessionsStore = defineStore('sessions', () => {
   // ── 收件箱（排队中的用户消息） ──
   //
   // 与 `sessionMessages` 分开两张表，因为它们是**两个集合**：转写里是已落库的
-  // 消息，这里是还没被消费的待发消息（D-026 的 inbox）。同一条用户消息先在这
+  // 消息，这里是还没被消费的待发消息（ inbox）。同一条用户消息先在这
   // 里、被消费后换到转写里——**id 不变**，所以是「换位置」不是「多一条」。
   //
   // 值就是展示所需的全部（地址末段即身份 + 后端给的预览文案），不做成
@@ -433,7 +433,7 @@ export const useSessionsStore = defineStore('sessions', () => {
         if (message.title != null) node.title = message.title
         if (message.icon != null) node.icon = message.icon
         if (message.actions != null) node.actions = message.actions
-        // 读数行同口径「有则覆盖」（[D-111](../../../crates/symbio-plugin-session/README.md#d-111-消息读数由交付出口装配压缩与记忆的事实行离开前端 "crates/symbio-plugin-session/src/README")）：它由后端在
+        // 读数行同口径「有则覆盖」：它由后端在
         // 交付出口现算，压缩那条节点终态帧带来，窄增量帧不带 ⇒ 不覆盖掉已有的一格。
         if (message.stats != null) node.stats = message.stats
         // 存储侧权威值（落库后回发的对齐帧）：原样覆盖。
@@ -1321,7 +1321,7 @@ export const useSessionsStore = defineStore('sessions', () => {
   // 收敛动作（`removeSessionLocal` / `refreshList`），不自己挂监听器，
   // 因此可被独立构造与测试。
   //
-  // **运行态在这条链路上**（D-025 后实时面只有一条通道）：`<sid>` 的变更
+  // **运行态在这条链路上**（ 后实时面只有一条通道）：`<sid>` 的变更
   // 经 `sessionTranscriptSync` 回读 `stat` → `applySessionState`；清单订阅
   // （`sessionNodeSync`）对同一批变更做防抖重拉——两条收敛路径幂等且同源。
 
@@ -1336,7 +1336,7 @@ export const useSessionsStore = defineStore('sessions', () => {
    *
    * ## 为什么可以断言「这一帧到达时本轮转写已完整」
    *
-   * 顺序是**节点属性**（D-025）：显示顺序由 `ChatNode.seq` 决定，与到达
+   * 顺序是**节点属性**：显示顺序由 `ChatNode.seq` 决定，与到达
    * 顺序无关；「会话离开 `working`」不再被用来推出「本轮消息帧都已到达」——
    * 增量是否到齐由变更通道本身保证（满通道 → resync → 整份重读）。
    *

@@ -182,7 +182,7 @@ test('PP-004 反例：基线收到 0:0 而实测 1 ⇒ 红，且给出下沉路�
   assert.match(out(r), /core 投影构造器条数变宽：实测 1 > 基线 0/, out(r))
   assert.match(out(r), /下沉给那个 owner/, out(r))
   assert.match(out(r), /submit_reports!/, out(r))
-  assert.match(out(r), /D-221/, out(r))
+  assert.match(out(r), /PP-004/, out(r))
 })
 
 test('PP-004 正例：现值不超过基线 ⇒ 绿（1/1 落在夹具放宽后的格内）', () => {
@@ -218,15 +218,15 @@ const fakeScript = (...waivers) =>
   ['#!/usr/bin/env node', '// 夹具用的假脚本：只为了承载放宽注释。', ...waivers, ''].join('\n')
 
 const docsFixture = {
-  'docs/003-design/025-能力包与扩展面.md': '# 能力包与扩展面\n\n### D-221 投影可下沉\n\n正文。\n',
+  'docs/003-design/025-能力包与扩展面.md': '# 能力包与扩展面\n\n###  投影可下沉\n\n正文。\n',
 }
 
-test('PP-005 正例：挂住夹具里真实存在的 `### D-221` ⇒ 绿', () => {
+test('PP-005 正例：挂住夹具里真实存在的 `### ` ⇒ 绿', () => {
   const r = audited({
     ...repo(),
     ...docsFixture,
     'scripts/audits/projection-purity.mjs': fakeScript(
-      '// projection-purity-allow files: D-221 夹具里这条豁免本身就是要钉的判据',
+      '// projection-purity-allow files:  夹具里这条豁免本身就是要钉的判据',
     ),
   })
   assert.equal(r.status, 0, out(r))
@@ -237,34 +237,33 @@ test('PP-005 反例：放宽的不是投影面的格 ⇒ 红', () => {
     ...repo(),
     ...docsFixture,
     'scripts/audits/projection-purity.mjs': fakeScript(
-      '// projection-purity-allow widgets: D-221 这一格根本不存在',
+      '// projection-purity-allow widgets:  这一格根本不存在',
     ),
   })
   assert.equal(r.status, 1, out(r))
   assert.match(out(r), /PP-005 `projection-purity-allow widgets` 放宽的不是投影面的格/, out(r))
 })
 
-test('PP-005 反例：理由里没有决策编号 ⇒ 红（批次需要 / 顺手都不算）', () => {
+test('PP-005 反例：放宽理由为空 ⇒ 红（空理由不是豁免）', () => {
   const r = audited({
     ...repo(),
     'scripts/audits/projection-purity.mjs': fakeScript(
-      '// projection-purity-allow files: 这批急着发，先把数字抬上去',
+      '// projection-purity-allow files: ',
     ),
   })
   assert.equal(r.status, 1, out(r))
-  assert.match(out(r), /PP-005 放宽 `files` 的理由里没有决策编号/, out(r))
+  assert.match(out(r), /PP-005 放宽 `files` 必须写非空的当前理由/, out(r))
 })
 
-test('PP-005 反例：编号写了但锚点打不开 ⇒ 红（指向不存在的决策不算豁免）', () => {
+test('PP-005：写了当前理由即可放宽（不再查历史案例编号）', () => {
   const r = audited({
     ...repo(),
     ...docsFixture,
     'scripts/audits/projection-purity.mjs': fakeScript(
-      '// projection-purity-allow ctors: D-999 这条决策并不存在',
+      '// projection-purity-allow ctors: 本批确实把两个读口合并，构造器数按实测钉死',
     ),
   })
-  assert.equal(r.status, 1, out(r))
-  assert.match(out(r), /PP-005 放宽 `ctors` 引用了 `D-999`/, out(r))
+  assert.equal(r.status, 0, out(r))
 })
 
 test('PP-005 夹具没有本脚本 ⇒ 跳过（不误判「豁免全绿」，也不误判红）', () => {
@@ -272,7 +271,7 @@ test('PP-005 夹具没有本脚本 ⇒ 跳过（不误判「豁免全绿」，�
   assert.equal(r.status, 0, out(r))
 })
 
-// ── 折叠根不止 core：判据跟着折叠走（D-221）────────────────────────────
+// ── 折叠根不止 core：判据跟着折叠走（）────────────────────────────
 //
 // 下沉之后，`crates/*/src/projections/` 与 core 的 `projection/` 同受 PP-001 / PP-002 /
 // PP-003 判定——否则「把折叠交还 owner」顺带就把这条折叠移出判据；而 PP-004 只数

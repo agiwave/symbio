@@ -2,7 +2,7 @@
 //! 两个存储原语（[`PersistentChatSession::append_messages`] /
 //! [`PersistentChatSession::replace_all`]）。
 //!
-//! 顺序反转（D-054 决策 2）在这里落地：
+//! 顺序反转（ 决策 2）在这里落地：
 //! `apply` **先落事实**、再折列表、再写缓存——内存列表是事实的一个渲染，
 //! 不是「正在被编辑的真相」。事实与缓存从此不可能分开（决策 3 的类型强制）。
 //!
@@ -130,9 +130,9 @@ pub(super) fn assign_seq(messages: &mut [ChatNode], base: i64) -> i64 {
     cursor
 }
 
-/// 一次**消息列表变更**（D-054 决策 2 + 3）。
+/// 一次**消息列表变更**（ 决策 2 + 3）。
 ///
-/// 这是 D-054 的**闭集原语**落到类型上：
+/// 这是  的**闭集原语**落到类型上：
 /// 消息列表的变更只有「诞生 / 断言 / 关闭」三种节点级原语（第四种「取代」是列表级的
 /// 压缩快照，见 [`PersistentChatSession::replace_all`]——它的事实 owner 不同）。
 ///
@@ -141,12 +141,12 @@ pub(super) fn assign_seq(messages: &mut [ChatNode], base: i64) -> i64 {
 /// 旧形态是 `replace_messages(整份列表)`：调用方自己折好列表再整体写入，事实
 /// **事后补**——于是「改了列表却没落事实」在编译期**表达得出来**（实测 10 个
 /// 写入口里 6 个没落）。收成枚举之后，`apply` 在**同一个函数里**落事实、折列表、
-/// 写缓存，那句话在类型上**表达不出来**——这就是 D-054 决策 3 要的类型强制。
+/// 写缓存，那句话在类型上**表达不出来**——这就是  决策 3 要的类型强制。
 pub(crate) enum MessageChange {
     /// **诞生**：一个此前不存在的节点出现。
     Born {
         nodes: Vec<ChatNode>,
-        /// 它的**承载事实**由谁落——一个事实只能有一个 owner（[D-049] 理由 1）。
+        /// 它的**承载事实**由谁落——一个事实只能有一个 owner（ 理由 1）。
         carrier: Carrier,
     },
     /// **断言**：一个已存在的节点现在读作 Y ⇒ 落 `message.edited`。
@@ -184,7 +184,7 @@ impl PersistentChatSession {
         PluginError::InternalError(format!("消息变更未能入格，本次变更未生效：{why}"))
     }
 
-    /// 一次消息列表变更的**唯一写入口**（D-054
+    /// 一次消息列表变更的**唯一写入口**（
     /// 决策 2 的「顺序反转」）。
     ///
     /// 顺序是**先落事实、再折列表、再写缓存**。这与旧形态（`读列表 → 改 Vec →
@@ -200,7 +200,7 @@ impl PersistentChatSession {
     ///
     /// 落事实在写缓存**之前**，所以这里返回错误时什么都已经没发生——报失败是如实。
     /// 两处例外各自有理由：拿不到写者令牌 ⇒ 寄存（稍后由持令牌方补落）；
-    /// 无锚可指 ⇒ v1 遗留会话，读侧本就回落 `messages.json`（D-049），缓存仍是真源。
+    /// 无锚可指 ⇒ v1 遗留会话，读侧本就回落 `messages.json`，缓存仍是真源。
     ///
     /// ## 返回值
     ///
@@ -209,7 +209,7 @@ impl PersistentChatSession {
     /// `Removed` 回空（被删的节点不在存储里，交回它们等于让前端对齐幻影）。
     pub(crate) async fn apply(&self, change: MessageChange) -> Result<Vec<ChatNode>, PluginError> {
         // ① 落事实（**先于**写缓存）。
-        // 事实源句柄由存储层按会话构造一次（D-084 §2）——本函数不再拼目录自己 open。
+        // 事实源句柄由存储层按会话构造一次（ open。
         // 打不开是**真失败**：与「没有事实源」（会话目录不存在）必须是两种处置。
         let facts = match self.store.facts(&self.session_id) {
             Ok(facts) => facts,
@@ -266,7 +266,7 @@ impl PersistentChatSession {
             MessageChange::Born { nodes, .. } => {
                 let (persisted, removed) = self.append_messages(nodes).await?;
                 // 写入期裁剪（`prune_tool_history` / `max_messages`）是**列表变更**，
-                // 必须入格（· D-054 决策 1 的「关闭」原语）。裁剪发生在
+                // 必须入格（·  决策 1 的「关闭」原语）。裁剪发生在
                 // `append_messages` 的存储临界区内（它才拿得到权威列表与配置），
                 // 故由本处补落 `message.removed`——**事实仍由 `apply` 这一个入口落**，
                 // 没有开出第二个写入口。
@@ -345,7 +345,7 @@ impl PersistentChatSession {
     ///
     /// 第二个返回值（****）是本次写入期裁剪删掉的 id：调用方（`apply`）
     /// 据此落 `message.removed`。为什么由调用方落而不是本函数落——本函数是
-    /// **存储原语**，事实落格收在 `apply` 一个入口（D-054 决策 2/3 的类型强制）；
+    /// **存储原语**，事实落格收在 `apply` 一个入口（ 决策 2/3 的类型强制）；
     /// 本函数只**报告**它动了哪些节点。空 `Vec` = 没裁任何节点。
     ///
     /// 顺序与入参一致（不含被淘汰项）；落库失败则整体失败，不返回部分结果。
@@ -437,7 +437,7 @@ impl PersistentChatSession {
             let start_idx = user_indices[user_indices.len() - max_turns];
             // 轮次 FIFO 淘汰只删消息节点，**不动** `tool_archives/` 存档文件（审计 A3）。
             // 理由：存档的磁盘生命周期归 `tool` 插件的 L0 守卫（`ARCHIVE_KEEP`，会话
-            // 作用域，D-528）按修改时间滚动淘汰。写入路径上再删一遍既与"淘汰旧轮"
+            // 作用域）按修改时间滚动淘汰。写入路径上再删一遍既与"淘汰旧轮"
             // 无关（旧轮引用的往往是最新的那几个存档），又让配置项 `max_messages`
             // 变成静默删文件的破坏性操作。
             let dropped = start_idx;
@@ -500,7 +500,7 @@ impl PersistentChatSession {
         // 孤儿存档：`replace_all` 整体重写消息列表（L2 语义压缩 /
         // Streaming 清理），被丢弃消息引用的 L0 `tool_archives/` 存档随之失去引用。
         // 此处**只统计不删除**（审计 A3）：存档的磁盘生命周期归 `tool` 插件的
-        // L0 守卫（会话作用域的 `ARCHIVE_KEEP`，D-528）统一负责，写入路径不再
+        // L0 守卫（会话作用域的 `ARCHIVE_KEEP`）统一负责，写入路径不再
         // 承担删文件职责——历史上这里需要在删除前做"拒绝 `..` + 限定 archives 根"
         // 的双重路径校验，正是因为把不可信输入变成了删除动作。
         if let Some(dir) = self.store.session_dir(&self.session_id) {
@@ -583,13 +583,13 @@ pub(super) fn ensure_durable_states(
 /// 存储与前端节点树可回看全部历史。
 ///
 /// **只删节点、不删文件**（审计 A3）：`meta.archive_path` 指向的 L0 存档由
-/// `tool` 插件的 L0 守卫按会话作用域的 `ARCHIVE_KEEP`（D-528，按修改时间）统一
+/// `tool` 插件的 L0 守卫按会话作用域的 `ARCHIVE_KEEP`（按修改时间）统一
 /// 回收。写入路径此前把不可信的消息 meta 当删除依据（需额外做 `..` 与根目录
 /// 双重校验），且"淘汰旧轮"删掉的常是最新存档——职责错位，故收敛为纯节点裁剪。
 ///
 /// 返回**被删节点 id**（顺序 = 原列表顺序）——调用方据此落 `message.removed` 事实。
 /// 这是「变更即事实」的承重面：裁剪是**列表变更**，
-/// 而列表变更必须入格（D-054
+/// 而列表变更必须入格（
 /// 决策 1 的「关闭」原语）。裁剪改了列表却不落事实 ⇒ 切主读后**被裁节点复活**
 /// ——WAL 里它们还在，只是缓存里少了（而缓存已经不再是真源）。
 pub fn prune_historical_tool_calls(messages: &mut Vec<ChatNode>, keep_turns: usize) -> Vec<String> {

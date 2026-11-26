@@ -6,7 +6,7 @@
 //! 一条 [`ReportDecl`]，名字只出现在 owner 自己的常量里；读方只遍历 [`reports()`]，
 //! 按 `views` 逐个读、把整片值交回 `render`。空形状、`own` 行、`cap` 截断、按档并表
 //! 全在 owner 的 `render` 里——读方不再替 owner 猜形状，也不必先「知道有哪几条」
-//! 才能出列（DE-024 D-387）。
+//! 才能出列（DE-024 ）。
 //!
 //! ## 顺序是判据
 //!
@@ -24,7 +24,7 @@
 //! - 同一视图进两条报表——两处各算一遍，口径静默漂移；
 //! - `fleet` 显式写成空串——落点为空时写不进去，等于静默丢实例级读数。
 //!
-//! ## 还有一类：出口 owner 与折账 owner 对账（`D-465`）
+//! ## 还有一类：出口 owner 与折账 owner 对账
 //!
 //! 上面四类只看登记表自己；[`check_view_owners`] 还要看**冻结声明表**——它判
 //! 「出这条列的人，是不是折这条账的人」。两处的输入不同（一张 inventory 表 vs 一张
@@ -48,9 +48,9 @@ use crate::sdk::plugin::views::ViewUnavailable::{self, NotSealed, Unknown};
 ///
 /// 只放**读方知道、owner 不知道**的两个值：主体与读侧闸的答案。owner 的
 /// `render` 用它们产出自己的形状（声誉的 `own` 行、无权限时的空表），读方不解释
-/// 这些形状。容量不在这张表里（`D-490`）：它是本轮配置**事实**（`session.config`
+/// 这些形状。容量不在这张表里：它是本轮配置**事实**（`session.config`
 /// 的 `readyset_cap` 贡献键），owner 的求值口从自己的切片里读——同一份史回放必然
-/// 得到同一个容量（`D-252` 的既有判据），不必由读方搬运。
+/// 得到同一个容量（既有判据），不必由读方搬运。
 #[derive(Debug, Clone, Copy, PartialEq, Eq)]
 pub struct ReportCtx<'a> {
     /// 本会话主体：`reputation.ledger` 的 `own` 行取谁。
@@ -71,7 +71,7 @@ pub struct ReportDecl {
     /// 因为 `declare(owner, …)` 收的是「交表方」的路径标识；这里是给人读的标签。
     /// 两种拼写不统一（既成形状，不该为了判据搬家），对账靠归一：装配期
     /// [`check_view_owners`] 把视图 owner 折成同一个短名（[`owner_short`]），再与这里
-    /// 逐条比对——出这条列的人必须就是折这条账的人（`D-465`，`D-463` 第三级）。
+    /// 逐条比对——出这条列的人必须就是折这条账的人（ 第三级）。
     pub owner: &'static str,
     /// `session/stats` 的顶层键；全局唯一，进 JSON 顶层就是出品契约（`SV-003`）。
     pub slot: &'static str,
@@ -237,7 +237,7 @@ pub fn validate(reports: &[&ReportDecl]) -> Vec<ReportError> {
 
 /// 交表方标识的**短名**：`crates/symbio-plugin-model` → `model`。
 ///
-/// 两种拼写都留着（`D-465`）：`ViewDecl` 的 owner 是 `declare` 的入参，要能 grep 到目录；
+/// 两种拼写都留着：`ViewDecl` 的 owner 是 `declare` 的入参，要能 grep 到目录；
 /// `ReportDecl.owner` 是给人读的标签，进错误信息。判据不该要求形状统一——那样会把
 /// 「对账」换成一次全仓改名，改完还是没人查。归一是一行 `strip_prefix`，比对才是判据。
 ///
@@ -247,7 +247,7 @@ pub fn owner_short(owner: &str) -> &str {
     last.strip_prefix("symbio-plugin-").unwrap_or(last)
 }
 
-/// 出口对账：**出这条列的人，必须就是折这条账的人**（`D-465`，`D-463` 第三级）。
+/// 出口对账：**出这条列的人，必须就是折这条账的人**（ 第三级）。
 ///
 /// ## 它补的是哪一格
 ///
@@ -272,7 +272,7 @@ pub fn owner_short(owner: &str) -> &str {
 /// `ReportError` 是**封闭取值面**（`CS-009` 按变体数守它）：每加一个变体，内核 / 契约
 /// 的公共数据面就宽一格。而这两条诊断**只有人读**——唯一的消费者是装配期的
 /// `assert!` 消息，没有任何一处会 `match` 它们的种类。为一条进日志的字符串加两个变体，
-/// 是拿契约面的宽度换一行文本；于是这里交 [`String`]，与 `D-462`「不设公共词表」同一条
+/// 是拿契约面的宽度换一行文本；于是这里交 [`String`]，与 「不设公共词表」同一条
 /// 纪律：**没有第二个消费者，就不给它造形状。**
 pub fn check_view_owners(
     reports: &[&ReportDecl],
@@ -357,7 +357,7 @@ pub fn read_view(name: &str, snapshot: &[Event]) -> Value {
 
 /// 一条已登记视图的读数**加口径版本**：供诊断列（`capability_views`）用。
 ///
-/// 与 [`read_view`] 同一条路径（冻结声明表 + 名字）：报表登记就是公开（`D-387`），
+/// 与 [`read_view`] 同一条路径（冻结声明表 + 名字）：报表登记就是公开，
 /// 名字由 owner 的 `ReportDecl` 交出，读方不需要它再出现在第二份清单里。读不到 ⇒
 /// 缺席原因（两种态之一），不是 `Null`——诊断列要说得出为什么没数。
 pub fn read_view_with_ver(name: &str, snapshot: &[Event]) -> Result<(u32, Value), ViewUnavailable> {

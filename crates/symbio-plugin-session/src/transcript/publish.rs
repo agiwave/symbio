@@ -4,7 +4,7 @@
 //! ## 为什么这一段原来住在宿主外壳、现在住在转写域
 //!
 //! 它原先在 `plugin.rs` 里，于是被切的两片（驱动器、上下文）都反过来 `use super::plugin::`
-//! 拿它——那是 [D-075](../../../../docs/003-design/002-架构总览.md#d-075-卸载能力先于目录分离session-切分立三条前置会话记忆与存储留守 "DE-002-架构总览") 前置 P3 判据点名的
+//! 拿它——那是  前置 P3 判据点名的
 //! 「跨片调用走表或端口」里最机械的一类：这个函数的真实依赖是**会话引擎**
 //! （`PersistentChatSession::apply`）与**两条发布通道**（执行期 sink / 活跃名册），
 //! 插件那一格从未参与。owner 跟着真实依赖走，它就搬进转写域（消息级变更的唯一写入点与发射器）。
@@ -68,7 +68,7 @@ pub(crate) async fn append_and_publish(
     session_id: &str,
     session_principal: &str,
 ) -> Result<Vec<cm::ChatNode>, PluginError> {
-    // 事实落格收在 `apply` 里（[D-054] 决策 2 的顺序反转）：`carrier` 声明
+    // 事实落格收在 `apply` 里（ 决策 2 的顺序反转）：`carrier` 声明
     // 「这条节点的诞生事实由谁落」——运行器承载的（用户发言 / 助手正文 / 工具结果）
     // 不另落，没有承载格的（压缩记录）落 `message.added`。
     let persisted = session
@@ -88,7 +88,7 @@ pub(crate) async fn append_and_publish(
         .await;
     }
     // 交回权威副本：loop 经地址面调用本条出口时，本地镜像要靠它换入存储分配的
-    // `seq` / `timestamp`（[D-086](../../../../docs/003-design/014-单环一表.md#d-086-loopsession-切片契约turndispatch-进程内交付turnspec-纯值面内部动作走地址面 "DE-014-单环一表") §4）。
+    // `seq` / `timestamp`（ §4）。
     Ok(persisted)
 }
 

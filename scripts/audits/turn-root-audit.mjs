@@ -90,7 +90,7 @@ const FACE_DEFS = [
     label: '事实 / 视图 / 行名',
     roots: ['crates'],
     exts: ['.rs', '.yml'],
-    // 两条内核角色名（`FinalizesTurn` / `StopsTurn`）实测已为 0：改名随 `D-318` 落成
+    // 两条内核角色名（`FinalizesTurn` / `StopsTurn`）实测已为 0：改名随 `` 落成
     // `FinalizesScope` / `StopsScope`。写法留在正则里是**防回潮**——有人把旧名写回来
     // 时该红，而不是「名字删了就没人记得它长什么样」。
     pattern:
@@ -99,7 +99,7 @@ const FACE_DEFS = [
   {
     id: 'F3',
     label: 'DTO 字段（Rust 命令层）',
-    // 部署驱动入口随 D-557 从装配方搬进运行时 host；扫描面跟着被测物走，
+    // 部署驱动入口随  从装配方搬进运行时 host；扫描面跟着被测物走，
     // 少算两个文件会让这里的「文件数」无声下降（曾降到 9，基线是 11）。
     roots: ['crates/symbio'],
     extraFiles: ['crates/symbio-runtime/src/host/entry.rs', 'crates/symbio-runtime/src/host/entry.test.rs'],

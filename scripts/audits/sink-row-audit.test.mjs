@@ -5,7 +5,7 @@
  * **统计口径写宽**——把注释里的行、测试夹具、`produced_by: None` 都算进来。
  * 两者都会让「生产里有几条归宿行」这个读数失去意义，而门禁照样全绿。
  *
- * `D-306` 之后口径换了对象：归宿行不再是「写了 `by: None` 的行」，而是**一笔债都
+ * `` 之后口径换了对象：归宿行不再是「写了 `by: None` 的行」，而是**一笔债都
  * 开不出来**的行（`owes` 被 `until` 同源同键、出口不带 eq 地完整覆盖）。因此下面除了
  * 各条判据的违规注入，还要断两件事：会开账的行**不许**被算成归宿行；判不了的行
  * （`owes` 或 `until` 不是字面量）**不许**静默消失。
@@ -69,7 +69,7 @@ function cleanFiles() {
       '];',
       '',
     ].join('\n'),
-    [DOC]: '### D-397 夹具决策\n',
+    [DOC]: '###  夹具决策\n',
   }
 }
 
@@ -77,8 +77,8 @@ function cleanBaseline() {
   return {
     note: 'fixture',
     rows: [
-      { name: 'demo.literal', why: '夹具：写即闭合', adr: 'D-397' },
-      { name: 'demo.event', why: '夹具：写即闭合', adr: 'D-397' },
+      { name: 'demo.literal', why: '夹具：写即闭合', adr: '' },
+      { name: 'demo.event', why: '夹具：写即闭合', adr: '' },
     ],
   }
 }
@@ -245,16 +245,16 @@ test('SR-002：基线有而生产没有 ⇒ 红（防「删一条再加一条」
   }
 })
 
-test('SR-003：基线理由为空、决策号不存在 ⇒ 两条都红', () => {
+test('SR-003：两条基线理由为空 ⇒ 两条都红', () => {
   const baseline = cleanBaseline()
   baseline.rows[0].why = '   '
-  baseline.rows[1].adr = 'D-999'
+  baseline.rows[1].why = '   '
   const box = sandbox(cleanFiles(), baseline)
   try {
     const { status, out } = run(box.root)
     assert.equal(status, 1, out)
     assert.match(out, /SR-003.*demo\.literal.*why/)
-    assert.match(out, /SR-003.*demo\.event.*D-999/)
+    assert.match(out, /SR-003.*demo\.event.*/)
   } finally {
     box.cleanup()
   }
@@ -308,9 +308,9 @@ test('常量别名可以解析：`use … as ALIAS` 与 `const … = "…"` 对�
     [DECL]: ['use crate::consts::REAL as ALIAS;', 'pub(crate) const ROWS: &[Decl] = &[', sinkRow('ALIAS'), '];', ''].join(
       '\n',
     ),
-    [DOC]: '### D-397 夹具决策\n',
+    [DOC]: '###  夹具决策\n',
   }
-  const baseline = { note: 'fixture', rows: [{ name: 'demo.aliased', why: '夹具', adr: 'D-397' }] }
+  const baseline = { note: 'fixture', rows: [{ name: 'demo.aliased', why: '夹具', adr: '' }] }
   const box = sandbox(files, baseline)
   try {
     const { status, out } = run(box.root)
@@ -335,7 +335,7 @@ test('基线缺失 ⇒ 退 2（读不出不许当 0 条通过）', () => {
 })
 
 test('crates/ 缺失 ⇒ 退 2', () => {
-  const files = { [DOC]: '### D-397 夹具决策\n' }
+  const files = { [DOC]: '###  夹具决策\n' }
   const box = sandbox(files)
   try {
     const { status, out } = run(box.root)
@@ -347,7 +347,7 @@ test('crates/ 缺失 ⇒ 退 2', () => {
   }
 })
 
-test('--print-baseline：输出当前生产清单，已有 why/adr 原样保留', () => {
+test('--print-baseline：输出当前生产清单，已有 why 原样保留', () => {
   const box = sandbox(cleanFiles())
   try {
     const { status, out } = run(box.root, ['--print-baseline'])
@@ -357,7 +357,7 @@ test('--print-baseline：输出当前生产清单，已有 why/adr 原样保留'
       parsed.rows.map((r) => r.name).sort(),
       ['demo.event', 'demo.literal'],
     )
-    assert.equal(parsed.rows.find((r) => r.name === 'demo.event').adr, 'D-397')
+    assert.equal(parsed.rows.find((r) => r.name === 'demo.event').why, '夹具：写即闭合')
   } finally {
     box.cleanup()
   }

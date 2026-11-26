@@ -1,5 +1,5 @@
 //! 收束贡献：技能编译 —— 本轮**成功**轨迹固化成一条 `memory.encoded{tag:"skill"}`
-//! （DE-041 §2 / DE-025 D-250）。
+//! （DE-041 §2 / DE-025 ）。
 //!
 //! ## 为什么是贡献而不是债
 //!
@@ -14,12 +14,12 @@
 //!   为 `None`——固化失败套路比不记更坏；
 //! - **同 trigger 至多一条**：否则技能集随对话长度无界增长（与记忆编码的同文去重同一
 //!   条纪律）；这条判据同时兼任幂等；
-//! - **开关默认关**：读 `history` 里最后一条 `session.config`（D-252：能力面不拿配置包），
+//! - **开关默认关**：读 `history` 里最后一条 `session.config`（能力面不拿配置包），
 //!   缺省 `false`——不编译，只检索。
 //!
 //! ## 归属与可见域
 //!
-//! 技能事件的归属主体由**事件声明**给定（认知归属人 `person/local`，D-339），不是
+//! 技能事件的归属主体由**事件声明**给定（认知归属人 `person/local`），不是
 //! 跑轮主体：它属于「人的认知」，召回视图按 `actor == viewer` 过滤时应当看见它。
 //! 可见域记为 `shared`——技能是固化的可复用经验，跨会话命中是它的设计意图。
 //!
@@ -94,7 +94,7 @@ symbio_plugin_api::submit_contributor!(SkillCompile);
 /// 的同一句判据）。所以这里只认**这轮召回条目里** `tag:"skill"` 的那些行。
 ///
 /// `skill_id` 从被召回的**源事件**读：召回条目只带 `{seq, content, tag}`，归属它的
-/// 那条 `memory.encoded` 才是 `skill_id` 的产地。`fallback` 恒 `false`：`D-318` 之后
+/// 那条 `memory.encoded` 才是 `skill_id` 的产地。`fallback` 恒 `false`之后
 /// 宿主不再按 `skill.retreat` 过滤提示词，召回条目里没有「这一条是被回退的技能」这一位。
 pub(crate) struct SkillCalibrate;
 

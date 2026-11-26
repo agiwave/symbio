@@ -208,7 +208,7 @@ pub(super) fn parse_or_self_heal<T: serde::de::DeserializeOwned>(content: &str) 
     }
 }
 
-/// 读消息——**真源是 `v2-events.wal`**（D-049）：
+/// 读消息——**真源是 `v2-events.wal`**：
 /// 有 WAL 就从它重建；WAL 不在才回落 `messages.json` / 元数据内联（v1 时代
 /// 的遗留布局——那批会话的事实从未入格，文件是它们的唯一记录）。
 pub(super) async fn load_messages(dir: &Path, meta: &SessionMetaFile) -> Vec<ChatNode> {
@@ -261,7 +261,7 @@ pub(super) fn read_meta(dir: &Path) -> Option<SessionMetaFile> {
 ///
 /// `sandbox_id` 是前端选项栏呈现的唯一安全选项；`mode` / `risk_level` 作为存量
 /// 兼容回退保留——旧会话 metadata、内部/心跳路径与无沙箱装配仍走它们，沙箱句柄
-/// 解析出的审批参数会覆盖它们（D-531 裁决 B 的渐进迁移形态）。
+/// 解析出的审批参数会覆盖它们（ 裁决 B 的渐进迁移形态）。
 #[derive(Debug, Clone, PartialEq, Eq)]
 pub(crate) struct SessionParams {
     /// 显式选中的沙箱档案 id；`None` = 装配侧用默认沙箱 / 全放行降级。
@@ -291,7 +291,7 @@ impl Default for SessionParams {
 ///   `provider_id` 无默认（缺席 = 由模型侧选默认 provider）；
 ///   `mode` 默认 `auto`、`risk_level` 默认 `medium`（存量兼容回退）；
 /// - 空串与非字符串值一律视为缺席——「写了空值」不等于「显式要空」；
-/// - 收件箱路径的 `req` 档恒为空：地址写入面不承载运行选项（D-066），metadata 是
+/// - 收件箱路径的 `req` 档恒为空：地址写入面不承载运行选项，metadata 是
 ///   唯一来源；直接调用方带进来的请求级参数仍然优先。
 ///
 /// 解析结果由事实源随 `DriveTarget` 交给驱动，在驱动装配处挂进本轮 ctx——
@@ -434,7 +434,7 @@ pub(super) fn session_dirs_deep(base: &Path) -> Vec<PathBuf> {
 
 /// 把一个旧布局目录（消息内联）拆成两个文件，并补写缺失的投影。幂等。
 ///
-/// ## 迁移边界（[D-049]）
+/// ## 迁移边界
 ///
 /// `messages.json` 已**不再是**布局的一部分：真源是 `v2-events.wal`，本函数只为
 /// **v1 遗留目录**服务——那些把消息内联在 `session.json` 里、事实从未入格的会话。

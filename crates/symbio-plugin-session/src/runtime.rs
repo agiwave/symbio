@@ -1,6 +1,6 @@
 //! 会话运行态的**事实投影**：上一轮结局从生命周期事实折出。
 //!
-//! [D-083 §5.2](../../../docs/003-design/001-核心架构.md "DE-001-核心架构") 的落地侧：结局在网格里
+//!  的落地侧：结局在网格里
 //! 有确切的证据格，因此它是投影而不是又一份状态；`working` 是点名论证过的
 //! 进程局部量，不在这里。
 //!
@@ -12,11 +12,11 @@
 //! | `chat.assistant.final` | 载荷 `status`：`aborted` / `failed` / 其余按 `completed` |
 //! | `chat.assistant.fallback` | `failed`，错误取载荷 `detail` |
 //! | `chat.assistant.progress` | `completed`（等待用户的那一轮以 `Ok` 收尾） |
-//! | `driver.stalled` | `failed`：驱动安全阀出口（`Exhausted` / `Stalled`），错误取载荷（`D-393`） |
+//! | `driver.stalled` | `failed`驱动安全阀出口（`Exhausted` / `Stalled`），错误取载荷 |
 //! | 根 run 节点的 `message.edited` / `message.added` | `Failed` / `Aborted` 即失败/中止收口 |
 //!
 //! 按**完整史**扫描、取最后一条证据：压缩只取代消息列表，不取代轮次生命周期
-//! （[D-085](README.md#d-085-压缩取代的是消息列表不是轮次生命周期恢复锚读完整史归档刀口不动 "crates/symbio-plugin-session/src/README") 的同一条取向）。非生命周期事件（产出、汇报、
+//! （同一条取向）。非生命周期事件（产出、汇报、
 //! 工具、任务、记忆、消息编辑里不承载根 run 节点的那些）一律不改变结局。
 
 use crate::declarations::{EVENT_CHAT_ASSISTANT_PROGRESS, EVENT_MESSAGE_EDITED};
@@ -97,7 +97,7 @@ fn outcome_step(e: &Event) -> Option<Option<RuntimeOutcome>> {
         })),
         // 等待用户：本轮以 Ok 收尾（恢复续写是下一轮的事），与现网结局一致。
         EVENT_CHAT_ASSISTANT_PROGRESS => Some(Some(RuntimeOutcome::Completed)),
-        // 驱动安全阀出口（`D-393`）：没有终答的一轮不能读成「正常结束」。
+        // 驱动安全阀出口：没有终答的一轮不能读成「正常结束」。
         // 文本面直接带「为什么停 + 未收束几笔」，非 CLI 宿主不用再拼第二套口径。
         EVENT_DRIVER_STALLED => Some(Some(RuntimeOutcome::Failed {
             error: Some(stall_error(e)),

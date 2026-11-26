@@ -102,7 +102,7 @@ fn host() -> Arc<dyn PluginInvokeRequest> {
 
 // ==================== 全局收尾：整树 stop(Shutdown) ====================
 //
-// CLI / Tauri 的退出路径对本根调一次 `stop(Shutdown)`（D-033 的第三态收尾）。
+// CLI / Tauri 的退出路径对本根调一次 `stop(Shutdown)`（第三态收尾）。
 // 遍历 owner 是 `PluginRegistry::shutdown_all`；这里的探针钉三件事：
 // **每个子插件恰一次**、**理由可读**（`Shutdown`，不是 Disabled/Uninstalled）、
 // **单家失败不拦其余**（收尾是对全表的广播，一家报错不等于其余不用落盘）。
@@ -378,7 +378,7 @@ async fn resource_tree_membership_is_derived_from_providers() {
     );
 }
 
-// ==================== 运行期停用一片插件（D-077 守卫后半） ====================
+// ==================== 运行期停用一片插件（ 守卫后半） ====================
 //
 // 「切出一个插件」的**兑现判据**不是目录搬对了，而是：停用它 ⇒ 少掉的正好是它这一
 // 个功能，其余一切照旧。这条判据跨插件，故两侧各钉一半——本插件自己那半
@@ -525,7 +525,7 @@ async fn disabling_a_slice_removes_its_rows_and_keeps_the_rest() {
         "停用后选项栏里不该再有 heartbeat 那一格"
     );
     // —— 而其余行照旧：会话自有项、会话挂载点 ——
-    // D-531 裁决 B：mode / risk_level 已并入沙箱档案，会话自有的只剩 workdir；
+    //  裁决 B：mode / risk_level 已并入沙箱档案，会话自有的只剩 workdir；
     // 本测试只装了 session + heartbeat，没有沙箱插件，故 sandbox_id 也不在该容器里。
     assert!(
         keys.contains(&"workdir".to_string()),

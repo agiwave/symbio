@@ -282,7 +282,7 @@ const RATCHETS = [
   },
   {
     // CS-005：内核业务事件常量 / CELLS 业务行。声明化之后这两格只许降，而「凭什么还
-    // 留着」由 CS-006 逐名判据（DE-024 D-202）；放宽 = 让「新事件仍要改内核手写表」
+    // 留着」由 CS-006 逐名判据（DE-024 ）；放宽 = 让「新事件仍要改内核手写表」
     // 悄悄回来，所以必须改一个提交进仓库的数字。
     id: 'vocab',
     file: 'scripts/audits/arch-shape-audit.mjs',
@@ -307,7 +307,7 @@ const RATCHETS = [
   },
   {
     // PP-004 core 投影面两格（产投影文件数 / 投影构造器条数）。能力折叠一旦长回
-    // `symbio_platform::sdk::projection/`，「加一个能力」就又成了改架构模块（DE-025 D-221）；
+    // `symbio_platform::sdk::projection/`，「加一个能力」就又成了改架构模块（DE-025 ）；
     // 放宽的资格由 PP-005 判（必须挂一条存在的决策），本条只判数字有没有比上一版更松。
     id: 'core-projection',
     file: 'scripts/audits/projection-purity.mjs',
@@ -374,7 +374,7 @@ const RATCHETS = [
   {
     // 旁路直调 `owes()` 的点数。「收口完成」定义成**这个数归零**，
     // 而定义要成立，那个数就不能被悄悄改大——「改一个数字」看起来像维护，实际是在
-    // 取消一条已经写进设计的定义。`D-158` 之后这里只数**调度旁路**：动手前复核另立一格。
+    // 取消一条已经写进设计的定义。`` 之后这里只数**调度旁路**：动手前复核另立一格。
     id: 'obligation-bypass',
     file: 'scripts/audits/obligation-bypass-audit.mjs',
     dir: 'ceiling',

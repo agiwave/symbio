@@ -153,7 +153,7 @@ impl WebSearchTool {
             Some(validate_upstream_http_url(&config.search_api_base)?.origin())
         };
 
-        // ── 第三道闸：出站主机须在 Agent 声明的域名白名单里（D-153）──
+        // ── 第三道闸：出站主机须在 Agent 声明的域名白名单里──
         //
         // 上游主机 = 「走哪家」×「有没有配 `search_api_base`」，三者都在上面这一块
         // 里定下来了，所以在分支**之前**算一次、判一次——三个分支各判一遍会得到

@@ -4,20 +4,20 @@ import './_selfrun.mjs';
 // ## 本用例钉的是什么
 //
 // 终点第 2 条（一次性总纲，历史在 `git log`）：「有一份 prompt 形状基线，
-// 能回答『这样对模型是变好还是变坏』」。[D-048a](../../crates/symbio-plugin-session/README.md "crates/symbio-plugin-session/src/README")
+// 能回答『这样对模型是变好还是变坏』」。
 // 判过「拍平是退步」，但那次判定依据的是**论证**，不是记录——连「现在送出去的是什么形状」
 // 都没有一份可核对的东西，「结构化一定更好」同样未经测量。
 //
 // 基线本体在 [`docs/004-ref/PROMPT_SHAPE.md`](../../docs/004-ref/PROMPT_SHAPE.md)
 // （生成物，唯一写者是本用例带 `PROMPT_SHAPE_UPDATE=1`），**判据口径**（什么进基线、
-// 什么只作观测、为什么规模不进判据）在 [D-057](../../crates/symbio-plugin-session/README.md "crates/symbio-plugin-session/src/README")，
+// 什么只作观测、为什么规模不进判据）在，
 // **提取与比对实现**在 `scripts/audits/prompt-shape-audit.mjs`（PS-001…003）。
 // 本用例只做三件事：跑一次真实链路 ⇒ 把 mock-llm 收到的原样请求体落盘 ⇒ 交给脚本判。
 //
 // ## 为什么从运行时抓，不静态读装配代码
 //
 // 静态读 `render_messages` / `request_view_prefix` 只能读出**打算**发什么。中间隔着投影、
-// 截断、记忆召回与协议适配器（四种 wire 形态各有一套 flatten）——D-048a 判的是
+// 截断、记忆召回与协议适配器（四种 wire 形态各有一套 flatten）—— 判的是
 // 「送进模型的是消息数组还是拼平的文本」，这是一条**运行时事实**，只有真实请求体能回答。
 //
 // ## 为什么把对话面钉死（`DIALOG_FACE_OFF`）
@@ -29,7 +29,7 @@ import './_selfrun.mjs';
 //
 // ## 为什么场景里必须带一次真实工具轮
 //
-// D-048a 争的就是 `role` 与 `tool_call_id` 这两个**结构载体**。只有纯文本轮次的基线
+//  争的就是 `role` 与 `tool_call_id` 这两个**结构载体**。只有纯文本轮次的基线
 // 拍不出它们——把工具结果降级成一段正文，形状里必须看得见 `tool_calls` 计数与
 // `tool_call_id` 的消失。工具走 mock-mcp 的 `echo`（返回确定，与 t26 同一取舍）。
 import { join } from 'node:path';

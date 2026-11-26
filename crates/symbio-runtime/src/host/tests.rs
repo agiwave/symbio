@@ -49,7 +49,7 @@ impl Plugin for EmptyRoot {
     }
 }
 
-/// 开面后的下界上下文：会话主体随 `AGENT_ID` 载体带进来（D-339 起驱动也要它）。
+/// 开面后的下界上下文：会话主体随 `AGENT_ID` 载体带进来（ 起驱动也要它）。
 fn bound_base() -> Arc<dyn PluginInvokeRequest> {
     let meta = serde_json::Map::from_iter([(
         symbio_plugin_api::AGENT_ID.name().to_string(),

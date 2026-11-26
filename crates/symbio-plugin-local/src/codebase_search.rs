@@ -30,7 +30,7 @@
 //! 索引是**工作区级**的（一个工作区一份），与 owner 插件的 store 里
 //! `{workdir}/.symbio/subagent/<id>` 同源——工作区级数据就落在工作区里。放进 homedir
 //! 反而要按工作区路径做哈希分片，多一层可能撞键的间接。`.symbio/` 以 `.` 开头，
-//! D-515 的 VDFS 递归遍历会跳过隐藏目录，`.bin` 也不在 `SOURCE_EXTS` 里，
+//!  的 VDFS 递归遍历会跳过隐藏目录，`.bin` 也不在 `SOURCE_EXTS` 里，
 //! 因此**索引不会把自己索引进去**（两重保险）。
 
 use async_trait::async_trait;
@@ -170,7 +170,7 @@ impl CodeIndex {
 
 /// 扫描到的一个候选文件（尚未分块/嵌入）
 ///
-/// D-515：只带 VDFS 相对地址，不带物理路径——插件既不读盘，也不持有盘上位置。
+/// 只带 VDFS 相对地址，不带物理路径——插件既不读盘，也不持有盘上位置。
 struct ScannedFile {
     rel: String,
     fingerprint: Fingerprint,
@@ -470,7 +470,7 @@ fn dot(a: &[f32], b: &[f32]) -> f32 {
 
 /// 把一个文件切成块并逐块嵌入。文本读不出来 / 全为空 ⇒ 空 `Vec`（该文件不进索引）
 ///
-/// D-515：正文经作用域 provider 按相对地址读取，不再 `tokio::fs::read_to_string`。
+/// 正文经作用域 provider 按相对地址读取，不再 `tokio::fs::read_to_string`。
 async fn embed_file(
     provider: &DynVdfsProvider,
     vctx: &VdfsContext,
@@ -599,7 +599,7 @@ fn clone_chunks(chunks: &[Chunk]) -> Vec<Chunk> {
 /// 因此返回的索引**总是当前作用域内容的视图**（除非写盘方刻意保留了时间，
 /// 见模块文档；那种情况用 `rebuild` 兜底）。
 ///
-/// `cache_key` 只是进程内缓存的分片键（D-515：它是**身份标识**，不是存储地址）——
+/// `cache_key` 只是进程内缓存的分片键（它是**身份标识**，不是存储地址）——
 /// 插件不拿它去读盘；所有文件访问都走 `provider` 的相对地址。
 async fn get_index(
     cache_key: &str,
@@ -806,7 +806,7 @@ fn decode_index(buf: &[u8]) -> Option<CodeIndex> {
     Some(CodeIndex { files })
 }
 
-/// 从工作区作用域读索引（D-515）。
+/// 从工作区作用域读索引。
 ///
 /// 任何异常（不存在 / 截断 / 版本不符）都只是"没有旧索引"，返回 `None`。
 /// 索引用 b64 载荷读写——它是二进制派生数据，不该借 provider 的文本通道。
@@ -838,7 +838,7 @@ async fn load_from_disk(provider: &DynVdfsProvider) -> Option<CodeIndex> {
     }
 }
 
-/// 把索引写到工作区作用域（D-515）。
+/// 把索引写到工作区作用域。
 ///
 /// 不再自己拼物理路径 + tmp/rename：provider 负责落位；索引是纯派生数据，
 /// 读到半截（魔数/版本不符）就丢弃重建，因此不需要原子 rename 那层保证。
@@ -861,7 +861,7 @@ async fn save_to_disk(provider: &DynVdfsProvider, idx: &CodeIndex) -> Result<(),
 
 /// 对查询嵌入并与所有分块做余弦相似度排序，返回 top-k
 ///
-/// **平手必须有稳定次级键**（[D-109](../../symbio-plugin-memory/README.md#d-109-两套检索内核不合一打分各归各平手有稳定次级键截断在全序之后是全项目一份的排序口径 "crates/symbio-plugin-memory/src/README")：排序口径的
+/// **平手必须有稳定次级键**（排序口径的
 /// 共同半边）：分数相等时按相对路径、再按起始行升序，于是「全序 ⇒ 同一个索引 +
 /// 同一个查询 = 同一份 top-k」。缺了这一半，平手块的先后由 `files`/`chunks` 的
 /// 向量顺序决定，而那个顺序是**增量重建的历史**（哪些文件上次被重嵌过）——

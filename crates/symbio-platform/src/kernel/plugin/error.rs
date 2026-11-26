@@ -35,10 +35,7 @@ pub enum PluginError {
     /// 而本类型是跨插件共享的错误词汇（`model` 插件也构造 `Aborted`）。它从来
     /// 就跨不过插件墙：`to_frame` 只写错误码与文案，模型侧的中止在 `adapters`
     /// 边界转成 `AdapterError::Aborted`（载荷在那里被丢掉）。半截产出由 loop
-    /// 插件私有的退出类型携带（生产方与消费方都在 loop，两侧编译期可见），
-    /// 见 [D-095]。
-    ///
-    /// 决策 D-095 见 [D-095](../../../../../docs/003-design/005-协议规范.md#d-095-keys-域环拆解键与值同住aborted-载荷不跨域vdfs_change_of-归-event_bus "D-095")
+    /// 插件私有的退出类型携带（生产方与消费方都在 loop，两侧编译期可见）。
     #[error("操作中止")]
     Aborted,
     #[error("上下文丢失，需要重试")]

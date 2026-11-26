@@ -195,7 +195,7 @@ async fn sub_agent_model_registration_is_discarded() {
 
 /// 生产形状的登记现场：收集器 + 端口容器 + 作用域前缀挂在同一份 ctx 上。
 ///
-/// 三样正是 host::plugin 给子树装配的那一格（D-468）：登记的写入口径只有
+/// 三样正是 host::plugin 给子树装配的那一格：登记的写入口径只有
 /// register_tool，它从这份 ctx 上读到「写进哪个容器」与「端口名前缀是什么」。
 fn scoped_ctx(
     scoped: &Arc<dyn Registry>,
@@ -253,7 +253,7 @@ async fn sub_agent_multi_slot_registrations_join_parent_with_prefix() {
             .is_some(),
         "前缀名必须查得到执行体，否则子 Agent 的工具不可派发"
     );
-    // 本名声明（D-428）：每个前缀工具都交出「前缀名 → 本名」一对，装配面据此折叠，
+    // 本名声明：每个前缀工具都交出「前缀名 → 本名」一对，装配面据此折叠，
     // 不需要认识 `agent_` 这套前缀形状。声明行的键不与工具行同名，读侧只取载荷。
     let declared: Vec<(String, String)> = inner
         .list(SCOPE_TWIN)

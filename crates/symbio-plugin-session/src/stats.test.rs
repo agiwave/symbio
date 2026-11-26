@@ -40,13 +40,13 @@ use symbio_plugin_api::events::{
     EVENT_ARTIFACT_ADDED, EVENT_CHAT_ASSISTANT_FALLBACK, EVENT_CHAT_ASSISTANT_FINAL,
     EVENT_USER_MESSAGE,
 };
-// 任务族的名字走清单生成物（写方在各自能力包，本插件只是读方，DE-024 D-204）。
+// 任务族的名字走清单生成物（写方在各自能力包，本插件只是读方，DE-024 ）。
 use symbio_plugin_api::events::EVENT_TASK_OPENED;
 use symbio_plugin_api::vocab;
 
 /// 校准观测的名字：**本测试二进制按线上字面量造它**。
 ///
-/// 这条事实归技能能力包（`D-262`），而它的折叠也住在那里（`D-286`）——本插件不链接兄弟
+/// 这条事实归技能能力包，而它的折叠也住在那里——本插件不链接兄弟
 /// 插件（E-009），名字也不在清单生成物里（除 owner 之外没有生产读方，`CS-007`）。写闸要的
 /// 格位由 `declarations.test.rs` 的夹具补（只补格位、不补视图），夹具带着真实形状，试的
 /// 正是「不认识这一格的插件读不出账」。
@@ -241,7 +241,7 @@ fn seed_instance(tag: &str, n: usize) -> (PathBuf, Vec<PathBuf>) {
 /// 扫错范围（`wals` 多）。两者都不抛错，所以必须有一个断言直接盯数字。
 ///
 /// 逐档两列里**有什么**归 owner（`slo`）：本进程不链接它，于是落点整条缺席、
-/// 合计两格是有据的零（`D-488`：落点缺席与报表列同一降级语义）。这不是「少验了一条」
+/// 合计两格是有据的零（落点缺席与报表列同一降级语义）。这不是「少验了一条」
 /// ——是「这一格不是本插件的数」：数字在 时延能力包的判据用例，
 /// 组合在 e2e `t28`。
 #[test]
@@ -328,7 +328,7 @@ fn fleet_survives_a_session_whose_wal_cannot_be_opened() {
 /// **聚合吃值**：交几份快照就合并几份，不碰路径、不自行枚举。
 ///
 /// 「哪些事实源打得开」由存储层判（`deep_snapshots` 跳过并出声）；本列只对
-/// 交到手里的值套投影——两半不要混在一个函数里（[D-084](../../../docs/003-design/001-核心架构.md#d-084-能力模块公用基础协议上下文只递值事实只经引擎abcde-五类需要的唯一取得方式 "DE-001-核心架构")）。
+/// 交到手里的值套投影——两半不要混在一个函数里。
 #[test]
 fn fleet_aggregates_the_snapshots_it_is_given() {
     let (root, _wals) = seed_instance("values", 2);
@@ -363,7 +363,7 @@ fn fleet_is_empty_when_the_reader_may_not_read() {
         serde_json::json!({
             "wals": 0, "sessions": 0, "turns": 0, "fallbacks": 0,
         }),
-        "不给你读 ⇒ 不扫也不报数（`D-488`）：空形状住 owner 那里（本进程不链接 owner，\
+        "不给你读 ⇒ 不扫也不报数：空形状住 owner 那里（本进程不链接 owner，\
          落点整条缺席，与报表列同一降级语义）；满装配下的有据零 / 空由 e2e 与 owner 单测钉"
     );
 }
@@ -371,7 +371,7 @@ fn fleet_is_empty_when_the_reader_may_not_read() {
 // ── 出口排版（本插件自己的代码，与 owner 在不在无关）────────────────────────
 //
 // 逐档行的口径与排版（`sample_ms` → `samples`、率原样搬、按档并表）已随报表登记搬回
-// owner（`D-387`），由 时延能力包的判据用例 钉。本插件只剩**加法**：
+// owner，由 时延能力包的判据用例 钉。本插件只剩**加法**：
 // 合计两格逐档相加。
 
 /// 合计两格 = 逐档相加（计数可加）。
@@ -393,12 +393,12 @@ fn totals_add_the_owner_rows() {
     assert_eq!(totals_of(&serde_json::Value::Null), (0, 0));
 }
 
-// ── 外部效标两列（DE-008 §3.1.1：主动性 / 时域跨度）────────────────────────────────
+// ── 外部效标两列（DE-008 §2.4：主动性 / 时域跨度）────────────────────────────────
 //
 // ## 这两列今天归谁
 //
 // 主动性（`conation`）、自主程度（`autonomy`）与跨度（`span`）的折叠都在各自的能力包里；
-// 本插件只按报表 `slot` 取整条读数、把值装进出口（`D-387`）。于是这里能验的是**读方
+// 本插件只按报表 `slot` 取整条读数、把值装进出口。于是这里能验的是**读方
 // 那一半**：缺席时交什么形状、形状的键是不是那一列自己的。数字（分子分母、中位数）
 // 归 owner 的单测与 e2e。
 
@@ -407,10 +407,10 @@ fn totals_add_the_owner_rows() {
 /// 本进程不链接任何 owner（E-009）⇒ `reports()` 为空 ⇒ `SessionStats::reports` 是空表。
 /// 这与迁移前的「读方替 owner 交一份文档写过的空形状」是两种降级语义：空形状会让
 /// 「装配里没有这个 owner」长得像「这一列本来就是空的」；整条缺席才可诊断
-/// （`D-281` 理由 3）。
+/// （ 理由 3）。
 ///
 /// 诊断列同样没有名字可报：不链接 owner 就没有报表登记的 `views`，而清单生成表已随
-/// 报表迁移清空（`D-387`）。**有名字却读不出来**的缺席由
+/// 报表迁移清空。**有名字却读不出来**的缺席由
 /// [`capability_views_column_follows_the_shared_manifest`] 与全装配 e2e 覆盖。
 #[test]
 fn unregistered_reports_are_absent_from_the_exit() {
@@ -433,7 +433,7 @@ fn unregistered_reports_are_absent_from_the_exit() {
 /// 实例级落点（`by_tier` / `axes` 三族）**没有 owner 时整条缺席**，与报表列同一降级语义。
 ///
 /// - `span` / `conation` / `autonomy` 的落点都由能力包在 `ReportDecl::fleet` 里声明
-///   （`D-387` / `D-488`）：本进程不链接它们 ⇒ 登记面没有 fleet 报表 ⇒ 读方既不猜
+///   （ / ）：本进程不链接它们 ⇒ 登记面没有 fleet 报表 ⇒ 读方既不猜
 ///   slot 也不猜落点，出口只有本插件自己的四格（`wals` / `sessions` / `turns` /
 ///   `fallbacks`）。空形状（零 / 空 / `null`）住 owner 那里，由 owner 的单测与
 ///   e2e（`e2e/cases/t36-autonomous-initiator.mjs` 读真实装配的
@@ -492,8 +492,8 @@ fn panel_matches_the_columns_it_describes() {
     let panel = panel_of(&got);
 
     // 分区：时延兜底 / 事实源 / 不变量 / 承诺，再加**能力视图**段
-    // （段数随登记面，不是本插件写死的常数——DE-025 D-221。技能段也是登记面的一段：
-    // `D-489` 起按 `slot` 取值，owner 缺席 ⇒ 整段不出现，本进程不链接它 ⇒ 四段）
+    // （段数随登记面，不是本插件写死的常数——DE-025。技能段也是登记面的一段：
+    //  起按 `slot` 取值，owner 缺席 ⇒ 整段不出现，本进程不链接它 ⇒ 四段）
     let expected_sections = 4 + usize::from(!expected_capability_view_names().is_empty());
     assert_eq!(
         panel.sections.len(),
@@ -577,7 +577,7 @@ fn panel_matches_the_columns_it_describes() {
     );
     assert!(panel.has_warn(), "有 warn 行 ⇒ `has_warn()` 为真");
 
-    // ④ 技能段：两格都是 skill 的报表（`D-489`），本进程不链接 owner ⇒ 整段缺席
+    // ④ 技能段：两格都是 skill 的报表，本进程不链接 owner ⇒ 整段缺席
     // （与实例级落点缺席同一条降级语义；值与排版在满装配由 e2e 对账）。
     assert!(
         panel
@@ -628,7 +628,7 @@ fn expected_capability_view_names() -> Vec<&'static str> {
     names
 }
 
-/// 能力视图列（D-387）：**键完全由报表登记面决定，本插件一个名字也不写**。
+/// 能力视图列：**键完全由报表登记面决定，本插件一个名字也不写**。
 ///
 /// 这一条判据盯的是「扩展不必改本插件」：登记面里多一条视图，列里就多一格，
 /// 而这个文件与 `stats_reading.rs` 都没有为此改过一行。
@@ -778,7 +778,7 @@ fn stats_recompute_equals_direct_apply() {
         .apply(&snap, i64::MAX, Budget::generous())
         .value;
 
-    // 报表列（就绪集 / 时延兜底 / 成本等）的口径与形状都归 owner（`D-387`）：本测试
+    // 报表列（就绪集 / 时延兜底 / 成本等）的口径与形状都归 owner：本测试
     // 进程不链接任何 owner ⇒ `reports()` 为空 ⇒ 这些键整条不出现。**数字**归 owner 的
     // 单测（`crates/symbio-plugin-task/src/readyset.test.rs`、
     // 时延能力包的判据用例、成本能力包的判据用例），
@@ -879,7 +879,7 @@ fn invariants_move_when_the_wal_changes() {
 ///    它们从分母 / 分子 / 样本里抹掉。
 ///
 /// 按布局分叉的第二个读法（只给窗口）因此不是「多一个选择」，而是把布局知识
-/// 交给每个调用方去挑——挑错还是静默的（[DE-001 §4.3](../../../docs/003-design/001-核心架构.md "DE-001-核心架构") 一源）。
+/// 交给每个调用方去挑——挑错还是静默的（[DE-001 §5](../../../docs/003-design/001-核心架构.md "DE-001-核心架构") 一源）。
 ///
 /// ## 反向自检
 ///
@@ -1163,7 +1163,7 @@ fn a_matrix_member_reads_shared_content_and_an_outsider_still_cannot() {
     std::fs::remove_dir_all(&dir).ok();
 }
 
-/// 声誉列**没有 owner** 时整条不出现（`D-387`）：本插件不再替 owner 补 `own` 行。
+/// 声誉列**没有 owner** 时整条不出现：本插件不再替 owner 补 `own` 行。
 ///
 /// 本测试二进制不链接声誉能力包（E-009）⇒ `reports()` 为空 ⇒
 /// `reputation` 这个键不存在。`own` 行的主体、配对规则与 as-of 都归 owner 的单测
@@ -1321,7 +1321,7 @@ fn commitments_column_exposes_each_delegation_record() {
     );
 
     // 面板那一份（人读的）与列同源：数字直接来自本列，不重算。
-    // 按标题找段而不是按位置：段集随登记面增减（`D-488` / `D-489`），位置不是契约。
+    // 按标题找段而不是按位置：段集随登记面增减（ / ），位置不是契约。
     let cm_section = got
         .panel
         .sections
@@ -1357,7 +1357,7 @@ fn commitments_column_exposes_each_delegation_record() {
     assert_eq!(denied.commitments["total"], 0);
 }
 
-/// 就绪集列**没有 owner** 时整条不出现（`D-387`）：折叠与容量套用都归任务能力包。
+/// 就绪集列**没有 owner** 时整条不出现：折叠与容量套用都归任务能力包。
 ///
 /// 本测试二进制不链接 `crates/symbio-plugin-task`（E-009）⇒ 报表 `readyset` 没有登记项
 /// ⇒ `readyset` 这个键不存在（读方不再猜 `{ready: [], cap}` 这份空形状）。在这里补一份
@@ -1426,7 +1426,7 @@ fn readyset_column_is_absent_when_no_owner_registers_it() {
     assert!(denied.has_wal, "has_wal 独立于可见域：文件在，只是不给你看");
 }
 
-/// 校准列**没有 owner** 时整条不出现（`D-387`）：折叠归技能能力包。
+/// 校准列**没有 owner** 时整条不出现：折叠归技能能力包。
 ///
 /// 本测试二进制不链接 `crates/symbio-plugin-skill`（E-009）⇒ `reports()` 为空 ⇒
 /// `calibration` 这个键不存在（读方不再猜 `{ by_skill: {} }` 这份空账）。
@@ -1474,7 +1474,7 @@ fn calibration_column_is_absent_when_no_owner_registers_it() {
     assert!(got.has_wal, "事实源在，账算不出来不改变这件事");
 }
 
-/// 技能编译两格已随 `D-489` 回 skill 能力包（报表 `slot = compiled_skills` /
+/// 技能编译两格已回 skill 能力包（报表 `slot = compiled_skills` /
 /// `skill_compile_enabled`）：本进程不链接 owner ⇒ 两格随报表列一起缺席。
 /// 「两种零分得开」的计数与开关判据移到 `crates/symbio-plugin-skill/src/decl.test.rs`
 /// ——数的是谁的格子、开关怎么读，都是 owner 的口径；读方不再抄标签、不再读配置。
@@ -1604,7 +1604,7 @@ fn transcript_column_surfaces_tool_rows() {
 // `crates/symbio/src/report_columns_acceptance.test.rs`（slot 集合 == 出口键集合）。
 
 /// 造一份只有 `usage` / `spend` 两格的报表表——这正是 [`usage_section`] 的全部入参
-/// （`D-452`：入参面不许比比较面宽）。
+/// （入参面不许比比较面宽）。
 fn reports_of(
     usage: Option<serde_json::Value>,
     spend: Option<serde_json::Value>,

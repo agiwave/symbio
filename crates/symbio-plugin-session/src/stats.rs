@@ -5,7 +5,7 @@
 //! 但**算得出 ≠ 读得到**——没有生产出口，投影只是「能算的函数」，三类收益
 //! 无法验收、回归也看不见。本模块就是那一格的读侧出口：出口形态②（只读路由）。
 //! 读数今天还多一族**能力视图**：键来自各能力包的报表登记（`ReportDecl.views`）、值由
-//! owner 自己的折叠算出，本插件只按登记取、不写任何视图名（`D-387`）——
+//! owner 自己的折叠算出，本插件只按登记取、不写任何视图名——
 //! 一项新能力登记一条视图，这一列就多一格，本文件不动一行。
 //!
 //! ## 两个文件的分工（判据：这一段错了谁会红）
@@ -30,11 +30,10 @@
 //!   扫描），本模块不拼路径、不开文件、不取令牌。存储层只读打开：不创建文件、
 //!   不截断撕裂尾行——截断是**写方**的恢复语义，读方顺手做会与正在落行的写方
 //!   撞车（append 模式下截断后剩下的字节接在新 EOF ⇒ 那一行静默损坏）
-//!   （[D-084](../../../docs/003-design/001-核心架构.md#d-084-能力模块公用基础协议上下文只递值事实只经引擎abcde-五类需要的唯一取得方式 "DE-001-核心架构")）。
 //! - **不重写视图类型**：口径住在 owner 那里——时延 / 兜底 / 跨度三列归能力包 `slo`、
 //!   成本列归能力包 `cost`（各自 `ViewDecl::eval`，`slo` 另有 `agg`），本插件按名字读
-//!   （`D-221`）并把值原样装进出口（`D-281`）；自主程度等仍是本插件 `projections/` 里的
-//!   纯折叠。core 只留共享投影词表，不再为会话读数占根出口（DE-025 D-221）。
+//!   并把值原样装进出口；自主程度等仍是本插件 `projections/` 里的
+//!   纯折叠。core 只留共享投影词表，不再为会话读数占根出口（DE-025 ）。
 //!
 //! ## as-of 口径
 //!
@@ -86,7 +85,7 @@ pub(crate) struct TierRow {
     pub samples: usize,
 }
 
-/// 会话级读数（四列同源，D-044）。
+/// 会话级读数（四列同源）。
 #[derive(Debug, Clone, PartialEq, Serialize)]
 pub(crate) struct SessionStats {
     /// 会话 id。
@@ -94,7 +93,7 @@ pub(crate) struct SessionStats {
     /// 事实源在不在。不在 = 这个会话还没跑过一轮，全零读数是**有据的零**，
     /// 不是错误（读方不该为了读而创建文件）。
     pub has_wal: bool,
-    /// **报表列**（`D-387`）：键 = 报表登记的 `slot`，值 = owner 的 `render` 交出的
+    /// **报表列**：键 = 报表登记的 `slot`，值 = owner 的 `render` 交出的
     /// 整条读数。
     ///
     /// ## 键由登记表决定
@@ -111,7 +110,7 @@ pub(crate) struct SessionStats {
     /// `capability_views` 的可诊断缺席说明原因；读方不替 owner 猜空形状。
     #[serde(flatten)]
     pub reports: std::collections::BTreeMap<String, serde_json::Value>,
-    // 用量与金额两列已随写方走（`D-461`）：`model` 写 `response.usage` /
+    // 用量与金额两列已随写方走：`model` 写 `response.usage` /
     // `response.spend`，折叠也归它；本出口按 `slot`（`usage` / `spend`）从
     // [`Self::reports`] 收，不再持有这两本账。两列的口径与空形状见
     // `crates/symbio-plugin-model/src/ledger.rs`。
@@ -156,7 +155,7 @@ pub(crate) struct SessionStats {
     /// 读的是**事实源本身**（`user.message` / `chat.assistant.final` /
     /// `chat.assistant.fallback` / `artifact.added` 四格——最后一格是工具结果），
     /// 不是会话存储里的消息副本——同一份事实既喂模型（`Reasoner` 组 prompt 的输入）
-    /// 又能从这里读回，D-044 的「实测与判据同源」。
+    /// 又能从这里读回 的「实测与判据同源」。
     ///
     /// 归**四列**那一族（同切片、同 as-of、`may_read = false ⇒ 空切片` ⇒
     /// `{ entries: [] }`），不取声誉列的空对象形态：对话为空与「不给你看」由 `has_wal`
@@ -165,7 +164,7 @@ pub(crate) struct SessionStats {
     /// 逐条可见域（「这条是谁说的」）不在这里过滤：本列只有**整列**闸（`may_read`），
     /// 与其余各列同款。
     pub transcript: serde_json::Value,
-    /// **能力视图**（DE-025 D-221）：别的插件公开的视图，按名字读出来的原样值。
+    /// **能力视图**（DE-025 ）：别的插件公开的视图，按名字读出来的原样值。
     ///
     /// ## 为什么这一列没有写死的键名
     ///
@@ -181,7 +180,7 @@ pub(crate) struct SessionStats {
     /// 未冻结 / 已声明但没实现分别报 `not_sealed` / `unknown`
     /// （词表在 `ViewUnavailable::reason`），不折叠成空值——「没算出来」与「算出来是空」
     /// 必须分得开（与 `usage.calls` 同一条纪律）。读侧没有「超预算」这一态：切片给多长
-    /// 就折多长，`cost` 只约束环内窗口求值（`D-284`）。
+    /// 就折多长，`cost` 只约束环内窗口求值。
     ///
     /// 归**四列**那一族：与其余各列同一份切片、同一个 as-of；`may_read = false`
     /// ⇒ 空切片 ⇒ 各视图读到「有据的空」，由 `has_wal` 与缺席态分辨。
@@ -191,7 +190,7 @@ pub(crate) struct SessionStats {
     /// ## 为什么读数也要一份描述
     ///
     /// 「这些数是什么意思、该叫什么、单位与精度怎么取」只有**产者**知道。前端自己
-    /// 拼就等于把口径抄进第二处（D-044 的反面），而读数一改，抄本不报错、只静静
+    /// 拼就等于把口径抄进第二处（反面），而读数一改，抄本不报错、只静静
     /// 显示旧标签。故本字段由 `panel_of` 从**上面各列已算出的值**生成——
     /// 前端只按 [`ReadingPanel`] 排版，不解析任何会话/统计语义。
     ///
@@ -222,8 +221,8 @@ pub(crate) struct SessionStats {
     ///
     /// 上面每一列回答「**这一个会话**怎么样」；本列回答「**整个实例**怎么样」——
     /// 口径是把本插件目录下**所有**会话的 WAL 各读一遍，再交给能力包 `slo` 的
-    /// `ViewDecl::agg` 合并（`D-281`）。分子分母与分位数因此与单会话列**逐字同一套
-    /// 口径**（D-044：实测与判据同源），本处不另写一套统计，也不认识交回来的形状。
+    /// `ViewDecl::agg` 合并。分子分母与分位数因此与单会话列**逐字同一套
+    /// 口径**（实测与判据同源），本处不另写一套统计，也不认识交回来的形状。
     ///
     /// ## 为什么这不是「多一份真相」
     ///
@@ -243,10 +242,10 @@ pub(crate) struct SessionStats {
 
 /// 读一个会话的事实源，出四列读数 + 校准 / 声誉 / 就绪集 / 转写四列 + 不变量清单 + 承诺列，
 /// 再加一列**能力视图**：按各能力包公开的清单逐条经 `symbio_platform::sdk::plugin::views` 读，
-/// 本插件不写任何视图名（DE-025 D-221）。
+/// 本插件不写任何视图名（DE-025 ）。
 ///
 /// 纯读：不写文件、不改网格、不碰会话存储（消息 / 转写）。事实由存储层以**值**
-/// 交回（[D-084](../../../docs/003-design/001-核心架构.md#d-084-能力模块公用基础协议上下文只递值事实只经引擎abcde-五类需要的唯一取得方式 "DE-001-核心架构")）：`snapshot` 是本会话
+/// 交回：`snapshot` 是本会话
 /// 完整史（含归档前缀），`deep_facts` 是部署级快照的**惰性取数**——只有读方有权
 /// 看时才调用（`may_read` 由本函数**单点**判定，见下）。
 ///
@@ -296,14 +295,14 @@ pub(crate) fn read(
     let snapshot = if may_read { snapshot } else { Vec::new() };
 
     // 报表读侧的公共上下文：两格都由本调用方给定，owner 的 `render` 只消费、不反查
-    // （`D-387`）。可见域整列判一次的口径不变，`readable` 只是把同一个答案告诉 owner。
-    // 容量不在上下文里（`D-490`）：它是本轮配置事实，owner 的求值口从自己的切片读。
+    //。可见域整列判一次的口径不变，`readable` 只是把同一个答案告诉 owner。
+    // 容量不在上下文里：它是本轮配置事实，owner 的求值口从自己的切片读。
     let report_ctx = symbio_plugin_api::reports::ReportCtx {
         principal: session_principal,
         readable: may_read,
     };
 
-    // 报表列（`D-387`）：`symbio_plugin_api::reports::read_all` 遍历已链接的报表登记，
+    // 报表列：`symbio_plugin_api::reports::read_all` 遍历已链接的报表登记，
     // 一次读出全部列。键 = 登记的 `slot`，`SessionStats::reports` 用 `#[serde(flatten)]`
     // 把它们抬到出口顶层——本插件不列任何列名、不认识任何一列的形状，加一条报表就多
     // 一格。登记表不合法时整批缺席并出声；「某一列算不出来」由 owner 的 `render` 交
@@ -312,12 +311,12 @@ pub(crate) fn read(
 
     // 以下各列仍由本插件折叠与排版（口径在本插件投影与能力包视图）。
     // 断点列读 `checkpoint` 投影；用量与金额两列不在这里——它们是 `model` 的报表
-    // （`D-461`），随 `reports` 一起到。
+    //，随 `reports` 一起到。
     let ck = checkpoint().read_all(&snapshot).value;
 
     let checkpoint = serde_json::to_value(&ck)
         .map_err(|e| PluginError::InternalError(format!("断点序列化失败：{e}")))?;
-    // 不变量清单的词汇面（DE-024 D-203）：判据问「这个名字扮演什么角色」，答案取自
+    // 不变量清单的词汇面（DE-024 ）：判据问「这个名字扮演什么角色」，答案取自
     // owner 交来的装配表；本二进制没装出表时用清单生成物（`symbio_plugin_api::vocab`）。
     let vocab = symbio_plugin_api::vocab();
     let invariants = serde_json::to_value(check_all(vocab, &snapshot))
@@ -339,7 +338,7 @@ pub(crate) fn read(
     .map_err(|e| PluginError::InternalError(format!("转写序列化失败：{e}")))?;
 
     // 实例级聚合列：owner 在 `ReportDecl::fleet` 里声明落点，读侧按登记求值、按登记
-    // 落格（`D-488`）。`may_read = false` 时**不扫**（扫遍实例再报「不给你看」是白花
+    // 落格。`may_read = false` 时**不扫**（扫遍实例再报「不给你看」是白花
     // 代价）：交空快照，owner 的 `agg(&[])` 交有据的零 / 空——空形状住 owner 那里
     // （与单会话列同一条），读方不再替 owner 猜形状。
     let fleet = fleet_reading(
@@ -347,7 +346,7 @@ pub(crate) fn read(
         &report_ctx,
     );
 
-    // 能力视图列（DE-025 D-221）：遍历**公开清单**，逐条经 plugin-api 的读口求值。
+    // 能力视图列（DE-025 ）：遍历**公开清单**，逐条经 plugin-api 的读口求值。
     // 本插件不认识任何具体视图名——名字、版本、成本与求值函数都在 owner 的声明里；
     // 新能力包公开一条视图，这里就多一格，不动本文件。
     let capability_views = capability_views(&snapshot);
@@ -415,8 +414,8 @@ impl SessionPlugin {
             Some(agent) => symbio_plugin_api::principal_of(Some(&agent)),
             None => symbio_platform::sdk::authz::request_principal(ctx.as_ref()),
         };
-        // 能力方贡献的配置键（`D-427`：技能编译开关归 `skill`、就绪集容量归 `task`）
-        // 都由 owner 自己读——`D-489` 起开关按报表列交值，`D-490` 起容量在 owner 的
+        // 能力方贡献的配置键（技能编译开关归 `skill`、就绪集容量归 `task`）
+        // 都由 owner 自己读—— 起开关按报表列交值， 起容量在 owner 的
         // 求值口从事实切片读，本处不再替任何能力搬运配置。
         let stats = read(
             &sid,

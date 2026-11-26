@@ -70,7 +70,7 @@ impl From<NativeMessage> for ChatNode {
             delta: None,
             status: Some(symbio_plugin_api::chat_node::NodeStatus::Completed),
             meta: None,
-            // 读数行只在交付出口的呈现装配里出现，消息本体不带（[D-111]）。
+            // 读数行只在交付出口的呈现装配里出现，消息本体不带。
             stats: None,
             timestamp: Some(msg.timestamp),
             seq: msg.seq,
@@ -189,7 +189,7 @@ impl NativeMessage {
 
         if let Some(ref tool_calls) = self.tool_calls {
             // 历史 `tool_calls` 的 name 本来就是模型发出的 wire 名（回灌），字符集已在
-            // 投影时落定，这里原样回灌（D-469）：`to_api_value` 拿不到本轮
+            // 投影时落定，这里原样回灌：`to_api_value` 拿不到本轮
             // tools/aliases 上下文，再投影一次只会多一处字符集规则，而请求形状不变。
             let api_tool_calls: Vec<serde_json::Value> = tool_calls
                 .iter()

@@ -85,7 +85,7 @@ fn snapshot_node(id: &str) -> symbio_plugin_api::chat_node::ChatNode {
 /// 一次「收束」级别的写入：取现有切片 → 按当前轮号入格。
 /// `round` 每调一次递增（与真实桥的行为同形：一轮一格）。
 ///
-/// 走的是**生产那条通路**（DE-025 D-207）：拼一次调用的纯值 → 交效果端口问
+/// 走的是**生产那条通路**（DE-025 ）：拼一次调用的纯值 → 交效果端口问
 /// 能力包要草稿 → 经唯一写入口落格。测试因此同时钉住两件事：任务的成格判据，
 /// 以及「这条效果确实由 `task_table` 的声明选出来」。
 fn write_all(store: &EventStore, round: u64, decls: &[Decl]) {
@@ -436,12 +436,12 @@ fn prompt_section_is_absent_when_nothing_is_ready() {
     );
 }
 
-/// **压缩不缩小就绪集**（[DE-001 §4.3](../../../docs/003-design/001-核心架构.md "DE-001-核心架构") 一源）：
+/// **压缩不缩小就绪集**（[DE-001 §5](../../../docs/003-design/001-核心架构.md "DE-001-核心架构") 一源）：
 /// 任务开在压缩之前 ⇒ 调度段仍要念得出它。就绪集是**状态**口径
 /// （「压缩前开的、还没做完」= 现在还没做完），不是「最近没被取代的那些事件」。
 ///
 /// 存储层归档（被取代的前缀移进归档段）不改变 `Store::range` 的「完整史」语义
-/// （[D-085](../../symbio-plugin-session/README.md#d-085-压缩取代的是消息列表不是轮次生命周期恢复锚读完整史归档刀口不动 "crates/symbio-plugin-session/src/README")；归档自身的判据在
+/// （归档自身的判据在
 /// `session::store::wal.test.rs`）。本用例因此只需一份「较早任务格 + 较晚快照」的完整史。
 ///
 /// **反向自检**：把 [`prompt_section`] 的切片换成「从最新快照起自切窗口」
@@ -483,7 +483,7 @@ fn a_ready_task_survives_the_snapshot_boundary() {
     );
 }
 
-// ── 调度者与租约（D-189：实现随唯一消费方住本插件） ──
+// ── 调度者与租约（实现随唯一消费方住本插件） ──
 
 /// 开一个任务（载荷 `{ task_id, depends_on, goal }`）——生产写方见本模块 `TaskTable`。
 fn open_task(store: &EventStore, id: &str, depends_on: &[&str], actor: &str) {
@@ -625,7 +625,7 @@ fn a_spec_without_assign_work_writes_nothing() {
     );
 }
 
-// ==================== 效果端口：任务表这条效果自己交出草稿（DE-025 D-207） ====================
+// ==================== 效果端口：任务表这条效果自己交出草稿（DE-025 ） ====================
 //
 // 判据四条，各钉一条反向：**只认成功的调用**（失败没改清单）、**参数形状容错**
 // （缺 `todos` / 空 `content` 不是一份清单）、**同一轮两次声明互不重开**（`applied`
@@ -831,7 +831,7 @@ fn event_ids_stay_unique_across_two_calls_in_one_turn() {
     assert_eq!(ids.len(), before, "幂等键撞了 ⇒ 第二条被存储静默丢掉");
 }
 
-// ==================== 写侧判断（DE-033 §3 / DE-025 D-219） ====================
+// ==================== 写侧判断（DE-033 §3 / DE-025 ） ====================
 //
 // 判据住在**本插件的 `TaskTable::before`**：工具声明 `task_table`，宿主把批首读好的
 // 主体交进来，本实现只答「这个主体能不能写」。名字与主体的匹配在 `ToolDecls`
@@ -911,7 +911,7 @@ fn producer_only_principals_are_refused_the_task_table() {
     }
 }
 
-/// 未绑定登记的主体在合流面没有行 ⇒ 拒（[D-099] 未登记 = 拒、[D-100] 绑定登记前
+/// 未绑定登记的主体在合流面没有行 ⇒ 拒（ 未登记 = 拒、 绑定登记前
 /// 没有行）。本用例直读合流面、不经过装配点绑定：忘配 / 忘绑的后果是一条会被看见的
 /// 拒绝，不是一次静默超权。
 #[test]
@@ -923,11 +923,11 @@ fn an_unbound_subagent_is_refused_the_task_table() {
     ));
 }
 
-// ==================== 收束贡献：调度不再由宿主代劳（DE-025 D-250） ====================
+// ==================== 收束贡献：调度不再由宿主代劳（DE-025 ） ====================
 //
 // 三条判据：只走生成轮（答话轮没有新声明）、事件号与归属由能力拼出
 // （`t3-s{n}` / 调度者 / 本轮开口格）、以及信封（`round` / `ts`）不进端口——
-// 草稿交出去时不带信封，由宿主的写口盖章（D-252）。
+// 草稿交出去时不带信封，由宿主的写口盖章。
 
 /// 一条已就绪的任务 + 本轮开口格。
 fn contributor_history(store: &EventStore) -> (u64, Vec<Event>) {
@@ -989,7 +989,7 @@ fn the_contributor_lands_ready_and_assigned_on_a_generated_turn() {
     }
 }
 
-/// 信封不进端口：草稿交出来时 `round` / `ts` 都是 0，由宿主写口盖章（D-252）。
+/// 信封不进端口：草稿交出来时 `round` / `ts` 都是 0，由宿主写口盖章。
 #[test]
 fn the_draft_carries_no_envelope() {
     let store = EventStore::new();
@@ -999,7 +999,7 @@ fn the_draft_carries_no_envelope() {
         PRINCIPAL_SCHEDULER.to_string(),
         ScheduleContributor.contribute(&at)[0].fact.clone(),
     );
-    assert_eq!(event.ts, 0, "草稿不带时刻：信封由写口盖（D-252）");
+    assert_eq!(event.ts, 0, "草稿不带时刻：信封由写口盖");
     assert_eq!(event.actor, PRINCIPAL_SCHEDULER);
 }
 

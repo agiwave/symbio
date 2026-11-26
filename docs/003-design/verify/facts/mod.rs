@@ -1,13 +1,13 @@
 // 生成物：由 `scripts/gens/gen-verify-facts.mjs` 从 docs/003-design（核心架构 / 坐标系 / 能力阶梯）抽取，**不要手改**。
-// 要改这些数据就改文档（DE-001 §8 / 02 坐标系 / 阶梯总表 / 各阶 §3·§4 / DE-040 §2），再重跑生成脚本。
+// 要改这些数据就改文档（DE-001 §9 / 02 坐标系 / 阶梯总表 / 各阶 §3·§4 / DE-040 §2），再重跑生成脚本。
 //
 // 每个 verify 程序都是一个**独立的 crate**，各自只 `use` 下面的一部分；
 // 没被某个程序读到的那些不是死码，是另一个程序在读。这里判死码只会制造噪音，
-// 所以整模块关掉这条 lint。模块里唯一的逻辑是 §8 取值域语法的 Rust 镜像（`in_domain`）——
+// 所以整模块关掉这条 lint。模块里唯一的逻辑是 §9 取值域语法的 Rust 镜像（`in_domain`）——
 // 它必须只有一份：判据抄进第二个程序，同一个输入就可能只翻红一处。
 #![allow(dead_code)]
 
-/// DE-001 §8 的顶层机制键（`projection.param` 这类子键不计，判据见生成器注释）
+/// DE-001 §9 的顶层机制键（`projection.param` 这类子键不计，判据见生成器注释）
 pub const MECHANISMS: &[&str] = &[
     "store",
     "projection",
@@ -21,7 +21,7 @@ pub const MECHANISMS: &[&str] = &[
     "principal",
 ];
 
-/// DE-001 §8 参数表里登记的全部键（含子键）——赋值块的合法词表
+/// DE-001 §9 参数表里登记的全部键（含子键）——赋值块的合法词表
 pub const PARAM_KEYS: &[&str] = &[
     "store",
     "projection",
@@ -36,7 +36,7 @@ pub const PARAM_KEYS: &[&str] = &[
     "principal",
 ];
 
-/// DE-001 §8 一行的**取值域**。`open` = 表里写成 `*` 的开放值域（数据，不判取值）；
+/// DE-001 §9 一行的**取值域**。`open` = 表里写成 `*` 的开放值域（数据，不判取值）；
 /// `forms` 里的 `<…>` 是通配段（`child:<id>` 匹配任何 `child:x`），标了 `↳ §N` 的
 /// 集合已由生成器从那张表读成逐项形态。
 pub struct Domain {
@@ -58,7 +58,7 @@ pub const DOMAINS: &[Domain] = &[
     },
     Domain {
         key: "projection.param",
-        forms: &["consolidate:max_gen=<n>", "consolidate:min_fidelity=<f>", "recall:tag=<label>", "recall:density=<n>", "recall:layer=<n>", "recall:spread=on", "recall:decay=<fn>", "recall:min_generality=<0–4>", "readyset:cap=<n>", "conation:pref=<p>"],
+        forms: &["consolidate:max_gen=<n>", "consolidate:min_fidelity=<f>", "recall:tag=<label>", "recall:density=<n>", "recall:layer=<n>", "recall:spread=on", "recall:decay=<fn>", "recall:min_generality=<0–4>", "readyset:cap=<n>"],
         open: false,
     },
     Domain {
@@ -103,13 +103,13 @@ pub const DOMAINS: &[Domain] = &[
     },
 ];
 
-/// DE-001 §8 取值域语法的 Rust 镜像（本生成物里唯一的逻辑，供各 verify 程序共用——
+/// DE-001 §9 取值域语法的 Rust 镜像（本生成物里唯一的逻辑，供各 verify 程序共用——
 /// 判据抄两份，同一个输入就可能只翻红一处）。三条放行路径：
-/// ① 键是**开放值域**（§8 那格写 `*`，如 `principal` = 身份是数据）；
+/// ① 键是**开放值域**（§9 那格写 `*`，如 `principal` = 身份是数据）；
 /// ② 值匹配该键的某个形态（`<…>` 是通配段：`child:<id>` 匹配任何 `child:x`）；
 /// ③ **带子键参数的取值**——`projection = recall:tag=judgment` 合法的条件是「`recall`
 ///    是 `projection` 的取值」**且**「整串是 `projection.*` 某个子键的取值」。
-/// ③ 的判据是「§8 里登记了 `key.*` 这一行」，不是「这一格恰好叫 projection」。
+/// ③ 的判据是「§9 里登记了 `key.*` 这一行」，不是「这一格恰好叫 projection」。
 pub fn form_matches(form: &str, v: &str) -> bool {
     match (form.find('<'), form.find('>')) {
         (Some(i), Some(j)) if j > i => {
@@ -121,13 +121,13 @@ pub fn form_matches(form: &str, v: &str) -> bool {
     }
 }
 
-/// §8 里这个键的值域行。键没登记时返回 `None`——那不是越界**取值**，是越界**键**，
+/// §9 里这个键的值域行。键没登记时返回 `None`——那不是越界**取值**，是越界**键**，
 /// 由调用方按自己问的那个问题分辨（同一处红不该有两种说法）。
 pub fn domain_of(key: &str) -> Option<&'static Domain> {
     DOMAINS.iter().find(|d| d.key == key)
 }
 
-/// 赋值 `key = value` 是否落在 DE-001 §8 声明的值域内；键没登记 ⇒ 判不了 ⇒ false。
+/// 赋值 `key = value` 是否落在 DE-001 §9 声明的值域内；键没登记 ⇒ 判不了 ⇒ false。
 pub fn in_domain(key: &str, value: &str) -> bool {
     let Some(d) = domain_of(key) else { return false };
     if d.open || d.forms.iter().any(|f| form_matches(f, value)) {
@@ -142,7 +142,7 @@ pub fn in_domain(key: &str, value: &str) -> bool {
         })
 }
 
-/// DE-008 §2 的五维（名册「维」列的合法取值）
+/// DE-008 §1 的五维（名册「维」列的合法取值）
 pub const DIMENSIONS: &[&str] = &[
     "知",
     "行",
@@ -151,7 +151,7 @@ pub const DIMENSIONS: &[&str] = &[
     "欲",
 ];
 
-/// DE-008 §3 的五轴（名册「轴」列的合法取值）
+/// DE-008 §2 的五轴（名册「轴」列的合法取值）
 pub const AXES: &[&str] = &[
     "主动性",
     "时域跨度",
@@ -160,7 +160,7 @@ pub const AXES: &[&str] = &[
     "自主程度",
 ];
 
-/// DE-008 §3 每条轴的**极性**：它要求什么性质、禁止什么性质。判据（`axis_orthogonality.rs`）：
+/// DE-008 §2 每条轴的**极性**：它要求什么性质、禁止什么性质。判据（`axis_orthogonality.rs`）：
 /// 要求与禁止都相同 ⇒ 同一条轴（必须合并）；A 的要求命中 B 的禁止 ⇒ 两条轴互相抵消。
 #[derive(Clone, Copy)]
 pub struct AxisPolarity {
@@ -197,7 +197,7 @@ pub const AXIS_POLARITIES: &[AxisPolarity] = &[
     },
 ];
 
-/// DE-008 §3.1 刻度表的**列数** = 等级的格数（L1..Ln）。名册「等级」列的上界取自这里，
+/// DE-008 §2.1 刻度表的**列数** = 等级的格数（L1..Ln）。名册「等级」列的上界取自这里，
 /// 程序不写死「四级」——刻度加一级而判据不动，新一级就静默落在判据之外。
 pub const LEVEL_MAX: usize = 4;
 
@@ -215,7 +215,7 @@ pub const CAPABILITY_STATUSES: &[&str] = &[
     "planned-unspecified",
 ];
 
-/// DE-008 §3.2 天梯每一级的「核心能力」——必须逐条是名册里**该级**的行
+/// DE-008 §2.2 天梯每一级的「核心能力」——必须逐条是名册里**该级**的行
 pub struct TierCore {
     pub tier: usize,
     pub names: &'static [&'static str],
@@ -256,16 +256,16 @@ pub const TIER_CORES: &[TierCore] = &[
     },
 ];
 
-/// DE-008 §3.3 的共线规则：同一对轴在多少阶里同时被抬起算**超限**（上限是判断，写在文档里）
+/// DE-008 §2.3 的共线规则：同一对轴在多少阶里同时被抬起算**超限**（上限是判断，写在文档里）
 pub const OVERLAP_LIMIT: usize = 4;
 
-/// DE-008 §3.3 登记的超限轴对与它声明的阶数——**声明**，与程序算出的同集合才对
+/// DE-008 §2.3 登记的超限轴对与它声明的阶数——**声明**，与程序算出的同集合才对
 pub const DECLARED_OVERLAP: &[(&str, &str, usize)] = &[
     ("时域跨度", "抽象层级", 5),
     ("抽象层级", "自我模型精度", 5),
 ];
 
-/// DE-008 §3.1 天梯的最高级——名册「天梯」列的取值上界
+/// DE-008 §2.1 天梯的最高级——名册「天梯」列的取值上界
 pub const TIER_MAX: usize = 8;
 
 /// DE-008 §6.1 名册的一行——坐标系审计的**输入**（全仓唯一一份能力名册就在文档里）
@@ -828,7 +828,7 @@ pub const CAPABILITIES: &[Capability] = &[
     },
 ];
 
-/// DE-008 §2「条数」列的**声明**——由名册算出后被验的结论，不是输入
+/// DE-008 §1「条数」列的**声明**——由名册算出后被验的结论，不是输入
 pub const DECLARED_DIM_COUNTS: &[(&str, usize)] = &[
     ("知", 10),
     ("行", 13),
@@ -837,15 +837,15 @@ pub const DECLARED_DIM_COUNTS: &[(&str, usize)] = &[
     ("欲", 7),
 ];
 
-/// DE-008 §5 表里的伪高阶说法——词表本体在文档，程序不再抄第二份
+/// DE-008 §4 表里的伪高阶说法——词表本体在文档，程序不再抄第二份
 pub const PSEUDO: &[&str] = &[
-    "工具数量多",
+    "工具数量更多",
     "上下文更长",
     "反应更快",
     "支持更多模型",
-    "能跑很久",
+    "能运行更久但每步请示",
     "会写代码",
-    "加了护栏 / 加了仪表盘",
+    "增加护栏或仪表盘",
 ];
 
 /// DE-008 §6.2 声明的空格子（生长位）——必须与名册算出的空格子**同集合**
@@ -859,7 +859,7 @@ pub const DECLARED_GROWTH: &[(&str, &str)] = &[
     ("省", "主动性"),
 ];
 
-/// DE-008 §7 声明的社会性能力（名 → 提升的轴）——名册里那些行的声明
+/// DE-008 §6.3 声明的社会性能力（名 → 提升的轴）——名册里那些行的声明
 pub const DECLARED_SOCIAL: &[(&str, &str)] = &[
     ("对等协商", "抽象层级"),
     ("跨体承诺", "时域跨度"),
@@ -1106,7 +1106,7 @@ pub const STAGE_DOCS: &[StageDoc] = &[
             ("actor.pattern", "decider"),
             ("actor.budget_ms", "86400000"),
         ],
-        fallback: ("event.entity", "scope"),
+        fallback: ("actor.budget_ms", "60000"),
     },
     StageDoc {
         id: "S13",
@@ -1127,7 +1127,7 @@ pub const STAGE_DOCS: &[StageDoc] = &[
 pub struct CognitiveDemand {
     pub id: &'static str,
     pub name: &'static str,
-    /// 落在 DE-001 §8 的哪些`(键, 取值)`上；**空 = 这条需求不占参数面**（文档里以 `—` 写明）
+    /// 落在 DE-001 §9 的哪些`(键, 取值)`上；**空 = 这条需求不占参数面**（文档里以 `—` 写明）
     pub assignments: &'static [(&'static str, &'static str)],
     /// 这条需求的落点在哪一阶——认知体系横跨多阶，不是单独一阶
     pub stage: &'static str,

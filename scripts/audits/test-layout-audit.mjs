@@ -133,7 +133,7 @@ for (const rootSpec of ROOTS) {
   for (const tf of testFiles) {
     const base = path.basename(tf)
     const dir = path.dirname(tf)
-    // crate 根测试模块的宿主：旧布局是 `mod.rs`，crate 化后根文件是 `lib.rs`（D-191）。
+    // crate 根测试模块的宿主：旧布局是 `mod.rs`，crate 化后根文件是 `lib.rs`（）。
     // 文件模块 `X.rs` 的测试放在 `X/tests.rs`（Rust 默认的模块目录解析），
     // 此时宿主是 `X.rs` 而不是 `X/mod.rs`——漏掉这种形状会把合法布局判成孤儿。
     const parentModule = path.join(dir, '..', `${path.basename(dir)}.rs`)

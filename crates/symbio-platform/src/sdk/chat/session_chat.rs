@@ -14,7 +14,7 @@ pub struct Request {
     /// 随每次发送携带；为空时回退会话 `metadata.provider_id`（默认 `none` = 用默认 Provider）。
     /// 与 `sandbox_id` 是**完全对称**的两条链：`req > session.metadata > 默认`
     /// （`crates/symbio-plugin-session/src/store/layout.rs::resolve_session_params`）。
-    /// 这条回退是 [D-066](../../../../../docs/003-design/012-会话输入与地址.md#d-066-输入面退役的前置条件解除地址写入不承载运行选项三项运行参数已有会话-metadata-回退协议面不必变宽 "DE-012-会话输入与地址") 的前提——
+    /// 这条回退是  的前提——
     /// 「地址写入不承载运行选项」正靠它成立，故它同时是一条不变量。
     #[serde(skip_serializing_if = "Option::is_none")]
     pub provider_id: Option<String>,
@@ -23,7 +23,7 @@ pub struct Request {
     /// - `Some(false)`：本次发送不加载历史会话信息
     #[serde(default, skip_serializing_if = "Option::is_none")]
     pub include_history: Option<bool>,
-    /// 会话选中的沙箱档案 id（裁决 B / D-531）：前端选项栏**只呈现本项**（原
+    /// 会话选中的沙箱档案 id（裁决 B / ）：前端选项栏**只呈现本项**（原
     /// `mode` / `risk_level` 两项已并入沙箱档案，不再向用户展示）。装配期经沙箱
     /// 句柄按本 id 解析出审批参数写回 ctx。
     /// 随每次发送携带；为空时回退会话 `metadata.sandbox_id`。
@@ -36,8 +36,8 @@ pub struct Request {
     /// 存量兼容字段（见 `mode`）。
     #[serde(default, skip_serializing_if = "Option::is_none")]
     pub risk_level: Option<String>,
-    /// 入站请求的**来源主体**（[DE-001 §12.2](../../../../../docs/003-design/001-核心架构.md "DE-001-核心架构")
-    /// 跨体承诺的「向谁宣告」，[D-067](../../../../../docs/003-design/011-Agent目录规范.md#d-067-产物收束的不变量面c4-认产物格closure_denied-数产物恢复锚刻意不认三处口径一次说清 "DE-011-Agent目录规范")）。
+    /// 入站请求的**来源主体**（[DE-001 §12](../../../../../docs/003-design/001-核心架构.md "DE-001-核心架构")
+    /// 跨体承诺的「向谁宣告」）。
     ///
     /// 完整主体名（如 `agent:main`）——**谁把这条消息交进来**。它不是「以谁的身份
     /// 跑轮」（那是 `agent_id` ⇒ 会话主体），而是「这条入站消息的出处」：轮末
@@ -69,7 +69,7 @@ pub struct Request {
 /// `remove` / `reset` / `warn`），后来收敛成只剩一个变元的 `Change`。两者都已
 /// 删除：**帧就是一条 [`ChatNode`]**（线协议上曾叫 `NodeEvent` =
 /// `{ session_id, seq, message }`，那层包装与承载它的转写流已于 2026-09-23
-/// 随 D-025 一并退役——消息变更改走 `VdfsChange`）。
+///  一并退役——消息变更改走 `VdfsChange`）。
 ///
 /// 原来那层枚举只是在重复 `ChatNode` 已经有的字段：
 ///

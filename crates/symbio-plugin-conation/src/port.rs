@@ -1,9 +1,9 @@
-//! `conation` 端口的执行面：把一条「欲」升格成 `task.opened`（DE-042 / `D-385` / `D-386`）。
+//! `conation` 端口的执行面：把一条「欲」升格成 `task.opened`（DE-042 /  / ）。
 //!
 //! ## 谁判、谁写
 //!
 //! 欠不欠在 [`crate::debt`] 判（开关 / 授权 / 已声明）；本文件是那一笔债的**动作点**：
-//! 执行体自判授权并交 [`AuthzVerdict`]（`D-385` 的「环不判、能力自判」），通过后把
+//! 执行体自判授权并交 [`AuthzVerdict`]（「环不判、能力自判」），通过后把
 //! `task.opened` 作为世界事实草稿交给宿主的唯一写口。
 //!
 //! ## 编译期唯一出口
@@ -65,7 +65,7 @@ struct PromoteExecutor;
 #[async_trait]
 impl PortExecutor for PromoteExecutor {
     async fn execute(&self, ctx: PortExecContext, input: PortInput) -> PortOutcome {
-        // 执行体自判（`D-385`）：不表态在类型上不可表达——`Denied` 总要带理由。
+        // 执行体自判：不表态在类型上不可表达——`Denied` 总要带理由。
         if !crate::debt::authorized() {
             return PortOutcome::denied(UNAUTHORIZED);
         }

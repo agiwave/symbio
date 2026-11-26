@@ -7,7 +7,7 @@ use super::{
     web_search::WebSearchTool,
 };
 // 审批闸门住在能力注册收口点（`sdk/collectors/approval.rs`）；本插件只交声明，
-// 不再有第二条路径去判闸（D-466）——`http_request` 声明 `High` 而「风险只是宣传语」
+// 不再有第二条路径去判闸——`http_request` 声明 `High` 而「风险只是宣传语」
 // 的第二个洞随 `route` 执行分支一起消失。
 use async_trait::async_trait;
 use std::sync::{Arc, Weak};
@@ -69,7 +69,7 @@ fn config_definition() -> DetailDefinition {
 ///
 /// 工具改形为 [`PortExecutor`] 后不再有 `Arc<dyn Capability>` 可藏；`traverse` 把
 /// 快照与执行体交给注册收口点（`register_tool`），闸门与行都在那里成形。本插件
-/// **不执行**工具——`route` 对工具名一律 `NotFound`（D-466）。
+/// **不执行**工具——`route` 对工具名一律 `NotFound`。
 ///
 /// 本插件全部工具都是**静态档**，故条目不持风险回答：动态覆写那一格随第二条执行面
 /// 一起消失，`register_tool` 一律收 `risk = None`（判定回落 `meta.effective_risk()`）。
@@ -220,7 +220,7 @@ impl Plugin for WebPlugin {
             }
         }
 
-        // 工具不再有第二条执行面（`D-440` / `D-466`）：执行只经 `port.tool` 契约，
+        // 工具不再有第二条执行面（ / ）：执行只经 `port.tool` 契约，
         // 闸门在注册收口点的 `GatedExecutor` 里。按工具名 `route` 一律 `NotFound`——
         // 保留父容器转发，是为了让本插件仍能代理挂在它下面的地址面。
         Err(PluginError::NotFound(format!("路径不存在: {path}")))

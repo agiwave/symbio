@@ -1,4 +1,4 @@
-//! 工具债：**一调用一笔**（D-378）——只问「有没有 `tool.call.requested` 这条标记」。
+//! 工具债：**一调用一笔**——只问「有没有 `tool.call.requested` 这条标记」。
 //!
 //! 模型执行体在一次带工具调用的往返里写一条 `tool.requested`（组织键）与 N 条
 //! `tool.call.requested`（逐调用标记，载荷 `{request_id, call_id}`）。本行按标记
@@ -34,7 +34,7 @@ impl DebtSource for ToolDebts {
         let mut owners: Vec<(&str, &str)> = Vec::new();
         // 同一请求内按 `calls[]` 顺序串一条**派发链**：后一笔的 `when_id` 绑前一笔的
         // `sent` 事实（环的「已派发」，按债 id 读），**不是**收束事实。等收束会让一笔
-        // `sent{deadline_ms:null}`（待批）堵住整条链，后面的调用永远选不到（D-378）；
+        // `sent{deadline_ms:null}`（待批）堵住整条链，后面的调用永远选不到；
         // 等派发只钉住首派次序，挂起的那笔不挡后面，重试 / 租约仍按笔计。
         //
         // 口径：读面是 `exists_id(kind, id)`，只比 `kind + key.id`，**不比 attempt**——

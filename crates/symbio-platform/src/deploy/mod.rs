@@ -174,7 +174,7 @@ pub const ASSEMBLY_SUB_AGENT_PLUGINS: &[&str] = &[
     "ui_prefs", // 界面偏好（外观 / 提示音 / 关于）的后端权威数据
 ];
 
-/// **核心插件**——默认装配且不可删除。这是注入 `REQUIRED_PLUGINS` 的唯一清单（D-520）。
+/// **核心插件**——默认装配且不可删除。这是注入 `REQUIRED_PLUGINS` 的唯一清单（）。
 #[rustfmt::skip]
 pub const ASSEMBLY_CORE_PLUGINS: &[&str] = &[
     "plugin_manager", // 插件管理与配置入口
@@ -200,7 +200,7 @@ pub const ASSEMBLY_CORE_PLUGINS: &[&str] = &[
     "ui_prefs", // 界面偏好（外观 / 提示音 / 关于）的后端权威数据
 ];
 
-/// **可选插件**——不默认装配，出现在插件市场里，安装后与核心插件同权（D-520）。
+/// **可选插件**——不默认装配，出现在插件市场里，安装后与核心插件同权（）。
 #[rustfmt::skip]
 pub const ASSEMBLY_OPTIONAL_PLUGINS: &[&str] = &[
     "heartbeat", // 心跳调度：会话空闲后自主开一轮（经地址面写会话收件箱，随每棵子树分形）

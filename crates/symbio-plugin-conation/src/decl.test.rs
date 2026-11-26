@@ -2,7 +2,7 @@
 //!
 //! 与实现**同级**分文件（`decl.rs` + 同级 `decl.test.rs`，见 `CONTRIBUTING.md`）。本文件钉
 //! 五件事：欲的**升格靠溯源认**（不是靠 goal 字符串）、**as-of** 口径、**无溯源的欲可读但
-//! 永不升格**（I2 边界）、**只声明升格过的那条**（不误伤同批的别的欲），以及 `D-281` 的
+//! 永不升格**（I2 边界）、**只声明升格过的那条**（不误伤同批的别的欲），以及  的
 //! 那一格——**单片与多片走同一条算式**。
 //!
 //! ## 为什么手工给 `seq`
@@ -173,7 +173,7 @@ fn adoption_rate_counts_unpromoted_intents_in_the_denominator() {
     assert_eq!(intents(&[], i64::MAX)["adoption_rate"], 0.0);
 }
 
-/// **`D-281` 的那一格**：N 片合成一个数走 owner 交的 `agg`，与单片同一条算式
+/// ** 的那一格**：N 片合成一个数走 owner 交的 `agg`，与单片同一条算式
 /// （分子分母可加、率在汇总值上重算），不是读方再折一遍。
 #[test]
 fn merge_aggregates_numerator_and_denominator() {
@@ -214,15 +214,11 @@ fn merging_nothing_is_a_zero_not_a_division() {
 /// 有事实没字段的，会判 `UndeclaredField`。两者都在装配期红，而这里让它们在**单测**里先红。
 ///
 /// 两种合法读法：本包的事实走 `FactDecl`（名字 + 字段都校验）；兄弟插件的事实族（任务族
-/// 没有 `FactDecl`）走 `D-282` 的第二种读法——名字必须在清单生成物 `SHARED_EVENTS` 里。
+/// 没有 `FactDecl`）走  的第二种读法——名字必须在清单生成物 `SHARED_EVENTS` 里。
 #[test]
 fn every_view_ships_both_halves_and_its_reads_are_declared() {
     for view in VIEWS {
-        assert!(
-            view.agg.is_some(),
-            "{}: 多片合并那一半必须交（D-281）",
-            view.name
-        );
+        assert!(view.agg.is_some(), "{}: 多片合并那一半必须交", view.name);
         for (fact, field) in view.reads {
             if let Some(decl) = FACTS.iter().find(|f| f.name == *fact) {
                 assert!(
@@ -235,7 +231,7 @@ fn every_view_ships_both_halves_and_its_reads_are_declared() {
                     symbio_plugin_api::events::SHARED_EVENTS
                         .iter()
                         .any(|e| e.name == *fact),
-                    "{}: reads 里的 {fact} 既不是本包事实，也不在共享事件表（D-282）",
+                    "{}: reads 里的 {fact} 既不是本包事实，也不在共享事件表",
                     view.name
                 );
             }
@@ -248,7 +244,7 @@ fn every_view_ships_both_halves_and_its_reads_are_declared() {
     }
 }
 
-// ==================== 自主程度列的报表登记（D-387） ====================
+// ==================== 自主程度列的报表登记 ====================
 
 fn report_ctx() -> symbio_plugin_api::reports::ReportCtx<'static> {
     symbio_plugin_api::reports::ReportCtx {
@@ -270,7 +266,7 @@ fn the_autonomy_report_hands_back_the_view_value_untouched() {
     assert_eq!(
         report.fleet,
         Some("axes.autonomy"),
-        "跨会话那一格由本包的 agg 合并（D-281）"
+        "跨会话那一格由本包的 agg 合并"
     );
 
     let sample = json!({ "closed": 3, "unattended": 2, "unattended_rate": 2.0 / 3.0 });

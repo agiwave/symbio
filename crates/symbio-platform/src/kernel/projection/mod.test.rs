@@ -12,7 +12,7 @@ fn ev(id: &str, kind: &str, verb: Verb, _turn: u64) -> Event {
 }
 
 /// 骨架投影：统计**交给它的事件**里某 kind 的条数（起的 `turnstate` 视图从
-/// 这里长出来）。闭包只返回 `V`——降级与预算由 `apply` 统一执行（D-105）。
+/// 这里长出来）。闭包只返回 `V`——降级与预算由 `apply` 统一执行。
 fn seen_count_projection() -> Projection<usize> {
     Projection::new(|events, _now| events.iter().filter(|e| e.kind == "user.message").count())
 }
@@ -65,7 +65,7 @@ fn view_changes_when_input_changes() {
 
 #[test]
 fn over_budget_projection_degrades_instead_of_erroring() {
-    // 预算语义在框架层（D-105）：`budget.ms` 为扫描配额，超窗只交**切片头部**，
+    // 预算语义在框架层：`budget.ms` 为扫描配额，超窗只交**切片头部**，
     // 截断 ⇒ 外壳 `degraded`。闭包对此一无所知——它只统计见到的事件。
     let p: Projection<String> = Projection::new(|events, _now| format!("{} 条", events.len()));
     let events: Vec<Event> = (0..10)

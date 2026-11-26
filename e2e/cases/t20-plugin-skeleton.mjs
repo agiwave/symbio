@@ -38,7 +38,7 @@ import './_selfrun.mjs';
 // 因此任何要调模型的产线在这里都取不到模型服务。这不是缺陷，恰好让断言**确定**：
 //
 // - `classify/decide`：规则命中 ⇒ 判决出来了（连模型都没有 ⇒ 这条路上没碰模型）；
-//   规则未命中 ⇒ `needs_model` 计划（往返由编排层经引擎 `model` 端口派发，D-122
+//   规则未命中 ⇒ `needs_model` 计划（往返由编排层经引擎 `model` 端口派发
 //   决策 2；兜底 `Escalate` 归编排层在派发失败后落，绝不是 `Answered`）；
 // - `compose/wording`：模板产线照常出文本；**生成产线取不到模型 ⇒ 落变体兜底**；
 //   `Report` 走**填表**产线（事实随 `snapshot` 带来）⇒ 同样零往返、同样拿得到完整句子。
@@ -194,7 +194,7 @@ export default defineCase(
         const text = readFileSync(yml, 'utf8');
         assertEq(yamlValue(text, 'plugin_provider'), p.name, `${p.name} 的 plugin_provider`);
         assertEq(yamlValue(text, 'plugin_name'), p.name, `${p.name} 的 plugin_name`);
-        // D-032：出厂身份在装配期投影进 manifest（此后运行期只读 manifest）
+        //：出厂身份在装配期投影进 manifest（此后运行期只读 manifest）
         assertEq(yamlValue(text, 'plugin_title'), p.title, `${p.name} 的出厂标题应投影进 manifest`);
       }
 
@@ -213,7 +213,7 @@ export default defineCase(
         200,
         `classify/decide 应可达（${JSON.stringify(decided.body)?.slice(0, 300)}）`,
       );
-      // 出参是 `DecideOutcome`（D-122 决策 2）：`decided{verdict}` 或 `needs_model{plan}`。
+      // 出参是 `DecideOutcome`（ 决策 2）：`decided{verdict}` 或 `needs_model{plan}`。
       assertEq(decided.body?.data?.outcome, 'decided', '规则命中 ⇒ 判完了（零模型往返）');
       assertEq(decided.body?.data?.verdict?.verdict, 'answered', '规则命中 ⇒ Answered');
       assertEq(decided.body?.data?.verdict?.reason, 'greeting', '问候的理由码');
@@ -281,8 +281,8 @@ export default defineCase(
       //    本线验的是**边界**，不是行为（行为见 `t21` / `t22`）。三条判据：
       //    ① 工具链照旧（插件装配没有改变工具链）；
       //    ② 对话面文本由 `compose` 产出 —— 它带 `meta.surface`，且 `reason` 来自判决；
-      //    ③ 它挂在**轮根**（本轮用户消息节点）下——D-335 之后轮根就是用户消息，
-      //       首响与工具卡 / 正文同级（D-426）：根级会让结构轴递归把它排到整轮之后。
+      //    ③ 它挂在**轮根**（本轮用户消息节点）下—— 之后轮根就是用户消息，
+      //       首响与工具卡 / 正文同级：根级会让结构轴递归把它排到整轮之后。
       //
       //    本线的输入被 mock 判成 `unclassified`（mock 对这一句返回的是工具调用、
       //    没有文本 ⇒ 分类解析不出词 ⇒ 兜底 `Escalate`），因此期望恰好一条首响节点。
@@ -305,7 +305,7 @@ export default defineCase(
       assertEq(
         surfaced[0].parent_id,
         userMsg.id,
-        '首响必须挂轮根（用户消息）下——根级会让递归渲染把它排到整轮子树之后（D-426）',
+        '首响必须挂轮根（用户消息）下——根级会让递归渲染把它排到整轮子树之后',
       );
       assertEq(
         surfaced[0].meta.exclude_from_context,

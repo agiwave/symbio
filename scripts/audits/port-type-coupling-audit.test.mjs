@@ -1,7 +1,7 @@
 /**
  * port-type-coupling-audit 回归测试
  *
- * 判据面（PTC-001/002，见 D-447 ② 与 2026-11-11 team-lead 边界修正）：
+ * 判据面（PTC-001/002，见  ② 与 2026-11-11 team-lead 边界修正）：
  *  - PTC-001：三个通用端口契约文件不得出现 `PromptMessage`（含 `Vec<PromptMessage>`）；
  *  - PTC-002：四个通用端口契约文件不得出现 `needs_wording_generation`；
  *    **不扫整个 `crates/symbio-platform/src/sdk/`**——`sdk/dialog` 的 `Verdict::needs_wording_generation`
@@ -198,7 +198,7 @@ test('PTC-002 边界：sdk/dialog 里出现 needs_wording_generation 不算违�
 test('注释叙述不算耦合：只在 doc comment 里提到 PromptMessage、无真实代码 ⇒ 通过', () => {
   const files = cleanFiles()
   files[PORT_RS] = [
-    '/// 迁移说明：模型协议类型 PromptMessage 已移出通用端口（D-447 ②）。',
+    '/// 迁移说明：模型协议类型 PromptMessage 已移出通用端口（ ②）。',
     'pub struct PortReply {',
     '    pub links: Vec<(String, String)>,',
     '}',

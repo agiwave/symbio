@@ -134,7 +134,7 @@ impl Plugin for MyPlugin {
         if path == TRAVERSE_AVAILABLE_TOOLS {
             if let Some(visitor) = ctx.get(CAPABILITY_VISITOR) {
                 // 工具由**实例**提供：停用 ⇒ 不构造 ⇒ 工具从模型工具面消失。
-                // `register_tool` 是工具注册的唯一收口（D-440）：一次写两条行——
+                // `register_tool` 是工具注册的唯一收口：一次写两条行——
                 // 裹了审批闸的端口行（执行面）与纯元数据的工具行（目录面）。
                 let tool = MyTool;
                 let meta = tool.meta();
@@ -158,8 +158,7 @@ mod tests;
 
 ### 3. 工具（`PortExecutor`）
 
-工具不是 `traverse` 里返回的 JSON，而是一个实现 `PortExecutor` 的类型（`D-440`：
-工具即端口），由 `traverse` 经 `register_tool` 装进收集器：
+工具不是 `traverse` 里返回的 JSON，而是一个实现 `PortExecutor` 的类型（工具即端口），由 `traverse` 经 `register_tool` 装进收集器：
 
 ```rust
 // crates/symbio-plugin-my_plugin/src/tool.rs
@@ -221,9 +220,8 @@ impl MyTool {
 ```
 
 `execute` 期间的事件与中止走**执行期环境** `ExecEnv`（`env.sink` / `env.abort`），
-不要用 `PluginPayload::Session` 回传——那条通道是**跨进程传输原语**（前端实时面 / CLI / 网关），
-理由见 [D-020](../003-design/001-核心架构.md "DE-001-核心架构") 与
-[DE-018 的 `exec` 行](../003-design/018-模块架构.md "DE-018-模块架构")（出口 / 中止 / 帧序的唯一落点）。
+不要用 `PluginPayload::Session` 回传——那条通道是**跨进程传输原语**（前端实时面 / CLI / 网关）；
+出口 / 中止 / 帧序的唯一落点见 [DE-018 的 `exec` 行](../003-design/018-模块架构.md "DE-018-模块架构")。
 
 ### 4. 让它被装配
 
@@ -244,7 +242,7 @@ impl MyTool {
 # ~/.symbio/my_plugin/PLUGIN.yml
 plugin_provider: my_plugin # 工厂 id（submit_object_creator! 的第一个参数）
 plugin_name: my_plugin # 实例名，缺省 = 目录名
-# ↓ 以下四个是**身份**保留键，由装配期从 Plugin::meta 一次性投影（D-032）
+# ↓ 以下四个是**身份**保留键，由装配期从 Plugin::meta 一次性投影
 plugin_title: 我的插件 # 展示标题 / 挂载点标题
 plugin_description: 演示插件 # 语义描述
 plugin_version: 0.1.0 # 版本

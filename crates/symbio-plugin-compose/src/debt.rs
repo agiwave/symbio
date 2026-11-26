@@ -1,4 +1,4 @@
-//! 措辞生成的**行债**：谁欠一次模型往返（D-341 裁决三、D-344）。
+//! 措辞生成的**行债**：谁欠一次模型往返（ 裁决三）。
 //!
 //! `wording` 不再直连 provider：只有「本轮可作答」（`session.config.compose_enabled`）
 //! 且分类判出「能凭上下文直接答」时，本插件才申报一行 `model.assist` 的口债。
@@ -24,7 +24,7 @@ use super::wording;
 /// 债行名（行表数据）：`plugin_rows` 按它选执行体，环按它派发。
 pub(crate) const COMPOSE_WORDING_MODEL: &str = "compose-wording-model";
 
-/// 一次性问答的端口（D-336 裁决 4）：名字住 `plugin-api` 的词汇面（D-364）。
+/// 一次性问答的端口（ 裁决 4）：名字住 `plugin-api` 的词汇面。
 pub(crate) use symbio_plugin_api::vocab::PORT_MODEL_ASSIST as ASSIST_PORT;
 
 /// 上游判决事实的种类：名字住 `plugin-api` 的生成面（owner 是 classify，本插件只读）。
@@ -33,7 +33,7 @@ use symbio_plugin_api::events::EVENT_CLASSIFY_ANSWERED as CLASSIFY_ANSWERED;
 /// 措辞的运行时债表（挂载时由 `traverse` 报到，每轮 `rows()` 现算）。
 pub(crate) struct ComposeDebts {
     config: ComposeConfig,
-    /// 措辞的**偏好 provider**（D-348）：缺席 ⇒ 会话选定值。
+    /// 措辞的**偏好 provider**：缺席 ⇒ 会话选定值。
     provider: Option<String>,
 }
 
@@ -75,7 +75,7 @@ impl DebtSource for ComposeDebts {
             return Vec::new();
         }
         let debt_id = format!("{COMPOSE_WORDING_MODEL}:{user_id}");
-        // 回执（或判死）已落 ⇒ 这笔已经还过。身份由本轮用户消息派生（D-323），
+        // 回执（或判死）已落 ⇒ 这笔已经还过。身份由本轮用户消息派生，
         // 同一轮重放不会造出第二笔债。
         if facts.closing(&debt_id).is_some() {
             return Vec::new();
@@ -93,7 +93,7 @@ impl DebtSource for ComposeDebts {
                 // 对话线由执行体从事实投影进 `user`（与 classify 的请求同一形态）：
                 // 这里不再拼第二份「以下是历史」。
                 "user": "",
-                // 措辞的偏好 provider（D-348）：能力方知道该用什么档就直说，
+                // 措辞的偏好 provider：能力方知道该用什么档就直说，
                 // 会话选定值只是缺省；缺席 / 查不到由端口回落。
                 "provider": self.provider,
                 // 回执的匹配键：宿主按 `(port, root_id)` 双认这一次往返。

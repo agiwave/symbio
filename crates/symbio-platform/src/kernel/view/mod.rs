@@ -9,7 +9,7 @@
 //! 而不是约定：超预算的投影返回 `degraded: true`，对话永不因状态爆炸而中断。
 //!
 //! 召回视图与可见域登记表是**词汇**（谁的记忆、哪个 namespace），住 `symbio-sdk` 的 `view` 模块；
-//! 本模块只装 [`Budget`] / [`View`] 这两个封闭语法（DE-023 D-188）。
+//! 本模块只装 [`Budget`] / [`View`] 这两个封闭语法（DE-023 ）。
 
 /// 投影预算（I3 记账口径）。
 #[derive(Debug, Clone, Copy, PartialEq, Eq)]
@@ -41,7 +41,7 @@ impl Budget {
 ///
 /// **只能**是 `View`，不是 `Result`（构造即锁定，见 [`crate::kernel::projection::Projection`]）。
 /// 只由 `Projection::apply` 构造
-/// （[D-105](../../../../../docs/003-design/001-核心架构.md#d-105-投影预算语义收敛到框架层闭包只返回-v窗口截断由-apply-统一执行 "DE-001-核心架构")：降级与预算在框架层统一执行，
+/// （降级与预算在框架层统一执行，
 /// `ok` / `degraded` 构造器随闭包签名一并退役）。
 #[derive(Debug, Clone, PartialEq, Eq)]
 pub struct View<V> {

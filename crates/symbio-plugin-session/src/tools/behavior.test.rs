@@ -88,7 +88,7 @@ fn behavior_is_selected_by_declaration() {
     assert_eq!(keys, vec!["c-close-v2c-t7-call-9", "c-offer-v2c-t7-call-9"]);
 }
 
-// ── 淘汰回路的前置判断（DE-025 D-219）────────────────────────────────
+// ── 淘汰回路的前置判断（DE-025 ）────────────────────────────────
 
 fn judgement<'a>(
     args: &'a serde_json::Value,

@@ -1,4 +1,4 @@
-//! 变更索引的**收集**判据（D-053）。
+//! 变更索引的**收集**判据。
 //!
 //! 折叠的**语义**（编辑换正文 / 删除丢条目）由 `transcript.test.rs` 从投影那一侧钉；
 //! 本文件只钉「收」这一半：载荷怎么读、坏载荷怎么办、同一节点被改多次谁说话。
@@ -129,7 +129,7 @@ fn only_mutation_cells_are_collected() {
 
 /// 删除也只认 `(Message, Closed)` 这一格：同 kind 落在别的格子上不算删除。
 ///
-/// 「哪条事实算删除」的扫描住在 kernel（`event::branch::removed_ids`，D-362 下沉），
+/// 「哪条事实算删除」的扫描住在 kernel（`event::branch::removed_ids` 下沉），
 /// 而消费方是本模块，所以从收集这一侧钉它——与 `only_mutation_cells_are_collected`
 /// 同一把尺子。
 #[test]
@@ -199,7 +199,7 @@ fn latest_snapshot_picks_the_most_recent_one() {
     );
 }
 
-/// `keep_from`（D-401）：切片只压最旧前缀时，载荷给出首条未压事实；读面从它起折。
+/// `keep_from`切片只压最旧前缀时，载荷给出首条未压事实；读面从它起折。
 #[test]
 fn snapshot_carries_the_first_uncompressed_fact() {
     let ev = Event::pending(

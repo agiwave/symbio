@@ -11,7 +11,7 @@
 // --------------
 // system 前缀与 `tools` 数组整体取自一次**真实链路捕获**（`capture-corpus.mjs`：
 // CLI × mock-llm × mock-mcp，出厂 `full` 档，对话面关闭 —— 与
-// [D-057](../../crates/symbio-plugin-session/README.md "crates/symbio-plugin-session/src/README") 形状基线同一条链路同一个场景名）。
+//  形状基线同一条链路同一个场景名）。
 // 题目只替换尾部消息。缺 `--corpus=` 就现场跑一次捕获。
 //
 // 判据（全部机械可读回，口径归 `tasks.mjs`）
@@ -23,7 +23,7 @@
 // - `attributed_correctly`：attribution 题——结果↔调用的对应关系还读得回来（答对且没串到另一条）
 // - 臂 B 独有一条 `protocol_followed`：文本协议那一行 JSON 是否被遵守（这是拍平自己新引入的失败面）
 //
-// **不进判据的**：时延、token 数、字节数——它们进报告的观测列。理由与 D-057 同源：
+// **不进判据的**：时延、token 数、字节数——它们进报告的观测列。理由与  同源：
 // 规模同时由夹具与负载决定，钉进结论会让读数解释不了自己。
 //
 // 用法
@@ -370,7 +370,7 @@ function renderReport({ corpus, provider, temperature, rows, repeat, generatedAt
   row('拍平侧：文本协议被遵守（臂 A 不适用）', 'protocol');
   row('拍平侧：正文漏出模型内部调用格式（越少越好）', 'native_leak');
   lines.push('');
-  lines.push('## 观测列（**不进判据**，与 D-057 同一取舍）');
+  lines.push('## 观测列（**不进判据**，与  同一取舍）');
   lines.push('');
   lines.push('| | 臂 A | 臂 B |');
   lines.push('|---|---|---|');

@@ -67,7 +67,7 @@ const REPO_ROOT = rootArg ? path.resolve(rootArg.slice('--root='.length)) : path
 /** 本判据的三份来源（唯一地址，变了改这里）。 */
 export const AGENT_REL = 'crates/symbio-plugin-subagent/src'
 export const PLUGINS_REL = 'crates'
-/** 插件 crate 目录前缀：目录名 = 前缀 + 插件 id（D-191 一插件一 crate）。 */
+/** 插件 crate 目录前缀：目录名 = 前缀 + 插件 id（ 一插件一 crate）。 */
 export const PLUGIN_CRATE_PREFIX = 'symbio-plugin-'
 export const ASSEMBLY_REL = 'crates/symbio-platform/src/deploy/mod.rs'
 /** 子树默认清单的常量名（全仓插件清单的唯一字面量，由各插件目录的 `PLUGIN.yml` 生成）。 */
@@ -101,7 +101,7 @@ function agentDocs(root) {
   const out = []
   const relOf = (abs) => path.relative(root, abs).split(path.sep).join('/')
   const asLines = (txt) => txt.split(/\r?\n/).map((text, i) => ({ text, line: i + 1 }))
-  // README 住 **crate 根**，不是 `src/`（D-191 后一插件一 crate：`crates/symbio-plugin-<id>/README.md`）。
+  // README 住 **crate 根**，不是 `src/`（ 后一插件一 crate：`crates/symbio-plugin-<id>/README.md`）。
   // 拆分前 README 住在 `src/` 下；现在
   // AGENT_REL 指 owner 插件的 src，照旧拼 `src/README.md` 会读不到——
   // 而读不到的效果是**整份归属语料消失**（AO-002/AO-003/AO-005 全部空转），不是报错。
@@ -304,7 +304,7 @@ function checkPathClaims(docs, dirs, root) {
       }
       for (const m of ln.text.matchAll(siblingRe)) {
         if (!dirs.has(m[2])) findings.push(found(doc.rel, ln.line, ln.text, 'AO-005', `指认的兄弟插件 \`${m[2]}\` 没有目录（${m[1]}）`))
-        // 兄弟插件的**落盘名**随 D-191 从 `<插件 id>/` 变成 `symbio-plugin-<id>/`：
+        // 兄弟插件的**落盘名**随  从 `<插件 id>/` 变成 `symbio-plugin-<id>/`：
         // 文档仍按 id 写（../<插件 id>/README.md，id 是稳定的那层），解析时补前缀。
         // 若照旧拼 crates/<id>/README.md，每一条兄弟指路都会被判「不存在」——
         // 而它们全是真的，改文档去迁就解析只会让下一轮再错一次。

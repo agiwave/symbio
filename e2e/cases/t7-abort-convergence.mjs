@@ -6,9 +6,9 @@ import './_selfrun.mjs';
 // 钉的不变量：
 // - 中止后**不得有节点停在 streaming/pending**；
 // - 会话节点 attributes.outcome = "aborted"（经 vdfs/stat 真实边界读取）；
-// - 中止落在**轮根**的 status=aborted 上（`D-435`：终态由骨架移交给轮根，中止轮
+// - 中止落在**轮根**的 status=aborted 上（终态由骨架移交给轮根，中止轮
 //   不再为「看得见」造一条空正文节点），且不落失败节点、不落兜底
-//   （中止不是失败，D-044 / D-165）。
+//   （中止不是失败）。
 import {
   MockLlm,
   makeHomedir,
@@ -84,7 +84,7 @@ export default defineCase('T7 中止收敛：运行中 action(会话地址, abor
     const msgs = await readSessionMessages(cli, 'e2e-t7');
     assertTranscriptInvariants(msgs, 'T7');
 
-    // 中止落在**这一轮的终态**上（`D-435`）：轮根（用户消息节点兼任轮组）带
+    // 中止落在**这一轮的终态**上：轮根（用户消息节点兼任轮组）带
     // `aborted`；中止前若已流过正文，那条正文子节点同为 `aborted`。不再为「让中止
     // 看得见」造一条空正文节点——终态由骨架移交给轮根，位置与失败轮同一条。
     const aborted = msgs.filter((m) => m.status === 'aborted');
@@ -99,7 +99,7 @@ export default defineCase('T7 中止收敛：运行中 action(会话地址, abor
       '其余带 aborted 的节点都是这一轮的正文子（不越出轮根）',
     );
 
-    // 中止不是失败：不推失败节点、不带错误信息（兜底是失败路径，D-044 / D-165）。
+    // 中止不是失败：不推失败节点、不带错误信息（兜底是失败路径）。
     const failedNodes = msgs.filter((m) => m.status === 'failed');
     assert(failedNodes.length === 0, `中止不应产生失败节点（实际 ${failedNodes.length}）`);
     assert(msgs.every((m) => m.error == null), '中止不应带错误信息（error 应为空）');

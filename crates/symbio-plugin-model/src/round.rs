@@ -1,9 +1,9 @@
 //! 一次模型往返的**产物与判决**：`RoundOutput` / `RoundToolCallInfo` /
 //! `ModelFinishReason` / `ModelUsage` / `ModelSpend`。
 //!
-//! ## 为什么在本插件，而不在 `symbio-sdk`（`D-439`）
+//! ## 为什么在本插件，而不在 `symbio-sdk`
 //!
-//! `D-438` 把这五个类型下沉到了 `symbio_platform::sdk::llm`，理由是「**两侧**共用：model 产、
+//!  把这五个类型下沉到了 `symbio_platform::sdk::llm`，理由是「**两侧**共用：model 产、
 //! loop / session 销」。那条理由来自 `port.model` **之前**的形状——那时会话侧直接持有
 //! `RoundOutput`（`is_reasoning_only` / `effective_text` / `into_messages` 三个读方法
 //! 甚至以 `impl RoundOutput` 的形式住在 loop 的 `message_build.rs`）。
@@ -13,12 +13,12 @@
 //! - 全仓**没有** `impl RoundOutput`，三个读方法连同它们的调用点一起消失；
 //! - `loop` / `session` 的生产代码**零处**提到这五个名字——会话侧读的是端口执行体
 //!   落下的**事实载荷键**（`usage` / `spend` / `reason` / `truncated`），见
-//!   `crates/symbio-plugin-model/src/ledger.rs`（两本账随写方走，`D-461`）；
+//!   `crates/symbio-plugin-model/src/ledger.rs`（两本账随写方走）；
 //! - 剩下的读者全在本插件：`stream.rs` 造、`bound_provider.rs` 填、`port.rs` 折成事实、
 //!   `tool_accumulator.rs` 累积、四个协议适配归一化 `finish`。
 //!
 //! 于是它不属于「跨插件词汇」，而属于**本插件的私有形状**：端口那一侧交给环的是
-//! 事实（JSON），不是 Rust 类型。按 `D-023` 的依赖方数量判据，一个插件独有的形状
+//! 事实（JSON），不是 Rust 类型。按依赖方数量判据，一个插件独有的形状
 //! 就该住在那个插件里——架构层只留**请求**词汇（`PromptMessage` 由 `classify` 构造、
 //! `tool` 分发、`model` 消费，三处跨插件，仍在 `symbio_platform::sdk::llm`）。
 //!

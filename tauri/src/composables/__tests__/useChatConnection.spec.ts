@@ -643,7 +643,7 @@ describe('skeletonLazy — 折叠释放 / 展开重取（[] 前端半写侧）',
   })
 })
 
-// ==================== 分支（[D-173] 并存两支 + 一个选中态）====================
+// ==================== 分支（ 并存两支 + 一个选中态）====================
 
 /** 一条成员根：`selected` 决定它进不进可见集。 */
 function branchRoot(id: string, candidates: string[], index: number, selected: boolean): ChatNode {

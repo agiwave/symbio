@@ -1,4 +1,4 @@
-//! 编码贡献的判据（DE-036 §3 / DE-026 D-263）：两条草稿各按标签取值、空不编、
+//! 编码贡献的判据（DE-036 §3 / DE-026 ）：两条草稿各按标签取值、空不编、
 //! 截断按字符、同文去重读**全量史**（跨标签、含巩固产物、排除式遗忘后可重记）。
 
 use serde_json::json;
@@ -87,7 +87,7 @@ fn one_settlement_encodes_question_and_conclusion() {
         assert_eq!(d.fact.produced_by, Some(41), "溯源同指本轮开口格（I2）");
         assert!(
             d.fact.payload.get("vec").is_none(),
-            "载荷里没有 vec 键：恒空的预留键不算承诺（D-110 / D-152）"
+            "载荷里没有 vec 键：恒空的预留键不算承诺"
         );
         assert_eq!(
             d.fact.payload.get("generation").and_then(|v| v.as_u64()),

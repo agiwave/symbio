@@ -373,7 +373,7 @@ const S010_SKIP_DIRS = new Set([
 ])
 // 与 resolveScope 同策略：cwd 是仓库树就用 cwd（回归测试注入临时树），否则退回仓库根。
 // 「是不是仓库树」由 `looksLikeRepoTree` 统一判——从前这里各写一份 `isDir(cwd/'symbio')`，
-// D-191 之后根下再无 symbio/，标记恒假 ⇒ 夹具永远落到 `repoRoot`，S-010 的用例测的是
+//  之后根下再无 symbio/，标记恒假 ⇒ 夹具永远落到 `repoRoot`，S-010 的用例测的是
 // **真仓**而不是自己造的树（实测造在 tauri/src/schemas/x.ts 的违规被去真仓里找 ⇒ 全红）。
 const S010_ROOT = looksLikeRepoTree(cwd) ? cwd : repoRoot
 
@@ -570,7 +570,7 @@ runLineRule({
 //
 // **不含** `chat_node.rs`（字段定义本体）；**不含** provider 请求构造
 // `symbio-plugin-model/src/port.rs::wire_messages` —— 那些 `ChatNode` 不落库，`role` 是
-// 线协议值（D-305 裁决一），逐行豁免会让棘轮靠豁免活着，故按函数体整段排除。
+// 线协议值（ 裁决一），逐行豁免会让棘轮靠豁免活着，故按函数体整段排除。
 const S014_WRITE_RE =
   /role:\s*Some\((?:cm::)?NodeRole::|\.role\s*=\s*Some\(|\.role\.get_or_insert\(/
 
@@ -594,7 +594,7 @@ function providerWireSpan(lines) {
   return null
 }
 // 基线三元形状与 `dead-code-audit` 的 R-002 同构——`35-baseline` 的提取函数按这个形状读格。
-// 151 → 146 → 143 → 0（D-147 三档）：构造点全部改收主体，剩下的只有读边界与两条
+// 151 → 146 → 143 → 0（ 三档）：构造点全部改收主体，剩下的只有读边界与两条
 // 存量格读法用例。清零之后这条棘轮数的就是「新增直写」：任何一处新写都即红。
 const LEGACY_ROLE_WRITE_BASELINE = process.env.LEGACY_ROLE_WRITE_BASELINE
   ? Number(process.env.LEGACY_ROLE_WRITE_BASELINE)
@@ -706,7 +706,7 @@ runLineRule({
 // 复活：`terminated.reason`（同一件事的两份账）与停机格载荷里的 `why`（自由文本）。
 // 扫描面 2026-11-13 重指为 `crates/symbio-plugin-loop/src` 下全部 `.rs`：原写死的三个
 // 路径随旧引擎退役都已不存在，`readFileSync` 落进 `catch → continue`，判据恒绿——
-// 正是 D-280 的「扫描面为空 ⇒ 读不到即全绿」。故另加「真仓里一个文件都没扫到即判红」。
+// 正是  的「扫描面为空 ⇒ 读不到即全绿」。故另加「真仓里一个文件都没扫到即判红」。
 // 正则要求 `"reason"` / `reason` 带冒号或引号，否则 `with_terminated(with_reason(..)`
 // 这种合法组合会被误命中。
 const RETIRED_RE = /terminated[^\n]*(?:"reason"\s*:|\breason\s*:)|"why"\]\s*=|\bwhy"\s*:/
@@ -728,7 +728,7 @@ runLineRule({
     if (IS_REPO && list.length === 0) {
       err(
         'S-016 扫描面为空：`crates/symbio-plugin-loop/src` 下一份 `.rs` 都没扫到 ⇒ ' +
-          '判据读不到任何东西（`D-280`）；路径写错或 crate 改名都要在这里变红，而不是静默变绿。',
+          '判据读不到任何东西（``）；路径写错或 crate 改名都要在这里变红，而不是静默变绿。',
       )
     } else if (n > 0) {
       err(

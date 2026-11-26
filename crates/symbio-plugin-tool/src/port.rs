@@ -1,9 +1,9 @@
-//! `port.tool` 的执行面：工具调用的提供者（D-303）。
+//! `port.tool` 的执行面：工具调用的提供者。
 //!
 //! 环只按端口名问一笔债；线上名怎么解析（`mcp__fs__read` → 能力名）、挂死怎么判
 //! （空闲而不是总时长）、结果怎么压成一段文本，都是本插件的私事。工具世界由能力表
 //! 承载：本类型按线上名解析出 canonical 名，再经装配期容器 `PORT_BINDINGS` 取该工具
-//! 自己的端口执行体（工具即端口，D-440 / D-468），自己不做执行。
+//! 自己的端口执行体（工具即端口），自己不做执行。
 //!
 //! ## 载荷契约（环 → 本插件）
 //!
@@ -15,20 +15,20 @@
 //! | `args` | 调用参数（模型发的原样 JSON） |
 //! | `call_id` | 本次调用的 id（幂等与节点挂靠；结果节点 id 由它派生） |
 //! | `node_id` | 工具卡在实时面上的节点 id（执行窗口的状态帧写到它上面；可选） |
-//! | `scratch_dir` | 宿主为本轮准备的可写目录（进程执行面保留；结果存档已改走 `ctx[WORKSPACE_VDFS]`，D-515） |
+//! | `scratch_dir` | 宿主为本轮准备的可写目录（进程执行面保留；结果存档已改走 `ctx[WORKSPACE_VDFS]`） |
 //! | `artifact` | `{ key, produced_by, allowed, denied_reason }`：落产物格的上下文，`allowed` 是环侧产物闸的结论 |
 //! | `land_only` | `{ text, success, needs_user_action, prompt, failure_kind }`：只落产物格、不再执行（唤醒结果与没跑到的结果走这一形态） |
 //! | `gate` | `{ authorized, spent_ms, requested_ms, budget_ms }`：外部执行闸门的中性输入；快慢与开窗由执行体判 |
 //!
 //! 环侧的宿主插件（`parent`）经 `ctx.parent()` 取得：只用于钩子等宿主侧效果；
-//! **名字解析失败一律在执行体内部落成 NotFound 事实，不回落到宿主路由**（D-445 ②）。
+//! **名字解析失败一律在执行体内部落成 NotFound 事实，不回落到宿主路由**。
 //!
 //! ## 产出契约（本插件 → 环）
 //!
 //! `PortOutcome.facts` 只有一项，键为 `result_text`（已守卫正文）/ `raw_text`
 //! （未裁剪原文，环侧记账与钩子用）/ `success` / `pending` / `guard`
 //! （`{ truncated, archive_path, origin_tokens }`）。产物格（`artifact.added`）由
-//! 本执行体在 `land_only` 出口经写口直落（P1b / DE-048 D-308）；环只交回结果纯值，
+//! 本执行体在 `land_only` 出口经写口直落（P1b / DE-048 ）；环只交回结果纯值，
 //! 不装配产物载荷、不写产物格。
 //! 工具失败**不**映射成 `PortOutcome.error`——失败是信息性事实（模型据此自我纠正），
 //! 与「这一笔协议失败」是两件事。
@@ -62,7 +62,7 @@ use symbio_plugin_api::{
     WORKSPACE_VDFS,
 };
 
-/// 存档作用域 provider（D-528）：会话私有数据落 `SESSION_VDFS`（根 = session_dir）；
+/// 存档作用域 provider：会话私有数据落 `SESSION_VDFS`（根 = session_dir）；
 /// 无会话的宿主态降级到 `WORKSPACE_VDFS`。都不在就不存档。宿主已在上下文注入三作用域
 /// provider；这里只取本插件需要的那一个，不再拿 `scratch_dir` 拼物理路径。
 fn archive_provider(exec: &PortExecContext) -> Option<DynVdfsProvider> {
@@ -72,13 +72,13 @@ fn archive_provider(exec: &PortExecContext) -> Option<DynVdfsProvider> {
         .or_else(|| ctx.get(WORKSPACE_VDFS).flatten())
 }
 
-/// 占位符取回地址用的会话 id（D-528）：只作地址前缀，不参与存储寻址。
+/// 占位符取回地址用的会话 id：只作地址前缀，不参与存储寻址。
 fn archive_session_id(exec: &PortExecContext) -> Option<&str> {
     let sid = exec.session_id.trim();
     (!sid.is_empty()).then_some(sid)
 }
 
-/// 端口名：名字住 `plugin-api` 的词汇面（D-364），提供者与消费方 import 同一常量。
+/// 端口名：名字住 `plugin-api` 的词汇面，提供者与消费方 import 同一常量。
 pub(crate) use symbio_plugin_api::vocab::PORT_TOOL as TOOL;
 
 /// 载荷键（环与提供者之间的私有约定，随 [`PortInput`] 走）。环不认识世界：
@@ -89,7 +89,7 @@ const KEY_TOOL_CALL_ID: &str = "call_id";
 /// 工具卡在实时面上的节点身份（`tool_calls[].id`）。执行窗口的状态帧要落到
 /// **那张卡**上，而 `call_id`（wire id）是产物配对键，两套身份不能互换。
 const KEY_NODE_ID: &str = "node_id";
-/// 应答配对键（环从模型应答承载里搬来的纯值，`D-319`）：工具结果按它挂回调用。
+/// 应答配对键（环从模型应答承载里搬来的纯值）：工具结果按它挂回调用。
 const KEY_REPLY_KEY: &str = "reply_key";
 /// 结果正文末尾的附注（环算好的同参重复提示；执行体只追加，不解释来源）。
 const KEY_REPLY_NOTE: &str = "reply_note";
@@ -98,7 +98,7 @@ const KEY_LAND_ONLY: &str = "land_only";
 /// 外部执行闸门的中性输入：`{ authorized, spent_ms, requested_ms, budget_ms }`。
 ///
 /// 环的授权矩阵与成本台账只把结论交给执行体；快慢、开窗与熔断事实都由本执行体判
-/// （DE-039 §6，DE-048 D-311）。缺省 = 不判（通用端口调用不带这一格）。
+/// （DE-039 §6，DE-048 ）。缺省 = 不判（通用端口调用不带这一格）。
 const KEY_GATE: &str = "gate";
 /// 调用信封的协议读数（环只搬原始值，判在本次执行体）：
 /// `{ id_missing, name_missing, parse_error }`。
@@ -115,7 +115,7 @@ const FACT_RAW_TEXT: &str = "raw_text";
 /// 守卫元数据：`{ truncated, archive_path, origin_tokens }`。
 const FACT_GUARD: &str = "guard";
 
-/// 授权输入键（`open-tools` 在开账时写进请求载荷，`D-306` 的「载荷装配留在行」）。
+/// 授权输入键（`open-tools` 在开账时写进请求载荷， 的「载荷装配留在行」）。
 ///
 /// 与执行键（`tool_name` / `tool_call_id`）分开：授权只看判定输入，执行才解析线上名。
 const KEY_TOOL: &str = "tool";
@@ -130,7 +130,7 @@ const KEY_FAILURE_KIND: &str = "failure_kind";
 const KEY_AUTHORIZE_ONLY: &str = "authorize_only";
 /// 建账专用输入（环的 open 调用）：把模型应答里的调用清单展开成 `request` 草稿。
 /// 环只交纯值（应答原文 / 调用清单 / 策略读数字串），线上名、风险档与
-/// 永久放行上限全在本执行体算定（DE-048 D-311）。
+/// 永久放行上限全在本执行体算定（DE-048 ）。
 const KEY_OPEN_ONLY: &str = "open_only";
 /// 幕锚（id 兜底段）：环的 `drive_seq` 纯值。
 const KEY_EPOCH: &str = "epoch";
@@ -158,7 +158,7 @@ const KEY_ATTEMPT: &str = "attempt";
 /// `declarations.rs` 的 `FACTS`）。
 const RESUME_ARTIFACT_SUFFIX: &str = ":resume";
 
-/// 一次授权判定（`D-306` 裁决一：由端口执行体判，不再由环的动作判）。
+/// 一次授权判定（ 裁决一：由端口执行体判，不再由环的动作判）。
 #[derive(Debug, Clone, Copy, PartialEq, Eq)]
 enum Authz {
     /// 放行；`basis` / `grant` 只用于记账，不参与执行。
@@ -366,7 +366,7 @@ fn approval_denied_draft(
     )
 }
 
-/// 批准结论的留痕草稿（D-368）。
+/// 批准结论的留痕草稿。
 ///
 /// 批准是**一次用户动作**，但此前的授权结论只在内存里（`resume` 动作串）：
 /// `authz.denied{needs_approval}` 之后没有对应的放行结论。这里在批准执行前补上
@@ -405,11 +405,11 @@ fn approval_granted_draft(
     })
 }
 
-/// 建账：把模型应答里的调用清单展开成 `request` 草稿（D-118 决策 5 的第一笔债）。
+/// 建账：把模型应答里的调用清单展开成 `request` 草稿（ 决策 5 的第一笔债）。
 ///
 /// 环只交纯值：应答原文（取 `id` / `calls`）、调用清单、阈值 / 放行清单 / 模式的
 /// 读数字串。线上名解析、风险档、永久放行上限与「不可派发」判定全在这里算定——
-/// 这是 DE-048 D-311 的唯一判定式：**事实面答不了「这个名对应哪个能力」，所以判在执行体**。
+/// 这是 DE-048  的唯一判定式：**事实面答不了「这个名对应哪个能力」，所以判在执行体**。
 async fn open_drafts(exec: &PortExecContext, payload: &serde_json::Value) -> Vec<FactDraft> {
     let tool_calls: Vec<serde_json::Value> = payload
         .get(KEY_TOOL_CALLS)
@@ -498,7 +498,7 @@ async fn open_drafts(exec: &PortExecContext, payload: &serde_json::Value) -> Vec
         };
         // 注册表里没有可判的能力（route-only 工具）⇒ 放行是**交给下游路由闸门**的
         // 延迟判定；不能凭一个猜出来的风险档拒绝它。风险档读工具行的自述快照
-        // （D-440：行是纯数据，`risk_for` 随 `Capability` 退场，动态档由注册收口点
+        // （行是纯数据，`risk_for` 随 `Capability` 退场，动态档由注册收口点
         // 的执行体闸在执行时判）。
         let resolved = match (name, visitor.as_ref()) {
             (Some(name), Some(visitor)) => match resolve(name, &aliases) {
@@ -512,7 +512,7 @@ async fn open_drafts(exec: &PortExecContext, payload: &serde_json::Value) -> Vec
         };
         let risk = resolved.as_ref().map(|(_, risk)| *risk);
         let risk_name = risk.map(CapabilityRiskLevel::as_str).unwrap_or("unknown");
-        // 永久放行上限按 canonical name 算（D-170）：线上名只是协议字符集的投影。
+        // 永久放行上限按 canonical name 算：线上名只是协议字符集的投影。
         let grant = resolved
             .as_ref()
             .and_then(|(canonical, _)| grants.get(canonical))
@@ -576,7 +576,7 @@ struct ArtifactCtx {
     denied_reason: String,
 }
 
-/// 产物格的授权结论由**本执行体自判**（D-385）：外部执行闸门的授权读数在载荷里，
+/// 产物格的授权结论由**本执行体自判**：外部执行闸门的授权读数在载荷里，
 /// 有读数按读数，没有读数就是「无待判事项」（通用端口调用不带这一格）。
 fn artifact_ctx(exec: &PortExecContext, gate: Option<GateInput>) -> Option<ArtifactCtx> {
     let allowed = gate.map(|g| g.authorized).unwrap_or(true);
@@ -648,7 +648,7 @@ fn refused(text: &str, failure_kind: &'static str) -> PortOutcome {
 /// `needs_user_action` / `prompt` / `failure_kind` + 能力交出的富化字段）只在这一处算定。
 /// 停等信息从结果事实**顶层**取（`needs_user_action` / `prompt` / `failure_kind`）；
 /// 嵌套 `pending` 只是详情，不是唯一来源。
-/// 结果节点 id 由 `tool_call_id` 派生，不作为载荷键（DE-048 D-312）。
+/// 结果节点 id 由 `tool_call_id` 派生，不作为载荷键（DE-048 ）。
 fn artifact_payload(meta: &CallMeta<'_>, result: &serde_json::Value) -> serde_json::Value {
     let pending = result.get(FACT_PENDING).filter(|v| !v.is_null());
     let needs_user_action = result
@@ -687,7 +687,7 @@ fn artifact_payload(meta: &CallMeta<'_>, result: &serde_json::Value) -> serde_js
     })
 }
 
-/// 落一条 `artifact.added`：产物是**这次结果的产物**，所以由执行体写（P1b / D-308）。
+/// 落一条 `artifact.added`产物是**这次结果的产物**，所以由执行体写（P1b / ）。
 ///
 /// **唯一写点**：批派与单次出口都不许自己装配载荷，一律经 [`artifact_payload`]。
 /// `allowed` 由环侧产物闸给出，执行体不自判权限；拒绝时按 `deny-{key}-artifact`
@@ -719,7 +719,7 @@ async fn land_artifact(
         return;
     }
     let mut artifact_payload = artifact_payload(meta, result);
-    // 能力交出的富化字段（DE-025 D-207）：执行体算，环侧只落（读侧认字段不认工具名）。
+    // 能力交出的富化字段（DE-025 ）：执行体算，环侧只落（读侧认字段不认工具名）。
     // 待用户动作的调用不记账——「审批没到可判时刻」，与环侧记账同一条口径。
     let pending = result.get(FACT_PENDING).filter(|v| !v.is_null());
     if pending.is_none() && !meta.declared.is_empty() {
@@ -831,7 +831,7 @@ async fn land_effects(exec: &PortExecContext, input: &EffectInput) -> EffectsLan
     // 两者混用会把账记到会话名下。
     let agent_id = exec.ctx.as_deref().and_then(|ctx| ctx.get(AGENT_ID));
     let principal = symbio_plugin_api::principal_of(agent_id.as_deref());
-    // 承诺对象 = **这条消息的来源主体**（D-067：`to` 是数据，不是写死的常量）。
+    // 承诺对象 = **这条消息的来源主体**（`to` 是数据，不是写死的常量）。
     // 宿主已在句柄束里解析好（`PortExecHandles.source`）；空 = 本机用户发起，
     // 回落会话身份（旧口径的唯一保留处，不是第二套默认）。
     let source = if exec.source.trim().is_empty() {
@@ -1010,7 +1010,7 @@ fn answer_text(value: &serde_json::Value) -> String {
 
 /// 统一出口：L0 守卫 → 交回事实（产物格由 [`land_only`] 出口另落）。
 ///
-/// 守卫在**执行体**里做（P1b / D-308）：环只消费「已守卫文本 + 守卫元数据」，不再
+/// 守卫在**执行体**里做（P1b / ）：环只消费「已守卫文本 + 守卫元数据」，不再
 /// 认识 token 预算或存档布局。待用户动作的结果不裁剪（它是卡片正文，不是工具结果）。
 async fn finish(
     raw: String,
@@ -1076,7 +1076,7 @@ async fn finish(
 /// [`finish`] 的失败变体：额外带上失败种类与「为什么没履约」。
 ///
 /// 两者都是**事实值**，环只读；`failure_kind` 进父节点元数据，`why` 交给能力包的
-/// 效果端口（DE-025 D-207）。
+/// 效果端口（DE-025 ）。
 async fn finish_with(
     raw: String,
     success: bool,
@@ -1176,7 +1176,7 @@ fn read_requested(
     Ok(calls)
 }
 
-/// 补齐应答承载（`D-319`）：工具结果的 `tool` 消息**在端口里组装**。
+/// 补齐应答承载：工具结果的 `tool` 消息**在端口里组装**。
 ///
 /// 环只搬来配对键与结果正文附注（纯值），消息文本、角色、配对全在这里定；
 /// 没有配对键（唤醒 / 无模型往返的路径）就不产出——环侧按旧口径兜底。
@@ -1217,7 +1217,7 @@ fn attach_reply(mut out: PortOutcome, payload: &serde_json::Value) -> PortOutcom
             body.push_str(note);
         }
     }
-    // 中性承载（D-446 ②）：通用端口不认模型角色 / `tool_call_id`。这里交回的是
+    // 中性承载：通用端口不认模型角色 / `tool_call_id`。这里交回的是
     // 结果本身，模型插件若要把结果投影成模型消息，由它按自己的协议装配。
     out.reply.messages.push(json!({
         "result": body,
@@ -1249,7 +1249,7 @@ fn protocol_input(payload: &serde_json::Value) -> Option<ProtocolInput<'_>> {
     })
 }
 
-/// 协议失败的结果：判定与措辞都在执行体（DE-048 D-312）。
+/// 协议失败的结果：判定与措辞都在执行体（DE-048 ）。
 ///
 /// 环只把原始协议读数搬进来，并给一个兜底 id 以便结果有落点；它不再判断
 /// 「缺 id / 缺 name / 参数解析失败」。
@@ -1314,7 +1314,7 @@ async fn refuse_protocol(
 }
 
 /// 工具生命周期钩子（Pre/PostToolUse）由**执行体**触发：环不按事件名调钩子，
-/// 只搬工具名与参数（DE-048 D-312）。
+/// 只搬工具名与参数（DE-048 ）。
 async fn fire_post_hook(
     parent: &Arc<dyn Plugin>,
     tool_name: &str,
@@ -1350,7 +1350,7 @@ fn sandbox_block_text(payload: &serde_json::Value) -> String {
 /// 载荷里的 `land_only` 是**结果纯值**（`text` / `success` / `needs_user_action` /
 /// `prompt` / `failure_kind`）；结构身份（`tool_name` / `args` / `tool_call_id`）与
 /// 执行形态共用同一组键。行为声明仍从能力表取——富化字段由执行体算，环不复制各
-/// 工具的行为名（DE-025 D-207）。
+/// 工具的行为名（DE-025 ）。
 async fn land_only(exec: &PortExecContext, payload: &serde_json::Value) {
     let Some(lo) = payload.get(KEY_LAND_ONLY) else {
         return;
@@ -1415,7 +1415,7 @@ async fn land_only(exec: &PortExecContext, payload: &serde_json::Value) {
 
 /// 端口声明的同批在飞上限（`PortDecl.concurrency`）——**执行体自己的**并发策略。
 ///
-/// 环不再做风险档 → 并行/串行映射，也不持上限（DE-048 D-311）：它只把每笔债交过来；
+/// 环不再做风险档 → 并行/串行映射，也不持上限（DE-048 ）：它只把每笔债交过来；
 /// 限流在这里，因为「同批最多几笔在飞」是这个端口的能力，不是环的判定。
 fn tool_concurrency() -> usize {
     crate::declarations::PORTS
@@ -1430,7 +1430,7 @@ struct ExecWindow {
     slots: tokio::sync::Semaphore,
 }
 
-/// 执行窗口按**会话**分格（DE-048 D-311）。
+/// 执行窗口按**会话**分格（DE-048 ）。
 ///
 /// 不分格会在委派时死锁：父会话的 `agent_run` 持写侧窗口、等子会话跑完，而子会话的
 /// 工具调用又来抢同一把锁。子会话有独立的 `SESSION_ID`，格子因此天然不互相等待；
@@ -1567,7 +1567,7 @@ impl ToolPort {
             .and_then(|v| v.as_str())
             .filter(|s| !s.is_empty());
         // 恢复失败判 **NonRetryable**：读面里没有答复 / 产物不是「还没到」的时机问题，
-        // 重试只会把同一笔债抬到新 attempt 上重跑（首派跟着重来）。D-442 已把重试
+        // 重试只会把同一笔债抬到新 attempt 上重跑（首派跟着重来）。 已把重试
         // 归属到行（恢复行重试不再带动首派重来），但缺读面 / 缺产物是账实不符——
         // 归属解决「谁来重跑」，不改变「这种失败重跑也无益」，仍判不可重试。
         let Some(answer) = facts.iter().rev().find(|fact| {
@@ -1714,7 +1714,7 @@ impl ToolPort {
                 let (outcome, run_args) =
                     match approved_resume_exec(&exec, &call_id, &canonical_tool, &original_args) {
                         Ok(approved_exec) => {
-                            // 批准留痕（D-368）：凭据签发后、执行前落事实；风险档从产物载荷原样搬。
+                            // 批准留痕：凭据签发后、执行前落事实；风险档从产物载荷原样搬。
                             if let Some(draft) = approval_granted_draft(
                                 &exec.idempotency_key,
                                 &artifact.payload,
@@ -1808,7 +1808,7 @@ impl ToolPort {
         outcome
     }
 
-    /// 一次只执行**一笔**（D-378）：载荷里的 `call_id` 从 `tool.requested.calls[]` 精确取。
+    /// 一次只执行**一笔**：载荷里的 `call_id` 从 `tool.requested.calls[]` 精确取。
     ///
     /// 不再按批循环；`tool.calls.done` 也不在这里写——收尾是**投影**，由工具插件的
     /// 簿记写方（`round_done`）在该请求每一笔债都有终局事实后重算，执行体中途死掉
@@ -2013,7 +2013,7 @@ impl ToolPort {
                 ..PortOutcome::ok()
             };
         }
-        // 协议失败：判定与措辞都在执行体（DE-048 D-312）。环只搬原始读数与兜底 id。
+        // 协议失败：判定与措辞都在执行体（DE-048 ）。环只搬原始读数与兜底 id。
         if let Some(protocol) = protocol_input(&payload) {
             if let Some(out) = refuse_protocol(protocol, archive_vdfs.as_ref(), sid).await {
                 return out;
@@ -2035,7 +2035,7 @@ impl ToolPort {
                 tool_name,
                 args_summary(&args, 200)
             );
-            // 工具生命周期钩子的入方向：由执行体触发，环不按事件名调钩子（DE-048 D-312）。
+            // 工具生命周期钩子的入方向：由执行体触发，环不按事件名调钩子（DE-048 ）。
             let pre = fire_hook(
                 &Some(parent.clone()),
                 HookEvent::PreToolUse {
@@ -2081,7 +2081,7 @@ impl ToolPort {
 
         // 外部执行闸门：环**不判快慢、不据此拒发**，只把中性输入随债交过来。
         // 「熔断中不发」在这里落地——本执行体自己不开窗，并把拒绝事实写进事实源；
-        // 环只认结果事实，不解释原因（DE-039 §6，DE-048 D-311）。
+        // 环只认结果事实，不解释原因（DE-039 §6，DE-048 ）。
         if let Some(gate) = gate_inputs(&payload) {
             match CircuitBreaker.gate(
                 gate.authorized,
@@ -2167,7 +2167,7 @@ impl ToolPort {
         };
         let aliases = exposure_aliases(&exec);
         let resolved_name = resolve(&tool_name, &aliases);
-        // 并发策略在本执行体（DE-048 D-311）：只读档（`Low`）可同时在途，受端口声明的
+        // 并发策略在本执行体（DE-048 ）：只读档（`Low`）可同时在途，受端口声明的
         // 上界约束；写侧档（`Medium` / `High`）与查不到风险档的调用独占**本会话**的
         // 执行窗口——写文件、改配置、发消息这类并行会引入顺序不确定。环不再替这里
         // 做任何判定；窗口按会话分格，委派链不会父子互等。
@@ -2230,7 +2230,7 @@ impl ToolPort {
             }
         }
 
-        // 声明闸（DE-025 D-219）：宿主闸之后、执行窗口之前，按 owner 序问这个工具
+        // 声明闸（DE-025 ）：宿主闸之后、执行窗口之前，按 owner 序问这个工具
         // 声明过的前置判断，先拒绝者胜。判据只认工具自己的 `CapabilityMeta.behaviors`
         // ——本执行体不认识任何工具名。历史交 `reader.events()`（与行执行体同一份）。
         let declared: &'static [&'static str] = resolved_name
@@ -2339,7 +2339,7 @@ impl ToolPort {
         tool_ctx.set(ABORT_SIGNAL, exec.abort.clone());
 
         // 工具调用的发起：**只有一条路径**——名字在本轮暴露集合里，且端口执行体存在。
-        // 未暴露名称、未知别名、无能力表一律是失败事实，**不回落宿主路由**（D-445 ②）：
+        // 未暴露名称、未知别名、无能力表一律是失败事实，**不回落宿主路由**：
         // 旧链「未命中 ⇒ p2.route」会把模型没被授权调用的名字交给任意路由处理器。
         // 包成 `Box<dyn Future>` 是为了下面那个「轮询 + 空闲判定」的循环能重复借用。
         let mut route_fut: std::pin::Pin<
@@ -2353,7 +2353,7 @@ impl ToolPort {
                     invoke_name
                 );
                 let _ = tool_ctx.set_payload(args.clone());
-                // 绑定在**派发之前**从调用方 ctx 读出（D-468）：装配期容器随 ctx 走，
+                // 绑定在**派发之前**从调用方 ctx 读出：装配期容器随 ctx 走，
                 // 执行体不由能力表的行携带。
                 let bound = tool_ctx
                     .get(symbio_plugin_api::port::PORT_BINDINGS)
@@ -2364,7 +2364,7 @@ impl ToolPort {
                 let exec2 = exec.clone();
                 let args2 = args.clone();
                 Box::pin(async move {
-                    // 执行体来自装配期容器（`D-440` ② / D-468）：工具就是端口，绑定是
+                    // 执行体来自装配期容器（ ② / ）：工具就是端口，绑定是
                     // 装配期收集的事实。执行体裹的是注册收口点已过闸的同一个能力，
                     // 闸门判定只有一份。
                     match bound {
@@ -2581,12 +2581,12 @@ impl ToolPort {
     }
 }
 
-/// 本轮暴露快照的别名表（内部端口身份 → 模型侧别名，D-444 ①）。
+/// 本轮暴露快照的别名表（内部端口身份 → 模型侧别名）。
 ///
-/// 只读本轮 `session.config` 里由模型插件投影、session 落格的那一份（D-469）——
+/// 只读本轮 `session.config` 里由模型插件投影、session 落格的那一份——
 /// 清单、四个协议的下行序列化与这里的返回解析读同一份数据，插件停用 / 撤权 /
 /// MCP 变化后的旧调用不会静默绑到同名新实现。没有快照 ⇒ 空表 ⇒ 解析失败落失败
-/// 事实（D-445 ②）；**不重建、不投影**：字符集规则只有一个 owner（模型插件）。
+/// 事实；**不重建、不投影**：字符集规则只有一个 owner（模型插件）。
 fn exposure_aliases(exec: &PortExecContext) -> std::collections::BTreeMap<String, String> {
     let Some(reader) = exec.reader.as_ref() else {
         return Default::default();
@@ -2601,7 +2601,7 @@ fn exposure_aliases(exec: &PortExecContext) -> std::collections::BTreeMap<String
         .unwrap_or_default()
 }
 
-/// 线上名 → **本轮实际暴露集合**里的内部端口身份（D-445 ②）。
+/// 线上名 → **本轮实际暴露集合**里的内部端口身份。
 ///
 /// 别名表在装配期一次生成、碰撞已拒绝，故每个 wire 至多对应一个身份。查不到 ⇒
 /// `None`：调用方必须落失败事实，**不回落宿主路由、不反演字符串、不猜另一个工具**。

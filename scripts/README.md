@@ -39,7 +39,7 @@ impl: done
   `obligation-ring-accept.mjs`、`check-commit-msg.mjs`、`cli-binary.mjs` / `tauri-binary.mjs`
   （后两者是「按指纹决定要不要重建」的构建入口）。
 - **共享库**（只被 import，声明 `@gate lib`）：`color`、`md-table`、`fs-walk`、`rust-scan`、
-  `line-count`、`decision-anchors`、`registry-lib`、`route-facts`、`commit`、
+  `line-count`、`registry-lib`、`route-facts`、`commit`、
   `core-change-backfill`、`e2e-order`、`e2e-concurrency`。
 
 库不再分目录：它们**本来就不需要接线**（没有清单、没有阶段会跑它们），

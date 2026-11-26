@@ -289,7 +289,7 @@ fn message_of_node_folds_attr_tool_name_into_meta() {
     assert_eq!(m.tool_name(), Some("new"));
 }
 
-/// 存量 `role` 属性在逆投影时**折成主体**（[D-147]）：属性表没有 `principal` 的节点
+/// 存量 `role` 属性在逆投影时**折成主体**：属性表没有 `principal` 的节点
 /// 读到后同样只有一份身份，显式 `principal` 优先。
 #[test]
 fn message_of_node_folds_legacy_role_into_principal() {
@@ -494,7 +494,7 @@ fn derived_actions_from_shape_status_meta() {
     assert!(has(&ask_q, ResumeAction::Answer));
 }
 
-/// 折叠以**主体为先**（D-147）：两格都在且说不同的话时，主体是权威。
+/// 折叠以**主体为先**：两格都在且说不同的话时，主体是权威。
 ///
 /// 这条判据的意义不在「取哪一个」，而在**只有一个来源**：反过来让残留格优先，
 /// 每一处身份改写都得写两格、还得记住顺序——`attributed` 之后两格各说一套的

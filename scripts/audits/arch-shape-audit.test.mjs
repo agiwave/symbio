@@ -169,7 +169,7 @@ const FIVE_TRAITS =
   'pub trait Registry {\n    fn r(&self);\n}\n'
 
 const NOUN_ALLOW_OK =
-  '// arch-shape-allow CS-004 tool ×1: 用途=wire 词汇（家族名）；不是插件引用=内核不认插件实现；依据=D-303；登记=2026-11-03\n'
+  '// arch-shape-allow CS-004 tool ×1: 用途=wire 词汇（家族名）；不是插件引用=内核不认插件实现；依据=wire 词汇的既有闭集，改动会影响所有读方；登记=2026-11-03\n'
 
 /** CS-004 夹具：内核文件 `alpha` 里可以放字面量；插件词表 = `tool`。 */
 const nounFiles = (alphaSrc, extra = {}) => ({
@@ -178,7 +178,7 @@ const nounFiles = (alphaSrc, extra = {}) => ({
   [KERNEL]: '// core-kernel-files: alpha/mod.rs\n',
   'crates/symbio-platform/src/sdk/plugin/mod.rs': '',
   'crates/symbio-plugin-tool/src/.keep': '',
-  'docs/003-design/047-义务环判据与归属推导.md': '# DE-047\n\n### D-303 夹具决策\n\n理由。\n',
+  'docs/003-design/047-义务环判据与归属推导.md': '# DE-047\n\n###  夹具决策\n\n理由。\n',
   ...extra,
 })
 
@@ -198,15 +198,15 @@ test('CS-004：登记处数超过实测 ⇒ 红（登记了却没有的代码是
   assert.match(r.stderr, /登记超过实测 1 处/)
 })
 
-test('CS-004：登记缺 `依据=` ⇒ 红（豁免必须挂一条决策）', () => {
+test('CS-004：登记的当前理由太短 ⇒ 红（豁免不能只挂一个旧编号）', () => {
   const r = audit(
     nounFiles(
-      FIVE_TRAITS + 'pub const T: &str = "tool";\n' + NOUN_ALLOW_OK.replace('依据=D-303；', ''),
+      FIVE_TRAITS + 'pub const T: &str = "tool";\n' + NOUN_ALLOW_OK.replace('依据=wire 词汇的既有闭集，改动会影响所有读方', '依据=旧编号'),
     ),
     { baseline: '5:5:0', turnState: '1' },
   )
   assert.equal(r.status, 1)
-  assert.match(r.stderr, /没有决策编号/)
+  assert.match(r.stderr, /依据=\` 太短/)
 })
 
 test('CS-004：登记缺 `登记=` 日期 ⇒ 红', () => {
@@ -270,32 +270,31 @@ test('CS-004 只量内核文件集：域文件里的插件 id 字面量不判红
   assert.match(bad.stderr, /回流/)
 })
 
-// ==================== CS-002 放宽必须有能打开的决策 ====================
+// ==================== CS-002 放宽必须写清当前理由 ====================
 
-test('放宽注释里没有决策编号 ⇒ CS-002 变红', () => {
+test('放宽注释的理由空泛 ⇒ CS-002 变红', () => {
   const r = audit(
     core(ONE, { 'scripts/audits/arch-shape-audit.mjs': '// core-shape-allow methods: 批次需要，先放宽一点\n' }),
     { baseline: '1:2:0' },
   )
-  assert.equal(r.status, 1, '没有决策的放宽必须红')
+  assert.equal(r.status, 1, '空泛的理由不能顶替当前理由')
   assert.match(r.stderr, /CS-002/)
-  assert.match(r.stderr, /没有决策编号/)
+  assert.match(r.stderr, /理由太短/)
 })
 
-test('放宽注释引用了不存在的决策 ⇒ CS-002 变红', () => {
+test('放宽注释理由过短 ⇒ CS-002 变红', () => {
   const r = audit(
-    core(ONE, { 'scripts/audits/arch-shape-audit.mjs': '// core-shape-allow methods: D-077 扩到 2 个成员的理由\n' }),
+    core(ONE, { 'scripts/audits/arch-shape-audit.mjs': '// core-shape-allow methods: 扩到 2 个成员\n' }),
     { baseline: '1:2:0' },
   )
-  assert.equal(r.status, 1, '指向打不开的决策 = 空引用')
-  assert.match(r.stderr, /D-077.*条目/)
+  assert.equal(r.status, 1, '空泛理由 = 空豁免')
+  assert.match(r.stderr, /理由太短/)
 })
 
-test('放宽注释挂着能打开的决策 ⇒ 通过（棘轮不判论证内容，只保证决策存在）', () => {
+test('放宽注释写了具体当前理由 ⇒ 通过', () => {
   const r = audit(
     core(ONE, {
-      'scripts/audits/arch-shape-audit.mjs': '// core-shape-allow methods: D-077 扩到 2 个成员的理由\n',
-      'crates/symbio-plugin-heartbeat/README.md': '# 心跳插件\n\n### D-077 夹具决策\n\n理由。\n',
+      'scripts/audits/arch-shape-audit.mjs': '// core-shape-allow methods: 扩展一位是因为本批把两个既有读口合并，成员数按实测钉死\n',
     }),
     { baseline: '1:2:0' },
   )
@@ -305,8 +304,8 @@ test('放宽注释挂着能打开的决策 ⇒ 通过（棘轮不判论证内容
 test('放宽一个不存在的格 ⇒ CS-002 变红（拼错的键名不能当豁免）', () => {
   const r = audit(
     core(ONE, {
-      'scripts/audits/arch-shape-audit.mjs': '// core-shape-allow methodz: D-077 打错了键名\n',
-      'crates/symbio-plugin-heartbeat/README.md': '# 心跳插件\n\n### D-077 夹具决策\n\n理由。\n',
+      'scripts/audits/arch-shape-audit.mjs': '// core-shape-allow methodz:  打错了键名\n',
+      'crates/symbio-plugin-heartbeat/README.md': '# 心跳插件\n\n###  夹具决策\n\n理由。\n',
     }),
     { baseline: '1:2:0' },
   )
@@ -365,7 +364,7 @@ test('反向：tuple struct 的位置字段计入，`pub(crate)` 与测试模块
   assert.equal(r.status, 0, r.stderr + r.stdout)
 })
 
-test('CS-009 的放宽同样要挂能打开的决策（`core-shape-allow enumVariants`）', () => {
+test('CS-009 的放宽同样要写清当前理由（`core-shape-allow enumVariants`）', () => {
   const bumped = DATA_TWO.replace('    Y,\n', '    Y,\n    Z,\n')
   const withoutDecision = audit(core(ONE, { 'crates/symbio-platform/src/sdk/beta/mod.rs': bumped }), {
     data: '2:3',
@@ -376,23 +375,22 @@ test('CS-009 的放宽同样要挂能打开的决策（`core-shape-allow enumVar
   const waived = audit(
     core(ONE, {
       'crates/symbio-platform/src/sdk/beta/mod.rs': bumped,
-      'scripts/audits/arch-shape-audit.mjs': '// core-shape-allow enumVariants: D-209 领域扩展位的理由\n',
-      'docs/003-design/025-能力包与扩展面.md': '# DE-025\n\n### D-209 领域轴用一个扩展位\n\n理由。\n',
+      'scripts/audits/arch-shape-audit.mjs': '// core-shape-allow enumVariants: 领域扩展位是本批新增读口的实际需要，按实测钉死不留余量\n',
     }),
     { data: '2:3' },
   )
   assert.equal(waived.status, 0, waived.stderr + waived.stdout)
-  assert.match(waived.stdout, /enumVariants←D-209/)
+  assert.match(waived.stdout, /enumVariants←/)
 
   const dangling = audit(
     core(ONE, {
       'crates/symbio-platform/src/sdk/beta/mod.rs': bumped,
-      'scripts/audits/arch-shape-audit.mjs': '// core-shape-allow enumVariants: D-999 指向不存在的决策\n',
+      'scripts/audits/arch-shape-audit.mjs': '// core-shape-allow enumVariants: 扩展位\n',
     }),
     { data: '2:3' },
   )
-  assert.equal(dangling.status, 1, '指向打不开的决策 = 空引用')
-  assert.match(dangling.stderr, /D-999.*条目/)
+  assert.equal(dangling.status, 1, '空泛理由 = 空豁免')
+  assert.match(dangling.stderr, /理由太短/)
 })
 
 // ==================== 判据自己不能哑火 ====================
@@ -417,7 +415,7 @@ const GRID = 'crates/symbio-platform/src/kernel/event/grid.rs'
 /**
  * 内核事件名表的最小夹具：协议五格照真仓写法，业务行由参数给。
  *
- * `cells` 只喂给**回潮用例**——`grid.rs` 已随 D-203 退役，真仓里它不该存在。
+ * `cells` 只喂给**回潮用例**——`grid.rs` 已随  退役，真仓里它不该存在。
  * 保留这条通路是为了钉住「加回来会红」，不是为了描述现状。
  */
 function vocab(sources = ['a.one'], cells = ['EVENT_A']) {
@@ -479,7 +477,7 @@ const CORE_DELTA = 'crates/symbio-platform/src/sdk/delta/mod.rs'
 
 /**
  * CS-008 的输入：内核事件表（含 `Entity` 闭集）+ 一条业务名，**不带** `grid.rs`
- * （那张表已随 D-203 退役，夹具不该替它续命）。
+ * （那张表已随  退役，夹具不该替它续命）。
  */
 function vocabWithEntity(variants = ['Turn', 'Chat', 'Artifact']) {
   const files = vocab()
@@ -539,7 +537,7 @@ auditCase('CS-006：两个 crate 同时消费 ⇒ 绿（名字不能被任一插
     { baseline: '1:1:0', vocab: '1:1' },
   ), 0, [/CS-006.*1 条都不在「单一消费方且 core 不读」这一形态（≥2 crate 消费 1/])
 
-auditCase('CS-006：core 生产代码读它 ⇒ 不判红，但账记在「待迁存量」上（迁的移动作在读者那一侧，DE-024 D-203）', () => audit(
+auditCase('CS-006：core 生产代码读它 ⇒ 不判红，但账记在「待迁存量」上（迁的移动作在读者那一侧，DE-024 ）', () => audit(
     core(ONE, {
       ...vocab(),
       [ALPHA_CRATE]: 'pub fn k() { EVENT_A }\n',

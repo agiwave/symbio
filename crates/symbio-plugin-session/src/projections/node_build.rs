@@ -1,6 +1,6 @@
 //! ChatNode 的**写侧构造与建树整形**（后端机制，不是显示定义）。
 //!
-//! 实现随唯一生产消费方 session 住本插件（D-561）。`chat_node.rs` 定义节点形状，
+//! 实现随唯一生产消费方 session 住本插件。`chat_node.rs` 定义节点形状，
 //! 本模块负责按该形状产出节点；平台 SDK 只保留内核规则 `result_node_id` 的转发。
 //!
 //! ## 消费方
@@ -22,7 +22,7 @@ use symbio_platform::sdk::llm::llm_short_id;
 // [`symbio_platform::kernel::event::result_node_id`]）。
 //
 // 执行体（流式增量帧的落点）经门面的 `node_build` 模块取它——写侧 / 读侧 / 执行体
-// 共用一份派生，三处各算一遍必然漂移（DE-048 D-312）。
+// 共用一份派生，三处各算一遍必然漂移（DE-048 ）。
 // ==================== 节点构造族 ====================
 
 /// 对话面文本节点的 `meta.surface` 取值（唯一字面量落点）。
@@ -34,12 +34,12 @@ pub const SURFACE_REPLY: &str = "reply";
 /// - 进度汇报：`ReportDraft::to_message`，`exclude_from_context = true`；它站在
 ///   **轮边界**上，不属于某一轮 ⇒ 根级；
 /// - 首响（`Escalate`）：重建侧 `opening_node` 用它复刻落库那一格，再把父改写成
-///   轮根（`D-426`）——形状一份，位置由事实给。
+///   轮根——形状一份，位置由事实给。
 ///
-/// 答话（`Answered`）**不走这里**（`D-435`）：它与工具轮的正文是同一条通道
+/// 答话（`Answered`）**不走这里**：它与工具轮的正文是同一条通道
 /// （轮根下的正文子 + 载荷 `meta` 带 `surface` / `reason`），不是第三种节点。
 ///
-/// `principal` 是**这条发言是谁说的**（D-147：身份只写一份）。对话面文本恒由
+/// `principal` 是**这条发言是谁说的**（身份只写一份）。对话面文本恒由
 /// 本会话主体产出，调用方从请求上下文取 `request_principal`（`authz` 域，控制面）。
 pub fn dialog_node(
     text: &str,
@@ -153,7 +153,7 @@ pub fn llm_build_tool_message(
         parent_id: Some(tool_call_id.into()),
         // 结果节点归**工具自己**一族：名字未知（协议级失败）时仍是「一条工具结果」，
         // 用 `legacy/unknown` 这个可路由的兜底地址承载族——不能退回会话主体，
-        // 否则同一张卡片会按「助手说的话」呈现（D-147：身份只写一份）。
+        // 否则同一张卡片会按「助手说的话」呈现（身份只写一份）。
         principal: Some(
             tool_name
                 .map(Principal::tool_principal)

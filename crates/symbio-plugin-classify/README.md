@@ -23,7 +23,7 @@ impl: done
 
 入参 `DecideRequest`、出参 `Verdict`，都在
 [`symbio_platform::sdk::dialog`](../symbio-platform/src/contract/dialog.rs) ——
-契约跨插件（`session` 生产，本插件与 `compose` 消费），故落在 core（D-023）。
+契约跨插件（`session` 生产，本插件与 `compose` 消费），故落在平台契约臂。
 
 `Verdict` 是**闭集枚举**（`Answered` / `Escalate` / `Report`），不是自由文本；
 其中的 `reason` 是**理由码**（数据），词表就在同一个模块里（`REASON_*`）——新增一类
@@ -80,7 +80,7 @@ decide(utterance)
 - **会调用模型，但不暴露工具**：快速档分类是一次**内部请求**（静默出口，
  与上下文压缩摘要同款形状）——不注册 `Capability` 与不调用模型是两件事。
 - **无状态、无副作用、不持有地址**：不实现 `VdfsProvider`，因此没有挂载视图；
- 它不回写转写（转写只有 `session` 一个写入者，见 D-020）。
+ 它不回写转写（转写只有 `session` 一个写入者）。
 - **可卸载**：不挂载本插件 ⇒ 路由 `NotFound` ⇒ 全部输入直接进工具循环（= 卸载前的行为）。
  这是**装配期**的状态（停用即不构造），不是运行期读一个 `enabled` 字段。
 

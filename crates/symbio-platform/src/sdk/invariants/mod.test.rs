@@ -642,7 +642,7 @@ fn declared_budget_prefers_spec_numeric_and_falls_back_to_tier() {
     assert_eq!(declared_budget_ms(EVENTS, &neither), None);
 }
 
-// ── C6 / D-203：停机判据读声明，不读名字 ───────────────────────────────
+// ── C6 /：停机判据读声明，不读名字 ───────────────────────────────
 
 /// 停机事实的第二臂同样读角色（C6）：具体事件名不出现在判据里。
 #[test]

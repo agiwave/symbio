@@ -60,7 +60,7 @@ impl HttpRequestTool {
         // 验证 URL
         let validated_url = Self::validate_url(url, &allowed_domains)?;
 
-        // Agent 声明的出站白名单（第三道闸，D-153）。放在宿主白名单**之后**：
+        // Agent 声明的出站白名单（第三道闸）。放在宿主白名单**之后**：
         // 两个清单取交集——宿主说「这些站能去」、Agent 说「这些站我要去」，
         // 少任何一票都不发。发送循环还会对每一个重定向跳重复这道判据。
         agent_network_allowed(&extract_host(validated_url.as_str())?, agent_scope)?;

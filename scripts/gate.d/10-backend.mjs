@@ -60,7 +60,7 @@ export default {
 
         // 测试：**本地与 CI 同一口径** —— 一次 `cargo test --workspace` 求和比对基线。
     //
-    // 为什么要改（D-191 crate 化之后）：`cargo test -p symbio` 现在只跑宿主门面，
+    // 为什么要改（ crate 化之后）：`cargo test -p symbio` 现在只跑宿主门面，
     // 实测 `0 passed`——21 个插件、core、providers 的用例全在各自 crate 里，分包跑
     // **一条都跑不到**，而 `rustTests` 基线 2175 守的正是那个空壳。这不是「数字要调」，
     // 是**守卫指向了不存在的对象**：它会在 0 个用例上一直报「通过数 < 基线」，或者
@@ -81,7 +81,7 @@ export default {
       }),
     )
 
-    // `dead_code` 的豁免与销账归 `scripts/audits/session-dead-code-audit.mjs`（D-331 / SD-001）：
+    // `dead_code` 的豁免与销账归 `scripts/audits/session-dead-code-audit.mjs`（ / SD-001）：
     // clippy 只判其余 lint，`-A dead_code` 让开这一族，否则「B 类待接入能力」会把
     // `-D warnings` 变成一张永远红的清单。这不是放宽——新死码仍由 SD-001 按台账判红，
     // 台账外的死码过不了门禁。
@@ -92,19 +92,19 @@ export default {
       cwd: backendDir,
     })
 
-    // B 类死码台账（D-331）：源码里每一条 `dead_code` 都必须在册，台账里每一行也都
+    // B 类死码台账（）：源码里每一条 `dead_code` 都必须在册，台账里每一行也都
     // 必须仍然成立（已有消费者 / 符号不存在 / 批次已落地 ⇒ 红）。与 clippy 同泳道串行。
     tasks.push({
-      label: 'session 死码台账（D-331 / SD-001）',
+      label: 'session 死码台账（ / SD-001）',
       cmd: process.execPath,
       args: [path.join(scriptDir, '..', 'audits', 'session-dead-code-audit.mjs')],
       cwd: repoRoot,
     })
 
-    // rustdoc 的两条 lint（断链 / 伪码块）**已废弃**（D-274）：`cargo doc --no-deps
+    // rustdoc 的两条 lint（断链 / 伪码块）**已废弃**（）：`cargo doc --no-deps
     // --workspace` 一次 core 改动实测 4m04s，是 backend 整阶段（clippy 8s + 测试构建
     // 17s + 测试运行 39s）的 4 倍，而它守的只是文档里的断链。判据降级为**一条命令**，
-    // 需要时手跑，见 `docs/003-design/016-工程落地与验证.md` 的 D-274。
+    // 需要时手跑，见 `docs/003-design/016-工程落地与验证.md` 的 。
 
     // cli release 二进制在本泳道尾部重建（e2e 的被测件）。放在这里的理由：
     // - `58-e2e` 的用例只等这份产物；原先构建在批后串行——改 Rust 的那一轮，

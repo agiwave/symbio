@@ -37,6 +37,9 @@ import {
   stringLiteralsOf,
   gensDeclOf,
   stateDeclOf,
+  exemptionRecordErrors,
+  coreChangeParts,
+  registrationTarget,
 } from './_shared.mjs'
 
 const repoRoot = path.resolve(import.meta.dirname, '../..')
@@ -1017,7 +1020,7 @@ test('55-verify：rustc 必须先**串行预热**再进并发批（否则撞 rus
   assert.match(block, /cmd:\s*'rustc'/, '预热项不是在调 rustc —— 上面几条钉的前提变了')
 })
 
-// ================= 限期豁免的日期语义（D-492） =================
+// ================= 限期豁免的日期语义（） =================
 //
 // `expires` 是**失效日**：当天仍有效，次日起失效。用到它的判据（EX-007 等）
 // 共用这一个原语；边界差一天是这里最容易悄悄回归的东西，所以两天各钉一条。
@@ -1048,25 +1051,78 @@ test('stateDeclOf：缺省与显式都是 live（在役脚本不写状态字）'
 
 test('stateDeclOf：redundant / retired 的合法形状', () => {
   assert.deepEqual(stateDeclOf('// @state redundant: GW-001\n'), { state: 'redundant', successor: 'GW-001' })
-  assert.deepEqual(stateDeclOf('// @state retired: D-123 判的是迁走前的旧形状\n'), {
+  assert.deepEqual(stateDeclOf('// @state retired: a1b2c3d 判的是迁走前的旧形状\n'), {
     state: 'retired',
-    decision: 'D-123',
+    target: 'a1b2c3d',
+    targetKind: 'sha',
     reason: '判的是迁走前的旧形状',
+  })
+  assert.deepEqual(stateDeclOf('// @state retired: T-123 由该任务收口\n'), {
+    state: 'retired',
+    target: 'T-123',
+    targetKind: 'task',
+    reason: '由该任务收口',
   })
 })
 
 test('stateDeclOf：声明掉在正文深处不算（前 80 行口径与 @gate 同）', () => {
-  assert.deepEqual(stateDeclOf(`${'// 填充\n'.repeat(90)}// @state retired: D-123 理由\n`), { state: 'live' })
+  assert.deepEqual(stateDeclOf(`${'// 填充\n'.repeat(90)}// @state retired:  理由\n`), { state: 'live' })
 })
 
-test('stateDeclOf：错误闭集（duplicate / unknown / bad-shape / empty-arg / retired-needs-decision）', () => {
+test('stateDeclOf：错误闭集（duplicate / unknown / bad-shape / empty-arg / retired-needs-target）', () => {
   assert.equal(stateDeclOf('// @state live\n// @state redundant: GW-001\n').error, 'duplicate')
   assert.deepEqual(stateDeclOf('// @state gone: 词\n'), { error: 'unknown', detail: 'gone' })
   assert.deepEqual(stateDeclOf('// @state\n'), { error: 'bad-shape', detail: '// @state' })
   assert.equal(stateDeclOf('// @state redundant:\n').error, 'empty-arg')
-  // 有裁决号没理由、或裁决号本身不对，都是「退役没署名」
-  assert.equal(stateDeclOf('// @state retired: D-123\n').error, 'retired-needs-decision')
-  assert.equal(stateDeclOf('// @state retired: 理由\n').error, 'retired-needs-decision')
+  // 缺目标、目标形状不对、有目标没理由，都是「退役没署名」；架构决策号不是目标
+  assert.equal(stateDeclOf('// @state retired: \n').error, 'empty-arg')
+  assert.equal(stateDeclOf('// @state retired: 理由\n').error, 'retired-needs-target')
+  assert.equal(stateDeclOf('// @state retired: 判例123 理由\n').error, 'retired-needs-target')
+  assert.equal(stateDeclOf('// @state retired: a1b2c3d\n').error, 'retired-needs-target')
+})
+
+test('registrationTarget：只认已存在的记录形态（SHA / T- / SP-）', () => {
+  assert.deepEqual(registrationTarget('a1b2c3d'), { target: 'a1b2c3d', kind: 'sha' })
+  assert.deepEqual(registrationTarget('5c7586a21f0a1b2c3d4e5f60718293a4b5c6d7e8'), {
+    target: '5c7586a21f0a1b2c3d4e5f60718293a4b5c6d7e8',
+    kind: 'sha',
+  })
+  assert.deepEqual(registrationTarget('T-123'), { target: 'T-123', kind: 'task' })
+  assert.deepEqual(registrationTarget('SP-001'), { target: 'SP-001', kind: 'spec' })
+  assert.equal(registrationTarget('待补'), null)
+})
+
+test('exemptionRecordErrors：规则码、当前理由、责任人、失效日、清除动作缺一不可', () => {
+  const ok = {
+    rule: 'CS-002',
+    reason: '环形状仍由旧求解器承担',
+    owner: 'arch',
+    expires: '2027-01-31',
+    clears: '求解器换轨后删除该行',
+  }
+  assert.deepEqual(exemptionRecordErrors(ok, { today: '2026-11-26' }), [])
+  assert.deepEqual(exemptionRecordErrors({ ...ok, rule: '' }, { today: '2026-11-26' }), ['rule 必须是判据码'])
+  assert.deepEqual(exemptionRecordErrors({ ...ok, reason: '  ' }, { today: '2026-11-26' }), ['reason 不可为空'])
+  assert.deepEqual(exemptionRecordErrors({ ...ok, owner: '' }, { today: '2026-11-26' }), ['owner 不可为空'])
+  assert.deepEqual(exemptionRecordErrors({ ...ok, expires: '2026-11-01' }, { today: '2026-11-26' }), ['expires 已失效'])
+  assert.deepEqual(exemptionRecordErrors({ ...ok, expires: '2026/11/30' }, { today: '2026-11-26' }), ['expires 必须是 YYYY-MM-DD'])
+  assert.deepEqual(exemptionRecordErrors({ ...ok, clears: '' }, { today: '2026-11-26' }), ['clears 不可为空'])
+  assert.deepEqual(exemptionRecordErrors(null), ['必须是结构化对象'])
+})
+
+test('coreChangeParts：判据码与非空当前理由同时给出才算声明', () => {
+  assert.deepEqual(coreChangeParts('Core-Change: CS-002 环形状仍由旧求解器承担'), {
+    rule: 'CS-002',
+    reason: '环形状仍由旧求解器承担',
+    value: 'CS-002 环形状仍由旧求解器承担',
+  })
+  assert.deepEqual(coreChangeParts('Core-Change：CS-002 收紧门面'), {
+    rule: 'CS-002',
+    reason: '收紧门面',
+    value: 'CS-002 收紧门面',
+  })
+  assert.equal(coreChangeParts('feat: 普通提交'), null)
+  assert.deepEqual(coreChangeParts('Core-Change: CS-002'), { rule: null, reason: '', value: 'CS-002' })
 })
 
 // ================= 历史路径别名（平台合并 / 运行时合并之后读历史） =================

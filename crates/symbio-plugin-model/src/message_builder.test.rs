@@ -5,7 +5,7 @@
 //! ## 落库树在这里是**本地 fixture**
 //!
 //! 真正的构造器（`llm_build_assistant_messages` / `RoundStreamChildIds` /
-//! `RoundOutput::into_messages`）生产上只有 session 一个消费方，已随 D-023 从
+//! `RoundOutput::into_messages`）生产上只有 session 一个消费方，已 从
 //! `symbio_plugin_api::llm::turn` 下沉到 `crates/symbio-plugin-loop/src/message_build.rs`；
 //! 插件之间禁止互引（`plugin-entry-audit` E-009），本文件不能再调它。
 //!
@@ -20,7 +20,7 @@ use symbio_plugin_api::chat_node::{NodeKind, NodeStatus};
 
 const ROUND_ID: &str = "round-0001";
 
-/// 身份写 `principal`（D-147）：本文件的树模仿**落库面**（见文件头），
+/// 身份写 `principal`本文件的树模仿**落库面**（见文件头），
 /// `role` 只是反序列化落点，不是写侧的身份来源。
 fn principal_for(role: NodeRole) -> symbio_plugin_api::principal::Principal {
     use symbio_plugin_api::principal::Principal;

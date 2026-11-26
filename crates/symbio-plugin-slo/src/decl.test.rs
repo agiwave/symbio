@@ -37,7 +37,7 @@ fn dispatch(round_id: &str, tier: &str, seq: u64, ts: i64) -> Event {
     e
 }
 
-/// 开轮格（`user.message`）：兜底率的分母 / 跨度的端点。**不再带档位**（`D-282`）。
+/// 开轮格（`user.message`）：兜底率的分母 / 跨度的端点。**不再带档位**。
 fn user_message(id: &str, seq: u64, ts: i64) -> Event {
     let mut e = Event::pending(
         id,
@@ -315,7 +315,7 @@ fn the_views_declare_both_halves_and_read_only_what_they_use() {
     let names: Vec<&str> = VIEWS.iter().map(|v| v.name).collect();
     assert_eq!(names, vec![SLO_LATENCY, SLO_FALLBACK, SLO_SPAN]);
     for v in VIEWS {
-        assert!(v.agg.is_some(), "`{}` 少了跨会话那一半（D-281）", v.name);
+        assert!(v.agg.is_some(), "`{}` 少了跨会话那一半", v.name);
         assert_eq!(v.cost, COST, "切点全仓只有一个值");
         assert!(v.evidence.is_empty(), "读数不替任何事实关门");
         for (fact, field) in v.reads {
@@ -330,7 +330,7 @@ fn the_views_declare_both_halves_and_read_only_what_they_use() {
     assert!(VIEWS[2].reads.is_empty());
 }
 
-/// 报表登记：两条视图并成一行，出口行与 `fleet.by_tier` 的排版都在 owner（`D-387`）。
+/// 报表登记：两条视图并成一行，出口行与 `fleet.by_tier` 的排版都在 owner。
 #[test]
 fn the_tiers_report_merges_latency_and_fallback_by_tier() {
     let latency = json!({ "by_tier": [

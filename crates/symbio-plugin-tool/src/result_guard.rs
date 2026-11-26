@@ -9,9 +9,9 @@
 //!    声明、经运行期数据取得，不在此写字面量），并对正文做 **head/tail 摘要**
 //!    （保留前 60% + 后 40% 预算，尾部通常是结论/错误，更关键），中间插入占位说明。
 //!
-//! D-515：存档不再由插件拿物理路径直写——调用方递来作用域 provider，本模块只
+//! 存档不再由插件拿物理路径直写——调用方递来作用域 provider，本模块只
 //! 认相对地址。这样后端换成内存 / 网络存储时插件无感，也避免每个插件各拼一份
-//! 物理路径。D-528 把存档根从工作区收窄到会话：会话私有数据不污染工作区根目录，
+//! 物理路径。 把存档根从工作区收窄到会话：会话私有数据不污染工作区根目录，
 //! 滚动淘汰也不再跨会话互相挤掉。provider 缺席（无会话也无工作区）= 不存档，
 //! 降级为「未存档」提示。
 //!
@@ -36,7 +36,7 @@ pub const ARCHIVE_KEEP: usize = 20;
 /// 存档目录在 `SESSION_VDFS` 下的相对地址。
 ///
 /// 相对地址是 provider 的寻址键；印给模型的取回地址由 [`retrieval_address`] 在此
-/// 基础上补会话地址面前缀，两者指向同一物理文件（D-528）。
+/// 基础上补会话地址面前缀，两者指向同一物理文件。
 pub const ARCHIVE_REL_DIR: &str = "tool_archives";
 
 /// 由存档相对地址算出印给模型的取回地址。
@@ -183,7 +183,7 @@ pub async fn guard_result(
     let archive_path = archive_full_text(text, n, provider).await;
 
     let omit = n.saturating_sub(budget_tokens);
-    // 统一取回协议：占位符印会话地址面虚拟地址（与写入根同源，D-528）。
+    // 统一取回协议：占位符印会话地址面虚拟地址（与写入根同源）。
     let archive_hint = match &archive_path {
         Some(p) => format!(
             "完整输出已存档至: {}{RETRIEVAL_HINT}",

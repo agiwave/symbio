@@ -1,15 +1,15 @@
 //! 插件核心 Trait（上下文注入版）——宿主侧补充面
 //!
-//! 契约本体（`Plugin` / 上下文 / 信封 / 错误）已在 `symbio_kernel`（D-188 C2b），
+//! 契约本体（`Plugin` / 上下文 / 信封 / 错误）已在 `symbio_kernel`（ C2b），
 //! 这里保留宿主事实：插件目录与清单（[`dir`]）、遍历端点（[`traverse`]），
 //! 能力效果的机制面（[`effects`] / [`behaviors`]，随 `submit_behavior!` 从门面
-//! 整块搬来，`D-408`）、上下文贡献的机制面（[`context`]，随 `submit_context_provider!`
-//! 整块搬来，`D-412`），以及四个链接期注册表（[`retrieval`] / [`rows`] / [`settle`] /
-//! [`fact_source`]，随各自的提交宏整块搬来，`D-413`）；跨插件报表的
-//! 登记与读取（[`reports`]）与视图缺席原因（[`views`]）随注册表搬来（`D-416`）。
+//! 整块搬来）、上下文贡献的机制面（[`context`]，随 `submit_context_provider!`
+//! 整块搬来），以及四个链接期注册表（[`retrieval`] / [`rows`] / [`settle`] /
+//! [`fact_source`]，随各自的提交宏整块搬来）；跨插件报表的
+//! 登记与读取（[`reports`]）与视图缺席原因（[`views`]）随注册表搬来。
 
 // 契约词汇由本域子模块直接从 `crate::kernel::plugin` 取；本域**不再**整模块转出内核的
-// 公开面——那会让 `crate::sdk::plugin::<内核符号>` 成为第二条合法路径（DE-018 的 D-419）。
+// 公开面——那会让 `crate::sdk::plugin::<内核符号>` 成为第二条合法路径（DE-018 的 ）。
 
 // 例外：`submit_object_creator!` 的宏体写 `$crate::sdk::plugin::PluginInvokeRequest`，
 // 展开在消费方 crate——这一条必须是公开路径。
@@ -36,5 +36,5 @@ pub use dir::{
     PLUGIN_KEY_VERSION,
 };
 // 锁辅助函数不在这里转出：扩展层经门面从 `crate::kernel::plugin::error` 取，
-// 本 crate 内没有消费方（DE-018 的 D-419：内核符号不留第二条路径）。
+// 本 crate 内没有消费方（DE-018 的：内核符号不留第二条路径）。
 pub use traverse::{TRAVERSE_AVAILABLE_OPTIONS, TRAVERSE_AVAILABLE_TOOLS};

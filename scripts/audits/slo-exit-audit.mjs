@@ -30,7 +30,7 @@
  * `—` 是「待建」，不是「不用有」。此前它只是每周日志里的一个数，债可以无限涨而门禁
  * 照绿——这正是「全绿由冻结债构成」的一种。SX-004 把它变成只许降的棘轮：新增一行没有
  * 读数的出口必须红；有人补上读数后，实测低于基线时提示同批把 `MISSING_BASELINE` 钉到
- * 实测（D-505 先例），余量不会被下一次新增免费占用。
+ * 实测（ 先例），余量不会被下一次新增免费占用。
  *
  * ## 为什么 `—` 不是豁免
  *
@@ -80,7 +80,7 @@ const MISSING_BASELINE = 9
  * 1. `stats.rs` 的两个 `#[derive(Serialize)]` 结构体：`SessionStats` 的**固定** `pub`
  *    字段（顶层列）与 `TierRow`（`tiers` 列的子列）。带 `#[serde(flatten)]` 的容器
  *    字段（`reports`）不是列本身，排除——它的键见来源 2。
- * 2. **报表登记**（`D-387`）：全仓 `crates/**` 里每条 `submit_reports!` 的 `slot: "…"`。
+ * 2. **报表登记**（``）：全仓 `crates/**` 里每条 `submit_reports!` 的 `slot: "…"`。
  *    报表列是动态的（owner 登记一条就多一格），硬编码一份列名会在加列时静默变成假话。
  *
  * **不硬编码一份列名**——硬编码的那份会在加列时静默变成假话（表里指认得对、代码里
@@ -135,7 +135,7 @@ export function readColumns(root) {
 
 /** 递归列出目录下的 `.rs` 文件（跳过 `target`）。 */
 /**
- * 全仓 `submit_reports!` 里登记的 `slot`（`D-387`：报表列的动态来源）。
+ * 全仓 `submit_reports!` 里登记的 `slot`（``：报表列的动态来源）。
  *
  * 扫描前先去掉注释，避免把文档里的示例调用当成一条真登记。`crates` 不在 ⇒ null
  * （规则源读不出，调用方 exit 2）；没有登记 ⇒ 空集（合法的「还没迁报表」）。
@@ -261,7 +261,7 @@ if (missing < MISSING_BASELINE) {
   console.log(
     dim(
       `· SX-004 余量 ${MISSING_BASELINE - missing}：请同批把 MISSING_BASELINE 钉到 ${missing}` +
-        '（D-505 先例，余量会被下一次新增免费占用）',
+        '（ 先例，余量会被下一次新增免费占用）',
     ),
   )
 }

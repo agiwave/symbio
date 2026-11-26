@@ -190,7 +190,7 @@ async fn apply_writes_the_plugins_own_file() {
     assert!(text.contains("plugin_provider: demo"), "{text}");
 }
 
-// ==================== 身份（D-032） ====================
+// ==================== 身份 ====================
 
 /// 从未落位过的目录（manifest 里没有身份键）→ 身份全空，消费方按目录名兜底
 #[test]
@@ -266,7 +266,7 @@ fn seed_identity_is_a_no_op_when_nothing_is_missing() {
     assert_eq!(std::fs::read_to_string(d.config_path()).unwrap(), before);
 }
 
-/// ★ 旧清单迁移（D-524）：`plugin_icon: session` 是**图标名**不是图元内容。
+/// ★ 旧清单迁移：`plugin_icon: session` 是**图标名**不是图元内容。
 ///
 /// 这正是「图标位置空白」的现场：旧值被前端误当成 SVG 包进壳里，渲染出空图。
 /// 读身份时按未声明处理；装配期用插件现在自给的图元串覆盖，且迁移幂等。
@@ -299,7 +299,7 @@ fn seed_identity_migrates_legacy_icon_name_to_svg_content() {
     assert_eq!(std::fs::read_to_string(d.config_path()).unwrap(), before);
 }
 
-/// 已是 SVG 的值（含用户手写）仍是 manifest 权威，出厂声明不得覆盖（D-524）。
+/// 已是 SVG 的值（含用户手写）仍是 manifest 权威，出厂声明不得覆盖。
 #[test]
 fn seed_identity_preserves_declared_svg_icon() {
     let tmp = tempfile::TempDir::new().unwrap();

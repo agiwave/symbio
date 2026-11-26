@@ -23,7 +23,7 @@ import './_selfrun.mjs';
 // | 清单里每一项的 `schema` 与草稿**逐字节相同** | 一处真相、两处投递 |
 // | 字段 key 含会话自有项 + 沙箱安全项、且各有 `widget` | 定义真的被收集到（不是空壳） |
 //
-// D-531 裁决 B：session 自有的 mode/risk_level 已并入沙箱档案，会话选项栏改由
+//  裁决 B：session 自有的 mode/risk_level 已并入沙箱档案，会话选项栏改由
 // sandbox 插件贡献 `sandbox_id`（唯一安全选项）。本用例装 sandbox 插件后验证该字段
 // 的完整「定义 / 值 / 落库」链路。
 // | `create: true` 时 metadata 随创建写入 | 草稿态的选择不丢 |
@@ -48,7 +48,7 @@ import {
   PROVIDER_ID,
 } from '../helpers.mjs';
 
-/** 会话选项栏的安全项由沙箱插件贡献（D-531 裁决 B）：mode/risk_level 已并入沙箱档案，
+/** 会话选项栏的安全项由沙箱插件贡献（ 裁决 B）：mode/risk_level 已并入沙箱档案，
  *  会话自有字段只剩 workdir，另两项由 agent / model 插件贡献，heartbeat 由心跳插件贡献。 */
 const OWN_FIELD_KEYS = ['workdir', 'sandbox_id', 'heartbeat'];
 
@@ -80,7 +80,7 @@ export default defineCase(
       providers: [{ id: PROVIDER_ID, config: providerConfig(llm.port) }],
       // heartbeat 贡献会话选项里的 heartbeat 字段；它是可选插件（不再默认装配），
       // 本用例要验证那条通路，故显式把它装上。
-      // sandbox 贡献会话选项里的 sandbox_id（D-531 裁决 B：承接原 mode/risk_level 字段），
+      // sandbox 贡献会话选项里的 sandbox_id（ 裁决 B：承接原 mode/risk_level 字段），
       // 本用例要验证那条通路，故显式装上。
       pluginConfigs: { gateway: gatewayConfig(GATEWAY_PORT), heartbeat: {}, sandbox: {} },
     });

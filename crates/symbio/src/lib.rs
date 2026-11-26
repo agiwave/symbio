@@ -32,10 +32,10 @@ pub(crate) static DEPLOYMENT_ROOT_TEST_LOCK: std::sync::Mutex<()> = std::sync::M
 
 // 插件 crate 必须**被链接**，否则 `inventory` 里的工厂注册项会被链接器丢掉。
 // 链接是私有的（`use … as _`，见下面的生成块）：宿主门面只显式导出装配所需符号，
-// 不把每个插件的完整公开面挂到 `symbio::` 下（D-417）。
+// 不把每个插件的完整公开面挂到 `symbio::` 下。
 pub use symbio_plugin_api::{hooks, routes};
 // >>> plugin-links:begin
-// 以下链接行由 `scripts/facts/plugin-links-rs.mjs` 从 `crates/symbio-plugin-<id>/` 目录投影，请勿手改；漏一行的后果是那个插件的 inventory 注册项被链接器丢掉（不报错，只少功能）。链接是私有的（`use … as _`）；装配方不重导出契约，宿主侧出口直接依赖平台与门面（D-417 / D-556）。
+// 以下链接行由 `scripts/facts/plugin-links-rs.mjs` 从 `crates/symbio-plugin-<id>/` 目录投影，请勿手改；漏一行的后果是那个插件的 inventory 注册项被链接器丢掉（不报错，只少功能）。链接是私有的（`use … as _`）；装配方不重导出契约，宿主侧出口直接依赖平台与门面（ / ）。
 use symbio_plugin_classify as _;
 use symbio_plugin_compact as _;
 use symbio_plugin_compose as _;

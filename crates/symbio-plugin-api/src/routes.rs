@@ -65,7 +65,7 @@ pub const ROUTE_HOOK_FIRE: &str = "hook/fire";
 
 // ============ model ============
 
-/// model/project_tools — 本轮工具名的协议投影：哪些能见、各自叫什么、谁因碰撞退出（D-469）
+/// model/project_tools — 本轮工具名的协议投影：哪些能见、各自叫什么、谁因碰撞退出
 pub const ROUTE_MODEL_PROJECT_TOOLS: &str = "model/project_tools";
 
 // ============ session ============

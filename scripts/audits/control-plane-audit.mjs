@@ -18,7 +18,7 @@
  * 这一族的老病是「读不出 ⇒ 通过」。故：
  * - 环 crate / 基线文件 / 词汇层 `events.rs` / 机制三段读不出 ⇒ exit 2（不亮绿灯）；
  * - 基线里的 `mechanism.file` 指向一个不存在的文件 ⇒ 红（陈旧基线）；
- * - `adr` 决策号不存在 ⇒ 红（不许匿名冻结）。
+ * - 机制面当前理由为空 ⇒ 红（不许匿名冻结）。
  *
  * ## 用法
  *
@@ -37,7 +37,6 @@ import path from 'node:path'
 import crypto from 'node:crypto'
 import { fileURLToPath } from 'node:url'
 import { green, red, yellow } from '../color.mjs'
-import { hasDecisionAnchor } from '../decision-anchors.mjs'
 import { stripComments as stripCommentsKeepStrings, blankComments, matchBrace } from '../rust-scan.mjs'
 import { walkFiles } from '../fs-walk.mjs'
 const walk = (rel) =>
@@ -388,8 +387,8 @@ if (baseline === null && !(PRINT || WRITE)) {
 }
 const mech = baseline?.mechanism ?? {}
 if (mech.file !== ENGINE_REL) report('CP-006', mech.file ?? BASELINE_REL, `机制面文件应为 ${ENGINE_REL}，基线写的是 ${mech.file ?? '(空)'}`)
-if (!mech.reason || !String(mech.reason).trim()) report('CP-006', BASELINE_REL, '机制面理由为空')
-if (!mech.adr || !hasDecisionAnchor(String(mech.adr).replace(/^D-/, ''), ROOT)) report('CP-006', BASELINE_REL, `机制面决策号不存在：${mech.adr ?? '(空)'}`)
+if (!mech.why || !String(mech.why).trim()) report('CP-006', BASELINE_REL, '机制面当前理由为空')
+if (!mech.why || !String(mech.why).trim()) report('CP-006', BASELINE_REL, '机制面当前理由不存在（why 为空）')
 
 const source = mechanismSource()
 // `engine.rs` 整个读不出（文件被删 / 权限）才是「范围读不出」退 2；
@@ -408,7 +407,7 @@ if (PRINT || WRITE) {
     process.exit(2)
   }
   const out = {
-    mechanism: { file: ENGINE_REL, parts: PART_LABELS, hash, adr: mech.adr ?? '', reason: mech.reason ?? '' },
+    mechanism: { file: ENGINE_REL, parts: PART_LABELS, hash, why: mech.why ?? '', reason: mech.reason ?? '' },
     extension: { productionFiles },
   }
   const text = JSON.stringify(out, null, 2)

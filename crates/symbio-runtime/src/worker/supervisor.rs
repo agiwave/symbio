@@ -867,7 +867,7 @@ async fn spawn_worker(
             (None, None, None, HashMap::new(), String::new())
         };
 
-    // D-555：host 落点是进程内执行体；只有 container 仍派生独立进程。
+    //：host 落点是进程内执行体；只有 container 仍派生独立进程。
     // 两条路径共用 WorkerLine 帧协议、durable inbox、epoch 与 WAL 租约语义。
     let stdin: Box<dyn AsyncWrite + Unpin + Send>;
     let stdout: Box<dyn AsyncRead + Unpin + Send>;

@@ -2,7 +2,7 @@
 //!
 //! `Reasoner`（`actors` 域，控制面） 组 prompt 的输入：多轮对话时模型
 //! 需要看到自己说过什么（否则第二轮起失忆）。转写是**纯函数读视图**——
-//! 历史来自同一份事实源，不另存副本（D-044：实测与判据同源的同族纪律）。
+//! 历史来自同一份事实源，不另存副本（实测与判据同源的同族纪律）。
 //!
 // doc-link-allow D-004: 「四格 → 三角色」是事件形状到角色的静态映射，非版本改造
 //! 口径（**四格 → 三角色**）：
@@ -28,7 +28,7 @@
 //! 工具行投影成 `role: "tool"` 的**条目**（带工具名）——与轮内交换
 //! （`tool_exchange_messages`）**同一形态**，于是「历史里的工具轮」与「本轮的工具轮」
 //! 在 prompt 里长得一样。条目 → 请求消息的转换**不在这里**：合成 `tool_call_id` 的
-//! 唯一规则住在组装请求的那一侧（`plugin-model`），转写只给事实（D-448）。
+//! 唯一规则住在组装请求的那一侧（`plugin-model`），转写只给事实。
 
 use symbio_platform::kernel::event::{event_payload_node_id, event_result_node_id, Event};
 use symbio_platform::kernel::Projection;
@@ -37,7 +37,7 @@ use symbio_platform::sdk::projection::vocab::{ChatVocab, MessageVocab};
 
 use serde::{Deserialize, Serialize};
 
-// 行类型与快照读法住在**消息读侧**（`super::mutations`，D-053）：
+// 行类型与快照读法住在**消息读侧**（`super::mutations`）：
 // `transcript` 折叠与 `prompt_fidelity` 复核共用同一份「一条消息被读作什么」——
 // 投影 A 不读投影 B（L2）：mutations 不含 `Projection::new`，是可共享的读侧普通函数
 // （`projection-purity.mjs` 静态守：产投影的文件不得导入产投影的兄弟模块）。
@@ -52,7 +52,7 @@ pub struct TranscriptView {
 
 /// `transcript` 投影：从事件切片读出对话转写。
 ///
-/// ## 折叠：不只是追加（D-053）
+/// ## 折叠：不只是追加
 ///
 /// 事实网格里除了「追加了什么」，还有「**改过什么**」——`message.edited` /
 /// `message.removed`。少了这一段，一次截断在 prompt 面上等于**没发生过**：模型
@@ -70,7 +70,7 @@ pub struct TranscriptView {
 /// 不进请求包。少了这一段，重试在模型眼里等于没发生：新旧两支的答复同时躺在请求包里，
 /// 而下一轮读的还是被用户刚刚不要的那一份。
 ///
-/// 以及**区间省略**（`message.added` 载荷的 `elision`，D-249）：一条事实同时说「这段
+/// 以及**区间省略**（`message.added` 载荷的 `elision`）：一条事实同时说「这段
 /// 历史被这份摘要取代」——载荷里的节点进转写且可见，被指的区间（按 seq 闭区间）照样进
 /// 转写、只是标成不进请求包。分支与区间两种来源在 [`Elisions`] 上合流成**同一个判据**：
 /// 「哪一段不读」只有一个答案，转写与 prompt 复核都用它。
@@ -101,7 +101,7 @@ pub fn transcript(c: ChatVocab, m: MessageVocab) -> Projection<TranscriptView> {
         // `elision`：这段被摘要取代）与未选中分支两种来源在同一个 `elides` 上合流。
         // 为什么必须合流见 `elision` 的模块文档——两个出口各判一遍，分叉是静默的。
         //
-        // 未选中支的根 id（[D-173](../../../../docs/003-design/001-核心架构.md "DE-001-核心架构")）：
+        // 未选中支的根 id：
         // 同一个问题在请求包里只能有**一支**答复，否则模型读到的是自己没说过的话。
         // 这里问「还在不在」的证据取变更格（被删的支不在世），而不是「有没有节点」——
         // 重试那一幕的新支此刻还没有任何节点，而那正是该把旧支挤出请求包的时刻。
@@ -113,7 +113,7 @@ pub fn transcript(c: ChatVocab, m: MessageVocab) -> Projection<TranscriptView> {
         //
         // 快照事件自身也受 `now` 约束（as-of 读视图：晚于 `now` 的压缩在那一刻
         // 还没发生，历史就该按压缩**前**的样子读）。
-        // `keep_from`（D-401）：切片只压最旧前缀时，首条未压事实在快照事件之前，
+        // `keep_from`切片只压最旧前缀时，首条未压事实在快照事件之前，
         // 必须从那里起接着折；旧快照没有这一格 ⇒ 回落 `快照下标 + 1`。
         let (start, snapshot) = match super::mutations::mutations_latest_snapshot(events, &m) {
             Some((i, msgs, keep_from)) if events[i].ts <= now => {
@@ -317,9 +317,9 @@ pub fn transcript(c: ChatVocab, m: MessageVocab) -> Projection<TranscriptView> {
                         false,
                     );
                 }
-                // 诞生格（`message × opened`，D-054 决策 1）：**没有别的格可搭车**的节点
+                // 诞生格（`message × opened` 决策 1）：**没有别的格可搭车**的节点
                 // 在这里出生。它有两副面孔，判别位是载荷带不带 `elision`
-                // （[`is_replacement`]，D-249）：
+                // （[`is_replacement`]）：
                 //
                 // - **不带**（现状：压缩记录卡「已压缩上下文」）⇒ 节点是界面文本，
                 //   `exclude_from_context` 恒为 `true`。让它进请求包会让模型看见一条

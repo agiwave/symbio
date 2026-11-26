@@ -40,14 +40,14 @@ test('parseRawCommits：正文里以冒号开头的行不截断消息，状态�
   const out = [
     '\x01abc123\x00feat: 新增能力包',
     '',
-    'Core-Change: D-247 补件已先行',
+    'Core-Change:  补件已先行',
     '',
     ':000000 100644 0000000 aaaa111 A\tcrates/symbio-plugin-glossary/PLUGIN.yml',
     ':100644 100644 bbbb222 cccc333 M\tcrates/symbio-plugin-loop/src/loop_rows.rs',
   ].join('\n')
   const [c] = parseRawCommits(out)
   assert.equal(c.sha, 'abc123')
-  assert.match(c.message, /Core-Change: D-247/)
+  assert.match(c.message, /Core-Change: /)
   assert.deepEqual(
     c.files.map((x) => [x.status, x.path]),
     [
@@ -78,8 +78,8 @@ test('isMigrationBatch：正文声明 Migration: 的提交是迁移批次（EX-0
   assert.equal(isMigrationBatch(null), false)
 })
 
-test('TREES：七棵是并集且含契约树、plugin-api 与 host（D-372 口径 + D-486）', () => {
-  // D-486：契约树加入活跃区（第七棵），仍是受保护树判据 + 契约的并集口径。
+test('TREES：七棵是并集且含契约树、plugin-api 与 host（ 口径 + ）', () => {
+  // ：契约树加入活跃区（第七棵），仍是受保护树判据 + 契约的并集口径。
   assert.deepEqual(TREES, [
     'crates/symbio-platform/src/sdk',
     'crates/symbio-platform/src/kernel',
@@ -92,7 +92,7 @@ test('TREES：七棵是并集且含契约树、plugin-api 与 host（D-372 口�
   assert.deepEqual(TREES, PROTECTED_TREES)
 })
 
-test('受保护树与机制面是两件事：host 只进并集，不进 ARCH / CONTROL（D-372 的并集口径）', () => {
+test('受保护树与机制面是两件事：host 只进并集，不进 ARCH / CONTROL（ 的并集口径）', () => {
   assert.deepEqual(HOST_TREES, ['crates/symbio-runtime/src/host'])
   assert.ok(TREES.includes('crates/symbio-runtime/src/host'))
   assert.ok(!ARCH_TREES.includes('crates/symbio-runtime/src/host'))
@@ -198,7 +198,7 @@ test('judgeNewCapability：新增能力包夹带 loop 分支 ⇒ 红且点名 lo
   assert.match(r.errors[0], /crates\/symbio-plugin-loop/)
 })
 
-test('judgeNewCapability：新增能力包夹带 host 分支 ⇒ 红且点名 host（D-372 的并集口径 / EX-002）', () => {
+test('judgeNewCapability：新增能力包夹带 host 分支 ⇒ 红且点名 host（ 的并集口径 / EX-002）', () => {
   const before = Object.fromEntries(TREES.map((t) => [t, 'h']))
   const after = { ...before, 'crates/symbio-runtime/src/host': 'changed' }
   const r = judgeNewCapability({ sha: 'x', added: ['crates/symbio-plugin-new/PLUGIN.yml'], before, after })
@@ -207,7 +207,7 @@ test('judgeNewCapability：新增能力包夹带 host 分支 ⇒ 红且点名 ho
   assert.match(r.errors[0], /crates\/symbio-runtime\/src\/host/)
 })
 
-test('judgeNewCapability：新增能力包改 SDK ⇒ 红（core 已并入 SDK，D-279）', () => {
+test('judgeNewCapability：新增能力包改 SDK ⇒ 红（core 已并入 SDK，）', () => {
   const before = Object.fromEntries(TREES.map((t) => [t, 'h']))
   const after = { ...before, 'crates/symbio-platform/src/sdk': 'changed' }
   const r = judgeNewCapability({ sha: 'x', added: ['crates/symbio-plugin-new/PLUGIN.yml'], before, after })

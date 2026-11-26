@@ -69,7 +69,7 @@ fn response() -> Event {
     )
 }
 
-/// 首响：对话面开场白，没有配对事实（`D-424`）；父（轮根）来自载荷 `root_id`（`D-426`）。
+/// 首响：对话面开场白，没有配对事实；父（轮根）来自载荷 `root_id`。
 fn opening() -> Event {
     event(
         "e-opening",
@@ -86,7 +86,7 @@ fn opening() -> Event {
     )
 }
 
-/// 拒言事实：本轮那句答复没获准进入对话（`D-390`）。
+/// 拒言事实：本轮那句答复没获准进入对话。
 fn denial() -> Event {
     event(
         "e-denied",
@@ -206,7 +206,7 @@ fn opening_projects_immediately() {
     assert_eq!(
         node.parent_id.as_deref(),
         Some("u1"),
-        "首响挂轮根（用户消息节点）下，与工具 / 正文同级（D-426）"
+        "首响挂轮根（用户消息节点）下，与工具 / 正文同级"
     );
     assert_eq!(node.msg_type, Some(NodeKind::Body));
     assert_eq!(node.status, Some(NodeStatus::Completed));
@@ -286,7 +286,7 @@ fn tool_port_response_is_not_projected() {
     assert!(!projects(&tool));
 }
 
-/// 面向读者的派发 → 一个临时轮骨架（`D-425`）：父 = 轮根、形状 = 整轮骨架。
+/// 面向读者的派发 → 一个临时轮骨架：父 = 轮根、形状 = 整轮骨架。
 #[test]
 fn reader_request_projects_round_placeholder() {
     let request = model_request("e-round", Some("u1"));
@@ -349,7 +349,7 @@ fn artifact_projects_through_frames_for() {
     );
 }
 
-/// 开轮派发即出骨架：用户消息之后的第一条回合事实，不等 reader 请求（`D-425`）。
+/// 开轮派发即出骨架：用户消息之后的第一条回合事实，不等 reader 请求。
 #[test]
 fn dispatch_projects_placeholder_immediately() {
     let (_dir, wal) = wal();

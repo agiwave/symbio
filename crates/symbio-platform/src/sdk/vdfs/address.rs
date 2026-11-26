@@ -61,7 +61,7 @@ pub fn declared_addr_root() -> Option<&'static str> {
 /// - `join_addr("", "x")` → `x`（无父可接：原样返回相对地址，见模块文档的降级说明）
 /// - `join_addr("/", "docs")` → `/docs`（**父地址的绝对锚点必须带走**：从 `/docs`
 ///   出发的遍历若交出相对子地址，绝对子树就被列成了工作目录下的影子树——见
-///   [D-172](../../../../../docs/003-design/009-VDFS规范.md#d-172-首段--是绝对锚点不是可折叠的分隔符docs-相对工作目录docs-是文件系统里的-docs "DE-009-VDFS规范")）
+///   ）
 pub fn join_addr(parent: &str, rel: &str) -> String {
     let parent = parent.trim();
     // 首部连续的 `/` 是锚点（最多认两个：一个 = 文件系统根，两个 = UNC 形态），
@@ -102,7 +102,7 @@ pub fn absolute_addr(ctx: &Arc<dyn PluginInvokeRequest>, rel: &str) -> String {
 
 // ==================== 路径判定 ====================
 //
-// 两个函数是**纯词汇**，已随 VDFS 纯接口住 `crate::kernel::vdfs::path`（D-188 C2b）；
+// 两个函数是**纯词汇**，已随 VDFS 纯接口住 `crate::kernel::vdfs::path`（ C2b）；
 // 这里只做路径与根地址拼接。调用方仍从 `crate::sdk::vdfs::*` / 根出口取用。
 
 #[cfg(test)]

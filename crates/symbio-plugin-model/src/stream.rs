@@ -181,8 +181,8 @@ fn truncate_for_display(s: &str, max: usize) -> String {
 
 /// 发送一帧**增量**：`delta` 追加到目标节点正文尾部（流式热路径，O(delta)）。
 /// 目标未知时写入点用帧内信息建占位（帧自给自足，不依赖任何先行帧）。
-/// 原住 `symbio_plugin_api::llm::turn`（帧家族），按 D-023 的「依赖方数量」判据随
-/// **唯一调用方**迁到本模块（D-023）：只有这里的流循环发增量帧。收束轮
+/// 原住 `symbio_plugin_api::llm::turn`（帧家族） 的「依赖方数量」判据随
+/// **唯一调用方**迁到本模块：只有这里的流循环发增量帧。收束轮
 /// 「思考即正文」的状态帧也在这里就地发（见流结束段），完整消息帧走 core 的
 /// `llm_emit_message`——同一套帧语义，位置由消费方决定。
 async fn llm_emit_delta(sink: &ExecEventSink, message_id: &str, delta: &str) {
@@ -688,7 +688,7 @@ async fn dispatch_protocol_event(
                         id: out.response_text_child_id.clone(),
                         parent_id: Some(root_id.into()),
                         // 身份不在这里：模型只产出正文，主体由落库点 `attributed`
-                        // / 重建面按会话主体补（D-147）。流式帧无 `role`，前端折叠
+                        // / 重建面按会话主体补。流式帧无 `role`，前端折叠
                         // 缺省即助手——这正是本帧的语义。
                         msg_type: Some(NodeKind::Body),
                         content: Some(MessageContent::Text(out.text.clone())),

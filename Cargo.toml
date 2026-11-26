@@ -28,7 +28,7 @@ inventory = "0.3.24"
 notify = "8.2.0"
 ort = "2.0.0-rc.13"
 regex = "1.13.1"
-# TLS 后端 = 平台原生栈（D-013）：默认特性会拉进 rustls + aws-lc-sys（~69 MB C 源码 + cmake），
+# TLS 后端 = 平台原生栈：默认特性会拉进 rustls + aws-lc-sys（~69 MB C 源码 + cmake），
 # 故默认关闭，由使用方补回 default 里的非 TLS 能力（charset · http2 · system-proxy）。
 reqwest = { version = "0.13.4", default-features = false }
 reqwest-eventsource = "0.6.0"

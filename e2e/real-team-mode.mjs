@@ -29,7 +29,7 @@
  *   工具结果带回 `[subagent_session_id]`。
  * - **场景 B（对等协作轮）**：对等会话（主体 `session/peer-b`，登记窄行）经收件箱
  *   收一条带 `metadata.source_principal = 'session/main'` 的消息，对等体用真实模型
- *   跑一轮委托。判定：`artifact.added` 的作者 = 对等主体（产物收束，D-067）；
+ *   跑一轮委托。判定：`artifact.added` 的作者 = 对等主体（产物收束）；
  *   事实源 `commitment.opened` + `commitment.released`；声誉列
  *   `offered=1 / kept=1 / broken=0 / score=1`；`invariants` 为空；子会话落盘。
  *

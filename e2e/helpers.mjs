@@ -443,7 +443,7 @@ export class MockHttp {
  * 它们验的是什么）。
  */
 /**
- * 三个开关的**关闭值**，按 owner 插件分组（D-427：配置真源在能力包自己的
+ * 三个开关的**关闭值**，按 owner 插件分组（配置真源在能力包自己的
  * `PLUGIN.yml`，会话不再代管 `classify_enabled` / `compose_enabled`）。
  *
  * 用法：`pluginConfigs: { ...dialogFaceOff() }`；要在某个插件上再加键，传第二层：
@@ -1083,7 +1083,7 @@ export async function sessionAddr(cli, sid) {
  * `session/chat/send` 悄悄代劳（它 `get_or_create`），于是「先建后写」这件事在
  * 调用方看起来可有可无；走地址面后它显式化了：一次写路径一个事实，会话的存在
  * 由**会话节点的那一次写**负责，消息写入不附带建会话的语义（也不该由它带——
- * 那正是 D-066 清掉的「选项随消息走」的同一处乖违）。
+ * 那正是  清掉的「选项随消息走」的同一处乖违）。
  *
  * 与前端 `createSession`、`register_subsession`、CLI `ensure_session` 同一条形状：
  * 带 `create` 的写是 **upsert**（不存在则就地创建，已存在则浅合并 metadata），
@@ -1108,7 +1108,7 @@ export async function createSession(cli, sid, metadata = {}) {
 /**
  * 经 HTTP 边界**发一条用户消息**（收件箱地址面——输入面双轨退役后唯一入口）。
  *
- * `session/chat/send` 已移除（[D-066]）：那条路由的 `message` 分支
+ * `session/chat/send` 已移除：那条路由的 `message` 分支
  * 只是入队的薄包装、回包恒为 `accepted`，而「接收消息」与「跑一轮」本来就在两处。
  * 现在发消息 = 对空间的一次 `vdfs/write(<根>/session/<sid>/inbox, text)`——
  * 与 T15 写**子智能体空间**收件箱同一条地址语义，机制统一、没有顶层专用分支。
@@ -1185,7 +1185,7 @@ export async function resumeSession(cli, sid, targetId, action, payload = {}, me
  *
  * `permissions`：可选的 `permissions:` YAML 块原文（块内缩进由调用方给足，
  * 从 `permissions:` 那一行开始）。不给 = 清单里没有权限段 = **零授权**
- * （D-153 的 grant 语义：空清单即拒）——多数用例要的就是这个形状，
+ * （ grant 语义：空清单即拒）——多数用例要的就是这个形状，
  * 少数要验「声明了真放行」的用例才显式给块。
  */
 export function makeAgentDir(homedir, { id, name = id, persona = '', providerId, providerPort, permissions = null }) {

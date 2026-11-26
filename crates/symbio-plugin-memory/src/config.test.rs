@@ -15,7 +15,7 @@ fn defaults_are_the_shipped_behaviour() {
     assert!(c.workspace_enabled);
     assert_eq!(c.workspace_max_bytes, 16 * 1024);
     assert_eq!(c.workspace_inject_max_bytes, 4 * 1024);
-    // 会话作用域（D-513，开关默认开）
+    // 会话作用域（开关默认开）
     assert!(c.session_enabled);
     assert_eq!(c.session_max_bytes, 16 * 1024);
     assert_eq!(c.session_inject_max_bytes, 4 * 1024);

@@ -14,7 +14,7 @@
 //! 三层记忆物理名**统一 `MEMORY.md`**（会话 / 工作区 / 智能体），机制一致、可预测。
 //! 它与**指令文件 `AGENTS.md` 语义隔离**：AGENTS.md 是稳定指令 / 人格，归 `setting`
 //! 插件读取并注入（工作区级 / 智能体级两级覆盖）；MEMORY.md 是动态记忆，归本插件
-//! 读写可叠加。两者物理隔离，不共用文件名，也不共用所有者（D-527）。
+//! 读写可叠加。两者物理隔离，不共用文件名，也不共用所有者。
 //!
 //! ## 作用域闸门：**宿主目录不存在就是没有这一层**
 //!
@@ -75,7 +75,7 @@ pub const MEMORY_DESCRIPTION: &str =
 
 /// 记忆门面（共享实现）：两道闸门由 [`super::config::MemoryConfig`] 给出。
 ///
-/// D-515：生产形态经 `AGENT_VDFS` provider 读写，相对地址就是文件名；
+/// 生产形态经 `AGENT_VDFS` provider 读写，相对地址就是文件名；
 /// 不再拼物理路径。「落位」用例的 `host_dir` / `file_path` helper 只存在于测试文件。
 pub fn store(
     provider: Option<symbio_plugin_api::DynVdfsProvider>,

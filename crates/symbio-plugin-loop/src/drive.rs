@@ -107,7 +107,7 @@ impl DriveCtx for SupportCtx {
     }
 
     fn executor(&self, port: &str) -> Option<Arc<dyn PortExecutor>> {
-        // 行执行体是机制自己的执行体（与端口提供者同一条解析面，D-338）。
+        // 行执行体是机制自己的执行体（与端口提供者同一条解析面）。
         if crate::plugin_rows::is_row_port(port) {
             return Some(crate::plugin_rows::executor());
         }
@@ -118,7 +118,7 @@ impl DriveCtx for SupportCtx {
         Arc::new(self.clone())
     }
 
-    /// 环的「现在」取**全部**事实（含世界事实）的最晚 `ts`，不读墙钟（`D-376`）。
+    /// 环的「现在」取**全部**事实（含世界事实）的最晚 `ts`，不读墙钟。
     ///
     /// 触发一次驱动的往往是世界事实（用户消息 / 工具回执）；只看五类事实会在
     /// 首圈得到 0，把刚派发的租约算成「早已过期」。

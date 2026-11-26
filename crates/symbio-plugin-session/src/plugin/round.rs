@@ -86,7 +86,7 @@ fn restore_execution_context(
 /// 而言两份是同一个能力。
 ///
 /// 哪两个名字是同一能力的两份，由**声明面**回答（`SCOPE_TWIN` 的 `(前缀名, 本名)` 对，
-/// D-428）；本函数只做一次集合判定：前缀名与本名都在本轮工具表里 ⇒ 前缀那份是副本，
+/// ）；本函数只做一次集合判定：前缀名与本名都在本轮工具表里 ⇒ 前缀那份是副本，
 /// 去掉。本名缺席（能力被卸载 / 子树独有工具）⇒ 前缀那份必须保留，否则能力会凭空消失。
 ///
 /// 控制面不解析任何名字形状，也不认识前缀规则；判定与写入顺序无关（集合，不是遍历序）。
@@ -107,12 +107,12 @@ fn dedup_declared_twins(
         .collect()
 }
 
-/// 本轮**暴露视图**（D-444 / D-445）：显式暴露 ∩ 作用域允许 ∩ 有效绑定 + wire 别名。
+/// 本轮**暴露视图**：显式暴露 ∩ 作用域允许 ∩ 有效绑定 + wire 别名。
 ///
-/// - 有效绑定取装配期收集容器 `PortBindings` 的 `bound()`（D-468）：只有描述行、
+/// - 有效绑定取装配期收集容器 `PortBindings` 的 `bound()`只有描述行、
 ///   没有执行体的孤儿行不进清单；只有绑定、没有描述行的内部端口也不进清单。
 ///   作用域允许由 `collect_capabilities` 的 `agent_scope` 在同一次收集里保证。
-/// - **本插件不算别名**（D-469）：候选集合交给 `model/project_tools`，取回
+/// - **本插件不算别名**：候选集合交给 `model/project_tools`，取回
 ///   `{ exposed, aliases, collisions }` 原样落 `session.config`。协议字符集是模型
 ///   侧的知识，会话不认识 `_` 替换，也不替碰撞做「优先匹配」——碰撞整组退出由投影
 ///   回答，会话只按回答过滤。
@@ -126,7 +126,7 @@ fn candidate_tools(
         .collect()
 }
 
-/// 本轮工具投影的读视图（`model/project_tools` 回执的形状，D-469）。
+/// 本轮工具投影的读视图（`model/project_tools` 回执的形状）。
 ///
 /// `collisions` 原样透传（形状归投影方解释），`session.config` 只负责搬运。
 #[derive(Debug, Default, Clone, serde::Deserialize, serde::Serialize)]
@@ -218,7 +218,7 @@ impl SessionPlugin {
         // 作用域按**会话自己的绑定**展开（metadata.agent_id）：收集器只把它当通用的
         // agent 作用域键递下去，子智能体插件自行把子树 prompt rows / 工具加前缀。
         let agent_scope = store.session_agent_scope(session_id);
-        // 会话级数据目录（D-513）：会话存储布局的唯一 owner 是本插件，收集期把目录
+        // 会话级数据目录：会话存储布局的唯一 owner 是本插件，收集期把目录
         // 按**值**递上请求 ctx（memory 的会话记忆据此落位）。
         let session_dir = store.session_dir(session_id);
         if let Some(dir) = &session_dir {
@@ -227,7 +227,7 @@ impl SessionPlugin {
                 dir.to_string_lossy().into_owned(),
             );
         }
-        // 作用域 VDFS provider（D-515）：在真实能力收集前挂上工作区 / 会话两层。
+        // 作用域 VDFS provider：在真实能力收集前挂上工作区 / 会话两层。
         // `AGENT_VDFS` 不由本处决定——保留 ctx 的既有绑定。
         let work_dir = ctx
             .get(symbio_plugin_api::WORKDIR)
@@ -511,9 +511,9 @@ impl SessionPlugin {
             })?;
 
         let result: Result<(), PluginError> = async {
-            // 幕级派发格（`D-223` / `D-282`）：`tier` 是档位的**唯一来源**，写侧在开轮处。
-            // 快路（技能命中直接作答）随 `D-318 B2` 整条退场后，本幕没有第二条执行路径——
-            // 档位折自「还能落到别处吗」的答案恒为 `Deep`（`D-262` 的「否则 Deep」一支）。
+            // 幕级派发格（ / ）：`tier` 是档位的**唯一来源**，写侧在开轮处。
+            // 快路（技能命中直接作答）随 ` B2` 整条退场后，本幕没有第二条执行路径——
+            // 档位折自「还能落到别处吗」的答案恒为 `Deep`（「否则 Deep」一支）。
             // `root_id` 与收束格的同名字段取同一个值（开轮事实的 event id），SLO 的
             // `declared_tier` 按它把收束格归回本幕；`budget_ms` 由档位数据面派生，两者
             // 不许各写一个数（`C5` 读的是这一格）。
@@ -555,7 +555,7 @@ impl SessionPlugin {
                 .collect::<Vec<_>>()
                 .join("\n\n");
             let twins = symbio_platform::sdk::capability::capability_scope_twins(&*manager).await;
-            // 有效绑定 = 装配期收集到的端口名（D-445 ③ / D-468）：描述与执行两视图由
+            // 有效绑定 = 装配期收集到的端口名（ / ）：描述与执行两视图由
             // **同一次收集**得出，不维护第二份注册事实。冲突键不在 `bound()` 里——
             // 它们已在收集期落进错误桶（上面那句 `capability_errors` 会读到）。
             let bound_ports: std::collections::HashSet<String> = ctx
@@ -563,7 +563,7 @@ impl SessionPlugin {
                 .map(|bindings| bindings.bound().into_iter().collect())
                 .unwrap_or_default();
             // 候选 = 显式暴露 ∩ 作用域 ∩ 有效绑定；协议命名（别名与碰撞）由模型插件的
-            // 投影回答（D-469）。投影缺席 ⇒ 本轮无工具：字符集规则不可用时不能把内部
+            // 投影回答。投影缺席 ⇒ 本轮无工具：字符集规则不可用时不能把内部
             // canonical 名直接当线上名送出去。
             let candidates = candidate_tools(
                 dedup_declared_twins(
@@ -628,10 +628,10 @@ impl SessionPlugin {
             } else {
                 None
             };
-            // 当轮配置快照 = 会话基底格 + 能力包在开轮 traverse 里各自贡献的格（D-427）。
+            // 当轮配置快照 = 会话基底格 + 能力包在开轮 traverse 里各自贡献的格。
             //
             // 两半的分工就是「谁的真源谁写」：`opening_*` / `progress_*` 的真源在本插件
-            // （实现体也仍在本插件，归属裁决见 DE-055 D-429），
+            // （实现体也仍在本插件，归属裁决见 DE-055 ），
             // 故**在这里直接投影**——不绕一次广播，也就不依赖本插件 `traverse` 与这次
             // 写格的先后。能力开关的真源在能力包，本插件不认识它们的键名，只按 owner
             // 合并收集口给出的那一张表；不按插件名去债表查「谁在场」——卸载一个能力包，
@@ -639,8 +639,8 @@ impl SessionPlugin {
             let mut config_payload = serde_json::Map::new();
             config_payload.insert("system_prompt".to_string(), json!(system_prompt));
             config_payload.insert("tools".to_string(), json!(tools));
-            // 本轮暴露快照的别名表（内部身份 → wire）：由模型插件的投影交出（D-469），
-            // 清单、协议序列化、返回调用解析三处读同一份数据（D-444 ①）；碰撞组已在
+            // 本轮暴露快照的别名表（内部身份 → wire）：由模型插件的投影交出，
+            // 清单、协议序列化、返回调用解析三处读同一份数据；碰撞组已在
             // 投影里整组退出清单，这里只记原因。
             config_payload.insert("tool_aliases".to_string(), json!(tool_aliases));
             config_payload.insert("tool_alias_collisions".to_string(), json!(alias_collisions));

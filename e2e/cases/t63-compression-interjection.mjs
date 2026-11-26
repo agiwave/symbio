@@ -4,7 +4,7 @@ import './_selfrun.mjs';
 //
 // ## 本用例钉的是什么
 //
-// 压缩现在由两行债完成（D-336）：`compact-summarize`（`model.assist`）取摘要，
+// 压缩现在由两行债完成：`compact-summarize`（`model.assist`）取摘要，
 // `compact-write`（`compact`）落 `session.consolidated`。摘要问答仍是真实窗口
 // （mock 用 10 个慢分片 ≈ 5s），插话就在这个窗口里写进收件箱。
 //
@@ -133,7 +133,7 @@ export default defineCase(
       await cli.waitGatewayReady();
       rt = await subscribeSessionRealtime(cli, { sessionId: SID, gatewayPort: GATEWAY_PORT });
 
-      /** 已收束的轮次数（终答节点到达终态；D-335：Turn 不作为可见节点） */
+      /** 已收束的轮次数（终答节点到达终态；：Turn 不作为可见节点） */
       const doneTurns = () => {
         const merged = new Map();
         for (const { mid, data } of rt.messages()) {

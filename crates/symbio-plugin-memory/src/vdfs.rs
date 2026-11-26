@@ -8,8 +8,8 @@
 //! <根>/memory/SESSION.md     会话记忆（rw；物理文件 = {session_dir}/MEMORY.md）
 //! ```
 //!
-//! 三者的作用域分别来自装配位置、`ctx[WORKDIR]` 与 `ctx[SESSION_DIR]`（D-513），
-//! 物理文件名统一 `MEMORY.md`（D-527）：机制一致、可预测。挂载名则各自点明作用域，
+//! 三者的作用域分别来自装配位置、`ctx[WORKDIR]` 与 `ctx[SESSION_DIR]`，
+//! 物理文件名统一 `MEMORY.md`机制一致、可预测。挂载名则各自点明作用域，
 //! 列表里不会撞名。三者都归本插件——稳定指令 `AGENTS.md` 归 `setting`，与本挂载点
 //! 无关。智能体 / 工作区两份地址不随会话变；会话那份跟着当前会话的作用域走。
 //!
@@ -81,7 +81,7 @@ async fn session_memory_node(store: &MemoryFile) -> VdfsNode {
 }
 
 impl MemoryPlugin {
-    /// 智能体记忆门面：作用域来自请求 ctx 的 `AGENT_VDFS` provider（D-515）。
+    /// 智能体记忆门面：作用域来自请求 ctx 的 `AGENT_VDFS` provider。
     async fn agent_store(&self, vctx: &VdfsContext) -> VdfsResult<MemoryFile> {
         let host = vdfs_host_ctx(vctx)?;
         Ok(self.store(&host).await)

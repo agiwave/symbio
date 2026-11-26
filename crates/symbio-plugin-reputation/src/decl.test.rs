@@ -252,7 +252,7 @@ fn a_closure_without_its_offer_is_skipped() {
 /// 未立约的主体在书里**没有那一行**：折叠不负责把它折成零分。
 ///
 /// 「这一格没立过约」是读方的口径（淘汰回路读成「不淘汰」，出口读成零分条目），
-/// 不是本视图的缺席态——缺席态只有四个，都在读口那一侧回答（`D-284`）。
+/// 不是本视图的缺席态——缺席态只有四个，都在读口那一侧回答。
 #[test]
 fn a_principal_that_never_promised_has_no_row() {
     let v = ledger(&[offered("c1", "session/main", 10)], i64::MAX);
@@ -325,7 +325,7 @@ fn rows_come_out_in_key_order_and_an_empty_slice_is_an_empty_book() {
     );
 }
 
-/// 声明形状：读的就是那四条 `reads` 对（断言格读法，见 `decl.rs` 的 `D-282` 一节）、
+/// 声明形状：读的就是那四条 `reads` 对（断言格读法，见 `decl.rs` 的  一节）、
 /// 台账不替事实关门（`evidence` 空）、没有实例级读者（`agg` 缺席）、切点取全仓同一个值。
 #[test]
 fn the_view_is_declared_over_the_three_commitment_cells() {
@@ -359,7 +359,7 @@ fn the_ledger_is_sealed_under_this_owner() {
     assert!(frozen.view(REPUTATION_LEDGER).is_some());
     assert_eq!(frozen.view_owner(REPUTATION_LEDGER), Some(OWNER));
     // 读的三条承诺格在本二进制里是**断言格读法**（有 `EventDecl`、无 `FactDecl`）：
-    // 拼错名字仍红（`Gap::UnknownFact`），没有形状可校字段则进这份名单（`D-282`）。
+    // 拼错名字仍红（`Gap::UnknownFact`），没有形状可校字段则进这份名单。
     let reads = frozen.assertion_reads();
     for fact in [
         EVENT_COMMITMENT_OPENED,

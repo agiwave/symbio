@@ -11,7 +11,7 @@
  * 由 `MessageNode.spec` / `chat_node.spec` 专门钉；本文件只关心**折后形状**的
  * 落地、建树与渲染。帧语义全在字段上（`delta` 追加 / `content` 替换 /
  * `status=removed` 移除 / 其余字段合并），与 `MainLayout` 的真实接线同路
- * （`stores/sessionTranscriptSync` → store；传输形态见 D-025——本文件钉的是
+ * （`stores/sessionTranscriptSync` → store；传输形态——本文件钉的是
  * **落地语义与渲染结果**，不是传输，故直接驱动 store 的落地口）。
  *
  * 注意**不再有整条替换的 `upsert`**：状态迁移帧只带身份 + 状态（与后端

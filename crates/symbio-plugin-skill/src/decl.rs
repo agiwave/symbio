@@ -1,26 +1,26 @@
-//! 本能力包拥有的事件名、事实形状、对外可读视图与行（DE-025 D-241 / D-251 / D-250）。
+//! 本能力包拥有的事件名、事实形状、对外可读视图与行（DE-025 ）。
 //!
 //! ## 三块职责，各有一个 owner
 //!
 //! | 能力面 | 本模块交什么 | 怎么写 |
 //! |---|---|---|
-//! | 编译 | 收束贡献（`memory.encoded{tag:"skill"}`，名字与事实形状归情景记忆家族，D-263） | `contributor.rs`，`submit_contributor!`（D-250） |
+//! | 编译 | 收束贡献（`memory.encoded{tag:"skill"}`，名字与事实形状归情景记忆家族） | `contributor.rs`，`submit_contributor!` |
 //! | 校准 | `memory.calibrated` 的账（`skill.calibration` 视图：每条技能的 `uses` / `fallbacks`） | 本模块的 `calibration_ledger`，算式只有一份 |
-//! | 回退 | `skill.retreat` 视图（低置信技能的 seq 集，D-286） | 本模块的 `retreating_skills`，阈值 `CONFIDENCE_THRESHOLD` |
-//! | 观测与命中 | **已随 B2 退场（D-318）**：`skill.recall` 行、`skill.answered` 判定格与实现文件一并删除 | — |
+//! | 回退 | `skill.retreat` 视图（低置信技能的 seq 集） | 本模块的 `retreating_skills`，阈值 `CONFIDENCE_THRESHOLD` |
+//! | 观测与命中 | **已随 B2 退场**：`skill.recall` 行、`skill.answered` 判定格与实现文件一并删除 | — |
 //!
 //! ## 为什么读的是「事实」而不是召回视图
 //!
 //! 回退要影响的是**本轮提示词**，而提示词由宿主（loop）装配。能力包不能去改宿主的
 //! 视图结构——那是跨插件的私有面。于是分工是：本能力按自己的置信度口径折出
-//! `skill.retreat`（哪些 seq 本轮**不该**进提示词）。`D-318` 之后宿主不再按这个名字
+//! `skill.retreat`（哪些 seq 本轮**不该**进提示词）。 之后宿主不再按这个名字
 //! 过滤自己的段，它因此没有读者，名字不公开——视图留着当包内口径与单测判据，等出现
-//! 第二个同步读方再登记 `shared_views`。观测与命中的债行已随 B2 退场（`D-318`）。
+//! 第二个同步读方再登记 `shared_views`。观测与命中的债行已随 B2 退场。
 //!
 //! ## 名字
 //!
 //! `memory.encoded` 的**名字、格位与事实形状**都随记忆家族走：格位由 loop 交（它
-//! 同时是会话统计的读方），事实形状由情景记忆能力包交（DE-026 D-263）。本能力只是
+//! 同时是会话统计的读方），事实形状由情景记忆能力包交（DE-026 ）。本能力只是
 //! 这条事实的一个**写方**（`tag:"skill"` 那半），不申报它的形状与归宿——一个事实
 //! 只有一个形状 owner，`seal` 的 `DuplicateFact` 也按这条判。
 //! `memory.calibrated` 由本能力**整条拥有**——名字、格位、写方、折法与读方都在这
@@ -46,43 +46,43 @@ pub(crate) const OWNER: &str = "crates/symbio-plugin-skill";
 /// 校准观测的名字：**本能力独占这条事实**，所以常量住在这里，不住共享表。
 ///
 /// `CS-007` 判的就是「除 owner 之外没有插件在生产代码里引用它」——折叠搬进本包之后
-/// 唯一的另一个读者改按视图名读 `skill.calibration`（`D-286`），于是这条名字退出
+/// 唯一的另一个读者改按视图名读 `skill.calibration`，于是这条名字退出
 /// `PLUGIN.yml` 的 `shared_events`，清单生成物里不再有它。
 pub(crate) const EVENT_MEMORY_CALIBRATED: &str = "memory.calibrated";
 
 /// 技能事实的标签：`memory.encoded{tag:"skill"}` 是**技能**而不是普通记忆的唯一标记。
 ///
-/// 与 core 的 `SKILL_TAG` 同一个字面量，但本 crate 不依赖 core（DE-025 D-258）：
+/// 与 core 的 `SKILL_TAG` 同一个字面量，但本 crate 不依赖 core（DE-025 ）：
 /// 这个字面量是本能力写下的词汇，读它的会话统计另有自己的一份。
 pub(crate) const SKILL_TAG: &str = "skill";
 
 /// 包内视图：本轮**不该进提示词**的技能（置信度低于阈值）的 seq 集。
 ///
-/// 名字不公开：宿主按 `skill.retreat` 过滤段的做法已随 `D-318` 退场，今天没有第二个
-/// 读者（`D-221` 的公开动作只对真有读方的视图做）。
+/// 名字不公开：宿主按 `skill.retreat` 过滤段的做法已退场，今天没有第二个
+/// 读者（公开动作只对真有读方的视图做）。
 pub(crate) const SKILL_RETREAT: &str = "skill.retreat";
 
 /// 对外可读视图：校准账本身（每条技能用过几次、其中回退几次）。
 ///
-/// 公开的动作是下面的报表登记（`D-387`）：会话统计的校准列按 `slot` 取整条读数，
+/// 公开的动作是下面的报表登记：会话统计的校准列按 `slot` 取整条读数，
 /// 不依赖本 crate、也不经过 `shared_views` 生成物。本能力自己要的那一半（置信度）
 /// 经 [`calibration_ledger`] 直接折，不绕名字读自己的观测。
 pub(crate) const SKILL_CALIBRATION: &str = "skill.calibration";
 
 /// 对外可读视图：本会话**已编译技能数**（`memory.encoded{tag:"skill"}` 的条数）。
 ///
-/// 读者是会话统计的 `compiled_skills` 顶层键（报表登记见下，`D-489`）。数的口径与
-/// 写方同源：数的是本能力写下的编码事实，`SKILL_TAG` 单点在本文件（`D-258`）——
+/// 读者是会话统计的 `compiled_skills` 顶层键（报表登记见下）。数的口径与
+/// 写方同源：数的是本能力写下的编码事实，`SKILL_TAG` 单点在本文件——
 /// 此前 `symbio_platform::sdk::actors` 里还挂着一份读侧词汇、由读方（session 的 stats）抄去数，
 /// 机制面上有一条只有 skill 认识的常量；随本条退场，读数不再由读方抄第二份标签。
 pub(crate) const SKILL_COMPILED: &str = "skill.compiled";
 
 /// 对外可读视图：编译开关的**当前值**（最后一条 `session.config` 的
-/// `skill_compile_enabled`，缺省 `false`——出厂关，`D-427`）。
+/// `skill_compile_enabled`，缺省 `false`——出厂关）。
 ///
 /// 开关的真源在配置事件里（会话写、本能力读）：`contributor` 的轮首编译判
 /// [`super::contributor::compile_enabled`]，会话统计的 `skill_compile_enabled`
-/// 顶层键按本视图交值（`D-489`）——「关着」与「开着但没编译过」两种零的分辨
+/// 顶层键按本视图交值——「关着」与「开着但没编译过」两种零的分辨
 /// （开关 × 已编译数并读）从此住在同一个 owner 里，读方不再各自读一遍配置。
 pub(crate) const SKILL_COMPILE_SWITCH: &str = "skill.compile_switch";
 
@@ -99,7 +99,7 @@ pub(crate) const COMPILE_LIMIT: usize = 400;
 pub(crate) const CONFIDENCE_THRESHOLD: f64 = 0.8;
 
 /// 扫描成本上界（事件条数）。它是环内窗口求值的预算：超界时 `Frozen::eval` 回 `None`，
-/// 环把这一格折成空集。跨插件读口不查它——读侧按调用方给的切片全量折（`D-284`）。
+/// 环把这一格折成空集。跨插件读口不查它——读侧按调用方给的切片全量折。
 const COST: u32 = 4096;
 
 pub(crate) const EVENTS: &[EventDecl] = &[
@@ -164,7 +164,7 @@ pub(crate) const VIEWS: &[ViewDecl] = &[
     ViewDecl {
         name: SKILL_COMPILE_SWITCH,
         ver: 1,
-        // `session.config` 只有事件格位、没有事实声明（`D-389` 移交时格位 / 载荷
+        // `session.config` 只有事件格位、没有事实声明（ 移交时格位 / 载荷
         // 原样照抄）⇒ 本 reads 冻结为 assertion read（报告项，不是缺口）。
         reads: &[(EVENT_SESSION_CONFIG, "skill_compile_enabled")],
         evidence: &[],
@@ -176,7 +176,7 @@ pub(crate) const VIEWS: &[ViewDecl] = &[
 
 pub(crate) const ROWS: &[Decl] = &[
     // `memory.encoded` 的归宿行不在这里：一条事实只有一张归宿行，它随事实形状的 owner
-    // 走（情景记忆能力包，DE-026 D-263）。`tag:"skill"` 那半同样是「有即闭合」，
+    // 走（情景记忆能力包，DE-026 ）。`tag:"skill"` 那半同样是「有即闭合」，
     // 被那张 eq 为空的行覆盖。
     // 校准观测的归宿行（同上）。
     Decl {
@@ -313,7 +313,7 @@ fn retreating_skills(events: &[Event], now: i64) -> Value {
 /// 纯折叠：已编译技能数 = `memory.encoded{tag:"skill"}` 的条数。
 ///
 /// 数的是**写下的事实**，不新增投影（DE-041：技能是事实、不是特殊类型）——与
-/// session 迁移前数的那一份逐字同口径，只是标签与格子都归 owner（`D-489`）。
+/// session 迁移前数的那一份逐字同口径，只是标签与格子都归 owner。
 fn compiled_count(events: &[Event], now: i64) -> Value {
     let n = events
         .iter()
@@ -334,10 +334,10 @@ fn compile_switch(events: &[Event], _now: i64) -> Value {
     json!(super::contributor::compile_enabled(events))
 }
 
-// 报表登记（`D-387`）：`session/stats` 的 `calibration` 顶层键。`views` 是 owner 自己的
+// 报表登记：`session/stats` 的 `calibration` 顶层键。`views` 是 owner 自己的
 // 常量；空账形状留在 [`report`]，读方不再替 owner 猜形状。
 //
-// `compiled_skills` / `skill_compile_enabled` 两格同批登记（`D-489`）：此前它们是
+// `compiled_skills` / `skill_compile_enabled` 两格同批登记：此前它们是
 // session 的 `SessionStats` 具名字段（读方数本能力的编码事实、读方再读一遍配置），
 // 现在随登记面回 owner——出口顶层键不变（`SV-003` 契约表随批扩两行），读方删字段。
 symbio_plugin_api::submit_reports!([
@@ -388,7 +388,7 @@ fn count_report(views: &[Value], _ctx: &ReportCtx<'_>) -> Value {
     views.first().cloned().unwrap_or(json!(0))
 }
 
-/// 开关列的排版：布尔原样交出；读不出来 ⇒ `false`（出厂关，`D-427`）。
+/// 开关列的排版：布尔原样交出；读不出来 ⇒ `false`（出厂关）。
 fn flag_report(views: &[Value], _ctx: &ReportCtx<'_>) -> Value {
     views.first().cloned().unwrap_or(json!(false))
 }

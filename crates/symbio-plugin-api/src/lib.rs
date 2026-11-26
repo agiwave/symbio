@@ -1,4 +1,4 @@
-//! 插件 API —— **扩展层插件的唯一宿主依赖**（DE-023 D-253）。
+//! 插件 API —— **扩展层插件的唯一宿主依赖**（DE-023 ）。
 //!
 //! 两类东西住在这里：
 //!
@@ -8,29 +8,29 @@
 //! - [`routes`]：跨插件调用路径（地址）常量
 //! - [`events`]：跨插件事件名常量与共享事件行（写闸的共享臂；清单生成物）
 //! - [`port`]：世界端口的注册面（`PortProvider` 与 port 族——名字与契约静态，提供者随活插件的能力行动态收集）
-//! - [`settle`]：收束之后贡献派生事实的端口（`Contributor`）（转出，`D-413`）
-//! - [`retrieval`]：轮首检索的端口（`Retriever`）——宿主交可见切片与发言，能力交回自有值（D-264）（转出，`D-413`）
+//! - [`settle`]：收束之后贡献派生事实的端口（`Contributor`）（转出）
+//! - [`retrieval`]：轮首检索的端口（`Retriever`）——宿主交可见切片与发言，能力交回自有值（转出）
 //! - [`hooks`]：`fire_hook` 助手与 hook 事件枚举
 //! - [`declarations`]：声明表的链接期提交口（事件 / 事实 / 视图 / 端口 / 执行体 / 行）
-//!   与词汇读法（冻结机制住 sdk，回落表是 [`events`]，D-415）
-//! - [`vocab`]：跨插件共享名的唯一住处（端口 / 行为 / 路径段 / 治理能力，D-364）
+//!   与词汇读法（冻结机制住 sdk，回落表是 [`events`]）
+//! - [`vocab`]：跨插件共享名的唯一住处（端口 / 行为 / 路径段 / 治理能力）
 //!
 //! **二、扩展层宿主面白名单**（文件末尾的 `pub use`）——插件要的语法类型、契约形状、机制
-//! 入口与装配常量，逐条转发、逐条可审。按**来源**分臂（D-255 / D-258 / D-276 / D-486）：
+//! 入口与装配常量，逐条转发、逐条可审。按**来源**分臂：
 //!
 //! | 臂 | 来源 | 条数（唯一 owner：`scripts/audits/plugin-surface-audit.mjs`，HS-002 / HS-006） | 性质 |
 //! |---|---|---|---|
-//! | 语法臂 | `symbio-kernel` | `GRAMMAR_BASELINE` | 形状与闭集，**不计债但计件**（D-278） |
+//! | 语法臂 | `symbio-kernel` | `GRAMMAR_BASELINE` | 形状与闭集，**不计债但计件** |
 //! | SDK 臂 | `symbio-sdk` | `SDK_BASELINE` | 只碰内核词汇的宿主机制（含授权判定） |
-//! | 契约臂 | `symbio-contract` | `CONTRACT_BASELINE` | 插件间共享的纯形状（D-486） |
+//! | 契约臂 | `symbio-contract` | `CONTRACT_BASELINE` | 插件间共享的纯形状 |
 //! | 模块转发 | 本 crate 自己的模块 | `MODULE_REEXPORT_BASELINE` | 端口与词汇的整块转出 |
 //!
-//! 三臂只许不涨，改值过的是脚本棘轮；本表不抄第二份数字。旧 core 的 6 条授权符号已于 D-276 清零——
+//! 三臂只许不涨，改值过的是脚本棘轮；本表不抄第二份数字。旧 core 的 6 条授权符号已于  清零——
 //! 授权判定只查一张部署表，按 sdk 自己的章程归位；manifest 因此**只列** `symbio-kernel` / `symbio-sdk` / `symbio-contract` / `symbio-deploy` 四条，HS-005 判它不许回头。
 //!
 //! 插件因此只写 `symbio_plugin_api::…`，manifest 里也不列 `symbio-kernel` /
 //! `symbio-sdk` / `symbio-deploy`；控制面（`loop` / `session`）不在此列，它们按影响类
-//! 运行、本来就认识宿主的容器概念（D-253）——`loop` 只依赖内核（连 `symbio-sdk` 都不依赖），
+//! 运行、本来就认识宿主的容器概念——`loop` 只依赖内核（连 `symbio-sdk` 都不依赖），
 //! `session` 依赖内核与 `symbio-sdk`。判据是
 //! `plugin-surface-audit`（HS-001 零直接依赖 / HS-002 三臂棘轮 / HS-003 无空转条目 /
 //! HS-005 门面 manifest 四条 / HS-006 语法臂与模块级转发只许不涨）。
@@ -39,7 +39,7 @@
 //! 声明表的收集与冻结在 `symbio_platform::sdk::declarations` 里；词汇读法（冻结表缺席时回落
 //! 清单生成物）随 `events.rs` 留在本 crate——内核与 sdk 的生产代码零事件名字面量
 //! （CS-008 / CP-004），回落表不能搬走。收集在链接期发生，因此插件之间仍然零依赖
-//! （DE-024 D-198）。
+//! （DE-024 ）。
 
 pub mod debt;
 pub mod declarations;
@@ -53,9 +53,9 @@ pub mod vocab;
 
 #[cfg(any(test, feature = "test-fixtures"))]
 pub mod testkit;
-// 已搬到 `symbio_sdk` 的端口模块不再各留一份转发文件（`D-408` / `D-412` / `D-413`）：
+// 已搬到 `symbio_platform::sdk` 的端口模块不再各留一份转发文件：
 // 模块名在根上一行转出，插件照旧写 `symbio_plugin_api::rows::…`。`text` 的实现住在
-// `symbio_platform::sdk::text::tokenizer`，沿用它原来的门面名转出（`D-404`）。
+// `symbio_platform::sdk::text::tokenizer`，沿用它原来的门面名转出。
 pub use symbio_platform::sdk::plugin::reports;
 pub use symbio_platform::sdk::plugin::{behaviors, context, effects, retrieval, rows, settle};
 pub use symbio_platform::sdk::text::tokenizer as text;
@@ -68,21 +68,21 @@ pub use context::{
 pub use declarations::{declared_event_cell, vocab};
 // `sealed_declarations` 的插件消费方全是控制面（loop 驱动器取冻结表；session 经
 // 2026-11-12 的取字同源批改走本门面）——loop 没有 sdk 直连通道（E-009 只另许 kernel），
-// 门面是 loop 的唯一合法取径（D-443）。
+// 门面是 loop 的唯一合法取径。
 pub use symbio_platform::sdk::declarations::sealed_declarations;
-// 驱动入口整块归 sdk（D-413），门面只留扩展层要的装配根登记。驱动句柄与解析口只有控制面
+// 驱动入口整块归 sdk，门面只留扩展层要的装配根登记。驱动句柄与解析口只有控制面
 // session 用（按影响类运行、不在门面约束面内），直接从 sdk 取——留这里是零消费方空转条目（HS-003）。
 pub use effects::{
     apply as apply_effects, apply_before, BeforeDecision, BeforeReadings, BeforeRefusal,
     BeforeRequest, EffectCall, EffectEnv, EffectInput, FactDraft, FileOp, ToolBehavior,
 };
 pub use symbio_platform::sdk::drive::publish_deployment_root;
-// fact_source 登记面不上门面（D-443）：唯一消费方是控制面 session（owner），按 D-253 / D-428
+// fact_source 登记面不上门面：唯一消费方是控制面 session（owner）
 // 走 sdk 豁免直取本体；`Principal` 留下（扩展层在用）。
 pub use symbio_platform::sdk::plugin::fact_source::Principal;
 // 宏用 `$crate::inventory` 展开（卫生），与 `symbio_sdk` 的 `submit_object_creator!` 同形。
 pub use inventory;
-// 提交宏随各自的注册表整块搬进 sdk（D-408 / D-412 / D-413）；门面在根上转出，
+// 提交宏随各自的注册表整块搬进 sdk；门面在根上转出，
 // 插件侧 `symbio_plugin_api::submit_*!` 的写法不变（E-009）。
 pub use port::{
     missing_caller, port_result, register_ports, scoped_port_name, AuthzVerdict, PortBindings,
@@ -121,7 +121,7 @@ pub use symbio_platform::deploy::*;
 // 这一臂**不计债**：它是内核本来就有的共享类型（事件 / 视图 / 声明容器 / 能力元数据），
 // `symbio-kernel` 的直接依赖只有 6 个，插件经它取语法不增加任何机制面。按来源分臂之后，
 // 「一条符号属于语法还是机制」在门面上直接可读，HS-002 的棘轮只压机制臂，目标才是可判的
-// 0（D-255）。
+// 0。
 pub use symbio_platform::contract::dialog::{
     ComposeRequest, DecideOutcome, DecideRequest, DecisionPlan, ParseVerdictRequest, RunSnapshot,
     Verdict, WordingReply, REASON_ACK, REASON_CLARIFY, REASON_EMPTY, REASON_FROM_CONTEXT,
@@ -167,17 +167,17 @@ pub use symbio_platform::kernel::vdfs::{
 pub use symbio_platform::kernel::{
     ActorSpec, Entity, Event, EventDecl, FactRole, LatencyTier, Pattern, Scope, Verb,
 };
-// 一次往返的**产物**五个名字不转出（`D-439` 退回 model 插件）：跨侧共享的是事实键名。
+// 一次往返的**产物**五个名字不转出（ 退回 model 插件）：跨侧共享的是事实键名。
 pub use symbio_platform::contract::llm::{PromptMessage, PromptToolCall};
-// 一次性问答载荷与转写地址段（D-486）：纯形状 + 字面量，session / compact / model 三插件共享。
+// 一次性问答载荷与转写地址段：纯形状 + 字面量，session / compact / model 三插件共享。
 pub use symbio_platform::contract::chat::{AssistReply, AssistRequest, SEG_MESSAGES};
 pub use symbio_platform::contract::merge_kernel::truncate_chars;
 pub use symbio_platform::contract::text::{text_floor_char_boundary, text_truncate_bytes};
-// ---- SDK 臂：`symbio-sdk` 的宿主机制（不依赖 core，D-258） ----
+// ---- SDK 臂：`symbio-sdk` 的宿主机制（不依赖 core） ----
 // 这一臂的每一条都只碰内核词汇与自己的表——配置 IO、事件总线的订阅表、VDFS 地址装配、
 // 对象构造器的链接期登记、日志与协议键。它们与「插件要用一条机制」是同一件事，
 // 与「插件要认识整个宿主」被绑成同一件事。SDK 把这条绑定切开：这一臂只依赖内核。
-#[rustfmt::skip] // D-530：锁定转出块排布，净零搬迁的机械行口径与 D-404 对齐
+#[rustfmt::skip] //：锁定转出块排布，净零搬迁的机械行口径
 pub use symbio_platform::contract::event_bus::{
     event_bus_build_envelope, event_bus_resync_of, event_bus_vdfs_change_of, EVENT_BUS_KIND_SYSTEM,
     EVENT_BUS_KIND_VDFS, EVENT_BUS_RESYNC_MARKER_TYPE,
@@ -210,8 +210,8 @@ pub use symbio_platform::sdk::plugin::{
 pub use symbio_platform::sdk::projection::vocab::CommitmentVocab;
 pub const TASK_CAP: usize = 1;
 pub use symbio_platform::sdk::round::node_build;
-// D-531 沙箱横切句柄：发布方与消费方共用机制形状与 ctx 键，不含工具名、策略或配置项。
-#[rustfmt::skip] // D-531：锁定转出块排布，压缩陈旧注释抵消新增行（同 D-530 口径）
+//  沙箱横切句柄：发布方与消费方共用机制形状与 ctx 键，不含工具名、策略或配置项。
+#[rustfmt::skip] //：锁定转出块排布，压缩陈旧注释抵消新增行（同  口径）
 pub use symbio_platform::sdk::sandbox::{sandbox_init_slot, sandbox_of, sandbox_publish, SandboxDecision, SandboxFace, SandboxFact, SANDBOX};
 pub use symbio_platform::sdk::address::{absolute_addr, descend_addr, join_addr, AddrRootDecl};
 pub use symbio_platform::sdk::vdfs::host::{
@@ -223,13 +223,13 @@ pub use symbio_platform::sdk::{
     submit_object_creator,
 };
 
-// ---- 授权判定：机制臂的一部分，单列成账（D-276） ----
-// 这几条曾以「认识容器概念」为由留在旧 core（D-259），门面为它们整块依赖控制面——21 个
-// 扩展层插件的编译图里躺着 grep / ignore / notify（多 34 个 crate）。D-276 复核改判：
+// ---- 授权判定：机制臂的一部分，单列成账 ----
+// 这几条曾以「认识容器概念」为由留在旧 core，门面为它们整块依赖控制面——21 个
+// 扩展层插件的编译图里躺着 grep / ignore / notify（多 34 个 crate）。 复核改判：
 // `principal_of` / `production_matrix` 只查一张**部署表**，`CAP_*` 是那张表的闭集，
 // `actor_can_assign_work` / `commitment_events` 只读 `ActorSpec` 与事件流——没有一条认识
 // 轮次、幕或判决。与 SDK 臂同源同一把尺（HS-002）**并入 SDK 基线**；HS-005 随之成立
-// （门面 manifest 现为只许四条，D-486）。
+// （门面 manifest 现为只许四条）。
 pub use symbio_platform::sdk::actors::{actor_can_assign_work, commitment_events};
 pub use symbio_platform::sdk::authz::{
     principal_of, production_matrix, CAP_ASSERT_VERIFICATION, CAP_DEFINE_WORK, PRINCIPAL_AUTONOMOUS,

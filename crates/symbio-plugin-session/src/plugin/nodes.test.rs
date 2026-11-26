@@ -7,7 +7,7 @@ use symbio_platform::kernel::vdfs::{VDFS_STATUS_ACTIVE, VDFS_STATUS_FAILED, VDFS
 // 目录树场景模块的区段常量（`SEG_SUB_SESSIONS` / `SEG_WORKDIR`）
 use crate::workdir;
 
-/// 身份写 `principal`（D-147）：夹具模仿的是**落库/投递面**的消息，`role` 只是读侧残留格。
+/// 身份写 `principal`夹具模仿的是**落库/投递面**的消息，`role` 只是读侧残留格。
 fn principal_for(role: cm::NodeRole) -> symbio_platform::kernel::chat::principal::Principal {
     use symbio_platform::kernel::chat::principal::Principal;
     match role {
@@ -199,7 +199,7 @@ fn vdfs_internal_path_parsing() {
     assert!(matches!(parse_session_path("").unwrap(), Root));
     assert!(matches!(parse_session_path("/").unwrap(), Root));
     assert!(matches!(parse_session_path("abc").unwrap(), Session("abc")));
-    // 会话记忆已随 D-513 归 memory 插件（<根>/memory/SESSION.md），
+    // 会话记忆已 归 memory 插件（<根>/memory/SESSION.md），
     // session 地址面不再解析这个集合段
     assert!(parse_session_path("abc/MEMORY.md").is_err());
     // 转写列表：目录本身与列表项两级
@@ -824,7 +824,7 @@ fn subtree_nodes_refetch_reproduces_released_subtree() {
     }
 }
 
-/// **触发声明只判成员资格**（DE-025 D-211）：登记表里的每个 kind 都放行，
+/// **触发声明只判成员资格**（DE-025 ）：登记表里的每个 kind 都放行，
 /// 表外的一律拒——写臂不再等值于某一个 kind（那会把别人的部署事实抄进 session）。
 ///
 /// 反向用例是这条判据的重点：「拼错的 kind 被当普通用户消息」不会让任何东西变红，

@@ -4,7 +4,7 @@
 //!
 //! 首响发生在 `classify.escalate` 之后、模型派发之前（`docs/003-design/022`）。环里
 //! **没有**那个「派发前窗口」可以钩：计划一次算全、按批派发，任何执行体都不许在发送
-//! 前再查一次事实（D-342）。所以首响做成一条**独立的事实与一笔独立的债**：
+//! 前再查一次事实。所以首响做成一条**独立的事实与一笔独立的债**：
 //!
 //! ```text
 //! session.opening（plugin_row，债 id 恒为 `session.opening:id=<user.message id>`）
@@ -16,12 +16,12 @@
 //! 模型行随后按 `after(session.opening:id=…)` 等这笔债收束——顺序由债表排出来，
 //! 不是执行体临时决定（`model/debt.rs`）。
 //!
-//! ## 行为什么能拿 ctx（D-344）
+//! ## 行为什么能拿 ctx
 //!
 //! 行拿到的是**派发这次调用的那份 `exec.ctx`**（同一份，不另造句柄、不加别的字段）。
 //! 它唯一的用途是：`fork` 子上下文、设 `PATH` 与载荷，经 `ctx.parent()` 的插件路由
 //! 去问 compose。**跨插件调用只走 route，不直连插件**；谁想用 `ctx` 绕过路由去摸
-//! 别处的数据，按 D-344 驳回。
+//! 别处的数据 驳回。
 //!
 //! 转写仍只有会话写（D-020）：措辞文本来自 compose（模板），落格动作用本插件的行做。
 //! 本文件不出现任何话术模板。
@@ -46,7 +46,7 @@ use crate::wording::compose_wording;
 /// （`after_port(plugin_row)`），不认这个行名。
 pub(crate) const SESSION_OPENING: &str = "session.opening";
 
-/// 上游判决事实（classify 插件所有）：名字由 owner 的清单生成（D-364），
+/// 上游判决事实（classify 插件所有）：名字由 owner 的清单生成，
 /// 本插件按 id 等它，不解释载荷。
 use symbio_plugin_api::events::EVENT_CLASSIFY_ESCALATE as CLASSIFY_ESCALATE;
 
@@ -117,7 +117,7 @@ async fn opening_step(req: &RowRequest<'_>, ctx: Option<Arc<dyn PluginInvokeRequ
         entity: Entity::Scope,
         verb: Verb::Asserted,
         payload: json!({
-            // 首响是**轮内容**：父是轮根（用户消息节点，`D-335` / `D-426`）。
+            // 首响是**轮内容**：父是轮根（用户消息节点， / ）。
             // 用户节点 id 就是 `user.message` 的事实 id（本债键里的 `user_id`）。
             "root_id": user_id,
             // 节点身份与用户消息区分（用户节点 id 就是 `user.message` 的事件 id）。

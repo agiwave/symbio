@@ -1,4 +1,4 @@
-//! 沙箱机制：一个**横切的通用能力句柄**，与 hook 同形（D-531）。
+//! 沙箱机制：一个**横切的通用能力句柄**，与 hook 同形。
 //!
 //! ## 本模块只定义「形状」，不含任何策略
 //!
@@ -67,7 +67,7 @@ impl SandboxFact {
     }
 }
 
-/// 一次调用在同一档案快照内得到的完整裁决（D-533）。
+/// 一次调用在同一档案快照内得到的完整裁决。
 #[derive(Debug, Clone, Default, PartialEq)]
 pub struct SandboxDecision {
     pub permitted: bool,
@@ -150,7 +150,7 @@ pub trait SandboxFace: Send + Sync {
     }
 }
 
-/// 沙箱句柄的 ctx Key —— **键与值同住**（D-095）。
+/// 沙箱句柄的 ctx Key —— **键与值同住**。
 ///
 /// 值类型 `Arc<OnceLock<Arc<dyn SandboxFace>>>` 是本域类型，故键住本模块。
 /// `WIRE = false`：trait object 无进程外形态，只在进程内传递。

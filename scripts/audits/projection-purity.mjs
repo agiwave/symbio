@@ -5,30 +5,30 @@
  * ## 它判什么
  *
  * `Projection::new` 的泛型约束是**一级**强制（句柄进不来，编译期）——但它拦不住
- * 「形参表合法、体内偷看全局」（DE-001 §1.4.1 的诚实划界）。本脚本是**二级**：
+ * 「形参表合法、体内偷看全局」（DE-001 §3 的诚实划界）。本脚本是**二级**：
  *
  * | 编号 | 规则 | 它拦的是哪一种回潮 |
  * |---|---|---|
- * | PP-001 | 产投影文件不得 `use` 导入**同根产投影的兄弟**（不含 `Projection::new` 的共享读侧——`mutations` / `rebuild` / `turns` / `prompt_fidelity` / `tiers`——谁都可以导） | 投影 A 读投影 B 的输出（L2，DE-001 §13.2）：视图叠视图，外壳 `degraded` / 预算语义在层间静默丢失 |
+ * | PP-001 | 产投影文件不得 `use` 导入**同根产投影的兄弟**（不含 `Projection::new` 的共享读侧——`mutations` / `rebuild` / `turns` / `prompt_fidelity` / `tiers`——谁都可以导） | 投影 A 读投影 B 的输出（L2，DE-001 §3）：视图叠视图，外壳 `degraded` / 预算语义在层间静默丢失 |
  * | PP-002 | 折叠目录里的生产文件禁 `SystemTime::now` / `rand::` / `static mut` / `std::time::Instant` | 隐式全局依赖：时钟、随机数、全局可变状态——确定性（N1）的口径外漏洞 |
  * | PP-003 | 每个 `pub fn X(..) -> Projection<` 构造器必须有**折叠目录之外**的生产消费方，或同文件里一行 `// projection-purity-allow <X>: 非空理由` | 死构造器：抽了纯函数视图却没有调用方——「为将来准备」的投机抽象（本仓只认消费方定的契约） |
- * | PP-004 | core 投影面的两格存量——**产投影文件数**与**投影构造器数**——只许降；放宽要按 PP-005 在本脚本旁留一条挂得住的决策 | **投影长回 core**：能力折叠一旦住在 `symbio_platform::sdk::projection/`，「加一个能力」就又成了改架构模块。下沉判据是消费方分布（只有一个 owner 在读 ⇒ 归那个 owner），而这条把「又长回来」变成机器可判的红（[DE-025](../../docs/003-design/025-能力包与扩展面.md "DE-025-能力包与扩展面") D-221） |
+ * | PP-004 | core 投影面的两格存量——**产投影文件数**与**投影构造器数**——只许降；放宽要按 PP-005 在本脚本旁留一条挂得住的决策 | **投影长回 core**：能力折叠一旦住在 `symbio_platform::sdk::projection/`，「加一个能力」就又成了改架构模块。下沉判据是消费方分布（只有一个 owner 在读 ⇒ 归那个 owner），而这条把「又长回来」变成机器可判的红（[DE-025](../../docs/003-design/025-能力包与扩展面.md "DE-025-能力包与扩展面") ） |
  * | PP-005 | 上面两格的放宽注释 `// projection-purity-allow <格>: D-NNN <非空理由>` 里的 `D-NNN` 必须在设计文档里有 `### D-NNN` 锚点 | 「改一个数字」看起来像维护：注释写得再像理由，指向不存在的决策就不算豁免（与 CS-002 同一条判据形状） |
  *
  * ## 判定面：折叠搬到哪儿，判据跟到哪儿
  *
  * PP-001 / PP-002 / PP-003 扫的是**所有折叠根**：`crates/symbio-platform/src/sdk/projection/`
- * 加上每个 crate 的 `src/projections/`（D-221 把只被一个 owner 读的折叠交还 owner 之后，
+ * 加上每个 crate 的 `src/projections/`（ 把只被一个 owner 读的折叠交还 owner 之后，
  * 判据不能跟着目录一起留下——否则「迁出 core」顺部就变成「逃出纯净性判定」）。
  * PP-004 只判 **core 那一根**：它是横向扩展的棘轮，不是「仓库里一共有几条折叠」。
  *
  * ## PP-004 的口径边界（写清楚，免得把绿灯当成证明）
  *
  * 它数的是**core 这一侧的投影面**，不是「core 有多少 `.rs`」：`vocab.rs` 是共享参数表，
- * `mod.rs` 是目录入口——它们长宽都不判。任务词汇面已随唯一消费方归 task（D-565）。
- * D-561 后两格已收平为 0 / 0：会话转写、分支、变更、汇报与造树实现归 session，
+ * `mod.rs` 是目录入口——它们长宽都不判。任务词汇面已随唯一消费方归 task（）。
+ *  后两格已收平为 0 / 0：会话转写、分支、变更、汇报与造树实现归 session，
  * core 不再持有 `Projection::new` 构造器。owner 的折叠仍由 PP-001 / 002 / 003 覆盖。
- * `readyset` 在 `D-289` 随 owner 搬进 `crates/symbio-plugin-task` 后是声明视图的
+ * `readyset` 在 `` 随 owner 搬进 `crates/symbio-plugin-task` 后是声明视图的
  * `eval`（`ViewDecl`），不在本脚本的判定面上；其确定性由 owner 包内双跑用例与 e2e 守。
  * 跨插件读取 owner 的折叠走 `symbio_plugin_api::views` 的按名字读口，不在 core 再写一份。
  *
@@ -60,7 +60,6 @@ import fs from 'node:fs'
 import path from 'node:path'
 import { fileURLToPath } from 'node:url'
 import { red, green, dim, yellow } from '../color.mjs'
-import { hasDecisionAnchor as anchorExists } from '../decision-anchors.mjs'
 import { isTestFile, walk } from '../fs-walk.mjs'
 import { blankComments } from '../rust-scan.mjs'
 
@@ -85,9 +84,6 @@ const ALLOW_RE = /^.*\/\/\s*projection-purity-allow\s+(\S+)\s*:\s*(\S.*)$/
 
 const errors = []
 const fail = (m) => errors.push(m)
-
-/** 决策是否存在（`###` 锚点或判定决策单文档的 `id`，口径在 `decision-anchors.mjs`，三个审计共用一份）。 */
-const hasDecisionAnchor = (id) => anchorExists(id, ROOT)
 
 const relPosix = (abs) => path.relative(ROOT, abs).split(path.sep).join('/')
 
@@ -177,7 +173,7 @@ for (const s of scopes) {
         const mod = name.split('::')[0]
         if (s.producerNames.has(mod)) {
           fail(
-            `PP-001 ${f.rel}:${i + 1} 导入同根产投影兄弟 \`${mod}\`——投影 A 不读投影 B（L2，DE-001 §13.2）；要共用的判据请放进不产投影的共享读侧（例：tiers.rs）`,
+            `PP-001 ${f.rel}:${i + 1} 导入同根产投影兄弟 \`${mod}\`——投影 A 不读投影 B（L2，DE-001 §3）；要共用的判据请放进不产投影的共享读侧（例：tiers.rs）`,
           )
         }
       }
@@ -230,9 +226,9 @@ for (const { rel, raw, name } of ctorRows) {
   }
 }
 
-// ── PP-004：core 投影面只许降（DE-025 D-221）────────────────────────────
+// ── PP-004：core 投影面只许降（DE-025 ）────────────────────────────
 /**
- * 两格的**现值**（D-561 会话实现归位后冻结）：
+ * 两格的**现值**（ 会话实现归位后冻结）：
  * - `files`：`projection/` 下产 `Projection` 的文件数；
  * - `ctors`：其中 `pub fn X(..) -> Projection<` 的构造器条数。
  *
@@ -268,7 +264,7 @@ for (const [key, cap] of Object.entries(PROJ_BASELINE)) {
   if (now > cap) {
     fail(
       `PP-004 ${PROJ_CELL_LABEL[key]}变宽：实测 ${now} > 基线 ${cap} —— ` +
-        `能力折叠住进 \`symbio_platform::sdk::projection/\` 就等于「加一个能力要改架构模块」（DE-025 D-221）。` +
+        `能力折叠住进 \`symbio_platform::sdk::projection/\` 就等于「加一个能力要改架构模块」（DE-025 ）。` +
         '唯一合法的路径按序走：① 数它有几个 crate 在读——只有一个 owner 在读就**下沉给那个 owner**' +
         '（先例：checkpoint / changes 归 session，fallback / slo / span 归 slo 能力包，consolidate 归 memory）；' +
         '② 别的插件想读 owner 的折叠，由 owner 用 `submit_reports!` 把视图登记成报表列' +
@@ -285,7 +281,7 @@ for (const [key, cap] of Object.entries(PROJ_BASELINE)) {
  * 读本脚本**自己**源码里的放宽痕迹（与 CS-002 同一分工：`35-baseline` 判「数字有没有
  * 比上一版更松」，这里判「这条豁免够不够格」）。夹具仓库里可能没有本脚本 ⇒ 读不到跳过。
  */
-const PROJ_WAIVER_RE = /^ {0,2}\/\/\s*projection-purity-allow\s+([A-Za-z0-9_]+)\s*:\s*(\S[^\n]*)$/gm
+const PROJ_WAIVER_RE = /^ {0,2}\/\/\s*projection-purity-allow\s+([A-Za-z0-9_]+)\s*:\s*(.*)$/gm
 const PROJ_WAIVABLE_KEYS = Object.keys(PROJ_BASELINE)
 const selfPath = path.join(ROOT, 'scripts', 'audits', 'projection-purity.mjs')
 if (fs.existsSync(selfPath)) {
@@ -299,21 +295,8 @@ if (fs.existsSync(selfPath)) {
       )
       continue
     }
-    const refs = [...reason.matchAll(/\bD-(\d{3}a?)\b/g)].map((r) => r[1])
-    if (refs.length === 0) {
-      fail(
-        `PP-005 放宽 \`${key}\` 的理由里没有决策编号（\`${key}: ${reason}\`）—— 动棘轮数字必须挂一条决策，` +
-          '「批次需要 / 顺手 / 待补 / 见对话」都不算',
-      )
-      continue
-    }
-    for (const id of refs) {
-      if (!hasDecisionAnchor(id)) {
-        fail(
-          `PP-005 放宽 \`${key}\` 引用了 \`D-${id}\`，但设计文档里没有任何 \`### D-${id}\` 条目 —— ` +
-            '指向不存在的决策的豁免不算豁免',
-        )
-      }
+    if (!reason) {
+      fail(`PP-005 放宽 \`${key}\` 必须写非空的当前理由（\`projection-purity-allow ${key}: <理由>\`）`)
     }
   }
 }

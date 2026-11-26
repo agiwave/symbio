@@ -10,7 +10,7 @@
  *     而它本可以在提交前被机械地查出来。
  *   D-002 过程文档不进仓：靠文档**头部自述**判定（一次性评审 / 体检 / 已落地实施方案）。
  *   D-003 行数预算：活跃文档 **不得超过 `MAX_DOC_LINES`**。
- *   D-004 变更史不得混入活跃文档正文：历史只归 `git log`（本仓不设归档目录，D-494）。
+ *   D-004 变更史不得混入活跃文档正文：历史只归 `git log`（本仓不设归档目录，）。
  *   D-006 反引号里的文件路径：正文用 `` `path/to/x.md` `` 指路时，目标必须存在。
  *   D-007 站内锚点：链接的 `#fragment` 必须等于目标文件某个标题的 slug（含纯锚点 `#x`）。
  *   D-008 裸风险编号：正文里的 `R\d+` 必须是**定义**（`| Rn |` 表行的首列）或
@@ -39,7 +39,7 @@
  *   而 D-001 报「失效 0 条」已经很久了。**守卫报 0 不等于没有坏链，只等于它看不见。**
  *
  * D-006 的两条防误报设计（缺任一条都会让规则被豁免喂到失效）：
- *   ① **双根解析**：`D-000-架构决策汇总.md` 这类路径在模块 README 里是**相对仓库根**
+ *   ① **双根解析**：`-架构决策汇总.md` 这类路径在模块 README 里是**相对仓库根**
  *      写的，在 `docs/` 内部又是相对当前文件——先试文件目录、再试仓库根，任一命中即通过。
  *      实测把失败数从 34 降到 9。
  *   ② **只判定「不含 `./` `../` 且至少含一个 `/`」的路径**：无斜杠的（`` `README.md` ``）
@@ -65,7 +65,7 @@
  *     故只在确需时用；行内豁免覆盖绝大多数真实场景。
  *
  * D-008 存在的理由（**编号引用**这一类的首条规则）：2026-10-08 复核时发现
- *   `DE-016-工程落地与验证` §3.2 与 [`D-047`](../../docs/003-design/011-Agent目录规范.md "DE-011-Agent目录规范") 都写着「R1」，
+ *   `DE-016-工程落地与验证` §3.2 与 [``](../../docs/003-design/011-Agent目录规范.md "DE-011-Agent目录规范") 都写着「R1」，
  *   而本仓的 `R1` 有**两个**含义——`04` 风险登记表的 R1（从未写过可运行系统代码）
  *   与从 `feat` 分支并入的 `docs/003-design/06` §10.2 的 R1（「主会话不持有工具」的架构定案）。
  *   后者那篇文档**不在本仓**：引用悬空，却撞进了前者的编号空间。
@@ -145,7 +145,7 @@
  *   （symbio / tauri / cli / scripts / e2e / examples / .github 下的非 .md 源码），
  *   两边共用同一份口径。
  *
- * **不设历史快照豁免**：本仓没有归档目录（历史只归 `git log`，D-494），所以扫描面里
+ * **不设历史快照豁免**：本仓没有归档目录（历史只归 `git log`，），所以扫描面里
  *   不存在「当时形态」的文档，失效链接一律照常报——没有中间态就没有豁免档。
  *
  * 用法：
@@ -174,7 +174,7 @@
  *   路径，同样不该带本机盘符——用 `<仓库根>` / `<盘符>` 占位）。
  *   D-016 的豁免只有**行内档**（`doc-link-allow D-016: 理由`，本行或前一行），且只对
  *   **机器读的字段**成立——另有判据每轮解析该引用的存在性与可达性，理由须写明是谁。
- *   散文与源码注释里的指路不给豁免（任务收口即删，那里没有机械复核，D-295）。
+ *   散文与源码注释里的指路不给豁免（任务收口即删，那里没有机械复核，）。
  *
  * 与仓库约定一致：纯 Node 实现，不依赖 bash / ripgrep，Windows / macOS / Linux 通用。
  */
@@ -212,7 +212,7 @@ const SKIP_DIRS = new Set(['node_modules', 'target', '.git', 'dist', 'build', '.
 /**
  * 归档是**动作**，能保持住的才是机制。
  *
- * `docs/README.md` 现写明「历史只归 `git log`（D-494），现行文档只描述当前行为」，
+ * `docs/README.md` 现写明「历史只归 `git log`（），现行文档只描述当前行为」，
  * 但它只是一句话，没有任何东西检查——于是 `docs/003-design/` 里曾躺着
  * 8 篇自述「一次性复核报告」「文档类型：评审」「实施前的方案（已全部落地）」的过程文档，
  * 活跃文档 9,662 行里有约 2,200 行是**第 N 轮的评审与整改记录**。
@@ -269,7 +269,7 @@ function processDocMarker(text) {
  *
  * 决策账与散文的膨胀方式不同：散文会重复、会跑题、会变成垃圾桶，所以要压；决策账是
  * **只追加的定案记录**，它的长度是项目史的读数，不是质量问题，读它的人也是按
- * `### D-NNN` 锚点跳（`decision-anchors` 是那条索引的唯一读法）。
+ * 指向文档内小节。
  *
  * 于是判据改为：**散文行数**（正文减去所有 `### D-NNN` 决策块）。决策块按标题层级现算
  * ——从 `### D-NNN` 起，到下一个一至三级标题止；不依赖节名叫「关键决策」还是「§2 关键
@@ -288,29 +288,9 @@ function lineCount(text) {
   return text.replace(/\n$/, '').split('\n').length
 }
 
-/**
- * 正文里属于 `### D-NNN` 决策块的行数（含块内子标题与空行）。
- *
- * 「一级到三级标题开块、`### D-NNN` 之外一律闭块」是这条判据的全部语法——`####` 也算
- * 闭块，于是决策条目里的子标题会被算成散文（宁可多算散文，也不给审计留一个「把正文
- * 塞进决策标题下面」的口子）。
- */
-export function decisionBlockLines(lines) {
-  const DECISION_HEAD = /^###\s+D-\d{3}a?\b/
-  const HEADING = /^#{1,3}\s/
-  let n = 0
-  let inBlock = false
-  for (const l of lines) {
-    if (HEADING.test(l)) inBlock = DECISION_HEAD.test(l)
-    if (inBlock) n++
-  }
-  return n
-}
-
-/** 预算量的是散文：正文行数减去决策账。 */
+/** 预算量完整正文；标题与决策条目不另开豁免。 */
 export function proseLineCount(body) {
-  const lines = body.replace(/\n$/, '').split('\n')
-  return lines.length - decisionBlockLines(lines)
+  return lineCount(body)
 }
 
 // ==================== D-004：变更史不得混入活跃文档 ====================
@@ -567,7 +547,7 @@ function containsWord(text, word) {
 }
 
 /**
- * 证据锚点的**兼容写法**：crate 化（D-191）之后，文档里沿用插件相对路径
+ * 证据锚点的**兼容写法**：crate 化（）之后，文档里沿用插件相对路径
  * （`local/policy/mod.rs`、`crates/symbio-plugin-loop/src/memory_events.rs`）是合理缩写，落点变成
  * `crates/symbio-plugin-<id>/src/…`。这里只做「同一份文档化事实的另一种写法」的展开，
  * 不放宽任何判定：展开出来的每个候选仍要精确存在，`::symbol` / `:line` 照旧核对。
@@ -576,7 +556,7 @@ function evidenceAlternates(base) {
   const out = new Set()
   // 「crate 名当目录名」的缩写（`symbio_sdk/llm/frames.rs`）。表里列全，是因为缺一项
   // 就会让写对的事实锚点被读成「指不到」——而报错落在读者眼里，原因却在解析器。
-  // D-258 之后 `symbio-sdk` 也是被引用的事实所在地，故与 core / kernel / deploy 并列。
+  //  之后 `symbio-sdk` 也是被引用的事实所在地，故与 core / kernel / deploy 并列。
   const CRATE_DIRS = {
     'symbio_sdk/': 'crates/symbio-platform/src/sdk/',
     'symbio_kernel/': 'crates/symbio-platform/src/kernel/',
@@ -628,7 +608,7 @@ function evidenceAnchorHits(file, text, limit = 8) {
       const base = m[1]
       evidenceChecked += 1
       if (evidenceAnchorResolves(file, base, m[2])) continue
-      // 决策段不再有冻结面（`D-483`）：裁决时点的锚点要么改指现行 owner，要么写成
+      // 决策段不再有冻结面（``）：裁决时点的锚点要么改指现行 owner，要么写成
       // 普通文字（反引号在本仓是「可地址的引用」，历史叙述不该占用它）。
       hits.push({ line: i + 1, target: m[0] })
     }
@@ -800,7 +780,7 @@ function checkAnchor(fromRel, absFile, rawFrag, toLabel) {
  * 一个指向已删文档的悬空引用就这样躺了几个月，三条判据（D-001 / D-006 / D-010）一起报 0。
  *
  * 判据故意窄：方括号内容剥掉前导 `|` 与空白后**以仓内目录开头**才算（`docs/`、`scripts/`
- * 等六个根，或 `../` / `./` 前缀）。这样 `[D-102]`、`[[DE-001 §4.3]]`、`[文字]`
+ * 等六个根，或 `../` / `./` 前缀）。这样 `[]`、`[[DE-001 §5]]`、`[文字]`
  * 这类正常括号不误报——它们不可能是「丢了地址的路径链接」。
  */
 const REPO_PATH_HEAD = /^(?:\.{1,2}\/)?(?:docs|scripts|symbio|tauri|cli|e2e|examples)\//
@@ -1152,13 +1132,13 @@ for (const { rel, why } of misplaced) {
   console.log(`  ✗ ${rel}  自述命中 /${why}/`)
 }
 if (misplaced.length > 0) {
-  console.log('\n提示：过程文档（一次性评审 / 体检 / 已落地的实施方案）不进仓——写完即删，历史归 git log（D-494）。')
+  console.log('\n提示：过程文档（一次性评审 / 体检 / 已落地的实施方案）不进仓——写完即删，历史归 git log（）。')
   console.log('      它们记录的是「当时怎么想的」，与现状一致既不必要也不可能——而每次重构')
   console.log('      回头改历史，正是「改一个功能要动十几个文档」的一部分来源。')
 }
 
 // ---- D-003：行数预算 ----
-console.log(`D-003 行数预算：散文上限 ${MAX_DOC_LINES} 行（不含 \`### D-NNN\` 决策账），超限 ${oversized.length} 篇`)
+console.log(`D-003 行数预算：完整正文上限 ${MAX_DOC_LINES} 行，超限 ${oversized.length} 篇`)
 for (const { rel, lines, total } of oversized) {
   console.log(`  ✗ ${rel}  散文 ${lines} 行（超 ${lines - MAX_DOC_LINES}）｜全文 ${total} 行`)
 }
@@ -1167,7 +1147,7 @@ if (oversized.length > 0) {
   console.log('      · 模块内部机制 → 该模块 README.md；· 论证与被否决的方案 → docs/003-design/（只留决策指路）')
   console.log('      · 协议线上形状 → docs/004-ref/ 对应 ref；· 列表类事实 → docs/004-ref/006-当前事实表.md（生成物，不手抄）')
   console.log('      · 实例 / 范例 → 由被举例的那个模块的 README 持有')
-  console.log('      本条**不给豁免**：拆分方向由 owner 表给出，不需要逐篇解释。决策账不计入预算。')
+  console.log('      本条**不给豁免**：拆分方向由 owner 表给出，不需要逐篇解释。完整正文都计入预算。')
 }
 
 // ---- D-004：变更史不得混入活跃文档 ----
@@ -1255,7 +1235,7 @@ if (machinePaths.length > 0) {
  * **为什么 D-016 需要豁免出口**：它的默认理由是「task 收口即删 ⇒ 引用必然悬空」。
  * 当引用它的判据**每轮门禁都重新解析**（存在性 + 可达性）时，那条引用不会静默悬空——
  * 悬空会在同一次门禁里变红。这类引用是**机器读的字段**，不是散文里的人名指路；
- * 豁免理由必须写明「由哪条判据复核」，散文引用照旧判红（`D-295`）。
+ * 豁免理由必须写明「由哪条判据复核」，散文引用照旧判红（``）。
  */
 const WAIVER_D016_RE = /doc-link-allow\s+D-016\s*:(.*)$/m
 

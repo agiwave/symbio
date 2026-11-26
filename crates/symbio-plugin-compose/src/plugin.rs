@@ -166,7 +166,7 @@ impl Plugin for ComposePlugin {
         _path: String,
         ctx: Arc<dyn PluginInvokeRequest>,
     ) -> PluginInvokeResponse<PluginPayload> {
-        // 本轮配置快照贡献（D-427）：真源是本插件自己的 PLUGIN.yml，值由本插件交。
+        // 本轮配置快照贡献：真源是本插件自己的 PLUGIN.yml，值由本插件交。
         // 挂载即贡献，卸载即缺席；会话不再按本插件的名字去债表算「有效开关」。
         symbio_plugin_api::capability_announce_config_snapshot(
             &ctx,
@@ -203,7 +203,7 @@ fn config_definition() -> DetailDefinition {
                 "compose_enabled",
                 "启用对话措辞",
                 "关掉后首响 / 答话都不生成；卸载本插件同样让这一格缺席，\
-                 读方按出厂值收敛（D-427）",
+                 读方按出厂值收敛",
                 d.compose_enabled,
             ),
             DetailField {

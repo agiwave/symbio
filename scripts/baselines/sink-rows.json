@@ -4,47 +4,47 @@
     {
       "name": "tool.artifact",
       "why": "产物格无端口；读者是 model 续接债与会话投影，不是环前件",
-      "adr": "D-397"
+      "adr": ""
     },
     {
       "name": "glossary.defined",
       "why": "术语定义写即闭合，没有「必须发生」的时机",
-      "adr": "D-397"
+      "adr": ""
     },
     {
       "name": "classify.verdict",
       "why": "判定记录无端口，结局由写方落定（守 classify.answered / classify.escalate）",
-      "adr": "D-397"
+      "adr": ""
     },
     {
       "name": "conation.expressed",
       "why": "表达记录，写方可选、无时机债务",
-      "adr": "D-397"
+      "adr": ""
     },
     {
       "name": "memory.encoded",
       "why": "编码是收束贡献，无派发时机",
-      "adr": "D-397"
+      "adr": ""
     },
     {
       "name": "memory.consolidated",
       "why": "巩固产物，写即闭合",
-      "adr": "D-397"
+      "adr": ""
     },
     {
       "name": "memory.forgotten",
       "why": "遗忘产物，写即闭合",
-      "adr": "D-397"
+      "adr": ""
     },
     {
       "name": "session.terminated-seat",
       "why": "终止由宿主簿记写方写，不在债表（守 session.terminated）",
-      "adr": "D-397"
+      "adr": ""
     },
     {
       "name": "memory.calibrated",
       "why": "校准观测，写即闭合",
-      "adr": "D-397"
+      "adr": ""
     }
   ]
 }

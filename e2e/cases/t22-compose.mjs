@@ -237,7 +237,7 @@ export default defineCase(
       assertEq(msgRoleOf(tplReply[0]), 'assistant', '对话面节点是助手说的话');
       assertEq(msgTypeOf(tplReply[0]), 'text', '对话面节点是文本节点');
       assertEq(tplReply[0].content, TEMPLATE_THANKS, 'A 线应拿到致谢模板的原文');
-      // 答话是**轮根下的正文子**（`D-435`）：与工具轮的正文子同一棵树，不再是
+      // 答话是**轮根下的正文子**：与工具轮的正文子同一棵树，不再是
       // 根级兄弟节点——根级那句会让按根切窗口多算一轮，也会让渲染把它排到轮末。
       const tplUser = tplMsgs.find((m) => msgRoleOf(m) === 'user');
       assert(tplUser, 'A 线应有用户消息节点（轮根）');
@@ -271,7 +271,7 @@ export default defineCase(
       assertEq(genReply[0].parent_id, genUser.id, '答话挂在轮根下');
       // 思考事实入格：生成产线是这条轮次里唯一一次真实模型推理，mock 已带
       // `reasoning` ⇒ 收束格载荷携带 reasoning/reasoning_id ⇒ 重建复刻 Reason 节点。
-      // 它与正文**同级**（同挂轮根）——与工具轮的树同形（`D-435`）：此前它在措辞
+      // 它与正文**同级**（同挂轮根）——与工具轮的树同形：此前它在措辞
       // 插件出口就被丢弃，Reason 节点从未存在；挂成答话的子节点则是第二种树形。
       const genReason = genMsgs.find(
         (m) =>
@@ -322,7 +322,7 @@ export default defineCase(
         true,
         'Escalate 的首响必须带剔除标记（界面开场白 ≠ 模型的对话内容）',
       );
-      // 位置：首响是**轮内容**，父 = 本轮用户消息（轮根，D-335 / D-426）。挂在根级
+      // 位置：首响是**轮内容**，父 = 本轮用户消息（轮根）。挂在根级
       // 会让结构轴递归把它排到整棵轮子树之后（轮末补一句），而不是用户发言之后的第一声。
       const b2User = escMsgs.filter((m) => msgRoleOf(m) === 'user').at(-1);
       assert(b2User, 'B 线第 2 步应有用户消息节点（轮根）');
@@ -372,7 +372,7 @@ export default defineCase(
         1,
         '一个轮首在实时面上就是一个节点（不多成两张卡）',
       );
-      // 实时面与重建面是同一棵树：下发帧的父也必须是轮根（D-426）。
+      // 实时面与重建面是同一棵树：下发帧的父也必须是轮根。
       const openingFrame = liveB2.find((m) => m.data?.meta?.reason === 'needs_work');
       assertEq(
         openingFrame?.data?.parent_id,
@@ -422,7 +422,7 @@ export default defineCase(
         await send(cli2, SIDS.unmounted, '谢谢', hdUn.workdir);
         // 降级方向 = **进模型轮**（不是沉默）：判据只有一个——这一轮真的发出了一次
         // 带工具表的模型请求（compose 没挂载时没人能说话，判决不能把整轮压成沉默）。
-        // 不等 `msgTypeOf === 'turn'`：D-259 把 `turn` 从容器改成**信封字段**，投影
+        // 不等 `msgTypeOf === 'turn'`把 `turn` 从容器改成**信封字段**，投影
         // 不再产出 Turn 组合节点——等它等于等一个按目标形状不该存在的东西。
         await waitFor(
           async () => (await reqCount()) - unmBase >= 1,

@@ -19,8 +19,8 @@
  *   ⑪ SC-006：工具名落在 sdk / kernel / loop / session 的非测试代码 → 红（不限于比较位置）；
  *   ⑫ SC-006 不误报：前缀 / 后缀变体、`.test.rs` / `tests.rs` / 内联测试模块 → 绿；
  *   ⑬ SC-006 基线：在册且处数相符 → 绿；处数下降而基线不改 → 红（只许降）；
- *      基线缺决策 / 引用不存在的决策 → 红；基线读不出来 → 判据失效；
- *   ⑭ SC-006 豁免：必须挂一条**能打开的** `### D-NNN` 或判定决策单文档的 `id`；悬空 → SC-005。
+ *      基线缺当前理由 / 理由为空白 → 红；基线读不出来 → 判据失效；
+ *   ⑭ SC-006 豁免：必须写当前具体理由；空理由或悬空 → 红。
  *
  * 用法：node --test scripts/audits/plugin-special-case-audit.test.mjs
  */
@@ -56,9 +56,6 @@ const TOOLS_FIXTURE = {
   ].join('\n'),
 }
 
-/** 决策夹具：SC-006 的基线与豁免都要挂在它身上。 */
-const DOCS_FIXTURE = { 'design.md': '### D-076 心跳片的八个宿主触点\n\n正文。\n' }
-
 /**
  * 跑一次守卫：五个根 + 基线 + 决策目录都是夹具；`REL_ROOT` 指夹具根，基线键才写成
  * `session/…` 这种稳定形状。`baseline: null` ⇒ 不写基线文件（判「基线缺失」）。
@@ -70,7 +67,6 @@ function run({
   sdk = {},
   kernel = {},
   loop = {},
-  docs = DOCS_FIXTURE,
   baseline = {},
 } = {}) {
   return withTempTree({}, (root) => {
@@ -87,10 +83,9 @@ function run({
     write('sdk', sdk)
     write('kernel', kernel)
     write('loop', loop)
-    write('docs', docs)
     const baselineFile = path.join(root, 'tool-names.json')
     if (baseline !== null) fs.writeFileSync(baselineFile, JSON.stringify(baseline))
-    for (const dir of ['session', 'protocols', 'tools', 'sdk', 'kernel', 'loop', 'docs']) {
+    for (const dir of ['session', 'protocols', 'tools', 'sdk', 'kernel', 'loop']) {
       fs.mkdirSync(path.join(root, dir), { recursive: true })
     }
     const result = spawnSync(
@@ -105,7 +100,6 @@ function run({
         `KERNEL_ROOT=${path.join(root, 'kernel')}`,
         `CONTRACT_ROOT=${path.join(root, 'sdk')}`,
         `LOOP_ROOT=${path.join(root, 'loop')}`,
-        `DOCS_ROOT=${path.join(root, 'docs')}`,
         `SC006_BASELINE=${baselineFile}`,
       ],
       { cwd: root, env: { ...process.env, NO_COLOR: '1' }, encoding: 'utf8', timeout: 30_000 },
@@ -126,10 +120,10 @@ const PROFILE_FIXTURE = {
   ].join('\n'),
 }
 
-/** 一处 SC-006 存量：基线 + 决策夹具都齐。 */
+/** 一处 SC-006 存量：基线写明当前理由。 */
 const SC006_BASELINE = {
   'session/autonomous.rs': {
-    heartbeat: { count: 1, adr: 'D-076', reason: '读心跳插件的 metadata 命名空间，不是按工具名分流' },
+    heartbeat: { count: 1, reason: '读心跳插件的 metadata 命名空间，不是按工具名分流' },
   },
 }
 
@@ -164,7 +158,7 @@ test('SC-001 不误报、SC-006 接住：缺省值与键名不是「按名分流
   assert.match(r.stderr, /SC-006/)
 })
 
-test('SC-006 基线与决策都在册 ⇒ 绿（存量占额度）', () => {
+test('SC-006 基线在册且处数相符 ⇒ 绿（存量占额度）', () => {
   const r = run({
     session: { 'autonomous.rs': 'let h = meta.get("heartbeat").and_then(|v| v.get("include_history"));\n' },
     baseline: SC006_BASELINE,
@@ -203,13 +197,13 @@ test('SC-006 基线只许降：代码里少了一处而基线没改 ⇒ 红', ()
     session: {
       'autonomous.rs': [
         'let h = meta.get("heartbeat");',
-        '// special-case-allow SC-006: D-076 读心跳插件的 metadata 命名空间',
+        '// special-case-allow SC-006:  读心跳插件的 metadata 命名空间',
         '',
       ].join('\n'),
     },
     baseline: {
       'session/autonomous.rs': {
-        heartbeat: { count: 2, adr: 'D-076', reason: '读心跳插件的 metadata 命名空间' },
+        heartbeat: { count: 2, reason: '读心跳插件的 metadata 命名空间' },
       },
     },
   })
@@ -217,32 +211,32 @@ test('SC-006 基线只许降：代码里少了一处而基线没改 ⇒ 红', ()
   assert.match(r.stderr, /基线已过期/)
 })
 
-test('SC-006 基线资格：没有决策 / 决策不在册 ⇒ 红', () => {
+test('SC-006 基线资格：缺少当前理由或理由为空白 ⇒ 红', () => {
   const missing = run({
     session: { 'autonomous.rs': 'let h = meta.get("heartbeat");\n' },
-    baseline: { 'session/autonomous.rs': { heartbeat: { count: 1, reason: '没有挂决策' } } },
+    baseline: { 'session/autonomous.rs': { heartbeat: { count: 1 } } },
   })
   assert.equal(missing.status, 1)
-  assert.match(missing.stderr, /没有挂决策/)
+  assert.match(missing.stderr, /没有理由/)
 
-  const bogus = run({
+  const blank = run({
     session: { 'autonomous.rs': 'let h = meta.get("heartbeat");\n' },
     baseline: {
       'session/autonomous.rs': {
-        heartbeat: { count: 1, adr: 'D-999', reason: '指向不存在的决策' },
+        heartbeat: { count: 1, why: '   ' },
       },
     },
   })
-  assert.equal(bogus.status, 1)
-  assert.match(bogus.stderr, /没有 `### D-999` 条目/)
+  assert.equal(blank.status, 1)
+  assert.match(blank.stderr, /没有理由/)
 })
 
-test('SC-006 豁免：带能打开的决策 ⇒ 绿；缺决策 / 决策不在册 / 悬空 ⇒ 红', () => {
+test('SC-006 豁免：当前具体理由 ⇒ 绿；空理由 / 悬空 ⇒ 红', () => {
   const waived = run({
     session: {
       'autonomous.rs': [
         'let h = meta.get("heartbeat");',
-        '// special-case-allow SC-006: D-076 读心跳插件的 metadata 命名空间，不是按工具名分流',
+        '// special-case-allow SC-006: 读心跳插件的 metadata 命名空间，不是按工具名分流',
         '',
       ].join('\n'),
     },
@@ -250,32 +244,20 @@ test('SC-006 豁免：带能打开的决策 ⇒ 绿；缺决策 / 决策不在�
   assert.equal(waived.status, 0, waived.stderr)
   assert.match(waived.stdout, /代码内豁免 1 处/)
 
-  const noAdr = run({
+  const empty = run({
     session: {
       'autonomous.rs': [
         'let h = meta.get("heartbeat");',
-        '// special-case-allow SC-006: 这处应该留下',
+        '// special-case-allow SC-006:',
         '',
       ].join('\n'),
     },
   })
-  assert.equal(noAdr.status, 1)
-  assert.match(noAdr.stderr, /没有挂决策/)
-
-  const badAdr = run({
-    session: {
-      'autonomous.rs': [
-        'let h = meta.get("heartbeat");',
-        '// special-case-allow SC-006: D-999 指向不存在的决策',
-        '',
-      ].join('\n'),
-    },
-  })
-  assert.equal(badAdr.status, 1)
-  assert.match(badAdr.stderr, /没有 `### D-999` 条目/)
+  assert.equal(empty.status, 1, empty.stderr)
+  assert.match(empty.stderr, /SC-006/)
 
   const dangling = run({
-    sdk: { 'lib.rs': 'fn f() {}\n// special-case-allow SC-006: D-076 这里早就没有工具名了\n' },
+    sdk: { 'lib.rs': 'fn f() {}\n// special-case-allow SC-006: 这里早就没有工具名了\n' },
   })
   assert.equal(dangling.status, 1)
   assert.match(dangling.stderr, /SC-005/)
@@ -365,7 +347,7 @@ test('带理由的豁免放行；空理由不算豁免', () => {
     session: {
       'executor.rs': [
         'if name == "agent_run" { // special-case-allow SC-001: 这里的名字来自外部清单',
-        '// special-case-allow SC-006: D-076 这处名字来自外部清单，不是注册表里的工具',
+        '// special-case-allow SC-006:  这处名字来自外部清单，不是注册表里的工具',
         '    go();',
         '}',
         '',

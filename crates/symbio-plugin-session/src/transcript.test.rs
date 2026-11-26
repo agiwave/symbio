@@ -14,7 +14,7 @@ use super::*;
 use std::sync::Mutex;
 use symbio_platform::kernel::chat::chat_node::{MessageContent, NodeKind, NodeRole, NodeStatus};
 
-/// 身份写 `principal`（D-147）：夹具模仿的是**投递/落库面**的消息，`role` 只是读侧残留格。
+/// 身份写 `principal`夹具模仿的是**投递/落库面**的消息，`role` 只是读侧残留格。
 fn principal_for(role: NodeRole) -> symbio_platform::kernel::chat::principal::Principal {
     use symbio_platform::kernel::chat::principal::Principal;
     match role {
@@ -198,7 +198,7 @@ fn delta_is_never_retained_on_graph_nodes() {
 
 /// 位置序号在**创建时**分配：在途消息（存储尚未写入）从此也有权威顺序。
 ///
-/// 这条是本轮（D-025 §3.3）的核心：两条并行工具的消息在同一毫秒创建时，
+/// 这条是本轮（
 /// 前端只能回退 `timestamp` ⇒ 并列、顺序不定。有了在途号，`ordered` 的
 /// 「`seq` 升序」对在途消息同样成立。
 #[test]
@@ -576,7 +576,7 @@ fn session_state_flushes_pending_delta_first() {
     assert!(tr.pending.is_none(), "运行态帧冲刷掉待投递窗口");
 }
 
-/// 会话运行态与消息走**同一张订阅表**（D-025 的实时面与历史面合流）。
+/// 会话运行态与消息走**同一张订阅表**（实时面与历史面合流）。
 ///
 /// 挂载点是会话叶子 `<sid>` 本身（`data` = 全量节点视图，与 `stat` 同源），
 /// 与消息的 `<sid>/message` 目录在同一棵地址树上——消费端一张 `vdfs/watch`
@@ -664,7 +664,7 @@ fn inflight_seq_occupies_only_its_own_segment() {
     );
 }
 
-// ── 轮占位（D-425）────────────────────────────────────────────
+// ── 轮占位────────────────────────────────────────────
 
 /// 轮占位帧：`Skeleton` + `run` + `streaming` + 带内标记（与 live 投影同形）。
 fn placeholder_msg(id: &str, parent: &str) -> cm::ChatNode {
@@ -735,7 +735,7 @@ fn round_placeholder_retires_on_first_sibling() {
     assert!(removed < text, "删除必须先于首个子帧到达");
 }
 
-/// 首响挂在轮根下（`D-426`）⇒ 它落图时同样是「真实子节点」，等待骨架让位。
+/// 首响挂在轮根下⇒ 它落图时同样是「真实子节点」，等待骨架让位。
 #[test]
 fn opening_retires_the_round_placeholder() {
     let (mut tr, _seen) = transcript();

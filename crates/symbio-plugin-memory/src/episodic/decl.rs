@@ -1,4 +1,4 @@
-//! 本能力包拥有的事实形状与归宿行（DE-025 D-241 / D-250 / DE-026 D-263）。
+//! 本能力包拥有的事实形状与归宿行（DE-025  / DE-026 ）。
 //!
 //! ## 名字在这里不在这里
 //!
@@ -52,8 +52,8 @@ pub(crate) const FACTS: &[FactDecl] = &[
             "trigger",
         ],
     },
-    // 巩固产物（写方是本包的 `memory` 端口执行体，DE-026 D-270 订正 D-268
-    // 第 3 条的落点）：形状随**活集折叠**走——`memory.live` 的 `reads` 要它，而
+    // 巩固产物由本包的 `memory` 端口执行体写入：形状随**活集折叠**走——
+    // `memory.live` 的 `reads` 要它，而
     // `seal` 的 `OrphanFact` 又要求形状与归宿行同处（行在本文件的 `ROWS`）。
     // 字段集与写方载荷逐字对应：`sources` 是最初一代的溯源链，`generation` /
     // `fidelity` 是 `accept` 的两个判据，`vis_scope` 继承源记忆。
@@ -73,7 +73,7 @@ pub(crate) const FACTS: &[FactDecl] = &[
     },
     // 排除式遗忘：`why` 是判据（今天只有 `consolidated` 一支），`into` 指向合并产物
     // ——「被谁取代」可审计。被排除的目标在**信封**的 `produced_by` 上，不是载荷字段
-    // （`memory.live` 的排除边因此读信封；依赖图少一条边，缺口登记在 D-268）。
+    // （`memory.live` 的排除边因此读信封；依赖图少一条边，缺口登记在 ）。
     FactDecl {
         name: EVENT_MEMORY_FORGOTTEN,
         port: None,
@@ -103,13 +103,13 @@ pub(crate) const ROWS: &[Decl] = &[
         }],
         unless: &[],
     },
-    // 巩固产物与遗忘的两张归宿行（DE-026 D-268 第 3 条）。
+    // 巩固产物与遗忘的两张归宿行（DE-026  第 3 条）。
     //
     // 三张归宿行同处一处（同一族的三条事实），形状同在本文件的 `FACTS`；写方是本包的
     // `memory` 端口执行体（`crate::consolidate`）。行是「谁接住这条事实」（`seal` 的
     // `OrphanFact`），与写方在哪无关。
     //
-    // 两行都是空转行（`owes` 被 `until` 完整覆盖，`D-306`）：有即闭合，永远不会被
+    // 两行都是空转行（`owes` 被 `until` 完整覆盖）：有即闭合，永远不会被
     // 选中，也不是任何能力的债。
     Decl {
         name: EVENT_MEMORY_CONSOLIDATED,

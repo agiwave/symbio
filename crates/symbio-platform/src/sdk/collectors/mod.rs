@@ -1,8 +1,8 @@
 //! 收集器的默认实现 —— 收集口 trait 的内存版（`DefaultToolVisitor`）
 //!
 //! 收集口 trait 与上下文键住在 [`crate::sdk::capability`]；默认实现是全体插件共同
-//! 写入的有状态机制，因此归 SDK，而不是嵌入或 VDFS 那类服务实现层（D-564）。
-//! 它只有一种实现，按 D-035 直接组合具体类型，不套 `creator_create_object` 工厂。
+//! 写入的有状态机制，因此归 SDK，而不是嵌入或 VDFS 那类服务实现层。
+//! 它只有一种实现 直接组合具体类型，不套 `creator_create_object` 工厂。
 //!
 //! 一个实现装全部族（工具 / 模型 / 提示词 / 挂载 / 选项 / 可配置）；去重、覆盖与
 //! 保序是表语义，收集管线仍归 session / composite。每个收集 pass 新建实例，状态不

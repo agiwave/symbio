@@ -115,7 +115,7 @@ fn addresses_normalize_and_keep_the_absolute_anchor() {
         ".vdfsv2/session"
     );
     assert_eq!(normalize_addr("D:/tmp/a.txt").unwrap(), "D:/tmp/a.txt");
-    // 首部的 `/` 是操作系统的绝对锚点，不是可折叠的分隔符（D-172）：
+    // 首部的 `/` 是操作系统的绝对锚点，不是可折叠的分隔符：
     // `/docs` 与 `docs` 归一后仍是两个地址，物理层据此落到两个位置。
     assert_eq!(normalize_addr("/").unwrap(), "/");
     assert_eq!(normalize_addr("/docs").unwrap(), "/docs");

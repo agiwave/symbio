@@ -15,7 +15,7 @@
 //! crates/symbio-plugin-composite/src/vdfs.rs       拓扑：包含子目录列表的 provider（子目录 = 子插件名）
 //! ```
 //!
-//! **纯接口已在 `symbio_kernel`**（D-188 C2b），这里只留宿主侧的两项：symbio 桥与
+//! **纯接口已在 `symbio_kernel`**（ C2b），这里只留宿主侧的两项：symbio 桥与
 //! 当前父地址机制。线上形状与访问层都在 vdfs 插件内部。
 //!
 //! ## 四条不变量
@@ -30,7 +30,7 @@
 //!    （`address::absolute_addr`），不得持有根名。
 
 // 契约词汇只供本域子模块取用（`super::…`）；本域**不再**整模块转出内核的公开面
-// ——那会让 `crate::sdk::vdfs::<内核符号>` 成为第二条合法路径（DE-018 的 D-419）。
+// ——那会让 `crate::sdk::vdfs::<内核符号>` 成为第二条合法路径（DE-018 的 ）。
 use crate::kernel::vdfs::*;
 
 // 例外：`config_mount_vdfs!` 的宏体写

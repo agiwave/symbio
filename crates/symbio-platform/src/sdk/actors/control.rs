@@ -1,16 +1,16 @@
 //! 控制面主体：淘汰回路（[DE-043](../../../../../docs/003-design/043-多智能体社会.md "DE-043-多智能体社会")）。
 //!
-//! 抢占面已删（`D-388`：`crates/symbio-plugin-session/src/transcript/inbox` 今天只做
+//! 抢占面已删（`crates/symbio-plugin-session/src/transcript/inbox` 今天只做
 //! 「忙则排队」）；外部执行闸门的授权在 `crates/symbio-plugin-tool/src/port.rs::gate_inputs`，
 //! 审批判据在 `crates/symbio-providers/src/collectors/approval.rs`。本模块的
 //! [`EliminationDecider`] 是唯一真正跨 owner 的策略——写侧裁决在声誉包
 //! （声誉能力包的淘汰模块）、读侧翻译就在本文件的
 //! [`EliminationDecider::verdict_grants_changes`]。
 //!
-//! **跨 owner 是它的归属，不是它的住址**（D-279）：两条判据给出相反结论——D-258 说
-//! 「认不认识容器概念」决定住哪个 crate，D-187 / D-189 / D-190 说「跨不跨 owner」决定留不留核。
+//! **跨 owner 是它的归属，不是它的住址**：两条判据给出相反结论—— 说
+//! 「认不认识容器概念」决定住哪个 crateD-187 /  说「跨不跨 owner」决定留不留核。
 //! 本模块一条容器概念都不认（它读的是 `verdict × asserted` 这个**事实格**，内核语法），
-//! 于是按前一条它住在 `symbio-sdk`，按后一条它该留在旧 core。D-276 把分工写死之后
+//! 于是按前一条它住在 `symbio-sdk`，按后一条它该留在旧 core。 把分工写死之后
 //! 只剩前一条：**crate 表达依赖方向，模块表达归属**。
 
 use crate::kernel::actors::{ActorSpec, Scope};
@@ -86,7 +86,7 @@ impl EliminationDecider {
     /// **为什么它今天没有生产调用方**（诚实缺口，不是漏接）：淘汰后唯一能涨声誉的
     /// 路径是成功委派，而委派恰是被收回的 `assign.work` 那个动作——闸门会拒掉它，
     /// 于是恢复不可能**自动**发生，必须有一个外部触发（申诉 / 人工复位）。这条缺席
-    /// 已在 [D-108](../../../../../docs/003-design/002-架构总览.md#d-108-淘汰是单向门恢复的生产触发器缺席记为边界自动恢复在本判据下不可能 "DE-002-架构总览") 记为**边界**并写明重开
+    /// 已在  记为**边界**并写明重开
     /// 条件；触发器落地时摘掉这个属性即可，载荷口径不随之改动。
     /// 把它当成「已实现的恢复能力」是本条要拦的读法：形状是真的，写方是缺席的。
     pub fn restoration_event(
@@ -123,7 +123,7 @@ impl EliminationDecider {
     pub fn verdict_grants_changes(events: &[Event]) -> Vec<GrantsChange> {
         let mut out = Vec::new();
         for e in events {
-            // 认的是**格子**而不是名字（DE-024 D-203）：裁决格上只有这一族事实，
+            // 认的是**格子**而不是名字（DE-024 ）：裁决格上只有这一族事实，
             // 落进 `verdict × asserted` 就是裁决者说过的话。
             if !(e.entity == Entity::Verdict && e.verb == Verb::Asserted) {
                 continue;
@@ -158,7 +158,7 @@ impl EliminationDecider {
 /// （`verdict × asserted`）折成覆盖层，再按主体取当前值（DE-043 §3）。调用点是 tool
 /// 端口执行体入口、`apply_before` 之前：此时闸还没问行为，但读侧非要交的结论已经能在
 /// 本会话切片里算出来。切片只来自该会话的读写口——跨会话的裁决由部署层在会话开面播种
-/// 进同一份切片（D-340），本函数永远不读别人的会话。
+/// 进同一份切片，本函数永远不读别人的会话。
 ///
 /// 判据是**调用方主体**（`principal`），不是被委派的目标：闸管的是「谁还能派活」，
 /// 与目标存不存在无关。

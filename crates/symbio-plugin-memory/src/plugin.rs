@@ -186,7 +186,7 @@ impl MemoryPlugin {
 
     /// 依生效配置构造**智能体记忆**门面（两道闸门在此注入，调用点不必各自判断）。
     ///
-    /// D-515：作用域来自 `ctx[AGENT_VDFS]`（provider 缺失 = 无此层），
+    /// 作用域来自 `ctx[AGENT_VDFS]`（provider 缺失 = 无此层），
     /// 不再由插件目录反推物理路径。
     pub(crate) async fn store(&self, ctx: &Arc<dyn PluginInvokeRequest>) -> MemoryFile {
         let cfg = self.config.read().await;
@@ -217,7 +217,7 @@ impl MemoryPlugin {
     ///
     /// **作用域闸门**（`ctx[SESSION_VDFS]` 缺失 → 无作用域）与**两道容量闸门**
     /// 都在这一处注入。provider 由会话插件按唯一布局构造、宿主随轮递来；
-    /// 本插件不认识 `SESSION_ID`，也不从它拼路径（D-513 / D-515）。
+    /// 本插件不认识 `SESSION_ID`，也不从它拼路径。
     pub(crate) async fn session_store_of(&self, ctx: &Arc<dyn PluginInvokeRequest>) -> MemoryFile {
         let cfg = self.config.read().await;
         session::store(
@@ -386,7 +386,7 @@ impl Plugin for MemoryPlugin {
         }
 
         if let Some(visitor) = ctx.get(CAPABILITY_VISITOR) {
-            // 巩固的债 + 还债的端口：两处在同一次收集里交出（D-268 订正）。
+            // 巩固的债 + 还债的端口：两处在同一次收集里交出（ 订正）。
             symbio_plugin_api::register_ports(&ctx, super::port::memory_port_provider().as_ref())
                 .await;
             for row in super::debt::memory_debt_rows() {

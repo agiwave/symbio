@@ -1,7 +1,7 @@
 //! 能力表的**宿主侧**：收集通道、审批 / 可配置 / 模型 / 提示词 / 挂载族的自由函数。
 //!
 //! 契约本体（`Capability` / `Registry` trait、元数据、行与族词汇、`failure_kind`）已在
-//! `symbio_kernel`（D-188 C2b）。
+//! `symbio_kernel`（ C2b）。
 
 mod collect;
 mod config_snapshot;
@@ -15,10 +15,10 @@ mod prompt;
 mod scoped_twin;
 
 // 契约词汇只供本域子模块取用（`super::…`）；本域**不再**整模块转出内核的公开面
-// ——那会让 `crate::sdk::capability::<内核符号>` 成为第二条合法路径（DE-018 的 D-419）。
+// ——那会让 `crate::sdk::capability::<内核符号>` 成为第二条合法路径（DE-018 的 ）。
 use crate::kernel::capability::*;
 
-// 三条收集通道键与错误桶键住本域（键与值同住，D-095 根因一）。**只导实例、
+// 三条收集通道键与错误桶键住本域（键与值同住 根因一）。**只导实例、
 // 不导 `…Key` 类型**——实例是 `ctx` 上的读写凭据（对外协议面），类型名没有任何
 // 域外消费方（C-003），`pub struct` 留在子模块里由本域自用。`CapabilityError`
 // 同理不出本域：读侧经 `capability_take_errors` 的返回类型推断拿到它，

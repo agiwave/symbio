@@ -11,7 +11,7 @@
 use super::*;
 use symbio_platform::kernel::chat::chat_node::NodeRole;
 
-/// 构造器入参：本文件的节点模仿**落库/流式面**，身份写 `principal`（D-147）。
+/// 构造器入参：本文件的节点模仿**落库/流式面**，身份写 `principal`。
 fn assistant_principal() -> symbio_platform::kernel::chat::principal::Principal {
     symbio_platform::kernel::chat::principal::Principal::from_legacy("session/main")
 }

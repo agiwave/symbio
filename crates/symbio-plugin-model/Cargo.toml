@@ -60,7 +60,7 @@ symbio-plugin-api = { path = "../symbio-plugin-api", features = ["test-fixtures"
 tempfile = { workspace = true }
 # 测试用：tokio 时间控制（start_paused / advance）
 tokio = { workspace = true, features = ["test-util"] }
-# 测试用：词汇拼写取 core 的测试夹具（D-204「拼写只有一个来源」）。
+# 测试用：词汇拼写取 core 的测试夹具（「拼写只有一个来源」）。
 # 本插件不是 `turn.*` / `message.*` 的 owner，测试也不该再抄一份字面量。
 symbio-platform = { path = "../symbio-platform", features = ["test-fixtures"] }
 # 测试用：事件存储基线（`MemoryStore`）直接取内核。

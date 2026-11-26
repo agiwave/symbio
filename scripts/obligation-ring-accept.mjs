@@ -47,10 +47,10 @@
  * | J3 | 一笔的最小 `sent.seq` 严格小于它的终态 `seq`（挂起补的 `sent` 若晚于终态不算） | DE-050 §0（引擎写 before，应答在后） |
  * | J4 | 收束格（`chat.assistant.final` \| `chat.assistant.fallback`）的 `reason` 非空 | DE-050 §3.2 结局必须有名 |
  * | J5 | 每个事件的 `produced_by` 指向一条**已存在且更早**的 seq（含归档段） | DE-001 I2 溯源不悬空 |
- * | J6 | 孤名 = 0：协议事实必须带 `ring:` 身份（形状判据，判红）。端口准入改读**实测端口集**；静态 `DECLARED_PORTS` 降级为漂移对照（「新端口」/「声明未出现」都只提示、不判红） | D-447 ①（装载期硬拒的实测对账） |
+ * | J6 | 孤名 = 0：协议事实必须带 `ring:` 身份（形状判据，判红）。端口准入改读**实测端口集**；静态 `DECLARED_PORTS` 降级为漂移对照（「新端口」/「声明未出现」都只提示、不判红） |  ①（装载期硬拒的实测对账） |
  * | J7 | 模型往返的**观测 ⇔ 三格**双向对账，逐条路径（见 `MODEL_PATHS`）：有观测没三格 ⇒ 一条绕开债环的调用；有三格没观测 ⇒ 记了账没人发起 | DE-001 I2 全量口径 |
  * | J8 | 给了 `--cli-log` 时：`[LLM] 请求发起` 行数 == `sent`（模型端口、剔除挂起补条）数。`--strict` 下没给日志即判红 | SP-033 TC-1「没有别的调度代码」 |
- * | J9 | 压缩产物 ⇔ 摘要往返：每一条 `session.consolidated` 都必须指名到一笔**已收束**的 `compact-summarize` 往返（`model.assist` 端口，`id` 尾缀 = 产物指纹） | DE-053 D-336 的**产物侧** |
+ * | J9 | 压缩产物 ⇔ 摘要往返：每一条 `session.consolidated` 都必须指名到一笔**已收束**的 `compact-summarize` 往返（`model.assist` 端口，`id` 尾缀 = 产物指纹） | DE-053  的**产物侧** |
  *
  * ## 四条退场（SP-033 §5：写明退场 + 承接判据，不静默删）
  *
@@ -75,16 +75,16 @@
  *    `HTTP == sent(模型端口)`——这不是放宽：原来的豁免项本身就是**已知债**，现在债没了。
  *    「有一条静默的模型调用」仍由 J8 的差额判红。
  *
- * ④ **J6 的静态端口白名单拒绝 + 配套的「表 ↔ 源码声明」漂移守卫退场（D-447 ①）**。
- *    白名单要求「加端口先改验收表」，与 D-440「端口名不进声明表」冲突；守卫又把
+ * ④ **J6 的静态端口白名单拒绝 + 配套的「表 ↔ 源码声明」漂移守卫退场（ ①）**。
+ *    白名单要求「加端口先改验收表」，与 「端口名不进声明表」冲突；守卫又把
  *    「新增源码声明不改表就红」钉成了门禁。承接判据是**动态端口集 + 漂移对照提示**：
  *    端口准入读实测端口集，静态表只报「新端口 / 声明未出现」，两侧都不判红。形状侧
  *    （`ring:` 身份、J1/J3/J7/J9）一条没放宽——退场的是「名单当拒绝依据」，不是判据。
  *
- * ## 端口准入为什么不再查静态表（D-447 ①）
+ * ## 端口准入为什么不再查静态表（ ①）
  *
  * J6 曾经判「这次运行有没有人往一个没声明的端口上写事实」，用一张带出处的常量表
- * `DECLARED_PORTS` 当白名单。那与 D-440「端口名不进声明表」正面冲突：**加端口先改
+ * `DECLARED_PORTS` 当白名单。那与 「端口名不进声明表」正面冲突：**加端口先改
  * 验收表**才能不判红，而端口本就是装配期动态收集的结果。旧版还吃过一次反方向的亏——
  * 常量停在 `['turn','model','tool']`、声明侧早换成了行名，J6 把整份合规 WAL 判成
  * 28 项假红；后来配了一条「扫源码声明 ↔ 表逐项比对」的漂移守卫，多一个端口不改表就红，
@@ -107,7 +107,7 @@
  *    （`crates/symbio-platform/src/sdk/capability/port.rs`），只有插件经 `register_ports` /
  *    `register_tool` 登记过的端口才有执行体，host `gather` 折 `snapshot()` 成交执行体表。
  *    没人登记的名字在装配结果里根本不存在；同名两绑定 / 无执行体由 `bind` 落错误，
- *    `snapshot()` 任一冲突**整份** `Err` ⇒ 装配失败（`DE-056 D-468`）。
+ *    `snapshot()` 任一冲突**整份** `Err` ⇒ 装配失败（`DE-056 `）。
  * 2. **运行期环（失败不静默）**：`crates/symbio-plugin-loop/src/ring/engine.rs` 派发时
  *    取不到执行体，仍按协议写全 `sent` / `request` / `failed`，`reason` 是
  *    `no provider for port ...`；不是跳过这一笔，也不是用 `response` 冒充成功。反例
@@ -153,7 +153,7 @@ const TERMINAL = new Set(['response', 'failed'])
 const RING = 'ring:'
 
 /**
- * **静态漂移对照表**（D-447 ① 之后不再是准入白名单）。
+ * **静态漂移对照表**（ ① 之后不再是准入白名单）。
  *
  * 端口准入改读**实测端口集**（见 J6）：新增端口不必先在这里登记也能通过 J6。
  * 这张表只用来报两种**漂移提示**（都不判红）：实测出现而表里没有 ⇒ 「新端口」；
@@ -562,7 +562,7 @@ function judgeSession(homedir, sid) {
     else if (pb >= e.seq) note(`J5 ${e.kind}#${e.seq} 的 produced_by=${pb} 不早于自己`)
   }
   // J6 形状判据：协议事实必须带 ring: 身份（缺了它端口无从判定，判红）。
-  // 端口准入不再查静态白名单（D-447 ①）：实测端口集就是本次运行的动态端口集，
+  // 端口准入不再查静态白名单（ ①）：实测端口集就是本次运行的动态端口集，
   // 静态 DECLARED_PORTS 降级为**漂移对照**，两侧差异只提示、不进 problems。
   const observedPorts = new Set()
   for (const e of events) {
@@ -580,7 +580,7 @@ function judgeSession(homedir, sid) {
   const drift = []
   for (const p of [...observedPorts].sort()) {
     if (!DECLARED.has(p)) {
-      drift.push(`新端口 "${p}"：本次实测出现，但不在静态漂移对照表里（D-447 ①：新增端口无需改验收表）`)
+      drift.push(`新端口 "${p}"：本次实测出现，但不在静态漂移对照表里（ ①：新增端口无需改验收表）`)
     }
   }
   const absent = [...DECLARED].filter((p) => !observedPorts.has(p)).sort()
@@ -634,7 +634,7 @@ for (const sid of args.sessions) {
     console.log(red(`✗ ${sid}: ${r.problems.length} 项失效（${r.events.length} 格 / ${r.rounds.size} 笔往返）`))
     for (const p of r.problems) console.log(red(`    ${p}`))
   }
-  // 漂移提示只输出 dim，不进 problems、不影响退出码（D-447 ①）。
+  // 漂移提示只输出 dim，不进 problems、不影响退出码（ ①）。
   for (const d of r.drift) console.log(dim(`    ${d}`))
 }
 for (const s of summary) console.log(dim(`    ${s}`))
@@ -665,7 +665,7 @@ if (logLines) {
   console.log(dim('    J8 未判：没有 --cli-log（账实相符需要真实 HTTP 计数）'))
 }
 
-// ── J9：压缩产物 ⇔ 摘要往返（DE-053 D-336 的产物侧）────────────────────
+// ── J9：压缩产物 ⇔ 摘要往返（DE-053  的产物侧）────────────────────
 //
 // 这一条**只读事实**，不需要日志：压缩产物的 `event_id` 是
 // `session.consolidated:<指纹>`，摘要往返的债键是 `compact-summarize:<同一个指纹>`

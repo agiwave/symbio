@@ -93,14 +93,14 @@ test('CC-001 仍触发：同批既改测试又改生产源码（测试不豁免�
   assert.match(r.errors[0], /^CC-001/)
 })
 
-test('CC-002 触发：既动插件又动 core，理由里没有决策号', () => {
+test('CC-002 触发：既动插件又动 core，理由里没有规则码 + 当前理由', () => {
   const r = judge(SHA, [CORE, PLUGIN], msg('\nCore-Change: 顺手补了个分支\n'))
   assert.equal(r.errors.length, 1)
   assert.match(r.errors[0], /^CC-002/)
 })
 
-test('通过：既动插件又动 core，理由挂决策号', () => {
-  const r = judge(SHA, [CORE, PLUGIN], msg('\nCore-Change: D-195 共享类型只能住机制层\n'))
+test('通过：既动插件又动 core，理由带规则码 + 当前理由', () => {
+  const r = judge(SHA, [CORE, PLUGIN], msg('\nCore-Change: EX-007 共享类型只能住机制层\n'))
   assert.deepEqual(r.errors, [])
 })
 
@@ -109,13 +109,13 @@ test('通过：只动 core，理由可以是自由文本（决策号只在「扩
   assert.deepEqual(r.errors, [])
 })
 
-test('认全角冒号：`Core-Change：D-195` 不是漏网的另一种写法', () => {
-  const r = judge(SHA, [CORE, PLUGIN], msg('\nCore-Change：D-195 理由\n'))
+test('认全角冒号：`Core-Change：` 不是漏网的另一种写法', () => {
+  const r = judge(SHA, [CORE, PLUGIN], msg('\nCore-Change： EX-007 共享类型只能住机制层\n'))
   assert.deepEqual(r.errors, [])
 })
 
-test('决策号允许三位以上（D-1000 不该被当成没写）', () => {
-  const r = judge(SHA, [CORE, PLUGIN], msg('\nCore-Change: D-1000 理由\n'))
+test('判据码按形态识别（三位以上照样合法）', () => {
+  const r = judge(SHA, [CORE, PLUGIN], msg('\nCore-Change: CC-002 共享类型只能住机制层\n'))
   assert.deepEqual(r.errors, [])
 })
 
@@ -127,8 +127,8 @@ test('provider / 历史 testkit 路径也算「扩能力」侧的证据', () => 
   }
 })
 
-test('reason 里只写「D-」不算：必须是完整决策号形态', () => {
-  const r = judge(SHA, [CORE, PLUGIN], msg('\nCore-Change: D- 理由\n'))
+test('rule 位写错形态 ⇒ 红（必须是 A-Z 前缀 + 三位数字）', () => {
+  const r = judge(SHA, [CORE, PLUGIN], msg('\nCore-Change: CC 随手改\n'))
   assert.equal(r.errors.length, 1)
   assert.match(r.errors[0], /^CC-002/)
 })
@@ -215,10 +215,10 @@ const FULL_SHA = 'a1b2c3d4e5f6a7b8c9d0a1b2c3d4e5f6a7b8c9d0'
 
 test('解析：`Core-Change:` trailer 住在正文末尾，必须完整读进 message', () => {
   // 这一条就是批量化第一版踩到的坑：正文被切到只剩标题 ⇒ trailer 全丢 ⇒ 判红。
-  const body = `feat(kernel): 标题\n\n1. 改了什么\n   续行。\n\n门禁：全绿\n\nCore-Change: D-195 共享类型只能住机制层`
+  const body = `feat(kernel): 标题\n\n1. 改了什么\n   续行。\n\n门禁：全绿\n\nCore-Change: EX-007 共享类型只能住机制层`
   const [c] = parseCommitRecords(rec(SHA, body, [CORE, PLUGIN]))
   assert.equal(c.sha, SHA)
-  assert.match(c.message, /Core-Change: D-195/)
+  assert.match(c.message, /Core-Change: /)
   assert.deepEqual(judge(c.sha, c.files, c.message).errors, [])
 })
 
@@ -313,43 +313,28 @@ test('显式 `--require-range` 与 CI 变量取并集，本地也能强制', () 
 //
 // 「不追改已推送的历史」是 CC-001 唯一诚实的退路，而退路会被滥用：一条不解释自己的
 // 豁免三个月后就变成永久后门，且没人看得出它豁免的是什么。所以名单的形状由脚本判。
-const D = new Set(['D-124'])
-
-test('晚于判据的豁免没写裁决号 ⇒ 红（豁免顶替的就是那条缺失的 Core-Change）', () => {
-  const errors = validateBaseline(
-    [{ sha: 'abc1234', beforeGuard: false, why: '已推到 origin/v2，不改历史', decision: '' }],
-    D,
-  )
+test('晚于判据的豁免理由太短 ⇒ 红（豁免顶替的就是那条缺失的 Core-Change）', () => {
+  const errors = validateBaseline([{ sha: 'abc1234', beforeGuard: false, why: '已推送' }])
   assert.equal(errors.length, 1, JSON.stringify(errors))
-  assert.match(errors[0], /裁决/)
-})
-
-test('裁决号在设计文档里打不开 ⇒ 红（写错的决策号等于没写）', () => {
-  const errors = validateBaseline(
-    [{ sha: 'abc1234', beforeGuard: false, why: '已推送', decision: '裁决 D-99999' }],
-    D,
-  )
-  assert.equal(errors.length, 1, JSON.stringify(errors))
-  assert.match(errors[0], /打不开/)
+  assert.match(errors[0], /当前理由/)
 })
 
 test('豁免没有理由正文 ⇒ 红；一条带决策号的合法条目 ⇒ 无错', () => {
   assert.match(
-    validateBaseline([{ sha: 'abc1234', beforeGuard: true, why: '   ' }], D)[0] ?? '',
+    validateBaseline([{ sha: 'abc1234', beforeGuard: true, why: '   ' }])[0] ?? '',
     /永久后门/,
   )
   const ok = validateBaseline(
     [
       { sha: 'abc1234', beforeGuard: true, why: '判据诞生于它之后，不可能自带 trailer' },
-      { sha: 'def5678', beforeGuard: false, why: '已推到 origin/v2 ⇒ 补 trailer 要重写历史', decision: '裁决 D-124' },
+      { sha: 'def5678', beforeGuard: false, why: '已推到 origin/v2 ⇒ 补 trailer 要重写历史，当前按不追改处理' },
     ],
-    D,
   )
   assert.deepEqual(ok, [])
 })
 
 test('sha 形状不合法（漏写 / 写错）⇒ 红，且不继续查它的理由', () => {
-  const errors = validateBaseline([{ sha: '', beforeGuard: true, why: '' }], D)
+  const errors = validateBaseline([{ sha: '', beforeGuard: true, why: '' }])
   assert.equal(errors.length, 1, JSON.stringify(errors))
   assert.match(errors[0], /提交号/)
 })

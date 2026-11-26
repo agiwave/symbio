@@ -16,11 +16,11 @@ use symbio_plugin_api::vocab;
 // `system` 实体只开不进；漏了「欲」= 这条触发没有留下可升格的数据
 // （[DE-042 §5](../../../../docs/003-design/042-自主层与长期目标.md "DE-042-自主层与长期目标")「自主写入对话 0」）。
 //
-// 升格不在这里：它是 conation 自申报的债 + 执行体（`D-386`）。本二进制不链接那个包
+// 升格不在这里：它是 conation 自申报的债 + 执行体。本二进制不链接那个包
 // （E-009），所以这里只能钉「读不到 ⇒ 不升格」；「只开一次」的组合证明在
 // `e2e/cases/t36-autonomous-initiator.mjs`。
 
-/// 开关不再住在 `SessionConfig`（D-427）：自主升格的闸门只读当轮
+/// 开关不再住在 `SessionConfig`自主升格的闸门只读当轮
 /// `session.config` 事实，所以夹具只需默认配置，开关由 [`seed_config`] 播种。
 fn autonomy_plugin() -> (tempfile::TempDir, Arc<SessionPlugin>) {
     let dir = tempfile::tempdir().expect("临时目录创建失败");
@@ -60,7 +60,7 @@ fn read_wal(p: &SessionPlugin, sid: &str) -> Vec<Event> {
 
 /// 轮首装配那一步的等价物：把开关按共享名写进 `session.config` 快照。
 ///
-/// 闸门读的是这条事实（`D-252` / `D-379`），不是插件里的活配置——因此凡是
+/// 闸门读的是这条事实（ / ），不是插件里的活配置——因此凡是
 /// 「闸门应当开着」的用例都必须先有这一格。
 fn seed_config(p: &SessionPlugin, sid: &str, payload: serde_json::Value) {
     EventWalStore::open(wal(p, sid))
@@ -178,7 +178,7 @@ async fn autonomous_request_does_not_override_session_sandbox_metadata() {
 /// ## 为什么这里断言的是「不开」而不是「只开一次」
 ///
 /// 升格判据（开关 / 授权 / 已声明）**归能力包**：主动性能力包的
-/// `DebtSource::rows` 算「哪些目标算已声明」（`D-386`）。本二进制不链接那个包（E-009），
+/// `DebtSource::rows` 算「哪些目标算已声明」。本二进制不链接那个包（E-009），
 /// 所以这里读到的必然是**可诊断的缺席**——本文件因此只能钉本插件剩下的那一半：
 /// **读不到 ⇒ 不升格**（而不是「读不到 ⇒ 当作没声明过，于是每 tick 重开一条」，
 /// 那会拿重复开工掩盖一个装配问题）。
@@ -244,7 +244,7 @@ async fn no_fact_source_or_a_live_writer_both_block_the_trigger() {
     assert_eq!(read_wal(&p, sid).len(), 1, "忙时一格都不写");
 }
 
-// ==================== 发起者与预算的单元验收（D-189） ====================
+// ==================== 发起者与预算的单元验收 ====================
 use crate::declarations::EVENT_SYSTEM_TRIGGERED;
 use crate::store::EventWalStore;
 use symbio_platform::kernel::store::EventStore;
@@ -298,7 +298,6 @@ fn scheduled_trigger_produces_event_not_side_channel() {
 /// 原先这条用例直接调 `budget_exceeded(&snapshot, Some(86.4M))`，预算由**测试自己塞**：
 /// 那样验的只是「谓词照传入的值判」，`declared_budget_ms` 读不到 `scope.dispatch` 也不会
 /// 有测试红——用例的注释声称在钉「升格产物形状 → 预算读数」，实际把最该验的那一跳绕开了
-/// （`D-455`）。
 #[test]
 fn long_goal_overrun_is_visible_and_budget_param_is_live() {
     // 同一条耗时、不同档位预算 → 判定必须跟着变（预算来自事实，不是测试塞的参数）。

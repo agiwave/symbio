@@ -167,7 +167,7 @@ fn readable_is_distinguished_from_a_failed_read() {
     );
 }
 
-// ── 出口对账（`D-465`，`D-463` 第三级）─────────────────────────────────────
+// ── 出口对账（ 第三级）─────────────────────────────────────
 
 #[test]
 fn owner_short_strips_the_crate_path_not_the_name() {

@@ -25,7 +25,7 @@ use symbio_plugin_api::{
 // - 造格型 + 成功 + 0 草稿 ⇒ 违约（fail-closed）——挡「将来有人写出静默空转的行为」；
 // - 富化型（只补 `file_op` 这类字段）与纯前置判断型本身不造格，0 草稿是正常形态，
 //   **不能**判成「有账不落」（`file_change` 一度就是这样被误判的）。
-// 种类的唯一来源是**实现自报**的 `kind()`（D-363），不在运行时猜 `after` 有没有被覆写。
+// 种类的唯一来源是**实现自报**的 `kind()`，不在运行时猜 `after` 有没有被覆写。
 
 /// 判据夹具：只在本测试二进制里登记，不依赖任何真插件被链接。
 const FIXTURE_FILE_CHANGE: &str = "fixture_file_change";
@@ -306,8 +306,8 @@ fn subagent_pending_payload_is_recognized_as_pending_intent() {
 
 /// 最小登记表（与 `plugin-api` 的 port.test 同款夹具）。
 ///
-/// 工具桩本身就是端口执行体（`D-440` ③：`Capability` 退场，桥随之消失）：**工具行**
-/// 入本表、**端口绑定**入装配期容器（`register_tool` 一次写两处，D-468）——派发侧
+/// 工具桩本身就是端口执行体（ ③：`Capability` 退场，桥随之消失）：**工具行**
+/// 入本表、**端口绑定**入装配期容器（`register_tool` 一次写两处）——派发侧
 /// 按端口名从容器取执行体，本表只管目录面。
 struct FakeRegistry {
     rows: RwLock<Vec<Arc<CapabilityRow>>>,
@@ -484,7 +484,7 @@ async fn ctx_with_tool(
     ctx
 }
 
-/// 本轮快照的别名表（`session.config` 里的 `tool_aliases`）：解析只读这一份（D-469）。
+/// 本轮快照的别名表（`session.config` 里的 `tool_aliases`）：解析只读这一份。
 fn aliases_fact(aliases: &[(&str, &str)]) -> symbio_plugin_api::port::PortFact {
     let map: std::collections::BTreeMap<&str, &str> = aliases.iter().copied().collect();
     symbio_plugin_api::port::PortFact {
@@ -631,7 +631,7 @@ async fn wire_names_resolve_to_canonical_capabilities() {
     assert!(success);
 }
 
-/// 返回调用只认**本轮暴露快照**的别名表（D-445 ②）：不反演字符串、不回退
+/// 返回调用只认**本轮暴露快照**的别名表：不反演字符串、不回退
 /// 「精确匹配优先」、内部端口名本身也不当别名用。
 #[test]
 fn resolve_only_accepts_this_rounds_exposure_aliases() {
@@ -1201,7 +1201,7 @@ fn requested_call_with(
 
 /// 一笔债只执行它指名的那次调用：清单里的其余调用由各自的债负责。
 ///
-/// `tool.calls.done` 不在执行体里写——收尾由簿记写方从各笔债的终局重算（D-378）。
+/// `tool.calls.done` 不在执行体里写——收尾由簿记写方从各笔债的终局重算。
 #[tokio::test]
 async fn one_debt_runs_only_the_call_it_names() {
     let parent: Arc<dyn Plugin> = Arc::new(NopPlugin);
@@ -1418,7 +1418,7 @@ async fn pending_call_lands_the_waiting_card_fields() {
     );
 }
 
-// ==================== 授权判定：执行体先判，再执行（D-306 裁决一） ====================
+// ==================== 授权判定：执行体先判，再执行（ 裁决一） ====================
 // 载荷带 `threshold`（开账行写的判定输入）时，执行体先落一条授权事实，再决定是否
 // 进入能力调用。拒绝必须是**判死**，不能静默放行；旧路径载荷不带 `threshold`，
 // 保持旁路（双路径到期点：P4）。
@@ -1643,7 +1643,7 @@ fn open_call(
         Arc::new(std::sync::Mutex::new(Vec::new()));
     let emit =
         symbio_plugin_api::port::PortFactEmit::new(Arc::new(CapturedFacts(captured.clone())));
-    // 建账同样只读本轮快照的别名表（D-469）；夹具的线上名与内部名相同 ⇒ 恒等展开。
+    // 建账同样只读本轮快照的别名表；夹具的线上名与内部名相同 ⇒ 恒等展开。
     // 没有 ctx 的夹具也没有本轮快照（别名表为空），用于「解析不到 ⇒ 只按 route 记」。
     let has_round = ctx.is_some();
     let alias_pairs: Vec<(String, String)> = if has_round {
@@ -1804,7 +1804,7 @@ async fn open_reads_the_grant_ceiling_by_canonical_name() {
     );
 }
 
-/// 协议失败的三条读数各说各的：缺 id / 缺 name / 参数不可解析（D-312 的措辞在
+/// 协议失败的三条读数各说各的：缺 id / 缺 name / 参数不可解析（措辞在
 /// 执行体，环不解释）。三者一律**不执行**、落一条失败结果，且成因可指认。
 #[tokio::test]
 async fn protocol_failures_each_name_their_own_cause() {
@@ -1881,7 +1881,7 @@ async fn legacy_payload_without_threshold_stays_on_the_old_path() {
     );
 }
 
-// ==================== 并发策略：写侧独占、只读并行（D-311）====================
+// ==================== 并发策略：写侧独占、只读并行====================
 
 /// 并发探针：`execute` 期间计数同时在跑的条数，返回前睡一会儿拉长执行窗口。
 struct ProbeTool {
@@ -2139,7 +2139,7 @@ async fn exhausted_budget_breaks_and_lands_a_control_event() {
     );
 }
 
-// ==================== 批准留痕（D-368）：风险档原样搬，不在消费端重算 ====================
+// ==================== 批准留痕：风险档原样搬，不在消费端重算 ====================
 
 #[test]
 fn approval_granted_carries_the_gate_risk_without_reparsing() {
@@ -2163,7 +2163,7 @@ fn approval_without_a_risk_level_writes_nothing() {
     assert!(approval_granted_draft("k1", &artifact, "call-1", "ask_user").is_none());
 }
 
-// ==================== 非法参数：端口不解释参数形状（D-450）====================
+// ==================== 非法参数：端口不解释参数形状====================
 //
 // 参数合法性由**执行体自己**判（MCP server 的 `inputSchema` / 本地工具的前置检查）：
 // 端口是零世界词的通用契约，它不知道也不该知道某个工具的 `arguments` 该长什么样。

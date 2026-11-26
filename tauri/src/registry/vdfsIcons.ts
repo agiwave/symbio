@@ -214,9 +214,9 @@ function svgIcon(inner: string): Component {
  * 因此图标长什么样完全由插件决定。同串缓存复用，避免同一图标反复建组件。
  *
  * ⚠️ 只认**图元内容**：以 `<` 起头才画。旧版清单存的是图标**名字**
- * （`session` / `terminal` …，D-523 前的语义），把它当内容包进 `<svg>` 会渲染出
+ * （`session` / `terminal` … 前的语义），把它当内容包进 `<svg>` 会渲染出
  * 一片空白——图标位空着正是这么来的。这类旧值按「未自报」处理，让 `iconForNode`
- * 回退到既有登记链；装配期后端会把它迁移成插件自给的图元串（D-524）。
+ * 回退到既有登记链；装配期后端会把它迁移成插件自给的图元串。
  */
 const svgComponentCache = new Map<string, Component>()
 
@@ -263,7 +263,7 @@ registerVdfsIcon(
   'plugin_manager:telegram',
   svgIcon('<line x1="22" y1="2" x2="11" y2="13"/><polygon points="22 2 15 22 11 13 2 9 22 2"/>')
 )
-// ui_prefs 的 kind 级图标：「界面」入口节点的 kind 归 ui_prefs（D-521）。
+// ui_prefs 的 kind 级图标：「界面」入口节点的 kind 归 ui_prefs。
 // 真实节点不带 config_type，项级键只在草稿里命中，故 kind 级必须登记，
 // 否则这一行退成默认兜底图标。
 registerVdfsIcon(

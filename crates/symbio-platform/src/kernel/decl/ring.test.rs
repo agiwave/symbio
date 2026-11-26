@@ -61,7 +61,7 @@ thread_local! {
 
 /// 本用例登记过的行实现（`submit_row!` 的替身）：`seal` 的 `row_writes` 入参。
 ///
-/// 「谁执行」是派生的（`D-306`），所以夹具也必须交出注册表而不是在行上写一个名字。
+/// 「谁执行」是派生的，所以夹具也必须交出注册表而不是在行上写一个名字。
 fn wired_rows() -> &'static RowWrites {
     let v: Vec<(&'static str, &'static [&'static str])> = WIRED.with(|w| w.borrow().clone());
     // 后登记的覆盖先登记的：一个用例里同一行名可以先用一支名单、后换另一支
@@ -81,7 +81,7 @@ fn wired_rows() -> &'static RowWrites {
 const ACT: ActorDecl = ActorDecl {
     name: "act",
     mode: LatencyTier::Deep,
-    // `f` / `batch` 也是它写的：D-296 的前件生产者判据要求 `owes` 的源有人落格。
+    // `f` / `batch` 也是它写的： 的前件生产者判据要求 `owes` 的源有人落格。
     writes: &["f", "g", "h", "done", "batch"],
 };
 
@@ -237,7 +237,7 @@ fn a_fact_without_until_keeps_the_debt_open_forever() {
     assert_eq!(owed(&rows, &decl_world(), &events, 0).len(), 1);
 }
 
-/// `unless` 命中 ⇒ **这笔债不成立**（`D-306` 裁决一：与 `until` 同键同效）。
+/// `unless` 命中 ⇒ **这笔债不成立**（ 裁决一：与 `until` 同键同效）。
 ///
 /// 旧语义「欠着但没人还」不再是可表达的态：没人还由「没有执行体」派生，装载期就红。
 #[test]
@@ -263,7 +263,7 @@ fn unless_makes_the_debt_not_hold() {
     assert!(!debts[0].blocked);
 }
 
-/// 「还不能执行」是派生的（`D-306` 裁决一）：`reads` 有名字没实例 ⇒ 在等，不是没事。
+/// 「还不能执行」是派生的（ 裁决一）：`reads` 有名字没实例 ⇒ 在等，不是没事。
 #[test]
 fn an_unproduced_read_keeps_the_debt_waiting() {
     // 前件是**行**的属性（`Decl.reads`），不是执行体的：同一段实现替两行干活时，
@@ -375,7 +375,7 @@ fn empty_table_is_complete() {
     assert!(owed(&[], &decl_world(), &events, 0).is_empty());
 }
 
-/// 「谁执行」不再是声明（`D-306` 裁决一）：会开账的行若不在注册表里、`owes` 也不指向
+/// 「谁执行」不再是声明（ 裁决一）：会开账的行若不在注册表里、`owes` 也不指向
 /// 端口开启侧，就没有任何人跑它——装载期红，而不是运行期静默空转。
 #[test]
 fn a_row_without_an_executor_is_a_load_time_gap() {
@@ -440,7 +440,7 @@ fn an_actor_that_writes_nothing_on_the_exit_is_a_gap() {
 /// 第 6 条的第二档：出口**全是**引擎独占格的行——派发行的形状。
 ///
 /// 交集判不了它：那等于要求执行体声明一条第 5 条禁止它声明的格，两条检查互斥。
-/// 这一档判「有没有交出去的凭据」（`D-306` 之后「谁跑」不声明了，这一格只剩凭据），
+/// 这一档判「有没有交出去的凭据」（ 之后「谁跑」不声明了，这一格只剩凭据），
 /// 两种形态都算：
 ///
 /// 1. 名单非空（旧口径）——它自己写得出领域格；
@@ -604,7 +604,7 @@ fn a_complete_row_set_has_no_gaps() {
     assert!(seal_gaps(&rows, &[ACT]).is_empty());
 }
 
-/// 归宿行的边界（D-397）：开不出账的行只许守**不产生债务的格**。
+/// 归宿行的边界：开不出账的行只许守**不产生债务的格**。
 ///
 /// 判据读的是事实自己的 `port`：端口事实是派发契约的输入，归宿必须是派发行。
 /// 这条与 `OrphanFact` 互补——前者说「有人接住」，本条说「接住的方式不能是
@@ -624,7 +624,7 @@ fn a_sink_row_may_not_guard_a_port_fact() {
     );
 }
 
-/// 派生出来的新风险（`D-306`）：`owes` 指向同一个端口开启格的两条行都会被读成受理行，
+/// 派生出来的新风险：`owes` 指向同一个端口开启格的两条行都会被读成受理行，
 /// 同一笔 `request` 就会被派发两遍。装载期红。
 #[test]
 fn two_dispatch_rows_on_one_port_fact_are_red() {
@@ -677,7 +677,7 @@ fn two_dispatch_rows_on_one_port_fact_are_red() {
     );
 }
 
-/// 写 `req` 的执行体：只为让「派发行」那一支有生产者（D-296），与本条判据无关。
+/// 写 `req` 的执行体：只为让「派发行」那一支有生产者，与本条判据无关。
 const REQ_ACT: ActorDecl = ActorDecl {
     name: "req_act",
     mode: LatencyTier::Deep,
@@ -973,7 +973,7 @@ fn the_envelope_fields_need_no_declaration() {
     );
 }
 
-/// 前件生产者判据的反向用例（`D-296`）：唯一的生产者被删掉 ⇒ 装载期红。
+/// 前件生产者判据的反向用例：唯一的生产者被删掉 ⇒ 装载期红。
 ///
 /// `act` 的 `writes` 不含 `f`，而 `r` 的前件正是 `f`——这一笔账在环里永远开不起来，
 /// 只能由 `seal` 说出来。
@@ -1444,7 +1444,7 @@ fn a_port_without_a_failure_exit_is_a_gap() {
         None,
         pattern(EVENT_SENT, &["id"], &[("port", Lit::Str("x"))]),
         &[
-            // 观察行自闭合（`D-306`：不开账就不需要执行体），守的格照旧进判据。
+            // 观察行自闭合（不开账就不需要执行体），守的格照旧进判据。
             pattern(EVENT_SENT, &["id"], &[("port", Lit::Str("x"))]),
             pattern(EVENT_RESPONSE, &["id"], &[("port", Lit::Str("x"))]),
         ],
@@ -1473,7 +1473,7 @@ fn a_port_with_both_answer_exits_loads() {
         None,
         pattern(EVENT_SENT, &["id"], &[("port", Lit::Str("x"))]),
         &[
-            // 观察行的 `owes` 被自己的出口覆盖 ⇒ 一笔债都开不出来（`D-306` 的
+            // 观察行的 `owes` 被自己的出口覆盖 ⇒ 一笔债都开不出来（
             // 「不会开账就不需要执行体」）。它守的三格照旧进 `check_ports` 的判据。
             pattern(EVENT_SENT, &["id"], &[("port", Lit::Str("x"))]),
             pattern(EVENT_RESPONSE, &["id"], &[("port", Lit::Str("x"))]),
@@ -1493,7 +1493,7 @@ fn another_ports_answer_does_not_cover_this_one() {
         None,
         pattern(EVENT_SENT, &["id"], &[("port", Lit::Str("x"))]),
         &[
-            // 观察行的 `owes` 被自己的出口覆盖 ⇒ 一笔债都开不出来（`D-306` 的
+            // 观察行的 `owes` 被自己的出口覆盖 ⇒ 一笔债都开不出来（
             // 「不会开账就不需要执行体」）。它守的三格照旧进 `check_ports` 的判据。
             pattern(EVENT_SENT, &["id"], &[("port", Lit::Str("x"))]),
             pattern(EVENT_RESPONSE, &["id"], &[("port", Lit::Str("y"))]),
@@ -1526,7 +1526,7 @@ fn a_ports_before_cell_must_be_declared() {
         None,
         pattern(EVENT_SENT, &["id"], &[("port", Lit::Str("x"))]),
         &[
-            // 观察行的 `owes` 被自己的出口覆盖 ⇒ 一笔债都开不出来（`D-306` 的
+            // 观察行的 `owes` 被自己的出口覆盖 ⇒ 一笔债都开不出来（
             // 「不会开账就不需要执行体」）。它守的三格照旧进 `check_ports` 的判据。
             pattern(EVENT_SENT, &["id"], &[("port", Lit::Str("x"))]),
             pattern(EVENT_RESPONSE, &["id"], &[("port", Lit::Str("x"))]),

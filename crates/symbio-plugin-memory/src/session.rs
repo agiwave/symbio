@@ -11,14 +11,14 @@
 //! ```
 //!
 //! `session_dir` 由会话插件按自己的唯一存储布局解析，经上下文 `SESSION_DIR` 递来
-//! （D-513）。本模块只把现成目录与文件名相接：**不**认识 session id、**不**复现
-//! 会话目录派生规则、**不**拿这个目录拼事实源路径（D-084 / FB-002）。
+//! 本模块只把现成目录与文件名相接：**不**认识 session id、**不**复现
+//! 会话目录派生规则、**不**拿这个目录拼事实源路径（ / FB-002）。
 //!
 //! ## 为什么挂载名不是 `MEMORY.md`
 //!
 //! 三层记忆同住 `<根>/memory`，地址本身要能说出作用域：智能体那份叫 `MEMORY.md`、
 //! 工作区那份叫 `WORKSPACE.md`，会话这份于是叫 `SESSION.md`。三层物理文件名**统一**
-//! `MEMORY.md`（D-527），挂载名才带作用域；它与 agent 目录里的指令文件 `AGENTS.md`
+//! `MEMORY.md`，挂载名才带作用域；它与 agent 目录里的指令文件 `AGENTS.md`
 //! 语义隔离、物理隔离（后者归 `setting` 只读注入）。
 //!
 //! ## 作用域闸门：**收得到会话目录才有记忆**
@@ -46,7 +46,7 @@ pub const MEMORY_DESCRIPTION: &str =
 
 /// 由会话作用域 provider 构造记忆门面（`None` = 无会话作用域）。
 ///
-/// D-515：作用域闸门从「目录字符串是否为空」改为「provider 是否存在」。
+/// 作用域闸门从「目录字符串是否为空」改为「provider 是否存在」。
 /// 两道容量闸门在此注入；本插件不认识 `SESSION_ID`，也不从它拼目录。
 pub fn store(
     provider: Option<symbio_plugin_api::DynVdfsProvider>,
