@@ -4,7 +4,9 @@
  *
  * 钉住两条「界面必须说出来」的事实：
  * 1. 有内容时报字数（长文作者要看得见规模；此前完全没有反馈）；
- * 2. 运行中回车是**换行**不是发送——提示行必须写明，否则用户以为发送失灵。
+ * 2. 运行中回车是**换行**不是发送——提示必须写明，否则用户以为发送失灵。
+ *    这条说明住在输入框 placeholder 里（用户按键的地方），不再额外占一行；
+ *    空输入时下方不该留下任何常驻提示行。
  */
 import { describe, expect, it } from 'vitest'
 import { mount } from '@vue/test-utils'
@@ -16,16 +18,17 @@ describe('ChatInputArea：提示行', () => {
     expect(w.find('.input-count').text()).toContain('3 字')
   })
 
-  it('空输入不显示计数，只显示键盘说明', () => {
+  it('空输入不占提示行，回车说明在 placeholder 里', () => {
     const w = mount(ChatInputArea, { props: { isLoading: false, modelValue: '' } })
-    expect(w.find('.input-count').exists()).toBe(false)
-    expect(w.find('.input-note').text()).toContain('Enter 发送')
+    expect(w.find('.input-meta').exists()).toBe(false)
+    expect(w.find('textarea').attributes('placeholder')).toContain('Enter 发送')
   })
 
-  it('运行中提示回车是换行（不发送）', () => {
+  it('运行中 placeholder 提示回车是换行（不发送）', () => {
     const w = mount(ChatInputArea, { props: { isLoading: true, modelValue: '' } })
-    expect(w.find('.input-note').text()).toContain('生成中')
-    expect(w.find('.input-note').text()).toContain('Enter 换行')
+    const placeholder = w.find('textarea').attributes('placeholder') ?? ''
+    expect(placeholder).toContain('生成中')
+    expect(placeholder).toContain('Enter 换行')
   })
 
   it('超长输入给出「消息较长」提示（不是硬上限）', () => {

@@ -243,7 +243,9 @@ const accessibleLabel = computed(() => {
   padding: 0.1rem 0.4rem;
   background: var(--surface-sunken);
   border-radius: var(--radius-sm);
-  font-size: 0.65rem;
+  /* 元信息已经压到 11px 的下限，别再小一号：0.65rem（10.4px）在浅色令牌的
+     --text-muted 上偏细，读「3 条 / 1 小时前」要眯眼。用字体令牌与别处对齐。 */
+  font-size: var(--font-size-xs);
 }
 .tag-primary { background: var(--accent-subtle-bg); color: var(--accent); }
 .tag-success { background: var(--success-bg); color: var(--success-fg); }
@@ -254,12 +256,17 @@ const accessibleLabel = computed(() => {
 /* 描述给两行：列表卡片宽度受 Workbench 中栏约束（窄屏还会进一步收缩），
    单行 nowrap 会把「当前目录下共有 **27 个条目**（13 个目录…」这类有用信息
    砍成半句。两行截断既能读全意图，又不会让卡片无限变高。标题仍保持单行——
-   标题是身份，被截断有 title 属性兜底；描述是辅助信息，两行足够。 */
+   标题是身份，被截断有 title 属性兜底；描述是辅助信息，两行足够。
+
+   `white-space: normal` 不能省：父级 .card-preview 是单行的 nowrap，span 会继承；
+   在 nowrap 下 -webkit-line-clamp 失效，实测变成「一行硬裁、连省略号都没有」，
+   与上面这句两行的承诺不符。显式恢复换行才让 clamp 与末尾省略号真正生效。 */
 .preview-text {
   font-size: var(--font-size-xs);
   color: var(--text-secondary);
   line-height: 1.4;
   overflow: hidden;
+  white-space: normal;
   display: -webkit-box;
   -webkit-box-orient: vertical;
   -webkit-line-clamp: 2;

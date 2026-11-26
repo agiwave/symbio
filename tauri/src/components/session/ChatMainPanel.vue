@@ -36,7 +36,7 @@
         <ReadingMeter class="header-meter" :section="stats?.usage" />
       </div>
       <div class="header-right">
-        <button class="header-btn" title="重命名" @click="startRename">
+        <button class="header-btn" title="重命名" aria-label="重命名" @click="startRename">
           <svg viewBox="0 0 24 24" width="14" height="14" fill="none" stroke="currentColor" stroke-width="2">
             <path d="M12 20h9" />
             <path d="M16.5 3.5a2.121 2.121 0 1 1 3 3L7 19l-4 1 1-4 12.5-12.5z" />
@@ -49,6 +49,7 @@
           :class="{ 'is-active': changesOpen }"
           :aria-expanded="changesOpen"
           title="变更"
+          aria-label="变更"
           :disabled="!hasActive"
           @click="changesOpen = !changesOpen"
         >
@@ -66,6 +67,7 @@
           :class="{ 'is-active': panelOpen }"
           :aria-expanded="panelOpen"
           title="读数"
+          aria-label="读数"
           :disabled="!hasActive"
           @click="panelOpen = !panelOpen"
         >

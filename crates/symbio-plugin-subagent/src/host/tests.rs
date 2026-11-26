@@ -617,6 +617,36 @@ async fn mount_root_lists_only_installed_agents() {
     );
 }
 
+/// 挂载根**只声明可列举，不声明树遍历**：清单里的每一条都是表单文件，没有可下钻的子层。
+///
+/// 前端只按 `t` 位选中栏形态（`useVdfs.treeMode`）。声明 `t` 会把「子智能体」变成
+/// 唯一一个用行式树渲染的类别——每条都是叶子、一个展开箭头都没有，外观却与模型 /
+/// 技能 / MCP 的卡片完全不同。内部结构走详情页的「浏览内部」（push 目录地址），
+/// 与列表形态无关，因此树在这里没有要表达的层级。
+#[tokio::test]
+async fn mount_root_is_flat_list_not_tree() {
+    let tmp = tempfile::tempdir().unwrap();
+    let agent_root = tmp.path().join("subagent");
+    std::fs::create_dir_all(&agent_root).unwrap();
+
+    let host: Arc<dyn PluginInvokeRequest> = Arc::new(PluginSimpleRequest::new(None, None));
+    let ctx = vdfs_context(&host);
+    let plugin = AgentPlugin::new_with_dir(PluginDir::at(&agent_root, PLUGIN_ID_SUBAGENT));
+
+    let root = plugin
+        .dispatch(&ctx, "", STAT)
+        .await
+        .unwrap()
+        .into_stat()
+        .unwrap();
+    assert!(root.access.list, "挂载根必须可列举");
+    assert!(
+        !root.access.traverse,
+        "条目全是表单文件，挂载根不该声明 `t`（否则前端渲染成行式树）"
+    );
+    assert!(root.new_type.is_some(), "「新建」入口仍由根节点自述给出");
+}
+
 /// 子智能体挂载点穿越必须**九操作一致**：`subagent/<id>/…` 下的每个操作都交给子
 /// composite，而不是「list / stat / delete 穿了，read / write 没穿」。
 ///

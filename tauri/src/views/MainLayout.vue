@@ -28,7 +28,7 @@
 </template>
 
 <script setup lang="ts">
-import { onBeforeUnmount, onMounted, ref, watch } from 'vue'
+import { nextTick, onBeforeUnmount, onMounted, ref, watch } from 'vue'
 import { RouterView, useRouter } from 'vue-router'
 import { startSessionTranscriptSync, registerTranscriptMount } from '@/stores/sessionTranscriptSync'
 import { startSessionNodeSync, registerSessionMount } from '@/stores/sessionNodeSync'
@@ -45,6 +45,7 @@ import { useSessionsStore } from '@/stores/sessions'
 import { useSoundSettingsStore } from '@/stores/soundSettings'
 import { useOnboardingStore } from '@/stores/onboarding'
 import { logger } from '@/utils/logger'
+import { requestNewResource } from '@/utils/newResource'
 import Toast from '@/components/common/Toast.vue'
 import Onboarding from '@/components/common/Onboarding.vue'
 import CommandPalette from '@/components/common/CommandPalette.vue'
@@ -107,15 +108,26 @@ useHotkeys('main-layout', [
     // 冷启动早期 sessionDir 还没解析出来。若此时 `when` 不成立，按键会被还给
     // 浏览器（Cmd/Ctrl+N 正好是「新建窗口」）——用户明明按了建会话却弹出新窗口。
     // 因此这里恒吞键，目的地未就绪时在 run 里现解析（已缓存，不会重复 IPC）。
+    //
+    // 仅 push 到会话目录并不足够：用户正停在某个会话上时路由原地不动、工作台也
+    // 不会铺草稿，「新建」就像失灵。到站后再发一条新建请求，由工作台按当前目录
+    // 执行与「+」按钮同一条路径（见 utils/newResource 与 VdfsWorkbench 的消费端）。
     run: () => {
+      const go = (dir: string) => {
+        // Promise.resolve 包一层：测试里 router.push 是返回 void 的桩，生产里是 Promise，
+        // 两种形状都等到站后再发请求，不把「有没有返回值」变成运行时分支。
+        void Promise.resolve(router.push(vdfsBrowserPathOf(dir))).then(() =>
+          nextTick(() => requestNewResource(dir))
+        )
+      }
       const dir = sessionDir.value
       if (dir) {
-        void router.push(vdfsBrowserPathOf(dir))
+        go(dir)
       } else {
         void ensureSessionMountDir()
           .then((d) => {
             sessionDir.value = d
-            void router.push(vdfsBrowserPathOf(d))
+            go(d)
           })
           .catch((e) => logger.info('MainLayout', 'Cmd+N 未启用：会话挂载点没认出来', e))
       }

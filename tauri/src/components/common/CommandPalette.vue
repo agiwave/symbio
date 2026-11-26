@@ -96,6 +96,7 @@ import { vdfsRoot } from '@/schemas/vdfsRoot'
 import { vdfsBrowserPathOf } from '@/schemas/vdfsAddress'
 import type { VdfsItem } from '@/schemas/vdfs'
 import { buildPalette, flattenGroups } from '@/utils/palette'
+import { requestNewResource } from '@/utils/newResource'
 
 const props = defineProps<{ visible: boolean }>()
 const emit = defineEmits<{ (e: 'close'): void }>()
@@ -204,12 +205,22 @@ function move(step: number) {
   })
 }
 
-/** 回车 / 点击：把数据地址换成浏览器地址推过去，然后收面板 */
+/**
+ * 回车 / 点击：把数据地址换成浏览器地址推过去，然后收面板。
+ *
+ * 「新建 X」命令项与「去 X 那一类」共用一个目的地（类别目录）；但若那一类里
+ * 已经选中了一项，只 push 地址不会铺草稿，面板里的「新建」就白点了。命令项的
+ * key 以 `new:` 开头（`buildPalette` 的唯一标记），到站后补一条新建请求。
+ */
 function activate(key?: string) {
   const entry = key ? flat.value.find((e) => e.key === key) : flat.value[activeIndex.value]
   if (!entry) return
+  const isNewCommand = entry.key.startsWith('new:')
   emit('close')
-  void router.push(vdfsBrowserPathOf(entry.addr))
+  // 测试里的 router.push 桩返回 void，生产里是 Promise——统一包一层再链式。
+  void Promise.resolve(router.push(vdfsBrowserPathOf(entry.addr))).then(() => {
+    if (isNewCommand) void nextTick(() => requestNewResource(entry.addr))
+  })
 }
 </script>
 

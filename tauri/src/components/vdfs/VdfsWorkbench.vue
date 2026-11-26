@@ -51,7 +51,7 @@
           <line x1="5" y1="12" x2="19" y2="12" />
         </svg>
       </button>
-      <button class="icon-btn" title="刷新" :disabled="loading" @click="refresh">
+      <button class="icon-btn" title="刷新" aria-label="刷新" :disabled="loading" @click="refresh">
         <svg viewBox="0 0 24 24" width="16" height="16" fill="none" stroke="currentColor" stroke-width="2">
           <path d="M21 12a9 9 0 1 1-3-6.7L21 8" />
           <polyline points="21 3 21 8 16 8" />
@@ -255,7 +255,7 @@
 </template>
 
 <script setup lang="ts">
-import { computed, ref, watch } from 'vue'
+import { computed, onBeforeUnmount, onMounted, ref, watch } from 'vue'
 import Workbench from '@/components/common/Workbench.vue'
 import VdfsCard from '@/components/common/VdfsCard.vue'
 import VdfsTreeNode from './VdfsTreeNode.vue'
@@ -293,6 +293,7 @@ import {
 } from '@/schemas/vdfs'
 import { vdfsRoot } from '@/schemas/vdfsRoot'
 import { useSessionsStore } from '@/stores/sessions'
+import { NEW_RESOURCE_EVENT } from '@/utils/newResource'
 
 const props = defineProps<{
   /** 绑定的 vdfs 数据地址（如 `<根>` 或 `<根>/session/<id>`）；变化 = 整体重载 */
@@ -499,6 +500,23 @@ function cancelLeave() {
 function startNewFromButton() {
   guardLeave(() => startNew())
 }
+
+/**
+ * 全局「新建」请求（Ctrl+N / 命令面板）。
+ *
+ * 那两个入口只 push 到类别目录；当目录里已经选中一项时，路由原地不动，
+ * 自动草稿的判据（未选中任何项）也不成立，于是「新建」毫无反应。这里让当前
+ * 工作台直接执行与按钮同一条路径（含未保存离开闸）。请求带地址时只认自己的
+ * 目录，避免跳转途中别页抢先铺出错误的草稿。
+ */
+function onNewResourceRequest(e: Event) {
+  const target = (e as CustomEvent<string | undefined>).detail
+  if (target && target !== cwd.value) return
+  startNewFromButton()
+}
+
+onMounted(() => window.addEventListener(NEW_RESOURCE_EVENT, onNewResourceRequest))
+onBeforeUnmount(() => window.removeEventListener(NEW_RESOURCE_EVENT, onNewResourceRequest))
 
 // ==================== 钻入（emit，宿主决定呈现） ====================
 

@@ -398,7 +398,7 @@ impl AgentPlugin {
         match parse_rel_path(path) {
             // 自身根：**名字留空**——provider 不知道自己的挂载名，由使用方回填
             RelPath::Root => Ok(
-                VdfsNode::dir("", LABEL, VdfsAccess::LIST_TRAVERSE).with_new_type(Some(
+                VdfsNode::dir("", LABEL, VdfsAccess::LIST).with_new_type(Some(
                     VdfsNewType::new(PLUGIN_ID_SUBAGENT, LABEL)
                         .with_description(format!("新建{LABEL}——在详情页里导入整包（.zip）"))
                         .with_node_ext(VDFS_EXT_FORM)

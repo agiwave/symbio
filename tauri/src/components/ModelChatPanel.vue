@@ -41,7 +41,6 @@
         <div class="column-body" ref="messagesRef" @scroll="onScroll">
           <div v-if="messageTree.length === 0" class="empty-chat">
             <p>开始与 AI 助手对话</p>
-            <p class="empty-hint">输入消息后按 Enter 发送，Shift+Enter 换行</p>
           </div>
 
           <!-- 渲染窗口的**显式入口**：更早的轮次没铺出来时，这里给一条按钮。
@@ -819,11 +818,6 @@ watch(sessionError, (now) => {
 
 .empty-chat p {
   margin: 0;
-}
-
-.empty-hint {
-  font-size: 0.8rem;
-  opacity: 0.7;
 }
 
 .chat-controls {

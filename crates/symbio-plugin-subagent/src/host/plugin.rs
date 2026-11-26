@@ -320,10 +320,13 @@ impl AgentPlugin {
             .with_version("0.1.0")
             .with_order(3)
             .with_icon(r#"<path d="M20 21v-2a4 4 0 0 0-4-4H8a4 4 0 0 0-4 4v2"/><circle cx="12" cy="7" r="4"/>"#)
-            // 根可列举 + 可递归遍历（agent 目录内部有子条目）。
-            // 「根下可新建类型」不在这里——agent 目录只能整包导入（没有「先建空壳
-            // 再填字段」的形态），清单由 provider 自持（见 `super::vdfs`）
-            .with_root_access(VdfsAccess::LIST_TRAVERSE)
+            // 根只可列举：清单里的每一条都是**表单文件**（有详情定义，访问位 `r`），
+            // 内部结构走详情页的「浏览内部」（push 目录地址），不由树下钻。
+            // 声明 `t` 会让前端把这张清单渲染成目录树——条目全是叶子，树里一个
+            // 箭头都没有，却换来与其它类别（模型 / 技能 / MCP…）不同的行式外观。
+            // 「根下可新建类型」也不在这里——agent 目录只能整包导入（没有「先建
+            // 空壳再填字段」的形态），清单由 provider 自持（见 `super::vdfs`）
+            .with_root_access(VdfsAccess::LIST)
     }
 
     /// 参与 `available_options` 收集：贡献「子智能体」字段。

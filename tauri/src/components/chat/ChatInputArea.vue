@@ -18,7 +18,7 @@
       </div>
     </div>
     
-    <div class="input-wrapper">
+    <div ref="wrapperRef" class="input-wrapper">
       <!-- 图片上传按钮 -->
       <button
         class="attach-btn"
@@ -46,8 +46,7 @@
         ref="textareaRef"
         v-model="modelValue"
         aria-label="消息输入"
-        aria-describedby="INPUT_HINT_ID"
-        placeholder="输入消息... (可粘贴图片)"
+        :placeholder="placeholder"
         @keydown.enter.exact="handleKeydown"
         @paste="handlePaste"
         rows="1"
@@ -75,16 +74,13 @@
       </button>
     </div>
 
-    <!-- 输入提示行：回车 / 字数反馈。
-         运行中回车**不发送**（见 handleKeydown 的注释），但此前界面对此一字不说，
-         用户按了回车只看到换行，会以为发送失灵——这条提示就是那句说明。
-         字数不做硬上限（后端没有声明上限，前端编一个只会提前拦住合法输入），
-         只在有内容时如实给出计数，让长文作者自己看得见规模。 -->
-    <div :id="INPUT_HINT_ID" class="input-meta">
-      <span v-if="isLoading" class="input-note">生成中：Enter 换行，停止请点右侧方块</span>
-      <span v-else class="input-note">Enter 发送，Shift+Enter 换行</span>
+    <!-- 字数反馈：只在有内容时出现。
+         回车口径（Enter 发送 / Shift+Enter 换行 / 生成中 Enter 换行）已经写进
+         输入框 placeholder——那是用户视线所在的位置，再在下方单占一行重复一遍
+         只会把输入区撑高。字数不做硬上限（后端没有声明上限，前端编一个只会提前
+         拦住合法输入），只在有内容时如实给出计数，让长文作者自己看得见规模。 -->
+    <div v-if="charCount > 0" class="input-meta">
       <span
-        v-if="charCount > 0"
         class="input-count"
         :class="{ long: charCount >= LONG_INPUT_HINT }"
       >
@@ -103,9 +99,6 @@ import { useToast } from '@/composables/useToast'
 
 /** 附件上限：前端先拦，避免大图 / 连贴把内存吃满后才由后端拒绝 */
 const MAX_IMAGES = 10
-
-/** 输入提示行的 id（textarea 的 aria-describedby 指向它） */
-const INPUT_HINT_ID = 'chat-input-hint'
 
 /** 超过这个字数就提示「消息较长」——不是上限，只是让长文有可见的规模反馈 */
 const LONG_INPUT_HINT = 2000
@@ -128,15 +121,46 @@ const emit = defineEmits<{
 
 const textareaRef = ref<HTMLTextAreaElement | null>(null)
 const imageInputRef = ref<HTMLInputElement | null>(null)
+const wrapperRef = ref<HTMLElement | null>(null)
 
 /** 按用户可见字符计数（`[...str]`），不是 UTF-16 码元——emoji 不该算两个字 */
 const charCount = computed(() => (modelValue.value ? [...modelValue.value].length : 0))
+
+/**
+ * 输入框占位提示 = 回车口径的唯一说明处。
+ *
+ * 运行中回车是换行不是发送（见 `handleKeydown`），这条必须在用户按键的地方说出来；
+ * 放在 placeholder 而不是下方独立一行，是因为输入区高度宝贵，同一句话占两处
+ * （占位 + 提示行）既重复又多压一行。生成中优先说「怎么停」，它此刻比发送更急。
+ */
+const placeholder = computed(() =>
+  props.isLoading
+    ? '生成中：Enter 换行，停止请点右侧方块'
+    : '输入消息（可粘贴图片），Enter 发送，Shift+Enter 换行'
+)
 
 // 暴露给父组件，用于重置高度
 function resetHeight() {
   if (textareaRef.value) {
     textareaRef.value.style.height = 'auto'
   }
+}
+
+/**
+ * 自动高度：先回 auto 再按 scrollHeight 定高。
+ *
+ * 不能只在 `modelValue` 变化时做：placeholder 也会换行——窄窗口下「输入消息…Shift+Enter
+ * 换行」占两行，而挂载时 rows=1 只有一行高，第二行就露到输入框边框外面（实测
+ * 768px 宽时 clientHeight=37 / scrollHeight=58）。窗口变宽变窄、侧栏宽度变化时同理：
+ * 已输入的多行文字需要的行数会变，不重算就会被裁掉。
+ */
+function syncHeight() {
+  const ta = textareaRef.value
+  if (!ta) return
+  ta.style.height = 'auto'
+  void nextTick(() => {
+    if (textareaRef.value) textareaRef.value.style.height = `${textareaRef.value.scrollHeight}px`
+  })
 }
 
 defineExpose({ resetHeight, textarea: textareaRef })
@@ -221,8 +245,26 @@ function handleGlobalPaste(event: ClipboardEvent) {
   handlePaste(event)
 }
 
+/** 只在**宽度**变化时重算高度：高度变化是本函数自己造成的，回头再观察它就成了环。 */
+let resizeObserver: ResizeObserver | null = null
+let lastWrapperWidth = 0
+
 onMounted(() => {
   window.addEventListener('paste', handleGlobalPaste)
+  // 挂载即按实际宽度定高（含 placeholder 的换行）；nextTick 等布局稳定。
+  void nextTick(syncHeight)
+  // 观察输入框容器：窗口缩放 / 侧栏宽度变化都落到它身上，比监听 window resize
+  // 少漏一种场景。happy-dom 等测试环境没有 ResizeObserver 时跳过，不影响逻辑测试。
+  if (typeof ResizeObserver !== 'undefined' && wrapperRef.value) {
+    lastWrapperWidth = wrapperRef.value.getBoundingClientRect().width
+    resizeObserver = new ResizeObserver((entries) => {
+      const width = entries[0]?.contentRect.width ?? 0
+      if (Math.abs(width - lastWrapperWidth) < 1) return
+      lastWrapperWidth = width
+      syncHeight()
+    })
+    resizeObserver.observe(wrapperRef.value)
+  }
   // 聚焦归输入框自己管：它才是 textarea 的所有者（此前由父级各写一遍
   // nextTick + `ref.textarea.focus()`，与 textarea 的暴露形状耦合在父级）。
   if (props.autofocus) void nextTick(() => textareaRef.value?.focus())
@@ -230,6 +272,7 @@ onMounted(() => {
 
 onUnmounted(() => {
   window.removeEventListener('paste', handleGlobalPaste)
+  resizeObserver?.disconnect()
 })
 
 /**
@@ -295,17 +338,8 @@ function removeImage(index: number) {
   attachedImages.value = newImages
 }
 
-// 自动高度
-watch(modelValue, () => {
-  if (textareaRef.value) {
-    textareaRef.value.style.height = 'auto'
-    nextTick(() => {
-      if (textareaRef.value) {
-        textareaRef.value.style.height = `${textareaRef.value.scrollHeight}px`
-      }
-    })
-  }
-})
+// 输入变化时的自动高度（挂载与宽度变化另由上面的 syncHeight 负责）
+watch(modelValue, syncHeight)
 </script>
 
 <style scoped>
@@ -330,12 +364,11 @@ watch(modelValue, () => {
   background: var(--surface-overlay);
 }
 
-/* 提示行：左边是键盘说明（静态），右边是字数（随输入变）。
-   两个字号的对比刻意压低——它是辅助信息，不该和正文抢注意力。 */
+/* 字数行：只在有内容时出现（模板 v-if），右对齐，不抢正文注意力。 */
 .input-meta {
   display: flex;
   align-items: center;
-  justify-content: space-between;
+  justify-content: flex-end;
   gap: var(--space-2);
   padding: 0.25rem 0.35rem 0;
   font-size: var(--font-size-xs);
@@ -343,7 +376,6 @@ watch(modelValue, () => {
   line-height: 1.4;
 }
 
-.input-note,
 .input-count {
   white-space: nowrap;
   overflow: hidden;
