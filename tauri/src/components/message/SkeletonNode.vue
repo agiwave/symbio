@@ -268,6 +268,7 @@ function submitSupply() {
 }
 .supply-toggle {
   align-self: flex-start;
+  min-height: 2rem;
   background: var(--color-supply-bg);
   border: 1px solid var(--color-prompt-border);
   color: var(--color-chip-tool-fg);
@@ -315,6 +316,7 @@ function submitSupply() {
 }
 .supply-submit {
   align-self: flex-start;
+  min-height: 2rem;
   background: var(--accent);
   color: var(--text-on-accent);
   border: none;

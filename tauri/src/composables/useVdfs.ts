@@ -233,7 +233,6 @@ export function useVdfs(opts: UseVdfsOptions) {
         key: n.name,
         label: n.title || n.name,
         icon: iconForNode(n) ?? null,
-        description: n.description,
         active: n.name === activeName,
       }))
   })
@@ -258,6 +257,8 @@ export function useVdfs(opts: UseVdfsOptions) {
   const cwdAddr = ref('')
   const loading = ref(false)
   const loadError = ref('')
+  const listGuard = useGenerationGuard()
+  const navGuard = useGenerationGuard()
 
   // ── 目录树（中栏的第二种形态）────────────────────────────────────
   // 判据只有一条：**当前目录声明了 `t`（traverse）位**。这是后端对「这棵目录
@@ -270,6 +271,7 @@ export function useVdfs(opts: UseVdfsOptions) {
   const treeNodes = shallowRef<VdfsTreeNode[]>([])
   const treeTruncated = ref(false)
   const treeMessage = ref('')
+  const treeError = ref('')
 
   /** 当前视图里是否看得到这条路径（列表只看本页；树看整棵已取回的树） */
   function isVisibleInCwd(path: string): boolean {
@@ -298,20 +300,26 @@ export function useVdfs(opts: UseVdfsOptions) {
 
   /** 加载当前目录（**有界**：默认只取最新一页） */
   async function refresh() {
+    const token = listGuard.advance()
+    const requestedCwd = cwd.value
     loading.value = true
     loadError.value = ''
     loadMoreError.value = ''
+    treeError.value = ''
     try {
       const resp = await listVdfs(
         READBACK_REASON.VDFS_BROWSER,
-        cwd.value,
+        requestedCwd,
         { limit: VDFS_PAGE_SIZE },
         (err) => {
           // listVdfs 吞错返空列表（服务层口径不变），这里借观测器把「读不到」
           // 与「真的空」分开——否则后端故障会被显示成「此目录为空/可新建」。
-          loadError.value = `加载失败：${err instanceof Error ? err.message : String(err)}`
+          if (listGuard.revision() === token) {
+            loadError.value = `加载失败：${readableError(err)}`
+          }
         }
       )
+      if (listGuard.revision() !== token || requestedCwd !== cwd.value) return
       items.value = resp.items
       cwdNode.value = resp.node
       // 自述与请求地址同源登记（见 `cwdAddr` 的说明）
@@ -322,20 +330,24 @@ export function useVdfs(opts: UseVdfsOptions) {
       // 渲染。树失败只清空树、退回列表形态，不牵连已经拿到的 list（树是增强）。
       if (treeMode.value) {
         try {
-          const tree = await treeVdfs(READBACK_REASON.VDFS_BROWSER, cwd.value)
-          treeNodes.value = assembleVdfsTree(tree.nodes, cwd.value)
+          const tree = await treeVdfs(READBACK_REASON.VDFS_BROWSER, requestedCwd)
+          if (listGuard.revision() !== token || requestedCwd !== cwd.value) return
+          treeNodes.value = assembleVdfsTree(tree.nodes, requestedCwd)
           treeTruncated.value = tree.truncated
           treeMessage.value = tree.message ?? ''
         } catch (err) {
+          if (listGuard.revision() !== token || requestedCwd !== cwd.value) return
           treeNodes.value = []
           treeTruncated.value = false
           treeMessage.value = ''
-          logger.error('useVdfs', `加载目录树失败 ${cwd.value}:`, err)
+          treeError.value = `加载目录树失败：${readableError(err)}`
+          logger.error('useVdfs', `加载目录树失败 ${requestedCwd}:`, err)
         }
       } else {
         treeNodes.value = []
         treeTruncated.value = false
         treeMessage.value = ''
+        treeError.value = ''
       }
 
       // 选中项若已不在当前目录（被删/被移走），清理选中态。
@@ -348,12 +360,14 @@ export function useVdfs(opts: UseVdfsOptions) {
         clearSelection(true)
       }
     } catch (err) {
-      loadError.value = String(err)
+      if (listGuard.revision() !== token || requestedCwd !== cwd.value) return
+      loadError.value = readableError(err)
       items.value = []
       hasMore.value = false
-      logger.error('useVdfs', `加载目录失败 ${cwd.value}:`, err)
+      logger.error('useVdfs', `加载目录失败 ${requestedCwd}:`, err)
     } finally {
-      loading.value = false
+      // 旧目录的 finally 不能把新目录的加载态提前关掉。
+      if (listGuard.revision() === token) loading.value = false
     }
   }
 
@@ -369,22 +383,26 @@ export function useVdfs(opts: UseVdfsOptions) {
     if (loadingMore.value || !hasMore.value) return
     const last = items.value[items.value.length - 1]
     if (!last) return
+    const requestedCwd = cwd.value
+    const token = listGuard.revision()
     loadingMore.value = true
     loadMoreError.value = ''
     try {
-      const resp = await listVdfs(READBACK_REASON.VDFS_BROWSER, cwd.value, {
+      const resp = await listVdfs(READBACK_REASON.VDFS_BROWSER, requestedCwd, {
         limit: VDFS_PAGE_SIZE,
         before: last.name,
       })
+      if (listGuard.revision() !== token || requestedCwd !== cwd.value) return
       const known = new Set(items.value.map((n) => n.path))
       const fresh = resp.items.filter((n) => !known.has(n.path))
       items.value = items.value.concat(fresh)
       hasMore.value = fresh.length > 0 && resp.items.length >= VDFS_PAGE_SIZE
     } catch (err) {
-      logger.error('useVdfs', `加载更早失败 ${cwd.value}:`, err)
+      if (listGuard.revision() !== token || requestedCwd !== cwd.value) return
+      logger.error('useVdfs', `加载更早失败 ${requestedCwd}:`, err)
       loadMoreError.value = '加载更早的条目失败，请重试'
     } finally {
-      loadingMore.value = false
+      if (listGuard.revision() === token) loadingMore.value = false
     }
   }
 
@@ -393,7 +411,11 @@ export function useVdfs(opts: UseVdfsOptions) {
    * 选中变化时内部已就地刷新当前目录（返回值告知调用方免重复刷）。
    */
   async function refreshNav(): Promise<boolean> {
-    const resp = await listVdfs(READBACK_REASON.VDFS_BROWSER, navDir.value)
+    const token = navGuard.advance()
+    const requestedAddr = addr.value
+    const requestedNavDir = navDir.value
+    const resp = await listVdfs(READBACK_REASON.VDFS_BROWSER, requestedNavDir)
+    if (navGuard.revision() !== token || requestedAddr !== addr.value) return false
     navDirs.value = resp.items
     // 挂载层：左栏是类别清单，点击 = 换类别页（宿主 push），当前目录恒为绑定地址
     // 本身，因此没有「选中的子目录」可落位。
@@ -405,11 +427,11 @@ export function useVdfs(opts: UseVdfsOptions) {
       return false
     }
     const names = resp.items.filter(isVdfsDir).map((n) => n.name)
-    const want = selectedMemo.get(addr.value)
+    const want = selectedMemo.get(requestedAddr)
     const next = want && names.includes(want) ? want : (names[0] ?? null)
     if (next === selectedName.value) return false
     selectedName.value = next
-    if (next) selectedMemo.set(addr.value, next)
+    if (next) selectedMemo.set(requestedAddr, next)
     clearSelection()
     void refresh()
     return true
@@ -538,12 +560,25 @@ export function useVdfs(opts: UseVdfsOptions) {
   watch(
     () => cwd.value,
     (dir) => {
+      listGuard.advance()
+      items.value = []
+      cwdNode.value = null
+      cwdAddr.value = ''
+      treeNodes.value = []
+      treeTruncated.value = false
+      treeMessage.value = ''
+      treeError.value = ''
+      hasMore.value = false
+      loadMoreError.value = ''
+      loadingMore.value = false
+      loading.value = true
       const sel = selectedNode.value
       if (!sel) return
       // 草稿无 path ⇒ 无法判归属，但它属于旧目录，换地址即作废
       if (!isVdfsDraft(sel) && isVdfsUnder(sel.path, dir)) return
       clearSelection()
     },
+    { flush: 'sync' },
   )
 
   // ==================== 列表筛选 ====================
@@ -624,11 +659,18 @@ export function useVdfs(opts: UseVdfsOptions) {
   /** form 渲染器的数据（`vdfs/read` 文本按 JSON 解析） */
   const formData = ref<Record<string, unknown> | null>(null)
   const loadingDetail = ref(false)
+  /**
+   * 详情**读取**失败（与保存 / 动作失败分开）。
+   *
+   * 读取失败时右栏只显示错误与重试，不能把尚未读到的空值当成可编辑表单；
+   * 保存或动作失败则仍保留当前详情与输入，因此不能复用同一个错误分支。
+   */
+  const detailLoadError = ref('')
 
   const saving = ref(false)
   /** 动作执行中（与 saving 分开：动作不写数据，别让保存态跟着转） */
   const actionBusy = ref(false)
-  /** 详情级错误（纯文本） */
+  /** 保存 / 动作 / 删除失败（纯文本）；与读取失败分开，失败后保留当前详情。 */
   const detailError = ref('')
   /** 字段级校验错误（provider 自持校验的产物；机制不解释其含义） */
   const fieldErrors = ref<VdfsFieldError[]>([])
@@ -716,6 +758,8 @@ export function useVdfs(opts: UseVdfsOptions) {
     selectedNode.value = null
     nodeText.value = ''
     formData.value = null
+    loadingDetail.value = false
+    detailLoadError.value = ''
     detailError.value = ''
     fieldErrors.value = []
     if (forget) selectedNodeMemo.delete(memoKey)
@@ -737,6 +781,10 @@ export function useVdfs(opts: UseVdfsOptions) {
       nodeText.value = ''
       formData.value = null
     }
+    // 新选中项（或同一节点的重读）开始时都不再展示上一条读取失败；骨架优先于
+    // 任何旧正文，失败时再由本次回执写入 detailLoadError。
+    loadingDetail.value = false
+    detailLoadError.value = ''
     detailError.value = ''
     fieldErrors.value = []
     // 记住这一层当时在看什么；换目录 / 进下一级只是暂时收起，返回时按此恢复。
@@ -768,7 +816,7 @@ export function useVdfs(opts: UseVdfsOptions) {
       if (detailGuard.revision() !== token) return
       if (appendGuard.revision(node.path) !== gen) return
       if (!content) {
-        detailError.value = `读取失败：${readErr instanceof Error ? readErr.message : '后端未返回内容'}`
+        detailLoadError.value = `读取失败：${readErr instanceof Error ? readErr.message : '后端未返回内容'}`
         return
       }
       const text = content.text ?? ''
@@ -776,16 +824,27 @@ export function useVdfs(opts: UseVdfsOptions) {
         try {
           formData.value = text.trim() ? (JSON.parse(text) as Record<string, unknown>) : {}
         } catch (err) {
-          detailError.value = `内容不是合法 JSON：${err}`
+          detailLoadError.value = `内容不是合法 JSON：${err}`
         }
       } else {
         nodeText.value = text
       }
+    } catch (err) {
+      if (detailGuard.revision() !== token) return
+      detailLoadError.value = `读取失败：${readableError(err)}`
+      logger.error('useVdfs', `读取详情失败 ${node.path}:`, err)
     } finally {
       // 用**自己取到的那个代次**比对，不重新 revision()：中途自增会让加载态
       // 永远复位不了（见 useGenerationGuard 的「边界」）
       if (detailGuard.revision() === token) loadingDetail.value = false
     }
+  }
+
+  /** 重试当前选中节点的详情读取；草稿没有正文，不需要重试。 */
+  async function retryDetail() {
+    const node = selectedNode.value
+    if (!node || isVdfsDraft(node) || loadingDetail.value) return
+    await select(node)
   }
 
   // ==================== 机制动作（单一定义点） ====================
@@ -824,6 +883,13 @@ export function useVdfs(opts: UseVdfsOptions) {
   const mechanismBusyId = ref<string | null>(null)
 
   // ==================== 写入 / 删除 / 新建 ====================
+  function readableError(err: unknown): string {
+    const parsed = parseVdfsValidation(err)
+    if (parsed?.message) return parsed.message
+    const text = err instanceof Error ? err.message : String(err)
+    return text.replace(/^\[Gateway HTTP\]\s*/, '')
+  }
+
   /** 还原字段级校验错误；非本协议载荷按纯文本展示 */
   function captureError(err: unknown): string {
     const parsed = parseVdfsValidation(err)
@@ -832,7 +898,7 @@ export function useVdfs(opts: UseVdfsOptions) {
       return parsed.message
     }
     fieldErrors.value = []
-    return String(err)
+    return readableError(err)
   }
 
   /**
@@ -847,6 +913,8 @@ export function useVdfs(opts: UseVdfsOptions) {
    * 只有匿名写才有它）——新建的落点是刚建出来的那一项，而不是那张已经失效的草稿。
    */
   async function write(payload: Record<string, unknown> | string): Promise<boolean> {
+    // 详情未读到时禁止写入 / 动作：不能让旧快照或空模型被保存到真实节点上。
+    if (saving.value || actionBusy.value || loadingDetail.value || detailLoadError.value) return false
     const node = selectedNode.value
     if (!node) return false
     const draft = isVdfsDraft(node)
@@ -910,6 +978,8 @@ export function useVdfs(opts: UseVdfsOptions) {
    * 只说「在这个目录里做这件事」，名字 / 落点由 provider 决定。
    */
   async function runAction(action: string, payload?: unknown): Promise<boolean> {
+    // 详情未读到时禁止写入 / 动作：不能让旧快照或空模型被保存到真实节点上。
+    if (saving.value || actionBusy.value || loadingDetail.value || detailLoadError.value) return false
     const node = selectedNode.value
     if (!node) return false
     const target = isVdfsDraft(node) ? cwd.value : node.path
@@ -948,9 +1018,11 @@ export function useVdfs(opts: UseVdfsOptions) {
     }
   }
 
-  /** 删除选中节点（目录递归） */
-  async function removeSelected(): Promise<boolean> {
-    const node = selectedNode.value
+  /** 删除选中节点（目录递归）；可显式传入确认时冻结的目标 */
+  async function removeSelected(target?: VdfsItem): Promise<boolean> {
+    // 详情未读到时禁止写入 / 动作：不能让旧快照或空模型被保存到真实节点上。
+    if (saving.value || actionBusy.value || loadingDetail.value || detailLoadError.value) return false
+    const node = target ?? selectedNode.value
     if (!node) return false
     saving.value = true
     mechanismBusyId.value = 'delete'
@@ -1158,6 +1230,8 @@ export function useVdfs(opts: UseVdfsOptions) {
     navItems,
     selectDir,
     selectedName,
+    /** 深链是否仍定住当前目录；自动草稿不得抢走尚未落位的深链选择。 */
+    pinnedAtAddr,
     /** 绑定地址是否处于**挂载层**（类别层）：宿主据此决定左栏点击 = 就地切换还是换地址页 */
     atMountLevel,
     // 目录
@@ -1172,6 +1246,7 @@ export function useVdfs(opts: UseVdfsOptions) {
     treeNodes,
     treeTruncated,
     treeMessage,
+    treeError,
     loading,
     loadError,
     hasMore,
@@ -1196,6 +1271,8 @@ export function useVdfs(opts: UseVdfsOptions) {
     nodeText,
     formData,
     loadingDetail,
+    detailLoadError,
+    retryDetail,
     saving,
     actionBusy,
     detailError,

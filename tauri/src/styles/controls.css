@@ -19,8 +19,8 @@
   display: flex;
   align-items: center;
   justify-content: center;
-  width: 1.625rem;
-  height: 1.625rem;
+  width: 2rem;
+  height: 2rem;
   border: none;
   background: transparent;
   border-radius: var(--radius-md);
@@ -45,6 +45,7 @@
 /* 单行文本输入 */
 .text-input {
   flex: 1;
+  min-height: 2rem;
   padding: 0.45rem 0.7rem;
   border: 1px solid var(--border-default);
   border-radius: var(--radius-md);
@@ -62,21 +63,24 @@
 
 .nav-btn {
   position: relative;
-  width: 2.5rem;
-  height: 2.5rem;
+  width: 100%;
+  aspect-ratio: 1;
+  min-height: 0;
   border: none;
   background: transparent;
   border-radius: var(--radius-md);
   cursor: pointer;
   display: flex;
+  flex-direction: column;
   align-items: center;
   justify-content: center;
   align-self: center;
   flex-shrink: 0;
-  gap: 0.75rem;
-  padding: 0;
+  gap: 0.15rem;
+  padding: 0.25rem 0.125rem;
   color: var(--text-secondary);
-  font-size: var(--font-size-base);
+  font-size: var(--font-size-xs);
+  line-height: 1.1;
   transition: background-color var(--motion-fast) var(--motion-ease),
     color var(--motion-fast) var(--motion-ease);
 }
@@ -92,15 +96,15 @@
 /* 侧栏图标尺寸：图标组件自身**不**写死尺寸（见 `registry/vdfsIcons.svgIcon`），
    由容器统一给——同一排出现的图标必须一样大，否则就是「随手凑的图」的观感。 */
 .nav-btn svg {
-  width: 1.25rem;
-  height: 1.25rem;
+  width: 1.125rem;
+  height: 1.125rem;
   flex-shrink: 0;
 }
 /* 计数角标（nav-btn 右上角） */
 .nav-count {
   position: absolute;
-  top: 0.1rem;
-  right: 0.1rem;
+  top: 0.2rem;
+  right: 0.2rem;
   min-width: 0.9rem;
   height: 0.9rem;
   padding: 0 0.25rem;
@@ -115,10 +119,48 @@
   pointer-events: none;
 }
 
-/* 窄条模式隐藏文字标签（保留 DOM，便于日后悬浮展开）；
-   可访问名称由 aria-label 提供，键盘焦点环由 base.css 的 :focus-visible 保证。 */
-.nav-label {
+/* 悬浮滚动条不参与布局，溢出出现时内容坐标保持不变。 */
+.overlay-scrollbar-host {
+  position: relative;
+  overscroll-behavior: contain;
+  scrollbar-width: none;
+}
+.overlay-scrollbar-host::-webkit-scrollbar {
   display: none;
+  width: 0;
+  height: 0;
+}
+.overlay-scrollbar-rail {
+  position: absolute;
+  top: 0;
+  right: 2px;
+  z-index: 3;
+  width: 10px;
+  padding: 2px 0;
+  touch-action: none;
+}
+.overlay-scrollbar-rail[hidden] {
+  display: none;
+}
+.overlay-scrollbar-thumb {
+  width: 6px;
+  margin-left: auto;
+  border-radius: var(--radius-full);
+  background: var(--border-strong);
+  opacity: 0;
+  cursor: default;
+  transition: opacity var(--motion-fast) var(--motion-ease),
+    background-color var(--motion-fast) var(--motion-ease);
+}
+.overlay-scrollbar-host:hover .overlay-scrollbar-thumb,
+.overlay-scrollbar-host:focus-within .overlay-scrollbar-thumb,
+.overlay-scrollbar-rail.is-dragging .overlay-scrollbar-thumb {
+  opacity: 1;
+}
+.overlay-scrollbar-thumb:hover,
+.overlay-scrollbar-thumb:focus-visible {
+  background: var(--text-muted);
+  opacity: 1;
 }
 
 /* 消息节点的微操作按钮（删除 / 重试 / 复制…）。
@@ -130,9 +172,9 @@
   background: rgba(100, 116, 139, 0.1);
   color: var(--color-chip-fg);
   border-radius: 0.25rem;
-  width: 1.125rem;
-  height: 1.125rem;
-  font-size: 0.7rem;
+  width: 1.5rem;
+  height: 1.5rem;
+  font-size: 0.75rem;
   line-height: 1;
   cursor: pointer;
   padding: 0;
@@ -159,4 +201,11 @@
 .node-act:disabled:hover {
   background: rgba(100, 116, 139, 0.1);
   color: var(--color-chip-fg);
+}
+
+@media (pointer: coarse) {
+  .node-act {
+    width: 2rem;
+    height: 2rem;
+  }
 }

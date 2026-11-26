@@ -16,7 +16,7 @@
           @blur="cancelRename"
         />
         <template v-else>
-          <h2 class="session-name">{{ store.activeTitle }}</h2>
+          <h2 class="session-name" :title="store.activeTitle">{{ store.activeTitle }}</h2>
           <span v-if="store.isActiveWorking" class="status-working">● AI 处理中</span>
           <!-- 断连可见性（DE-020「还差什么」第 3 行）：状态来自**真实连接事件**
                （`services/connectionStatus` 是唯一写口），界面不拿定时器猜。
@@ -611,7 +611,7 @@ function openChange(row: ChangeRow) {
 
 .status-working {
   font-size: 0.75rem;
-  color: #22c55e;
+  color: var(--success-fg);
 }
 
 /* 断连徽标：与「AI 处理中」同一行、同一字号。断开用告警色，首连用中性色——
@@ -623,7 +623,7 @@ function openChange(row: ChangeRow) {
 }
 
 .status-offline.is-retrying {
-  color: var(--warning-solid, #f59e0b);
+  color: var(--warning-fg);
 }
 
 /* 会话头的用量格：占位随内容收缩，标题被压缩时它是**最后**让位的
@@ -674,8 +674,8 @@ function openChange(row: ChangeRow) {
   display: flex;
   align-items: center;
   justify-content: center;
-  width: 1.75rem;
-  height: 1.75rem;
+  width: 2rem;
+  height: 2rem;
   border: none;
   background: transparent;
   border-radius: 0.375rem;
@@ -728,6 +728,7 @@ function openChange(row: ChangeRow) {
 }
 
 .drawer-btn {
+  min-height: 1.5rem;
   border: 1px solid var(--border-default);
   background: transparent;
   color: var(--text-secondary);
@@ -920,6 +921,7 @@ function openChange(row: ChangeRow) {
 }
 .history-degraded-btn,
 .history-degraded-close {
+  min-height: 1.5rem;
   border: 1px solid var(--border-default);
   background: var(--surface-panel);
   color: var(--text-primary);

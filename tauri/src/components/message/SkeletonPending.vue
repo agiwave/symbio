@@ -18,8 +18,8 @@
   时兜底（那时骨架等待态必然不显示），两者因此天然互斥，不会同时出现两条。
 -->
 <template>
-  <div class="skeleton-pending">
-    <span class="skeleton-pending-dots"><span /><span /><span /></span>
+  <div class="skeleton-pending" role="status" aria-live="polite" aria-atomic="true">
+    <span class="skeleton-pending-dots" aria-hidden="true"><span /><span /><span /></span>
     <span class="skeleton-pending-text">{{ text }}</span>
   </div>
 </template>

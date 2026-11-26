@@ -20,7 +20,7 @@
   <Workbench
     :rail-items="navItems"
     :title="title"
-    :has-list-content="filteredItems.length > 0"
+    :has-list-content="filteredItems.length > 0 || Boolean(treeError)"
     :has-detail="hasDetail"
     :has-draft="isDraftSelected"
     :can-create="canCreate"
@@ -88,6 +88,7 @@
       </div>
 
       <div
+        v-overlay-scrollbar
         ref="listRef"
         class="vdfs-list"
         role="listbox"
@@ -97,17 +98,23 @@
         <!-- 目录树形态：当前目录声明 `t` 位时，中栏改渲染可展开的树。
              点目录就地展开 / 折叠，点文件走与列表项相同的 onItemClick（右栏出详情）。 -->
         <template v-if="treeMode">
-          <VdfsTreeNode
-            v-for="n in treeNodes"
-            :key="n.item.path"
-            :node="n"
-            :selected-id="selectedId"
-            @activate="onItemClick"
-          />
-          <!-- 树被深度 / 数量上限截断时如实告知：别把「还没展开完」读成「就这些」。 -->
-          <p v-if="treeTruncated" class="tree-truncated" role="status">
-            {{ treeMessage || '目录过大，仅显示部分层级' }}
-          </p>
+          <div v-if="treeError" class="tree-error" role="alert">
+            <p>{{ treeError }}</p>
+            <button class="more-btn" type="button" :disabled="loading" @click="refresh">重试</button>
+          </div>
+          <template v-else>
+            <VdfsTreeNode
+              v-for="n in treeNodes"
+              :key="n.item.path"
+              :node="n"
+              :selected-id="selectedId"
+              @activate="onItemClick"
+            />
+            <!-- 树被深度 / 数量上限截断时如实告知：别把「还没展开完」读成「就这些」。 -->
+            <p v-if="treeTruncated" class="tree-truncated" role="status">
+              {{ treeMessage || '目录过大，仅显示部分层级' }}
+            </p>
+          </template>
         </template>
 
         <!-- 扁平列表形态（未声明 `t` 位的目录）。
@@ -133,7 +140,7 @@
         <!-- 有界列表的收尾：滚到底自动续页，也留一个显式入口。
              ⚠️ 筛选态下**必须保留**：命中可能落在更早的页里，去掉这个入口
              就会把「还没找到」误报成「不存在」。 -->
-        <div v-if="!treeMode && hasMore && filteredItems.length > 0" class="list-more">
+        <div v-if="!treeMode && hasMore" class="list-more">
           <!-- 续页失败不能把入口藏起来：保留按钮就是保留重试，错误行说明为什么没动。 -->
           <p v-if="loadMoreError" class="list-more-error" role="alert">{{ loadMoreError }}</p>
           <button
@@ -188,9 +195,23 @@
            机制动作（删除）由**本控件**算一次后注入所有渲染器：它们是
            「页面对任何已落盘可写节点都能做的默认动作」，不该由每个渲染器各算一遍
            （见 useVdfs.mechanismActions）。渲染器只声明**它自己特有**的动作。 -->
+      <!-- 详情加载中：骨架必须优先于真实表单 / 正文。选中真实节点后 vdfs/read
+           可能仍在途，此时挂载表单会把尚未读到的 null / 空串显示成默认可编辑值。 -->
+      <div v-if="loadingDetail" class="vdfs-detail-skeleton" aria-busy="true">
+        <SkeletonBlock :width="'38%'" :height="0.95" />
+        <SkeletonBlock v-for="i in DETAIL_SKELETON_ROWS" :key="i" :lines="1" :height="0.85" />
+      </div>
+
+      <!-- 读取失败独立于保存 / 动作失败：前者卸载未就绪详情并给出重试，后者仍把
+           错误传给当前渲染器，保留表单与用户输入。 -->
+      <div v-else-if="detailLoadError" class="vdfs-detail-error" role="alert">
+        <p>{{ detailLoadError }}</p>
+        <button class="more-btn" type="button" @click="retryDetail">重试详情</button>
+      </div>
+
       <component
         :is="rendererComp"
-        v-if="selectedNode && rendererComp"
+        v-else-if="selectedNode && rendererComp"
         ref="rendererRef"
         :key="selectedNode.path || `draft-${draftSeq}`"
         :node="selectedNode"
@@ -210,12 +231,6 @@
         @dirty-change="onDetailDirty"
       />
 
-      <!-- 详情加载中：骨架按"标题 + 若干字段行"的形状占位，与表单详情同构，
-           数据到达时是填充而不是重排 -->
-      <div v-else-if="loadingDetail" class="vdfs-detail-skeleton" aria-busy="true">
-        <SkeletonBlock :width="'38%'" :height="0.95" />
-        <SkeletonBlock v-for="i in DETAIL_SKELETON_ROWS" :key="i" :lines="1" :height="0.85" />
-      </div>
       <div v-else class="vdfs-placeholder">
         <!-- 深链指向的条目没找到时，占位符必须给出理由：否则「← 选择一个资源」
              读起来像是用户自己没选，而不是地址里的那一项失效了。 -->
@@ -235,7 +250,7 @@
     icon="🗑"
     icon-kind="danger"
     @confirm="confirmDelete"
-    @cancel="pendingDelete = false"
+    @cancel="cancelDelete"
   />
 
   <!-- 未保存离开确认：详情表单/文本改到一半就切走会静默丢内容，这里兜住。
@@ -255,7 +270,8 @@
 </template>
 
 <script setup lang="ts">
-import { computed, onBeforeUnmount, onMounted, ref, watch } from 'vue'
+import { computed, onBeforeUnmount, onMounted, ref, shallowRef, watch } from 'vue'
+import { vOverlayScrollbar } from '@/directives/overlayScrollbar'
 import Workbench from '@/components/common/Workbench.vue'
 import VdfsCard from '@/components/common/VdfsCard.vue'
 import VdfsTreeNode from './VdfsTreeNode.vue'
@@ -322,6 +338,7 @@ const {
   navItems,
   selectDir,
   selectedName,
+  pinnedAtAddr,
   cwd,
   cwdNode,
   cwdAddr,
@@ -331,6 +348,7 @@ const {
   treeNodes,
   treeTruncated,
   treeMessage,
+  treeError,
   filteredItems,
   searchable,
   filter,
@@ -353,6 +371,8 @@ const {
   nodeText,
   formData,
   loadingDetail,
+  detailLoadError,
+  retryDetail,
   saving,
   actionBusy,
   detailError,
@@ -411,44 +431,43 @@ watch(
   { immediate: true },
 )
 
-// ==================== 进入「可新建」的目录时自动备好一张草稿 ====================
+// ==================== 空目录自动备好一张草稿 ====================
 //
-// 空目录里唯一能做的事就是新建，而新建详情已经铺在右栏 ⇒ 中栏整栏收起（判据在
-// `common/Workbench.vue` 的 `showList`）。这里只负责**把那张草稿备好**。
+// 只有**已加载完成、确实为空**的可新建目录才自动铺草稿（新用户引导）；已有条目的
+// 目录默认保持「列表 + 空详情」，草稿只由用户点新建 / Ctrl+N / 命令面板打开。
 //
-// ⚠️ 监听源是**刚读回来的目录自述**（`cwdNode`），**不是**目录地址（`cwd`）。换目录
-// 时 `cwd` 立刻变、`cwdNode` 要等 `refresh()` 回来才更新，中间那一拍 `creatableType`
-// 还是**上一栏**的——拿它开草稿，就把上一类的详情页开到了这一栏上（用户报的「模型
-// 页显示智能体详情、会话页显示模型详情」，一步滞后）。草稿的类型只能来自当前目录
-// 自己的自述。
+// 自述与条目必须同源：一次 list 回执同时更新 items、cwdNode、cwdAddr；只有
+// `cwdAddr === cwd` 才认这份自述，且 loading / loadError 期间不把空数组当结果。
+// 类型仍只来自 `creatableType`（它内部也核同源），不出现任何资源类型名。
 //
-// ⚠️ 判据**不得出现类型名**：曾写成 `creatableType.ext === 'session'`，结果只有会话
-// 页有草稿、其余类型永远收不了栏。类型只由目录自述 `new_type` 决定。
-//
-// 两条边界：① 用户还没选中任何东西（不抢深链进来的选择）；② 每个目录只开一次
-// （否则清空选中 / 删掉刚选中的项之后草稿会"复活"）。
-// ③ **schema 驱动的选择器页不自动开**（如插件市场）：它的数据在 `schema` 里，
-//    进目录第一眼该是已装列表，草稿只由用户点「新建 / 添加插件」打开。
-//    判据来自渲染注册表（落成 ext → 渲染器），不写资源类型名、不改内核协议。
+// 深链在 list 之后还要 select / stat 落位，因此仅看 selectedNode 不够；pinnedAtAddr
+// 覆盖整个到达态，避免慢 stat 时被草稿抢走。每个目录只自动开一次，清空选中或删掉
+// 条目不会让草稿「复活」。schema 驱动的选择器页（如插件市场）同样不自动开。
 let autoDraftDone = false
+/** undefined = 没有待处理的明确新建；null = 当前页；字符串 = 目标目录。 */
+let pendingNewTarget: string | null | undefined
+const autoDraftContext = computed(() => ({
+  dir: cwd.value,
+  selfAddr: cwdAddr.value,
+  itemCount: items.value.length,
+  loading: loading.value,
+  loadError: loadError.value,
+  selected: selectedNode.value,
+  deepLinked: pinnedAtAddr.value,
+  type: creatableType.value,
+}))
 watch(
-  () => cwdNode.value,
-  (node) => {
-    if (autoDraftDone || !node?.new_type) return
-    if (isSchemaDrivenExt(node.new_type.node_ext ?? node.new_type.ext)) return
-    if (selectedNode.value) return
+  autoDraftContext,
+  (ctx, prev) => {
+    if (prev && prev.dir !== ctx.dir) autoDraftDone = false
+    if (pendingNewTarget !== undefined) return
+    if (autoDraftDone || ctx.loading || ctx.loadError || ctx.selfAddr !== ctx.dir) return
+    if (!ctx.type || isSchemaDrivenExt(ctx.type.node_ext ?? ctx.type.ext)) return
+    if (ctx.itemCount > 0 || ctx.selected || ctx.deepLinked) return
     autoDraftDone = true
     startNew()
   },
   { immediate: true },
-)
-
-// 换目录时重置「已自动开过」的标记：新目录是新的上下文，理应各自开一份。
-watch(
-  () => cwd.value,
-  () => {
-    autoDraftDone = false
-  },
 )
 
 // ==================== 未保存离开拦截 ====================
@@ -457,9 +476,18 @@ watch(
 const detailDirty = ref(false)
 const pendingLeave = ref(false)
 let queuedLeave: (() => void) | null = null
+let leaveResolver: ((allowed: boolean) => void) | null = null
 
 function onDetailDirty(dirty: boolean) {
   detailDirty.value = dirty
+}
+
+function resetLeave() {
+  queuedLeave = null
+  pendingLeave.value = false
+  const resolve = leaveResolver
+  leaveResolver = null
+  resolve?.(false)
 }
 
 // 兜底：任何路径导致的详情节点切换（含保存后 select、自动草稿、后端收敛）都清掉
@@ -468,8 +496,7 @@ watch(
   () => selectedNode.value?.path ?? selectedNode.value?.id,
   () => {
     detailDirty.value = false
-    queuedLeave = null
-    pendingLeave.value = false
+    resetLeave()
   },
 )
 
@@ -483,17 +510,28 @@ function guardLeave(action: () => void) {
   pendingLeave.value = true
 }
 
+/** 路由宿主用它拦截浏览器 Back/Forward；控件只提供确认，不关心路由实现。 */
+function confirmRouteLeave(): Promise<boolean> {
+  if (!detailDirty.value) return Promise.resolve(true)
+  pendingLeave.value = true
+  return new Promise((resolve) => {
+    leaveResolver = resolve
+  })
+}
+
 function confirmLeave() {
   pendingLeave.value = false
+  detailDirty.value = false
   const action = queuedLeave
   queuedLeave = null
-  detailDirty.value = false
+  const resolve = leaveResolver
+  leaveResolver = null
   action?.()
+  resolve?.(true)
 }
 
 function cancelLeave() {
-  pendingLeave.value = false
-  queuedLeave = null
+  resetLeave()
 }
 
 /** 用户点「新建」：也是离开当前详情，过闸；自动备草稿不经过这里 */
@@ -504,19 +542,47 @@ function startNewFromButton() {
 /**
  * 全局「新建」请求（Ctrl+N / 命令面板）。
  *
- * 那两个入口只 push 到类别目录；当目录里已经选中一项时，路由原地不动，
- * 自动草稿的判据（未选中任何项）也不成立，于是「新建」毫无反应。这里让当前
- * 工作台直接执行与按钮同一条路径（含未保存离开闸）。请求带地址时只认自己的
- * 目录，避免跳转途中别页抢先铺出错误的草稿。
+ * 那两个入口只 push 到类别目录；当目录里已经选中一项时，路由原地不动。
+ * 已有条目的目录不再自动铺草稿，因此这里让当前工作台直接执行与按钮同一条
+ * 路径（含未保存离开闸）。请求带地址时只认自己的目录，避免跳转途中别页抢先
+ * 铺出错误的草稿。
  */
-function onNewResourceRequest(e: Event) {
-  const target = (e as CustomEvent<string | undefined>).detail
+function flushPendingNewResource() {
+  if (pendingNewTarget === undefined) return
+  const target = pendingNewTarget
   if (target && target !== cwd.value) return
-  startNewFromButton()
+  if (loading.value || loadError.value || cwdAddr.value !== cwd.value) return
+  pendingNewTarget = undefined
+  if (canCreate.value) startNewFromButton()
 }
 
-onMounted(() => window.addEventListener(NEW_RESOURCE_EVENT, onNewResourceRequest))
-onBeforeUnmount(() => window.removeEventListener(NEW_RESOURCE_EVENT, onNewResourceRequest))
+watch(
+  [cwd, cwdAddr, canCreate, loading, loadError],
+  flushPendingNewResource,
+  { immediate: true },
+)
+
+function onNewResourceRequest(e: Event) {
+  pendingNewTarget = (e as CustomEvent<string | undefined>).detail ?? null
+  flushPendingNewResource()
+}
+
+function onBeforeUnload(event: BeforeUnloadEvent) {
+  if (!detailDirty.value) return
+  event.preventDefault()
+  event.returnValue = true
+}
+
+onMounted(() => {
+  window.addEventListener(NEW_RESOURCE_EVENT, onNewResourceRequest)
+  window.addEventListener('beforeunload', onBeforeUnload)
+})
+onBeforeUnmount(() => {
+  window.removeEventListener(NEW_RESOURCE_EVENT, onNewResourceRequest)
+  window.removeEventListener('beforeunload', onBeforeUnload)
+  pendingNewTarget = undefined
+  resetLeave()
+})
 
 // ==================== 钻入（emit，宿主决定呈现） ====================
 
@@ -586,7 +652,8 @@ function listHasFocus(): boolean {
  * 绕回会把人甩到看不见的位置，比多按一次键更糟。
  */
 function moveCardFocus(step: number) {
-  const cards = Array.from(listRef.value?.querySelectorAll<HTMLElement>('.vdfs-card') ?? [])
+  const selector = treeMode.value ? '.tree-row' : '.vdfs-card'
+  const cards = Array.from(listRef.value?.querySelectorAll<HTMLElement>(selector) ?? [])
   if (cards.length === 0) return
   const active = document.activeElement as HTMLElement | null
   const at = active ? cards.indexOf(active) : -1
@@ -660,7 +727,7 @@ const DETAIL_SKELETON_ROWS = 5
  * 上，保留中栏反而给了用户换一个选项的余地。
  */
 const hasDetail = computed(() => {
-  if (loadingDetail.value) return true
+  if (loadingDetail.value || detailLoadError.value) return true
   return Boolean(selectedNode.value && rendererComp.value)
 })
 
@@ -695,7 +762,7 @@ const rendererData = computed<unknown>(() => {
   return null
 })
 
-const rendererRef = ref<{ markSaved?: () => void } | null>(null)
+const rendererRef = ref<{ markSaved?: () => void; currentTitle?: () => string } | null>(null)
 
 function onSave(payload: unknown) {
   const r = renderer.value
@@ -721,10 +788,11 @@ function onSave(payload: unknown) {
 
 /** 删除确认：确认前不动数据（目录是递归删除，节点内容不可撤销） */
 const pendingDelete = ref(false)
-const deleteTargetIsDir = computed(() => Boolean(selectedNode.value && isVdfsDir(selectedNode.value)))
+const deleteTarget = shallowRef<VdfsItem | null>(null)
+const deleteTargetIsDir = computed(() => Boolean(deleteTarget.value && isVdfsDir(deleteTarget.value)))
 
 const deleteConfirmMessage = computed(() => {
-  const node = selectedNode.value
+  const node = deleteTarget.value
   if (!node) return ''
   const name = node.title || node.name
   return deleteTargetIsDir.value
@@ -733,13 +801,23 @@ const deleteConfirmMessage = computed(() => {
 })
 
 function onDelete() {
-  if (!selectedNode.value) return
+  const node = selectedNode.value
+  if (!node) return
+  const currentTitle = rendererRef.value?.currentTitle?.()
+  deleteTarget.value = { ...node, title: currentTitle || node.title }
   pendingDelete.value = true
 }
 
 function confirmDelete() {
   pendingDelete.value = false
-  void removeSelected()
+  const target = deleteTarget.value
+  deleteTarget.value = null
+  if (target) void removeSelected(target)
+}
+
+function cancelDelete() {
+  pendingDelete.value = false
+  deleteTarget.value = null
 }
 
 /**
@@ -769,6 +847,8 @@ async function onCreated(id: string) {
   if (target) void select(target)
 }
 
+defineExpose({ confirmRouteLeave })
+
 // ==================== 列表项展示 ====================
 //
 // 卡片上那几个可见元素取什么值（状态点 / 状态文案 / 徽标 / 标签 / 图标），
@@ -782,13 +862,13 @@ async function onCreated(id: string) {
 <style scoped>
 /* ============== 新建（本栏唯一主操作） ============== */
 /* 填充主题色：与同排的次要图标按钮（透明底）拉开层级。
-   尺寸沿用 `.icon-btn` 的 1.625rem 方形，故两者基线对齐、不撑高 header。 */
+   尺寸沿用 `.icon-btn` 的 2rem 方形，故两者基线对齐、不撑高 header。 */
 .new-btn {
   display: flex;
   align-items: center;
   justify-content: center;
-  width: 1.625rem;
-  height: 1.625rem;
+  width: 2rem;
+  height: 2rem;
   border: none;
   border-radius: var(--radius-md);
   background: var(--accent);
@@ -814,7 +894,9 @@ async function onCreated(id: string) {
 }
 
 .vdfs-filter-input {
+  box-sizing: border-box;
   width: 100%;
+  min-height: 2rem;
   padding: 0.3rem 1.6rem 0.3rem 0.6rem;
   border: 1px solid var(--border-default);
   border-radius: var(--radius-md);
@@ -837,9 +919,9 @@ async function onCreated(id: string) {
 
 .filter-clear {
   position: absolute;
-  right: 0.85rem;
-  width: 1.1rem;
-  height: 1.1rem;
+  right: 0.65rem;
+  width: 1.5rem;
+  height: 1.5rem;
   display: flex;
   align-items: center;
   justify-content: center;
@@ -859,6 +941,7 @@ async function onCreated(id: string) {
 /* 空态里的动作：恢复路径（清除筛选）与引导入口（新建）共用一个原子。
    不能只有一个说明而没有出口。 */
 .empty-action {
+  min-height: 2rem;
   margin-top: 0.5rem;
   padding: 0.3rem 0.85rem;
   border: 1px solid var(--border-default);
@@ -898,12 +981,28 @@ async function onCreated(id: string) {
 }
 
 /* 有界列表的收尾（滚到底可见；也提供显式入口） */
+.tree-error,
+.vdfs-detail-error {
+  display: flex;
+  flex-direction: column;
+  align-items: center;
+  gap: 0.65rem;
+  padding: 1rem;
+  color: var(--danger-fg);
+  font-size: 0.78rem;
+  text-align: center;
+}
+.tree-error p,
+.vdfs-detail-error p {
+  margin: 0;
+}
 .list-more {
   display: flex;
   justify-content: center;
   padding: 0.75rem 0 1rem;
 }
 .more-btn {
+  min-height: 2rem;
   padding: 0.35rem 1rem;
   border: 1px solid var(--border-default);
   border-radius: 999px;

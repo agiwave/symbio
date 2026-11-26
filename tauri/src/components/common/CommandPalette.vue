@@ -17,9 +17,9 @@
   3. **一次 `vdfs/tree`，筛词在本地**。打字不发请求 ⇒ 面板不会把后端的读放大
      乘上按键次数；被截断时 `truncated` 会说出来，不把「没返回」演成「不存在」。
 
-  「新建 X」与「去 X 那一类」是**同一个目的地**：工作台进入带 `new_type` 的目录、
-  且没选中任何项时会自动铺好一张草稿（`VdfsWorkbench` 的 `autoDraftDone`），
-  因此面板不做出两条长得不同的入口。
+  「新建 X」与「浏览 X 那一类」是**同一个目的地、两种动作**：前者到站后显式
+  发新建请求（已选中某项时也能铺草稿），后者只导航。候选用 `action` 区分，
+  不从 key 前缀猜；类别导航标题只露 `title`，新建标题只露 `new_type.title`。
 -->
 <template>
   <BaseModal
@@ -33,8 +33,8 @@
       v-model="query"
       class="pa-input"
       type="text"
-      placeholder="搜索资源，或回车进入某一类…"
-      aria-label="搜索资源"
+      placeholder="搜索资源、设置或命令…"
+      aria-label="搜索资源、设置或命令"
       role="combobox"
       aria-controls="palette-results"
       :aria-expanded="true"
@@ -68,18 +68,19 @@
             @mouseenter="activeKey = e.key"
             @click="activate(e.key)"
           >
-            <span class="pa-title">{{ e.title }}</span>
-            <span class="pa-hint">{{ e.hint }}</span>
+            <span class="pa-title" :title="e.title">{{ e.title }}</span>
+            <span class="pa-hint" :title="e.hint">{{ e.hint }}</span>
           </button>
         </section>
         <p v-if="flat.length === 0" class="pa-note">
-          {{ query.trim() ? '没有匹配的资源' : '没有可新建的类别' }}
+          {{ query.trim() ? '没有匹配的资源或命令' : '没有可导航的类别或可用命令' }}
         </p>
       </template>
     </div>
 
     <div class="pa-foot">
       <span v-if="truncated" class="pa-warn">清单未取完（还有目录没展开），结果可能不全</span>
+      <span v-else-if="limited" class="pa-warn">仅显示前 {{ flat.length }} 条，输入更具体的关键词可继续筛选</span>
       <span class="pa-keys"><kbd>↑↓</kbd> 选择 · <kbd>Enter</kbd> 前往 · <kbd>Esc</kbd> 关闭</span>
     </div>
   </BaseModal>
@@ -95,10 +96,10 @@ import { READBACK_REASON } from '@/services/readback'
 import { vdfsRoot } from '@/schemas/vdfsRoot'
 import { vdfsBrowserPathOf } from '@/schemas/vdfsAddress'
 import type { VdfsItem } from '@/schemas/vdfs'
-import { buildPalette, flattenGroups } from '@/utils/palette'
+import { buildPalette, flattenGroups, type PaletteEntry } from '@/utils/palette'
 import { requestNewResource } from '@/utils/newResource'
 
-const props = defineProps<{ visible: boolean }>()
+const props = defineProps<{ visible: boolean; commands?: PaletteEntry[] }>()
 const emit = defineEmits<{ (e: 'close'): void }>()
 
 const router = useRouter()
@@ -114,9 +115,31 @@ const listRef = ref<HTMLElement | null>(null)
 
 /** 类别 + 条目两层（再深是会话内部的事，面板不替用户钻进去） */
 const DEPTH = 2
+const PALETTE_MAX = 40
+const PALETTE_PER_GROUP = 12
 
-const groups = computed(() => buildPalette(nodes.value, { root: vdfsRoot(), query: query.value }))
+const groups = computed(() =>
+  buildPalette(nodes.value, {
+    root: vdfsRoot(),
+    query: query.value,
+    commands: props.commands,
+    perGroup: PALETTE_PER_GROUP,
+    max: PALETTE_MAX,
+  })
+)
 const flat = computed(() => flattenGroups(groups.value))
+const limited = computed(
+  () =>
+    flattenGroups(
+      buildPalette(nodes.value, {
+        root: vdfsRoot(),
+        query: query.value,
+        commands: props.commands,
+        perGroup: Number.MAX_SAFE_INTEGER,
+        max: Number.MAX_SAFE_INTEGER,
+      })
+    ).length > flat.value.length
+)
 
 /** 结果行的 DOM id（按摊平序编，避免用路径做 id） */
 const optionIds = computed(() => new Map(flat.value.map((e, i) => [e.key, `pa-opt-${i}`])))
@@ -208,17 +231,19 @@ function move(step: number) {
 /**
  * 回车 / 点击：把数据地址换成浏览器地址推过去，然后收面板。
  *
- * 「新建 X」命令项与「去 X 那一类」共用一个目的地（类别目录）；但若那一类里
- * 已经选中了一项，只 push 地址不会铺草稿，面板里的「新建」就白点了。命令项的
- * key 以 `new:` 开头（`buildPalette` 的唯一标记），到站后补一条新建请求。
+ * 只有显式 `action === 'new'` 才在到站后补一条新建请求；类别导航、资源结果与
+ * 外壳设置命令一律只路由。key 只是稳定标识，不承担动作语义。
  */
 function activate(key?: string) {
   const entry = key ? flat.value.find((e) => e.key === key) : flat.value[activeIndex.value]
   if (!entry) return
-  const isNewCommand = entry.key.startsWith('new:')
+  const isNewCommand = entry.action === 'new'
   emit('close')
   // 测试里的 router.push 桩返回 void，生产里是 Promise——统一包一层再链式。
-  void Promise.resolve(router.push(vdfsBrowserPathOf(entry.addr))).then(() => {
+  const target = entry.select
+    ? { path: vdfsBrowserPathOf(entry.addr), query: { select: entry.select } }
+    : vdfsBrowserPathOf(entry.addr)
+  void Promise.resolve(router.push(target)).then(() => {
     if (isNewCommand) void nextTick(() => requestNewResource(entry.addr))
   })
 }

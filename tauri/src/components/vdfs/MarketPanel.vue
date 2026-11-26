@@ -10,7 +10,7 @@
   这里不据此分叉出任何恒空分支。
 -->
 <template>
-  <section class="market">
+  <section class="market" :aria-busy="installing">
     <header class="market-head">
       <h2 class="market-title">插件市场</h2>
       <p class="market-desc">添加尚未安装的可选插件。已安装的插件可在列表中卸载。</p>
@@ -25,7 +25,9 @@
           <span class="card-source">{{ sourceLabel(c.source) }}</span>
         </div>
         <code class="card-id">{{ c.name }}</code>
-        <button type="button" class="install-btn" @click="install(c)">安装</button>
+        <button type="button" class="install-btn" :disabled="installing" @click="install(c)">
+          {{ installing ? '安装中…' : '安装' }}
+        </button>
       </article>
     </div>
 
@@ -71,6 +73,7 @@ const providerField = computed<string>(() => {
 })
 
 const visible = candidates
+const installing = computed(() => Boolean(props.saving || props.testing))
 
 function sourceLabel(source: string): string {
   return source === 'builtin' ? '内置可选' : source || '未知来源'
@@ -83,6 +86,7 @@ function sourceLabel(source: string): string {
  * 回到页面上，不在渲染器里再写一份 VDFS。
  */
 function install(c: Candidate): void {
+  if (installing.value) return
   emit('save', { [providerField.value]: c.provider })
 }
 </script>
@@ -92,6 +96,7 @@ function install(c: Candidate): void {
   padding: 20px;
   overflow-y: auto;
   height: 100%;
+  min-width: 0;
 }
 
 .market-head {
@@ -113,20 +118,21 @@ function install(c: Candidate): void {
 .market-error {
   padding: 10px 12px;
   margin: 0 0 16px;
-  border: 1px solid var(--border-default);
+  border: 1px solid var(--danger-border);
   border-radius: var(--radius-md, 8px);
-  background: var(--surface-sunken);
-  color: var(--text-primary);
+  background: var(--danger-subtle-bg);
+  color: var(--danger-fg);
   font-size: var(--font-size-sm, 13px);
 }
 
 .market-grid {
   display: grid;
-  grid-template-columns: repeat(auto-fill, minmax(220px, 1fr));
+  grid-template-columns: repeat(auto-fill, minmax(min(220px, 100%), 1fr));
   gap: 12px;
 }
 
 .market-card {
+  min-width: 0;
   display: flex;
   flex-direction: column;
   gap: 8px;
@@ -144,6 +150,8 @@ function install(c: Candidate): void {
 }
 
 .card-name {
+  min-width: 0;
+  overflow-wrap: anywhere;
   margin: 0;
   font-size: var(--font-size-base, 14px);
   font-weight: var(--font-weight-semibold, 600);
@@ -160,6 +168,7 @@ function install(c: Candidate): void {
 }
 
 .card-id {
+  overflow-wrap: anywhere;
   color: var(--text-muted);
   font-family: var(--font-mono, monospace);
   font-size: var(--font-size-xs, 11px);
@@ -167,11 +176,12 @@ function install(c: Candidate): void {
 
 .install-btn {
   align-self: flex-start;
+  min-height: 2rem;
   padding: 6px 14px;
   border: 1px solid var(--border-default);
   border-radius: var(--radius-md, 8px);
   background: var(--accent);
-  color: var(--surface-panel);
+  color: var(--text-on-accent);
   font-size: var(--font-size-sm, 13px);
   cursor: pointer;
 }

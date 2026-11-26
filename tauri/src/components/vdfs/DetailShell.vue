@@ -37,7 +37,7 @@
   shell 不必也不该再排一次。
 -->
 <template>
-  <div class="detail-shell" :class="{ 'is-panel': panel }">
+  <div v-overlay-scrollbar="!panel" class="detail-shell" :class="{ 'is-panel': panel }">
     <header class="detail-head">
       <div class="head-title">
         <slot name="title">
@@ -63,6 +63,7 @@
 
 <script setup lang="ts">
 import { computed } from 'vue'
+import { vOverlayScrollbar } from '@/directives/overlayScrollbar'
 import VdfsActions from './VdfsActions.vue'
 import { mergeDetailActions, type DetailAction } from '@/schemas/vdfs'
 
@@ -134,12 +135,14 @@ const merged = computed(() =>
   align-items: center;
   justify-content: space-between;
   gap: 0.75rem;
+  min-height: var(--workbench-bar-height);
+  height: var(--workbench-bar-height);
   flex-shrink: 0;
-  flex-wrap: wrap;
+  flex-wrap: nowrap;
 }
 
 .detail-shell.is-panel .detail-head {
-  padding: 0.5rem 1rem;
+  padding: 0.4375rem 1rem;
   border-bottom: 1px solid var(--border-default);
   background: var(--surface-panel);
 }
@@ -149,7 +152,9 @@ const merged = computed(() =>
   align-items: center;
   gap: 0.5rem;
   min-width: 0;
-  flex-wrap: wrap;
+  flex: 1 1 auto;
+  overflow: hidden;
+  flex-wrap: nowrap;
 }
 
 .title {
@@ -167,8 +172,14 @@ const merged = computed(() =>
   align-items: center;
   gap: 0.4rem;
   flex-shrink: 0;
-  flex-wrap: wrap;
+  flex-wrap: nowrap;
   justify-content: flex-end;
+  max-width: 65%;
+  overflow-x: auto;
+  scrollbar-width: none;
+}
+.head-actions::-webkit-scrollbar {
+  display: none;
 }
 
 .detail-error {

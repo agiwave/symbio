@@ -54,6 +54,9 @@ describe('MessageNode：根级骨架（skeleton）容器三形态', () => {
     expect(w.find('.node-tag.run').text()).toContain('运行中')
     await w.find('.node-head').trigger('click')
     expect(w.find('.skeleton-pending').exists()).toBe(true)
+    expect(w.find('.skeleton-pending').attributes()).toMatchObject({
+      role: 'status', 'aria-live': 'polite', 'aria-atomic': 'true',
+    })
     expect(w.text()).toContain('正在思考')
   })
 
@@ -91,6 +94,9 @@ describe('MessageNode：根级骨架（skeleton）容器三形态', () => {
     // 骨架级错误条存在且携带错误文本；叶子级错误由父失败抑制（不重复报错）
     const boxes = w.findAll('.error-box')
     expect(boxes.length).toBe(1)
+    expect(boxes[0].attributes()).toMatchObject({
+      role: 'alert', 'aria-live': 'assertive', 'aria-atomic': 'true',
+    })
     expect(boxes[0].text()).toContain('请求失败')
     await boxes[0].find('button.retry').trigger('click')
     expect(w.emitted('retry')?.[0]).toEqual(['t1'])
@@ -115,6 +121,9 @@ describe('MessageNode：根级骨架（skeleton）容器三形态', () => {
     await w.find('.node-head').trigger('click')
     const boxes = w.findAll('.error-box')
     expect(boxes.length, '中止必须有交代，否则这一轮看起来像正常结束').toBe(1)
+    expect(boxes[0].attributes()).toMatchObject({
+      role: 'alert', 'aria-live': 'assertive', 'aria-atomic': 'true',
+    })
     expect(boxes[0].text()).toContain('已中止')
     expect(boxes[0].text()).not.toContain('⚠')
     expect(boxes[0].classes(), '不渲染成故障红').toContain('aborted')

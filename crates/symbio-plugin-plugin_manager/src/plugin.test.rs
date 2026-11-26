@@ -178,6 +178,16 @@ fn definition_of(node: &VdfsNode) -> DetailDefinition {
     serde_json::from_value(node.schema.clone().expect("条目应带定义")).expect("定义应可解析")
 }
 
+fn meta_tags_of(node: &VdfsNode) -> Vec<&str> {
+    node.attributes
+        .get("meta_tags")
+        .and_then(Value::as_array)
+        .expect("条目节点应带 meta_tags")
+        .iter()
+        .map(|tag| tag.as_str().expect("meta_tags 应为字符串数组"))
+        .collect()
+}
+
 fn action_of<'a>(d: &'a DetailDefinition, id: &str) -> &'a DetailAction {
     d.actions
         .iter()
@@ -332,35 +342,111 @@ async fn list_hides_required_plugins_without_config() {
     );
 }
 
-/// 条目显式无状态：启用 / 停用 / 装配失败都不画状态点，失败原因仍随描述呈现
+/// 四种装配态都用明确标签表达，不借用会画绿点的运行时 status。
 #[tokio::test]
-async fn entry_has_no_status_dot_in_any_assembly_state() {
+async fn entry_assembly_states_are_explicit_meta_tags() {
+    let unmounted = PluginEntry {
+        mounted: false,
+        ..entry("delta", "delta_factory", false, true)
+    };
     let fake = Arc::new(FakeRegistry::new(vec![
         entry("alpha", "alpha_factory", false, true),
         entry("beta", "beta_factory", false, false),
         failed_entry("gamma", "本构建没有工厂 gone_factory（未注册）"),
+        unmounted,
     ]));
     let p = plugin_with(fake);
 
-    // 三种装配态都不画点——启用 / 停用是装配位、不是运行态，留着缺省的
-    // active 会在列表每一项上画一个绿点（凭空造出来的信息）。
-    for name in ["alpha", "beta", "gamma"] {
-        assert_eq!(
-            stat(&p, &vctx(), name).await.status,
-            VDFS_STATUS_NONE,
-            "{name} 不应有状态点"
-        );
+    for (name, label) in [
+        ("alpha", "已启用"),
+        ("beta", "已停用"),
+        ("gamma", "装配失败"),
+        ("delta", "未挂载"),
+    ] {
+        let node = stat(&p, &vctx(), name).await;
+        assert_eq!(meta_tags_of(&node), vec![label], "{name} 的装配态标签");
+        assert_eq!(node.status, VDFS_STATUS_NONE, "{name} 不应有状态点");
     }
-    let gamma = stat(&p, &vctx(), "gamma").await;
-    assert!(
-        gamma
-            .description
-            .as_deref()
-            .unwrap_or_default()
-            .contains("未注册"),
-        "失败原因要跟着条目走（描述位），否则用户只知道它不对、不知道为什么不装配：{}",
-        gamma.description.unwrap_or_default()
+}
+
+/// 必需位只补一个标签，不改变装配态，也不增加状态点。
+#[tokio::test]
+async fn required_entry_adds_required_meta_tag() {
+    let fake = Arc::new(FakeRegistry::new(vec![entry(
+        "core",
+        "core_factory",
+        true,
+        true,
+    )]));
+    let p = plugin_with(fake);
+
+    let node = stat(&p, &vctx(), "core").await;
+    assert_eq!(meta_tags_of(&node), vec!["已启用", "必需"]);
+    assert_eq!(node.status, VDFS_STATUS_NONE);
+}
+
+/// 装配失败补充原因而不替换用途说明；没有说明时只呈现原因。
+#[tokio::test]
+async fn failed_entry_preserves_description_and_appends_reason() {
+    let described = PluginEntry {
+        description: Some("协助规划与执行".to_string()),
+        ..failed_entry("gamma", "工厂未注册")
+    };
+    let fake = Arc::new(FakeRegistry::new(vec![
+        described,
+        failed_entry("delta", "构造时 panic"),
+    ]));
+    let p = plugin_with(fake);
+
+    assert_eq!(
+        stat(&p, &vctx(), "gamma").await.description.as_deref(),
+        Some("协助规划与执行；装配失败：工厂未注册")
     );
+    assert_eq!(
+        stat(&p, &vctx(), "delta").await.description.as_deref(),
+        Some("装配失败：构造时 panic")
+    );
+}
+
+/// 重复的最终标题用目录实例名消歧，provider 工厂 id 不抢占可见标签；单选 stat 不猜全局重复。
+#[tokio::test]
+async fn list_disambiguates_duplicate_final_titles_by_instance_name() {
+    let same_title = PluginEntry {
+        title: "网络工具".to_string(),
+        provider: "internal_agent_factory".to_string(),
+        ..entry("agent_copy", "other_factory", false, true)
+    };
+    let fake = Arc::new(FakeRegistry::new(vec![
+        entry("web", "web_factory", false, true),
+        same_title,
+        entry("beta", "beta_factory", false, true),
+    ]));
+    let p = plugin_with(fake);
+    let ctx = ctx_with_configs().await;
+
+    let items = list(&p, &ctx).await;
+    for (name, expected) in [
+        ("web", vec!["已启用", "实例：web"]),
+        ("agent_copy", vec!["已启用", "实例：agent_copy"]),
+        ("beta", vec!["已启用"]),
+    ] {
+        let node = &items
+            .iter()
+            .find(|item| item.node.name == name)
+            .expect("条目应在清单中")
+            .node;
+        assert_eq!(
+            node.title,
+            if name == "beta" {
+                "beta 的名字"
+            } else {
+                "网络工具"
+            }
+        );
+        assert_eq!(meta_tags_of(node), expected, "{name} 的清单标签");
+    }
+
+    assert_eq!(meta_tags_of(&stat(&p, &ctx, "web").await), vec!["已启用"]);
 }
 
 /// 没有配置文档的插件也有一张只读概览——否则点开一片空白，连装配按钮都没有落脚处

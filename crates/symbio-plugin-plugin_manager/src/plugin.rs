@@ -167,6 +167,19 @@ fn leaf(path: &str) -> VdfsResult<&str> {
     Ok(p)
 }
 
+/// 装配态是标签而不是运行态：借用 `status` 会让前端把装配位误画成绿点。
+fn assembly_label(entry: &PluginEntry) -> &'static str {
+    if !entry.enabled {
+        "已停用"
+    } else if entry.mounted {
+        "已启用"
+    } else if entry.mount_error.is_some() {
+        "装配失败"
+    } else {
+        "未挂载"
+    }
+}
+
 /// 条目节点：一个插件在界面上的样子
 ///
 /// 有配置文档的插件沿用**拥有者给的呈现定义**（标题 / 表单定义都在里面），本插件只
@@ -218,20 +231,29 @@ fn entry_node(entry: &PluginEntry, config: Option<VdfsItem>) -> VdfsNode {
             serde_json::Value::String(icon.to_string()),
         );
     }
-    n.description = config
+    let mut tags = vec![Value::String(assembly_label(entry).to_string())];
+    if entry.required {
+        tags.push(Value::String("必需".to_string()));
+    }
+    n.attributes
+        .insert("meta_tags".to_string(), Value::Array(tags));
+    let description = config
         .as_ref()
         .and_then(|c| c.node.description.clone())
         .or_else(|| entry.description.clone());
+    n.description = match &entry.mount_error {
+        Some(reason) => Some(match description.filter(|d| !d.trim().is_empty()) {
+            // 失败原因补充用途说明，不能把插件自己的用户语义顶掉。
+            Some(description) => format!("{description}；装配失败：{reason}"),
+            None => format!("装配失败：{reason}"),
+        }),
+        None => description,
+    };
     // 条目**显式无状态**：启用 / 停用是装配位、不是运行态，装配失败原因随描述呈现，
     // 没有「运行中 / 就绪」这种会变化的量可画。留着缺省的 `active` 会在每一项上画
     // 一个绿点——那是凭空造出来的信息（规范 §4.2）。装配态仍由 read 的投影键与
     // 动作条件表达（见 `management_actions`），不依赖状态点。
     n.status = VDFS_STATUS_NONE.to_string();
-    if let Some(reason) = &entry.mount_error {
-        // 原因写进描述：列表行与详情头部都读这一条，不必为它新增一个投影键
-        // 再让前端多认一个字段——「为什么不见了」这条事实的落点就是节点的描述。
-        n.description = Some(format!("装配失败：{reason}"));
-    }
     n.schema = serde_json::to_value(&definition).ok();
     n
 }
@@ -464,6 +486,8 @@ impl PluginManagerPlugin {
         let entries = self.entries(ctx).await?;
         let configs = Self::config_entries(ctx).await;
         let mut out: Vec<VdfsItem> = Vec::with_capacity(entries.len() + UI_SECTIONS.len());
+        let mut title_counts: std::collections::HashMap<String, usize> =
+            std::collections::HashMap::new();
         for entry in &entries {
             // ui_prefs 由下面的专属入口承载，不再列一条「界面偏好」造成重复。
             if entry.name == PLUGIN_ID_UI_PREFS {
@@ -476,7 +500,28 @@ impl PluginManagerPlugin {
             if entry.required && config.is_none() {
                 continue;
             }
-            out.push(VdfsItem::new(entry_node(entry, config)));
+            let node = entry_node(entry, config);
+            *title_counts.entry(node.title.clone()).or_default() += 1;
+            out.push(VdfsItem::new(node));
+        }
+        // 只按最终可见清单判重：隐藏项不应让唯一可见项多出无意义的实例标签。
+        for item in &mut out {
+            if title_counts
+                .get(&item.node.title)
+                .copied()
+                .unwrap_or_default()
+                > 1
+            {
+                let tag = format!("实例：{}", item.node.name);
+                let tags = item
+                    .node
+                    .attributes
+                    .get_mut("meta_tags")
+                    .and_then(Value::as_array_mut);
+                if let Some(tags) = tags {
+                    tags.push(Value::String(tag));
+                }
+            }
         }
         out.extend(UI_SECTIONS.iter().map(|s| VdfsItem::new(section_node(s))));
         Ok(out)

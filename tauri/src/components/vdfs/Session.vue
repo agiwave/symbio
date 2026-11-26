@@ -59,7 +59,7 @@
   </div>
 </template>
 <script setup lang="ts">
-import { computed, ref, watch } from 'vue'
+import { computed, ref, watch, onBeforeUnmount } from 'vue'
 import {
   isVdfsDraft,
   vdfsBase,
@@ -134,9 +134,28 @@ const draftDefinition = computed<DetailDefinition | null>(
  */
 const draftComposerRef = ref<{
   getDraftMetadata: () => Record<string, unknown>
+  transferImages: (images: ImageAttachment[]) => void
+  restoreImages: (images: ImageAttachment[]) => boolean
 } | null>(null)
 const draftText = ref('')
 const draftImages = ref<ImageAttachment[]>([])
+/** 懒创建期间由草稿发送方持有的 URL；成功转交邮箱，失败 / 取消则由发送方释放。 */
+const claimedImageUrls = new Set<string>()
+let disposed = false
+
+function returnClaimedImages(images: ImageAttachment[]): void {
+  const urls = images
+    .map((image) => image.thumbnailUrl)
+    .filter((url): url is string => !!url && claimedImageUrls.delete(url))
+  if (!disposed && draftComposerRef.value?.restoreImages(images)) return
+  for (const url of urls) URL.revokeObjectURL(url)
+}
+
+onBeforeUnmount(() => {
+  disposed = true
+  // 未开始的草稿附件由 ChatInputArea 释放；进行中的创建必须等结果后再决定
+  // 转交邮箱还是回收，不能在卸载时提前 revoke。
+})
 
 /** 动作分发（ChatMainPanel 头部按钮 → 页面层机制通道） */
 function onAction(a: DetailAction) {
@@ -201,29 +220,48 @@ watch(
  */
 async function onSendFirst() {
   const text = draftText.value.trim()
-  if ((!text && draftImages.value.length === 0) || creating.value) return
+  const images = [...draftImages.value]
+  if ((!text && images.length === 0) || creating.value) return
   creating.value = true
+  // 创建是异步的：先把 URL 所有权从输入区接到发送方，避免等待期间切换页面
+  // 被输入区卸载回收。失败会接回草稿，成功则随首条消息转移给 store 邮箱。
+  for (const image of images) {
+    if (image.thumbnailUrl) claimedImageUrls.add(image.thumbnailUrl)
+  }
+  draftComposerRef.value?.transferImages(images)
+  draftText.value = ''
+  draftImages.value = []
   try {
     // 懒创建：此刻才真正建会话——一次 `vdfs/write`（写会话挂载根，无名字，
     // id 由后端生成）；草稿选择（机制通用 metadata 补丁）随创建一并落库，
     // 保证选中切换后选项栏回显与草稿一致。
     const id = await store.createSessionWithFirstMessage(
       draftComposerRef.value?.getDraftMetadata(),
-      { text, images: draftImages.value.length ? draftImages.value : undefined }
+      { text, images: images.length ? images : undefined }
     )
-    // 清空本地草稿输入（附件的 object URL 所有权已随载荷转移给邮箱，
-    // 故此处**不可 revoke**——契约见 store 的 `PendingFirstMessage`）
-    draftText.value = ''
-    draftImages.value = []
-    emit('created', id)
+    // 成功即转移给邮箱 / 新会话面板；本发送方不再持有，也不得 revoke。
+    claimedImageUrls.clear()
+    if (!disposed) emit('created', id)
   } catch (e) {
-    // 创建失败（后端没落库）→ 必须说出来，否则「点了没反应」；草稿内容原样保留，可重试
-    logger.error('Session', '新建会话失败：', e)
-    showToast('error', `新建会话失败：${e instanceof Error ? e.message : String(e)}`)
+    // 创建失败（后端没落库）→ 必须说出来，否则「点了没反应」；草稿内容原样保留，可重试。
+    // 若切换 / 卸载后还没有接收方，回收本次接手的 URL。
+    returnClaimedImages(images)
+    if (!disposed) {
+      draftText.value = text
+      logger.error('Session', '新建会话失败：', e)
+      showToast('error', `新建会话失败：${e instanceof Error ? e.message : String(e)}`)
+    }
   } finally {
     creating.value = false
   }
 }
+
+defineExpose({
+  currentTitle: () =>
+    store.activeId === vdfsBase(props.node?.path ?? '')
+      ? store.activeTitle
+      : props.node?.title || props.node?.name || '',
+})
 </script>
 
 <style scoped>

@@ -9,7 +9,7 @@
  * 2. 语义落到 class（`toast--success` / `error` / `info`），**颜色不由测试断言**
  *    （值是令牌，归 CSS）。
  * 3. 关闭走**关闭按钮**（可聚焦的语义控件）；正文可选中复制，点正文不关闭；
- *    `aria-live` 与 `role=status` 让读屏能播报，错误另有 assertive 通道。
+ *    普通通知用 `role=status`，错误用 `role=alert`，不重复播报。
  *
  * ⚠️ 单例状态跨用例共享，每条用例前必须清场。Teleport 的内容不在 wrapper 里，
  *    直接查 `document`。
@@ -82,10 +82,16 @@ describe('Toast — 浮层', () => {
     expect(toasts.value).toHaveLength(0)
   })
 
-  it('aria-live 让读屏能播报', () => {
+  it('普通通知用 status，错误用 alert，各自只播报一次', () => {
+    const { showToast } = useToast()
+    showToast('info', '提示')
+    showToast('error', '失败')
     mount(Toast, { attachTo: document.body })
     const region = document.querySelector('.toast-layer')
-    expect(region?.getAttribute('aria-live')).toBe('polite')
     expect(region?.getAttribute('role')).toBe('region')
+    expect(region?.getAttribute('aria-live')).toBeNull()
+    expect(document.querySelector('.toast--info')?.getAttribute('role')).toBe('status')
+    expect(document.querySelector('.toast--error')?.getAttribute('role')).toBe('alert')
+    expect(document.querySelector('.toast-assertive')).toBeNull()
   })
 })

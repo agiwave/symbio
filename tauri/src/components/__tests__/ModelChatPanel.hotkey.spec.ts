@@ -22,6 +22,8 @@ import type { Mock } from 'vitest'
 
 interface ChatStub {
   isLoading: { value: boolean }
+  isStopping: { value: boolean }
+  stopNotice: { value: { tone: 'info' | 'success' | 'error'; text: string } | null }
   isWaitingApproval: { value: boolean }
   isConnected: { value: boolean }
   messageTree: { value: unknown[] }
@@ -43,6 +45,8 @@ vi.mock('@/composables/useChatConnection', async () => {
   const { ref, shallowRef } = await import('vue')
   hoisted.chat = {
     isLoading: ref(false),
+    isStopping: ref(false),
+    stopNotice: ref(null),
     isWaitingApproval: ref(false),
     isConnected: ref(true),
     messageTree: shallowRef([]),
@@ -101,6 +105,8 @@ beforeEach(() => {
   const chat = chatStub()
   for (const fn of [chat.send, chat.abort, chat.removeMessage, chat.resume, chat.expandSkeleton]) fn.mockClear()
   chat.isLoading.value = false
+  chat.isStopping.value = false
+  chat.stopNotice.value = null
 })
 
 afterEach(() => {
@@ -112,6 +118,14 @@ afterEach(() => {
 describe('ModelChatPanel 的 Esc（停止生成）', () => {
   it('★ 正在生成 ⇒ 在输入框里按 Esc 也能中止（allowInInput 是那条守卫的必需例外）', () => {
     chatStub().isLoading.value = true
+    panel()
+
+    expect(pressEscInTextarea()).toEqual({ consumed: true, prevented: true })
+    expect(chatStub().abort).toHaveBeenCalledTimes(1)
+  })
+
+  it('★ 停止请求已回执、权威帧未到（isStopping）⇒ Esc 仍走停止入口，不会改发新消息', () => {
+    chatStub().isStopping.value = true
     panel()
 
     expect(pressEscInTextarea()).toEqual({ consumed: true, prevented: true })

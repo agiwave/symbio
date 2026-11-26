@@ -17,6 +17,9 @@
         >×</button>
       </div>
     </div>
+    <p v-if="attachedImages.length > 0" class="attachment-note">
+      未发送图片仅保留在当前输入，切换会话后会清除
+    </p>
     
     <div ref="wrapperRef" class="input-wrapper">
       <!-- 图片上传按钮 -->
@@ -123,6 +126,17 @@ const textareaRef = ref<HTMLTextAreaElement | null>(null)
 const imageInputRef = ref<HTMLInputElement | null>(null)
 const wrapperRef = ref<HTMLElement | null>(null)
 
+/**
+ * 本输入区创建、且尚未移交出去的 object URL。
+ *
+ * 父区发送 / 懒创建交接前显式调用 `transferImages`；发送失败再经 `restoreImages`
+ * 把所有权接回来。外部传入或已转移的 URL 不在这里释放，避免把接收方的预览 revoke 掉。
+ */
+const ownedThumbnailUrls = new Set<string>()
+const activeReaders = new Set<FileReader>()
+let disposed = false
+let imageQueue: Promise<void> = Promise.resolve()
+
 /** 按用户可见字符计数（`[...str]`），不是 UTF-16 码元——emoji 不该算两个字 */
 const charCount = computed(() => (modelValue.value ? [...modelValue.value].length : 0))
 
@@ -163,7 +177,12 @@ function syncHeight() {
   })
 }
 
-defineExpose({ resetHeight, textarea: textareaRef })
+defineExpose({
+  resetHeight,
+  textarea: textareaRef,
+  transferImages,
+  restoreImages,
+})
 
 // 键盘事件
 //
@@ -189,10 +208,11 @@ function triggerImageUpload() {
 
 async function handleImageSelect(event: Event) {
   const input = event.target as HTMLInputElement
-  if (input.files) {
-    await processImageFiles(Array.from(input.files))
+  try {
+    if (input.files) await processImageFiles(Array.from(input.files))
+  } finally {
+    input.value = ''
   }
-  input.value = ''
 }
 
 async function handlePaste(event: ClipboardEvent) {
@@ -271,8 +291,15 @@ onMounted(() => {
 })
 
 onUnmounted(() => {
+  disposed = true
   window.removeEventListener('paste', handleGlobalPaste)
   resizeObserver?.disconnect()
+  for (const reader of activeReaders) reader.abort()
+  activeReaders.clear()
+  releaseOwnedImages(attachedImages.value)
+  // 已 transfer 的 URL 不在集合里；异步读取也会在 disposed 检查后直接退出。
+  for (const url of ownedThumbnailUrls) URL.revokeObjectURL(url)
+  ownedThumbnailUrls.clear()
 })
 
 /**
@@ -284,7 +311,12 @@ onUnmounted(() => {
 function readFileAsBase64(file: File): Promise<string> {
   return new Promise<string>((resolve, reject) => {
     const reader = new FileReader()
-    reader.onload = () => {
+    activeReaders.add(reader)
+    const settle = (callback: () => void) => {
+      activeReaders.delete(reader)
+      callback()
+    }
+    reader.onload = () => settle(() => {
       const result = typeof reader.result === 'string' ? reader.result : ''
       const comma = result.indexOf(',')
       if (comma < 0) {
@@ -292,51 +324,112 @@ function readFileAsBase64(file: File): Promise<string> {
         return
       }
       resolve(result.slice(comma + 1))
+    })
+    reader.onerror = () => settle(() => reject(reader.error ?? new Error('读取失败')))
+    reader.onabort = () => settle(() => reject(new Error('读取已取消')))
+    try {
+      reader.readAsDataURL(file)
+    } catch (err) {
+      activeReaders.delete(reader)
+      reject(err)
     }
-    reader.onerror = () => reject(reader.error ?? new Error('读取失败'))
-    reader.onabort = () => reject(new Error('读取已取消'))
-    reader.readAsDataURL(file)
   })
 }
 
-async function processImageFiles(files: File[]) {
-  const newImages = [...attachedImages.value]
-  const failures: string[] = []
-  for (const file of files) {
-    if (newImages.length >= MAX_IMAGES) {
-      failures.push(`${file.name}：最多附加 ${MAX_IMAGES} 张图片`)
-      continue
-    }
-    if (file.size > MAX_IMAGE_BYTES) {
-      failures.push(`${file.name}：超过 ${MAX_IMAGE_BYTES / 1024 / 1024}MB 上限`)
-      continue
-    }
-    try {
-      const base64 = await readFileAsBase64(file)
-      const thumbnailUrl = URL.createObjectURL(file)
-      newImages.push({
-        base64,
-        mimeType: file.type,
-        fileName: file.name,
-        thumbnailUrl
-      })
-    } catch (err) {
-      logger.error('ChatInputArea', '处理图片失败', err)
-      failures.push(`${file.name}：读取失败`)
-    }
+/** 只释放仍归本输入区所有的 URL；重复调用不会重复 revoke。 */
+function releaseOwnedImages(images: ImageAttachment[]): void {
+  for (const image of images) {
+    const url = image.thumbnailUrl
+    if (!url || !ownedThumbnailUrls.delete(url)) continue
+    URL.revokeObjectURL(url)
   }
-  attachedImages.value = newImages
-  // 一个坏文件不该吞掉整批：成功的仍然加入，失败的逐条说出来
-  if (failures.length) showToast('error', failures.join('；'))
+}
+
+/** 父区接手发送 / 懒创建载荷时调用；此后卸载与移除都不再碰这些 URL。 */
+function transferImages(images: ImageAttachment[]): void {
+  for (const image of images) {
+    if (image.thumbnailUrl) ownedThumbnailUrls.delete(image.thumbnailUrl)
+  }
+}
+
+/**
+ * 发送失败时父区把所有权交回。只接回仍在本输入区展示的图片，并按最新十张截断；
+ * 被挤掉的旧图随所有权一起释放，不把超过上限的数组挂回父区。
+ */
+function restoreImages(images: ImageAttachment[]): boolean {
+  if (disposed) return false
+  for (const image of images) {
+    if (image.thumbnailUrl) ownedThumbnailUrls.add(image.thumbnailUrl)
+  }
+  const current = new Set(attachedImages.value)
+  const restored = images.filter((image) => !current.has(image))
+  const next = [...attachedImages.value, ...restored]
+  const overflow = Math.max(0, next.length - MAX_IMAGES)
+  if (overflow) releaseOwnedImages(next.slice(0, overflow))
+  attachedImages.value = overflow ? next.slice(overflow) : next
+  return true
+}
+
+/** 批次按提交顺序串行；每次成功都基于**当前**数组原子追加，绝不覆盖另一批。 */
+function processImageFiles(files: File[]): Promise<void> {
+  const run = async () => {
+    if (disposed) return
+    const failures: string[] = []
+    for (const file of files) {
+      if (disposed) return
+      if (file.size > MAX_IMAGE_BYTES) {
+        failures.push(`${file.name}：超过 ${MAX_IMAGE_BYTES / 1024 / 1024}MB 上限`)
+        continue
+      }
+      try {
+        const base64 = await readFileAsBase64(file)
+        if (disposed) return
+        const thumbnailUrl = URL.createObjectURL(file)
+        ownedThumbnailUrls.add(thumbnailUrl)
+        const next = [...attachedImages.value, {
+          base64,
+          mimeType: file.type,
+          fileName: file.name,
+          thumbnailUrl,
+        }]
+        const overflow = Math.max(0, next.length - MAX_IMAGES)
+        if (overflow) {
+          const removed = next.splice(0, overflow)
+          releaseOwnedImages(removed)
+          failures.push(...removed.map((img) => `${img.fileName}：超出 ${MAX_IMAGES} 张上限，已移除`))
+        }
+        attachedImages.value = next
+      } catch (err) {
+        if (disposed) return
+        logger.error('ChatInputArea', '处理图片失败', err)
+        failures.push(`${file.name}：读取失败`)
+      }
+    }
+    // 一个坏文件不该吞掉整批：成功的仍然加入，失败的逐条说出来。
+    if (!disposed && failures.length) showToast('error', failures.join('；'))
+  }
+
+  const task = imageQueue.then(run, run)
+  // 单批异常不能让后续粘贴永久卡住；run 自己会收敛单项读取失败。
+  imageQueue = task.catch(() => undefined)
+  return task
 }
 
 function removeImage(index: number) {
   const newImages = [...attachedImages.value]
-  const img = newImages[index]
-  if (img.thumbnailUrl) URL.revokeObjectURL(img.thumbnailUrl)
-  newImages.splice(index, 1)
+  const [img] = newImages.splice(index, 1)
+  if (!img) return
+  releaseOwnedImages([img])
   attachedImages.value = newImages
 }
+
+// 父区也可能直接回填附件（例如从既有消息恢复）；统一在这里守住十张上限。
+watch(attachedImages, (images) => {
+  if (disposed || images.length <= MAX_IMAGES) return
+  const overflow = images.length - MAX_IMAGES
+  releaseOwnedImages(images.slice(0, overflow))
+  attachedImages.value = images.slice(overflow)
+})
 
 // 输入变化时的自动高度（挂载与宽度变化另由上面的 syncHeight 负责）
 watch(modelValue, syncHeight)
@@ -461,10 +554,18 @@ textarea::placeholder {
 }
 
 .image-item img { width: 100%; height: 100%; object-fit: cover; }
+
+.attachment-note {
+  margin: 0 0 0.5rem;
+  color: var(--text-muted);
+  font-size: var(--font-size-xs);
+  line-height: 1.4;
+}
+
 .image-item .remove-image {
   position: absolute;
-  top: var(--space-1); right: var(--space-1);
-  width: 1.25rem; height: 1.25rem;
+  top: var(--space-2); right: var(--space-2);
+  width: 1.5rem; height: 1.5rem;
   border-radius: 50%;
   background: rgba(0, 0, 0, 0.6);
   color: white; border: none;

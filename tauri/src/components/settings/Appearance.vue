@@ -171,7 +171,7 @@
       <div class="preview-card">
         <h4>明晰的标题</h4>
         <p>这是一段用于预览字体大小与主题配色效果的示例文字，会随你在上面的选择实时变化。</p>
-        <button class="preview-chip" type="button">代码片段</button>
+        <span class="preview-chip">代码片段</span>
       </div>
     </div>
 
@@ -244,13 +244,18 @@ function isFontSize(v: unknown): v is FontSize {
   return v === 'small' || v === 'medium' || v === 'large'
 }
 
+// 父层写操作是单飞：在途修改只保留最新完整快照，等本次保存结束后补发。
+let queuedPayload: string | null = null
+
 // 后端权威值到达时覆盖首屏快照；store 的 watch 会同步持久化并即时应用主题。
-// 这里**不** emit save——否则「读回 → 写回」会形成回环。
+// 写在途期间的旧回包不能覆盖用户快照：否则下一次修改会把旧字段一起序列化，
+// 让已保存的新值倒退。空闲后仍以后端权威值为准。
+// 这里不 emit save——否则「读回 → 写回」会形成回环。
 watch(
   () => props.data,
   (raw) => {
     const p = parseBackend(raw)
-    if (!p) return
+    if (!p || props.saving || queuedPayload !== null) return
     if (isTheme(p.theme)) appearance.theme = p.theme
     if (isFontSize(p.font_size)) appearance.fontSize = p.font_size
     if (typeof p.sound_enabled === 'boolean') sound.enabled = p.sound_enabled
@@ -264,20 +269,35 @@ watch(
   { immediate: true },
 )
 
+watch(
+  () => props.saving,
+  (saving, wasSaving) => {
+    if (saving || !wasSaving || queuedPayload === null) return
+    // 先清空再 emit：父层可能同步经历 true → false，watch 重入也不能重复发送。
+    const payload = queuedPayload
+    queuedPayload = null
+    emit('save', payload)
+  },
+  // 父层可能在同一轮更新里把 saving 置 true 后又置 false；同步观察每次边沿。
+  { flush: 'sync' },
+)
+
 /** 把当前偏好写成完整配置 JSON，交工作台写回 ui_prefs */
 function persist(): void {
-  emit(
-    'save',
-    JSON.stringify({
-      theme: appearance.theme,
-      font_size: appearance.fontSize,
-      sound_enabled: sound.enabled,
-      sound_completed: sound.kinds.completed,
-      sound_aborted: sound.kinds.aborted,
-      sound_failed: sound.kinds.failed,
-      volume: sound.volume,
-    }),
-  )
+  const payload = JSON.stringify({
+    theme: appearance.theme,
+    font_size: appearance.fontSize,
+    sound_enabled: sound.enabled,
+    sound_completed: sound.kinds.completed,
+    sound_aborted: sound.kinds.aborted,
+    sound_failed: sound.kinds.failed,
+    volume: sound.volume,
+  })
+  if (props.saving) {
+    queuedPayload = payload
+    return
+  }
+  emit('save', payload)
 }
 
 function setTheme(v: ThemeMode): void {
@@ -439,6 +459,7 @@ const fontSizeOptions: Array<{ value: FontSize; label: string }> = [
   flex-shrink: 0;
 }
 .preview-btn {
+  min-height: 2rem;
   padding: 0.3rem 0.7rem;
   font-size: 0.8rem;
   color: var(--accent);
@@ -452,6 +473,7 @@ const fontSizeOptions: Array<{ value: FontSize; label: string }> = [
 }
 /* 引导重开按钮：与「试听」共用视觉语言，保持设置面板内控件一致 */
 .replay-btn {
+  min-height: 2rem;
   padding: 0.3rem 0.7rem;
   font-size: 0.8rem;
   color: var(--accent);
@@ -466,6 +488,7 @@ const fontSizeOptions: Array<{ value: FontSize; label: string }> = [
 }
 .volume-input {
   width: 160px;
+  min-height: 2rem;
   accent-color: var(--accent);
   cursor: pointer;
 }

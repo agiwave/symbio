@@ -21,8 +21,8 @@
  * 3. **未设置时的按钮文本来自 `options` 的值→标签表**（`path` / `form` 没有候选
  *    菜单，`options` 退化为查表），这是「外观不变」的关键一格。
  */
-import { beforeEach, describe, expect, it, vi } from 'vitest'
-import { flushPromises, mount } from '@vue/test-utils'
+import { afterEach, beforeEach, describe, expect, it, vi } from 'vitest'
+import { enableAutoUnmount, flushPromises, mount } from '@vue/test-utils'
 
 const hoisted = vi.hoisted(() => ({
   updateSession: vi.fn(async (_id: string, _patch: Record<string, unknown>) => {}),
@@ -139,6 +139,12 @@ beforeEach(() => {
   hoisted.pickPath.mockResolvedValue(null)
 })
 
+enableAutoUnmount(afterEach)
+afterEach(() => {
+  document.body.replaceChildren()
+  vi.restoreAllMocks()
+})
+
 describe('ChatOptionBar：按钮文本（紧凑形态的取值规则）', () => {
   it('select 未设置时显示定义缺省值的标签（default 查表）', () => {
     const w = mountBar()
@@ -219,6 +225,23 @@ describe('ChatOptionBar：select 分派（菜单 → 落库）', () => {
     expect(w.find('.opt-menu').exists()).toBe(false)
     expect(hoisted.updateSession).not.toHaveBeenCalled()
   })
+
+  it('select 禁用时原生 disabled，点击与方向键均不能展开', async () => {
+    const def = definition()
+    def.sections[0].fields[1].disabled_when = { key: 'beta', equals: 'b' }
+    const w = mount(ChatOptionBar, { props: { definition: def, values: { beta: 'b' } } })
+    const trigger = btn(w, 1)
+    expect(trigger.attributes('disabled')).toBeDefined()
+
+    await trigger.trigger('click')
+    trigger.element.dispatchEvent(new KeyboardEvent('keydown', {
+      key: 'ArrowDown', bubbles: true, cancelable: true,
+    }))
+    await flushPromises()
+
+    expect(w.find('.opt-menu').exists()).toBe(false)
+    expect(hoisted.updateSession).not.toHaveBeenCalled()
+  })
 })
 
 describe('ChatOptionBar：path 分派（原生取值 → 落库）', () => {
@@ -264,9 +287,11 @@ describe('ChatOptionBar：path 分派（原生取值 → 落库）', () => {
     expect(hoisted.updateSession).not.toHaveBeenCalled()
   })
 
-  it('disabled_when 成立 ⇒ 按钮禁用且点击无效（作用域含节点属性）', async () => {
+  it('disabled_when 成立 ⇒ 原生 disabled 且点击无效（作用域含节点属性）', async () => {
     const w = mountBar({ sessionId: 's1', values: { alpha: '/a' }, scope: { message_count: 2 } })
     expect(btn(w, 0).classes()).toContain('is-disabled')
+    expect(btn(w, 0).attributes('disabled')).toBeDefined()
+    expect((btn(w, 0).element as HTMLButtonElement).disabled).toBe(true)
 
     await btn(w, 0).trigger('click')
     await flushPromises()
@@ -275,6 +300,7 @@ describe('ChatOptionBar：path 分派（原生取值 → 落库）', () => {
     // 同样的值，但会话还没有历史 ⇒ 不锁
     const free = mountBar({ sessionId: 's1', values: { alpha: '/a' }, scope: { message_count: 0 } })
     expect(btn(free, 0).classes()).not.toContain('is-disabled')
+    expect(btn(free, 0).attributes('disabled')).toBeUndefined()
   })
 
   it('草稿态（作用域里没有 message_count）⇒ 不锁：缺席的键按「没有历史」处理', () => {
@@ -434,6 +460,8 @@ describe('ChatOptionBar：保存进行中的忙态', () => {
     expect(btn(w, 1).classes()).toContain('is-busy')
     expect(btn(w, 1).attributes('aria-busy')).toBe('true')
     expect(btn(w, 1).find('.opt-spinner').exists()).toBe(true)
+    expect((btn(w, 1).element as HTMLButtonElement).disabled).toBe(true)
+    expect((btn(w, 0).element as HTMLButtonElement).disabled).toBe(true)
 
     // 忙态里再点不会发出第二次写
     await btn(w, 1).trigger('click')
@@ -442,6 +470,7 @@ describe('ChatOptionBar：保存进行中的忙态', () => {
     resolve()
     await flushPromises()
     expect(btn(w, 1).classes()).not.toContain('is-busy')
+    expect((btn(w, 1).element as HTMLButtonElement).disabled).toBe(false)
   })
 })
 
@@ -464,6 +493,126 @@ describe('ChatOptionBar：候选菜单的键盘导航', () => {
     await w.find('.opt-menu').trigger('keydown', { key: 'ArrowUp' })
     expect(document.activeElement).toBe(items[2].element)
 
-    w.unmount()
+    await w.find('.opt-menu').trigger('keydown', { key: 'Home' })
+    expect(document.activeElement).toBe(items[0].element)
+
+    await w.find('.opt-menu').trigger('keydown', { key: 'End' })
+    expect(document.activeElement).toBe(items[2].element)
+  })
+})
+
+describe('ChatOptionBar：菜单焦点恢复与触发键', () => {
+  it('提交成功后关闭菜单并把焦点还给触发器', async () => {
+    const w = mount(ChatOptionBar, { props: { definition: definition(), sessionId: 's1' }, attachTo: document.body })
+    const trigger = btn(w, 1).element as HTMLButtonElement
+    trigger.focus()
+    await btn(w, 1).trigger('click')
+    await flushPromises()
+    expect(document.activeElement).toBe(w.findAll('.menu-item')[1].element)
+
+    await w.findAll('.menu-item')[0].trigger('click')
+    await flushPromises()
+
+    expect(w.find('.opt-menu').exists()).toBe(false)
+    expect(document.activeElement).toBe(trigger)
+  })
+
+  it('Esc 取消后关闭菜单并把焦点还给触发器', async () => {
+    const w = mount(ChatOptionBar, { props: { definition: definition() }, attachTo: document.body })
+    const trigger = btn(w, 1).element as HTMLButtonElement
+    await btn(w, 1).trigger('click')
+    await flushPromises()
+
+    document.dispatchEvent(new KeyboardEvent('keydown', { key: 'Escape', bubbles: true, cancelable: true }))
+    await flushPromises()
+
+    expect(w.find('.opt-menu').exists()).toBe(false)
+    expect(document.activeElement).toBe(trigger)
+    expect(hoisted.updateSession).not.toHaveBeenCalled()
+  })
+
+  it('保存期间取消 ⇒ 保存结束仍恢复触发器焦点', async () => {
+    let resolve!: () => void
+    hoisted.updateSession.mockImplementationOnce(
+      () => new Promise<void>((r) => { resolve = () => r() }),
+    )
+    const w = mount(ChatOptionBar, { props: { definition: definition(), sessionId: 's1' }, attachTo: document.body })
+    const trigger = btn(w, 1).element as HTMLButtonElement
+    await btn(w, 1).trigger('click')
+    await flushPromises()
+    await w.findAll('.menu-item')[0].trigger('click')
+    await flushPromises()
+    expect(trigger.disabled).toBe(true)
+
+    document.dispatchEvent(new KeyboardEvent('keydown', { key: 'Escape', bubbles: true, cancelable: true }))
+    await flushPromises()
+    expect(w.find('.opt-menu').exists()).toBe(false)
+
+    resolve()
+    await flushPromises()
+    expect(trigger.disabled).toBe(false)
+    expect(document.activeElement).toBe(trigger)
+  })
+
+  it('再次点击触发器取消后也恢复焦点', async () => {
+    const w = mount(ChatOptionBar, { props: { definition: definition() }, attachTo: document.body })
+    const trigger = btn(w, 1).element as HTMLButtonElement
+    await btn(w, 1).trigger('click')
+    await flushPromises()
+    await btn(w, 1).trigger('click')
+    await flushPromises()
+
+    expect(w.find('.opt-menu').exists()).toBe(false)
+    expect(document.activeElement).toBe(trigger)
+  })
+
+  it('触发器 ArrowDown / ArrowUp 分别打开菜单并聚焦首项 / 末项', async () => {
+    const w = mount(ChatOptionBar, { props: { definition: definition() }, attachTo: document.body })
+    const trigger = btn(w, 1).element as HTMLButtonElement
+    const down = new KeyboardEvent('keydown', { key: 'ArrowDown', bubbles: true, cancelable: true })
+    trigger.dispatchEvent(down)
+    await flushPromises()
+
+    expect(down.defaultPrevented).toBe(true)
+    expect(document.activeElement).toBe(w.findAll('.menu-item')[0].element)
+
+    document.dispatchEvent(new KeyboardEvent('keydown', { key: 'Escape', bubbles: true, cancelable: true }))
+    await flushPromises()
+    const up = new KeyboardEvent('keydown', { key: 'ArrowUp', bubbles: true, cancelable: true })
+    trigger.dispatchEvent(up)
+    await flushPromises()
+
+    expect(up.defaultPrevented).toBe(true)
+    expect(document.activeElement).toBe(w.findAll('.menu-item')[2].element)
+  })
+})
+
+describe('ChatOptionBar：菜单视口夹取', () => {
+  it('靠近视口边缘时限制宽度与高度，并在 resize 后上下翻转', async () => {
+    let triggerTop = 20
+    const w = mount(ChatOptionBar, { props: { definition: definition() }, attachTo: document.body })
+    const trigger = btn(w, 1).element as HTMLElement
+    vi.spyOn(window, 'innerWidth', 'get').mockReturnValue(320)
+    vi.spyOn(window, 'innerHeight', 'get').mockReturnValue(240)
+    vi.spyOn(HTMLElement.prototype, 'getBoundingClientRect').mockImplementation(function (this: HTMLElement) {
+      if (this === trigger) return new DOMRect(280, triggerTop, 32, 32)
+      if (this.classList.contains('opt-menu')) return new DOMRect(0, 0, 300, 400)
+      return new DOMRect(0, 0, 320, 240)
+    })
+    vi.spyOn(HTMLElement.prototype, 'scrollHeight', 'get').mockReturnValue(400)
+
+    await btn(w, 1).trigger('click')
+    await flushPromises()
+    const menu = w.find('.opt-menu').element as HTMLElement
+    expect(menu.style.left).toBe('12px')
+    expect(menu.style.top).toBe('60px')
+    expect(menu.style.maxHeight).toBe('172px')
+
+    triggerTop = 200
+    window.dispatchEvent(new Event('resize'))
+    await flushPromises()
+    expect(menu.style.left).toBe('12px')
+    expect(menu.style.top).toBe('8px')
+    expect(menu.style.maxHeight).toBe('184px')
   })
 })

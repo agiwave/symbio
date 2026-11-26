@@ -91,6 +91,27 @@ describe('VdfsReadonlyDetail 动作装配', () => {
     const w = mount(VdfsReadonlyDetail, { props: { node: node() } })
     expect(w.findAll('.ea-btn')).toHaveLength(0)
   })
+
+  it('描述、错误与动作优先，机制字段默认收进技术信息', () => {
+    const w = mount(VdfsReadonlyDetail, {
+      props: {
+        node: node({ description: '资源说明', ext: 'json', custom_field: '扩展值' }),
+        error: '读取失败',
+        mechanismActions: MECHANISM,
+      },
+    })
+    expect(w.find('.desc').text()).toBe('资源说明')
+    expect(w.find('.detail-error').text()).toBe('读取失败')
+    expect(titles(w)).toEqual(['删除'])
+    const technical = w.find('details.technical-info')
+    expect(technical.attributes('open')).toBeUndefined()
+    expect(technical.find('summary').text()).toBe('技术信息')
+    expect(technical.text()).toContain('model')
+    expect(technical.text()).toContain('@vfs/model/p1')
+    expect(technical.text()).toContain('json')
+    expect(technical.text()).toContain('custom_field')
+    expect(technical.text()).toContain('扩展值')
+  })
 })
 
 describe('VdfsSessionDetail 动作装配', () => {

@@ -130,8 +130,8 @@ function isDisabled(i: number): boolean {
   align-items: center;
   justify-content: center;
   gap: 0.35rem;
-  min-width: 1.75rem;
-  height: 1.75rem;
+  min-width: 2rem;
+  height: 2rem;
   padding: 0 0.35rem;
   border: none;
   background: transparent;
@@ -154,7 +154,7 @@ function isDisabled(i: number): boolean {
 .ea-btn.primary { color: var(--accent); }
 .ea-btn.primary:hover:not(:disabled) { background: var(--accent-subtle-bg); color: var(--accent); }
 .ea-btn.danger { color: var(--text-secondary); }
-.ea-btn.danger:hover:not(:disabled) { background: var(--danger-bg); color: var(--danger-solid); }
+.ea-btn.danger:hover:not(:disabled) { background: var(--danger-bg); color: var(--danger-fg); }
 /* 文字回落按钮（无图标映射） */
 .ea-btn.is-text { padding: 0 0.55rem; }
 

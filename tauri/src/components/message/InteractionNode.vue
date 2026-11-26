@@ -514,6 +514,7 @@ function submitQuestions() {
 .up-allow-forever,
 .up-reject {
   flex: 1;
+  min-height: 2rem;
   padding: 0.35rem;
   border-radius: 0.375rem;
   font-size: 0.8rem;

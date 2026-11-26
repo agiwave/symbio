@@ -36,6 +36,7 @@ const mocks = vi.hoisted(() => ({
   subscribeVdfsChanged: vi.fn(),
   // 动作通道：草稿上的「导入整包」要走它（载荷编码 + 目标地址在下面两条用例里钉住）
   runVdfsAction: vi.fn(),
+  deleteVdfs: vi.fn(),
   arrayBufferToBase64: vi.fn(),
 }))
 
@@ -46,10 +47,10 @@ vi.mock('@/services/vdfs', () => ({
   statVdfs: mocks.statVdfs,
   treeVdfs: mocks.treeVdfs,
   runVdfsAction: mocks.runVdfsAction,
+  deleteVdfs: mocks.deleteVdfs,
   arrayBufferToBase64: mocks.arrayBufferToBase64,
   // 以下未被本用例触达，仅为满足模块导入
   base64ToBytes: vi.fn(),
-  deleteVdfs: vi.fn(),
   downloadBlob: vi.fn(),
 }))
 // 订阅入口整体替身：`subscribeVdfsChanged` 已把「总线频道 + 后端 watch 登记 +
@@ -190,6 +191,140 @@ describe('useVdfs 地址代数（挂载层 / 选中项 / 深链）', () => {
       mocks.listVdfs.mock.calls.some((c) => c[1] === '@vfs/session/subsession'),
       '悬空的选中名不得被拼成本目录的子地址',
     ).toBe(false)
+    wrapper.unmount()
+  })
+})
+
+describe('useVdfs 目录刷新与写入闸门', () => {
+  it('慢的旧目录回执不能覆盖新目录，也不能提前关掉新目录 loading', async () => {
+    let releaseOld!: () => void
+    const oldGate = new Promise<void>((resolve) => { releaseOld = resolve })
+    let switched = false
+    const skillDir = '@vfs/skill'
+    const skillNode = { ...dirNode(), path: skillDir, name: 'skill', title: '技能' }
+    mocks.listVdfs.mockImplementation(async (_reason: unknown, path: string) => {
+      if (path === '@vfs') {
+        return { path, node: { ...dirNode(), path: '@vfs', name: '', title: '资源' }, items: [] }
+      }
+      if (path === MODEL_DIR) {
+        if (switched) await oldGate
+        return { path, node: dirNode(), items: [] }
+      }
+      return { path, node: skillNode, items: [] }
+    })
+
+    const addrRef = ref(MODEL_DIR)
+    const { api, wrapper } = mountHost(addrRef)
+    await settle()
+    expect(api.title.value).toBe('模型')
+
+    switched = true
+    const stale = api.refresh()
+    addrRef.value = skillDir
+    await settle()
+    expect(api.title.value).toBe('技能')
+    expect(api.cwdAddr.value).toBe(skillDir)
+    expect(api.loading.value).toBe(false)
+
+    releaseOld()
+    await stale
+    await settle()
+    expect(api.title.value).toBe('技能')
+    expect(api.items.value).toEqual([])
+    expect(api.loading.value).toBe(false)
+    wrapper.unmount()
+  })
+
+  it('就地切目录先同步失效旧代次，新请求不会被目录 watch 作废', async () => {
+    let releaseNext!: () => void
+    const nextGate = new Promise<void>((resolve) => { releaseNext = resolve })
+    let delayDocs = false
+    const base = '@vfs/session/abc'
+    const workdir = `${base}/workdir`
+    const docs = `${base}/docs`
+    const directory = (path: string, name: string): VdfsNode => ({
+      path, name, title: name, kind: 'dir', status: '', access: 'l', ext: 'dir',
+    })
+    mocks.listVdfs.mockImplementation(async (_reason: unknown, path: string) => {
+      if (path === docs && delayDocs) await nextGate
+      return {
+        path,
+        node: directory(path, path === base ? 'abc' : path === workdir ? 'workdir' : 'docs'),
+        items: path === base ? [directory(workdir, 'workdir'), directory(docs, 'docs')] : [],
+      }
+    })
+
+    const { api, wrapper } = mountHost(base)
+    await settle()
+    expect(api.cwd.value).toBe(workdir)
+
+    delayDocs = true
+    const switching = api.selectDir('docs')
+    await nextTick()
+    expect(api.cwd.value).toBe(docs)
+    expect(api.loading.value).toBe(true)
+    expect(api.cwdAddr.value).toBe('')
+
+    releaseNext()
+    await switching
+    await settle()
+    expect(api.cwdAddr.value).toBe(docs)
+    expect(api.loading.value).toBe(false)
+    wrapper.unmount()
+  })
+
+  it('后端校验错误只展示可读消息，不暴露 Gateway 与 JSON 前缀', async () => {
+    mocks.listVdfs.mockImplementation(async (_reason: unknown, path: string, _opts: unknown, onError?: (e: Error) => void) => {
+      onError?.(new Error('[Gateway HTTP] 输入验证失败：{"message":"目录不存在","fields":[]}'))
+      return { path, node: dirNode(), items: [] }
+    })
+    const { api, wrapper } = mountHost(MODEL_DIR)
+    await settle()
+    expect(api.loadError.value).toBe('加载失败：目录不存在')
+    wrapper.unmount()
+  })
+
+  it('保存在途时拒绝重复保存与节点动作', async () => {
+    mocks.listVdfs.mockResolvedValue({ path: MODEL_DIR, node: dirNode(), items: [] })
+    const { api, wrapper } = mountHost(MODEL_DIR)
+    await settle()
+    api.startNew()
+    await settle()
+
+    let release!: (value: { name: string }) => void
+    mocks.writeVdfs.mockReturnValue(new Promise((resolve) => { release = resolve }))
+    const first = api.saveFields({ name: '第一个' })
+    expect(api.saving.value).toBe(true)
+    await expect(api.saveFields({ name: '第二个' })).resolves.toBe(false)
+    await expect(api.runAction('test')).resolves.toBe(false)
+    expect(mocks.writeVdfs).toHaveBeenCalledTimes(1)
+    expect(mocks.runVdfsAction).not.toHaveBeenCalled()
+
+    release({ name: 'created' })
+    await expect(first).resolves.toBe(true)
+    expect(api.saving.value).toBe(false)
+    wrapper.unmount()
+  })
+
+  it('动作在途时只执行一次', async () => {
+    mocks.listVdfs.mockResolvedValue({ path: MODEL_DIR, node: dirNode(), items: [] })
+    const { api, wrapper } = mountHost(MODEL_DIR)
+    await settle()
+    api.startNew()
+    await settle()
+
+    let release!: () => void
+    mocks.runVdfsAction.mockReturnValue(new Promise((resolve) => {
+      release = () => resolve({ action: 'import', ok: true, message: '已导入' })
+    }))
+    const first = api.runAction('import')
+    expect(api.actionBusy.value).toBe(true)
+    await expect(api.runAction('import')).resolves.toBe(false)
+    expect(mocks.runVdfsAction).toHaveBeenCalledTimes(1)
+
+    release()
+    await expect(first).resolves.toBe(true)
+    expect(api.actionBusy.value).toBe(false)
     wrapper.unmount()
   })
 })
@@ -557,7 +692,7 @@ describe('useVdfs 新建 = 选中一张草稿节点（与「选中一项」同�
     await nextTick()
     // 地址变了、自述还停在 model —— 这一拍绝不能把 model 的类型套到 skill 上
     expect(api.cwd.value).toBe('@vfs/skill')
-    expect(api.cwdAddr.value, '自述还是上一份').toBe(MODEL_DIR)
+    expect(api.cwdAddr.value, '旧目录自述已清空，不再与新地址错配').toBe('')
     expect(api.creatableType.value, '那一拍没有可信的新建类型').toBeUndefined()
     expect(api.canCreate.value, '新建按钮该先缺席').toBe(false)
 
@@ -567,6 +702,129 @@ describe('useVdfs 新建 = 选中一张草稿节点（与「选中一项」同�
     await settle()
     await settle()
     expect(api.cwdAddr.value).toBe('@vfs/skill')
+    wrapper.unmount()
+  })
+})
+
+describe('useVdfs 详情读取失败与保存失败是两条分支', () => {
+  function modelItem(id: string): VdfsItem {
+    return {
+      path: `${MODEL_DIR}/${id}`,
+      name: id,
+      title: id,
+      kind: 'model',
+      status: 'active',
+      access: 'rw',
+      ext: 'form',
+    }
+  }
+
+  function serveModel(item: VdfsItem) {
+    mocks.listVdfs.mockResolvedValue({ path: MODEL_DIR, node: dirNode(), items: [item] })
+  }
+
+  it('慢读期间只暴露加载态，禁止用空模型保存', async () => {
+    const item = modelItem('detail-slow')
+    serveModel(item)
+    let release!: (value: { text: string }) => void
+    mocks.readVdfs.mockReturnValue(new Promise((resolve) => { release = resolve }))
+    const { api, wrapper } = mountHost(MODEL_DIR)
+    await settle()
+
+    const pending = api.select(item)
+    expect(api.selectedNode.value?.path).toBe(item.path)
+    expect(api.loadingDetail.value).toBe(true)
+    expect(api.detailLoadError.value).toBe('')
+    expect(api.formData.value).toBeNull()
+    await expect(api.saveFields({ name: '尚未读取的空值' })).resolves.toBe(false)
+    expect(mocks.writeVdfs).not.toHaveBeenCalled()
+
+    release({ text: JSON.stringify({ name: '读到的模型' }) })
+    await pending
+    expect(api.loadingDetail.value).toBe(false)
+    expect(api.formData.value).toEqual({ name: '读到的模型' })
+    wrapper.unmount()
+  })
+
+  it('读取失败持久显示独立错误，重试同一节点成功后恢复', async () => {
+    const item = modelItem('detail-retry')
+    serveModel(item)
+    let attempts = 0
+    mocks.readVdfs.mockImplementation(async (_reason, _path, onFallback) => {
+      attempts += 1
+      if (attempts === 1) {
+        onFallback?.(new Error('读取超时'))
+        return null
+      }
+      return { text: JSON.stringify({ name: '重试成功' }) }
+    })
+    const { api, wrapper } = mountHost(MODEL_DIR)
+    await settle()
+
+    await api.select(item)
+    expect(api.loadingDetail.value).toBe(false)
+    expect(api.detailLoadError.value).toContain('读取超时')
+    expect(api.detailError.value, '读取失败不能借用保存错误分支').toBe('')
+    expect(api.formData.value).toBeNull()
+    await expect(api.saveFields({ name: '空值' })).resolves.toBe(false)
+    expect(mocks.writeVdfs).not.toHaveBeenCalled()
+
+    await api.retryDetail()
+    expect(mocks.readVdfs).toHaveBeenCalledTimes(2)
+    expect(mocks.readVdfs).toHaveBeenLastCalledWith(
+      READBACK_REASON.VDFS_BROWSER,
+      item.path,
+      expect.any(Function),
+    )
+    expect(api.detailLoadError.value).toBe('')
+    expect(api.formData.value).toEqual({ name: '重试成功' })
+    wrapper.unmount()
+  })
+
+  it('同一节点重读失败时旧快照仍留着，但不得被保存', async () => {
+    const item = modelItem('detail-stale')
+    serveModel(item)
+    mocks.readVdfs.mockResolvedValueOnce({ text: JSON.stringify({ name: '旧快照' }) })
+    const { api, wrapper } = mountHost(MODEL_DIR)
+    await settle()
+    await api.select(item)
+    expect(api.formData.value).toEqual({ name: '旧快照' })
+
+    mocks.readVdfs.mockImplementationOnce(async (_reason, _path, onFallback) => {
+      onFallback?.(new Error('连接中断'))
+      return null
+    })
+    await api.select(item)
+    expect(api.formData.value).toEqual({ name: '旧快照' })
+    expect(api.detailLoadError.value).toContain('连接中断')
+    await expect(api.saveFields(api.formData.value!)).resolves.toBe(false)
+    expect(mocks.writeVdfs).not.toHaveBeenCalled()
+    wrapper.unmount()
+  })
+
+  it('保存或动作失败保留当前节点与字段快照，不触发读取错误分支', async () => {
+    const item = modelItem('detail-write-failure')
+    serveModel(item)
+    mocks.readVdfs.mockResolvedValue({ text: JSON.stringify({ name: '服务端值' }) })
+    const { api, wrapper } = mountHost(MODEL_DIR)
+    await settle()
+    await api.select(item)
+    const values = { name: '用户输入' }
+    api.formData.value = values
+
+    mocks.writeVdfs.mockRejectedValueOnce(new Error('保存被拒绝'))
+    await expect(api.saveFields(values)).resolves.toBe(false)
+    expect(api.selectedNode.value?.path).toBe(item.path)
+    expect(api.formData.value).toEqual(values)
+    expect(api.detailLoadError.value).toBe('')
+    expect(api.detailError.value).toContain('保存被拒绝')
+
+    mocks.runVdfsAction.mockRejectedValueOnce(new Error('动作失败'))
+    await expect(api.runAction('test')).resolves.toBe(false)
+    expect(api.selectedNode.value?.path).toBe(item.path)
+    expect(api.formData.value).toEqual(values)
+    expect(api.detailLoadError.value).toBe('')
+    expect(api.detailError.value).toContain('动作失败')
     wrapper.unmount()
   })
 })
@@ -1299,6 +1557,28 @@ describe('useVdfs 目录树详情（树里的文件不能被列表口径误清�
     ext: 'text',
   }
 
+  it('树读取失败保留明确错误，重试成功后清除', async () => {
+    mocks.listVdfs.mockImplementation(async (_reason: unknown, path: string) => ({
+      path,
+      node: { path, name: 'workdir', kind: 'dir', status: '', access: 'lt' },
+      items: [],
+    }))
+    mocks.treeVdfs.mockRejectedValueOnce(new Error('tree offline'))
+
+    const { api, wrapper } = mountHost(TREE_ROOT)
+    await settle()
+
+    expect(api.treeMode.value).toBe(true)
+    expect(api.treeNodes.value).toEqual([])
+    expect(api.treeError.value).toContain('tree offline')
+
+    mocks.treeVdfs.mockResolvedValueOnce({ nodes: [dirItem, fileItem], truncated: false })
+    await api.refresh()
+    expect(api.treeError.value).toBe('')
+    expect(api.treeNodes.value).toHaveLength(2)
+    wrapper.unmount()
+  })
+
   it('★ 树里的文件选中后，后台刷新不得清空正文', async () => {
     vi.useFakeTimers()
     try {
@@ -1352,8 +1632,8 @@ describe('useVdfs 目录树详情（树里的文件不能被列表口径误清�
  * `cwdAddr` —— 当前目录自述**对应哪个地址**。
  *
  * 「能不能新建 / 是不是会话空间 / 树形态」全都按目录自述判，而换目录时 `cwd`
- * 立刻变、自述要等 `refresh()` 回来。两者错位的那一拍若无人记录，消费方就会把
- * 上一栏的自述套到这一栏（真实事故：进入会话后点开 `message`，工作台拿会话节点的
+ * 立刻变、旧自述立即清空，新自述要等 `refresh()` 回来。两者错位的那一拍若无人记录，
+ * 消费方就会把上一栏的自述套到这一栏（真实事故：进入会话后点开 `message`，工作台拿会话节点的
  * `new_type.ext = session` 把 `<sid>/message` 声明成了「当前会话空间」）。
  *
  * 这里只钉住**登记**这一半：`cwdAddr` 必须等于本次 list 回执的 `path`，而不是
@@ -1375,7 +1655,7 @@ describe('cwdAddr：目录自述的来源地址', () => {
     wrapper.unmount()
   })
 
-  it('换地址时落后一拍（cwd 已变、自述还是上一份），回执到了才对齐', async () => {
+  it('换地址时立即清空旧自述，回执到了才对齐', async () => {
     // 到达 `sub` 的那次 list 先扣住不回，好把「错位的那一拍」固定住看。
     const gates: Array<() => void> = []
     let gated = true
@@ -1398,9 +1678,8 @@ describe('cwdAddr：目录自述的来源地址', () => {
     addrRef.value = `${MSG_DIR}/sub`
     await nextTick()
     expect(api.cwd.value).toBe(`${MSG_DIR}/sub`)
-    // 这一拍正是 `cwdAddr` 存在的理由：消费方靠「两者不等」拒绝把上一份自述
-    // （如 `new_type.ext = session`）套到这个新目录上。
-    expect(api.cwdAddr.value, '自述还是上一份').toBe(MSG_DIR)
+    // 这一拍旧自述已清空；消费方靠「两者不等」拒绝把上一份自述套到新目录。
+    expect(api.cwdAddr.value, '旧自述不得继续冒充新目录').toBe('')
 
     // 放行：此后（含被扣住的那几条）一律直接回执
     gated = false

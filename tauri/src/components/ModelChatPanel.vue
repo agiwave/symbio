@@ -12,6 +12,18 @@
           aria-label="编辑消息内容"
           :placeholder="editing.isJson ? 'JSON 内容' : '消息内容'"
         />
+        <div v-if="editing.attachments.length > 0" class="edit-attachments">
+          <div v-for="(attachment, index) in editing.attachments" :key="index" class="edit-attachment">
+            <img :src="attachment.image_url.url" :alt="`附件 ${index + 1}`" />
+            <button
+              type="button"
+              class="edit-attachment-remove"
+              :title="`移除附件 ${index + 1}`"
+              :aria-label="`移除附件 ${index + 1}`"
+              @click="removeEditAttachment(index)"
+            >×</button>
+          </div>
+        </div>
         <div class="edit-btns">
           <button class="edit-save" @click="saveEdit">保存</button>
           <button class="edit-cancel" @click="editing = null">取消</button>
@@ -71,6 +83,18 @@
                发送会看到「什么都没发生」。两者互斥，不会同时出现两条。 -->
           <SkeletonPending v-if="showTyping" />
 
+          <!-- 停止反馈与等待骨架分开：错误走 toast 的 assertive 通道，停止过程 / 成功
+               只走持久 polite 区域，且不订阅消息状态帧，避免每个终态帧重复播报。 -->
+          <div
+            v-if="stopNotice"
+            class="stop-notice"
+            :class="`stop-notice--${stopNotice.tone}`"
+            aria-hidden="true"
+          >{{ stopNotice.text }}</div>
+          <div class="stop-live" role="status" aria-live="polite" aria-atomic="true">
+            {{ stopNotice?.text }}
+          </div>
+
           <!-- 排队中的用户消息（「待发送」气泡）。
 
                发送方不止前端自己：CLI / telegram / 心跳 / 别的进程都往同一个收件箱
@@ -119,7 +143,7 @@
         ref="composerRef"
         v-model="inputText"
         v-model:attached-images="attachedImages"
-        :is-loading="isLoading"
+        :is-loading="isLoading || isStopping"
         :session-id="props.sessionId"
         :definition="optionDefinition"
         :values="optionValues"
@@ -143,7 +167,6 @@ import {
   PRINCIPAL_KIND_PERSON,
   PRINCIPAL_USER,
   messageTextOf,
-  replaceMessageText,
 } from '@/schemas/chat_node'
 import type { ImageAttachment } from '@/types'
 import type { DetailDefinition } from '@/schemas/vdfs'
@@ -194,6 +217,8 @@ const messagesRef = ref<HTMLElement | null>(null)
 /** 输入区（ChatComposer）：发送后复位高度、排队首条消息回填文本与附件 */
 const composerRef = ref<{
   resetHeight: () => void
+  transferImages: (images: ImageAttachment[]) => void
+  restoreImages: (images: ImageAttachment[]) => boolean
 } | null>(null)
 
 // 会话级纯 UI 状态（按 sessionId 记忆）：本面板是按地址**重挂载**的
@@ -208,8 +233,77 @@ const inputText = ref(uiState.draftOf(props.sessionId))
 // 不在这里做防抖：键盘输入本来就该即时生效，而写入是一次浅对象替换。
 watch(inputText, (text) => uiState.setDraft(props.sessionId, text))
 const attachedImages = ref<ImageAttachment[]>([])
-// 编辑单条消息的浮层状态
-const editing = ref<{ id: string; content: string; isJson: boolean; original: MessageContent | undefined } | null>(null)
+/** 已从输入区接手、但发送尚未有终态的 URL；卸载时也由面板收尾。 */
+const claimedImageUrls = new Set<string>()
+let disposed = false
+
+function claimImages(images: ImageAttachment[]): void {
+  for (const image of images) {
+    if (image.thumbnailUrl) claimedImageUrls.add(image.thumbnailUrl)
+  }
+  composerRef.value?.transferImages(images)
+}
+
+function releaseClaimedImages(images?: ImageAttachment[]): void {
+  const urls = images
+    ? images.map((image) => image.thumbnailUrl).filter((url): url is string => !!url)
+    : [...claimedImageUrls]
+  for (const url of urls) {
+    if (!claimedImageUrls.delete(url)) continue
+    URL.revokeObjectURL(url)
+  }
+}
+
+/** 失败时优先还给仍挂载的输入区；切换 / 卸载后没有接收方，就由面板释放。 */
+function returnClaimedImages(images: ImageAttachment[]): void {
+  const urls = images
+    .map((image) => image.thumbnailUrl)
+    .filter((url): url is string => !!url && claimedImageUrls.delete(url))
+  if (!disposed && composerRef.value?.restoreImages(images)) return
+  for (const url of urls) URL.revokeObjectURL(url)
+}
+
+// 编辑单条消息的浮层状态。附件保留 wire 中的 image_url 分片，保存时原样带回；
+// 删除恢复时再转成输入区已有的 ImageAttachment 形状，不改消息 payload 协议。
+type ImageContentPart = Extract<ContentPart, { type: 'image_url' }>
+const editing = ref<{
+  id: string
+  content: string
+  isJson: boolean
+  attachments: ImageContentPart[]
+} | null>(null)
+
+function imagePartsOf(content: MessageContent | undefined): ImageContentPart[] {
+  if (!Array.isArray(content)) return []
+  return content.filter((part): part is ImageContentPart => part.type === 'image_url')
+}
+
+/** 现有协议把图片存为 data URL；删除回填只负责这一种真实可恢复的形状。 */
+function restoreImagesOf(content: MessageContent | undefined): {
+  images: ImageAttachment[]
+  unsupported: number
+} {
+  const images: ImageAttachment[] = []
+  let unsupported = 0
+  imagePartsOf(content).forEach((part, index) => {
+    const match = /^data:([^;,]+);base64,([\s\S]*)$/.exec(part.image_url.url)
+    if (!match) {
+      unsupported += 1
+      return
+    }
+    images.push({
+      base64: match[2],
+      mimeType: match[1],
+      fileName: `图片 ${index + 1}`,
+      thumbnailUrl: part.image_url.url,
+    })
+  })
+  return { images, unsupported }
+}
+
+function removeEditAttachment(index: number) {
+  editing.value?.attachments.splice(index, 1)
+}
 
 // --- Composables ---
 const { isUserAtBottom, scrollToBottom, scrollToGap, gapFromBottom, smartScroll, handleScroll } = useChatScroll(messagesRef)
@@ -259,7 +353,7 @@ provide(SWITCH_BRANCH_KEY, (mid: string, to: string) => {
 })
 
 
-const { isLoading } = chat
+const { isLoading, isStopping, stopNotice } = chat
 const messageTree = chat.messageTree
 
 /**
@@ -308,8 +402,8 @@ useHotkeys('model-chat-panel', [
     group: '会话',
     label: '停止生成',
     allowInInput: true,
-    when: () => isLoading.value,
-    run: () => chat.abort(),
+    when: () => isLoading.value || isStopping.value,
+    run: () => void chat.abort(),
   },
 ])
 
@@ -426,9 +520,19 @@ const optionScope = computed<Record<string, unknown>>(() => ({
       lastFailedSend.value = null
       // 失败时内容已经还给输入区；重试成功后再留着就等于同一内容可以发两次。
       // 只在输入区未被用户改过时清空（改过就说明他正在写别的）。
-      const failedText = messageTextOf(failed.content)
+      const failedText = messageTextOf(failed.message.content)
       if (failedText && inputText.value === failedText) inputText.value = ''
-      void dispatchSend(failed)
+      // 图片随这条失败消息重试，从输入区摘下来并交接所有权；用户新加的图留在原处。
+      const retryImages = failed.images.filter((image) => attachedImages.value.includes(image))
+      if (retryImages.length) {
+        attachedImages.value = attachedImages.value.filter((image) => !retryImages.includes(image))
+        claimImages(retryImages)
+      }
+      void (async () => {
+        const ok = await dispatchSend(failed.message, retryImages)
+        if (ok) releaseClaimedImages(retryImages)
+        else returnClaimedImages(retryImages)
+      })()
       return
     }
 
@@ -465,12 +569,15 @@ onMounted(() => {
   const pending = sessionsStore.consumePendingFirstMessage(props.sessionId)
   if (pending) {
     inputText.value = pending.text
-    if (pending.images?.length) attachedImages.value = pending.images
+    if (pending.images?.length) composerRef.value?.restoreImages(pending.images)
     void handleSend()
   }
 })
 
 onBeforeUnmount(() => {
+  disposed = true
+  // 发送中的附件已离开输入区，由面板负责；未发送的仍由 ChatInputArea 自己释放。
+  releaseClaimedImages()
   if (scrollRaf !== null) {
     cancelAnimationFrame(scrollRaf)
     scrollRaf = null
@@ -479,21 +586,29 @@ onBeforeUnmount(() => {
 
 // Handle send or abort logic
 function handleSendOrAbort() {
-  if (isLoading.value) {
+  if (isStopping.value) {
+    // 请求 / 权威终态帧到达前的重复点击统一由 composable 的同步 latch 拦下。
+    void chat.abort()
+  } else if (isLoading.value) {
     // While loading, only allow abort (no queuing new messages)
-    chat.abort()
+    void chat.abort()
   } else if (inputText.value.trim() || attachedImages.value.length > 0) {
     void handleSend()
   }
 }
 
 /** 最近一条**没入队成功**的消息：错误条的「重试」据此发对那一条 */
-const lastFailedSend = ref<ChatNode | null>(null)
+const lastFailedSend = ref<{ message: ChatNode; images: ImageAttachment[] } | null>(null)
 
 /** 发送并记录失败目标（成功时清空，避免错误条重发旧内容） */
-async function dispatchSend(msg: ChatNode): Promise<boolean> {
-  const ok = await chat.send(msg)
-  lastFailedSend.value = ok ? null : msg
+async function dispatchSend(msg: ChatNode, images: ImageAttachment[] = []): Promise<boolean> {
+  let ok = false
+  try {
+    ok = await chat.send(msg)
+  } catch (err) {
+    logger.error('ModelChatPanel', '发送消息失败', err)
+  }
+  lastFailedSend.value = ok ? null : { message: msg, images }
   return ok
 }
 
@@ -523,8 +638,9 @@ async function handleSend() {
     timestamp: Date.now()
   }
 
-  // 重置输入状态。**附件先不 revoke**：入队失败时要原样还给用户，
-  // 提前 revoke 会让恢复出来的缩略图变成裂图。
+  // 先把附件所有权交给面板，再清空预览。这样发送期间切换会话不会把 URL
+  // 丢给已卸载的输入区；失败时由 returnClaimedImages 原样接回。
+  claimImages(images)
   inputText.value = ''
   attachedImages.value = []
   composerRef.value?.resetHeight()
@@ -538,18 +654,19 @@ async function handleSend() {
     timestamp: userMessage.timestamp
   }
 
-  const ok = await dispatchSend(chatMessage)
+  const ok = await dispatchSend(chatMessage, images)
   if (ok) {
-    // 入队成功，正文与图片所有权到此结束
-    images.forEach(img => img.thumbnailUrl && URL.revokeObjectURL(img.thumbnailUrl))
+    // 入队成功，正文与图片所有权到此结束；集合保证只 revoke 一次。
+    releaseClaimedImages(images)
     return
   }
 
   // 失败：内容已经不在输入框里了，必须还给用户——他刚刚打的字不能只留在
-  // 一条错误提示里。图片同理（object URL 未 revoke，直接挂回去）。
+  // 一条错误提示里。图片同理；若面板已卸载，则由本层释放而不是挂回死组件。
+  returnClaimedImages(images)
+  if (disposed) return
   const restoredToInput = !inputText.value
   if (restoredToInput) inputText.value = text
-  if (images.length) attachedImages.value = [...attachedImages.value, ...images]
   // 提示必须自带重试入口：此前只说「可重试」，按钮却在别处（错误条 / 流末尾），
   // 用户此刻的注意力在 toast 上，找不到就以为只能重新打一遍。
   showToast(
@@ -587,6 +704,10 @@ interface PendingDelete {
   id: string
   isUser: boolean
   userText: string
+  /** 删除成功后回填到输入区的附件（data URL → 输入区形状）。 */
+  images: ImageAttachment[]
+  /** 非 data URL 的附件无法转回现有输入协议，必须明确告知。 */
+  unrecoverableAttachments: number
   /** 本次会被删除的条数（目标 + 其后全部） */
   count: number
 }
@@ -609,10 +730,13 @@ function handleDelete(messageId: string) {
   const isUserMsg = msg ? messageRoleOf(msg) === CHAT_ROLE_USER : false
   // 取值走契约层唯一实现，不在此另写形状判定
   const userText = isUserMsg ? messageTextOf(msg?.content) : ''
+  const restored = isUserMsg ? restoreImagesOf(msg?.content) : { images: [], unsupported: 0 }
   pendingDelete.value = {
     id: messageId,
     isUser: isUserMsg,
     userText,
+    images: restored.images,
+    unrecoverableAttachments: restored.unsupported,
     count: idx >= 0 ? msgs.length - idx : 1,
   }
 }
@@ -624,11 +748,17 @@ async function confirmDelete() {
   if (!p) return
   try {
     await sessionsStore.deleteMessage(props.sessionId, p.id)
-    // 仅当用户消息被删时，把其内容回填到输入框，方便用户修改后重发（不自动发送）
-    if (p.isUser && p.userText) {
-      const cur = inputText.value ?? ''
-      const sep = cur.trim().length > 0 ? '\n\n' : ''
-      inputText.value = cur + sep + p.userText
+    // 用户消息的正文与附件一并回填，方便原样修改后重发（不自动发送）。
+    if (p.isUser) {
+      if (p.userText) {
+        const cur = inputText.value ?? ''
+        const sep = cur.trim().length > 0 ? '\n\n' : ''
+        inputText.value = cur + sep + p.userText
+      }
+      if (p.images.length > 0) composerRef.value?.restoreImages(p.images)
+      if (p.unrecoverableAttachments > 0) {
+        showToast('error', `删除完成，但 ${p.unrecoverableAttachments} 个附件无法恢复：仅支持内嵌 base64 图片`)
+      }
     }
   } catch (e) {
     logger.error('ModelChatPanel', 'deleteMessage 失败', e)
@@ -644,8 +774,8 @@ function handleEdit(messageId: string) {
   const c = msg.content
   const isJson = typeof c === 'string' && /^[\\[{]/.test(c.trim())
   const text = messageTextOf(c)
-  // 保留原始内容：多模态消息的截图分片在编辑时不可见，保存时必须原样带回
-  editing.value = { id: messageId, content: text, isJson, original: c }
+  // 文本可编辑，现有图片分片同时展示并允许逐张移除。
+  editing.value = { id: messageId, content: text, isJson, attachments: imagePartsOf(c) }
 }
 
 /**
@@ -658,14 +788,17 @@ function handleEdit(messageId: string) {
  */
 async function saveEdit() {
   if (!editing.value) return
-  const { id, content, original } = editing.value
+  const { id, content, attachments } = editing.value
   const msg = sessionsStore.getSessionMessages(props.sessionId).find(m => m.id === id)
   if (!msg) {
     editing.value = null
     return
   }
-  // 只替换文本分片，截图等非文本分片原样保留（见 replaceMessageText）
-  const newContent: MessageContent = replaceMessageText(original, content)
+  // 文本 + 保留的 image_url 分片仍是原来的 ChatNode.content 协议；全部移除后
+  // 回落纯文本，不会留下空图片数组或把图片 URL 拼进正文。
+  const newContent: MessageContent = attachments.length > 0
+    ? [{ type: 'text', text: content }, ...attachments]
+    : content
   try {
     await sessionsStore.updateMessage(props.sessionId, {
       ...msg,
@@ -804,6 +937,7 @@ watch(sessionError, (now) => {
   padding: 0.25rem 0 0.5rem;
 }
 .earlier-btn {
+  min-height: 2rem;
   padding: 0.35rem 1rem;
   border: 1px solid var(--border-default);
   border-radius: 999px;
@@ -818,6 +952,36 @@ watch(sessionError, (now) => {
 
 .empty-chat p {
   margin: 0;
+}
+
+/* 停止过程 / 结果留在流尾，直到下一次发言或恢复；不随 token 更新。 */
+.stop-notice {
+  display: flex;
+  align-items: center;
+  padding: 0.4rem 0.65rem;
+  border: 1px solid var(--border-default);
+  border-radius: 0.5rem;
+  background: var(--color-option-bg);
+  color: var(--text-secondary);
+  font-size: 0.8rem;
+}
+.stop-notice--success {
+  color: var(--success-fg);
+}
+.stop-notice--error {
+  color: var(--color-error-fg);
+  border-color: var(--color-error-border);
+  background: var(--color-error-bg);
+}
+/* 读屏专用区域始终挂载：内容从空变为一句终态，才能被 polite 通道可靠播报。 */
+.stop-live {
+  position: absolute;
+  width: 1px;
+  height: 1px;
+  overflow: hidden;
+  clip: rect(0 0 0 0);
+  clip-path: inset(50%);
+  white-space: nowrap;
 }
 
 .chat-controls {
@@ -865,6 +1029,40 @@ watch(sessionError, (now) => {
 .edit-area:focus {
   outline: none;
   border-color: var(--accent);
+}
+
+.edit-attachments {
+  display: flex;
+  flex-wrap: wrap;
+  gap: var(--space-2);
+}
+.edit-attachment {
+  position: relative;
+  width: 4.5rem;
+  height: 4.5rem;
+}
+.edit-attachment img {
+  width: 100%;
+  height: 100%;
+  object-fit: cover;
+  border: 1px solid var(--border-default);
+  border-radius: var(--radius-md);
+  background: var(--surface-sunken);
+}
+.edit-attachment-remove {
+  position: absolute;
+  top: -0.35rem;
+  right: -0.35rem;
+  width: 1.5rem;
+  height: 1.5rem;
+  display: grid;
+  place-items: center;
+  padding: 0;
+  border: 1px solid var(--border-default);
+  border-radius: 999px;
+  background: var(--surface-overlay);
+  color: var(--text-primary);
+  cursor: pointer;
 }
 
 .edit-btns {

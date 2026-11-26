@@ -192,6 +192,11 @@ watch(
   font-weight: var(--font-weight-semibold);
 }
 .close-btn {
+  display: inline-flex;
+  align-items: center;
+  justify-content: center;
+  width: 2rem;
+  height: 2rem;
   border: none;
   background: transparent;
   color: var(--text-secondary);

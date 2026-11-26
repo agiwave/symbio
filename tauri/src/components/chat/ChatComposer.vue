@@ -33,6 +33,7 @@
   - `resetHeight()` —— 发送后输入框高度复位；
   - `focus()`       —— 主动聚焦；
   - `getDraftMetadata()` —— 草稿态选项缓冲（创建会话时取用）。
+  - `transferImages()` / `restoreImages()` —— 图片 object URL 的所有权交接。
 
   ## 与「首条消息交接」的关系
 
@@ -119,6 +120,8 @@ const attachedImages = defineModel<ImageAttachment[]>('attachedImages', { defaul
 const inputRef = ref<{
   resetHeight: () => void
   textarea: HTMLTextAreaElement | null
+  transferImages: (images: ImageAttachment[]) => void
+  restoreImages: (images: ImageAttachment[]) => boolean
 } | null>(null)
 const optionsRef = ref<{ getDraftMetadata: () => Record<string, unknown> } | null>(null)
 
@@ -127,6 +130,8 @@ defineExpose({
   resetHeight: () => inputRef.value?.resetHeight(),
   focus: () => inputRef.value?.textarea?.focus(),
   getDraftMetadata: () => optionsRef.value?.getDraftMetadata() ?? {},
+  transferImages: (images: ImageAttachment[]) => inputRef.value?.transferImages(images),
+  restoreImages: (images: ImageAttachment[]) => inputRef.value?.restoreImages(images) ?? false,
 })
 </script>
 

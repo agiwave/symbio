@@ -14,7 +14,7 @@
       <h2 class="form-title">{{ title }}</h2>
       <p v-if="description" class="form-desc">{{ description }}</p>
     </header>
-    <div class="form-body">
+    <div v-overlay-scrollbar class="form-body">
       <slot />
     </div>
     <footer v-if="$slots.footer" class="form-footer">
@@ -24,6 +24,8 @@
 </template>
 
 <script setup lang="ts">
+import { vOverlayScrollbar } from '@/directives/overlayScrollbar'
+
 defineProps<{
   title: string
   description?: string
@@ -36,21 +38,37 @@ defineProps<{
   display: flex;
   flex-direction: column;
   min-width: 0;
-  overflow-y: auto;
-  padding: 1.5rem 2.5rem;
+  min-height: 0;
+  overflow: hidden;
+  container: settings / inline-size;
 }
 
 .form-header {
-  margin-bottom: 1.25rem;
+  display: flex;
+  align-items: center;
+  gap: 0.75rem;
+  min-height: var(--workbench-bar-height);
+  height: var(--workbench-bar-height);
+  padding: 0.4375rem 1rem;
+  border-bottom: 1px solid var(--border-default);
+  background: var(--surface-panel);
+  flex-shrink: 0;
 }
+
 .form-title {
   margin: 0;
-  font-size: var(--font-size-lg);
+  font-size: var(--font-size-base);
   font-weight: var(--font-weight-semibold);
   color: var(--text-primary);
+  white-space: nowrap;
+  flex-shrink: 0;
 }
 .form-desc {
-  margin: 0.3rem 0 0;
+  margin: 0;
+  min-width: 0;
+  overflow: hidden;
+  text-overflow: ellipsis;
+  white-space: nowrap;
   font-size: var(--font-size-sm);
   color: var(--text-muted);
 }
@@ -59,16 +77,23 @@ defineProps<{
   display: flex;
   flex-direction: column;
   gap: 0.25rem;
+  flex: 1;
+  min-height: 0;
+  overflow-y: auto;
+  padding: 1rem clamp(1rem, 4vw, 2.5rem) 1.5rem;
   max-width: 40rem;
+  width: 100%;
 }
 
 .form-footer {
   display: flex;
   gap: 0.75rem;
-  padding-top: 1rem;
-  margin-top: 0.75rem;
+  padding: 1rem clamp(1rem, 4vw, 2.5rem);
   border-top: 1px solid var(--border-default);
+  background: var(--surface-panel);
+  flex-shrink: 0;
   max-width: 40rem;
+  width: 100%;
 }
 
 /* ============ slot 内容（经 :deep 生效） ============ */
@@ -109,6 +134,7 @@ defineProps<{
 .form-body :deep(.setting-item input[type='number']),
 .form-body :deep(.setting-item input[type='text']),
 .form-body :deep(.setting-item input[type='password']) {
+  min-height: 2rem;
   padding: 0.45rem 0.7rem;
   border: 1px solid var(--border-default);
   border-radius: var(--radius-md);
@@ -171,12 +197,15 @@ defineProps<{
 /* 分段选择 */
 .form-body :deep(.segmented) {
   display: inline-flex;
+  flex-wrap: wrap;
+  max-width: 100%;
   background: var(--surface-sunken);
   border: 1px solid var(--border-default);
   border-radius: var(--radius-md);
   padding: 0.125rem;
 }
 .form-body :deep(.seg-btn) {
+  min-height: 2rem;
   padding: 0.35rem 0.9rem;
   border: none;
   background: transparent;
@@ -193,5 +222,34 @@ defineProps<{
   background: var(--surface-panel);
   color: var(--accent);
   font-weight: var(--font-weight-medium);
+}
+
+/* 详情栏可能只有 400–600px；按容器而非窗口折行，宽屏并排、窄栏堆叠。 */
+@container settings (max-width: 40rem) {
+  .form-body :deep(.setting-item) {
+    flex-direction: column;
+    align-items: stretch;
+    gap: 0.65rem;
+  }
+  .form-body :deep(.segmented) {
+    width: 100%;
+  }
+  .form-body :deep(.seg-btn) {
+    flex: 1 1 4rem;
+    min-height: 2.25rem;
+  }
+  .form-body :deep(.kind-controls),
+  .form-body :deep(.volume-control) {
+    width: 100%;
+  }
+  .form-body :deep(.setting-item input[type='text']),
+  .form-body :deep(.setting-item input[type='password']) {
+    box-sizing: border-box;
+    width: 100%;
+    min-width: 0;
+  }
+  .form-footer {
+    flex-wrap: wrap;
+  }
 }
 </style>

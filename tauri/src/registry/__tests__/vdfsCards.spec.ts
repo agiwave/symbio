@@ -15,7 +15,7 @@
  *    `children` 缺省时**不给徽标**（不给好过给一个错的 0）。
  */
 
-import { describe, expect, it } from 'vitest'
+import { afterEach, describe, expect, it, vi } from 'vitest'
 import type { VdfsNode } from '@/schemas/vdfs'
 import {
   cardBadgeOf,
@@ -40,6 +40,10 @@ function node(over: Partial<VdfsNode> = {}): VdfsNode {
     ...over,
   }
 }
+
+afterEach(() => {
+  vi.useRealTimers()
+})
 
 describe('cardStatusOf', () => {
   it('后端状态逐一映射到状态点取值', () => {
@@ -114,11 +118,31 @@ describe('cardTagsOf', () => {
     expect(cardTagsOf(node({ meta_tags: ['本地'] }))).toHaveLength(1)
   })
 
-  it('有 updated_at 时追加相对时间，排在 meta_tags 之后', () => {
-    const tags = cardTagsOf(node({ meta_tags: ['本地'], updated_at: Date.now() }))
+  it('有 updated_at 时追加相对时间，并用绝对时间补齐 tooltip', () => {
+    vi.useFakeTimers()
+    const now = new Date(2026, 10, 1, 12, 0, 0).getTime()
+    vi.setSystemTime(now)
+    const updatedAt = now - 60_000
+    const tags = cardTagsOf(node({ meta_tags: ['本地'], updated_at: updatedAt / 1000 }))
     expect(tags).toHaveLength(2)
-    expect(tags[0].label).toBe('本地')
-    expect(tags[1].label).toBeTruthy()
+    expect(tags[0]).toEqual({ label: '本地', kind: 'muted' })
+    expect(tags[1]).toEqual({
+      label: '1 分钟前',
+      kind: 'muted',
+      title: new Date(updatedAt).toLocaleString(),
+    })
+  })
+
+  it('未来或无效时间仍不显示时间标签（也不生成假 tooltip）', () => {
+    vi.useFakeTimers()
+    const now = new Date(2026, 10, 1, 12, 0, 0).getTime()
+    vi.setSystemTime(now)
+    expect(cardTagsOf(node({ meta_tags: ['本地'], updated_at: now + 60_000 }))).toEqual([
+      { label: '本地', kind: 'muted' },
+    ])
+    expect(cardTagsOf(node({ meta_tags: ['本地'], updated_at: Number.NaN }))).toEqual([
+      { label: '本地', kind: 'muted' },
+    ])
   })
 
   it('标签里不含机制字段：访问位 / ext / path / kind 都不出现', () => {

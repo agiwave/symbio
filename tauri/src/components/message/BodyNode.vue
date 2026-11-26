@@ -200,7 +200,10 @@ async function copy() {
   background: var(--surface-panel);
   color: var(--text-secondary);
   border-radius: 0.3rem;
-  padding: 0.1rem 0.4rem;
+  display: inline-flex;
+  align-items: center;
+  min-height: 1.5rem;
+  padding: 0.15rem 0.5rem;
   font-size: 0.7rem;
   cursor: pointer;
   transition: opacity 0.12s ease;

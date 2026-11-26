@@ -52,6 +52,8 @@ import { createPinia, setActivePinia } from 'pinia'
 // import 整条路由）在这种负载下会远慢于单跑（实测门禁里越过 30s 上限一次）。
 // 这是上限不是预期值，放宽只影响「负载尖峰时算不算失败」。
 const ROUTER_RELOAD_TIMEOUT = 120_000
+const UNKNOWN_ROUTE_QUERY = 'routeNotFound'
+const UNKNOWN_ROUTE_FLAG = '1'
 
 const hoisted = vi.hoisted(() => ({
   ensureSessionMountDir: vi.fn(async () => '@vfs/session'),
@@ -96,6 +98,7 @@ describe('冷启动落点', () => {
     await router.isReady()
 
     expect(router.currentRoute.value.path).toBe('/vdfs/session')
+    expect(router.currentRoute.value.query).toEqual({})
     expect(hoisted.ensureSessionMountDir).toHaveBeenCalled()
   }, ROUTER_RELOAD_TIMEOUT)
 
@@ -149,6 +152,7 @@ describe('冷启动落点', () => {
     await router.isReady()
 
     expect(router.currentRoute.value.path).toBe('/vdfs/model')
+    expect(router.currentRoute.value.query).toEqual({})
     expect(hoisted.ensureSessionMountDir).not.toHaveBeenCalled()
   }, ROUTER_RELOAD_TIMEOUT)
 
@@ -200,8 +204,34 @@ describe('冷启动落点', () => {
     expect(state?.back).toBe('/vdfs/session')
   }, ROUTER_RELOAD_TIMEOUT)
 
+  describe('未知地址提示标记', () => {
+    it('用户输入不认识的地址 ⇒ 冷启动落点附一次性标记，不静默跳转', async () => {
+      const router = await freshRouter()
+      await router.push('/no-such-page')
+      await router.isReady()
+
+      expect(router.currentRoute.value.path).toBe('/vdfs/session')
+      expect(router.currentRoute.value.query).toEqual({
+        [UNKNOWN_ROUTE_QUERY]: UNKNOWN_ROUTE_FLAG,
+      })
+      expect(hoisted.ensureSessionMountDir).toHaveBeenCalled()
+    }, ROUTER_RELOAD_TIMEOUT)
+
+    it('会话挂载点解析失败 ⇒ 未知地址回资源根，提示标记仍保留', async () => {
+      hoisted.ensureSessionMountDir.mockRejectedValue(new Error('根清单为空'))
+      const router = await freshRouter()
+      await router.push('/no-such-page')
+      await router.isReady()
+
+      expect(router.currentRoute.value.path).toBe('/vdfs')
+      expect(router.currentRoute.value.query).toEqual({
+        [UNKNOWN_ROUTE_QUERY]: UNKNOWN_ROUTE_FLAG,
+      })
+    }, ROUTER_RELOAD_TIMEOUT)
+  })
+
   /**
-   * 以下三条是**回归用例**，对应打包后的 Tauri webview 里「落点根本没执行」。
+   * 以下四条是**回归用例**，对应打包后的 Tauri webview 里「落点根本没执行」。
    *
    * 上面那几条**全部**走 `router.push('/')`——那是冷启动守卫唯一"正常"的分支，
    * 所以它们带着一个致命 bug 也能全绿。真实现场是：打包环境用自定义协议加载
@@ -234,6 +264,7 @@ describe('冷启动落点', () => {
 
       // 兜底 `:unknown(.*)*` → 首页 → 守卫接管 → 落到会话目录
       expect(router.currentRoute.value.path).toBe('/vdfs/session')
+      expect(router.currentRoute.value.query).toEqual({})
     }, ROUTER_RELOAD_TIMEOUT)
 
     it('不认识的首段进入时，落点照样执行（不是停在那个不认识的地址）', async () => {
@@ -242,6 +273,15 @@ describe('冷启动落点', () => {
       await router.isReady()
 
       expect(router.currentRoute.value.path).toBe('/vdfs/session')
+    }, ROUTER_RELOAD_TIMEOUT)
+
+    it('Windows 打包路径的 index.html 也不附带未知地址提示', async () => {
+      const router = await freshRouter()
+      await router.push('/C:/Program Files/Symbio/index.html')
+      await router.isReady()
+
+      expect(router.currentRoute.value.path).toBe('/vdfs/session')
+      expect(router.currentRoute.value.query).toEqual({})
     }, ROUTER_RELOAD_TIMEOUT)
 
     it('判据用路由名而非 path：显式导航到具名 home 也能触发落点', async () => {

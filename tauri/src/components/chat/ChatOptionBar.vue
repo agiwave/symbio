@@ -38,7 +38,9 @@
       :aria-busy="busy && busyKey === f.key ? 'true' : undefined"
       :aria-expanded="opensMenu(f) ? openKey === f.key : undefined"
       :aria-haspopup="opensMenu(f) ? 'menu' : undefined"
+      :disabled="isDisabled(f) || busy"
       @click.stop="onFieldClick(f, $event)"
+      @keydown="onFieldKeydown(f, $event)"
     >
       <!-- 保存进行中：当前字段原地转圈。
            此前只在逻辑里 `if (busy) return`：按钮看着完全正常却点不动，用户以为
@@ -58,7 +60,11 @@
         class="opt-menu"
         role="menu"
         :aria-label="openField.label"
-        :style="{ left: `${menuLeft}px` }"
+        :style="{
+          left: `${menuLeft}px`,
+          top: `${menuTop}px`,
+          maxHeight: menuMaxHeight === null ? undefined : `${menuMaxHeight}px`,
+        }"
         @click.stop
         @keydown="onMenuKeydown"
       >
@@ -128,7 +134,7 @@
  * 出站只在 `useSessionOptionBar.save`（写会话 metadata）与 `services/nativePick`
  * / `DirectoryPicker`（embedded 原生取值 / browser Server 目录取值）两处。
  */
-import { computed, inject, nextTick, onBeforeUnmount, onMounted, ref, type Ref } from 'vue'
+import { computed, inject, nextTick, onBeforeUnmount, onMounted, ref, watch, type Ref } from 'vue'
 import { routerKey } from 'vue-router'
 import OptionFormDialog from './OptionFormDialog.vue'
 import DirectoryPicker from '@/components/common/DirectoryPicker.vue'
@@ -218,12 +224,20 @@ function scopeOf(key: string): unknown {
 }
 
 // ── 分派 ──────────────────────────────────────────────
+const VIEWPORT_PADDING = 8
+const MENU_GAP = 8
+const MAX_MENU_HEIGHT = 400
+
 const openKey = ref<string | null>(null)
 const menuLeft = ref(0)
+const menuTop = ref(0)
+const menuMaxHeight = ref<number | null>(null)
 const formField = ref<DetailField | null>(null)
 const pickerField = ref<DetailField | null>(null)
 /** 打开菜单的触发按钮：关闭时焦点要回到它，而不是丢到 body 上 */
 const menuTrigger: Ref<HTMLElement | null> = ref(null)
+/** 忙态期间触发器被原生 disabled，保存结束后再尝试还焦点。 */
+const pendingMenuTrigger: Ref<HTMLElement | null> = ref(null)
 /** 候选菜单容器（键盘导航在它内部移动焦点） */
 const menuRef: Ref<HTMLElement | null> = ref(null)
 /** 正在保存的字段 key：忙态只标这一格（见模板注释） */
@@ -270,9 +284,71 @@ function fieldAriaLabel(f: DetailField): string {
   return `${f.label}：${val}`
 }
 
+function restoreMenuTriggerFocus() {
+  const trigger = pendingMenuTrigger.value
+  if (!trigger || busy.value) return
+  pendingMenuTrigger.value = null
+  if (trigger.isConnected && !(trigger as HTMLButtonElement).disabled) trigger.focus()
+}
+
 function closeMenu(restoreFocus = false) {
-  if (openKey.value && restoreFocus) menuTrigger.value?.focus()
+  const trigger = restoreFocus ? menuTrigger.value : null
   openKey.value = null
+  menuTrigger.value = null
+  menuMaxHeight.value = null
+  // 等菜单卸载、按钮解除忙态后再还焦点，避免 disabled 按钮拒绝聚焦。
+  if (trigger) {
+    pendingMenuTrigger.value = trigger
+    void nextTick(restoreMenuTriggerFocus)
+  }
+}
+
+watch(busy, (saving) => {
+  if (!saving) void nextTick(restoreMenuTriggerFocus)
+})
+
+/** 菜单仍在选项栏的定位上下文内，只按触发器矩形做轻量夹取与翻转。 */
+function positionMenu() {
+  const trigger = menuTrigger.value
+  if (!trigger) return
+
+  const viewportWidth = window.innerWidth
+  const viewportHeight = window.innerHeight
+  const triggerRect = trigger.getBoundingClientRect()
+  const parent = (trigger.offsetParent as HTMLElement | null) ?? trigger.parentElement
+  const parentRect = parent?.getBoundingClientRect()
+  const originLeft = (parentRect?.left ?? 0) + (parent?.clientLeft ?? 0)
+  const originTop = (parentRect?.top ?? 0) + (parent?.clientTop ?? 0)
+  const menu = menuRef.value
+  const measuredWidth = menu?.getBoundingClientRect().width ?? 0
+  const menuWidth = Math.min(
+    measuredWidth || Math.min(352, viewportWidth - VIEWPORT_PADDING * 2),
+    Math.max(0, viewportWidth - VIEWPORT_PADDING * 2),
+  )
+
+  const minLeft = VIEWPORT_PADDING - originLeft
+  const maxLeft = viewportWidth - VIEWPORT_PADDING - menuWidth - originLeft
+  const desiredLeft = triggerRect.left - originLeft
+  menuLeft.value = minLeft <= maxLeft
+    ? Math.min(Math.max(desiredLeft, minLeft), maxLeft)
+    : minLeft
+
+  const measuredHeight = Math.max(menu?.scrollHeight ?? 0, menu?.getBoundingClientRect().height ?? 0)
+  const preferredHeight = Math.min(measuredHeight || MAX_MENU_HEIGHT, MAX_MENU_HEIGHT)
+  const above = triggerRect.top - VIEWPORT_PADDING - MENU_GAP
+  const below = viewportHeight - triggerRect.bottom - VIEWPORT_PADDING - MENU_GAP
+  // 默认向上；上方放不下且下方更宽裕时翻转，两边都不够时选空间较大的一侧。
+  const opensUp = above >= preferredHeight || (above >= below && above > 0)
+  const availableHeight = Math.max(0, opensUp ? above : below)
+  const menuHeight = Math.min(preferredHeight, availableHeight)
+  const desiredTop = opensUp
+    ? triggerRect.top - MENU_GAP - menuHeight
+    : triggerRect.bottom + MENU_GAP
+  const maxTop = Math.max(VIEWPORT_PADDING, viewportHeight - VIEWPORT_PADDING - menuHeight)
+  const viewportTop = Math.min(Math.max(desiredTop, VIEWPORT_PADDING), maxTop)
+
+  menuTop.value = viewportTop - originTop
+  menuMaxHeight.value = menuHeight
 }
 
 /** 结构化子对象的当前值（缺省 = 字段 `default`，即子对象的缺省配置） */
@@ -286,13 +362,46 @@ async function commit(f: DetailField, value: unknown) {
   busyKey.value = f.key
   try {
     await save(f.key, value)
-    closeMenu()
+    closeMenu(true)
   } catch (e) {
     // 诊断日志在写入口（`useSessionOptionBar`）已经记过，这里只负责让用户看见
     showToast('error', `${f.label}保存失败：${e instanceof Error ? e.message : String(e)}`)
   } finally {
     busyKey.value = null
   }
+}
+
+function focusMenuItem(edge: 'active' | 'first' | 'last') {
+  const items = menuItemsOf()
+  const active = items.find((el) => el.classList.contains('active')) ?? items[0]
+  const target = edge === 'last'
+    ? items[items.length - 1]
+    : edge === 'first' ? items[0] : active
+  target?.focus()
+}
+
+function openMenu(f: DetailField, trigger: HTMLElement, edge: 'active' | 'first' | 'last' = 'active') {
+  formField.value = null
+  openKey.value = f.key
+  menuTrigger.value = trigger
+  // 展开即把焦点送到候选上：`role=menu` 承诺的就是「用方向键选」。
+  void nextTick(() => {
+    positionMenu()
+    focusMenuItem(edge)
+  })
+}
+
+/** 原生按钮已负责 Enter / Space 激活；方向键只补菜单的打开与首尾定位。 */
+function onFieldKeydown(f: DetailField, e: KeyboardEvent) {
+  if (f.widget !== 'select' || isDisabled(f) || busy.value) return
+  if (e.key !== 'ArrowDown' && e.key !== 'ArrowUp') return
+  e.preventDefault()
+  const trigger = e.currentTarget as HTMLElement
+  if (openKey.value === f.key) {
+    focusMenuItem(e.key === 'ArrowDown' ? 'first' : 'last')
+    return
+  }
+  openMenu(f, trigger, e.key === 'ArrowDown' ? 'first' : 'last')
 }
 
 async function onFieldClick(f: DetailField, ev: MouseEvent) {
@@ -316,20 +425,10 @@ async function onFieldClick(f: DetailField, ev: MouseEvent) {
   // ② 候选菜单：一层展开（再次点击收起）
   if (f.widget === 'select') {
     if (openKey.value === f.key) {
-      closeMenu()
+      closeMenu(true)
       return
     }
-    formField.value = null
-    openKey.value = f.key
-    menuTrigger.value = (ev.currentTarget as HTMLElement | null) ?? null
-    menuLeft.value = menuTrigger.value?.offsetLeft ?? 0
-    // 展开即把焦点送到候选上：`role=menu` 承诺的就是「用方向键选」。
-    // 焦点留在触发按钮上时，方向键没有任何接收者——菜单看着能用，键盘用不了。
-    void nextTick(() => {
-      const items = menuItemsOf()
-      const active = items.find((el) => el.classList.contains('active')) ?? items[0]
-      active?.focus()
-    })
+    openMenu(f, ev.currentTarget as HTMLElement)
     return
   }
 
@@ -402,13 +501,21 @@ function onDocKeydown(e: KeyboardEvent) {
   closeMenu(true)
 }
 
+function onViewportChange() {
+  if (openKey.value) void nextTick(positionMenu)
+}
+
 onMounted(() => {
   document.addEventListener('click', onDocClick)
   document.addEventListener('keydown', onDocKeydown)
+  window.addEventListener('resize', onViewportChange)
+  document.addEventListener('scroll', onViewportChange, true)
 })
 onBeforeUnmount(() => {
   document.removeEventListener('click', onDocClick)
   document.removeEventListener('keydown', onDocKeydown)
+  window.removeEventListener('resize', onViewportChange)
+  document.removeEventListener('scroll', onViewportChange, true)
 })
 </script>
 
@@ -427,6 +534,7 @@ onBeforeUnmount(() => {
   display: inline-flex;
   align-items: center;
   gap: 0.35rem;
+  min-height: 2rem;
   padding: 0.3rem 0.55rem;
   border: none;
   border-radius: var(--radius-md);
@@ -503,7 +611,7 @@ onBeforeUnmount(() => {
 /* ── 候选菜单 ───────────────────────────────────────── */
 .opt-menu {
   position: absolute;
-  bottom: calc(100% + var(--space-2));
+  top: 0;
   min-width: 13.75rem;
   max-width: min(22rem, 88vw);
   max-height: 25rem;
@@ -538,6 +646,7 @@ onBeforeUnmount(() => {
 }
 
 .hint-action {
+  min-height: 2rem;
   padding: 0.3rem 0.85rem;
   border: 1px solid var(--border-default);
   border-radius: var(--radius-md);

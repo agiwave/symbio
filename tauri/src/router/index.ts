@@ -1,11 +1,19 @@
 import { createRouter, createWebHistory } from 'vue-router'
 import MainLayout from '../views/MainLayout.vue'
-import VdfsView from '../views/VdfsView.vue'
+import VdfsView, {
+  UNKNOWN_ROUTE_FLAG,
+  UNKNOWN_ROUTE_QUERY,
+} from '../views/VdfsView.vue'
 import { ensureSessionMountDir } from '../services/vdfsScheme'
 import { VDFS_HOME_PATH, vdfsBrowserPathOf } from '../schemas/vdfsAddress'
 import { logger } from '../utils/logger'
 
 const MODULE_TAG = 'router'
+
+/** 打包入口可能落在任意前缀的 `index.html`；它是启动地址，不是用户输错的页面。 */
+function isPackagedEntryPath(path: string): boolean {
+  return /(?:^|\/)index\.html\/?$/i.test(path)
+}
 
 /**
  * 冷启动落点：**恒为会话目录**（不是资源根）。
@@ -82,9 +90,18 @@ const router = createRouter({
         // 兜底把它接回首页，冷启动落点逻辑（守卫）随即接手。
         //
         // 放 `vdfs/:dir(.*)*` **之后**：那条更具体，先匹配；只有它接不住的
-        // 首段（如 `index.html`）才落到这里。回首页用 `'/'` 而非 `/vdfs`——
-        // 首页才是「交给守卫决定去哪」的入口。
-        { path: ':unknown(.*)*', redirect: () => '/' }
+        // 首段才落到这里。回首页用 `'/'` 而非 `/vdfs`——首页才是「交给守卫
+        // 决定去哪」的入口。打包入口 `index.html` 静默回落；用户输错的地址
+        // 附一次性标记，落点页消费并 replace 清理，避免静默跳转。
+        {
+          path: ':unknown(.*)*',
+          redirect: (to) => ({
+            path: '/',
+            query: isPackagedEntryPath(to.path)
+              ? {}
+              : { [UNKNOWN_ROUTE_QUERY]: UNKNOWN_ROUTE_FLAG },
+          }),
+        }
       ]
     },
     // 容器内部的整页入口不再需要：内部结构由 VDFS 的
@@ -124,7 +141,13 @@ const router = createRouter({
  */
 router.beforeEach(async (to) => {
   if (to.name !== 'home' && to.path !== '/') return true
-  return { path: await coldStartPath(), replace: true }
+  // 未知地址经兜底 redirect 到首页；冷启动落点必须把标记带给最终页，
+  // 但不能把其它 query 误当成落点参数一起带过去。
+  const query =
+    to.query[UNKNOWN_ROUTE_QUERY] === UNKNOWN_ROUTE_FLAG
+      ? { [UNKNOWN_ROUTE_QUERY]: UNKNOWN_ROUTE_FLAG }
+      : {}
+  return { path: await coldStartPath(), query, replace: true }
 })
 
 export default router

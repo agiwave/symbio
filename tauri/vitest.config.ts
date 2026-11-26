@@ -76,7 +76,7 @@ export default defineConfig({
       // 只看文本报告：html/json 产物会在工作区留下垃圾且无人读
       reporter: ['text'],
       thresholds: {
-        lines: 67, // 实测 72.21 → 下取整 72 − 5
+        lines: 80, // 实测 85.92 → 下取整 85 − 5
         statements: 61, // 实测 66.53 → 66 − 5
         functions: 59, // 实测 64.12 → 64 − 5
         branches: 57, // 实测 62.61 → 62 − 5

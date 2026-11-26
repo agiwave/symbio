@@ -80,17 +80,17 @@ describe('Workbench — 侧边栏形态', () => {
     expect(svg.attributes('viewBox')).toBe('0 0 24 24')
   })
 
-  it('tooltip 优先取 description，缺省回落 label', () => {
+  it('tooltip 使用可见类别名，aria-label 同样读取类别名', () => {
     const w = mount(Workbench, {
       props: {
-        railItems: [rail({ label: '会话', description: '会话挂载点' }), rail({ label: '模型' })],
+        railItems: [rail({ label: '会话' }), rail({ label: '模型' })],
       },
     })
-    const [withDesc, withoutDesc] = w.findAll('.nav-btn')
-    expect(withDesc.attributes('title')).toBe('会话挂载点')
-    expect(withoutDesc.attributes('title')).toBe('模型')
-    // aria-label 恒为 label（读屏说的是名字，不是说明）
-    expect(withDesc.attributes('aria-label')).toBe('会话')
+    const [sessions, models] = w.findAll('.nav-btn')
+    expect(sessions.attributes('title')).toBe('会话')
+    expect(models.attributes('title')).toBe('模型')
+    expect(sessions.attributes('aria-label')).toBe('会话')
+    expect(sessions.find('.nav-label').exists()).toBe(false)
   })
 
   it('计数角标：有 count 才渲染，0 不渲染', () => {
@@ -102,12 +102,14 @@ describe('Workbench — 侧边栏形态', () => {
     expect(w.findAll('.nav-btn')[0].find('.nav-count').text()).toBe('3')
   })
 
-  it('active 只在当前项上（高亮不扩散）', () => {
+  it('active 只在当前项上，并通过 aria-current 告知读屏', () => {
     const w = mount(Workbench, {
       props: { railItems: [rail({ key: 'a', active: true }), rail({ key: 'b' })] },
     })
-    const classes = w.findAll('.nav-btn').map((b) => b.classes('active'))
-    expect(classes).toEqual([true, false])
+    const buttons = w.findAll('.nav-btn')
+    expect(buttons.map((b) => b.classes('active'))).toEqual([true, false])
+    expect(buttons[0].attributes('aria-current')).toBe('page')
+    expect(buttons[1].attributes('aria-current')).toBeUndefined()
   })
 
   it('点击侧栏项 emit rail-select，带的是 key 而不是 label', async () => {
@@ -203,6 +205,7 @@ describe('Workbench — 列表为空时收起中栏', () => {
       slots: { detail: '<div class="d">详情</div>' },
     })
     expect(w.find('.workbench-list').exists()).toBe(false)
+    expect(w.find('.workbench-detail').classes('no-list')).toBe(true)
     // 详情仍在（收的是列表，不是详情）
     expect(w.find('.workbench-detail .d').exists()).toBe(true)
   })

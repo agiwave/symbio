@@ -27,6 +27,8 @@ import type { ChatNode } from '@/schemas/chat_node'
 
 interface ChatStub {
   isLoading: { value: boolean }
+  isStopping: { value: boolean }
+  stopNotice: { value: { tone: 'info' | 'success' | 'error'; text: string } | null }
   isWaitingApproval: { value: boolean }
   isConnected: { value: boolean }
   messageTree: { value: unknown[] }
@@ -60,6 +62,8 @@ vi.mock('@/composables/useChatConnection', async () => {
   const { ref, shallowRef } = await import('vue')
   hoisted.chat = {
     isLoading: ref(false),
+    isStopping: ref(false),
+    stopNotice: ref(null),
     isWaitingApproval: ref(false),
     isConnected: ref(true),
     messageTree: shallowRef([]),
@@ -145,6 +149,9 @@ function scrollStub(): ScrollStub {
 
 beforeEach(() => {
   setActivePinia(createPinia())
+  chatStub().isLoading.value = false
+  chatStub().isStopping.value = false
+  chatStub().stopNotice.value = null
   chatStub().messageTree.value = []
   for (const fn of [
     scrollStub().scrollToBottom,

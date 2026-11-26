@@ -23,13 +23,21 @@
 // @vitest-environment happy-dom
 import { afterEach, beforeEach, describe, expect, it, vi } from 'vitest'
 import { mount, type VueWrapper } from '@vue/test-utils'
-import { computed, defineComponent, h, nextTick, ref, shallowRef, type Ref } from 'vue'
+import { computed, defineComponent, h, nextTick, ref, shallowRef, watch, type Ref } from 'vue'
 
 const hoisted = vi.hoisted(() => {
-  const fns = { startNew: vi.fn(), runAction: vi.fn(), runPackAction: vi.fn() }
+  const fns = {
+    startNew: vi.fn(),
+    runAction: vi.fn(),
+    runPackAction: vi.fn(),
+    removeSelected: vi.fn(),
+    loadMore: vi.fn(),
+    refresh: vi.fn(),
+    retryDetail: vi.fn(),
+  }
   /** 每次 `startNew()` 实际开出的**类型**——断言的是"开了哪一类"，不只是"开了几次" */
   const newTypes: (string | null)[] = []
-  return { stub: {} as Record<string, unknown>, fns, newTypes, sessions: { setSessionSpace: vi.fn() } }
+  return { stub: {} as Record<string, unknown>, fns, newTypes, rendererTitle: '', sessions: { setSessionSpace: vi.fn() } }
 })
 
 vi.mock('@/composables/useVdfs', () => ({ useVdfs: () => hoisted.stub }))
@@ -41,10 +49,12 @@ vi.mock('@/stores/sessions', () => ({ useSessionsStore: () => hoisted.sessions }
 vi.mock('@/registry/vdfsRenderers', () => ({}))
 
 import VdfsWorkbench from '../VdfsWorkbench.vue'
+import ConfirmDialog from '@/components/common/ConfirmDialog.vue'
 import DetailShell from '../DetailShell.vue'
 import { dispatchHotkeys } from '@/composables/useHotkeys'
-import { registerVdfsRenderer } from '@/registry/vdfsTypes'
-import type { DetailAction, VdfsNewType, VdfsNode } from '@/schemas/vdfs'
+import { registerVdfsRenderer, type VdfsRenderer } from '@/registry/vdfsTypes'
+import type { DetailAction, VdfsItem, VdfsNewType, VdfsNode, VdfsTreeNode } from '@/schemas/vdfs'
+import { NEW_RESOURCE_EVENT } from '@/utils/newResource'
 
 /**
  * 详情渲染器桩：它只做两件事——
@@ -60,19 +70,54 @@ const RendererStub = defineComponent({
   name: 'RendererStub',
   props: { mechanismActions: { type: Array, default: () => [] } },
   // 声明而非留给 fallthrough：`action` 是本桩要上抛的事件，不是要往下传的 attr
-  emits: ['action'],
-  setup(props) {
-    return () =>
-      h(DetailShell, { actions: props.mechanismActions as DetailAction[] })
+  emits: ['action', 'delete', 'dirty-change'],
+  setup(props, { expose }) {
+    expose({ currentTitle: () => hoisted.rendererTitle })
+    return () => h(DetailShell, { actions: props.mechanismActions as DetailAction[] })
   },
 })
 // `session` 是本文件节点（`makeNode`）的渲染器键（ext → renderer 由 vdfsTypes 解析）
 registerVdfsRenderer('session', RendererStub)
 
+/** 表单桩：保留本地输入，用来验证保存失败只更新 error、不卸载或重置表单。 */
+const FormRendererStub = defineComponent({
+  name: 'FormRendererStub',
+  props: { data: { type: Object, default: null }, error: { type: String, default: '' } },
+  setup(props) {
+    const name = ref('')
+    watch(
+      () => props.data,
+      (data) => {
+        name.value = data && typeof data === 'object' ? String((data as Record<string, unknown>).name ?? '') : ''
+      },
+      { immediate: true },
+    )
+    return () => h('div', [
+      h('input', {
+        class: 'renderer-name',
+        value: name.value,
+        onInput: (event: Event) => { name.value = (event.target as HTMLInputElement).value },
+      }),
+      props.error ? h('p', { class: 'renderer-error' }, props.error) : null,
+    ])
+  },
+})
+registerVdfsRenderer('form', FormRendererStub)
+
+/** 正文桩：让 nodeText 在 DOM 里可直接观察，验证慢读时不会闪现旧正文。 */
+const TextRendererStub = defineComponent({
+  name: 'TextRendererStub',
+  props: { data: { type: String, default: '' } },
+  setup(props) {
+    return () => h('pre', { class: 'renderer-text' }, props.data)
+  },
+})
+registerVdfsRenderer('text', TextRendererStub)
+
 /** 配置型：呈现 ext 是 skill、落成后节点 ext 是 form（详情是定义驱动表单） */
 const SKILL: VdfsNewType = { ext: 'skill', title: '技能', node_ext: 'form' }
 
-function makeNode(name: string): VdfsNode {
+function makeNode(name: string): VdfsItem {
   return {
     path: `@vfs/session/${name}`,
     name,
@@ -85,24 +130,62 @@ function makeNode(name: string): VdfsNode {
 }
 
 /** `installStub` 装上的可写 ref（换目录的用例要在挂载后改它们） */
-let stubRefs: { cwd: Ref<string>; cwdNode: Ref<VdfsNode | null>; cwdAddr: Ref<string> } | null = null
+let stubRefs: {
+  cwd: Ref<string>
+  cwdNode: Ref<VdfsNode | null>
+  cwdAddr: Ref<string>
+  selectedNode: Ref<VdfsNode | null>
+  items: Ref<VdfsItem[]>
+  loading: Ref<boolean>
+  pinnedAtAddr: Ref<boolean>
+  loadingDetail: Ref<boolean>
+  detailLoadError: Ref<string>
+  detailError: Ref<string>
+  formData: Ref<Record<string, unknown> | null>
+  nodeText: Ref<string>
+} | null = null
 
 /** 可控的 `useVdfs` 桩：只填本文件关心的那几个键，其余给空值 */
 function installStub(
   opts: {
     newType?: VdfsNewType | null
     selected?: VdfsNode | null
-    items?: VdfsNode[]
+    items?: VdfsItem[]
     /** 当前目录地址（`@vfs` / `@vfs/session`…）；默认 `@vfs`（资源根） */
     cwd?: string
     /** 当前目录**节点**；`new_type.ext = session` 时控件会声明「当前空间」 */
     cwdNode?: VdfsNode | null
     /** 左栏类别（挂载层的目录名，按顺序）——键盘「切到第 N 个类别」的判据取自这里 */
     nav?: string[]
+    /** 目录树形态与树读取失败态 */
+    treeMode?: boolean
+    treeNodes?: VdfsTreeNode[]
+    treeError?: string
+    /** 是否还有更早的一页 */
+    hasMore?: boolean
+    /** 目录列表是否仍在加载 */
+    loading?: boolean
+    /** 深链到达态尚未由用户主动解除 */
+    pinnedAtAddr?: boolean
+    /** 详情读取态与两类独立错误 */
+    loadingDetail?: boolean
+    detailLoadError?: string
+    detailError?: string
+    /** 渲染器与已读数据（详情槽用例用） */
+    renderer?: VdfsRenderer
+    formData?: Record<string, unknown> | null
+    nodeText?: string
   } = {}
 ) {
   const selectedNode = ref<VdfsNode | null>(opts.selected ?? null)
-  const items = ref<VdfsNode[]>(opts.items ?? [])
+  const items = ref<VdfsItem[]>(opts.items ?? [])
+  const loading = ref(opts.loading ?? false)
+  const pinnedAtAddr = ref(opts.pinnedAtAddr ?? false)
+  const loadingDetail = ref(opts.loadingDetail ?? false)
+  const detailLoadError = ref(opts.detailLoadError ?? '')
+  const detailError = ref(opts.detailError ?? '')
+  const formData = ref<Record<string, unknown> | null>(opts.formData ?? null)
+  const nodeText = ref(opts.nodeText ?? '')
   // 这两个**可写**：换目录的用例要在挂载后改它们（真实现里 `cwd` 立刻变、
   // `cwdNode` 要等 `refresh()` 回来，两者的时间差正是那条滞后 bug 的来源）
   const cwd = ref(opts.cwd ?? '@vfs')
@@ -110,7 +193,10 @@ function installStub(
   // `cwdNode` 是**哪个地址**的自述（真实现里由 list 回执同源登记）。缺省与 `cwd`
   // 一致 = 「自述已经跟上当前目录」；换目录的用例可以把两者拆开，复刻那一步滞后。
   const cwdAddr = ref(opts.cwd ?? '@vfs')
-  stubRefs = { cwd, cwdNode, cwdAddr }
+  stubRefs = {
+    cwd, cwdNode, cwdAddr, selectedNode, items, loading, pinnedAtAddr,
+    loadingDetail, detailLoadError, detailError, formData, nodeText,
+  }
   /** 筛选词：真实现是 ref + computed 投影；桩里复刻成同一个形状，
    *  好让「筛选框输入 → 列表收窄」这条链路在本文件也能被断言 */
   const filter = ref('')
@@ -128,15 +214,21 @@ function installStub(
     atMountLevel: computed(() => false),
     selectDir: vi.fn(),
     selectedName: ref<string | null>(null),
+    pinnedAtAddr,
     cwd,
     // 当前目录节点：`new_type.ext = session` 时控件会声明「当前空间」
-    // （会话挂载目录）并自动开一份新会话草稿（见控件内的 autoDraft）。
+    // （会话挂载目录）；只有已加载完成且为空的目录才自动开草稿。
     // 默认给 null（不可新建的目录），本文件多数用例测的是新建入口与动作转发。
     cwdNode: computed<VdfsNode | null>(() => cwdNode.value),
     // 自述对应的地址（真实现里 `cwdAddr === cwd` 才说明自述已经跟上当前目录）
     cwdAddr: computed(() => cwdAddr.value),
     title: computed(() => '资源'),
     items,
+    treeMode: ref(opts.treeMode ?? false),
+    treeNodes: shallowRef(opts.treeNodes ?? []),
+    treeTruncated: ref(false),
+    treeMessage: ref(''),
+    treeError: ref(opts.treeError ?? ''),
     filteredItems,
     // 筛选入口是否在场：与真实现**同源** —— `cwdNode.search === true`（服务端
     // 声明，裁决在 list 响应里已做好）。前端不自判「条目够不够多」。
@@ -147,22 +239,21 @@ function installStub(
       () => Boolean(filter.value.trim()) && items.value.length > 0 && filteredItems.value.length === 0
     ),
     filterTruncated: computed(() => false),
-    loading: ref(false),
+    loading,
     loadError: ref(''),
-    hasMore: ref(false),
+    hasMore: ref(opts.hasMore ?? false),
     loadingMore: ref(false),
-    refresh: vi.fn(),
-    loadMore: vi.fn(),
     select: vi.fn(),
     selectedNode,
     selectedId: computed(() => selectedNode.value?.path ?? null),
-    renderer: computed(() => 'form'),
-    nodeText: ref(''),
-    formData: ref(null),
-    loadingDetail: ref(false),
+    renderer: computed(() => opts.renderer ?? 'form'),
+    nodeText,
+    formData,
+    loadingDetail,
+    detailLoadError,
     saving: ref(false),
     actionBusy: ref(false),
-    detailError: ref(''),
+    detailError,
     fieldErrors: ref([]),
     // 机制动作（当前只有「删除」）由页面算好注入渲染器；可写节点才有它
     mechanismActions: computed<DetailAction[]>(() =>
@@ -171,7 +262,6 @@ function installStub(
     mechanismBusyId: ref<string | null>(null),
     saveFields: vi.fn(),
     saveText: vi.fn(),
-    removeSelected: vi.fn(),
     // 可新建类型**来自当前目录节点的自述**（前端不做任何推导）——与真实现同源：
     // `useVdfs.creatableType` 先核 `cwdAddr === cwd`（自述与当前目录同源），
     // 再取 `cwdNode.new_type`。桩里必须用同一条来源，否则「换目录那一拍拿上一栏
@@ -214,6 +304,7 @@ beforeEach(() => {
   Object.values(hoisted.fns).forEach((f) => f.mockClear())
   hoisted.sessions.setSessionSpace.mockClear()
   hoisted.newTypes.length = 0
+  hoisted.rendererTitle = ''
   stubRefs = null
 })
 
@@ -316,6 +407,126 @@ describe('VdfsWorkbench 详情槽', () => {
       { id: 'delete', label: '删除', style: 'secondary' },
     ])
   })
+
+  it('★ 慢读时骨架优先，真实表单与旧字段值都不渲染', () => {
+    const node: VdfsItem = { ...makeNode('m1'), kind: 'model', ext: 'form' }
+    installStub({ selected: node, formData: { name: '旧值' }, loadingDetail: true })
+    const w = bench()
+
+    expect(w.find('.vdfs-detail-skeleton').exists()).toBe(true)
+    expect(w.findComponent({ name: 'FormRendererStub' }).exists()).toBe(false)
+    expect(w.find('.renderer-name').exists()).toBe(false)
+    expect(w.text()).not.toContain('旧值')
+  })
+
+  it('★ 慢读时旧 nodeText 也不得先渲染成可编辑正文', async () => {
+    const node: VdfsItem = { ...makeNode('a.md'), kind: 'file', ext: 'text' }
+    installStub({ selected: node, renderer: 'text', nodeText: '旧正文', loadingDetail: true })
+    const w = bench()
+    expect(w.find('.renderer-text').exists()).toBe(false)
+
+    stubRefs!.loadingDetail.value = false
+    await nextTick()
+    expect(w.find('.renderer-text').text()).toBe('旧正文')
+  })
+
+  it('读取失败持久显示明确错误与「重试详情」，不挂载未就绪表单', async () => {
+    const node: VdfsItem = { ...makeNode('m1'), kind: 'model', ext: 'form' }
+    installStub({
+      selected: node,
+      formData: { name: '旧值' },
+      detailLoadError: '读取失败：连接中断',
+    })
+    const w = bench()
+
+    expect(w.find('.vdfs-detail-error').attributes('role')).toBe('alert')
+    expect(w.find('.vdfs-detail-error').text()).toContain('读取失败：连接中断')
+    expect(w.findComponent({ name: 'FormRendererStub' }).exists()).toBe(false)
+    await w.find('.vdfs-detail-error button').trigger('click')
+    expect(hoisted.fns.retryDetail).toHaveBeenCalledTimes(1)
+  })
+
+  it('★ 保存失败仍保留当前表单与用户输入，只展示操作错误', async () => {
+    const node: VdfsItem = { ...makeNode('m1'), kind: 'model', ext: 'form' }
+    installStub({ selected: node, formData: { name: '服务端值' } })
+    const w = bench()
+    const input = w.find('.renderer-name')
+    await input.setValue('用户输入')
+
+    stubRefs!.detailError.value = '保存失败：写入被拒绝'
+    await nextTick()
+
+    expect(w.findComponent({ name: 'FormRendererStub' }).exists()).toBe(true)
+    expect(w.find<HTMLInputElement>('.renderer-name').element.value).toBe('用户输入')
+    expect(w.find('.renderer-error').text()).toContain('写入被拒绝')
+    expect(w.find('.vdfs-detail-error').exists()).toBe(false)
+    expect(w.find('.vdfs-detail-skeleton').exists()).toBe(false)
+  })
+
+  it('删除确认冻结目标与最新标题，后续选中变化不改变删除对象', async () => {
+    const target = { ...makeNode('s1'), title: '旧标题' }
+    installStub({ selected: target })
+    hoisted.rendererTitle = '重命名后的标题'
+    const w = bench()
+    const renderer = w.findComponent({ name: 'RendererStub' })
+
+    renderer.vm.$emit('delete')
+    await nextTick()
+    expect(w.text()).toContain('将删除「重命名后的标题」')
+
+    stubRefs!.selectedNode.value = makeNode('s2')
+    await nextTick()
+    expect(w.text()).toContain('将删除「重命名后的标题」')
+
+    const dialog = w.findAllComponents(ConfirmDialog)[0]
+    dialog.vm.$emit('confirm')
+    expect(hoisted.fns.removeSelected).toHaveBeenCalledWith(
+      expect.objectContaining({ path: target.path, title: '重命名后的标题' }),
+    )
+  })
+
+  it('路由离开确认在取消后保留 dirty，确认后放行', async () => {
+    installStub({ selected: makeNode('s1') })
+    const w = bench()
+    const renderer = w.findComponent({ name: 'RendererStub' })
+    renderer.vm.$emit('dirty-change', true)
+    await nextTick()
+
+    let settled = false
+    const first = w.vm.confirmRouteLeave().then((allowed) => {
+      settled = true
+      return allowed
+    })
+    await nextTick()
+    expect(settled).toBe(false)
+    const leaveDialog = () =>
+      w.findAllComponents(ConfirmDialog).find((d) => d.props('title') === '放弃未保存的修改？')!
+    leaveDialog().vm.$emit('cancel')
+    await expect(first).resolves.toBe(false)
+
+    const second = w.vm.confirmRouteLeave()
+    leaveDialog().vm.$emit('confirm')
+    await expect(second).resolves.toBe(true)
+    await expect(w.vm.confirmRouteLeave()).resolves.toBe(true)
+  })
+
+  it('有未保存修改时阻止刷新与硬离页，确认放弃后放行', async () => {
+    installStub({ selected: makeNode('s1') })
+    const w = bench()
+    w.findComponent({ name: 'RendererStub' }).vm.$emit('dirty-change', true)
+    await nextTick()
+
+    const dirtyUnload = new Event('beforeunload', { cancelable: true })
+    window.dispatchEvent(dirtyUnload)
+    expect(dirtyUnload.defaultPrevented).toBe(true)
+
+    const pending = w.vm.confirmRouteLeave()
+    w.findAllComponents(ConfirmDialog).find((d) => d.props('title') === '放弃未保存的修改？')!.vm.$emit('confirm')
+    await pending
+    const cleanUnload = new Event('beforeunload', { cancelable: true })
+    window.dispatchEvent(cleanUnload)
+    expect(cleanUnload.defaultPrevented).toBe(false)
+  })
 })
 
 /**
@@ -390,6 +601,27 @@ describe('VdfsWorkbench 列表筛选', () => {
     expect(w.findAll('.vdfs-card')).toHaveLength(3)
   })
 
+  it('筛掉全部结果且还有更早页 ⇒ 仍保留“加载更早”入口', async () => {
+    installStub({ items: list(), cwdNode: dirNode(true), hasMore: true })
+    const w = bench()
+    await w.find('.vdfs-filter-input').setValue('zzz')
+
+    expect(w.find('.empty-state').text()).toContain('没有匹配')
+    expect(w.find('.list-more').exists()).toBe(true)
+    await w.find('.more-btn').trigger('click')
+    expect(hoisted.fns.loadMore).toHaveBeenCalledTimes(1)
+  })
+
+  it('目录树读取失败 ⇒ 显示错误与重试，不伪装成空目录', async () => {
+    installStub({ treeMode: true, treeError: '加载目录树失败：连接中断' })
+    const w = bench()
+
+    expect(w.find('.tree-error').text()).toContain('连接中断')
+    expect(w.find('.empty-state').exists()).toBe(false)
+    await w.find('.tree-error .more-btn').trigger('click')
+    expect(hoisted.fns.refresh).toHaveBeenCalledTimes(1)
+  })
+
   it('Esc 与 × 都能清除筛选', async () => {
     installStub({ items: list(), cwdNode: dirNode(true) })
     const w = bench()
@@ -406,28 +638,13 @@ describe('VdfsWorkbench 列表筛选', () => {
 })
 
 /**
- * 进入一个**可新建**的目录时自动备好一张草稿。
+ * **空目录**自动备好草稿；已有条目的目录默认列表 + 空详情。
  *
- * 它是「列表为空 ⇒ 直接显示详情（新建）、中栏收起」这条机制的**上游**：收栏判据
- * 在容器里（`common/Workbench.vue` 的 `showList`），但容器自己不开草稿，草稿由
- * 这里开。所以这一段不对，MCP / 技能页就永远收不了栏——那正是用户报的现象。
- *
- * ⚠️ 判据**必须与类型无关**。曾经它写的是 `creatableType.ext === 'session'`，
- * 于是只有会话页有草稿、其余类型一律没有：一份写死在前端的类型名单，后端每加
- * 一类资源都要回来补。下面的第 2、3 条是这条教训的验收——把那个 `ext` 判断加
- * 回去，它们会红，那正是它们存在的理由。
- *
- * 正确的判据只有一条：**目录自己声明了可新建什么**（`cwdNode.new_type`）。
- * 其余两条边界与类型无关，缺一条就会帮倒忙（都会静默走样：不报错，只是草稿
- * 出现在不该出现的地方 / 覆盖用户的选择 / 删了又"复活"）：
- *
- * 1. 只在**用户还没选中任何东西**时做——覆盖深链进来的选中项等于抢用户的选择；
- * 2. **每个目录只自动开一次**——否则清空选中 / 删掉刚选中的项之后草稿会复活；
- * 3. **目录没声明 `new_type`** ⇒ 不可新建 ⇒ 不开（由后端声明，不由类型名决定）；
- * 4. schema 驱动的选择器页（落成 ext = `market`）⇒ 不开——进目录先看列表，草稿只由
- *    用户点新建打开（判据来自渲染注册表，不是前端按资源类型名猜）。
+ * 判据仍必须与类型无关：目录自述声明 `new_type`，且本次 list 已加载完成、条目确实
+ * 为空。自述与 items 同源（`cwdAddr === cwd`），加载中 / 读失败不提前开；深链到达态
+ * 不抢；每个目录只开一次；schema 驱动的选择器页只由用户明确新建。
  */
-describe('VdfsWorkbench 进入可新建目录时自动备好草稿', () => {
+describe('VdfsWorkbench 空目录自动草稿与明确新建', () => {
   const SESSION_TYPE: VdfsNewType = { ext: 'session', title: '会话' }
   /** 会话挂载目录节点：`new_type.ext = session` ⇒ 控件据此认定「当前空间」 */
   const mountNode: VdfsNode = {
@@ -450,7 +667,7 @@ describe('VdfsWorkbench 进入可新建目录时自动备好草稿', () => {
     expect(hoisted.fns.startNew).toHaveBeenCalledTimes(1)
   })
 
-  it('★ 模型 / MCP / 技能目录**同样**自动开（曾写死成只认 session）', () => {
+  it('★ 空的可新建目录不区分类型（模型 / MCP / 技能同样自动开）', () => {
     installStub({
       cwd: '@vfs/mcp',
       cwdNode: { ...mountNode, path: '@vfs/mcp', name: 'mcp', new_type: { ext: 'mcp', title: 'MCP' } },
@@ -459,6 +676,28 @@ describe('VdfsWorkbench 进入可新建目录时自动备好草稿', () => {
 
     expect(hoisted.fns.startNew).toHaveBeenCalledTimes(1)
   })
+
+  it.each(['model', 'mcp', 'skill', 'sandbox'])(
+    '★ %s 目录已有条目 ⇒ 默认列表 + 空详情，不自动抢草稿',
+    (name) => {
+      installStub({
+        cwd: `@vfs/${name}`,
+        cwdNode: {
+          ...mountNode,
+          path: `@vfs/${name}`,
+          name,
+          new_type: { ext: name, title: name, node_ext: 'form' },
+        },
+        items: [makeNode('existing')],
+      })
+      const w = bench()
+
+      expect(hoisted.fns.startNew).not.toHaveBeenCalled()
+      expect(w.findAll('.vdfs-card')).toHaveLength(1)
+      expect(w.find('.workbench-list').exists()).toBe(true)
+      expect(w.findComponent({ name: 'FormRendererStub' }).exists()).toBe(false)
+    },
+  )
 
   it('★ 后端新下发的类型（前端没见过的名字）⇒ 照样自动开（不靠类型名单）', () => {
     installStub({
@@ -476,10 +715,7 @@ describe('VdfsWorkbench 进入可新建目录时自动备好草稿', () => {
     expect(hoisted.fns.startNew).toHaveBeenCalledTimes(1)
   })
 
-  it('★ 换目录的那一拍不得拿**上一栏**的目录自述开草稿（否则上一类的详情页会开到这一栏）', async () => {
-    // 用户报的现象：模型页显示智能体详情、会话页显示模型详情——**一步滞后**。
-    // 成因：换目录时地址（`cwd`）立刻变，而目录自述（`cwdNode`）要等列表回来才更新，
-    // 中间那一拍 `creatableType` 仍是上一栏的类型。故监听源必须是目录自述。
+  it('★ 换目录时自述与 items 必须同源，错位的那一拍不得开草稿', async () => {
     const agent: VdfsNode = {
       ...mountNode,
       path: '@vfs/subagent',
@@ -492,20 +728,78 @@ describe('VdfsWorkbench 进入可新建目录时自动备好草稿', () => {
       name: 'model',
       new_type: { ext: 'model', title: '模型' },
     }
-    installStub({ cwd: '@vfs/subagent', cwdNode: agent })
+    installStub({ cwd: '@vfs/subagent', cwdNode: agent, items: [makeNode('existing')] })
     bench()
-    expect(hoisted.newTypes).toEqual(['subagent'])
+    expect(hoisted.fns.startNew).not.toHaveBeenCalled()
 
-    // 切到模型：地址先变，自述还没回来 —— 这一拍里绝不能开（开了就是 agent 的详情）
+    // 地址先变，自述与条目仍属于上一栏。
     stubRefs!.cwd.value = '@vfs/model'
     await nextTick()
-    expect(hoisted.fns.startNew).toHaveBeenCalledTimes(1)
+    expect(hoisted.fns.startNew).not.toHaveBeenCalled()
 
-    // 自述回来 ⇒ 开的是**模型**的草稿
+    // 新自述先到，但来源地址尚未对齐，仍不能认。
     stubRefs!.cwdNode.value = model
     await nextTick()
-    expect(hoisted.fns.startNew).toHaveBeenCalledTimes(2)
-    expect(hoisted.newTypes).toEqual(['subagent', 'model'])
+    expect(hoisted.fns.startNew).not.toHaveBeenCalled()
+
+    // 同源登记后的空列表才是一份可自动开草稿的完整回执。
+    stubRefs!.items.value = []
+    stubRefs!.cwdAddr.value = '@vfs/model'
+    await nextTick()
+    expect(hoisted.fns.startNew).toHaveBeenCalledTimes(1)
+    expect(hoisted.newTypes).toEqual(['model'])
+  })
+
+  it('列表加载中不得提前把空数组当成结果自动开草稿', async () => {
+    installStub({ cwd: '@vfs/session', cwdNode: mountNode, items: [], loading: true })
+    bench()
+    expect(hoisted.fns.startNew).not.toHaveBeenCalled()
+
+    stubRefs!.loading.value = false
+    await nextTick()
+    expect(hoisted.fns.startNew).toHaveBeenCalledTimes(1)
+  })
+
+  it('深链到达态不得被自动草稿抢走（包括 list 后仍在 stat 的窗口）', () => {
+    installStub({ cwd: '@vfs/session', cwdNode: mountNode, items: [], pinnedAtAddr: true })
+    bench()
+    expect(hoisted.fns.startNew).not.toHaveBeenCalled()
+  })
+
+  it('已有条目时，Ctrl+N / 命令面板的明确新建请求仍直接开草稿', async () => {
+    const cwd = '@vfs/explicit-new'
+    installStub({
+      cwd,
+      cwdNode: { ...mountNode, path: cwd, name: 'explicit-new' },
+      items: [makeNode('existing')],
+    })
+    const w = bench()
+    expect(hoisted.fns.startNew).not.toHaveBeenCalled()
+
+    window.dispatchEvent(new CustomEvent(NEW_RESOURCE_EVENT, { detail: cwd }))
+    await nextTick()
+    expect(hoisted.fns.startNew).toHaveBeenCalledTimes(1)
+    w.unmount()
+  })
+
+  it('明确新建早于列表回执时排队，目录就绪后只开一次', async () => {
+    const cwd = '@vfs/explicit-new-loading'
+    installStub({
+      cwd,
+      cwdNode: { ...mountNode, path: cwd, name: 'explicit-new-loading' },
+      items: [makeNode('existing')],
+      loading: true,
+    })
+    const w = bench()
+
+    window.dispatchEvent(new CustomEvent(NEW_RESOURCE_EVENT, { detail: cwd }))
+    await nextTick()
+    expect(hoisted.fns.startNew).not.toHaveBeenCalled()
+
+    stubRefs!.loading.value = false
+    await nextTick()
+    expect(hoisted.fns.startNew).toHaveBeenCalledTimes(1)
+    w.unmount()
   })
 
   it('已有选中项 ⇒ 不覆盖用户的选择', () => {
@@ -703,6 +997,24 @@ describe('VdfsWorkbench 键盘', () => {
 
     expect(pressKey({ key: 'ArrowDown' }).consumed).toBe(true)
     expect(document.activeElement).toBe(cards()[1])
+  })
+
+  it('树模式 ↑↓ 在 .tree-row 之间移动焦点', () => {
+    mountAttached({
+      treeMode: true,
+      treeNodes: [
+        { item: makeNode('a'), children: [] },
+        { item: makeNode('b'), children: [] },
+      ],
+    })
+    const rows = Array.from(document.querySelectorAll<HTMLElement>('.tree-row'))
+    rows[0].focus()
+
+    expect(pressKey({ key: 'ArrowDown' }).consumed).toBe(true)
+    expect(document.activeElement).toBe(rows[1])
+
+    expect(pressKey({ key: 'ArrowUp' }).consumed).toBe(true)
+    expect(document.activeElement).toBe(rows[0])
   })
 
   it('★ 焦点不在列表里 ⇒ ↑↓ 还给页面（详情栏与聊天输入的滚动不被抢走）', () => {

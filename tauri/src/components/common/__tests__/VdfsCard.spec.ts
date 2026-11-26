@@ -15,9 +15,8 @@
  * 3. **元信息行按需出现**：只有 `meta` 插槽或 `tags` 非空时才渲染，
  *    否则不留一条空的横条。
  *
- * ⚠️ 已知争议（本次**只记录不改**）：`disabled` 只影响 `tabindex` /
- * `aria-disabled` / 视觉，点击与键盘**仍会 emit click**——拦截应在调用方或
- * 本组件补一层判断，属行为变更，需确认范围后再动。故此处不断言该组合。
+ * 4. **禁用态不可激活**：`disabled` 同时约束 Tab 顺序与点击/键盘激活，
+ *    避免只改视觉却仍打开不可用资源。
  */
 
 // @vitest-environment happy-dom
@@ -68,11 +67,15 @@ describe('VdfsCard — 激活', () => {
     expect(off.attributes('aria-selected')).toBe('false')
   })
 
-  it('禁用态移出 Tab 序（tabindex=-1）但仍保留 role', () => {
+  it('禁用态移出 Tab 序且不可由点击或键盘激活', async () => {
     const w = mountCard({ disabled: true })
     expect(w.attributes('tabindex')).toBe('-1')
     expect(w.attributes('aria-disabled')).toBe('true')
     expect(w.classes()).toContain('disabled')
+    await w.trigger('click')
+    await w.trigger('keydown.enter')
+    await w.trigger('keydown.space')
+    expect(w.emitted('click')).toBeUndefined()
   })
 })
 
@@ -122,6 +125,18 @@ describe('VdfsCard — 文本与标签', () => {
     expect(tags).toHaveLength(2)
     expect(tags[0].classes()).toContain('tag-default')
     expect(tags[1].classes()).toContain('tag-success')
+  })
+
+  it('读屏名称包含状态与标签，重复状态只读一次', () => {
+    const w = mountCard({
+      title: '智能体',
+      showStatus: false,
+      tags: [{ label: '装配失败' }, { label: '实例：agent' }],
+    })
+    expect(w.attributes('aria-label')).toBe('智能体，装配失败，实例：agent')
+    expect(
+      mountCard({ statusTitle: '已启用', tags: [{ label: '已启用' }, { label: '必需' }] }).attributes('aria-label'),
+    ).toBe('一张卡，已启用，必需')
   })
 })
 

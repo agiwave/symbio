@@ -96,9 +96,14 @@ describe('HomedirEntry — 显示', () => {
     expect(w.find('.nav-btn').attributes('title')).toContain('远端')
   })
 
-  it('aria-label 是稳定的「系统目录」（不随路径变）', () => {
+  it('纯图标入口：aria-label 与 title 说明当前系统目录', async () => {
+    currentLocation.value = { kind: 'local', localPath: '/home/x/.symbio' }
     const w = mount(HomedirEntry)
-    expect(w.find('.nav-btn').attributes('aria-label')).toBe('系统目录')
+    await new Promise((r) => setTimeout(r, 0))
+    expect(w.find('.nav-btn').attributes('aria-label')).toContain('本地')
+    expect(w.find('.nav-btn').attributes('aria-label')).toContain('/home/x/.symbio')
+    expect(w.find('.nav-btn svg').exists()).toBe(true)
+    expect(w.find('.nav-btn .nav-label').exists()).toBe(false)
   })
 })
 

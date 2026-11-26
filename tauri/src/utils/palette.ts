@@ -23,16 +23,25 @@
 
 import type { VdfsItem } from '@/schemas/vdfs'
 
+/** 命令到达目的地后的语义：默认导航；只有显式 `new` 才发新建请求 */
+export type PaletteAction = 'navigate' | 'new'
+
 /** 面板里的一条可执行项（Enter = 宿主把它 push 成地址页） */
 export interface PaletteEntry {
-  /** 稳定标识（结果用地址，命令用 `new:<地址>`） */
+  /** 稳定标识（结果用地址，类别导航用 `nav:<地址>`，新建用 `new:<地址>`） */
   key: string
   /** 主标题 */
   title: string
-  /** 次级说明（命令项 = 类别自述，资源项 = 地址相对段） */
+  /** 次级说明（类别命令 = 浏览/新建动作，资源项 = 地址相对段） */
   hint: string
   /** 目标**数据地址**（浏览器地址由宿主经 `vdfsBrowserPathOf` 换算） */
   addr: string
+  /** 缺省 = 导航；新建命令必须显式标 `new`，不能靠 key 前缀猜 */
+  action?: PaletteAction
+  /** 到达目录后顺带选中的末段名（全局设置等“目录中的一项”用） */
+  select?: string
+  /** 搜索别名；用户会说“主题”，命令标题却可能叫“外观与提示音” */
+  keywords?: string[]
 }
 
 /** 一屏内的一组结果 */
@@ -50,6 +59,8 @@ export interface PaletteOptions {
   perGroup?: number
   /** 整屏最多几条（默认 30） */
   max?: number
+  /** 外壳注入的全局命令（设置等不属于 VDFS 新建动作的入口） */
+  commands?: PaletteEntry[]
 }
 
 /** 「命令」组的组名（打字前后都是它，用户看到的是同一格里长出来的动作） */
@@ -95,6 +106,13 @@ function matchScore(item: VdfsItem, q: string): number | null {
   return null
 }
 
+function commandMatches(entry: PaletteEntry, q: string): boolean {
+  if (!q) return true
+  return [entry.title, entry.hint, ...(entry.keywords ?? [])].some((text) =>
+    text.toLowerCase().includes(q)
+  )
+}
+
 /** 地址的展示用相对段（`session/abc` —— 类别一眼可见，又不重复标题） */
 function relHint(addr: string, root: string): string {
   const segs = relSegments(addr, root)
@@ -109,12 +127,12 @@ function byScoreThenTitle(a: { score: number; item: VdfsItem }, b: { score: numb
 /**
  * 算出面板该显示什么。
  *
- * **空词只给动作**（每个可新建的类别一条「新建 X」）：那时没有「找什么」的问题，
- * 用户要的是入口；把整库条目倒进面板只是噪音。
+ * **空词只给命令**：每个根一级类别都能导航，可新建的类别另给一条新建动作；
+ * 整库资源条目仍不出现，直到用户输入筛选词。两类命令同去类别目录，但语义不同：
+ * 导航只 push，新建在到站后显式发请求（正在浏览某项时也能铺草稿）。
  *
- * 「新建 X」的目标地址就是**类别目录本身**——工作台进入一个带 `new_type` 的目录、
- * 且当前没选中任何项时会自动铺好一张草稿（`VdfsWorkbench` 的 `autoDraftDone` 那段），
- * 所以「去那一类」与「在那一类新建」本来就是同一个目的地，不必做出两条入口。
+ * 类别导航标题只读类别 `title`，不把内部挂载名摆给用户；新建标题只读
+ * `new_type.title`（「添加插件」），hint 用「新建」补足动作语义。
  */
 export function buildPalette(nodes: VdfsItem[], opts: PaletteOptions): PaletteGroup[] {
   const root = opts.root ?? ''
@@ -123,15 +141,36 @@ export function buildPalette(nodes: VdfsItem[], opts: PaletteOptions): PaletteGr
   const q = (opts.query ?? '').trim().toLowerCase()
   const { categories, resources } = splitPaletteNodes(nodes, root)
 
-  const commands: PaletteEntry[] = categories
-    .filter((c) => c.new_type)
+  const newCommands: PaletteEntry[] = categories.flatMap((c) => {
+    const newType = c.new_type
+    if (!newType) return []
+    const entry: PaletteEntry = {
+      key: `new:${c.path}`,
+      title: newType.title,
+      hint: '新建',
+      addr: c.path,
+      action: 'new',
+      keywords: [`新建${newType.title}`, ...(newType.description ? [newType.description] : [])],
+    }
+    // 类别名 / 描述仍可命中；`new_type` 自己的标题与「新建…」也参与本地筛选。
+    if (q && matchScore(c, q) === null && !commandMatches(entry, q)) return []
+    return [entry]
+  })
+  const navigationCommands: PaletteEntry[] = categories
     .filter((c) => !q || matchScore(c, q) !== null)
     .map((c) => ({
-      key: `new:${c.path}`,
-      title: `新建${c.title || c.name}`,
-      hint: c.description || `进入 ${c.name}`,
+      key: `nav:${c.path}`,
+      title: c.title,
+      hint: `浏览${c.title}`,
       addr: c.path,
+      action: 'navigate' as const,
     }))
+  // 新建仍排在导航前：空查询默认高亮的行为不变，Enter 继续执行第一个新建动作。
+  const commands = [
+    ...(opts.commands ?? []).filter((entry) => commandMatches(entry, q)),
+    ...newCommands,
+    ...navigationCommands,
+  ]
 
   const groups: PaletteGroup[] = []
   if (q) {
@@ -159,6 +198,7 @@ export function buildPalette(nodes: VdfsItem[], opts: PaletteOptions): PaletteGr
           // 它能把同名的两项区分开（两个类别下都可能有「默认」）。
           hint: relHint(item.path, root),
           addr: item.path,
+          action: 'navigate' as const,
         })),
       })
     }

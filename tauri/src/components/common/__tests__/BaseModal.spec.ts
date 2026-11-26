@@ -17,19 +17,31 @@
  */
 
 // @vitest-environment happy-dom
-import { describe, expect, it } from 'vitest'
+import { afterEach, describe, expect, it } from 'vitest'
 import { flushPromises, mount } from '@vue/test-utils'
 import BaseModal from '../BaseModal.vue'
 
 const SLOT = '<button class="first">一</button><button class="last">二</button>'
+const mounted: ReturnType<typeof mount>[] = []
 
-function mountModal(props: Record<string, unknown> = {}, slots: Record<string, string> = {}) {
-  return mount(BaseModal, {
+function mountModal(
+  props: Record<string, unknown> = {},
+  slots: Record<string, string> = {},
+  attachTo: HTMLElement = document.body,
+) {
+  const w = mount(BaseModal, {
     props: { visible: true, ...props },
     slots: { default: SLOT, ...slots },
-    attachTo: document.body,
+    attachTo,
   })
+  mounted.push(w)
+  return w
 }
+
+afterEach(() => {
+  for (const w of mounted.splice(0)) w.unmount()
+  document.body.innerHTML = ''
+})
 
 /** 在遮罩上派发一次键盘事件并返回它（用于检查是否被 preventDefault） */
 function pressKey(w: ReturnType<typeof mountModal>, init: KeyboardEventInit) {
@@ -77,6 +89,45 @@ describe('BaseModal — 两条关闭途径', () => {
     await w.find('.modal-mask').trigger('keydown', { key: 'Escape' })
     await w.find('.modal-mask').trigger('click')
     expect(w.emitted('close')).toBeUndefined()
+  })
+})
+
+describe('BaseModal — 焦点与环境隔离', () => {
+  it('关闭后恢复触发者焦点，并原样恢复背景 inert 状态', async () => {
+    const host = document.createElement('div')
+    const opener = document.createElement('button')
+    const background = document.createElement('div')
+    const alreadyInert = document.createElement('div')
+    alreadyInert.setAttribute('inert', '')
+    host.append(opener, background, alreadyInert)
+    document.body.append(host)
+    opener.focus()
+
+    const w = mountModal({}, {}, host)
+    await flushPromises()
+    expect(background.hasAttribute('inert')).toBe(true)
+    expect(alreadyInert.hasAttribute('inert')).toBe(true)
+
+    await w.setProps({ visible: false })
+    await flushPromises()
+    expect(background.hasAttribute('inert')).toBe(false)
+    expect(alreadyInert.hasAttribute('inert')).toBe(true)
+    expect(document.activeElement).toBe(opener)
+
+    host.remove()
+  })
+
+  it('卸载时清理背景隔离，不把 inert 留给页面', async () => {
+    const host = document.createElement('div')
+    host.innerHTML = '<div class="background">背景</div>'
+    document.body.append(host)
+    const w = mountModal({}, {}, host)
+    await flushPromises()
+    expect(host.querySelector('.background')?.hasAttribute('inert')).toBe(true)
+    w.unmount()
+    mounted.splice(mounted.indexOf(w), 1)
+    expect(host.querySelector('.background')?.hasAttribute('inert')).toBe(false)
+    host.remove()
   })
 })
 

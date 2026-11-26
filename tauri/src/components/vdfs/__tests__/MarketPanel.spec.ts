@@ -59,6 +59,29 @@ describe('MarketPanel', () => {
     expect(w.emitted('save')).toEqual([[{ provider: 'demo' }]])
   })
 
+  it('安装中禁用全部入口并静默拒绝重复点击，结束后恢复', async () => {
+    const w = mount(MarketPanel, {
+      props: {
+        node: marketDraft(),
+        data: data([candidate('demo'), candidate('setting')]),
+        saving: true,
+      },
+    })
+    const buttons = w.findAll<HTMLButtonElement>('.install-btn')
+    expect(w.find('.market').attributes('aria-busy')).toBe('true')
+    for (const button of buttons) {
+      expect(button.element.disabled).toBe(true)
+      expect(button.text()).toBe('安装中…')
+      await button.trigger('click')
+    }
+    expect(w.emitted('save')).toBeUndefined()
+
+    await w.setProps({ saving: false })
+    for (const button of buttons) expect(button.element.disabled).toBe(false)
+    await buttons[0].trigger('click')
+    expect(w.emitted('save')).toEqual([[{ provider: 'demo' }]])
+  })
+
   it('安装载荷的键名来自后端下发的 provider_field，不硬编码', async () => {
     const w = mount(MarketPanel, {
       props: { node: marketDraft(), data: data([candidate('demo')], 'plugin_provider') },

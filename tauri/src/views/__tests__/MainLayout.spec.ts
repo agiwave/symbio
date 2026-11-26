@@ -174,6 +174,25 @@ describe('全局键（外壳这张表）', () => {
     expect(sheetVisible(w)).toBe(true)
   })
 
+  it('Ctrl+, 直达外观与提示音，并保留目录内选中项', async () => {
+    const w = await bench()
+
+    const evt = await press(w, { key: ',', ctrlKey: true })
+    expect(evt.defaultPrevented).toBe(true)
+    expect(hoisted.push).toHaveBeenCalledWith({
+      path: '/vdfs/plugin_manager',
+      query: { select: 'appearance' },
+    })
+  })
+
+  it('命令面板收到外壳注入的外观设置命令', async () => {
+    const w = await bench()
+    const commands = w.findComponent(CommandPalette).props('commands') as Array<{ key: string; select?: string }>
+    expect(commands).toEqual([
+      expect.objectContaining({ key: 'settings:appearance', select: 'appearance' }),
+    ])
+  })
+
   it('★ Cmd+N 推**认出来的**会话目录；目的地就是那一类目录（工作台自动铺草稿）', async () => {
     const w = await bench()
 

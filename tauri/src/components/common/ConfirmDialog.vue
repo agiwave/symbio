@@ -129,6 +129,7 @@ function onConfirm() {
   align-items: center;
   gap: var(--space-2);
   padding: var(--space-4) var(--space-5) var(--space-2);
+  flex-shrink: 0;
 }
 
 .confirm-icon {
@@ -159,6 +160,8 @@ function onConfirm() {
   line-height: var(--line-height-normal);
   color: var(--text-secondary);
   white-space: pre-line;
+  min-height: 0;
+  overflow-y: auto;
 }
 
 .confirm-footer {
@@ -168,6 +171,7 @@ function onConfirm() {
   padding: var(--space-3) var(--space-5) var(--space-4);
   border-top: 1px solid var(--border-default);
   background: var(--surface-hover);
+  flex-shrink: 0;
 }
 
 .confirm-btn {

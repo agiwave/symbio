@@ -3,7 +3,7 @@
 
   页面容器，只做插槽装配，自身无数据逻辑。三栏自上而下相接：
 
-  - **侧边栏**（窄条图标导航，可选——不传 railItems 即无侧边栏的两栏形态）：
+  - **侧边栏**（纯图标，可选——不传 railItems 即无侧边栏的两栏形态）：
     类别集合一律由后端下发（VDFS 目录节点），前端只做 UI 映射；`rail-header` /
     `rail-footer` 由宿主注入（返回键 / logo / 系统目录入口等宿主件）；
   - **中栏**：panel-header（标题 + header-actions）+ list + 空态 / 加载态；
@@ -14,7 +14,7 @@
   以及 `back` / `backTitle` 两个恒为缺省的 prop（连同它们的默认返回键），已删除——
   不可达的分支不是灵活性，是维护税。
 
-  侧栏的 `.nav-btn` / `.nav-count` / `.nav-label` 是**全局**样式
+  侧栏的 `.nav-btn` / `.nav-count` 是**全局**样式
   （styles/controls.css）：`rail-header` 插槽内容属宿主作用域，只有全局类才能命中。
 
   VDFS 的三栏页面 = VdfsWorkbench 控件（components/vdfs）+ useVdfs 数据逻辑
@@ -28,14 +28,15 @@
     <nav v-if="railItems" class="side-nav">
       <slot name="rail-header" />
 
-      <div class="nav-items">
+      <div v-overlay-scrollbar class="nav-items">
         <button
           v-for="it in railItems"
           :key="it.key"
           class="nav-btn"
           :class="{ active: it.active }"
           :aria-label="it.label"
-          :title="it.description || it.label"
+          :aria-current="it.active ? 'page' : undefined"
+          :title="it.label"
           @click="$emit('rail-select', it.key)"
         >
           <component :is="it.icon" v-if="it.icon" />
@@ -54,7 +55,6 @@
             <path d="M22 19a2 2 0 0 1-2 2H4a2 2 0 0 1-2-2V5a2 2 0 0 1 2-2h5l2 3h9a2 2 0 0 1 2 2z" />
           </svg>
           <span v-if="it.count" class="nav-count">{{ it.count }}</span>
-          <span class="nav-label">{{ it.label }}</span>
         </button>
       </div>
 
@@ -68,7 +68,7 @@
          （「此目录为空 / 没有匹配」必须说出来），后者是过渡，收起都会闪。 -->
     <aside v-if="showList" class="workbench-list" :style="{ width: `${listWidth}px` }">
       <header class="panel-header">
-        <h3 class="panel-title">{{ title }}</h3>
+        <h3 class="panel-title" :title="title || undefined">{{ title }}</h3>
         <div class="header-actions">
           <slot name="header-actions" />
         </div>
@@ -88,7 +88,7 @@
     </aside>
 
     <!-- 第三栏：详情 -->
-    <section class="workbench-detail">
+    <section class="workbench-detail" :class="{ 'no-list': !showList }">
       <slot name="detail" />
     </section>
   </div>
@@ -97,6 +97,7 @@
 <script setup lang="ts">
 import type { Component } from 'vue'
 import { computed } from 'vue'
+import { vOverlayScrollbar } from '@/directives/overlayScrollbar'
 import VdfsCardSkeleton from './VdfsCardSkeleton.vue'
 
 /**
@@ -122,8 +123,6 @@ export interface WorkbenchRailItem {
   label: string
   /** 类别图标（registry/vdfsIcons 注册表映射；缺省回退通用文件图标） */
   icon?: Component | null
-  /** 语义说明（作 tooltip；VDFS 导航由后端下发 description） */
-  description?: string
   /** 计数角标（0/undefined 不显示） */
   count?: number
   active?: boolean
@@ -214,7 +213,7 @@ defineEmits<{
 .side-nav {
   width: var(--sidebar-width);
   background: var(--surface-panel);
-  border-right: 1px solid var(--border-default);
+  box-shadow: inset -1px 0 var(--border-default);
   display: flex;
   flex-direction: column;
   flex-shrink: 0;
@@ -224,10 +223,10 @@ defineEmits<{
 .nav-items {
   display: flex;
   flex-direction: column;
-  align-items: center;
-  gap: 0.25rem;
+  align-items: stretch;
+  gap: 0.125rem;
   flex: 1;
-  padding: 0.5rem 0.375rem;
+  padding: 0.25rem;
   overflow-y: auto;
 }
 
@@ -243,20 +242,34 @@ defineEmits<{
   overflow: hidden;
 }
 
-/* 窄屏：列表的行内 width 只是「宽屏下的期望值」，不是不可让的硬宽度。
-   放开收缩并压低 min-width，给详情区留出可读空间——否则 56px 图标栏 +
-   260px 列表会在 420px 视口把详情挤到约 100px，正文逐字竖排、输入框不可用。
-   列表自身有横向滚动边界（overflow:hidden + 卡片省略号），收缩不会撑破。 */
+/* 极窄窗口不再把详情压成百余像素：侧栏保留，列表与详情改为上下分区。
+   行高按比例分配且列表有下限，矮屏仍能操作；无列表时详情跨满两行。 */
 @media (max-width: 34rem) {
+  .workbench {
+    display: grid;
+    grid-template-columns: var(--sidebar-width) minmax(0, 1fr);
+    grid-template-rows: minmax(7rem, 0.8fr) minmax(0, 1.2fr);
+  }
+
+  .side-nav {
+    grid-column: 1;
+    grid-row: 1 / span 2;
+  }
+
   .workbench-list {
-    flex: 1 1 auto;
-    min-width: 8rem;
-    max-width: 11rem;
+    grid-column: 2;
+    grid-row: 1;
+    /* 宽度由宿主写成行内样式；窄屏必须让它让位给上下分区。 */
+    width: auto !important;
+    min-width: 0;
+    max-width: none;
+    border-right: none;
+    border-bottom: 1px solid var(--border-default);
   }
 
   .workbench-detail {
-    flex: 2 1 auto;
-    min-width: 0;
+    grid-column: 2;
+    grid-row: 2;
   }
 }
 
@@ -264,7 +277,9 @@ defineEmits<{
   display: flex;
   align-items: center;
   gap: 0.25rem;
-  padding: 0.5rem 0.75rem;
+  min-height: var(--workbench-bar-height);
+  height: var(--workbench-bar-height);
+  padding: 0.4375rem 0.75rem;
   border-bottom: 1px solid var(--border-default);
   flex-shrink: 0;
 }
@@ -333,6 +348,10 @@ defineEmits<{
   flex-direction: column;
   overflow: hidden;
   background: var(--surface-panel);
+}
+
+.workbench-detail.no-list {
+  grid-row: 1 / span 2;
 }
 
 @supports (backdrop-filter: blur(1px)) or (-webkit-backdrop-filter: blur(1px)) {

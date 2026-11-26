@@ -70,7 +70,7 @@ function onInput() {
 }
 
 function handleKeydown(e: KeyboardEvent) {
-  // 只读模式下不响应保存 / Tab 编辑快捷键
+  // 只读模式下不响应保存快捷键
   if (props.readonly) {
     // Ctrl/Cmd+A 仍然允许（浏览器默认行为）
     return
@@ -82,21 +82,7 @@ function handleKeydown(e: KeyboardEvent) {
     emit('request-save')
   }
 
-  // Tab 键支持
-  if (e.key === 'Tab') {
-    e.preventDefault()
-    const textarea = textareaRef.value
-    if (textarea) {
-      const start = textarea.selectionStart
-      const end = textarea.selectionEnd
-      const value = textarea.value
-
-      textarea.value = value.substring(0, start) + '  ' + value.substring(end)
-      textarea.selectionStart = textarea.selectionEnd = start + 2
-
-      onInput()
-    }
-  }
+  // Tab / Shift+Tab 不拦截：编辑器不是模态输入框，焦点必须能移出。
 }
 
 defineExpose({

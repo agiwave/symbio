@@ -32,6 +32,7 @@
  */
 
 import { beforeEach, describe, expect, it, vi } from 'vitest'
+import { ref } from 'vue'
 import type { ChatNode } from '@/schemas/chat_node'
 import {
   NODE_STATUS_STREAMING,
@@ -56,6 +57,8 @@ const hoisted = vi.hoisted(() => {
     actions: [] as Array<{ path: string; action: string; payload?: unknown; ctx?: unknown }>,
     writeVdfs: vi.fn(),
     runVdfsAction: vi.fn(),
+    ensureSessionScheme: vi.fn(),
+    showToast: vi.fn(),
     store: {} as Record<string, unknown>,
     /** useReleasedSkeletonsStore 的桩：本文件只关心 expandSkeleton 会摘除释放标记 */
     released: {} as Record<string, unknown>,
@@ -71,13 +74,10 @@ vi.mock('@/services/vdfs', () => ({
 vi.mock('@/services/vdfsScheme', () => ({
   // 忠实于生产契约：`ensureSessionScheme(mountDir)` 返回的 `mountDir`
   // 就是请求的那个（省略参数 = 默认挂载目录那份）。
-  ensureSessionScheme: vi.fn(async (mountDir?: string) => ({
-    mountDir: mountDir ?? '/root/session',
-    messagesSeg: 'message',
-    inboxSeg: 'inbox',
-  })),
+  ensureSessionScheme: hoisted.ensureSessionScheme,
 }))
 vi.mock('@/stores/sessions', () => ({ useSessionsStore: () => hoisted.store }))
+vi.mock('@/composables/useToast', () => ({ useToast: () => ({ showToast: hoisted.showToast }) }))
 // 纯函数（subtreeOf / statsOf / forgetSession）保持真实实现——断言要的就是
 // 它们的真实产物；被桩掉的只有 store（useReleasedSkeletonsStore）。
 vi.mock('@/stores/skeletonLazy', async (importOriginal) => {
@@ -121,8 +121,15 @@ beforeEach(() => {
   hoisted.actions.length = 0
   hoisted.writeVdfs.mockReset()
   hoisted.runVdfsAction.mockReset()
+  hoisted.ensureSessionScheme.mockReset()
+  hoisted.showToast.mockReset()
   hoisted.logger.warn.mockReset()
   hoisted.logger.error.mockReset()
+  hoisted.ensureSessionScheme.mockImplementation(async (mountDir?: string) => ({
+    mountDir: mountDir ?? '/root/session',
+    messagesSeg: 'message',
+    inboxSeg: 'inbox',
+  }))
   hoisted.writeVdfs.mockImplementation(async (path: string, text: string, opts?: unknown) => {
     hoisted.writes.push({ path, text, opts })
     return { created: true }
@@ -372,29 +379,29 @@ describe('send — 写收件箱条目 + 乐观置位', () => {
 describe('abort — 两个动作，作用在两个对象上', () => {
   it('中止在途轮次 + 清空排队（成对，缺一个就会「点了停止它又跑起来」）', async () => {
     const c = conn()
-    c.abort()
-    await vi.waitFor(() => expect(hoisted.actions).toHaveLength(2))
+    await c.abort()
     const [abortCall, clearCall] = hoisted.actions
     expect(abortCall.path).toBe(ADDR)
     expect(abortCall.action).toBe('abort')
     expect(clearCall.path).toBe(`${ADDR}/inbox`)
     expect(clearCall.action).toBe('clear')
     expect((abortCall.ctx as Record<string, unknown>).session_id).toBe('s1')
+    expect(c.isStopping.value).toBe(false)
+    expect(c.stopNotice.value).toEqual({ tone: 'success', text: '已停止当前请求' })
   })
 
   it('子智能体空间：两个动作都打在子空间地址上', async () => {
     const subAddr = '/root/agent/reviewer/session/sub-1'
     const c = conn({ sessionId: 'sub-1', sessionAddr: subAddr })
-    c.abort()
-    await vi.waitFor(() => expect(hoisted.actions).toHaveLength(2))
+    await c.abort()
     expect(hoisted.actions.map((a) => a.path)).toEqual([subAddr, `${subAddr}/inbox`])
   })
 
   it('出站失败不抛出（abort 是尽力而为）', async () => {
     hoisted.runVdfsAction.mockRejectedValue(new Error('x'))
     const c = conn()
-    expect(() => c.abort()).not.toThrow()
-    await vi.waitFor(() => expect(hoisted.runVdfsAction).toHaveBeenCalled())
+    await expect(c.abort()).resolves.toBeUndefined()
+    expect(hoisted.runVdfsAction).toHaveBeenCalled()
   })
 
   it('一个失败不影响另一个发出（停在途 / 清排队互不依赖）', async () => {
@@ -402,10 +409,103 @@ describe('abort — 两个动作，作用在两个对象上', () => {
       .mockRejectedValueOnce(new Error('abort 失败'))
       .mockResolvedValueOnce({ action: 'clear', ok: true, message: 'ok' })
     const c = conn()
-    c.abort()
-    // 两个请求都发出去了（一个 rejected、一个 resolved）——`allSettled` 的意义所在
-    await vi.waitFor(() => expect(hoisted.runVdfsAction).toHaveBeenCalledTimes(2))
+    await c.abort()
     expect(hoisted.runVdfsAction.mock.calls.map((call) => call[1])).toEqual(['abort', 'clear'])
+  })
+
+  it('★ 连点 / 重复 Esc 在请求期和权威终态帧到达前都只发一次', async () => {
+    const working = ref(true)
+    hoisted.store = makeStore({ isSessionWorking: vi.fn(() => working.value) })
+    let release!: () => void
+    const gate = new Promise<void>((resolve) => { release = resolve })
+    hoisted.runVdfsAction.mockImplementation(
+      async (path: string, action: string, payload?: unknown, ctx?: unknown) => {
+        hoisted.actions.push({ path, action, payload, ctx })
+        await gate
+        return { action, ok: true, message: 'ok' }
+      },
+    )
+    const c = conn()
+
+    const first = c.abort()
+    await c.abort() // 地址解析尚未返回，第二个调用必须被同步 latch 拦下
+    expect(c.isStopping.value).toBe(true)
+    expect(c.stopNotice.value?.text).toContain('正在停止')
+    await vi.waitFor(() => expect(hoisted.actions).toHaveLength(2))
+
+    release()
+    await first
+    expect(hoisted.actions).toHaveLength(2)
+    // IPC 已回执但 store 仍 working ⇒ 权威状态帧未到，仍不允许再发一对请求。
+    expect(c.isStopping.value).toBe(true)
+    await c.abort()
+    expect(hoisted.actions).toHaveLength(2)
+
+    working.value = false
+    expect(c.isStopping.value).toBe(false)
+  })
+
+  it('寻址失败 → 不发动作，持久状态与 assertive toast 都说明无法定位', async () => {
+    hoisted.ensureSessionScheme.mockRejectedValueOnce(new Error('no scheme'))
+    const c = conn()
+    await c.abort()
+    expect(hoisted.actions).toHaveLength(0)
+    expect(c.isStopping.value).toBe(false)
+    expect(c.stopNotice.value).toMatchObject({ tone: 'error', text: expect.stringContaining('无法定位会话地址') })
+    expect(hoisted.showToast).toHaveBeenCalledWith('error', expect.stringContaining('无法定位会话地址'))
+  })
+
+  it('abort 失败 → 明确提示当前请求未能中止，clear 仍照发', async () => {
+    hoisted.runVdfsAction.mockRejectedValueOnce(new Error('IPC 断了'))
+    const c = conn()
+    await expect(c.abort()).resolves.toBeUndefined()
+    expect(hoisted.runVdfsAction.mock.calls.map((call) => call[1])).toEqual(['abort', 'clear'])
+    expect(c.stopNotice.value).toMatchObject({ tone: 'error', text: expect.stringContaining('当前请求未能中止') })
+    expect(hoisted.showToast).toHaveBeenCalledWith('error', '当前请求未能中止，请重试')
+  })
+
+  it('clear 失败（拒绝）→ 单独提示排队消息未能清除', async () => {
+    hoisted.runVdfsAction
+      .mockResolvedValueOnce({ action: 'abort', ok: true, message: 'ok' })
+      .mockRejectedValueOnce(new Error('IPC 断了'))
+    const c = conn()
+    await c.abort()
+    expect(c.stopNotice.value).toMatchObject({ tone: 'error', text: expect.stringContaining('排队消息未能清除') })
+    expect(hoisted.showToast).toHaveBeenCalledWith('error', '排队消息未能清除，请重试')
+  })
+
+  it('clear 回执 ok:false → 也报错，不把「停了」冒充成完整成功', async () => {
+    hoisted.runVdfsAction
+      .mockResolvedValueOnce({ action: 'abort', ok: true, message: 'ok' })
+      .mockResolvedValueOnce({ action: 'clear', ok: false, message: '队列被占用' })
+    const c = conn()
+    await c.abort()
+    expect(c.stopNotice.value).toMatchObject({ tone: 'error', text: expect.stringContaining('队列被占用') })
+    expect(hoisted.showToast).toHaveBeenCalledWith('error', '排队消息未能清除：队列被占用')
+  })
+
+  it('没有在途轮次不是失败，但也给出明确的已停止反馈', async () => {
+    hoisted.runVdfsAction.mockResolvedValueOnce({
+      action: 'abort', ok: false, message: '会话没有在途轮次',
+    })
+    const c = conn()
+    await c.abort()
+    expect(c.stopNotice.value).toEqual({ tone: 'success', text: '已停止：当前没有正在运行的请求' })
+    expect(hoisted.showToast).not.toHaveBeenCalled()
+  })
+
+  it('终态状态帧只更新消息树，不重复停止 toast / 提示', async () => {
+    const messages = ref<ChatNode[]>([])
+    hoisted.store = makeStore({ getSessionMessages: vi.fn(() => messages.value) })
+    const c = conn()
+    await c.abort()
+    const notice = c.stopNotice.value
+    messages.value = [msg({ id: 'run', status: 'aborted' })]
+    expect(c.messageTree.value).toHaveLength(1)
+    messages.value = [msg({ id: 'run', status: 'aborted', error: '终态补帧' })]
+    expect(c.messageTree.value).toHaveLength(1)
+    expect(c.stopNotice.value).toEqual(notice)
+    expect(hoisted.showToast).not.toHaveBeenCalled()
   })
 })
 

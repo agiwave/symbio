@@ -33,13 +33,17 @@
     由同一个 VdfsView 承接；返回键逐级回到出发点。
 -->
 <template>
-  <VdfsWorkbench :key="reloadKey" :addr="addr" :select="focus" @open="onOpen">
+  <VdfsWorkbench
+    ref="workbenchRef"
+    :key="reloadKey"
+    :addr="addr"
+    :select="focus"
+    @open="onOpen"
+  >
     <template #rail-header>
       <!--
-        页面**最左上角**这一格只在深页面有主人：返回键；首页**整个空出来**——
-        首页不放品牌 logo（主窗口菜单栏已有一枚，侧栏再来一枚是同屏重复），
-        占位也一并省掉，空间归还给类别列表。`.side-nav` 头部没有包裹容器，
-        插槽为空即自然塌陷，不留残高。
+        页面**最左上角**这一格在首页/一级页是命令面板入口，深页面则是返回键。
+        不放品牌 logo（主窗口菜单栏已有一枚，侧栏再来一枚是同屏重复）。
 
         返回键做成**整行的导航件**（占满侧栏宽 + 下方一条分隔线），而不是挤在
         56px 里的描边小胶囊——后者既塞不下「返回」二字，又和一排 40px 图标
@@ -48,6 +52,18 @@
       <button v-if="showBack" class="rail-back" title="返回" aria-label="返回" @click="goBack">
         <svg viewBox="0 0 24 24" width="20" height="20" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round">
           <polyline points="15 18 9 12 15 6" />
+        </svg>
+      </button>
+      <button
+        v-else
+        class="rail-command"
+        title="命令面板（Ctrl/Cmd+K）"
+        aria-label="打开命令面板"
+        @click="emit('open-command-palette')"
+      >
+        <svg viewBox="0 0 24 24" width="18" height="18" fill="none" stroke="currentColor" stroke-width="1.8" stroke-linecap="round" stroke-linejoin="round">
+          <circle cx="11" cy="11" r="6.5" />
+          <path d="m16 16 4 4" />
         </svg>
       </button>
     </template>
@@ -59,16 +75,62 @@
   </VdfsWorkbench>
 </template>
 
+<script lang="ts">
+/** 未知地址的一次性提示契约：路由只负责带标记，本页消费后清理。 */
+export const UNKNOWN_ROUTE_QUERY = 'routeNotFound'
+export const UNKNOWN_ROUTE_FLAG = '1'
+export const UNKNOWN_ROUTE_MESSAGE = '这个地址不存在，已带你回到可用页面'
+</script>
+
 <script setup lang="ts">
-import { computed, ref } from 'vue'
-import { useRoute, useRouter } from 'vue-router'
+import { computed, ref, watch } from 'vue'
+import { onBeforeRouteLeave, onBeforeRouteUpdate, useRoute, useRouter } from 'vue-router'
 import VdfsWorkbench from '@/components/vdfs/VdfsWorkbench.vue'
 import HomedirEntry from '@/components/common/HomedirEntry.vue'
 import { useSessionsStore } from '@/stores/sessions'
+import { useToast } from '@/composables/useToast'
 import { vdfsAddrOf, vdfsBrowserPathOf, shouldShowBack } from '@/schemas/vdfsAddress'
 
 const route = useRoute()
 const router = useRouter()
+const workbenchRef = ref<InstanceType<typeof VdfsWorkbench> | null>(null)
+const emit = defineEmits<{ (e: 'open-command-palette'): void }>()
+const { showToast } = useToast()
+
+onBeforeRouteLeave(() => workbenchRef.value?.confirmRouteLeave() ?? true)
+// `/vdfs/:dir` 的目录切换复用同一路由组件，Back/Forward 触发的是 update 而非 leave。
+onBeforeRouteUpdate((to) => {
+  // 清理未知地址标记只改 query、不换页面，不能拿它去打断工作台里的未保存草稿。
+  if (
+    route.query[UNKNOWN_ROUTE_QUERY] === UNKNOWN_ROUTE_FLAG &&
+    to.path === route.path &&
+    to.query[UNKNOWN_ROUTE_QUERY] == null
+  ) {
+    return true
+  }
+  return workbenchRef.value?.confirmRouteLeave() ?? true
+})
+
+/**
+ * 未知地址提示是一次性的：先展示，再原地 replace 掉标记。正常首页、打包入口与
+ * 深链都没有标记；刷新时 URL 已清理，也不会再次提示。watch 同时覆盖初次落点
+ * 与同一路由组件内的兜底跳转。
+ */
+watch(
+  () => route.query[UNKNOWN_ROUTE_QUERY],
+  (marker) => {
+    if (marker !== UNKNOWN_ROUTE_FLAG) return
+    showToast('info', UNKNOWN_ROUTE_MESSAGE)
+    const query = { ...route.query }
+    delete query[UNKNOWN_ROUTE_QUERY]
+    void router.replace({
+      path: route.path,
+      query,
+      ...(route.hash ? { hash: route.hash } : {}),
+    })
+  },
+  { immediate: true },
+)
 
 // ==================== 数据地址 ↔ 浏览器地址 ====================
 //
@@ -149,26 +211,43 @@ async function onHomedirReloaded() {
 
 <style scoped>
 /*
- * 返回按钮：侧栏顶部**整行**的导航件（页面最左上角，仅有 push 来源的子页存在）。
- *
- * 首页这一格**整个空出来**——品牌 logo 连同占位一并移除（主窗口菜单栏已有
- * 一枚，侧栏再来一枚是同屏重复），空间归还给类别列表。`.side-nav` 头部没有
- * 包裹容器，插槽为空即自然塌陷；返回键出现时列表整体让位是预期的，故这里
- * 不再有「两态等高」那条配对约束。
- *
- * 三条刻意的取舍：
- * - **不加边框**：右侧那排图标按钮都是无边框的，单独描边会显得是外来物；
- *   靠「整行 + 分隔线 + 悬停底色」表达它是窗口级导航件，而非又一个类别图标。
- * - **不塞文字**：侧栏只有 56px（--sidebar-width），硬塞「返回」只能把字号压到
- *   不可读，反而更丑。可访问性由 title / aria-label 承担。
- * - **箭头与类别图标同尺寸（20px）**，避免它比一排导航项更抢眼。
+ * 侧栏顶部两枚入口：一级页显示命令面板，深页面显示返回。两者共用整行导航件
+ * 的视觉语言；命令入口只保留图标，返回键在深页面保持整行箭头。
  */
+.rail-command {
+  display: flex;
+  flex-direction: column;
+  align-items: center;
+  justify-content: center;
+  gap: 0.2rem;
+  width: 100%;
+  height: var(--workbench-bar-height);
+  flex-shrink: 0;
+  padding: 0;
+  border: none;
+  border-bottom: 1px solid var(--border-default);
+  background: transparent;
+  color: var(--text-secondary);
+  font-size: var(--font-size-xs);
+  cursor: pointer;
+  transition: background 0.12s ease, color 0.12s ease;
+}
+.rail-command:hover {
+  background: var(--surface-hover);
+  color: var(--text-primary);
+}
+.rail-command svg {
+  width: 1.125rem;
+  height: 1.125rem;
+}
+
 .rail-back {
   display: flex;
   align-items: center;
   justify-content: center;
   width: 100%;
-  height: 3.5rem;
+  height: var(--workbench-bar-height);
+  flex-shrink: 0;
   padding: 0;
   border: none;
   border-bottom: 1px solid var(--border-default);

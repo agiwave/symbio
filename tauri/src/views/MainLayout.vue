@@ -13,7 +13,12 @@
   <div class="main-layout">
     <!-- 不加 :key：路由变化由 VdfsView 依 route.params 换算数据地址，
          控件（VdfsWorkbench）按绑定的数据地址自行重载 -->
-    <RouterView />
+    <RouterView v-slot="{ Component }">
+      <component
+        :is="Component"
+        @open-command-palette="paletteOpen = true"
+      />
+    </RouterView>
     <!-- 全局浮动消息浮层 -->
     <Toast />
     <!-- 首启引导（全 App 仅渲染一次；可见性由自己的 store 决定，
@@ -21,14 +26,14 @@
     <Onboarding />
     <!-- 全局命令面板（Cmd/Ctrl+K）：显隐只由快捷键表决定，不放进任何 store
          ——面板是本壳的职责（本文件是唯一持有它的人），第二份真相无益 -->
-    <CommandPalette :visible="paletteOpen" @close="paletteOpen = false" />
+    <CommandPalette :visible="paletteOpen" :commands="globalCommands" @close="paletteOpen = false" />
     <!-- 快捷键速查（Cmd+/）：内容直接读登记表，所以它永远不会和真实键位不一致 -->
     <HotkeySheet :visible="sheetOpen" @close="sheetOpen = false" />
   </div>
 </template>
 
 <script setup lang="ts">
-import { nextTick, onBeforeUnmount, onMounted, ref, watch } from 'vue'
+import { computed, nextTick, onBeforeUnmount, onMounted, ref, watch } from 'vue'
 import { RouterView, useRouter } from 'vue-router'
 import { startSessionTranscriptSync, registerTranscriptMount } from '@/stores/sessionTranscriptSync'
 import { startSessionNodeSync, registerSessionMount } from '@/stores/sessionNodeSync'
@@ -41,6 +46,9 @@ import { READBACK_REASON } from '@/services/readback'
 import { isSessionExt } from '@/registry/vdfsTypes'
 import { dispatchHotkeys, useHotkeys } from '@/composables/useHotkeys'
 import { vdfsBrowserPathOf } from '@/schemas/vdfsAddress'
+import { vdfsJoin } from '@/schemas/vdfs'
+import { vdfsRoot } from '@/schemas/vdfsRoot'
+import type { PaletteEntry } from '@/utils/palette'
 import { useSessionsStore } from '@/stores/sessions'
 import { useSoundSettingsStore } from '@/stores/soundSettings'
 import { useOnboardingStore } from '@/stores/onboarding'
@@ -72,6 +80,25 @@ const sheetOpen = ref(false)
  */
 const sessionDir = ref('')
 
+/** 全局设置命令由外壳注入；命令面板本身只认识通用“命令项”形状。 */
+const globalCommands = computed<PaletteEntry[]>(() => [
+  {
+    key: 'settings:appearance',
+    title: '外观与提示音',
+    hint: '主题、字体大小、会话结束提示音',
+    keywords: ['外观', '主题', '字体', '提示音', '声音', '设置'],
+    addr: vdfsJoin(vdfsRoot(), 'plugin_manager'),
+    select: 'appearance',
+  },
+])
+
+function openAppearance(): void {
+  void router.push({
+    path: vdfsBrowserPathOf(vdfsJoin(vdfsRoot(), 'plugin_manager')),
+    query: { select: 'appearance' },
+  })
+}
+
 /**
  * 这张表是**快捷键的唯一登记处**，也是速查面板的唯一信源。
  *
@@ -97,6 +124,13 @@ useHotkeys('main-layout', [
     run: () => {
       sheetOpen.value = true
     },
+  },
+  {
+    id: 'appearance-settings',
+    keys: 'mod+,',
+    group: '全局',
+    label: '打开外观与提示音',
+    run: openAppearance,
   },
   {
     id: 'new-session',

@@ -18,9 +18,9 @@
     :aria-selected="isActive"
     :aria-disabled="disabled"
     :aria-label="accessibleLabel"
-    @click="$emit('click')"
-    @keydown.enter="$emit('click')"
-    @keydown.space.prevent="$emit('click')"
+    @click="activate"
+    @keydown.enter="activate"
+    @keydown.space.prevent="activate"
   >
     <!-- 状态条 + 类型图标 + 标题（状态点可由后端控制隐藏） -->
     <div class="card-header">
@@ -43,7 +43,7 @@
     <div v-if="$slots.meta || tags.length" class="card-meta">
       <slot name="meta" />
       <template v-for="(tag, i) in tags" :key="i">
-        <span class="tag" :class="`tag-${tag.kind || 'default'}`">{{ tag.label }}</span>
+        <span class="tag" :class="`tag-${tag.kind || 'default'}`" :title="tag.title">{{ tag.label }}</span>
       </template>
     </div>
   </div>
@@ -55,6 +55,7 @@ import { computed, type Component } from 'vue'
 interface Tag {
   label: string
   kind?: 'default' | 'primary' | 'success' | 'warn' | 'info' | 'muted'
+  title?: string
 }
 
 interface VdfsCardProps {
@@ -83,7 +84,7 @@ const props = withDefaults(defineProps<VdfsCardProps>(), {
   showStatus: true,
 })
 
-defineEmits<{
+const emit = defineEmits<{
   (e: 'click'): void
 }>()
 
@@ -96,10 +97,15 @@ const badgeClass = computed(() => `kind-${props.badgeKind}`)
  */
 const accessibleLabel = computed(() => {
   const parts = [props.title]
-  if (props.statusTitle) parts.push(props.statusTitle)
-  else if (props.badge) parts.push(props.badge)
-  return parts.join('，')
+  const status = props.statusTitle || props.badge
+  if (status) parts.push(status)
+  parts.push(...props.tags.map((tag) => tag.label))
+  return [...new Set(parts)].join('，')
 })
+
+function activate() {
+  if (!props.disabled) emit('click')
+}
 </script>
 
 <style scoped>
@@ -207,9 +213,9 @@ const accessibleLabel = computed(() => {
   flex-shrink: 0;
 }
 .activity-text.kind-primary { color: var(--accent); }
-.activity-text.kind-success { color: var(--success-solid); }
-.activity-text.kind-warn { color: var(--warning-solid); }
-.activity-text.kind-info { color: var(--info-solid); }
+.activity-text.kind-success { color: var(--success-fg); }
+.activity-text.kind-warn { color: var(--warning-fg); }
+.activity-text.kind-info { color: var(--info-fg); }
 
 /* 副标题 */
 .card-preview {

@@ -8,26 +8,20 @@
   - 浮层底色：--surface-overlay
   - 描边：--border-default，左侧语义强调条按 type 取 solid 色
   - 阴影：--shadow-2（深色下自动转为深底描边感）
-  点 × 按钮关闭（整块不再可点，错误信息因此能选中复制）；aria-live 便于读屏播报，
-  错误另走 assertive 通道以便立刻告知。
+  点 × 按钮关闭（整块不再可点，错误信息因此能选中复制）；普通通知用 status、
+  错误用 alert，读屏按对应优先级播报。
 -->
 <template>
   <Teleport to="body">
-    <div class="toast-layer" role="region" aria-label="通知" aria-live="polite">
-      <!-- 错误用 assertive 通道：读屏用户必须被立刻告知失败（切换失败等），
-           polite 会排到当前朗读之后，常被错过。 -->
-      <div class="toast-assertive" aria-live="assertive" aria-atomic="true">
-        <template v-for="t in toasts" :key="'a-' + t.id">
-          <span v-if="t.type === 'error'" class="sr-only">{{ t.text }}</span>
-        </template>
-      </div>
+    <div class="toast-layer" role="region" aria-label="通知">
       <TransitionGroup name="toast">
         <div
           v-for="t in toasts"
           :key="t.id"
           class="toast"
           :class="`toast--${t.type}`"
-          role="status"
+          :role="t.type === 'error' ? 'alert' : 'status'"
+          aria-atomic="true"
           @mouseenter="pause(t.id)"
           @mouseleave="resume(t.id)"
           @focusin="pause(t.id)"
@@ -149,25 +143,6 @@ function runAction(t: ToastItem) {
   user-select: text;
 }
 
-.toast-assertive {
-  position: absolute;
-  width: 1px;
-  height: 1px;
-  overflow: hidden;
-  clip: rect(0 0 0 0);
-  clip-path: inset(50%);
-  white-space: nowrap;
-}
-.sr-only {
-  position: absolute;
-  width: 1px;
-  height: 1px;
-  overflow: hidden;
-  clip: rect(0 0 0 0);
-  clip-path: inset(50%);
-  white-space: nowrap;
-}
-
 .toast--success {
   border-left-color: var(--success-solid);
 }
@@ -187,13 +162,13 @@ function runAction(t: ToastItem) {
   height: 1rem;
 }
 .toast--success .toast__icon {
-  color: var(--success-solid);
+  color: var(--success-fg);
 }
 .toast--error .toast__icon {
-  color: var(--danger-solid);
+  color: var(--danger-fg);
 }
 .toast--info .toast__icon {
-  color: var(--info-solid);
+  color: var(--info-fg);
 }
 
 .toast__text {
@@ -204,6 +179,7 @@ function runAction(t: ToastItem) {
 
 .toast__action {
   flex-shrink: 0;
+  min-height: 1.5rem;
   padding: 0.1rem 0.5rem;
   border: 1px solid var(--border-default);
   border-radius: var(--radius-sm);
@@ -225,8 +201,8 @@ function runAction(t: ToastItem) {
   display: inline-flex;
   align-items: center;
   justify-content: center;
-  width: 1.25rem;
-  height: 1.25rem;
+  width: 1.5rem;
+  height: 1.5rem;
   padding: 0;
   border: none;
   border-radius: var(--radius-sm);

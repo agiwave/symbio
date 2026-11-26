@@ -304,6 +304,22 @@ describe('DetailForm table：行编排与单元格错误', () => {
     actions: [{ id: 'save', label: '保存', style: 'primary' }],
   })
 
+  it('窄栏下表格放在可键盘聚焦的横向滚动区内', () => {
+    const w = mount(DetailForm, {
+      props: {
+        definition,
+        node: node({ name: 'srv' }),
+        values: { items: [{ kind: 'a', value: 'first' }] },
+        capabilities: { mutable: true },
+      },
+    })
+    const scroll = w.find('.table-scroll')
+    expect(scroll.attributes('role')).toBe('region')
+    expect(scroll.attributes('tabindex')).toBe('0')
+    expect(scroll.attributes('aria-label')).toBe('项目表格')
+    expect(scroll.find('.table-grid').exists()).toBe(true)
+  })
+
   it('上移与复制写回同一表单模型，保存保留新顺序', async () => {
     const w = mount(DetailForm, {
       props: {
@@ -437,6 +453,130 @@ describe('DetailForm disabled_when：条件成立才禁用', () => {
   })
 })
 
+describe('DetailForm 资源只读与字段可访问性', () => {
+  it('readonly 统一禁用输入、toggle、表格、路径与子表单入口', async () => {
+    const definition = def({
+      sections: [{
+        fields: [
+          { key: 'name', label: '名称', widget: 'text' },
+          { key: 'secret', label: '密钥', widget: 'password' },
+          { key: 'count', label: '数量', widget: 'number' },
+          { key: 'model', label: '模型', widget: 'datalist' },
+          { key: 'notes', label: '备注', widget: 'textarea' },
+          { key: 'kind', label: '类型', widget: 'select', options: [{ value: 'a', label: 'A' }] },
+          { key: 'enabled', label: '启用', widget: 'toggle' },
+          { key: 'location', label: '位置', widget: 'path', pick: 'directory' },
+          { key: 'nested', label: '子配置', widget: 'form', form: { binding: 'option', sections: [] } },
+          { key: 'items', label: '项目', widget: 'table', columns: [{ key: 'value', label: '值' }] },
+        ],
+      }],
+      actions: [{ id: 'save', label: '保存', style: 'primary' }],
+    })
+    const w = mount(DetailForm, {
+      props: {
+        definition,
+        node: node({ name: 'srv' }),
+        values: { items: [{ value: 'a' }] },
+        capabilities: { mutable: false },
+        readonly: true,
+      },
+    })
+
+    const controls = w.findAll(
+      '.setting-item input, .setting-item select, .setting-item textarea, .setting-item button'
+    )
+    expect(controls.length).toBeGreaterThan(10)
+    for (const control of controls) expect(control.attributes('disabled')).toBeDefined()
+    expect(w.find<HTMLButtonElement>('.ea-btn').element.disabled).toBe(true)
+    await w.find('.ea-btn').trigger('click')
+    expect(w.emitted('save')).toBeUndefined()
+  })
+
+  it('说明关联到控件，必填控件补齐 aria-required，错误与说明可同时读取', async () => {
+    const definition = def({
+      binding: 'option',
+      sections: [{
+        fields: [
+          { key: 'name', label: '名称', widget: 'text', required: true, description: '填写显示名称' },
+          { key: 'notes', label: '备注', widget: 'textarea', description: '支持多行' },
+          { key: 'enabled', label: '启用', widget: 'toggle', required: true, description: '是否启用' },
+          {
+            key: 'kind', label: '类型', widget: 'select', required: true, description: '选择类型',
+            options: [{ value: 'a', label: 'A' }],
+          },
+        ],
+      }],
+    })
+    const w = mount(DetailForm, {
+      props: {
+        definition,
+        node: node({ name: 'srv' }),
+        values: { name: 'demo', enabled: true, kind: 'a' },
+        capabilities: { mutable: true },
+      },
+    })
+
+    for (const label of ['名称', '启用', '类型']) {
+      expect(w.find(`[aria-label="${label}"]`).attributes('aria-required')).toBe('true')
+    }
+    expect(w.find('textarea').attributes('aria-required')).toBeUndefined()
+
+    for (const label of ['名称', '备注', '启用', '类型']) {
+      const control = w.find(`[aria-label="${label}"]`)
+      const ids = control.attributes('aria-describedby')?.split(' ') ?? []
+      expect(ids).toHaveLength(1)
+      expect(w.find(`#${ids[0]}`).classes()).toContain('setting-desc')
+    }
+
+    await w.setProps({ fieldErrors: [{ field: 'name', message: '名称不可用' }] })
+    const ids = w.find('input[aria-label="名称"]').attributes('aria-describedby')?.split(' ') ?? []
+    expect(ids).toHaveLength(2)
+    expect(w.find(`#${ids[0]}`).text()).toBe('填写显示名称')
+    expect(w.find(`#${ids[1]}`).text()).toBe('名称不可用')
+  })
+
+  it('纯空白必填值拦截保存，补填后就地错误与汇总同步清除', async () => {
+    const definition = def({
+      binding: 'option',
+      sections: [{
+        fields: [
+          { key: 'name', label: '名称', widget: 'text', required: true, description: '填写显示名称' },
+          { key: 'endpoint', label: '端点', widget: 'text', required: true },
+        ],
+      }],
+      actions: [{ id: 'save', label: '保存', style: 'primary' }],
+    })
+    const w = mount(DetailForm, {
+      props: {
+        definition,
+        node: node({ name: 'srv' }),
+        values: { name: '   ', endpoint: '\t  ' },
+        capabilities: { mutable: true },
+      },
+    })
+
+    await w.find('button[title="保存"]').trigger('click')
+    expect(w.emitted('save')).toBeUndefined()
+    expect(w.find('.form-required-error').text()).toBe('请填写必填项：名称、端点')
+    expect(w.findAll('.field-error')).toHaveLength(2)
+
+    const name = w.find('input[aria-label="名称"]')
+    await name.setValue('  名称  ')
+    expect(name.attributes('aria-describedby')?.split(' ')).toHaveLength(1)
+    expect(w.findAll('.field-error')).toHaveLength(1)
+    expect(w.find('.form-required-error').text()).toBe('请填写必填项：端点')
+
+    await w.find('input[aria-label="端点"]').setValue(' https://example.com ')
+    expect(w.find('.form-required-error').exists()).toBe(false)
+    expect(w.findAll('.field-error')).toHaveLength(0)
+    await w.find('button[title="保存"]').trigger('click')
+    expect(w.emitted('save')![0][0]).toEqual({
+      name: '  名称  ',
+      endpoint: ' https://example.com ',
+    })
+  })
+})
+
 describe('DetailForm option 绑定（VDFS）：异步 values 到达触发预填', () => {
   // VDFS 走 option 绑定，`values` 来自 `vdfs/read`、在挂载后才异步返回。
   // 若 watch 的身份键不纳入「数据是否到位」，则「挂载（null）→ 数据到达（对象）」
@@ -490,6 +630,8 @@ describe('DetailForm option 绑定（VDFS）：异步 values 到达触发预填'
 
     // 数据到位后：身份键翻转（…:0 → …:1），触发表单预填
     expect(w.find('.title-text').text()).toBe('My GPT')
+    expect(w.find('.title-line').attributes('title')).toBe('My GPT · OpenAI')
+    expect(w.find('.detail-head .subtitle').exists()).toBe(false)
     const values = w
       .findAll('input[type="text"]')
       .map((i) => (i.element as HTMLInputElement).value)

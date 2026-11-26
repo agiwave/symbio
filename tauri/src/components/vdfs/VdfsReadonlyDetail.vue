@@ -16,38 +16,38 @@
     :error="error"
     @run="onAction"
   >
-    <template #meta>
-      <span class="kind">{{ node.kind }}</span>
-    </template>
-
     <p v-if="node.description" class="desc">{{ node.description }}</p>
 
-    <dl class="meta">
-      <div class="meta-row"><dt>路径</dt><dd><code>{{ node.path }}</code></dd></div>
-      <div class="meta-row"><dt>状态</dt><dd>{{ node.status }}</dd></div>
-      <div class="meta-row"><dt>访问位</dt><dd><code>{{ node.access || '—' }}</code> {{ accessText }}</dd></div>
-      <div v-if="node.ext" class="meta-row"><dt>呈现扩展名</dt><dd>{{ node.ext }}</dd></div>
-      <div v-if="typeof node.size === 'number'" class="meta-row"><dt>大小</dt><dd>{{ node.size }} 字节</dd></div>
-      <div v-if="node.updated_at" class="meta-row"><dt>更新时间</dt><dd>{{ updatedText }}</dd></div>
-    </dl>
-
-    <div v-if="attributes.length">
-      <p class="attrs-title">扩展字段</p>
+    <details class="technical-info">
+      <summary>技术信息</summary>
       <dl class="meta">
-        <div v-for="a in attributes" :key="a.key" class="meta-row">
-          <dt>{{ a.key }}</dt>
-          <dd>
-            <!-- 对象 / 数组值此前被一行 JSON.stringify 平铺：大对象会把后面所有
-                 字段推到很远。默认只显摘要，展开才看完整 JSON。 -->
-            <details v-if="a.objectKind" class="attr-object">
-              <summary>{{ a.objectKind }}</summary>
-              <pre class="attr-json">{{ a.value }}</pre>
-            </details>
-            <template v-else>{{ a.value }}</template>
-          </dd>
-        </div>
+        <div class="meta-row"><dt>类型</dt><dd>{{ node.kind }}</dd></div>
+        <div class="meta-row"><dt>路径</dt><dd><code>{{ node.path }}</code></dd></div>
+        <div class="meta-row"><dt>状态</dt><dd>{{ node.status }}</dd></div>
+        <div class="meta-row"><dt>访问位</dt><dd><code>{{ node.access || '—' }}</code> {{ accessText }}</dd></div>
+        <div v-if="node.ext" class="meta-row"><dt>呈现扩展名</dt><dd>{{ node.ext }}</dd></div>
+        <div v-if="typeof node.size === 'number'" class="meta-row"><dt>大小</dt><dd>{{ node.size }} 字节</dd></div>
+        <div v-if="node.updated_at" class="meta-row"><dt>更新时间</dt><dd>{{ updatedText }}</dd></div>
       </dl>
-    </div>
+
+      <div v-if="attributes.length">
+        <p class="attrs-title">扩展字段</p>
+        <dl class="meta">
+          <div v-for="a in attributes" :key="a.key" class="meta-row">
+            <dt>{{ a.key }}</dt>
+            <dd>
+              <!-- 对象 / 数组值此前被一行 JSON.stringify 平铺：大对象会把后面所有
+                   字段推到很远。默认只显摘要，展开才看完整 JSON。 -->
+              <details v-if="a.objectKind" class="attr-object">
+                <summary>{{ a.objectKind }}</summary>
+                <pre class="attr-json">{{ a.value }}</pre>
+              </details>
+              <template v-else>{{ a.value }}</template>
+            </dd>
+          </div>
+        </dl>
+      </div>
+    </details>
   </DetailShell>
 </template>
 
@@ -109,12 +109,25 @@ const attributes = computed(() =>
 </script>
 
 <style scoped>
-.kind {
-  font-size: 0.65rem;
-  padding: 0.1rem 0.45rem;
-  border-radius: var(--radius-full);
-  background: var(--accent-subtle-bg);
-  color: var(--accent);
+.technical-info {
+  border: 1px solid var(--border-subtle);
+  border-radius: var(--radius-md);
+  background: var(--surface-sunken);
+}
+
+.technical-info > summary {
+  padding: 0.5rem 0.65rem;
+  cursor: pointer;
+  color: var(--text-secondary);
+  font-size: var(--font-size-sm);
+}
+
+.technical-info[open] > summary {
+  border-bottom: 1px solid var(--border-subtle);
+}
+
+.technical-info .meta {
+  padding: 0.5rem 0.65rem;
 }
 
 .desc {

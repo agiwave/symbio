@@ -224,6 +224,15 @@ export default defineCase(
       assertEq(w.status, 200, `写收件箱 ${sid}（${JSON.stringify(w.body)?.slice(0, 300)}）`);
     };
 
+    /** 会话节点：调度器看到的同一份 status / updated_at / metadata（公开 list 出口）。 */
+    const sessionNodeOf = async (sid) => {
+      const root = (await cli.invoke('vdfs/root', {})).body?.data?.path;
+      assert(typeof root === 'string' && root.length > 0, 'vdfs/root 应返回根地址');
+      const listed = await cli.invoke('vdfs/list', { path: `${root.replace(/\/+$/, '')}/session` });
+      assertEq(listed.status, 200, `列会话清单（${JSON.stringify(listed.body)?.slice(0, 300)}）`);
+      return (listed.body?.data?.items ?? []).find((node) => node.name === sid) ?? null;
+    };
+
     /** 该会话转写里的用户发言正文（经读出口读回 = 前端加载历史同一出口） */
     const userTexts = async (sid) => {
       const msgs = (await readSessionMessages(cli, sid)) ?? [];
@@ -280,7 +289,13 @@ export default defineCase(
         const ready = await statsOf(sid)
           .then((d) => d?.readyset ?? null)
           .catch((e) => `读取失败: ${e?.message ?? e}`);
-        rows.push(`  ${sid}｜转写用户发言=${JSON.stringify(texts)}｜就绪集=${JSON.stringify(ready)}`);
+        const node = await sessionNodeOf(sid).catch((e) => `读取失败: ${e?.message ?? e}`);
+        const timing = node && typeof node === 'object'
+          ? { status: node.status, updated_at: node.updated_at, heartbeat: node.metadata?.heartbeat ?? null }
+          : node;
+        rows.push(
+          `  ${sid}｜转写用户发言=${JSON.stringify(texts)}｜就绪集=${JSON.stringify(ready)}｜调度输入=${JSON.stringify(timing)}`,
+        );
       }
       const reqCount = await llm.requests().then((r) => r.length).catch(() => -1);
       const stderrLines = cli.out.stderr.split(/\r?\n/);
@@ -318,6 +333,28 @@ export default defineCase(
         broadCalls.length >= 1 && broadCalls.every((a) => a.includes(PROMPT_BROAD)),
         `SID_BROAD 的装心跳轮必须带长提示词（闸门拒收侧；实际: ${JSON.stringify(broadCalls)}）`,
       );
+
+      // LLM 请求数只证明结果轮已发出，不证明工具写入与轮末收尾都完成。调度器会
+      // 静默跳过 working / 缺 metadata 的会话，所以必须按它实际读取的节点面设闸。
+      try {
+        await waitFor(
+          async () => {
+            const [ok, broad] = await Promise.all([sessionNodeOf(SID_OK), sessionNodeOf(SID_BROAD)])
+            const ready = (node, prompt) =>
+              node?.status !== 'working' &&
+              node?.metadata?.heartbeat?.enabled === true &&
+              node?.metadata?.heartbeat?.interval_seconds === INTERVAL &&
+              node?.metadata?.heartbeat?.prompt === prompt
+            return ready(ok, PROMPT_OK) && ready(broad, PROMPT_BROAD)
+          },
+          {
+            what: '两个会话均结束 working 且心跳配置已落到调度器读取的节点面',
+            timeoutMs: 60_000,
+          },
+        )
+      } catch (e) {
+        throw new Error(`${e.message}${await diagnose()}`)
+      }
 
       // ── 等一个 tick：真进程里的调度器到点触发 ───────────────────────────
       // 放行侧应长出心跳轮（提示词作为用户发言落进转写）；拒收侧什么都不该有。

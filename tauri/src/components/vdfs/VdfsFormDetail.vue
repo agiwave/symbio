@@ -37,18 +37,21 @@
         </li>
       </ul>
     </div>
+    <p v-if="!capabilities.mutable" class="readonly-note">系统管理，不可编辑</p>
     <DetailForm
       :definition="definition"
       :node="node"
       :values="values"
       :field-errors="fieldErrors"
       :capabilities="capabilities"
+      :readonly="!capabilities.mutable"
       :mechanism-actions="mechanismActions"
       :mechanism-busy="mechanismBusy"
       :saving="saving"
       :testing="testing"
       @save="(v) => $emit('save', v)"
       @delete="$emit('delete')"
+      @set-default="$emit('action', 'set-default')"
       @open-container="$emit('browse')"
       @test="$emit('action', 'test')"
       @action="(id, file) => $emit('action', id, file)"
@@ -199,6 +202,12 @@ const capabilities = computed<Record<string, boolean>>(() => ({
   border: 1px solid var(--danger-border);
   border-radius: var(--radius-md);
   background: var(--danger-subtle-bg);
+}
+.readonly-note {
+  flex-shrink: 0;
+  margin: 0.5rem 1rem 0;
+  font-size: 0.78rem;
+  color: var(--text-muted);
 }
 .banner-msg {
   margin: 0;

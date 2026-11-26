@@ -40,25 +40,21 @@
     panel
     @run="runAction"
   >
-    <!-- 标题块：标题 + 徽标 + 副标题。比默认的「一行纯标题」复杂，故覆盖 #title 插槽 -->
+    <!-- 标题栏只占一行：副标题与字段内容重复，仅保留在悬浮提示中。 -->
     <template #title>
-      <div class="title-block">
-        <div class="title-line">
-          <h2 class="title-text">{{ displayTitle }}</h2>
-          <span v-for="(b, i) in visibleBadges" :key="i" class="badge" :class="b.style">
-            {{ b.label }}
-          </span>
-        </div>
-        <p v-if="subtitleParts.length" class="subtitle">
-          <span v-for="(p, i) in subtitleParts" :key="i" class="subtitle-part">
-            <span v-if="i > 0" class="dot">·</span>{{ p }}
-          </span>
-        </p>
+      <div
+        class="title-line"
+        :title="subtitleParts.length ? [displayTitle, ...subtitleParts].join(' · ') : displayTitle"
+      >
+        <h2 class="title-text">{{ displayTitle }}</h2>
+        <span v-for="(b, i) in visibleBadges" :key="i" class="badge" :class="b.style">
+          {{ b.label }}
+        </span>
       </div>
     </template>
 
     <!-- 表单主体：分区（可折叠）+ 字段行 -->
-    <div class="form-body">
+    <div v-overlay-scrollbar class="form-body">
       <!-- 必填预检的错误行：后端校验仍是最终权威，这里只差一步往返与定位 -->
       <p v-if="requiredError" class="form-required-error" role="alert">{{ requiredError }}</p>
       <template v-for="(sec, si) in definition.sections" :key="si">
@@ -77,7 +73,7 @@
             <div v-if="fieldVisible(f)" class="setting-item" :class="{ column: widgetIsFullWidth(f), 'field-invalid': fieldHasError(f) }">
             <div class="setting-info">
               <label :for="isLabelable(f) ? fieldControlId(f) : undefined">{{ f.label }}<span v-if="f.required" class="required">*</span></label>
-              <p v-if="f.description" class="setting-desc">{{ f.description }}</p>
+              <p v-if="f.description" :id="fieldDescriptionId(f)" class="setting-desc">{{ f.description }}</p>
               <p v-if="fieldErrorText(f)" :id="fieldErrorId(f)" class="field-error" role="alert">{{ fieldErrorText(f) }}</p>
             </div>
 
@@ -91,6 +87,7 @@
                 type="button"
                 class="icon-btn"
                 :title="`配置「${f.label}」`"
+                :aria-describedby="fieldDescribedBy(f)"
                 :disabled="fieldDisabled(f)"
                 @click="openSubForm(f)"
               >
@@ -103,7 +100,8 @@
 
             <!-- table（对象数组：按 columns 渲染可编排行表格） -->
             <div v-else-if="specOf(f).tag === 'table'" class="table-widget">
-              <table class="table-grid">
+              <div class="table-scroll" tabindex="0" role="region" :aria-label="`${f.label}表格`">
+                <table class="table-grid">
                 <thead>
                   <tr>
                     <th v-for="c in f.columns ?? []" :key="c.key">{{ c.label }}</th>
@@ -118,7 +116,7 @@
                         v-model="row[c.key]"
                         :class="{ 'input-invalid': tableCellErrorText(f, ri, c.key) }"
                         :aria-invalid="Boolean(tableCellErrorText(f, ri, c.key))"
-                        :aria-describedby="tableCellErrorId(f, ri, c.key)"
+                        :aria-describedby="tableCellDescribedBy(f, ri, c.key)"
                         :aria-label="c.label"
                         :disabled="fieldDisabled(f)"
                       >
@@ -133,7 +131,7 @@
                           :list="`table-dl-${uid}-${f.key}-${ri}`"
                           :class="{ 'input-invalid': tableCellErrorText(f, ri, c.key) }"
                           :aria-invalid="Boolean(tableCellErrorText(f, ri, c.key))"
-                          :aria-describedby="tableCellErrorId(f, ri, c.key)"
+                          :aria-describedby="tableCellDescribedBy(f, ri, c.key)"
                           :aria-label="c.label"
                           :placeholder="c.placeholder ?? ''"
                           :disabled="fieldDisabled(f)"
@@ -147,7 +145,7 @@
                         v-model="row[c.key]"
                         :class="{ 'input-invalid': tableCellErrorText(f, ri, c.key) }"
                         :aria-invalid="Boolean(tableCellErrorText(f, ri, c.key))"
-                        :aria-describedby="tableCellErrorId(f, ri, c.key)"
+                        :aria-describedby="tableCellDescribedBy(f, ri, c.key)"
                         :type="(c.widget || 'text') === 'number' ? 'number' : 'text'"
                         :aria-label="c.label"
                         :placeholder="c.placeholder ?? ''"
@@ -198,6 +196,7 @@
                   </tr>
                 </tbody>
               </table>
+              </div>
               <p v-if="tableRowsOf(f).length === 0" class="table-empty">
                 暂无行，点击「添加一行」开始配置
               </p>
@@ -217,7 +216,8 @@
                 type="checkbox"
                 v-model="form[f.key]"
                 :aria-label="f.label"
-              :aria-describedby="fieldErrorText(f) ? fieldErrorId(f) : undefined"
+                :aria-required="f.required ? 'true' : undefined"
+                :aria-describedby="fieldDescribedBy(f)"
                 :disabled="fieldDisabled(f)"
               />
               <span class="toggle-slider" />
@@ -229,7 +229,8 @@
               :id="fieldControlId(f)"
               v-model="form[f.key]"
               :aria-label="f.label"
-              :aria-describedby="fieldErrorText(f) ? fieldErrorId(f) : undefined"
+              :aria-required="f.required ? 'true' : undefined"
+              :aria-describedby="fieldDescribedBy(f)"
               :disabled="fieldDisabled(f)"
               @change="onPresetFieldChange(f)"
             >
@@ -242,7 +243,8 @@
               :id="fieldControlId(f)"
               v-model="form[f.key]"
               :aria-label="f.label"
-              :aria-describedby="fieldErrorText(f) ? fieldErrorId(f) : undefined"
+              :aria-required="f.required ? 'true' : undefined"
+              :aria-describedby="fieldDescribedBy(f)"
               :rows="f.rows ?? 3"
               :placeholder="widgetPlaceholderOf(f)"
               :disabled="fieldDisabled(f)"
@@ -256,7 +258,8 @@
                 v-model="form[f.key]"
                 :type="reveal[f.key] ? 'text' : 'password'"
                 :aria-label="f.label"
-              :aria-describedby="fieldErrorText(f) ? fieldErrorId(f) : undefined"
+                :aria-required="f.required ? 'true' : undefined"
+                :aria-describedby="fieldDescribedBy(f)"
                 :placeholder="f.placeholder"
                 :disabled="fieldDisabled(f)"
               />
@@ -264,6 +267,7 @@
                 type="button"
                 class="icon-btn"
                 :title="reveal[f.key] ? '隐藏' : '显示'"
+                :disabled="fieldDisabled(f)"
                 @click="reveal[f.key] = !reveal[f.key]"
               >
                 <svg v-if="reveal[f.key]" viewBox="0 0 24 24" width="14" height="14" fill="none" stroke="currentColor" stroke-width="2">
@@ -283,7 +287,8 @@
               v-model.number="form[f.key]"
               type="number"
               :aria-label="f.label"
-              :aria-describedby="fieldErrorText(f) ? fieldErrorId(f) : undefined"
+              :aria-required="f.required ? 'true' : undefined"
+              :aria-describedby="fieldDescribedBy(f)"
               :min="f.min"
               :max="f.max"
               :step="f.step"
@@ -298,7 +303,8 @@
                 type="text"
                 :list="`dl-${uid}-${f.key}`"
                 :aria-label="f.label"
-              :aria-describedby="fieldErrorText(f) ? fieldErrorId(f) : undefined"
+                :aria-required="f.required ? 'true' : undefined"
+                :aria-describedby="fieldDescribedBy(f)"
                 :placeholder="f.placeholder"
                 :disabled="fieldDisabled(f)"
               />
@@ -313,7 +319,8 @@
                 v-model="form[f.key]"
                 :type="specOf(f).inputType ?? 'text'"
                 :aria-label="f.label"
-              :aria-describedby="fieldErrorText(f) ? fieldErrorId(f) : undefined"
+                :aria-required="f.required ? 'true' : undefined"
+                :aria-describedby="fieldDescribedBy(f)"
                 :placeholder="widgetPlaceholderOf(f)"
                 :disabled="fieldDisabled(f)"
               />
@@ -345,6 +352,7 @@
           :node="null"
           :values="subValues"
           :capabilities="EMPTY_CAPABILITIES"
+          :readonly="readonly"
           @save="onSubSave"
           @cancel="closeSubForm"
         />
@@ -376,6 +384,7 @@
 
 <script setup lang="ts">
 import { computed, nextTick, onMounted, reactive, ref, watch } from 'vue'
+import { vOverlayScrollbar } from '@/directives/overlayScrollbar'
 import DetailShell from './DetailShell.vue'
 import BaseModal from '@/components/common/BaseModal.vue'
 import DirectoryPicker from '@/components/common/DirectoryPicker.vue'
@@ -431,6 +440,8 @@ const props = withDefaults(
   /** 后端字段级校验错误（供逐字段就地高亮；机器 key → 文案） */
   fieldErrors?: VdfsFieldError[]
   capabilities: Record<string, boolean>
+    /** 资源只读态：由调用方从 cap.mutable 适配；无资源语义的子表单不启用。 */
+    readonly?: boolean
     /** 机制动作注入（页面单一定义点计算：重命名 / 删除），与定义动作同排渲染于动作区。
      *  同 id 时**定义声明的那一份胜出**（去重规则见 schemas/vdfs-form.mergeDetailActions）。 */
     mechanismActions?: DetailAction[]
@@ -445,6 +456,7 @@ const props = withDefaults(
   {
     values: null,
     fieldErrors: () => [],
+    readonly: false,
     mechanismActions: () => [],
     saving: false,
     testing: false,
@@ -518,17 +530,18 @@ function fieldVisible(f: DetailField): boolean {
 }
 
 /**
- * 字段是否**禁用**（`disabled_when` 成立才禁用；缺省 = 不禁用）。
+ * 字段是否**禁用**（资源只读，或 `disabled_when` 成立；缺省条件 = 不禁用）。
  *
  * 与 `visible_when` 的分工：隐藏 = 这一项与当前场景无关；禁用 = 这一项存在、
- * 但此刻不能改（原因写在 `description` 里）。
+ * 但此刻不能改（原因写在 `description` 里）。资源只读由调用方从 `cap.mutable`
+ * 适配为 `readonly`，所有输入、toggle、表格与子表单入口共用这一判据。
  *
  * 判空是必须的，理由与动作侧 `actionDisabled` 逐字相同：`evalCond` 对空条件返回
  * `true`（那是为 `when` / `visible_when` 的「缺省即显示」服务的），
  * 写成 `!evalCond(...)` 会把「无条件」与「条件成立」两种相反情形都解释成不禁用。
  */
 function fieldDisabled(f: DetailField): boolean {
-  return f.disabled_when ? evalCond(f.disabled_when) : false
+  return props.readonly || Boolean(f.disabled_when && evalCond(f.disabled_when))
 }
 
 // ==================== 机制原生取值原语（DetailField.pick） ====================
@@ -539,6 +552,7 @@ const { showToast } = useToast()
 const pickerField = ref<DetailField | null>(null)
 
 async function onPick(f: DetailField) {
+  if (fieldDisabled(f)) return
   // 原生取值也会失败（权限 / 路径失效 / 系统对话框异常）。失败必须说出来，
   // 否则用户点完「选择目录」看到的是毫无反应，只能反复点。
   try {
@@ -554,7 +568,7 @@ async function onPick(f: DetailField) {
 }
 
 function onDirectorySelected(path: string) {
-  if (pickerField.value) form[pickerField.value.key] = path
+  if (pickerField.value && !fieldDisabled(pickerField.value)) form[pickerField.value.key] = path
   pickerField.value = null
 }
 
@@ -598,6 +612,7 @@ const subField = ref<DetailField | null>(null)
 const subValues = ref<Record<string, unknown>>({})
 
 function openSubForm(f: DetailField) {
+  if (fieldDisabled(f)) return
   const cur = form[f.key]
   subValues.value = cur && typeof cur === 'object' ? { ...(cur as Record<string, unknown>) } : {}
   subField.value = f
@@ -608,7 +623,7 @@ function closeSubForm() {
 }
 
 function onSubSave(values: Record<string, unknown>) {
-  if (subField.value) form[subField.value.key] = values
+  if (subField.value && !props.readonly) form[subField.value.key] = values
   subField.value = null
 }
 
@@ -620,12 +635,33 @@ function tableRowsOf(f: DetailField): Record<string, unknown>[] {
   return tableRows(form[f.key])
 }
 
+function fieldDescriptionId(f: DetailField): string {
+  return `${fieldControlId(f)}-description`
+}
+
 function fieldErrorId(f: DetailField): string {
   return `${fieldControlId(f)}-error`
 }
 
+/** 控件同时读取字段说明与就地错误；只关联实际渲染出的节点。 */
+function fieldDescribedBy(f: DetailField): string | undefined {
+  const ids = [
+    f.description ? fieldDescriptionId(f) : '',
+    fieldErrorText(f) ? fieldErrorId(f) : '',
+  ].filter(Boolean)
+  return ids.length ? ids.join(' ') : undefined
+}
+
 function tableCellErrorId(f: DetailField, row: number, column: string): string {
   return `df-${uid}-${f.key}-${row}-${column}-error`
+}
+
+function tableCellDescribedBy(f: DetailField, row: number, column: string): string | undefined {
+  const ids = [
+    f.description ? fieldDescriptionId(f) : '',
+    tableCellErrorText(f, row, column) ? tableCellErrorId(f, row, column) : '',
+  ].filter(Boolean)
+  return ids.length ? ids.join(' ') : undefined
 }
 
 function tableCellErrorText(f: DetailField, row: number, column: string): string {
@@ -684,10 +720,36 @@ function isLabelable(f: DetailField): boolean {
   return widgetIsLabelable(f.widget)
 }
 
-/** 必填预检的错误信息（空 = 没有未填的必填项） */
-const requiredError = ref('')
-/** 就地高亮的字段 key：本地必填预检 + 后端字段级校验的并集 */
+/** 就地高亮的字段 key：只保存本地必填预检命中的项，补填后由字段 watcher 清除。 */
 const requiredFieldKeys = ref(new Set<string>())
+/** 必填汇总只列仍为空的项目，避免补填后错误文案残留。 */
+const requiredError = computed(() => {
+  const labels: string[] = []
+  for (const sec of props.definition.sections) {
+    for (const f of sec.fields) {
+      if (requiredFieldKeys.value.has(f.key)) labels.push(f.label)
+    }
+  }
+  return labels.length ? `请填写必填项：${labels.join('、')}` : ''
+})
+
+/** 必填空值：纯空白串与空串同义；0 / false 是有效值。 */
+function requiredValueMissing(v: unknown): boolean {
+  return v == null || (typeof v === 'string' && v.trim() === '') || (Array.isArray(v) && v.length === 0)
+}
+
+function clearResolvedRequiredErrors(): void {
+  for (const sec of props.definition.sections) {
+    for (const f of sec.fields) {
+      if (
+        requiredFieldKeys.value.has(f.key) &&
+        (!fieldVisible(f) || fieldDisabled(f) || !requiredValueMissing(form[f.key]))
+      ) {
+        requiredFieldKeys.value.delete(f.key)
+      }
+    }
+  }
+}
 /** 后端字段级错误：key → 文案（把机器 key 映射回字段 label 展示） */
 const backendFieldError = computed<Record<string, string>>(() => {
   const map: Record<string, string> = {}
@@ -737,8 +799,7 @@ function missingRequiredFields(): DetailField[] {
     for (const f of sec.fields) {
       if (!f.required || !fieldVisible(f) || fieldDisabled(f)) continue
       if (specOf(f).tag === 'static') continue
-      const v = form[f.key]
-      if (v == null || v === '' || (Array.isArray(v) && v.length === 0)) missing.push(f)
+      if (requiredValueMissing(form[f.key])) missing.push(f)
     }
   }
   return missing
@@ -813,6 +874,7 @@ function actionBusy(a: DetailAction): boolean {
 
 function actionDisabled(a: DetailAction): boolean {
   if (actionBusy(a)) return true
+  if (a.id === 'save' && props.readonly) return true
   // `disabled_when` = **条件成立才禁用**（缺省 ⇒ 不禁用）。
   // `evalCond` 对空条件返回 true（那是为 `when` 显隐服务的：无 when ⇒ 显示），
   // 所以这里必须显式判空，不能写成 `!evalCond(...)`——那样既会把「无条件」
@@ -828,12 +890,11 @@ const disabledFlags = computed(() => visibleActions.value.map((a) => actionDisab
 function runAction(a: DetailAction) {
   switch (a.id) {
     case 'save': {
-      // info 只读：没有 save 语义
-      if (isInfo.value) return
+      // info / 资源只读：没有 save 语义
+      if (isInfo.value || props.readonly) return
       const missing = missingRequiredFields()
       if (missing.length) {
         // 一次列全所有缺失项，别让用户逐个点保存才发现下一个
-        requiredError.value = `请填写必填项：${missing.map((f) => f.label).join('、')}`
         missing.forEach((f) => requiredFieldKeys.value.add(f.key))
         void nextTick(() => {
           const el = document.getElementById(fieldControlId(missing[0]))
@@ -843,7 +904,6 @@ function runAction(a: DetailAction) {
         return
       }
       requiredFieldKeys.value.clear()
-      requiredError.value = ''
       // json 字段语法预检：解析失败时聚焦到该字段，避免把非法文本提交给后端
       for (const sec of props.definition.sections) {
         for (const f of sec.fields) {
@@ -963,6 +1023,7 @@ function snapshotBaseline() {
 watch(
   form,
   () => {
+    clearResolvedRequiredErrors()
     const dirty = JSON.stringify(form) !== baseline
     if (dirty !== lastDirty) {
       lastDirty = dirty
@@ -980,6 +1041,7 @@ defineExpose({ markSaved })
 
 // ==================== 预填（watch values：编辑态 / 新建态重置） ====================
 function initForm() {
+  requiredFieldKeys.value.clear()
   for (const sec of props.definition.sections) {
     for (const f of sec.fields) {
       form[f.key] = widgetInitialOf(f)
@@ -1027,20 +1089,13 @@ watch(
 </script>
 
 <style scoped>
-/* 标题块 / 徽标 / 副标题：DetailShell 的 header 是「一行」，本表单需要两行
-   （标题行 + 副标题行），故走 #title 插槽自带排版。 */
-.title-block {
-  display: flex;
-  flex-direction: column;
-  gap: 0.2rem;
-  min-width: 0;
-}
-
+/* 标题栏只占一行；完整副标题通过 title 属性提供。 */
 .title-line {
   display: flex;
   align-items: center;
   gap: 0.5rem;
   min-width: 0;
+  overflow: hidden;
 }
 
 .title-text {
@@ -1052,21 +1107,6 @@ watch(
   overflow: hidden;
   text-overflow: ellipsis;
 }
-
-.subtitle {
-  font-size: var(--font-size-xs);
-  color: var(--text-muted);
-  margin: 0;
-  display: flex;
-  align-items: center;
-  gap: 0.3rem;
-  white-space: nowrap;
-  overflow: hidden;
-  text-overflow: ellipsis;
-}
-
-.subtitle-part { display: inline-flex; align-items: center; gap: 0.3rem; }
-.dot { opacity: 0.5; }
 
 .badge {
   font-size: 0.65rem;
@@ -1171,6 +1211,7 @@ watch(
 .advanced-toggle {
   display: inline-flex;
   align-items: center;
+  min-height: 2rem;
   gap: 0.4rem;
   margin: 0.6rem 0 0.15rem;
   align-self: flex-start;
@@ -1200,6 +1241,7 @@ watch(
 .setting-item textarea,
 .input-row input,
 .input-wrap input {
+  min-height: 2rem;
   border: 1px solid var(--border-default);
   border-radius: var(--radius-md);
   padding: 0.4rem 0.55rem;
@@ -1231,7 +1273,8 @@ watch(
 }
 
 .setting-item input:disabled,
-.setting-item select:disabled {
+.setting-item select:disabled,
+.setting-item textarea:disabled {
   background: var(--surface-sunken);
   color: var(--text-muted);
   cursor: not-allowed;
@@ -1257,8 +1300,14 @@ watch(
   flex-direction: column;
   gap: 0.4rem;
 }
+.table-scroll {
+  max-width: 100%;
+  overflow-x: auto;
+  border-radius: var(--radius-md);
+}
 .table-grid {
   width: 100%;
+  min-width: max-content;
   border-collapse: collapse;
   font-size: var(--font-size-sm);
 }

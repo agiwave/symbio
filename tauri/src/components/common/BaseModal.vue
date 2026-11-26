@@ -53,7 +53,7 @@
 </template>
 
 <script setup lang="ts">
-import { nextTick, ref, watch } from 'vue'
+import { nextTick, onBeforeUnmount, ref, watch } from 'vue'
 
 interface Props {
   /** 是否可见 */
@@ -81,10 +81,39 @@ const props = withDefaults(defineProps<Props>(), {
 const emit = defineEmits<{ (e: 'close'): void }>()
 
 const panelRef = ref<HTMLDivElement | null>(null)
+let returnFocus: HTMLElement | null = null
+let backgroundElements: Array<{ el: HTMLElement; inert: boolean }> = []
 
 /** 可聚焦元素选择器（焦点陷阱与自动聚焦**共用一份**，避免两处口径漂移） */
 const FOCUSABLE =
   'button:not([disabled]), [href], input:not([disabled]), select:not([disabled]), textarea:not([disabled]), [tabindex]:not([tabindex="-1"])'
+
+function isolateBackground() {
+  const mask = panelRef.value?.closest('.modal-mask') ?? null
+  let parent = mask?.parentElement ?? null
+  while (parent && parent !== document.body) {
+    for (const el of Array.from(parent.children) as HTMLElement[]) {
+      if (el === mask || el.contains(mask) || el.querySelector('.modal-mask')) continue
+      backgroundElements.push({ el, inert: el.hasAttribute('inert') })
+      el.setAttribute('inert', '')
+    }
+    parent = parent.parentElement
+  }
+}
+
+function restoreBackground() {
+  for (const { el, inert } of backgroundElements) {
+    if (inert) el.setAttribute('inert', '')
+    else el.removeAttribute('inert')
+  }
+  backgroundElements = []
+}
+
+function restoreFocus() {
+  restoreBackground()
+  if (returnFocus?.isConnected) returnFocus.focus()
+  returnFocus = null
+}
 
 function onMaskClick() {
   if (props.dismissable) emit('close')
@@ -128,8 +157,13 @@ function onKeydown(e: KeyboardEvent) {
 watch(
   () => props.visible,
   async (v) => {
-    if (!v) return
+    if (!v) {
+      restoreFocus()
+      return
+    }
+    returnFocus = document.activeElement instanceof HTMLElement ? document.activeElement : null
     await nextTick()
+    isolateBackground()
     const first = panelRef.value?.querySelector<HTMLElement>(FOCUSABLE)
     if (first) {
       first.focus()
@@ -139,6 +173,8 @@ watch(
   },
   { immediate: true }
 )
+
+onBeforeUnmount(restoreFocus)
 </script>
 
 <style scoped>
@@ -161,6 +197,9 @@ watch(
   border-radius: var(--radius-xl);
   box-shadow: var(--shadow-2);
   outline: none;
+  max-height: calc(100dvh - var(--space-4) - var(--space-4));
+  overflow: auto;
+  overscroll-behavior: contain;
 }
 
 .modal-fade-enter-active,

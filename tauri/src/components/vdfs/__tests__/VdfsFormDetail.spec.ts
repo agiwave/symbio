@@ -96,6 +96,77 @@ describe('VdfsFormDetail 传参基线（通道适配 + 直通）', () => {
     ])
   })
 
+  it('cap.mutable 驱动统一只读态，并说明系统管理不可编辑', async () => {
+    const node = formNode({
+      sections: [{
+        fields: [
+          { key: 'name', label: '名称', widget: 'text' },
+          { key: 'enabled', label: '启用', widget: 'toggle' },
+          { key: 'nested', label: '子配置', widget: 'form', form: { binding: 'option', sections: [] } },
+          { key: 'items', label: '项目', widget: 'table', columns: [{ key: 'value', label: '值' }] },
+        ],
+      }],
+      actions: [{ id: 'save', label: '保存', style: 'primary' }],
+    })
+    node.access = 'r'
+    const w = mount(VdfsFormDetail, {
+      props: { node, data: { items: [{ value: 'a' }] } },
+    })
+    const form = w.findComponent(DetailForm)
+    expect(form.props('capabilities').mutable).toBe(false)
+    expect(form.props('readonly')).toBe(true)
+    expect(w.find('.readonly-note').text()).toBe('系统管理，不可编辑')
+    const controls = w.findAll('.setting-item input, .setting-item select, .setting-item textarea, .setting-item button')
+    expect(controls.length).toBeGreaterThan(4)
+    for (const control of controls) expect(control.attributes('disabled')).toBeDefined()
+
+    await w.setProps({ node: { ...node, access: 'rw' } })
+    expect(form.props('readonly')).toBe(false)
+    expect(w.find('.readonly-note').exists()).toBe(false)
+    expect(w.find('input[aria-label="名称"]').attributes('disabled')).toBeUndefined()
+    expect(w.find('input[aria-label="启用"]').attributes('disabled')).toBeUndefined()
+    expect(w.find('button[title="配置「子配置」"]').attributes('disabled')).toBeUndefined()
+    expect(w.find('.table-add').attributes('disabled')).toBeUndefined()
+  })
+
+  it('★ 保存失败只显示错误，保留当前表单与用户输入', async () => {
+    const node = formNode({
+      sections: [{ fields: [{ key: 'name', label: '名称', widget: 'text' }] }],
+      actions: [{ id: 'save', label: '保存', style: 'primary' }],
+    })
+    const w = mount(VdfsFormDetail, { props: { node, data: { name: '服务端值' } } })
+    const input = w.find<HTMLInputElement>('input[aria-label="名称"]')
+    await input.setValue('用户输入')
+    expect(w.emitted('dirty-change')).toContainEqual([true])
+
+    await w.setProps({ error: '保存失败：写入被拒绝' })
+
+    expect(w.find('.banner-msg').text()).toBe('保存失败：写入被拒绝')
+    expect(w.find<HTMLInputElement>('input[aria-label="名称"]').element.value).toBe('用户输入')
+    expect(w.findComponent(DetailForm).props('values')).toEqual({ name: '服务端值' })
+    expect(w.emitted('dirty-change')).toContainEqual([true])
+  })
+
+  it('set-default 经现有 action 通道转发，testing 忙态禁用动作', async () => {
+    const w = mount(VdfsFormDetail, {
+      props: {
+        node: formNode({
+          actions: [{ id: 'set-default', label: '设为默认 Provider', style: 'icon' }],
+        }),
+        data: {},
+      },
+    })
+    const button = w.find<HTMLButtonElement>('button[title="设为默认 Provider"]')
+    await button.trigger('click')
+    expect(w.emitted('action')).toEqual([['set-default']])
+
+    await w.setProps({ testing: true })
+    expect(w.findComponent(DetailForm).props('testing')).toBe(true)
+    expect(button.element.disabled).toBe(true)
+    await button.trigger('click')
+    expect(w.emitted('action')).toHaveLength(1)
+  })
+
   it('草稿态剥掉 copy（没有可复制的已存在资源）', () => {
     const node = formNode({
       actions: [

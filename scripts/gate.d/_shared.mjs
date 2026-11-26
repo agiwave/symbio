@@ -102,7 +102,7 @@ export const BASELINE = {
   // duplex 帧协议往返，以及监督者不把 host 帧回灌总线 / 不转给另一 host 执行体。纯新增判据。
   // baseline-allow ciRustTestsTotal: 2603 → 2604（+1，）——新增根工厂每次调用返回独立实例的回归。
   // baseline-allow ciRustTestsTotal: 2658 → 2609（-49）——编排环此前在 loop 插件与 providers 各留一份同源码测试副本（engine 39 / table 5 / facts 5）；删除 loop 插件后只保留 providers 的一份，49 条重复判据退场，环机制判据逐条随实现迁入 orchestrator，覆盖未丢。
-  ciRustTestsTotal: 2610,
+  ciRustTestsTotal: 2613,
   cliRustTests: 23,
   tauriRustTests: 5,
   // doc-link-allow D-010: 下一行是退役文件的历史叙述（已把这两个文件删掉），不是入链
@@ -119,8 +119,8 @@ export const BASELINE = {
   // `vdfsHelpers.spec.ts`（26 条）与 `detailForm/display.spec.ts`（14 条）为**新抽出纯函数补的
   // 直接单测**（原先只能借 mount composable / 组件间接覆盖）；被测对象与调用点逐字保留，
   // 依赖方向不变（composables → schemas、components → schemas）。不是补回覆盖，是新增判据。
-  vitestFiles: 91,
-  vitestTests: 1327,
+  vitestFiles: 96,
+  vitestTests: 1443,
   verifyPrograms: 17,
   verifyNegatives: 4,
   // baseline-allow e2eCases: 读通道禁令（e2e 不得读任何内部存储文件——`messages.json` / `v2-events.wal` / `session.json` 一并禁）下删 3 个用例：t33 熔断（存储层判据，已由 `wal.test.rs` / `active.test.rs` 覆盖）、t40（断言全为 WAL 白盒入格，可见效果已由 t29 记忆召回 / t35 技能编译覆盖）、t43（messages-json-is-rebuildable，判据「真源已换、缓存可弃」已下沉 `store/tests.rs`，且 messages.json 已停写）。45 → 42，非侵蚀：三条的判据都下沉到了 Rust 侧，不是丢掉覆盖。

@@ -1,4 +1,4 @@
-import { shallowRef, computed, type ComputedRef, type InjectionKey } from 'vue'
+import { shallowRef, ref, computed, type ComputedRef, type InjectionKey } from 'vue'
 import { runVdfsAction, writeVdfs } from '@/services/vdfs'
 import { ensureSessionScheme } from '@/services/vdfsScheme'
 import { messageTextOf, type ChatNode, type ResumeAction } from '@/schemas/chat_node'
@@ -81,6 +81,10 @@ export interface ResumePayload {
 
 export interface UseChatConnectionReturn {
   isLoading: ComputedRef<boolean>
+  /** 停止请求未回执，或已回执但会话仍在等待权威终态帧。 */
+  isStopping: ComputedRef<boolean>
+  /** 一次停止动作的可见反馈；只随动作边界变化，不随消息状态帧重复播报。 */
+  stopNotice: ComputedRef<{ tone: 'info' | 'success' | 'error'; text: string } | null>
   isWaitingApproval: ComputedRef<boolean>
   isConnected: ComputedRef<boolean>
   messageTree: ComputedRef<ChatNode[]>
@@ -92,7 +96,7 @@ export interface UseChatConnectionReturn {
    *  消息列表里，是后端消费后发权威帧那一刻（前端不做乐观回显，见 `send` 实现）。
    *  等待期间的反馈是 working 状态（空白流 + working ⇒ 补一条等待骨架）。 */
   send: (message: ChatNode) => Promise<boolean>
-  abort: () => void
+  abort: () => Promise<void>
   removeMessage: (messageId: string) => void
   resume: (payload: ResumePayload) => void
   /** 按需重取一个已折叠释放骨架的子树（[] 只读动作） */
@@ -483,6 +487,24 @@ export function useChatConnection(options: UseChatConnectionOptions): UseChatCon
     return store.isSessionWorking(sid)
   })
 
+  // 停止反馈是**动作级**状态，不是消息状态的镜像：点击时立即置位，回执后只更新
+  // 一次。成功 latch 到 isLoading 落下为止，堵住「IPC 已回、权威帧未到」这段窗口，
+  // 因而连点或重复 Esc 都不会再发一对 abort / clear。
+  const stopPhase = ref<'idle' | 'stopping' | 'stopped' | 'error'>('idle')
+  const stopText = ref('')
+  const isStopping = computed(
+    () => stopPhase.value === 'stopping' || (stopPhase.value === 'stopped' && isLoading.value),
+  )
+  const stopNotice = computed(() => {
+    if (stopPhase.value === 'idle') return null
+    const tone: 'info' | 'success' | 'error' = stopPhase.value === 'error' ? 'error' : stopPhase.value === 'stopped' ? 'success' : 'info'
+    return { tone, text: stopText.value }
+  })
+  function clearStopNotice() {
+    stopPhase.value = 'idle'
+    stopText.value = ''
+  }
+
   const isWaitingApproval = computed(() => {
     const sid = options.sessionId
     if (!sid) return false
@@ -500,6 +522,7 @@ export function useChatConnection(options: UseChatConnectionOptions): UseChatCon
   async function send(msg: ChatNode): Promise<boolean> {
     const outgoing: ChatNode = { ...msg }
     const sid = options.sessionId
+    clearStopNotice()
     logger.info('useChatConnection', `[${sid}] Sending message`)
 
     // ⚠️ **不做乐观回显**（与从前相反，见下）。
@@ -587,30 +610,64 @@ export function useChatConnection(options: UseChatConnectionOptions): UseChatCon
    * 两者都**只发一次 IPC 且互不依赖**（`allSettled`）：其中一个失败不该让另一个
    * 不发——「停了但队列没清」与「队列清了但没停」都是需要被如实报告的状态。
    */
-  function abort() {
+  async function abort(): Promise<void> {
+    // 同步 latch：address 解析也是异步的，不能在第一个 await 之后才去重。
+    if (isStopping.value) return
+    stopPhase.value = 'stopping'
+    stopText.value = '正在停止当前请求…'
     const sid = options.sessionId
     logger.info('useChatConnection', `[${sid}] aborting`)
-    void (async () => {
+
+    const reportErrors = (errors: string[]) => {
+      stopPhase.value = 'error'
+      stopText.value = `停止未完成：${errors.join('；')}`
+      // 错误仍走全局 assertive 通道；持久状态行只保留完整现场，供稍后阅读。
+      errors.forEach((text) => showToast('error', text))
+    }
+
+    try {
       const target = await addressingOf(sid)
-      if (!target) return
+      if (!target) {
+        reportErrors(['无法定位会话地址，请检查地址后重试'])
+        return
+      }
       const ctx = { workdir: store.getSessionWorkdir(sid) ?? '', session_id: sid }
       const [stopped, cleared] = await Promise.allSettled([
         runVdfsAction(target.addr, VDFS_ACTION_ABORT, undefined, ctx),
         runVdfsAction(vdfsInboxAddr(target.scheme, sid), VDFS_ACTION_CLEAR, undefined, ctx),
       ])
+
+      const errors: string[] = []
+      let noActiveTurn = false
       if (stopped.status === 'rejected') {
         logger.error('useChatConnection', 'Failed to abort:', stopped.reason)
-        showToast('error', '停止未生效，请重试')
+        errors.push('当前请求未能中止，请重试')
       } else if (!stopped.value.ok) {
-        // 「本来就没在跑」不是错误，但也不该静默——回执的文案直接可读
+        // 后端以 ok:false 表示「没有在途轮次」；这不是失败，但仍明确交代。
+        noActiveTurn = true
         logger.warn('useChatConnection', `[${sid}] abort 未生效：${stopped.value.message}`)
-        showToast('info', stopped.value.message || '当前没有正在运行的请求')
       }
+
       if (cleared.status === 'rejected') {
         logger.error('useChatConnection', 'Failed to clear inbox:', cleared.reason)
-        showToast('error', '排队消息未清除，请重试')
+        errors.push('排队消息未能清除，请重试')
+      } else if (!cleared.value.ok) {
+        logger.warn('useChatConnection', `[${sid}] clear 未生效：${cleared.value.message}`)
+        errors.push(`排队消息未能清除：${cleared.value.message || '请重试'}`)
       }
-    })()
+
+      if (errors.length > 0) {
+        reportErrors(errors)
+        return
+      }
+
+      stopPhase.value = 'stopped'
+      stopText.value = noActiveTurn ? '已停止：当前没有正在运行的请求' : '已停止当前请求'
+      // 成功由面板内持久 polite 状态主动播报，不再按每个终态帧重复 toast。
+    } catch (err: unknown) {
+      logger.error('useChatConnection', 'Failed to stop:', err)
+      reportErrors([`停止操作出错：${err instanceof Error ? err.message : String(err)}`])
+    }
   }
 
   function removeMessage(messageId: string) { markRemoved(messageId) }
@@ -650,6 +707,7 @@ export function useChatConnection(options: UseChatConnectionOptions): UseChatCon
     // 立即置为 working（让 UI 立即反映 resume 已经发出）；
     // 同一会话才切 working 状态，避免跨会话工具调用误改父会话状态。
     if (targetSid === sid) {
+      clearStopNotice()
       store.putStatus(sid, { status: VDFS_STATUS_WORKING, activity: '处理中…', outcome: undefined })
       store.setSessionError(sid, null)
       store.setSessionStatus(sid, VDFS_STATUS_WORKING)
@@ -833,6 +891,8 @@ export function useChatConnection(options: UseChatConnectionOptions): UseChatCon
 
   return {
     isLoading,
+    isStopping,
+    stopNotice,
     isWaitingApproval,
     isConnected: computed(() => true), // 始终视为已连接（状态由全局消费端收敛）
     messageTree,

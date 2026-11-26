@@ -11,14 +11,13 @@
       class="nav-btn"
       :class="{ 'nav-btn--error': locationError }"
       :title="homedirTitle"
-      aria-label="系统目录"
+      :aria-label="homedirTitle"
       @click="open = true"
     >
       <svg viewBox="0 0 24 24" width="20" height="20" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round">
         <path d="M3 7a2 2 0 0 1 2-2h4l2 2h8a2 2 0 0 1 2 2v8a2 2 0 0 1-2 2H5a2 2 0 0 1-2-2V7z" />
         <circle cx="17" cy="13" r="2" />
       </svg>
-      <span class="nav-label">系统目录</span>
       <span v-if="locationError" class="nav-dot" />
     </button>
   </div>
@@ -104,7 +103,7 @@ async function onReloaded() {
   display: flex;
   flex-direction: column;
   gap: 0.25rem;
-  padding: 0.5rem;
+  padding: 0.25rem;
   border-top: 1px solid var(--border-default);
 }
 

@@ -14,11 +14,17 @@
   但**重试入口照给**——这一轮只跑了一半，用户中止后通常就想重跑它。
 -->
 <template>
-  <div class="error-box" :class="{ aborted, 'skeleton-error': variant === 'skeleton' }">
-    <span class="err-icon">{{ aborted ? '⏹' : '⚠' }}</span>
+  <div
+    class="error-box"
+    :class="{ aborted, 'skeleton-error': variant === 'skeleton' }"
+    role="alert"
+    aria-live="assertive"
+    aria-atomic="true"
+  >
+    <span class="err-icon" aria-hidden="true">{{ aborted ? '⏹' : '⚠' }}</span>
     <span class="err-text">{{ aborted ? MESSAGE_ABORTED_NOTE : text }}</span>
     <button v-if="retryable" class="retry" @click="emit('retry')">重试</button>
-    <button v-if="dismissible" class="dismiss" title="关闭" @click="emit('dismiss')">×</button>
+    <button v-if="dismissible" class="dismiss" title="关闭" aria-label="关闭" @click="emit('dismiss')">×</button>
   </div>
 </template>
 
@@ -80,6 +86,7 @@ const emit = defineEmits<{ retry: []; dismiss: [] }>()
 }
 .retry {
   flex-shrink: 0;
+  min-height: 1.5rem;
   background: var(--color-option-bg);
   border: 1px solid var(--color-error-border);
   color: var(--color-error-fg);
@@ -91,6 +98,11 @@ const emit = defineEmits<{ retry: []; dismiss: [] }>()
 /* 关闭（×）：与「重试」同排，但视觉上更低一级——它不是主操作。 */
 .dismiss {
   flex-shrink: 0;
+  display: inline-flex;
+  align-items: center;
+  justify-content: center;
+  width: 1.5rem;
+  height: 1.5rem;
   background: transparent;
   border: none;
   color: var(--color-error-fg);

@@ -374,6 +374,7 @@ function resetFields() {
   font-weight: var(--font-weight-semibold);
 }
 .close-btn {
+  min-height: 1.5rem;
   background: transparent;
   border: none;
   font-size: 1.4rem;

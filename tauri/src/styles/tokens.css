@@ -124,7 +124,8 @@
   --surface-fade: rgba(255, 255, 255, 0.95);
 
   /* ── 布局尺寸 ────────────────────────────────────────────────── */
-  --sidebar-width: 3.5rem;   /* 56px 图标窄条 */
+  --workbench-bar-height: 3rem; /* 48px：紧凑三栏标题栏统一高度 */
+  --sidebar-width: var(--workbench-bar-height);
 
   /* ── 会话区语义令牌（原样保留，零回退）───────────────────────── */
   --color-chat-bg: #ffffff;

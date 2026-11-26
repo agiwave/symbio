@@ -29,7 +29,7 @@
 
 import type { Component } from 'vue'
 import { isVdfsDir, type VdfsNode } from '@/schemas/vdfs'
-import { relativeTime } from '@/utils/time'
+import { formatDateTime, relativeTime } from '@/utils/time'
 import { iconForNode } from '@/registry/vdfsIcons'
 
 /** 卡片状态点取值（与 `VdfsCard` 的 `status` prop 同域） */
@@ -39,6 +39,8 @@ export type CardStatus = 'active' | 'working' | 'disabled' | 'warning' | 'error'
 export interface CardTag {
   label: string
   kind?: 'muted' | 'primary'
+  /** 可选原生 tooltip；相对时间标签用它补齐绝对时间 */
+  title?: string
 }
 
 /**
@@ -109,7 +111,7 @@ export function cardTagsOf(n: VdfsNode): CardTag[] {
     }
   }
   const t = relativeTime(n.updated_at)
-  if (t) out.push({ label: t, kind: 'muted' })
+  if (t) out.push({ label: t, kind: 'muted', title: formatDateTime(n.updated_at) })
   return out
 }
 
