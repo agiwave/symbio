@@ -5,6 +5,7 @@ use std::sync::{Arc, Mutex};
 use async_trait::async_trait;
 use serde_json::{json, Value};
 use symbio_http::{
+    ingress_policy::{reserve_idempotency, Idempotency},
     payload_response, CancellationToken, HttpRequest, HttpResponse, Ingress, IngressReply,
     ServerConfig as HttpServerConfig, ServerHandle,
 };
@@ -43,6 +44,7 @@ pub struct ServerIngress {
     frontend_dist: PathBuf,
     runtime_gate: Arc<RwLock<()>>,
     realtime: Arc<RealtimeConnections>,
+    idempotency: Arc<Idempotency>,
 }
 
 impl ServerIngress {
@@ -52,6 +54,7 @@ impl ServerIngress {
             frontend_dist,
             runtime_gate: Arc::new(RwLock::new(())),
             realtime: Arc::new(RealtimeConnections::default()),
+            idempotency: Idempotency::new(),
         }
     }
 }
@@ -135,18 +138,35 @@ impl Ingress for ServerIngress {
                 if !request.is_json() {
                     return error_reply(415, "Content-Type must be application/json");
                 }
+                let ticket = match reserve_idempotency(&request, &self.idempotency) {
+                    Ok(ticket) => ticket,
+                    Err(response) => return IngressReply::Response(response),
+                };
                 let message = match serde_json::from_slice::<PluginMessageWire>(&request.body) {
                     Ok(message) => message,
                     Err(error) => {
+                        if let Some(ticket) = &ticket {
+                            ticket.release();
+                        }
                         return error_reply(400, &format!("invalid PluginMessageWire: {error}"));
                     }
                 };
                 match self.invoke(message, cancel).await {
                     Ok(payload) => match payload_response(payload).await {
                         Ok(response) => IngressReply::Response(response),
-                        Err(error) => error_reply(500, &error),
+                        Err(error) => {
+                            if let Some(ticket) = &ticket {
+                                ticket.release();
+                            }
+                            error_reply(500, &error)
+                        }
                     },
-                    Err(error) => error_reply(400, &error),
+                    Err(error) => {
+                        if let Some(ticket) = &ticket {
+                            ticket.release();
+                        }
+                        error_reply(400, &error)
+                    }
                 }
             }
             ("GET", "/api/v1/events") => {

@@ -3,6 +3,9 @@
 use super::*;
 
 use serde_json::json;
+use std::collections::HashMap;
+use std::sync::Mutex;
+use std::time::Duration;
 use symbio_plugin_api::{PluginError, PluginFrame, PluginInvokeResponse, PluginMeta};
 use tokio::io::{AsyncReadExt, AsyncWriteExt};
 use tokio::net::TcpStream;
@@ -18,62 +21,6 @@ fn build_ctx_marks_untrusted_gateway_calls_as_model_and_overwrites_forged_metada
         let context = build_ctx(&message);
         assert_eq!(context.get(VDFS_CALLER), Some(VdfsCaller::Model));
     }
-}
-
-#[test]
-fn idempotency_rejects_duplicates_until_released() {
-    let table = Idempotency::new();
-    let ticket = table.reserve("k-1").expect("first reservation");
-    assert!(table.reserve("k-1").is_none());
-    assert!(table.reserve("k-2").is_some());
-    ticket.release();
-    assert!(table.reserve("k-1").is_some());
-}
-
-#[test]
-fn idempotency_forgets_entries_past_ttl() {
-    let table = Idempotency::new();
-    let stored = Instant::now();
-    table
-        .seen
-        .lock()
-        .unwrap_or_else(|error| error.into_inner())
-        .insert("stale".to_string(), stored);
-    assert!(table
-        .reserve_at("stale", stored + IDEMPOTENCY_TTL + Duration::from_secs(1))
-        .is_some());
-}
-
-#[test]
-fn idempotency_evicts_oldest_when_full() {
-    let table = Idempotency::new();
-    let base = Instant::now();
-    {
-        let mut seen = table.seen.lock().unwrap_or_else(|error| error.into_inner());
-        for index in 0..IDEMPOTENCY_CAPACITY - 1 {
-            seen.insert(format!("old-{index}"), base + Duration::from_secs(10));
-        }
-        seen.insert("oldest".to_string(), base);
-    }
-    assert!(table
-        .reserve_at("fresh", base + Duration::from_secs(500))
-        .is_some());
-    let seen = table.seen.lock().unwrap_or_else(|error| error.into_inner());
-    assert_eq!(seen.len(), IDEMPOTENCY_CAPACITY);
-    assert!(!seen.contains_key("oldest"));
-}
-
-#[test]
-fn idempotency_key_shape_is_bounded() {
-    assert!(valid_idempotency_key(
-        "550e8400-e29b-41d4-a716-446655440000"
-    ));
-    assert!(!valid_idempotency_key(""));
-    assert!(!valid_idempotency_key("has space"));
-    assert!(!valid_idempotency_key("line\nbreak"));
-    assert!(!valid_idempotency_key(
-        &"a".repeat(MAX_IDEMPOTENCY_KEY_BYTES + 1)
-    ));
 }
 
 struct NopRouter;

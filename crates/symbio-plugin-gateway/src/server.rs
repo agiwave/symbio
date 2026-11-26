@@ -3,13 +3,12 @@
 //! HTTP/1.1、WebSocket、SSE、鉴权和大小限制由 `symbio-http` 提供；本模块只实现
 //! 该传输的 [`Ingress`] 端口，不复制线路机制。
 
-use std::collections::HashMap;
-use std::sync::{Arc, Mutex};
-use std::time::{Duration, Instant};
+use std::sync::Arc;
 
 use async_trait::async_trait;
 use serde_json::Value;
 use symbio_http::{
+    ingress_policy::{is_readonly_allowed, reserve_idempotency, Idempotency},
     payload_response, start as start_http, stop as stop_http, CancellationToken, HttpRequest,
     HttpResponse, Ingress, IngressReply, ServerConfig,
 };
@@ -20,13 +19,9 @@ use symbio_plugin_api::{
 };
 use tracing::{debug, error, warn};
 
-use super::config::{is_readonly_allowed, GatewayConfig};
+use super::config::GatewayConfig;
 
 pub use symbio_http::ServerHandle;
-
-const IDEMPOTENCY_TTL: Duration = Duration::from_secs(600);
-const IDEMPOTENCY_CAPACITY: usize = 4096;
-const MAX_IDEMPOTENCY_KEY_BYTES: usize = 200;
 
 /// 按 gateway 配置启动共享传输；未启用或非 HTTP 协议时不监听。
 pub async fn start(
@@ -189,23 +184,9 @@ impl GatewayIngress {
                 serde_json::json!({ "error": "Content-Type must be application/json" }),
             );
         }
-        let ticket = match request.headers.get("idempotency-key").map(|key| key.trim()) {
-            Some(key) if !valid_idempotency_key(key) => {
-                return HttpResponse::json(
-                    400,
-                    serde_json::json!({ "error": "invalid Idempotency-Key" }),
-                );
-            }
-            Some(key) => match self.idempotency.reserve(key) {
-                Some(ticket) => Some(ticket),
-                None => {
-                    return HttpResponse::json(
-                        409,
-                        serde_json::json!({ "error": "duplicate Idempotency-Key" }),
-                    );
-                }
-            },
-            None => None,
+        let ticket = match reserve_idempotency(&request, &self.idempotency) {
+            Ok(ticket) => ticket,
+            Err(response) => return response,
         };
 
         let message: PluginMessageWire = match serde_json::from_slice(&request.body) {
@@ -250,66 +231,6 @@ fn build_ctx(message: &PluginMessageWire) -> Arc<dyn PluginInvokeRequest> {
     ));
     context.set(VDFS_CALLER, VdfsCaller::Model);
     context
-}
-
-struct Idempotency {
-    seen: Mutex<HashMap<String, Instant>>,
-}
-
-struct IdempotencyTicket {
-    table: Arc<Idempotency>,
-    key: String,
-}
-
-impl Idempotency {
-    fn new() -> Arc<Self> {
-        Arc::new(Self {
-            seen: Mutex::new(HashMap::new()),
-        })
-    }
-
-    fn reserve(self: &Arc<Self>, key: &str) -> Option<IdempotencyTicket> {
-        self.reserve_at(key, Instant::now())
-    }
-
-    fn reserve_at(self: &Arc<Self>, key: &str, now: Instant) -> Option<IdempotencyTicket> {
-        let mut seen = self.seen.lock().unwrap_or_else(|error| error.into_inner());
-        seen.retain(|_, stored| now.duration_since(*stored) < IDEMPOTENCY_TTL);
-        if seen.contains_key(key) {
-            return None;
-        }
-        if seen.len() >= IDEMPOTENCY_CAPACITY {
-            if let Some(oldest) = seen
-                .iter()
-                .min_by_key(|(_, stored)| **stored)
-                .map(|(key, _)| key.clone())
-            {
-                seen.remove(&oldest);
-            }
-        }
-        seen.insert(key.to_string(), now);
-        Some(IdempotencyTicket {
-            table: self.clone(),
-            key: key.to_string(),
-        })
-    }
-}
-
-impl IdempotencyTicket {
-    fn release(&self) {
-        let mut seen = self
-            .table
-            .seen
-            .lock()
-            .unwrap_or_else(|error| error.into_inner());
-        seen.remove(&self.key);
-    }
-}
-
-fn valid_idempotency_key(key: &str) -> bool {
-    !key.is_empty()
-        && key.len() <= MAX_IDEMPOTENCY_KEY_BYTES
-        && key.bytes().all(|byte| (0x21..=0x7E).contains(&byte))
 }
 
 #[cfg(test)]

@@ -128,7 +128,8 @@ POST /api/v1/invoke
 #### 5.1.1 重放防护：`Idempotency-Key`
 
 `POST /api/v1/invoke` 可带请求头 `Idempotency-Key`（1–200 字节，可见 ASCII）。缺省时行为
-与不带本头逐字相同——**这是能力，不是强制**。
+与不带本头逐字相同——**这是能力，不是强制**。键表与键校验的唯一实现在
+`symbio-http/src/ingress_policy.rs`，两个 ingress 共用同一形状。
 
 **语义裁决：拒绝重放，不缓存旧结果**（锁式，不是缓存式）。三条理由：
 

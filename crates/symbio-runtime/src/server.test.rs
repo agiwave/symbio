@@ -114,6 +114,54 @@ async fn invoke_rejects_non_json_content_type() {
 }
 
 #[tokio::test]
+async fn invoke_rejects_replayed_idempotency_key() {
+    let temp = tempfile::tempdir().expect("tempdir");
+    let ingress = ServerIngress::new(
+        Arc::new(RuntimeHost::from_root(Arc::new(NoopHost))),
+        std::fs::canonicalize(temp.path()).expect("canonical tempdir"),
+    );
+    let request = |key: &str| HttpRequest {
+        method: "POST".to_string(),
+        path: "/api/v1/invoke".to_string(),
+        headers: [
+            ("content-type".to_string(), "application/json".to_string()),
+            ("idempotency-key".to_string(), key.to_string()),
+        ]
+        .into_iter()
+        .collect(),
+        body: serde_json::to_vec(&json!({
+            "metadata": { "path": "vdfs/root" },
+            "payload": {},
+        }))
+        .expect("request"),
+    };
+
+    let reply = ingress
+        .handle(request("same"), CancellationToken::new())
+        .await;
+    let IngressReply::Response(response) = reply else {
+        panic!("invoke must return an HTTP response");
+    };
+    assert_eq!(response.status, 200);
+
+    let reply = ingress
+        .handle(request("same"), CancellationToken::new())
+        .await;
+    let IngressReply::Response(response) = reply else {
+        panic!("replayed invoke must return an HTTP response");
+    };
+    assert_eq!(response.status, 409);
+
+    let reply = ingress
+        .handle(request("bad key"), CancellationToken::new())
+        .await;
+    let IngressReply::Response(response) = reply else {
+        panic!("invalid key must return an HTTP response");
+    };
+    assert_eq!(response.status, 400);
+}
+
+#[tokio::test]
 async fn homedir_reload_cancels_and_drains_realtime_connections() {
     let temp = tempfile::tempdir().expect("tempdir");
     let ingress = ServerIngress::new(

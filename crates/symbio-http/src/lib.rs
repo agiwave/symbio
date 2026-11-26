@@ -1,7 +1,7 @@
 //! Symbio 共享入站传输：HTTP/1.1、WebSocket 与 SSE。
 //!
-//! 本 crate 只认识线路协议与 [`Ingress`] 端口，不依赖 gateway、server 或宿主实现。
-//! 路由策略、调用上下文与订阅来源都由 ingress 实现决定。
+//! 本 crate 不依赖 gateway、server 或宿主实现；线路机制与两个 ingress 必须同形的
+//! 边界策略（只读白名单、重放键）住在这里，路由分发与调用上下文由 [`Ingress`] 实现决定。
 
 use async_trait::async_trait;
 use serde::Serialize;
@@ -11,6 +11,7 @@ use std::sync::{Arc, RwLock};
 pub use symbio_platform::kernel::plugin::PluginPayloadWire;
 use symbio_plugin_api::{PluginChannel, PluginMessageWire, PluginPayload};
 
+pub mod ingress_policy;
 mod server;
 
 pub use server::{start, stop, ServerHandle};

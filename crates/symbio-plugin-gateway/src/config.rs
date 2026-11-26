@@ -8,10 +8,6 @@
 //! 因此本配置只描述「本实例如何被调用（入站）」。
 
 use serde::{Deserialize, Serialize};
-use symbio_plugin_api::routes::{
-    ROUTE_VDFS_LIST, ROUTE_VDFS_READ, ROUTE_VDFS_ROOT, ROUTE_VDFS_SEARCH, ROUTE_VDFS_STAT,
-    ROUTE_VDFS_TREE,
-};
 
 /// 网关配置（整体作为插件配置持久化于 `symbio.plugins.gateway`）
 #[derive(Debug, Clone, Serialize, Deserialize)]
@@ -50,69 +46,6 @@ impl Default for GatewayConfig {
             inbound_max_connections: 64,
         }
     }
-}
-
-/// 只读模式放行的路径白名单
-///
-/// 只读并非完整安全边界，而是**兜底**：即便令牌泄露到可信内网，也只能读取
-/// 而无法触发写操作与命令执行。
-///
-/// **资源一律经 VDFS**（`vdfs/<操作>`）：只读放行其**读操作**——
-/// `root`（进入地址空间，拿到资源类别清单）/ `list` / `tree` / `stat` / `read` /
-/// `search`；写操作（`write` / `delete` / `mkdir` / `move` / `edit`）与节点动作
-/// （`action`）不在其列。
-///
-/// **配置文件是例外**：插件配置可能含凭据（网关访问令牌、搜索服务 API Key），
-/// 因此 `vdfs/read` 落到任一插件的配置文件（`<挂载点>/PLUGIN.yml`）时一律拒绝——
-/// 否则只读模式下就能把令牌读走。（`tree` / `search` 只回地址与节点描述、不回正文，
-/// 故不在此列。）
-///
-/// **会话实时面是第二个例外，且是「不放进白名单」这一侧**：`event_bus/subscribe`
-/// 不在放行之列，只读模式下订阅不到实时流（历史仍可经 `vdfs/read` 逐地址读）。
-/// 判据不是「它写了什么」——它什么都不写——而是它的**形态**与 `vdfs/*` 的读操作不同：
-///
-/// 1. 它是一条**长连接订阅**（返回 `PluginPayload::Session` 通道），不是一次性读；
-/// 2. 它是**广播**语义：订阅时不带会话参数，一次订阅覆盖该作用域内**全部**会话的
-///    在途内容（含**尚未落库**的增量），而 `vdfs/read` 至少要逐个地址去读。
-///
-/// 只读模式的自我定位是「即便令牌泄露也只能读、不能写与执行」，放开实时面并不破坏
-/// 这条，但会把「可读范围」从「你点名要的那份」扩大到「当前全部在途内容」。
-/// 这是一条**保守取舍，不是遗漏**：若将来确需只读客户端看实时输出，应把它作为
-/// 显式配置项加入，而不是顺手塞进白名单。详见
-/// `crates/symbio-plugin-session/src/docs/105-node-state-streaming.md` §11。SSE 端点（`GET /api/v1/events`）
-/// 是同一个订阅面的另一种传输，只读模式下同判（`server.rs` 直接回 403）。
-///
-/// **白名单与可达面必须一致（无死条目）**：gateway 挂在 worker composite 之下、
-/// `Composite::route` 不向上转发 ⇒ `home/get_homedir` / `home/get_workspace`（home
-/// 的臂）经入站**走不到**（e2e t69 ⑦ 实测回 400），放进白名单只是永不生效的死条目。
-/// t69 ⑦ 钉住的就是这条边界事实。撤销条件：若将来把 gateway 抬到根 composite、
-/// home 的臂经入站真的可达，先在白名单显式加回并补 e2e，再动这里。
-pub fn is_readonly_allowed(path: &str, payload: &serde_json::Value) -> bool {
-    let p = path.trim_start_matches('/');
-    if p == ROUTE_VDFS_READ && reads_config_document(payload) {
-        return false;
-    }
-    matches!(
-        p,
-        ROUTE_VDFS_ROOT
-            | ROUTE_VDFS_LIST
-            | ROUTE_VDFS_TREE
-            | ROUTE_VDFS_STAT
-            | ROUTE_VDFS_READ
-            | ROUTE_VDFS_SEARCH
-    )
-}
-
-/// `vdfs/read` 的地址是否正好落在某个插件的配置文件上
-fn reads_config_document(payload: &serde_json::Value) -> bool {
-    payload
-        .get("path")
-        .and_then(serde_json::Value::as_str)
-        .map(|addr| {
-            addr.trim_end_matches('/')
-                .ends_with(&format!("/{}", symbio_plugin_api::PLUGIN_FILE))
-        })
-        .unwrap_or(false)
 }
 
 #[cfg(test)]
