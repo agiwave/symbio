@@ -5,6 +5,13 @@ use symbio_platform::deploy::PLUGIN_ID_HOME;
 use symbio_platform::kernel::plugin::Plugin;
 use symbio_platform::sdk::creator::creator_create_object;
 
+// 编排 runner 由组合根登记；宿主优先于 `drive` 族回退使用。
+inventory::submit! {
+    symbio_runtime::host::DriveRunnerDecl {
+        make: || Some(symbio_providers::orchestrator::runner()),
+    }
+}
+
 pub fn initialize() {
     symbio_platform::sdk::logger::logger_init();
 }

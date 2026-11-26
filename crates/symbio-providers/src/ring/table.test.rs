@@ -1,0 +1,70 @@
+use super::*;
+use crate::ring::facts::{Fact, FactKind};
+use serde_json::json;
+
+#[test]
+fn table_returns_rows_in_order() {
+    let table = Table::new(vec![
+        DebtRow::new("a", "p", "d-a", json!({"q": 1})).after(DebtKey::new("p", "d-0", 1)),
+        DebtRow::new("b", "p", "d-b", json!({"q": 2})),
+    ]);
+    let facts: Vec<Fact> = Vec::new();
+    let view = FactView::new(&facts);
+    let rows = table.rows(&view);
+    assert_eq!(rows.len(), 2);
+    assert_eq!(rows[0].name, "a");
+    assert_eq!(rows[0].id, "d-a");
+    assert_eq!(rows[1].payload, json!({"q": 2}));
+    assert!(rows[1].after.is_none());
+}
+
+#[test]
+fn after_records_the_prerequisite_identity() {
+    let key = DebtKey::new("p", "d-a", 1);
+    let row = DebtRow::new("b", "p", "d-b", json!({})).after(key.clone());
+    assert_eq!(row.after, Some(key));
+}
+
+#[test]
+fn unless_records_the_exclusion_predicate() {
+    let by_kind = DebtRow::new("b", "p", "d-b", json!({})).unless("turn.done");
+    assert_eq!(by_kind.unless, Some(Unless::Kind("turn.done".into())));
+    let by_id = DebtRow::new("c", "p", "d-c", json!({})).unless_id("turn.done", "turn.done:1");
+    assert_eq!(
+        by_id.unless,
+        Some(Unless::Id {
+            kind: "turn.done".into(),
+            id: "turn.done:1".into(),
+        })
+    );
+    assert!(DebtRow::new("d", "p", "d-d", json!({})).unless.is_none());
+}
+
+#[test]
+fn lease_builder_clamps_to_at_least_one_attempt() {
+    let row = DebtRow::new("a", "p", "d", json!({})).lease(5, 0);
+    assert_eq!(row.lease_ms, 5);
+    assert_eq!(row.max_attempts, 1);
+}
+
+#[test]
+fn source_can_derive_rows_from_the_session_facts() {
+    struct Once;
+    impl DebtSource for Once {
+        fn rows(&self, facts: &FactView<'_>) -> Vec<DebtRow> {
+            if facts.all().iter().any(|f| f.kind == FactKind::Response) {
+                Vec::new()
+            } else {
+                vec![DebtRow::new("a", "p", "d", json!({}))]
+            }
+        }
+    }
+    assert_eq!(Once.rows(&FactView::new(&[])).len(), 1);
+    let done = [Fact::new(
+        FactKind::Response,
+        DebtKey::new("p", "d", 1),
+        json!({}),
+        0,
+    )];
+    assert!(Once.rows(&FactView::new(&done)).is_empty());
+}
