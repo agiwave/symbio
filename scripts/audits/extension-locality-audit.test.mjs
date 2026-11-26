@@ -78,14 +78,14 @@ test('isMigrationBatch：正文声明 Migration: 的提交是迁移批次（EX-0
   assert.equal(isMigrationBatch(null), false)
 })
 
-test('TREES：七棵是并集且含契约树、plugin-api 与 host（ 口径 + ）', () => {
-  // ：契约树加入活跃区（第七棵），仍是受保护树判据 + 契约的并集口径。
+test('TREES：六棵是并集且含契约树、plugin-api 与 host（ 口径 + ）', () => {
+  // ：契约树加入活跃区（第六棵），仍是受保护树判据 + 契约的并集口径；
+  // orchestrator 迁入 providers 后不再是插件树，受保护面随之收窄。
   assert.deepEqual(TREES, [
     'crates/symbio-platform/src/sdk',
     'crates/symbio-platform/src/kernel',
     'crates/symbio-platform/src/contract',
     'crates/symbio-plugin-api',
-    'crates/symbio-plugin-loop',
     'crates/symbio-plugin-session',
     'crates/symbio-runtime/src/host',
   ])
@@ -135,7 +135,7 @@ test('fingerprints：与输入顺序无关', () => {
   const entries = [
     f('crates/symbio-platform/src/sdk/a.rs', '111'),
     f('crates/symbio-platform/src/kernel/b.rs', '222'),
-    f('crates/symbio-plugin-loop/src/c.rs', '333'),
+    f('crates/symbio-plugin-session/src/c.rs', '333'),
   ]
   assert.deepEqual(fingerprints(entries), fingerprints([...entries].reverse()))
 })
@@ -166,16 +166,16 @@ test('fingerprints：新出现的 *.gen.rs 不是生成物镜像，会动指纹'
 test('fingerprints：一棵树的改动不串到另一棵', () => {
   const before = [
     f('crates/symbio-platform/src/sdk/a.rs', '1'),
-    f('crates/symbio-plugin-loop/src/b.rs', '2'),
+    f('crates/symbio-plugin-session/src/b.rs', '2'),
   ]
   const after = [
     f('crates/symbio-platform/src/sdk/a.rs', '9'),
-    f('crates/symbio-plugin-loop/src/b.rs', '2'),
+    f('crates/symbio-plugin-session/src/b.rs', '2'),
   ]
   const b = fingerprints(before, paths(before))
   const a = fingerprints(after, paths(before))
   assert.notEqual(a['crates/symbio-platform/src/sdk'], b['crates/symbio-platform/src/sdk'])
-  assert.equal(a['crates/symbio-plugin-loop'], b['crates/symbio-plugin-loop'])
+  assert.equal(a['crates/symbio-plugin-session'], b['crates/symbio-plugin-session'])
 })
 
 test('judgeNewCapability：没有新增能力包的提交不判', () => {
@@ -189,13 +189,13 @@ test('judgeNewCapability：受保护树指纹不变 ⇒ 绿', () => {
   assert.deepEqual(r.errors, [])
 })
 
-test('judgeNewCapability：新增能力包夹带 loop 分支 ⇒ 红且点名 loop', () => {
+test('judgeNewCapability：新增能力包夹带 session 分支 ⇒ 红且点名 session', () => {
   const before = Object.fromEntries(TREES.map((t) => [t, 'h']))
-  const after = { ...before, 'crates/symbio-plugin-loop': 'changed' }
+  const after = { ...before, 'crates/symbio-plugin-session': 'changed' }
   const r = judgeNewCapability({ sha: 'x', added: ['crates/symbio-plugin-new/PLUGIN.yml'], before, after })
   assert.equal(r.errors.length, 1)
   assert.match(r.errors[0], /EX-002/)
-  assert.match(r.errors[0], /crates\/symbio-plugin-loop/)
+  assert.match(r.errors[0], /crates\/symbio-plugin-session/)
 })
 
 test('judgeNewCapability：新增能力包夹带 host 分支 ⇒ 红且点名 host（ 的并集口径 / EX-002）', () => {

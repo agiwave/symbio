@@ -50,7 +50,6 @@ use symbio_plugin_heartbeat as _;
 use symbio_plugin_home as _;
 use symbio_plugin_hook as _;
 use symbio_plugin_local as _;
-use symbio_plugin_loop as _;
 use symbio_plugin_mcp as _;
 use symbio_plugin_memory as _;
 use symbio_plugin_model as _;

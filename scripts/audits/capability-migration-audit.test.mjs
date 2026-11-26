@@ -57,7 +57,7 @@ const script = fileURLToPath(new URL('./capability-migration-audit.mjs', import.
 const repoRoot = path.resolve(path.dirname(script), '..', '..')
 
 const CORE = 'crates/symbio-platform/src/sdk/a.rs'
-const LOOP = 'crates/symbio-plugin-loop/src/loop_rows.rs'
+const LOOP = 'crates/symbio-plugin-session/src/loop_rows.rs'
 const SESSION = 'crates/symbio-plugin-session/src/lib.rs'
 
 /** 一份最小的 `git show --unified=0` 补丁文本。 */

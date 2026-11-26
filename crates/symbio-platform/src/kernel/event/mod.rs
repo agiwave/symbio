@@ -404,7 +404,7 @@ impl ClosureReason {
 
 // ── 记忆格子（[DE-036 §3](../../../../../docs/003-design/036-长期记忆与语义检索.md "DE-036-长期记忆与语义检索")）────
 //
-// 校准断言 `memory.calibrated`（`memory × asserted`）不在这里：写方只有 `crates/symbio-plugin-loop`
+// 校准断言 `memory.calibrated`（`memory × asserted`）不在这里：写方只有 `crates/symbio-providers/src/orchestrator`
 // 一家，名字与格位由它自己的 `EventDecl` 交出（`control_decl`），读侧投影的名字由调用方
 // 在构造期交进 core（DE-024 ）。
 //

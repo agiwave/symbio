@@ -34,7 +34,7 @@
  * | E-007 | 插件不得按**强引用**持有兄弟插件实例（`Arc<dyn Plugin>` 字段）  | 跨插件调用必须经 `ctx.parent()` 走容器；按值持有会绕过地址分发、并在插件重建后钉住旧实例（`telegram` 的 `llm_plugin` 就是这么烂掉的） |
  * | E-008 | 文档里标了 `<!-- vocab:PREFIX_ -->` 的**词表行**必须与代码常量逐字一致 | 闭集的第二份真相常驻文档：`013-vdfs.md` 的 status 行曾一直写 `error`，而代码早已改名为 `failed`——漂移会从文档**流回**代码 |
  * | E-009 | 插件依赖边闭集：**`[dependencies]` 的 `symbio-*` 按身份分档——扩展层只许 `plugin-api` / `providers` / `http`（+ 第三方），控制面（`loop` / `session`）另许平台 `symbio-platform`**；兄弟插件、`symbio` 宿主门面（只许 dev）、`include!`/`#[path]` 跨 crate、源码 `symbio_plugin_<兄弟>` 一律禁，**测试代码同样判**；没有例外 | 「插件之间互不可见」是架构公理，但它的**载体换过一次而判据没跟**。拆 crate 前兄弟插件是同 crate 的私有模块，`crate::plugins::web` 编得过；拆 crate（）后能让插件互可见的唯一动作是加一行依赖，而旧实现从不读清单 ⇒ 本条曾**静默空转**。现判六条通路：清单闭集（含 `alias = { package }` 改名与 `.workspace = true` 继承两种绕法；扩展层直连 `symbio-platform` 同样红——共享语法走门面的语法臂，``）· 源码裸 `symbio_plugin_<x>` · 旧路径兜底 · `symbio` 宿主门面（`pub use` 全部插件，只许 dev）· `include!`/`#[path]`（不需要依赖也能搬源码）· `symbio-providers` 的三条准入条件（自身不依赖插件 / 不含端口名 / 不含业务事实名）。控制面直连平台的符号量**不记账**（：原 `plugin-session-sdk` 冻结账与 `session-retire-audit` 一并退役，其两条单槽登记绊线改住 `facts-boundary-audit` 的 FB-003 / FB-004） |
- * | E-013 | `crates/symbio-plugin-loop/src/**` 的 import 根 ⊆ 闭族（core 端口 / 通用库 / 自身 `super` / owner 声明表 / owner 自己的折叠），**测试同样判** | 驱动器片跨墙只准用 [ §4](../../docs/003-design/001-核心架构.md "DE-001-核心架构") 的闭族通货：宿主机制面 `symbio_platform::sdk::` + 封闭语法 `symbio_platform::kernel::` + 通用库 + crate 根日志/工厂宏 + 本插件自己的模块根。它一旦 import 会话模块（或任何兄弟插件），切片就退回「搬家」：卸载 loop 时编译面仍钉着会话内部类型。E-009 已拦兄弟插件的全部依赖通路（清单 / 源码 / 宿主门面），但拦不住 `crate::providers` / 第三方 crate 这类**族外根**；本条把闭族写成枚举白名单，族外新增必须先回到  §4 论证「它代表哪条事实，或哪个方向的世界端口」 |
+ * | E-013 | `crates/symbio-providers/src/orchestrator/**` 的 import 根 ⊆ 闭族（core 端口 / 通用库 / 自身 `super` / owner 声明表 / owner 自己的折叠），**测试同样判** | 驱动器片跨墙只准用 [ §4](../../docs/003-design/001-核心架构.md "DE-001-核心架构") 的闭族通货：宿主机制面 `symbio_platform::sdk::` + 封闭语法 `symbio_platform::kernel::` + 通用库 + crate 根日志/工厂宏 + 本插件自己的模块根。它一旦 import 会话模块（或任何兄弟插件），切片就退回「搬家」：卸载 loop 时编译面仍钉着会话内部类型。E-009 已拦兄弟插件的全部依赖通路（清单 / 源码 / 宿主门面），但拦不住 `crate::providers` / 第三方 crate 这类**族外根**；本条把闭族写成枚举白名单，族外新增必须先回到  §4 论证「它代表哪条事实，或哪个方向的世界端口」 |
  * | E-011 | 纯配置挂载点插件不得手写 `impl VdfsProvider`                    | 「挂载根 = 一份配置文档」的插件（`CONFIG_MOUNT_PLUGINS`）四臂 dispatch 骨架逐字相同，机制侧已提供唯一实现（`symbio_platform::sdk::PluginConfigMount` 的泛型 blanket impl）。手写一份 = 把同一段语义复制出去：四份副本改一条错误文案要改四处，新增插件「记得抄对每条分支」是纯人肉负担。本条与行数棘轮互补——棘轮在**事后**度量规模，本条在**事前**禁止把已收口的语义再摊开 |
  * | E-012 | `ROUTE_*` 常量：**名**去掉前缀后逐字等于**值**的大写，且**值**必须是真实分发目标 | 名字与值分叉 ⇒ 照名字拼出的地址不存在；值不在 `route()` 的臂也不在 `VDFS_OPS` ⇒ 登记的是一条没人能到达的地址（`AGENT_CHAT` 就是这个形态）。E-005 判「引用」不判「定义」，这两条此前无守卫，而 `route.rs` 的文档还声称有 |
  * | E-015 | 每份插件 crate 必须有 `README.md`（能力包的自述页） | 它不是一个「可有可无的文档」：`docs/004-ref/006-当前事实表.md` 的插件表有一列直接渲染「有 / **缺**」，而那一列长期挂着六个 `缺` 且没有任何判据会红——手册页缺失是**读者**的失败，不是作者的失败，所以它只能靠机制拦。README 还承载 E-006（路由权威清单）与 AO-005（兄弟插件地址）两处判据的输入面 |
@@ -805,7 +805,7 @@ function pluginIdOfDir(dir) {
  * `symbio-providers` 是**带条件的白名单**：它进白名单的前提是「不是第二个共享层」，
  * 三条条件由下面的 providers 条件块实际检查，不是写在注释里就算数。
  */
-const CONTROL_PLANE_IDS = new Set(['loop', 'session'])
+const CONTROL_PLANE_IDS = new Set(['session'])
 const PLUGIN_DEP_WHITELIST = new Set(['symbio-plugin-api', 'symbio-providers', 'symbio-http'])
 const CONTROL_PLANE_DEP_WHITELIST = new Set([...PLUGIN_DEP_WHITELIST, 'symbio-platform'])
 function depWhitelistFor(id) {
@@ -1127,7 +1127,7 @@ for (const abs of codeFiles) {
   }
 }
 
-// ── E-013：`crates/symbio-plugin-loop/src/**` 的 import 根 ⊆ 闭族 ─────────────────────────
+// ── E-013：`crates/symbio-providers/src/orchestrator/**` 的 import 根 ⊆ 闭族 ─────────────────────────
 //
 // [](../../docs/003-design/001-核心架构.md "DE-001-核心架构") §4 把跨墙通货收成闭族（穷举即白名单，族外无
 // 通货），[](../../docs/003-design/014-单环一表.md "DE-014-单环一表") §9 把「import 根 ⊆ 闭族」列为切片判据。
@@ -1146,7 +1146,7 @@ for (const abs of codeFiles) {
 // 拆「loop 可独立卸载」这条判据。唯一测试豁免是 `crate::providers::DefaultToolVisitor`
 // （`providers` 是「被多个插件模块公用」的实现层，测试拿它当工具清单的默认收集器，
 // 不携带会话状态）。生产文件用它是违规。
-const LOOP_DIR = crateDirOf('loop')
+const LOOP_DIR = 'crates/symbio-providers/src/orchestrator'
 const LOOP_ALLOWED_CRATE_ROOTS = new Set([
   // 旧 core 的 crate 根曾在这里： 把它 crate 化、 直接删掉了 crate，
   // 那条 `crate::<旧 core>` 的写法从此不可能出现在任何源码里。留着它就是一条
@@ -1243,8 +1243,9 @@ const LOOP_ALLOWED_EXTERNAL_ROOTS = new Set([
   'tempfile',
   'url',
 ])
-if (fs.existsSync(LOOP_DIR)) {
-  for (const abs of walk(LOOP_DIR, isRs)) {
+const LOOP_ABS = path.join(repoRoot, LOOP_DIR)
+if (fs.existsSync(LOOP_ABS)) {
+  for (const abs of walk(LOOP_ABS, isRs)) {
     const raw = fs.readFileSync(abs, 'utf8').split(/\r?\n/)
     const code = blankComments(raw.join('\n'))
     const text = code.join('\n')

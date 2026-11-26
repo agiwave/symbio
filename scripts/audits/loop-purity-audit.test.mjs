@@ -18,14 +18,14 @@ import { fileURLToPath } from 'node:url'
 
 const script = fileURLToPath(new URL('./loop-purity-audit.mjs', import.meta.url))
 const BASELINE_REL = 'scripts/loop-purity-baseline.json'
-const CARGO = 'crates/symbio-plugin-loop/Cargo.toml'
-const LIB = 'crates/symbio-plugin-loop/src/lib.rs'
-const RING = 'crates/symbio-plugin-loop/src/ring.rs'
+const CARGO = 'crates/symbio-providers/Cargo.toml'
+const LIB = 'crates/symbio-providers/src/orchestrator/lib.rs'
+const RING = 'crates/symbio-providers/src/orchestrator/ring.rs'
 const API_PORT = 'crates/symbio-platform/src/sdk/capability/port.rs'
 
 function cleanFiles() {
   return {
-    [CARGO]: '[package]\nname = "symbio-plugin-loop"\n\n[dependencies]\nsymbio-kernel = { path = "../symbio-kernel" }\nsymbio-plugin-api = { path = "../symbio-plugin-api" }\n',
+    [CARGO]: '[package]\nname = "symbio-providers"\n\n[dependencies]\nsymbio-platform = { path = "../symbio-platform" }\nsymbio-plugin-api = { path = "../symbio-plugin-api" }\n',
     [LIB]: 'pub fn ok() -> u8 {\n    1\n}\n',
     [RING]: 'pub fn drive() -> u8 {\n    1\n}\n',
     [API_PORT]:
@@ -96,14 +96,14 @@ test('LP-002 新增：Cargo 清单多一条 provider crate ⇒ 红', () => {
   const files = cleanFiles()
   files[CARGO] = files[CARGO].replace(
     'symbio-plugin-api = { path = "../symbio-plugin-api" }',
-    'symbio-plugin-api = { path = "../symbio-plugin-api" }\nsymbio-providers = { path = "../symbio-providers" }',
+    'symbio-plugin-api = { path = "../symbio-plugin-api" }\nsymbio-plugin-session = { path = "../symbio-plugin-session" }',
   )
   const box = sandbox(files)
   try {
     const r = run(box.root)
     assert.equal(r.status, 1, r.out)
     assert.match(r.out, /LP-002/)
-    assert.match(r.out, /symbio-providers/)
+    assert.match(r.out, /symbio-plugin-session/)
   } finally {
     box.cleanup()
   }
@@ -151,7 +151,7 @@ test('LP-003 归属守卫：总数没变但换了别的世界词根 ⇒ 红（�
   // 4 个回执名，棘轮的逐文件比较「新增 / 收窄」都判不出——只有 token 级守卫能红。
   // 用基线同名文件，让棘轮绿、只留归属守卫这一条红。
   const files = cleanFiles()
-  files['crates/symbio-plugin-loop/src/plugin_rows.rs'] =
+  files['crates/symbio-providers/src/orchestrator/plugin_rows.rs'] =
     'use symbio_plugin_api::rows::{ToolCall, RowRequest};\nfn reply_of() -> Option<ToolCall> {\n    let a = ToolCall::Text("");\n    let b = ToolCall::Failed("");\n    Some(a)\n}\n'
   const baseline = cleanBaseline()
   baseline.lp003WorldRoots = { 'plugin_rows.rs': 4 }
@@ -171,7 +171,7 @@ test('LP-003 归零后：行级回执的现名不触世界词根（ 改名后的
   // 不是把 world 名换成另一个 world 名」——若日后有人加回 `Model*` / `Tool*` 别名，
   // 上面的归属守卫会先红，这条则保证现名确实通过。
   const files = cleanFiles()
-  files['crates/symbio-plugin-loop/src/plugin_rows.rs'] =
+  files['crates/symbio-providers/src/orchestrator/plugin_rows.rs'] =
     'use symbio_plugin_api::rows::{RowReply, RowRequest};\nfn reply_of() -> Option<RowReply> {\n    let a = RowReply::Text("");\n    let b = RowReply::Failed("");\n    Some(a)\n}\n'
   const box = sandbox(files, cleanBaseline())
   try {
@@ -275,7 +275,7 @@ test('基线缺失 ⇒ exit 2（不许当「无存量」放行）', () => {
 test('源目录缺失 ⇒ exit 2（读不出就不亮绿灯）', () => {
   const files = cleanFiles()
   for (const rel of Object.keys(files)) {
-    if (rel.startsWith('crates/symbio-plugin-loop/src/')) delete files[rel]
+    if (rel.startsWith('crates/symbio-providers/src/orchestrator/')) delete files[rel]
   }
   const box = sandbox(files)
   try {

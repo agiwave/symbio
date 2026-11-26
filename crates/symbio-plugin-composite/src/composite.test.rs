@@ -590,7 +590,7 @@ use symbio_plugin_api::VdfsError;
 async fn uninstalling_a_required_plugin_is_refused_and_the_directory_survives() {
     let root = guard_root("required");
     put_plugin_dir(&root, "session", "session");
-    put_plugin_dir(&root, "loop", "loop");
+    put_plugin_dir(&root, "model", "model");
     let registry = Arc::new(PluginRegistry::with_instances(
         plugin_map(Vec::new()),
         root.clone(),

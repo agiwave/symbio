@@ -1,8 +1,6 @@
 //! 宿主的出口读数：无债即 `NoDebt`，未还债即带上未收束的键。
 
 use super::*;
-// 只做链接：环经 creator 注册被这个根构造，测试二进制必须把它的注册项带进来。
-use symbio_platform::deploy::PLUGIN_ID_LOOP;
 use symbio_platform::kernel::event::{Entity, Event, Verb};
 use symbio_platform::kernel::keys::SymbioKey;
 use symbio_platform::kernel::plugin::{
@@ -16,7 +14,18 @@ use symbio_plugin_api::port::{
     PortBindings, PortExecContext, PortExecutor, PortInput, PortOutcome, PortProvider,
 };
 use symbio_plugin_api::FactDraft;
-use symbio_plugin_loop as _;
+
+fn drive_row(
+    name: &str,
+    runner: Arc<dyn DriveRunner>,
+) -> symbio_platform::kernel::capability::CapabilityRow {
+    symbio_platform::kernel::capability::CapabilityRow::new(
+        DRIVE_FAMILY,
+        format!("<drive>{name}"),
+        DrivePayload::new(runner),
+        false,
+    )
+}
 
 /// 没有业务行、只把系统环挂进来的根：用来把驱动走到「无债」。
 struct EmptyRoot;
@@ -36,16 +45,19 @@ impl Plugin for EmptyRoot {
 
     async fn traverse(
         self: Arc<Self>,
-        path: String,
+        _path: String,
         ctx: Arc<dyn PluginInvokeRequest>,
     ) -> PluginInvokeResponse<PluginPayload> {
-        // 与真实装配一致：系统插件从工厂表构造，再委托 traverse（根自己没有行）。
-        let ring = symbio_plugin_api::creator_create_object::<dyn Plugin>(
-            PLUGIN_ID_LOOP,
-            Arc::clone(&ctx),
-        )
-        .ok_or_else(|| PluginError::NotFound("环插件未注册".into()))?;
-        ring.traverse(path, ctx).await
+        let visitor = ctx
+            .get(symbio_plugin_api::CAPABILITY_VISITOR)
+            .ok_or_else(|| PluginError::NotFound("能力收集器缺席".into()))?;
+        visitor
+            .put(drive_row(
+                "orchestrator",
+                symbio_providers::orchestrator::runner(),
+            ))
+            .await;
+        Ok(PluginPayload::new(&Vec::<serde_json::Value>::new()))
     }
 }
 
@@ -242,19 +254,18 @@ impl Plugin for SmokeRoot {
 
     async fn traverse(
         self: Arc<Self>,
-        path: String,
+        _path: String,
         ctx: Arc<dyn PluginInvokeRequest>,
     ) -> PluginInvokeResponse<PluginPayload> {
-        let ring = symbio_plugin_api::creator_create_object::<dyn Plugin>(
-            PLUGIN_ID_LOOP,
-            Arc::clone(&ctx),
-        )
-        .ok_or_else(|| PluginError::NotFound("环插件未注册".into()))?;
-        ring.traverse(path.clone(), Arc::clone(&ctx)).await?;
-
         let visitor = ctx
             .get(symbio_plugin_api::CAPABILITY_VISITOR)
             .ok_or_else(|| PluginError::NotFound("能力收集器缺席".into()))?;
+        visitor
+            .put(drive_row(
+                "orchestrator",
+                symbio_providers::orchestrator::runner(),
+            ))
+            .await;
         let provider: Arc<dyn PortProvider> = Arc::new(SmokeModel);
         symbio_plugin_api::port::register_ports(&ctx, provider.as_ref()).await;
         visitor
@@ -507,19 +518,18 @@ impl Plugin for ToolLoopRoot {
 
     async fn traverse(
         self: Arc<Self>,
-        path: String,
+        _path: String,
         ctx: Arc<dyn PluginInvokeRequest>,
     ) -> PluginInvokeResponse<PluginPayload> {
-        let ring = symbio_plugin_api::creator_create_object::<dyn Plugin>(
-            PLUGIN_ID_LOOP,
-            Arc::clone(&ctx),
-        )
-        .ok_or_else(|| PluginError::NotFound("环插件未注册".into()))?;
-        ring.traverse(path, Arc::clone(&ctx)).await?;
-
         let visitor = ctx
             .get(symbio_plugin_api::CAPABILITY_VISITOR)
             .ok_or_else(|| PluginError::NotFound("能力收集器缺席".into()))?;
+        visitor
+            .put(drive_row(
+                "orchestrator",
+                symbio_providers::orchestrator::runner(),
+            ))
+            .await;
         let model: Arc<dyn PortProvider> = Arc::new(LoopModel {
             counters: Arc::clone(&self.counters),
         });

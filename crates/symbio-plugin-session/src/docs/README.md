@@ -35,13 +35,13 @@ impl: done
 | [DE-107-session-options](107-session-options.md "DE-107-session-options") | 现行规范 | 会话选项 = 会话配置表单：同一份 `DetailDefinition` 的两种渲染形态（选项栏 / 详情页），三条通路（`node.schema` / `attributes.metadata` / `vdfs/write`），收集走统一 `Registry`（选项行）|
 
 > **主循环旧设计的去向**（原 DE-102「会话核心循环」已退场，实现随环收口删除）：债的挑选与偿还住
-> `crates/symbio-plugin-loop/src/ring/engine.rs`（驱动在 `crates/symbio-runtime/src/host/entry.rs`），一轮的装配与
+> `crates/symbio-providers/src/orchestrator/ring/engine.rs`（驱动在 `crates/symbio-runtime/src/host/entry.rs`），一轮的装配与
 > 收尾住 `plugin/round.rs`，轮的身份是事实源打开时绑定的会话身份，节点状态见 [DE-105](105-node-state-streaming.md "DE-105-node-state-streaming")，
 > 模块拆分见 [DE-104](104-module-layout.md "DE-104-module-layout")。历史在 `git log`。
 
 ## 建议阅读路径
 
-- **要改核心循环** → [`../../loop/README.md`](../../../symbio-plugin-loop/README.md "crates/symbio-plugin-loop/README")（环的形状与收口点）→ [`../README.md`](../../README.md "crates/symbio-plugin-session/README") 五大策略 → [`017-module-layout.md`](104-module-layout.md "DE-104-module-layout") 找文件落点
+- **要改核心循环** → `crates/symbio-providers/src/orchestrator/mod.rs`（环的形状与收口点）→ [`../README.md`](../../README.md "crates/symbio-plugin-session/README") 五大策略 → [`017-module-layout.md`](104-module-layout.md "DE-104-module-layout") 找文件落点
 - **要改压缩** → [`014-context-compression-design.md`](101-context-compression-design.md "DE-101-context-compression-design")（分层与不变量）→ [`../README.md`](../../README.md "crates/symbio-plugin-session/README")（阈值与函数）
 - **要查历史为什么这么改** → 已归档的审计与迁移记录（见上表下方），以及 `git log --grep=<词>` / `git log -S<符号>`（本仓库不另维护变更日志）
 - **要动前端转写/会话列表** → [`019-perf.md`](106-perf.md "DE-106-perf") → [`022-vdfs-session-messages.md`](109-vdfs-session-messages.md "DE-109-vdfs-session-messages")

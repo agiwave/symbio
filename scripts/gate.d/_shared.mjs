@@ -101,11 +101,12 @@ export const BASELINE = {
   // baseline-allow ciRustTestsTotal: 2601 → 2603（+2，）——新增两条判据：host 执行体
   // duplex 帧协议往返，以及监督者不把 host 帧回灌总线 / 不转给另一 host 执行体。纯新增判据。
   // baseline-allow ciRustTestsTotal: 2603 → 2604（+1，）——新增根工厂每次调用返回独立实例的回归。
-  ciRustTestsTotal: 2658,
+  // baseline-allow ciRustTestsTotal: 2658 → 2609（-49）——编排环此前在 loop 插件与 providers 各留一份同源码测试副本（engine 39 / table 5 / facts 5）；删除 loop 插件后只保留 providers 的一份，49 条重复判据退场，环机制判据逐条随实现迁入 orchestrator，覆盖未丢。
+  ciRustTestsTotal: 2609,
   cliRustTests: 23,
   tauriRustTests: 5,
   // doc-link-allow D-010: 下一行是退役文件的历史叙述（已把这两个文件删掉），不是入链
-  // baseline-allow vitestFiles: （`76324817`， 会话呈现合流）退役 `tauri/src/schemas/conversation_line.ts` 与其 185 行 spec `tauri/src/schemas/__tests__/conversation_line.spec.ts`（整文件删除 ⇒ 测试文件 55→54）。被测对象随「对话/工作分栏退役」消失，判据随之下沉：新形态由 `e2e/cases/t24-panel-split.mjs` 与 `crates/symbio-plugin-loop/src/context/conversation_view.rs` 侧覆盖，不是丢掉覆盖。
+  // baseline-allow vitestFiles: （`76324817`， 会话呈现合流）退役 `tauri/src/schemas/conversation_line.ts` 与其 185 行 spec `tauri/src/schemas/__tests__/conversation_line.spec.ts`（整文件删除 ⇒ 测试文件 55→54）。被测对象随「对话/工作分栏退役」消失，判据随之下沉：新形态由 `e2e/cases/t24-panel-split.mjs` 与 `crates/symbio-providers/src/orchestrator/context/conversation_view.rs` 侧覆盖，不是丢掉覆盖。
   // baseline-allow vitestTests: 上述 spec 的用例 + `tauri/src/stores/__tests__/appearance.spec.ts` 随分栏退役收窄的那部分，合计 856→838（-18）。`appearance` 的其余行为仍由该 spec 的保留用例守着（只删了分栏相关的那一段），非侵蚀。
   // baseline-allow vitestTests:  净删 6 条（894→888）——删的是**已不存在的被测对象**：`registry/messageTypes` 的 `messageCompactionStats` / `messageMemoryStats` / `compactionTriggerLabel` / `formatTokens` 四条前端口径随裁决迁到交付出口（那 6 条逐个断言的正是这四个函数的取值与格式化）。覆盖没有丢，是换了承担者：同一口径现在由 Rust 侧 `crates/symbio-plugin-session/src/stats_reading.test.rs` 7 条判据钉（四行齐全 / 失败路径报「当前水位」不补 0 / 无数字出行即消失 / 压缩产物两行 / 非压缩的 notice 不误读 / token 单位只有一处 / 未知触发词原样透出），前端只留「有行就逐行排版」的渲染判据（`MessageNode.spec.ts` 那三条改吃 `stats` 行，条数不变）。非侵蚀。
   // baseline-allow vitestTests: 1002 → 1003（+1， / ）——新增的是**判据用例**，不是补回覆盖：

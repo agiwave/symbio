@@ -1,6 +1,6 @@
 {
   "mechanism": {
-    "file": "crates/symbio-plugin-loop/src/ring/engine.rs",
+    "file": "crates/symbio-providers/src/orchestrator/ring/engine.rs",
     "parts": [
       "drive loop body",
       "fn plan",
@@ -11,7 +11,9 @@
     "why": "指纹覆盖驱动循环体与 plan / expire 的归一化 token 流，加条件、改返回值、换比较符才进；历次演进已落代码，这里只留不变量"
   },
   "extension": {
-    "productionFiles": 8
+    "productionFiles": 7
   },
-  "baseline-allow": []
+  "baseline-allow": [
+    "crates/symbio-plugin-loop/src/ring/engine.rs→crates/symbio-providers/src/orchestrator/ring/engine.rs 编排实现从插件迁到 provider 单元，引擎归一化指纹逐字未变；dead-path-allow: 基线对账要写出迁移前的真实路径"
+  ]
 }

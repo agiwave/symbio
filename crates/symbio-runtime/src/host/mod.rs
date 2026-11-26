@@ -400,7 +400,11 @@ impl DriveSupport for HostDriveSupport {
             payload: fact.payload.clone(),
             produced_by: provenance_at(&*self.source),
         };
-        if let Err(err) = self.source.append("loop".to_string(), draft) {
+        let owner = symbio_plugin_api::sealed_declarations()
+            .ok()
+            .and_then(|frozen| frozen.event_writer(&kind).map(str::to_string))
+            .unwrap_or_else(|| symbio_platform::kernel::event::OWNER_PRINCIPAL.to_string());
+        if let Err(err) = self.source.append(owner, draft) {
             // 契约层把失败压成字符串（`AppendError` 的 `Debug` 形态），幂等命中即
             // 裸 `Duplicate`——正常路径，不按错误报。
             if err != "Duplicate" {

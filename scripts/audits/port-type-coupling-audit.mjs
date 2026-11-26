@@ -6,7 +6,7 @@
  *
  * | 码 | 判据 | 范围 |
  * |---|---|---|
- * | PTC-001 | 通用端口契约 / 驱动 / 环事实三个文件不得出现 `PromptMessage`（`Vec<PromptMessage>` 由同一条命中） | `crates/symbio-platform/src/sdk/capability/port.rs`、`crates/symbio-plugin-api/src/drive.rs`、`crates/symbio-plugin-loop/src/ring/facts.rs` |
+ * | PTC-001 | 通用端口契约 / 驱动 / 环事实三个文件不得出现 `PromptMessage`（`Vec<PromptMessage>` 由同一条命中） | `crates/symbio-platform/src/sdk/capability/port.rs`、`crates/symbio-plugin-api/src/drive.rs`、`crates/symbio-providers/src/orchestrator/ring/facts.rs` |
  * | PTC-002 | 通用端口契约四个文件不得出现 `needs_wording_generation` | 上述三个 + `crates/symbio-plugin-api/src/port.rs` |
  *
  * 违规**逐条点名 `文件:行号`**。退出码：0 = 无耦合；1 = 有耦合，或判据没有输入。
@@ -69,7 +69,7 @@ const ROOT = rootArg ? path.resolve(rootArg.slice('--root='.length)) : path.reso
 const PORT_CONTRACT_FILES = [
   'crates/symbio-platform/src/sdk/capability/port.rs',
   'crates/symbio-plugin-api/src/drive.rs',
-  'crates/symbio-plugin-loop/src/ring/facts.rs',
+  'crates/symbio-providers/src/orchestrator/ring/facts.rs',
 ]
 /** PTC-002：同一份通用端口契约表 + plugin-api 的 port.rs（共四个文件）。 */
 const WORDING_SCOPE_FILES = [

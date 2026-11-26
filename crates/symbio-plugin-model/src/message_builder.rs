@@ -49,7 +49,7 @@ use tree::RequestTree;
 ///
 /// ## 与对话线投影的分工（看着矛盾，其实各管一条线）
 ///
-/// 本标记管**工作线**（发给模型的包）；`crates/symbio-plugin-loop/src/context/conversation_view.rs`
+/// 本标记管**工作线**（发给模型的包）；`会话侧对话视图`
 /// 管**对话线**（判决 / 措辞 / 对话面板），它**不看**这个键。详见那个文件的模块文档。
 pub const META_EXCLUDE_FROM_CONTEXT: &str = "exclude_from_context";
 
@@ -120,7 +120,7 @@ pub fn flatten_chat_messages(messages: &[ChatNode]) -> Vec<NativeMessage> {
 // ChatNode 的**构造**不在本插件：`llm_build_assistant_messages` /
 // `llm_build_tool_message` / `RoundStreamChildIds` / `RoundOutput::into_messages`
 // 生产上只有 session 一个消费方，已 从 `symbio_plugin_api::llm::turn` 下沉到
-// `crates/symbio-plugin-loop/src/message_build.rs`。本文件是**读侧**（存储树 → 请求包），
+// `crates/symbio-plugin-model/src/message_builder.rs`。本文件是**读侧**（存储树 → 请求包），
 // 测试用同形状的本地 fixture（理由见 tests 模块文件头）。
 
 #[cfg(test)]

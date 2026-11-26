@@ -1319,7 +1319,7 @@ export function textOf(m) {
  * 断言轮次事实时先按本表筛一遍：用「总数等于几」去断言会把两类混在一起——
  * 派生素化多写一条就假红、少写一条又假绿（t26 / t27 各踩过一次）。
  *
- * 与 `crates/symbio-plugin-loop/src/turn_exec.test.rs::turn_facts` 同一口径；两边分开
+ * 与 `Rust 侧 `turn_facts` 判据` 同一口径；两边分开
  * 是因为 e2e 跑在**独立进程**里，够不着 Rust 测试的语料。
  */
 export const TURN_FACT_KINDS = new Set([

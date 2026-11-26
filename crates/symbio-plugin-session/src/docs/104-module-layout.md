@@ -7,15 +7,15 @@ created: 2026-09-16
 impl: done
 ---
 
-# Session / Loop 插件模块分工
+# Session / 编排模块分工
 
 > 状态：**现行规范**（域划分、判据与落点）
 > 范围：`crates/symbio-plugin-session/src/`（存储与生命周期，**留守层**）与
-> `crates/symbio-plugin-loop/src/`（单环驱动器，独立插件）
+> `crates/symbio-providers/src/orchestrator/`（编排驱动器，装配层持有的服务）
 > 划分的现行边界见 [DE-018-模块架构](../../../../docs/003-design/018-模块架构.md "DE-018-模块架构")；
 > 文件清单与行数属**结构事实**，由代码生成，
 > 见 [当前事实表](../../../../docs/004-ref/006-当前事实表.md "RE-006-当前事实表")，本文件不抄。
-> 相关：[`../../loop/README.md`](../../../symbio-plugin-loop/README.md "crates/symbio-plugin-loop/README")（环的形状与收口点，主循环的现行 owner）、
+> 相关：`crates/symbio-providers/src/orchestrator/mod.rs`（环的形状与收口点，编排 runner 的现行 owner）、
 > [`../README.md`](../../README.md "crates/symbio-plugin-session/README")（现行机制与配置面）
 
 ---
@@ -72,7 +72,7 @@ impl: done
 > （`rate_limit.rs` 在 `orchestrator/`、`fs_watcher.rs` 在 `workdir/`），只有被多个
 > 域共享、或本身独立成域的支撑件才留在根级。
 
-### 1.4 驱动器片（`crates/symbio-plugin-loop/src/`，独立插件）
+### 1.4 编排驱动器片（`crates/symbio-providers/src/orchestrator/`，providers 私有模块）
 
 | 层 | 落点 | 职责 |
 |---|---|---|
@@ -184,7 +184,7 @@ X/mod.rs + X/tests.rs 模块文件是 mod.rs 的（如 store/、workdir/）：
 
 - **不动机制语义**：分工只回答「代码落在哪」，不改判定、阈值、文案、执行顺序。
 - **不动单点结构**：`persist_turn` 与压缩内核的内部结构是「单一实现」约束的落点，
- 拆开会让两条入口各自维护一套流水线——见 [`../../loop/README.md`](../../../symbio-plugin-loop/README.md "crates/symbio-plugin-loop/README") 的环体一节。
+ 拆开会让两条入口各自维护一套流水线——见 `crates/symbio-providers/src/orchestrator/mod.rs` 的环体说明。
 - **不顺手收窄 / 放宽可见性**：搬移阶段只做归位；可见性调整是独立评审，
  要有跨域共享面或域内分工的判据支撑（§3）。
 - **不抄结构快照**：文件数、行数、代码规模一律以

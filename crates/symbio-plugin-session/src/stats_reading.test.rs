@@ -19,7 +19,7 @@ use symbio_platform::kernel::chat::chat_node as cm;
 use symbio_platform::kernel::present::{ReadingSection, ReadingTone};
 
 /// 一条压缩节点（形状 = 折叠叶；压缩的数字住在 `meta`，owner 是
-/// `crates/symbio-plugin-loop/src/context/pipeline.rs::compression_stats`）。
+/// `会话侧 `compression_stats``）。
 fn compression(meta: serde_json::Value) -> cm::ChatNode {
     cm::ChatNode {
         id: "m1".into(),

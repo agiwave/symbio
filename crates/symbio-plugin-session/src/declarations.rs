@@ -96,7 +96,7 @@ pub(crate) const EVENTS: &[EventDecl] = &[
     // ── 承诺面四格（owner 跟着写方走 同一条纪律）──
     //
     // 写方在本插件的 `tools::behavior`（`agent_run` 的委派以 `commitment_events`
-    // 成格）。所有者原先是环（`crates/symbio-plugin-loop`），随工具迁入 子智能体插件
+    // 成格）。所有者原先是环（`crates/symbio-providers/src/orchestrator`），随工具迁入 子智能体插件
     // （ 批二），再随委托工具迁回本插件——委托是会话级原语，写方在这里。
     // `asserted` 不在共享表（单消费方，见上方 `EVENT_COMMITMENT_ASSERTED`）。
     EventDecl::new("commitment.asserted", (Entity::Commitment, Verb::Asserted)),

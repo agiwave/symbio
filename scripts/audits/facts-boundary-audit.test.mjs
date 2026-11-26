@@ -24,7 +24,7 @@ const CAPABILITY_FILES = [
   'crates/symbio-plugin-session/src/transcript/inbox.rs',
   'crates/symbio-plugin-session/src/transcript/autonomous.rs',
   'crates/symbio-plugin-session/src/message_events.rs',
-  'crates/symbio-plugin-loop/src/ring/facts.rs',
+  'crates/symbio-providers/src/orchestrator/ring/facts.rs',
 ]
 
 /** 单槽登记的生产侧夹具：FB-003 要恰好一家开面、FB-004 至多一家地址根，与真实仓同形。 */

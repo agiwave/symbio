@@ -12,11 +12,25 @@ use symbio_platform::kernel::plugin::{
     Plugin, PluginError, PluginInvokeRequest, PluginInvokeRequestExt, PluginInvokeResponse,
     PluginMeta, PluginPayload,
 };
-use symbio_plugin_api::drive::{drive_row, DriveOutcome, DriveReport, DriveSupport};
+use symbio_plugin_api::drive::{
+    DriveOutcome, DrivePayload, DriveReport, DriveSupport, DRIVE_FAMILY,
+};
 use symbio_plugin_api::{ExecEventSink, PluginSimpleRequest, SymbioKey, CAPABILITY_VISITOR};
 
 use super::*;
 use crate::host::Host;
+
+fn drive_row(
+    name: &str,
+    runner: Arc<dyn DriveRunner>,
+) -> symbio_platform::kernel::capability::CapabilityRow {
+    symbio_platform::kernel::capability::CapabilityRow::new(
+        DRIVE_FAMILY,
+        format!("<drive>{name}"),
+        DrivePayload::new(runner),
+        false,
+    )
+}
 
 thread_local! {
     static USE_DECLARED: Cell<bool> = const { Cell::new(false) };

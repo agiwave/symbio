@@ -12,7 +12,7 @@ use std::fmt;
 use std::sync::Arc;
 
 use serde_json::Value;
-use symbio_platform::kernel::capability::{CapabilityFamily, CapabilityRow};
+use symbio_platform::kernel::capability::CapabilityFamily;
 
 use crate::port::{PortExecHandles, PortExecutor, PortFactEmit, PortFactReader, PortReply};
 
@@ -62,16 +62,6 @@ impl fmt::Debug for DrivePayload {
     fn fmt(&self, f: &mut fmt::Formatter<'_>) -> fmt::Result {
         f.write_str("DrivePayload")
     }
-}
-
-/// 造一行 `drive` 族登记（`active = false`，与 port / debt 同一手法）。
-pub fn drive_row(name: &str, runner: Arc<dyn DriveRunner>) -> CapabilityRow {
-    CapabilityRow::new(
-        DRIVE_FAMILY,
-        format!("<drive>{name}"),
-        DrivePayload::new(runner),
-        false,
-    )
 }
 
 /// 债身份（中性形状）：端口名 + 欠债方派生的 id + 租约尝试号。

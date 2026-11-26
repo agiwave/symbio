@@ -795,7 +795,7 @@ fn row(label: &str, value: String) -> ReadingRow {
 }
 
 /// 一次压缩 / 一份压缩产物的**事实行**（数字取自节点 `meta`，口径见
-/// `crates/symbio-plugin-loop/src/context/pipeline.rs::compression_stats` 的文档注释）。
+/// `会话侧 `compression_stats`` 的文档注释）。
 ///
 /// ## 缺数字就不出行，绝不补 0
 ///

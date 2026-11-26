@@ -324,7 +324,7 @@ fn forced_failure_produces_fallback_with_provenance() {
 // ── 彩排：记忆链路 ──
 //
 // 这里留的是**内核侧**的判据：编码格子的溯源覆盖（I2）。巩固入库前的保真度
-// 闸门（N8）随 `consolidate` 住它的写方（`crates/symbio-plugin-loop`，DE-025 ）；
+// 闸门（N8）随 `consolidate` 住它的写方（`crates/symbio-providers/src/orchestrator`，DE-025 ）；
 // 检索那半条链路（`recall` 投影的 as-of、预算降级、主体隔离）随投影住它的唯一生产
 // 消费方（[DE-024](../../../../../docs/003-design/024-能力横向扩充的通路.md "DE-024-能力横向扩充的通路") ），验收在同侧。
 
@@ -494,7 +494,7 @@ const TASK_OPENED: &str = "task.opened";
 const TASK_PROGRESSED: &str = "task.progress";
 const TASK_TERMINAL: &str = "task.asserted";
 
-/// `memory.encoded`：名字与格位都在 owner 插件（`crates/symbio-plugin-loop` 的 `EventDecl` + 清单
+/// `memory.encoded`：名字与格位都在 owner 插件（`crates/symbio-providers/src/orchestrator` 的 `EventDecl` + 清单
 /// `shared_events`，DE-024 ），core 不认识它。core 的夹具因此自己写这条字面量——
 /// 与 `REWORK` 同一形状：词汇是数据，不是 core 的常量。
 const MEMORY_ENCODED: &str = "memory.encoded";

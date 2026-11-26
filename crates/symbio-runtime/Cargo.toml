@@ -39,6 +39,4 @@ inventory = { workspace = true }
 windows-sys = { version = "0.61.2", features = ["Win32_Storage_FileSystem"] }
 
 [dev-dependencies]
-# 环插件经能力收集注册 `drive` 行；宿主的驱动测试需要链接它（源码零引用）。
-symbio-plugin-loop = { path = "../symbio-plugin-loop" }
 tokio = { workspace = true, features = ["test-util", "macros", "rt", "time"] }

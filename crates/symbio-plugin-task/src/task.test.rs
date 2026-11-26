@@ -1039,7 +1039,7 @@ fn a_second_declaration_of_the_same_task_event_is_rejected() {
     let mut b = symbio_plugin_api::testkit::Builder::new();
     b.declare("crates/symbio-plugin-task", decls());
     // 旧实现没删干净的样子：同一个名字在第二个 owner 下再声明一次。
-    b.declare("crates/symbio-plugin-loop", decls());
+    b.declare("crates/symbio-providers/src/orchestrator", decls());
     let Err(gaps) = b.seal(&symbio_plugin_api::rows::row_writes()) else {
         panic!("同名事件在两个 owner 下声明，装载必须判红");
     };

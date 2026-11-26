@@ -182,7 +182,7 @@ board.columns: [impl]
 > ⚠️ **本区块由 `node scripts/audits/registry-audit.mjs --write` 维护（标记之间），请勿手改标记区内内容。**
 > 状态的唯一登记处是各条目文件本身，本区块是投影。字段规范见 [SP-001](../005-spec/001.md)，机制见 [DE-017 · 登记与汇总机制](017-登记与汇总机制.md "DE-017-登记与汇总机制")。
 
-**计数**：active 105 · draft 0 · retired 1（共 106）
+**计数**：active 104 · draft 0 · retired 1（共 105）
 
 ## 现行设计（active）
 
@@ -269,7 +269,6 @@ board.columns: [impl]
 | [`crates/symbio-plugin-home/README`](../../crates/symbio-plugin-home/README.md) | Home 插件 | 与代码一致 |
 | [`crates/symbio-plugin-hook/README`](../../crates/symbio-plugin-hook/README.md) | Hook 插件 | 与代码一致 |
 | [`crates/symbio-plugin-local/README`](../../crates/symbio-plugin-local/README.md) | Local 插件 | 与代码一致 |
-| [`crates/symbio-plugin-loop/README`](../../crates/symbio-plugin-loop/README.md) | Loop 插件（纯机制环） | 与代码一致 |
 | [`crates/symbio-plugin-mcp/README`](../../crates/symbio-plugin-mcp/README.md) | MCP 插件 | 与代码一致 |
 | [`crates/symbio-plugin-memory/README`](../../crates/symbio-plugin-memory/README.md) | Memory 插件 | 与代码一致 |
 | [`crates/symbio-plugin-model/README`](../../crates/symbio-plugin-model/README.md) | Model 插件 | 与代码一致 |

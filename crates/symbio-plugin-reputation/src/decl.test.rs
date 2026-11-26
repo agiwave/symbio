@@ -33,7 +33,7 @@ use symbio_plugin_api::{
 
 /// `loop` 拥有的三条承诺格（本二进制不链接它 ⇒ 夹具补格位）。
 ///
-/// 格位与 `crates/symbio-plugin-loop/src/control_decl.rs` 的 `EVENTS` 逐条同构；
+/// 格位与 `crates/symbio-platform/src/sdk/sealed_declarations.rs` 的 `EVENTS` 逐条同构；
 /// `commitment.asserted` 也一并交上——它**不是**本视图的输入，夹具要交的是「这一族在
 /// 完整进程里长什么样」，漏一格就等于替折叠免了一次「名字对不对」的检查。
 const HARNESS_EVENTS: &[EventDecl] = &[

@@ -35,7 +35,7 @@
  * - 顺序是 **sent → request → response**：宿主先领租约（`before`）再问行（`request`）。
  *   旧判据假设的 `request → sent` 是上一代派发器的顺序；
  * - 一次往返的 `sent` 可能**多于一条**：执行体判「要挂起等人」时，`finish` 会补一条
- *   `{deadline_ms: null, shard: 1}` 的 `sent`（`symbio-plugin-loop/src/ring/engine.rs:713-726`），
+ *   `{deadline_ms: null, shard: 1}` 的 `sent`（`symbio-providers/src/orchestrator/ring/engine.rs:713-726`），
  *   它不是第二次派发，也不是第二个分片。
  *
  * ## 判据（逐条，编号即输出编号）
@@ -108,10 +108,10 @@
  *    `register_tool` 登记过的端口才有执行体，host `gather` 折 `snapshot()` 成交执行体表。
  *    没人登记的名字在装配结果里根本不存在；同名两绑定 / 无执行体由 `bind` 落错误，
  *    `snapshot()` 任一冲突**整份** `Err` ⇒ 装配失败（`DE-056 `）。
- * 2. **运行期环（失败不静默）**：`crates/symbio-plugin-loop/src/ring/engine.rs` 派发时
+ * 2. **运行期环（失败不静默）**：`crates/symbio-providers/src/orchestrator/ring/engine.rs` 派发时
  *    取不到执行体，仍按协议写全 `sent` / `request` / `failed`，`reason` 是
  *    `no provider for port ...`；不是跳过这一笔，也不是用 `response` 冒充成功。反例
- *    `crates/symbio-plugin-loop/src/ring/engine.test.rs` 的
+ *    `crates/symbio-providers/src/orchestrator/ring/engine.test.rs` 的
  *    `absent_executor_lands_failed_and_names_the_port` 钉住三格齐全与点名。
  * 3. **运行期判定器（形状对账）**：本文件 J6 要求每条协议事实带 `ring:` 身份，端口因此
  *    可观测；J1 同时要求每笔有终态。一个没有归属的端口名只要真的产生了协议事实，就会
@@ -168,7 +168,7 @@ const DECLARED_PORTS = [
   // 工具执行端口
   { port: 'tool', source: 'crates/symbio-plugin-tool/src/declarations.rs:79（PortDecl{port: TOOL} → PORT_TOOL，api/vocab.rs:24）' },
   // 行执行端口（所有 `by: plugin_row` 的债行都走它；`plugin_row` 是宿主词汇）
-  { port: 'plugin_row', source: 'crates/symbio-plugin-loop/src/plugin_rows.rs:58（port: PLUGIN_ROW，sdk/src/plugin/rows.rs:56）' },
+  { port: 'plugin_row', source: 'crates/symbio-providers/src/orchestrator/plugin_rows.rs:58（port: PLUGIN_ROW，sdk/src/plugin/rows.rs:56）' },
   // 上下文压缩的落格端口（摘要走 model.assist，产物由这条落）
   { port: 'compact', source: 'crates/symbio-plugin-compact/src/port.rs:38（PortProvider::ports → COMPACT_PORT）' },
   // 意向提升端口

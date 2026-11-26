@@ -34,7 +34,7 @@ const script = fileURLToPath(new URL('./port-type-coupling-audit.mjs', import.me
 
 const PORT_RS = 'crates/symbio-platform/src/sdk/capability/port.rs'
 const DRIVE_RS = 'crates/symbio-plugin-api/src/drive.rs'
-const FACTS_RS = 'crates/symbio-plugin-loop/src/ring/facts.rs'
+const FACTS_RS = 'crates/symbio-providers/src/orchestrator/ring/facts.rs'
 const API_PORT_RS = 'crates/symbio-plugin-api/src/port.rs'
 const SDK_DIALOG = 'crates/symbio-platform/src/sdk/dialog/mod.rs'
 const SDK_LIB = 'crates/symbio-platform/src/sdk/mod.rs'

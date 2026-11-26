@@ -1074,16 +1074,16 @@ test('E-012 不误报：注释里的示例声明（文档写了一条不存在�
   assert.doesNotMatch(r.stdout, E012_HIT)
 })
 
-// ── E-013：`crates/symbio-plugin-loop/src/**` 的 import 根 ⊆ 闭族 ─────────────────────────
+// ── E-013：`crates/symbio-providers/src/orchestrator/**` 的 import 根 ⊆ 闭族 ─────────────────────────
 //
 //  §4 的闭族是枚举白名单； §9 把「import 根 ⊆ 闭族」列为切片判据。
 // E-009 只拦兄弟插件，拦不住 `crate::providers` / 族外第三方 crate 这类族外根。
-const E013_HIT = /\[ERROR\]\s+E-013\s+crates\/symbio-plugin-loop\/src\//
+const E013_HIT = /\[ERROR\]\s+E-013\s+crates\/symbio-providers\/src\/orchestrator\//
 
 test('E-013 命中：loop 生产文件 import 了会话模块（E-009 之外的仓内实现面）', () => {
   const r = audit({
     ...CLEAN,
-    'crates/symbio-plugin-loop/src/driver.rs': 'use crate::plugins::session::SessionConfig;\n',
+    'crates/symbio-providers/src/orchestrator/driver.rs': 'use crate::plugins::session::SessionConfig;\n',
   })
   assert.equal(r.status, 1, r.stdout)
   assert.match(r.stdout, E013_HIT)
@@ -1091,18 +1091,18 @@ test('E-013 命中：loop 生产文件 import 了会话模块（E-009 之外的�
 
 auditCase('E-013 命中：loop 生产文件 import 了族外第三方 crate', () => audit({
     ...CLEAN,
-    'crates/symbio-plugin-loop/src/driver.rs': 'use reqwest::Client;\n',
+    'crates/symbio-providers/src/orchestrator/driver.rs': 'use reqwest::Client;\n',
   }), 1, [/E-013 .*`use reqwest::…` 不在驱动器闭族内/])
 
 auditCase('E-013 命中：loop 生产文件用了 `crate::providers`（实现层，测试才豁免）', () => audit({
     ...CLEAN,
-    'crates/symbio-plugin-loop/src/driver.rs': 'use crate::providers::DefaultToolVisitor;\n',
+    'crates/symbio-providers/src/orchestrator/driver.rs': 'use crate::providers::DefaultToolVisitor;\n',
   }), 1, [/E-013 .*`crate::providers` 不在驱动器闭族内/])
 
 test('E-013 不误报：宿主机制面 / 通用库 / 相对路径 / crate 根宏', () => {
   const r = audit({
     ...CLEAN,
-    'crates/symbio-plugin-loop/src/driver.rs':
+    'crates/symbio-providers/src/orchestrator/driver.rs':
       'use std::sync::Arc;\n' +
       'use async_trait::async_trait;\n' +
       'use serde_json::Value;\n' +
@@ -1123,7 +1123,7 @@ test('E-013 不误报：宿主机制面 / 通用库 / 相对路径 / crate 根�
 test('E-013 测试豁免：`DefaultToolVisitor` 可作测试夹具', () => {
   const r = audit({
     ...CLEAN,
-    'crates/symbio-plugin-loop/src/driver.test.rs': 'use crate::providers::DefaultToolVisitor;\n',
+    'crates/symbio-providers/src/orchestrator/driver.test.rs': 'use crate::providers::DefaultToolVisitor;\n',
   })
   assert.equal(r.status, 0, r.stdout)
   assert.doesNotMatch(r.stdout, E013_HIT)
@@ -1132,7 +1132,7 @@ test('E-013 测试豁免：`DefaultToolVisitor` 可作测试夹具', () => {
 test('E-013 测试同样判：测试文件 import 会话模块仍然违规', () => {
   const r = audit({
     ...CLEAN,
-    'crates/symbio-plugin-loop/src/driver.test.rs': 'use crate::plugins::session::SessionConfig;\n',
+    'crates/symbio-providers/src/orchestrator/driver.test.rs': 'use crate::plugins::session::SessionConfig;\n',
   })
   assert.equal(r.status, 1, r.stdout)
   assert.match(r.stdout, E013_HIT)
@@ -1150,13 +1150,13 @@ test('E-013 豁免：带理由的 plugin-entry-allow 放行；空理由仍报', 
   const line = 'use reqwest::Client;\n'
   const withReason = audit({
     ...CLEAN,
-    'crates/symbio-plugin-loop/src/driver.rs': `// plugin-entry-allow E-013: 该 crate 代表一次外部世界请求\n${line}`,
+    'crates/symbio-providers/src/orchestrator/driver.rs': `// plugin-entry-allow E-013: 该 crate 代表一次外部世界请求\n${line}`,
   })
   assert.doesNotMatch(withReason.stdout, E013_HIT)
 
   const emptyReason = audit({
     ...CLEAN,
-    'crates/symbio-plugin-loop/src/driver.rs': `// plugin-entry-allow E-013:\n${line}`,
+    'crates/symbio-providers/src/orchestrator/driver.rs': `// plugin-entry-allow E-013:\n${line}`,
   })
   assert.match(emptyReason.stdout, E013_HIT)
 })

@@ -17,7 +17,7 @@
  *
  * | 码 | 读数 | 取法 |
  * |---|---|---|
- * | `EL-001` | 引擎自持的行数 | `crates/symbio-plugin-loop/src/**`（生产 `.rs`）里 `Decl {` 的出现次数（行数据已由应用交来，环侧目标 0） |
+ * | `EL-001` | 引擎自持的行数 | `crates/symbio-providers/src/orchestrator/**`（生产 `.rs`）里 `Decl {` 的出现次数（行数据已由应用交来，环侧目标 0） |
  * | `EL-002` | 分发方的出参通道数 | `ring/engine.rs` 的 `CollectingWriter` 结构体里 `Mutex<` 字段数 |
  * | `EL-003` | 驱动 / 回合路径的全量读点数 | `ring/engine.rs`、`crates/symbio-runtime/src/host/entry.rs`、`session/plugin/round.rs` 三处的 `range(…Seq::new(0))` |
  *
@@ -83,10 +83,10 @@ const ROOT = rootArg ? path.resolve(rootArg.slice('--root='.length)) : path.reso
  */
 const BASELINE = { rows: 0, channels: 1, fullScans: 0 }
 
-const LOOP_SRC = 'crates/symbio-plugin-loop/src'
-const DISPATCH = 'crates/symbio-plugin-loop/src/ring/engine.rs'
+const LOOP_SRC = 'crates/symbio-providers/src/orchestrator'
+const DISPATCH = 'crates/symbio-providers/src/orchestrator/ring/engine.rs'
 const SCAN_FILES = [
-  'crates/symbio-plugin-loop/src/ring/engine.rs',
+  'crates/symbio-providers/src/orchestrator/ring/engine.rs',
   'crates/symbio-runtime/src/host/entry.rs',
   'crates/symbio-plugin-session/src/plugin/round.rs',
 ]

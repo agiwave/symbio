@@ -11,7 +11,7 @@ use crate::sdk::projection::vocab::CommitmentVocab;
 /// 的两个名字，违约必须带 `why`（可观测，DE-038 §5）。
 ///
 /// 四个格名由调用方在构造期交进来（`CommitmentVocab`，DE-024 ）：本域只留
-/// 「立约 → 了结 → 告知」的形状，拼写归 owner（`crates/symbio-plugin-loop` 的清单）。
+/// 「立约 → 了结 → 告知」的形状，拼写归 owner（`crates/symbio-providers/src/orchestrator` 的清单）。
 #[derive(Debug, Clone, Copy)]
 pub struct CommitmentKeeper {
     v: CommitmentVocab,

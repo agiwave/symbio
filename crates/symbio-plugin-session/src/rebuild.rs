@@ -640,7 +640,7 @@ fn opening_node(e: &Event) -> ChatNode {
 
 /// 收束 / 进展 / 兜底格 → `[Turn 根, Reasoning 子?, Text 子?, rounds 的中途产出…]`。
 ///
-/// 形状与 `crates/symbio-plugin-loop/src/message_build::llm_build_assistant_messages` 同源（同一判据：
+/// 形状与 `crates/symbio-plugin-model/src/message_builder.rs` 的 `llm_build_assistant_messages` 同源（同一判据：
 /// reasoning-only 时那段内容归 Text 子节点，不另立 Reasoning 子，否则同一段内容
 /// 在存储层出现两份）。
 ///

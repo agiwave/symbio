@@ -62,10 +62,6 @@ pub const PLUGIN_ID_HOOK: &str = "hook";
 // dead-code-allow R-001: 插件 id 是部署身份，未被引用不等于可删（同文件头 R-003）
 pub const PLUGIN_ID_LOCAL: &str = "local";
 
-/// 纯机制环：选债、派发、等待、配对、记账、预算与租约、重放
-// dead-code-allow R-001: 插件 id 是部署身份，未被引用不等于可删（同文件头 R-003）
-pub const PLUGIN_ID_LOOP: &str = "loop";
-
 /// 工具
 // dead-code-allow R-001: 插件 id 是部署身份，未被引用不等于可删（同文件头 R-003）
 pub const PLUGIN_ID_MCP: &str = "mcp";
@@ -144,7 +140,6 @@ pub const ASSEMBLY_SUB_AGENT_PLUGINS: &[&str] = &[
     "plugin_manager", // 插件管理与配置入口
     "event_bus", // 事件总线
     "session", // 会话
-    "loop", // 纯机制环：选债、派发、等待、配对、记账、预算与租约、重放
     "task", // 任务表：清单声明成事实、独立验证与返工、就绪集调度与调度段
     "heartbeat", // 心跳调度：会话空闲后自主开一轮（经地址面写会话收件箱，随每棵子树分形）
     "persona", // 人格：一处定义「我是谁」，两条输出面（轮内正文 / 对话措辞）读同一段
@@ -180,7 +175,6 @@ pub const ASSEMBLY_CORE_PLUGINS: &[&str] = &[
     "plugin_manager", // 插件管理与配置入口
     "event_bus", // 事件总线
     "session", // 会话
-    "loop", // 纯机制环：选债、派发、等待、配对、记账、预算与租约、重放
     "task", // 任务表：清单声明成事实、独立验证与返工、就绪集调度与调度段
     "classify", // 对话面·判决（无它 ⇒ 全部输入直接进工具循环）
     "compose", // 对话面·措辞（无它 ⇒ 无对话面文本，worker 正文照旧）
@@ -230,7 +224,6 @@ pub const ASSEMBLY_UNDISABLABLE_PLUGINS: &[&str] = &[
 pub const ASSEMBLY_REQUIRED_PLUGINS: &[&str] = &[
     "plugin_manager", // 插件管理与配置入口
     "session", // 会话
-    "loop", // 纯机制环：选债、派发、等待、配对、记账、预算与租约、重放
     "model", // 模型服务（子智能体自己的模型；子树会话自行解析）
     "vdfs", // VDFS 根（单槽归系统 Agent）
     "ui_prefs", // 界面偏好（外观 / 提示音 / 关于）的后端权威数据

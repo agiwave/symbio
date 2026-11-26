@@ -82,7 +82,7 @@ const CAPABILITY_FILES = [
   'crates/symbio-plugin-session/src/transcript/inbox.rs',
   'crates/symbio-plugin-session/src/transcript/autonomous.rs',
   'crates/symbio-plugin-session/src/message_events.rs',
-  'crates/symbio-plugin-loop/src/ring/facts.rs',
+  'crates/symbio-providers/src/orchestrator/ring/facts.rs',
 ]
 
 const STORE_DIR = 'crates/symbio-plugin-session/src/store/'

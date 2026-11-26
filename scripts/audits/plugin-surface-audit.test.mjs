@@ -134,9 +134,9 @@ test('②b 源码直取 kernel ⇒ 红（：语法也走门面）', () => {
 
 test('②c 控制面源码直取 kernel ⇒ 绿（源码前缀豁免）', () => {
   const root = fixture({
-    'symbio-plugin-loop': {
+    'symbio-plugin-session': {
       rs: 'use symbio_platform::kernel::event::ClosureReason;\npub fn f(_: ClosureReason) {}\n',
-      manifest: CLEAN_MANIFEST.replace('symbio-plugin-fix', 'symbio-plugin-loop'),
+      manifest: CLEAN_MANIFEST.replace('symbio-plugin-fix', 'symbio-plugin-session'),
     },
     'symbio-plugin-fix': {},
     'symbio-plugin-api': { rs: 'pub use symbio_platform::sdk::{Event};\n' },
@@ -166,9 +166,9 @@ test('③ 只在注释里提 core ⇒ 绿（判代码不判措辞）', () => {
 
 test('④ 控制面插件源码直取 sdk ⇒ 绿（源码前缀豁免；manifest 归 E-009）', () => {
   const root = fixture({
-    'symbio-plugin-loop': {
+    'symbio-plugin-session': {
       rs: 'use symbio_platform::sdk::Event;\npub fn f(_: Event) {}\n',
-      manifest: CLEAN_MANIFEST.replace('symbio-plugin-fix', 'symbio-plugin-loop'),
+      manifest: CLEAN_MANIFEST.replace('symbio-plugin-fix', 'symbio-plugin-session'),
     },
     // 门面里那条 `Event` 必须有扩展层消费方，否则 HS-003 反过来判它空转
     'symbio-plugin-fix': {},
@@ -177,7 +177,7 @@ test('④ 控制面插件源码直取 sdk ⇒ 绿（源码前缀豁免；manifes
   try {
     const r = runOn(root)
     assert.equal(r.status, 0, r.stdout + r.stderr)
-    assert.equal(CONTROL_PLANE.includes('symbio-plugin-loop'), true)
+    assert.equal(CONTROL_PLANE.includes('symbio-plugin-session'), true)
   } finally {
     rmTree(root)
   }

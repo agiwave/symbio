@@ -46,7 +46,7 @@
 //!
 //! 内核只声明**协议五格**（`request` / `sent` / `response` / `failed` / `retry`）——
 //! 它们是引擎自己的写读面，属于语法而非业务。控制面事实与全部视图由
-//! `crates/symbio-plugin-loop/src/control_decl.rs` 声明，经 [`Builder::declare`] 交进来；内核不认识
+//! `crates/symbio-platform/src/sdk/sealed_declarations.rs` 声明，经 [`Builder::declare`] 交进来；内核不认识
 //! 那些名字。新增一个视图、一个控制面事实、一处字段，改的是插件文件，不是本模块。
 //!
 //! **owner 就是「谁把这张表交进 `Builder`」**（DE-023 ）：`declare` 的第一个
@@ -62,7 +62,7 @@
 //! ## 生产接线
 //!
 //! 声明集由 [`Builder::new`] 预置的协议五格与插件自己的声明一起 `seal` 冻结；求解只在
-//! 环的选债口（`crates/symbio-plugin-loop/src/ring/engine.rs` 的 `plan` → `owed`）做一次。
+//! 环的选债口（`crates/symbio-providers/src/orchestrator/ring/engine.rs` 的 `plan` → `owed`）做一次。
 //! `Frozen::eval` 的成本上界仍按声明生效：调用方传入**本轮切片**（不是整份 WAL），
 //! 一轮的事件数由轮的生命周期界定。
 
@@ -224,7 +224,7 @@ pub struct PluginDeclarations<'a> {
 
 /// 内核自己交出的声明（协议五格）的 owner 标识。
 ///
-/// 与插件 owner（如 `"crates/symbio-plugin-loop"`）同处一个命名空间：`Frozen` 的 owner 清单里
+/// 与插件 owner（如 `"crates/symbio-providers/src/orchestrator"`）同处一个命名空间：`Frozen` 的 owner 清单里
 /// 没有第二种来源，问「这一条归谁」永远只有一个答案（DE-023 ）。
 pub const KERNEL_OWNER: &str = "kernel";
 

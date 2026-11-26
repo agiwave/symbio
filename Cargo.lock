@@ -4161,7 +4161,6 @@ dependencies = [
  "symbio-plugin-home",
  "symbio-plugin-hook",
  "symbio-plugin-local",
- "symbio-plugin-loop",
  "symbio-plugin-mcp",
  "symbio-plugin-memory",
  "symbio-plugin-model",
@@ -4455,27 +4454,6 @@ dependencies = [
  "url",
  "uuid",
  "which",
- "zip",
-]
-
-[[package]]
-name = "symbio-plugin-loop"
-version = "0.1.14"
-dependencies = [
- "async-trait",
- "futures",
- "glob",
- "grep",
- "notify",
- "serde",
- "serde_json",
- "symbio-platform",
- "symbio-plugin-api",
- "tempfile",
- "time",
- "tokio",
- "tracing",
- "uuid",
  "zip",
 ]
 
@@ -4807,7 +4785,6 @@ dependencies = [
  "symbio-http",
  "symbio-platform",
  "symbio-plugin-api",
- "symbio-plugin-loop",
  "symbio-providers",
  "tempfile",
  "tokio",

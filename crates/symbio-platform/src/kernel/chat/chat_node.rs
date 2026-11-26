@@ -483,8 +483,8 @@ pub enum ResumeAction {
 /// 会话恢复请求（与 `session_chat::Request.message` 互斥；存在时走 resume 分支）。
 ///
 /// 由 session 编排层随请求透传，最终在 loop 插件的会话循环
-/// （`crates/symbio-plugin-loop/src/chat_loop.rs`）的 turn 循环前由唤醒支
-/// （`crates/symbio-plugin-loop/src/chat_loop/wake.rs`）处理。
+/// （`旧会话循环`）的 turn 循环前由唤醒支
+/// （`旧唤醒支`）处理。
 #[derive(Debug, Serialize, Deserialize, Clone)]
 pub struct ResumeRequest {
     /// 目标消息 ID（Failed Turn 或 ToolCall，稳定标识，覆盖式更新锚点）

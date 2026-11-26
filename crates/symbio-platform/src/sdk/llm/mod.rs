@@ -27,7 +27,7 @@
 //! ## 帧原语为什么在这里
 //!
 //! **只被一个插件消费的部分不在本层**（同一条依赖方数量判据）：落库视图与消息构造在
-//! `crates/symbio-plugin-loop/src/message_build.rs`，增量帧 `llm_emit_delta` 在
+//! `crates/symbio-plugin-model/src/message_builder.rs`，增量帧 `llm_emit_delta` 在
 //! `crates/symbio-plugin-model/src/stream.rs`。留守的三个导出
 //! （`llm_emit_message` / `llm_removed_frame` / `llm_short_id`）逐个都有两个以上消费方
 //! （`llm_message_frame` 是登记在案的例外）。

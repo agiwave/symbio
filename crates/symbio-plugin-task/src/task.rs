@@ -473,7 +473,7 @@ pub(crate) const SCHEDULE_BUDGET_MS: u64 = 80;
 ///
 /// 取值理由与端口租约同一条：**比最慢的可接受持有长，比「用户已经以为坏了」短**。
 /// 任务是模型驱动的一步工作，分钟级足够；到期不续即放回候选池（不是重试——重试语义
-/// 归端口，见 `crates/symbio-plugin-loop/src/port`）。
+/// 归端口，见 `crates/symbio-plugin-api/src/port.rs`）。
 const LEASE_MS: i64 = 300_000;
 
 /// 调度者要落的一笔事实（**只描述，不构造 `Event`**）。

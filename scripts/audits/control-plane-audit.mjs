@@ -8,9 +8,9 @@
  *
  * | 码 | 判什么 | 范围 |
  * |---|---|---|
- * | `CP-001` | 唯一循环体：整个环 crate 的生产代码只有一段 `loop` / `while`，落在 `ring/engine.rs` | `crates/symbio-plugin-loop/src/**` |
- * | `CP-004` | 机制层无世界域名：词汇层生成物 `events.rs` 的 `EVENT_*` 事件名不得作为**代码**字面量出现在 kernel / sdk / loop；端口名不得出现在 **loop 的派发面**（注释与测试夹具不算） | `crates/symbio-platform/src/kernel/**`、`crates/symbio-platform/src/sdk/**`、`crates/symbio-plugin-loop/src/**` |
- * | `CP-006` | 机制面指纹：驱动循环体 + `fn plan` + `fn expire` 的**归一化 token 流**哈希（注释 / 空白 / import 顺序 / 尾逗号无关）与生产文件数冻结在基线里 | `crates/symbio-plugin-loop/src/**` |
+ * | `CP-001` | 唯一循环体：整个环 crate 的生产代码只有一段 `loop` / `while`，落在 `ring/engine.rs` | `crates/symbio-providers/src/orchestrator/**` |
+ * | `CP-004` | 机制层无世界域名：词汇层生成物 `events.rs` 的 `EVENT_*` 事件名不得作为**代码**字面量出现在 kernel / sdk / loop；端口名不得出现在 **loop 的派发面**（注释与测试夹具不算） | `crates/symbio-platform/src/kernel/**`、`crates/symbio-platform/src/sdk/**`、`crates/symbio-providers/src/orchestrator/**` |
+ * | `CP-006` | 机制面指纹：驱动循环体 + `fn plan` + `fn expire` 的**归一化 token 流**哈希（注释 / 空白 / import 顺序 / 尾逗号无关）与生产文件数冻结在基线里 | `crates/symbio-providers/src/orchestrator/**` |
  * | `CP-009` | 第二推进循环：除 `ring/engine.rs` 外，任何生产文件的循环体都不得调 `drive(` | 全部 crate 的生产源码 |
  *
  * ## 失效形态
@@ -46,8 +46,8 @@ const walk = (rel) =>
 const scriptDir = path.dirname(fileURLToPath(import.meta.url))
 const rootArg = process.argv.find((a) => a.startsWith('--root='))
 const ROOT = rootArg ? path.resolve(rootArg.slice('--root='.length)) : path.resolve(scriptDir, '..', '..')
-const LOOP_REL = 'crates/symbio-plugin-loop'
-const LOOP_SRC = `${LOOP_REL}/src`
+const LOOP_REL = 'crates/symbio-providers/src/orchestrator'
+const LOOP_SRC = LOOP_REL
 const ENGINE_REL = `${LOOP_SRC}/ring/engine.rs`
 const BASELINE_REL = 'scripts/baselines/control-plane.json'
 const KERNEL_SRC = 'crates/symbio-platform/src/kernel'

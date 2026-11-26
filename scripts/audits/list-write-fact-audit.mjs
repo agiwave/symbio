@@ -151,10 +151,10 @@ const rootArg = process.argv.find((a) => a.startsWith('ROOT='))
 // 两棵树一起扫，锚才真的有人看。`ROOT=` 供回归测试指向夹具树。
 const roots = rootArg
   ? [{ dir: path.resolve(rootArg.slice(5)), prefix: '' }]
-  : ['session', 'loop'].map((p) => ({
-      dir: path.join(repoRoot, 'crates', 'symbio-plugin-' + p, 'src'),
-      prefix: p,
-    }))
+  : [
+      { dir: path.join(repoRoot, 'crates', 'symbio-plugin-session', 'src'), prefix: 'session' },
+      { dir: path.join(repoRoot, 'crates', 'symbio-providers', 'src', 'orchestrator'), prefix: 'loop' },
+    ]
 for (const { dir } of roots) {
   if (!fs.existsSync(dir)) {
     console.error(red(`✗ 扫描根不存在：${dir}`))

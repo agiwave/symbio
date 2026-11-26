@@ -102,7 +102,7 @@ const MSG_ROOTS = [
   ['sdk', path.join('crates', 'symbio-platform', 'src', 'sdk')],
   ['kernel', path.join('crates', 'symbio-platform', 'src', 'kernel')],
   ['contract', path.join('crates', 'symbio-platform', 'src', 'contract')],
-  ['loop', path.join('crates', 'symbio-plugin-loop', 'src')],
+  ['loop', path.join('crates', 'symbio-providers', 'src', 'orchestrator')],
   ['session', path.join('crates', 'symbio-plugin-session', 'src')],
 ]
 

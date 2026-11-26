@@ -65,7 +65,7 @@ import { walkFiles } from '../fs-walk.mjs'
  * 注意：这里的豁免只作用于**源码前缀**（HS-001）。插件的 **manifest 依赖边**归
  * `plugin-entry-audit` 的 E-009 统一裁定，控制面插件不豁免。
  */
-export const CONTROL_PLANE = ['symbio-plugin-api', 'symbio-plugin-loop', 'symbio-plugin-session']
+export const CONTROL_PLANE = ['symbio-plugin-api', 'symbio-plugin-session']
 
 /**
  * 源码里不得出现的平台前缀：`symbio_platform::`。

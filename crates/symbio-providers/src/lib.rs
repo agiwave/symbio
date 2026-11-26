@@ -61,13 +61,13 @@
 
 // 实现源码随所有者迁入本 crate 的私有模块；出口仍是原来的 `symbio_providers::`
 // 平铺面，模块路径只保留给需要深引的装配代码。
-mod drive;
 #[cfg(feature = "embedding")]
 pub mod embedding;
 pub mod orchestrator;
-mod plugin_rows;
-mod ring;
 pub mod vdfs_service;
+
+// 迁移后的环实现仍以 `crate::ring` / `crate::plugin_rows` 自指，保持引擎指纹不变。
+pub(crate) use orchestrator::{plugin_rows, ring};
 
 // `embedding` 实例经 `submit_object_creator!` 注册，调用方只取「为什么不可用」。
 #[cfg(feature = "embedding")]

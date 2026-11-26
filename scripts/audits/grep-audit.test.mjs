@@ -604,10 +604,10 @@ test('S-015 真实仓库零处（存量已全部迁完）', () => {
 })
 
 // ── S-016: 停机原因单形状 ────────────────────────────────────────────
-// 判据扫 `crates/symbio-plugin-loop/src` 下全部 `.rs`：停机格只在这个 crate 里出生。
+// 判据扫 `crates/symbio-providers/src/orchestrator` 下全部 `.rs`：停机格只在这套机制里出生。
 // 原先写死的三个 `turn_runner/*.rs` 随旧引擎退役都不存在了，判据恒绿（``）——
 // 下面第一条新用例钉的正是「扫描面为空必须判红」。
-const S016_TARGET = 'crates/symbio-plugin-loop/src/ring/settle.rs'
+const S016_TARGET = 'crates/symbio-providers/src/orchestrator/ring/settle.rs'
 // 别的 crate 的别的格子：`why` 在那里合法（没有竞争的 `reason` 字段），不该被卷进来。
 const S016_OTHER_CELL = 'crates/symbio-plugin-memory/src/memory_events.rs'
 
@@ -701,7 +701,7 @@ test('S-016 真实仓库：零违例，且扫描面非空', () => {
   // 「读空即全绿」的 dogfood 断言（``）：必须真的读到文件。原文写死三个
   // `turn_runner/*.rs`，那些文件退役后判据一个字都没读过、恒绿——单看「通过」
   // 是看不出来的，所以这里连**读了几份**一起钉。
-  const m = r.stdout.match(/plugin-loop\/src` 下 (\d+) 份 \.rs/)
+  const m = r.stdout.match(/providers\/src\/orchestrator` 下 (\d+) 份 \.rs/)
   assert.ok(m, `S-016 没有报出扫描份数：${r.stdout}`)
   assert.ok(Number(m[1]) >= 8, `S-016 只读到 ${m[1]} 份 .rs，扫描面塌了`)
 })
@@ -711,7 +711,7 @@ test('S-016 真实仓库：零违例，且扫描面非空', () => {
 // （自己写协议事实、自己跑执行体，绕开行表）。旁路退役后唯一入口是**事实**。
 // 放任它回来的代价不是风格问题——恢复路径会绕过行表写事实，于是「这一轮欠了
 // 什么」与「这一轮做了什么」对不上账，而没有任何东西会变红。
-const S017_LOOP = 'crates/symbio-plugin-loop/src'
+const S017_LOOP = 'crates/symbio-providers/src/orchestrator'
 
 /** 多文件临时树（这条规则要同时看「文件在不在」与「文件里写了什么」）。 */
 function gateAudit17(files) {

@@ -704,7 +704,7 @@ runLineRule({
 // ── S-016: 停机原因只有一个形状 ───────────────────────────────────────────
 // 收束格 / 否定事实的「为什么停」只能写在顶层 `reason`（闭集）。两个已退役形状不许
 // 复活：`terminated.reason`（同一件事的两份账）与停机格载荷里的 `why`（自由文本）。
-// 扫描面 2026-11-13 重指为 `crates/symbio-plugin-loop/src` 下全部 `.rs`：原写死的三个
+// 扫描面重指为 `crates/symbio-providers/src/orchestrator` 下全部 `.rs`：原写死的三个
 // 路径随旧引擎退役都已不存在，`readFileSync` 落进 `catch → continue`，判据恒绿——
 // 正是  的「扫描面为空 ⇒ 读不到即全绿」。故另加「真仓里一个文件都没扫到即判红」。
 // 正则要求 `"reason"` / `reason` 带冒号或引号，否则 `with_terminated(with_reason(..)`
@@ -713,7 +713,7 @@ const RETIRED_RE = /terminated[^\n]*(?:"reason"\s*:|\breason\s*:)|"why"\]\s*=|\b
 
 runLineRule({
   title: '--- S-016: 停机原因单形状（terminated.reason / why 不许回来）---',
-  roots: ['crates/symbio-plugin-loop/src'],
+  roots: ['crates/symbio-providers/src/orchestrator'],
   hit: (l, i, file, lines, per, ctx) => {
     if (isCommentStart(l)) return
     if (!RETIRED_RE.test(l)) return
@@ -727,7 +727,7 @@ runLineRule({
     const hits = ctx.list ?? []
     if (IS_REPO && list.length === 0) {
       err(
-        'S-016 扫描面为空：`crates/symbio-plugin-loop/src` 下一份 `.rs` 都没扫到 ⇒ ' +
+        'S-016 扫描面为空：`crates/symbio-providers/src/orchestrator` 下一份 `.rs` 都没扫到 ⇒ ' +
           '判据读不到任何东西（``）；路径写错或 crate 改名都要在这里变红，而不是静默变绿。',
       )
     } else if (n > 0) {
@@ -739,7 +739,7 @@ runLineRule({
     } else {
       ok(
         IS_REPO
-          ? `S-016 通过：\`plugin-loop/src\` 下 ${list.length} 份 .rs 里零处已退役的停机原因形状`
+          ? `S-016 通过：\`providers/src/orchestrator\` 下 ${list.length} 份 .rs 里零处已退役的停机原因形状`
           : 'S-016 跳过：当前树不是真实仓库（临时 fixture）',
       )
     }
@@ -752,8 +752,8 @@ runLineRule({
 // 判据是**零出现**：① `resume.rs` / `resume.test.rs` 不许存在；② 生产代码里
 // `resume_anchor` 零出现。第三样 `resumed` 已移出判据面：它如今是召回阶段格的载荷键。
 const RETIRED_FILES = [
-  'crates/symbio-plugin-loop/src/resume.rs',
-  'crates/symbio-plugin-loop/src/resume.test.rs',
+  'crates/symbio-providers/src/orchestrator/resume.rs',
+  'crates/symbio-providers/src/orchestrator/resume.test.rs',
 ]
 
 runLineRule({

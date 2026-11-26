@@ -143,7 +143,7 @@ export const ARCH_TREES = [
 export const CORE_TREES = ['crates/symbio-platform/src/sdk', 'crates/symbio-platform/src/kernel']
 
 /** 控制面：迁移批次只许在这里删旧实现。 */
-export const CONTROL_TREES = ['crates/symbio-plugin-loop', 'crates/symbio-plugin-session']
+export const CONTROL_TREES = ['crates/symbio-plugin-session']
 
 /** 门面：扩展插件只许依赖它（E-009）。搬迁的红 3 判的就是这里的转出行。 */
 const PLUGIN_API_TREES = ['crates/symbio-plugin-api']

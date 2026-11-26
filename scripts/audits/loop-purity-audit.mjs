@@ -12,8 +12,8 @@
  *
  * | 码 | 判什么 | 范围 |
  * |---|---|---|
- * | `LP-001` | loop 生产源码不得 import 端口**载荷类型**（只许端口名 / 事实行 / 债） | `crates/symbio-plugin-loop/src/**`（`.rs`，排除 `*.test.rs` 与 `test_support.rs`） |
- * | `LP-002` | `symbio-plugin-loop` 的 Cargo 清单不得依赖 provider / 插件 crate | `crates/symbio-plugin-loop/Cargo.toml` |
+ * | `LP-001` | loop 生产源码不得 import 端口**载荷类型**（只许端口名 / 事实行 / 债） | `crates/symbio-providers/src/orchestrator/**`（`.rs`，排除 `*.test.rs` 与 `test_support.rs`） |
+ * | `LP-002` | `symbio-plugin-loop` 的 Cargo 清单不得依赖 provider / 插件 crate | `crates/symbio-providers/Cargo.toml` |
  * | `LP-003` | loop 生产源码不得出现世界语义词根（`batch` / `gate` / `llm` / `tool` / `model` / `Tool*` / `Model*` / `Turn*`）与硬编码端口行名 | 同上（现只剩 `ring/**` 与驱动层本体） |
  * | `LP-004` | 端口受理面（`sdk/src/capability/port.rs`，`` ② 自 plugin-api 搬入）的 trait / 类型 / 方法名不得含世界词根（`llm` / `tool` / `model` / `batch` / `gate`） | `crates/symbio-platform/src/sdk/capability/port.rs` |
  * | `LP-005` | `PortProvider` / `PortExecutor` 的签名只许通用行 / 值类型，具名世界载荷（`ToolCall*` / `LlmAdapter` / `ModelProvider` / `tool_batch`）入签名即红 | 同上 |
@@ -43,8 +43,9 @@ const scriptDir = path.dirname(fileURLToPath(import.meta.url))
 const rootArg = process.argv.find((a) => a.startsWith('--root='))
 const ROOT = rootArg ? path.resolve(rootArg.slice('--root='.length)) : path.resolve(scriptDir, '..', '..')
 const BASELINE_REL = 'scripts/loop-purity-baseline.json'
-const LOOP_REL = 'crates/symbio-plugin-loop'
-const SRC_REL = `${LOOP_REL}/src`
+const LOOP_REL = 'crates/symbio-providers/src/orchestrator'
+const SRC_REL = LOOP_REL
+const CARGO_REL = 'crates/symbio-providers/Cargo.toml'
 const API_PORT_REL = 'crates/symbio-platform/src/sdk/capability/port.rs'
 
 const PRINT = process.argv.includes('--print-baseline')
@@ -102,7 +103,7 @@ const INTERFACE_WORLD_ROOTS = new Set(['llm', 'tool', 'model', 'batch', 'gate'])
  * LP-003 的**逐条归属**表（判据脚本是唯一 owner，不另立台账；`DE-047` §4 只写判法）。
  *
  * 现在**为空**。这张表存在的理由不是「留个位置」：棘轮只数总数，判不出「同一个总数换了
- * 个词根」。曾经 4 格全在 `crates/symbio-plugin-loop/src/plugin_rows.rs`，全是同一个
+ * 个词根」。曾经 4 格全在 `crates/symbio-providers/src/orchestrator/plugin_rows.rs`，全是同一个
  * 名字——`` 行派发机制的回执值（只有 `Text` / `Failed` 两支，按 id 配对
  * `response` / `failed`，与谁答无关）；词根是「只有模型答得回来」那段时间留下的误名。
  * `` 把它改名 `RowReply`，4 格一并消失，基线降到 0。
@@ -288,9 +289,9 @@ function scan() {
     for (const h of hits) lp003Hits.push({ rel, token: h.token, label: h.label })
   }
 
-  const cargoFile = path.join(ROOT, LOOP_REL, 'Cargo.toml')
+  const cargoFile = path.join(ROOT, CARGO_REL)
   if (!fs.existsSync(cargoFile)) {
-    console.error(red(`没有 ${LOOP_REL}/Cargo.toml——读不出就不亮绿灯`))
+    console.error(red(`没有 ${CARGO_REL}——读不出就不亮绿灯`))
     process.exit(2)
   }
   const lp002 = forbiddenDeps(readOrDie(cargoFile))

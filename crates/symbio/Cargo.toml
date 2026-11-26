@@ -34,7 +34,6 @@ symbio-plugin-heartbeat = { path = "../symbio-plugin-heartbeat" }
 symbio-plugin-home = { path = "../symbio-plugin-home" }
 symbio-plugin-hook = { path = "../symbio-plugin-hook" }
 symbio-plugin-local = { path = "../symbio-plugin-local" }
-symbio-plugin-loop = { path = "../symbio-plugin-loop" }
 symbio-plugin-mcp = { path = "../symbio-plugin-mcp" }
 symbio-plugin-memory = { path = "../symbio-plugin-memory" }
 symbio-plugin-model = { path = "../symbio-plugin-model" }

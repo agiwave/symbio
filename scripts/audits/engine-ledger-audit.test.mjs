@@ -22,9 +22,9 @@ import { fileURLToPath } from 'node:url'
 const script = fileURLToPath(new URL('./engine-ledger-audit.mjs', import.meta.url))
 
 // 读数面：环源码（EL-001）、环的收集器（EL-002）、驱动 / 回合路径（EL-003）。
-const LOOP_SRC = 'crates/symbio-plugin-loop/src'
-const TABLE = 'crates/symbio-plugin-loop/src/ring/table.rs'
-const ENGINE = 'crates/symbio-plugin-loop/src/ring/engine.rs'
+const LOOP_SRC = 'crates/symbio-providers/src/orchestrator'
+const TABLE = 'crates/symbio-providers/src/orchestrator/ring/table.rs'
+const ENGINE = 'crates/symbio-providers/src/orchestrator/ring/engine.rs'
 const DRIVE = 'crates/symbio-runtime/src/host/entry.rs'
 const TURN = 'crates/symbio-plugin-session/src/plugin/round.rs'
 

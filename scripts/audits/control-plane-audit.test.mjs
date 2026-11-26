@@ -38,7 +38,7 @@ import { auditCase, expectAudit, onStderr } from '../audit-assert.mjs'
 
 const script = fileURLToPath(new URL('./control-plane-audit.mjs', import.meta.url))
 const BASELINE_REL = 'scripts/baselines/control-plane.json'
-const LOOP = 'crates/symbio-plugin-loop/src'
+const LOOP = 'crates/symbio-providers/src/orchestrator'
 const ENGINE = `${LOOP}/ring/engine.rs`
 const PORT_VOCAB = 'crates/symbio-plugin-api/src/vocab.rs'
 const EVENTS = 'crates/symbio-plugin-api/src/events.rs'
@@ -133,7 +133,7 @@ pub const EVENT_CHAT_ASSISTANT_FINAL: &str = "chat.assistant.final";
 
 function cleanTree() {
   return {
-    [`${LOOP}/lib.rs`]: 'pub mod ring;\n',
+    [`${LOOP}/mod.rs`]: 'pub mod drive;\npub mod plugin_rows;\npub mod ring;\n',
     [`${LOOP}/ring/mod.rs`]: 'pub mod engine;\n',
     [ENGINE]: ENGINE_SRC,
     [EVENTS]: EVENTS_SRC,
@@ -194,13 +194,13 @@ test('CP-004：sdk 的代码里出现世界事件名字面量 ⇒ 红', () => {
 
 test('CP-004：loop 的代码里出现世界事件名字面量 ⇒ 红', () => {
   const files = cleanTree()
-  files[`${LOOP}/lib.rs`] += '\npub const N: &str = "user.message";\n'
+  files[`${LOOP}/mod.rs`] += '\npub const N: &str = "user.message";\n'
   assertRed(audit(files), 'CP-004')
 })
 
 test('CP-004：loop 的派发面出现端口名字面量 ⇒ 红', () => {
   const files = cleanTree()
-  files[`${LOOP}/lib.rs`] += '\npub const P: &str = "model";\n'
+  files[`${LOOP}/mod.rs`] += '\npub const P: &str = "model";\n'
   assertRed(audit(files), 'CP-004')
 })
 

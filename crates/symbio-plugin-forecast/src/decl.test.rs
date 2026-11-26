@@ -16,7 +16,7 @@ const TASK_EVENTS: &[EventDecl] = &[
     EventDecl::new(EVENT_TASK_ASSERTED, (Entity::Task, Verb::Asserted)),
 ];
 
-/// 协议五格的**自读行** —— 完整进程里由 `crates/symbio-plugin-loop` 交表，
+/// 协议五格的**自读行** —— 完整进程里由 `crates/symbio-providers/src/orchestrator` 交表，
 /// 本 crate 的测试二进制不链接它 ⇒ 夹具补上，否则 `seal` 判 `OrphanFact`。
 fn protocol_rows() -> &'static [Decl] {
     let mut out = Vec::new();

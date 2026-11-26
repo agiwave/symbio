@@ -3,7 +3,7 @@
 //! ## 为什么本文件还要交一份「协议行」夹具
 //!
 //! 本插件的测试二进制只链接自己：协议五格的归宿行住在
-//! `crates/symbio-plugin-loop`，不在这里 ⇒ `seal` 报 `OrphanFact`、整张表失败
+//! `crates/symbio-providers/src/orchestrator`，不在这里 ⇒ `seal` 报 `OrphanFact`、整张表失败
 //! （装载期检查），于是 [`symbio_plugin_api::vocab`] 退回共享清单——而
 //! `task.rework_created` 的 `CountsRework` 角色只在本插件自己的声明里。
 //!
