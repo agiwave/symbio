@@ -49,6 +49,31 @@ impl Plugin for EmptyRoot {
     }
 }
 
+/// 只带端口与债务声明、没有编排提供者的根：用来验证空 `drive` 族不是装配失败。
+struct NoDriveRoot;
+
+#[async_trait::async_trait]
+impl Plugin for NoDriveRoot {
+    fn meta(&self) -> PluginMeta {
+        PluginMeta::new("test-no-drive-root", "test-no-drive-root")
+    }
+
+    async fn route(
+        self: Arc<Self>,
+        _ctx: Arc<dyn PluginInvokeRequest>,
+    ) -> PluginInvokeResponse<PluginPayload> {
+        Err(PluginError::NotFound("route".into()))
+    }
+
+    async fn traverse(
+        self: Arc<Self>,
+        _path: String,
+        _ctx: Arc<dyn PluginInvokeRequest>,
+    ) -> PluginInvokeResponse<PluginPayload> {
+        Ok(PluginPayload::new(&Vec::<serde_json::Value>::new()))
+    }
+}
+
 /// 开面后的下界上下文：会话主体随 `AGENT_ID` 载体带进来（ 起驱动也要它）。
 fn bound_base() -> Arc<dyn PluginInvokeRequest> {
     let meta = serde_json::Map::from_iter([(
@@ -69,6 +94,18 @@ async fn a_session_with_no_debt_reports_no_debt() {
         .drive(&base, "s-1", None, ExecEventSink::silent())
         .await
         .expect("驱动装配成立");
+
+    assert_eq!(report.outcome, DriveOutcome::NoDebt);
+    assert_eq!(report.dispatched, 0);
+}
+
+#[tokio::test]
+async fn a_session_without_drive_provider_completes_as_no_debt() {
+    let host = Host::new(Arc::new(NoDriveRoot));
+    let report = host
+        .drive(&bound_base(), "s-no-drive", None, ExecEventSink::silent())
+        .await
+        .expect("empty drive family must complete the request");
 
     assert_eq!(report.outcome, DriveOutcome::NoDebt);
     assert_eq!(report.dispatched, 0);

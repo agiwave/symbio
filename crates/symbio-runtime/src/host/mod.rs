@@ -157,7 +157,16 @@ impl Host {
         // 事实源，环下一圈经同一投影读回——环零知识，宿主不替它判。
         let support_handle = Arc::clone(&support);
         observe_termination(&gathered.writers, &*support_handle, &self.source, false).await;
-        let report = gathered.runner.drive(support).await?;
+        // 编排提供者缺席 ⇒ 本轮不派发、按无债收尾；这不是「装配失败」，而是允许
+        // 只带端口与债务声明的装配独立完成一次请求。多提供者仍由 gather 判红。
+        let Some(runner) = gathered.runner else {
+            observe_termination(&gathered.writers, &*support_handle, &self.source, true).await;
+            return Ok(DriveReport {
+                dispatched: 0,
+                outcome: DriveOutcome::NoDebt,
+            });
+        };
+        let report = runner.drive(support).await?;
         if matches!(&report.outcome, DriveOutcome::NoDebt) {
             observe_termination(&gathered.writers, &*support_handle, &self.source, true).await;
         }
@@ -253,7 +262,6 @@ impl Host {
             }
             runner = Some(payload.runner());
         }
-        let runner = runner.ok_or_else(|| "drive 族没有任何提供者".to_string())?;
 
         // 簿记写方是按行收集的**数据**：宿主不认插件名，也不给某个内置写方开旁路
         //。一个写方都没有时，前后两次观察都是空转。
@@ -278,7 +286,7 @@ impl Host {
 struct Gathered {
     executors: HashMap<String, Arc<dyn PortExecutor>>,
     sources: Vec<Arc<dyn DeclaredDebtSource>>,
-    runner: Arc<dyn DriveRunner>,
+    runner: Option<Arc<dyn DriveRunner>>,
     /// 宿主侧簿记写方（`termination` 族）：驱动前后各观察一次。
     writers: Vec<Arc<dyn TerminationWriter>>,
     /// 装配好的调用方上下文（含能力表）；原样交给执行体，宿主不解释。
