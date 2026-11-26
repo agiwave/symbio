@@ -91,8 +91,10 @@ pub fn mcp_detail_definition() -> DetailDefinition {
                         ..field("enabled", "启用", "禁用后该 Server 的工具不注册", "toggle")
                     },
                     DetailField {
-                        required: true,
+                        // 默认 stdio：绝大多数 MCP Server 是本地进程；选它即展开
+                        // command/args/env，省去新建时必选一次传输类型。
                         options: vec![opt("stdio", "本地进程 (stdio)"), opt("http", "HTTP")],
+                        default: Some(serde_json::json!("stdio")),
                         ..field(
                             "type",
                             "传输类型",
@@ -140,6 +142,7 @@ pub fn mcp_detail_definition() -> DetailDefinition {
                     DetailField {
                         min: Some(1.0),
                         placeholder: Some("30".into()),
+                        default: Some(serde_json::json!(30)),
                         ..field(
                             "timeout_secs",
                             "请求超时（秒）",

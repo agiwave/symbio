@@ -236,7 +236,8 @@ pub(crate) fn sandbox_detail_definition() -> DetailDefinition {
                 collapsed: false,
                 fields: vec![
                     DetailField {
-                        required: true,
+                        // 已有 default（interactive），无需再标必填——否则表单显示
+                        // 必填星号却根本不需要用户填，徒增"必须理解该术语"的压力。
                         options: vec![
                             opt("interactive", "交互模式（需审批时弹出审批卡）"),
                             opt("auto", "自动模式（无人值守，需审批时拒绝并提示）"),
@@ -250,7 +251,7 @@ pub(crate) fn sandbox_detail_definition() -> DetailDefinition {
                         )
                     },
                     DetailField {
-                        required: true,
+                        // 已有 default（medium），不标必填，理由同 approval_mode。
                         options: vec![
                             opt("low", "低（仅低风险自动放行）"),
                             opt("medium", "中（中风险及以下自动放行）"),

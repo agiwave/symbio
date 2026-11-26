@@ -26,6 +26,10 @@ fn definition_covers_model_form_surface() {
     let openai = spec.presets.iter().find(|p| p.value == "openai").unwrap();
     assert_eq!(openai.set["api_base"], "https://api.openai.com/v1");
     assert!(openai.options["api_protocol"].contains(&"openai_responses".to_string()));
+    // LM Studio 的 /v1 端点 OpenAI 兼容：默认协议必须是 openai_chat，
+    // 选该预设新建时应自动校正到能测通的协议，而非 anthropic_messages。
+    let lm = spec.presets.iter().find(|p| p.value == "lmstudio").unwrap();
+    assert_eq!(lm.set_always["api_protocol"], "openai_chat");
     // 动作：test/save/divider/set-default/delete 全齐
     let ids: Vec<&str> = def.actions.iter().map(|a| a.id.as_str()).collect();
     assert!(

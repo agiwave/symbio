@@ -160,7 +160,10 @@ const PRESETS: &[PresetTuple] = &[
         "LM Studio（本地）",
         "http://localhost:1234/v1",
         &[],
-        &["anthropic_messages", "openai_chat", "openai_responses"],
+        // LM Studio 的 /v1 端点是 OpenAI 兼容实现，默认协议必须是 openai_chat；
+        // anthropic_messages（/v1/messages）只是较新版本的可选兼容层，不能当默认，
+        // 否则选此预设新建的 Provider 会默认用一个测不通的协议。
+        &["openai_chat", "openai_responses", "anthropic_messages"],
     ),
     (
         "local",

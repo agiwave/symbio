@@ -18,7 +18,7 @@ use symbio_plugin_api::{
     PluginError, PluginInvokeRequest, PluginInvokeRequestExt, PluginInvokeResponse, PluginMeta,
     PluginPayload, PortExecutor,
 };
-use symbio_plugin_api::{DetailDefinition, DetailField, DetailOption};
+use symbio_plugin_api::{DetailDefinition, DetailField, DetailOption, DetailSection};
 use tokio::sync::RwLock;
 
 // ==================== 配置文档（`<根>/local/PLUGIN.yml`） ====================
@@ -30,17 +30,11 @@ use tokio::sync::RwLock;
 /// 出现过面板显示值与实际行为不符的漂移）。
 fn config_definition() -> DetailDefinition {
     let d = LocalConfig::default();
-    DetailDefinition::form(
+    // 首屏只放"这个智能体能做什么"的决策项；超时/频次/白名单是低频调参，
+    // 收进折叠的高级区，避免 9 项平铺把人劝退。
+    let mut def = DetailDefinition::form(
         "本地工具设置",
         vec![
-            DetailField::number(
-                "shell_timeout",
-                "Shell 超时（秒）",
-                "Shell 命令执行超时时间",
-                1.0,
-                3600.0,
-                json!(d.shell_timeout),
-            ),
             DetailField::select(
                 "autonomy",
                 "自主级别",
@@ -67,14 +61,6 @@ fn config_definition() -> DetailDefinition {
                     AutonomyLevel::Full => "full",
                 },
             ),
-            DetailField::number(
-                "max_actions_per_hour",
-                "每小时动作上限",
-                "Shell 调用频次上限，0 = 不限流",
-                0.0,
-                1_000_000.0,
-                json!(d.max_actions_per_hour),
-            ),
             DetailField::toggle(
                 "require_approval_for_medium_risk",
                 "中风险命令需审批",
@@ -86,6 +72,28 @@ fn config_definition() -> DetailDefinition {
                 "阻止高风险命令",
                 "直接拒绝高风险命令（rm/shutdown 等），不提供审批机会",
                 d.block_high_risk_commands,
+            ),
+        ],
+    );
+    def.sections.push(DetailSection {
+        title: Some("高级：限额与路径".into()),
+        collapsed: true,
+        fields: vec![
+            DetailField::number(
+                "shell_timeout",
+                "Shell 超时（秒）",
+                "Shell 命令执行超时时间",
+                1.0,
+                3600.0,
+                json!(d.shell_timeout),
+            ),
+            DetailField::number(
+                "max_actions_per_hour",
+                "每小时动作上限",
+                "Shell 调用频次上限，0 = 不限流",
+                0.0,
+                1_000_000.0,
+                json!(d.max_actions_per_hour),
             ),
             DetailField::toggle(
                 "workspace_only",
@@ -109,7 +117,8 @@ fn config_definition() -> DetailDefinition {
                 "每行一个绝对路径，仅在「限制读取在工作区内」开启时生效",
             ),
         ],
-    )
+    });
+    def
 }
 
 /// 注册用的工具条目：自述快照 + 风险回答 + 端口执行体。

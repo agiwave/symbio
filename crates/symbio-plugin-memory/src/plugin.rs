@@ -48,22 +48,19 @@ use symbio_plugin_api::{
     PluginMeta, PluginPayload, AGENT_VDFS, CAPABILITY_VISITOR, PATH, SESSION_VDFS,
     TRAVERSE_AVAILABLE_TOOLS, WORKSPACE_VDFS,
 };
-use symbio_plugin_api::{DetailDefinition, DetailField};
+use symbio_plugin_api::{DetailDefinition, DetailField, DetailSection};
 use tokio::sync::RwLock;
 
 /// 配置表单的定义 —— **定义由配置的拥有者产出**，默认值从 [`MemoryConfig::default`]
 /// 读出，不写第二份字面量（避免面板显示值与实际行为漂移）。
 ///
-/// 三个作用域的字段分组排列：工作区在前（有开关，是用户最常调的），会话居中，
-/// 智能体在后（闸门对，与出厂行为一致）。
+/// 首屏只放三个"是否注入"开关——这是用户真正要决定的；六个字节上限是调优项，
+/// 收进折叠的高级区，避免首屏出现 6 个看不懂的数字。
 fn config_definition() -> DetailDefinition {
     let d = MemoryConfig::default();
-    DetailDefinition::form(
+    let mut def = DetailDefinition::form(
         PLUGIN_TITLE,
         vec![
-            // 三层记忆的**正文**都不是配置项：配置只存开关与闸门，正文一律经各自的
-            // VDFS 地址（`<根>/memory/MEMORY.md` / `WORKSPACE.md` / `SESSION.md`）读写。
-            // 稳定指令 `AGENTS.md` 归 `setting`，更不在这里。
             DetailField::toggle(
                 "agent_enabled",
                 "注入智能体记忆",
@@ -82,6 +79,15 @@ fn config_definition() -> DetailDefinition {
                 "每轮请求把本会话的记忆追加进系统提示词（关掉只影响注入，文件照旧可编辑）",
                 d.session_enabled,
             ),
+        ],
+    );
+    def.sections.push(DetailSection {
+        title: Some("高级：容量上限".into()),
+        collapsed: true,
+        fields: vec![
+            // 三层记忆的**正文**都不是配置项：配置只存开关与闸门，正文一律经各自的
+            // VDFS 地址（`<根>/memory/MEMORY.md` / `WORKSPACE.md` / `SESSION.md`）读写。
+            // 稳定指令 `AGENTS.md` 归 `setting`，更不在这里。
             DetailField::number(
                 "workspace_max_bytes",
                 "工作区写入上限（字节）",
@@ -131,7 +137,8 @@ fn config_definition() -> DetailDefinition {
                 json!(d.memory_inject_max_bytes),
             ),
         ],
-    )
+    });
+    def
 }
 
 /// 记忆插件（智能体自身 / 工作区 / 本会话，三个作用域）。

@@ -70,6 +70,9 @@ fn select_fields_carry_explicit_options() {
             if f.key == "approval_mode" || f.key == "risk_threshold" {
                 assert!(f.widget == "select");
                 assert!(!f.options.is_empty(), "{} 必须带候选", f.key);
+                // 有 default 兜底，不必标必填：避免"必填星号 + 已预填"的认知矛盾
+                assert!(!f.required, "{} 已有 default，不应标必填", f.key);
+                assert!(f.default.is_some(), "{} 必须有 default", f.key);
             }
         }
     }
