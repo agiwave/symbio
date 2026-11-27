@@ -147,7 +147,9 @@ impl Ingress for GatewayIngress {
         }
 
         debug!(trace_id = %trace_id, path = %path, "网关路由");
-        if let Some(result) = symbio_http::dispatch_session_invoke(message.clone()).await {
+        if let Some(result) =
+            symbio_http::dispatch_session_invoke(message.clone(), VdfsCaller::Model).await
+        {
             return result.map_err(|error| {
                 error!(trace_id = %trace_id, path = %path, error = %error, "运行时分发失败");
                 error

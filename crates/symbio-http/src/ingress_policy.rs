@@ -8,6 +8,9 @@ use std::sync::{Arc, Mutex};
 use std::time::{Duration, Instant};
 
 use serde_json::{json, Value};
+use symbio_platform::kernel::vdfs::{
+    vdfs_has_alternate_data_stream, vdfs_has_parent_segment, vdfs_normalize_path,
+};
 use symbio_plugin_api::routes::{
     ROUTE_VDFS_LIST, ROUTE_VDFS_READ, ROUTE_VDFS_ROOT, ROUTE_VDFS_SEARCH, ROUTE_VDFS_STAT,
     ROUTE_VDFS_TREE,
@@ -42,14 +45,40 @@ pub fn is_readonly_allowed(path: &str, payload: &Value) -> bool {
 }
 
 fn reads_config_document(payload: &Value) -> bool {
-    payload
-        .get("path")
-        .and_then(Value::as_str)
-        .map(|addr| {
-            addr.trim_end_matches('/')
-                .ends_with(&format!("/{}", PLUGIN_FILE))
-        })
-        .unwrap_or(false)
+    let Some(addr) = payload.get("path").and_then(Value::as_str) else {
+        return false;
+    };
+    let addr = vdfs_normalize_path(addr);
+    if vdfs_has_parent_segment(&addr) {
+        return true;
+    }
+    #[cfg(windows)]
+    if vdfs_has_alternate_data_stream(&addr) {
+        return true;
+    }
+    let segments: Vec<_> = addr
+        .split('/')
+        .filter(|segment| !segment.is_empty())
+        .collect();
+    #[cfg(windows)]
+    if segments.iter().any(|segment| segment.ends_with('.')) {
+        return true;
+    }
+    let is_plugin_file = segments.last().is_some_and(|segment| {
+        #[cfg(windows)]
+        {
+            segment.eq_ignore_ascii_case(PLUGIN_FILE)
+        }
+        #[cfg(not(windows))]
+        {
+            *segment == PLUGIN_FILE
+        }
+    });
+    // 配置别名整棵子树 fail-closed，避免在 HTTP 层复制插件管理器的别名表。
+    let is_config_alias = segments
+        .iter()
+        .any(|segment| segment.eq_ignore_ascii_case("plugin_manager"));
+    is_plugin_file || is_config_alias
 }
 
 /// 按请求头登记幂等键；`Err` 是应直接返回给调用方的响应。

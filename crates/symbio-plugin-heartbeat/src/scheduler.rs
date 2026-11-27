@@ -30,9 +30,9 @@ use symbio_plugin_api::routes::ROUTE_VDFS_WRITE;
 use symbio_plugin_api::PLUGIN_ID_SESSION;
 use symbio_plugin_api::{
     clock_now_ms, descend_addr, join_addr, vdfs_context, DynVdfsProvider, PluginInvokeRequest,
-    PluginMessageWire, PluginSimpleRequest, VdfsContent, VdfsContext, VdfsError, VdfsNode,
-    VdfsRequest, VdfsResponse, VdfsResult, EVENT_TRIGGER_KIND_SCHEDULED, EVENT_TRIGGER_META_KEY,
-    VDFS_STATUS_WORKING,
+    PluginMessageWire, PluginSimpleRequest, VdfsCaller, VdfsContent, VdfsContext, VdfsError,
+    VdfsNode, VdfsRequest, VdfsResponse, VdfsResult, EVENT_TRIGGER_KIND_SCHEDULED,
+    EVENT_TRIGGER_META_KEY, VDFS_STATUS_WORKING,
 };
 
 /// 扫描间隔（秒）
@@ -270,7 +270,9 @@ impl HeartbeatPlugin {
             metadata: json!({ "path": ROUTE_VDFS_WRITE }),
             payload: json!({ "path": addr, "text": body }),
         };
-        if let Some(result) = symbio_http::dispatch_session_invoke(invoke).await {
+        if let Some(result) =
+            symbio_http::dispatch_session_invoke(invoke, VdfsCaller::Manager).await
+        {
             return result.map(|_| ()).map_err(VdfsError::Internal);
         }
         provider

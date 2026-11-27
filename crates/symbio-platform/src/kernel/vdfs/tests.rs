@@ -265,9 +265,36 @@ fn parent_segment_is_separator_agnostic() {
     // Windows 分隔符：按 `../../` 前缀实现的旧判定会放过
     assert!(vdfs_has_parent_segment(r"src\..\..\..\Windows"));
     assert!(vdfs_has_parent_segment(r"..\etc"));
+    assert!(vdfs_has_parent_segment("a/ .. /b"));
     // 含 `..` 但不是独立段 → 合法
     assert!(!vdfs_has_parent_segment("a/..b/c"));
     assert!(!vdfs_has_parent_segment("src/main.rs"));
+}
+
+#[test]
+fn alternate_data_stream_detection_preserves_only_the_drive_colon() {
+    for path in [
+        "gateway/PLUGIN.yml::$DATA",
+        r"C:\gateway\PLUGIN.yml:secret",
+        "C:relative.txt",
+        r"\\server\share\PLUGIN.yml:secret",
+    ] {
+        assert!(
+            vdfs_has_alternate_data_stream(path),
+            "流别名必须拒绝：{path}"
+        );
+    }
+    for path in [
+        "C:/docs/readme.txt",
+        r"\\?\C:\docs\readme.txt",
+        r"\\server\share\readme.txt",
+        "docs/readme.txt",
+    ] {
+        assert!(
+            !vdfs_has_alternate_data_stream(path),
+            "普通路径不得误伤：{path}"
+        );
+    }
 }
 
 /// 前缀判定按**路径段**——`/etcfoo` 不在 `/etc` 之内。
@@ -293,6 +320,11 @@ fn path_normalization_preserves_anchor_and_parent_intent() {
     assert_eq!(vdfs_normalize_path(r"\\server\share\x"), "//server/share/x");
     assert_eq!(vdfs_normalize_path(r"\\?\C:\docs\x"), "c:/docs/x");
     assert_eq!(vdfs_normalize_path("a/../b"), "a/../b");
+    let root = [".", "vdfs", "v2"].concat();
+    assert_eq!(
+        vdfs_normalize_path(&format!(" {root} / gateway / PLUGIN.yml ")),
+        format!("{root}/gateway/PLUGIN.yml")
+    );
 }
 
 #[test]

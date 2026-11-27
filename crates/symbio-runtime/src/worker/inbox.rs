@@ -4,6 +4,7 @@ use std::path::{Path, PathBuf};
 
 use serde::{Deserialize, Serialize};
 use serde_json::Value;
+use symbio_plugin_api::VdfsCaller;
 
 use super::epoch::EpochRegistry;
 use super::id::{validate_session_id, BuildId, Epoch, RequestId, WorkerId};
@@ -25,6 +26,12 @@ pub struct InboxRequest {
     message: Value,
     params: Value,
     workdir: Option<String>,
+    #[serde(default = "legacy_caller")]
+    caller: VdfsCaller,
+}
+
+fn legacy_caller() -> VdfsCaller {
+    VdfsCaller::Model
 }
 
 impl InboxRequest {
@@ -39,7 +46,13 @@ impl InboxRequest {
             message,
             params,
             workdir,
+            caller: VdfsCaller::Model,
         })
+    }
+
+    pub fn with_caller(mut self, caller: VdfsCaller) -> Self {
+        self.caller = caller;
+        self
     }
 
     pub fn id(&self) -> &RequestId {
@@ -56,6 +69,10 @@ impl InboxRequest {
 
     pub fn workdir(&self) -> Option<&str> {
         self.workdir.as_deref()
+    }
+
+    pub fn caller(&self) -> VdfsCaller {
+        self.caller
     }
 }
 

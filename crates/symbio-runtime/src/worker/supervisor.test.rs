@@ -47,6 +47,7 @@ async fn subagent_rejects_a_child_owned_by_another_parent() {
         &parent,
         "child",
         message(ROUTE_VDFS_WRITE),
+        VdfsCaller::Model,
         &CancellationToken::new(),
         &AtomicBool::new(false),
     )
@@ -78,12 +79,16 @@ async fn shutdown_rejects_new_requests_and_subagent_starts() {
 
     supervisor.shutdown().await;
 
-    assert!(supervisor.invoke(message(ROUTE_VDFS_WRITE)).await.is_err());
+    assert!(supervisor
+        .invoke(message(ROUTE_VDFS_WRITE), VdfsCaller::Model)
+        .await
+        .is_err());
     assert!(start_subagent(
         &supervisor.inner,
         &parent,
         "child",
         message(ROUTE_VDFS_WRITE),
+        VdfsCaller::Model,
         &CancellationToken::new(),
         &AtomicBool::new(false),
     )
@@ -126,6 +131,7 @@ async fn lifecycle_cancellation_unblocks_subagent_waiting_for_routing() {
             &parent,
             "child",
             message(ROUTE_VDFS_WRITE),
+            VdfsCaller::Model,
             &CancellationToken::new(),
             &start_dispatched,
         )
@@ -179,6 +185,7 @@ async fn subagent_rejects_control_routes_before_spawning() {
         &parent,
         "child",
         message("sandbox/update"),
+        VdfsCaller::Model,
         &CancellationToken::new(),
         &AtomicBool::new(false),
     )
@@ -493,6 +500,7 @@ async fn subagent_rejects_payload_targeting_another_session() {
         &parent,
         "child",
         wrong_target,
+        VdfsCaller::Model,
         &CancellationToken::new(),
         &AtomicBool::new(false),
     )
@@ -671,6 +679,7 @@ async fn cancelled_dispatch_removes_pending_reply_and_durable_record() {
             &state_for_dispatch,
             request_id,
             message(ROUTE_VDFS_WRITE),
+            VdfsCaller::Model,
         )
         .await
     });

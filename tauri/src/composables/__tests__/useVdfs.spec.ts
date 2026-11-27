@@ -927,7 +927,7 @@ describe('useVdfs 换目录 ⇒ 旧选中项失效', () => {
   })
 })
 
-describe('useVdfs 草稿上的动作（「导入整包」）：载荷编码 + 落点 + 退出草稿', () => {
+describe('useVdfs 草稿上的动作：载荷、落点与退出规则', () => {
   /** 挂到模型目录并进入草稿态（下面每条用例都从「一张开着的草稿」开始） */
   async function draft() {
     mocks.listVdfs.mockResolvedValue({ path: MODEL_DIR, node: dirNode(), items: [] })
@@ -947,9 +947,14 @@ describe('useVdfs 草稿上的动作（「导入整包」）：载荷编码 + �
     // happy-dom 的 File 不保证实现 arrayBuffer（Node 侧 Blob 有），显式补上
     Object.defineProperty(file, 'arrayBuffer', { value: async () => new ArrayBuffer(2) })
 
-    await api.runPackAction('import', file)
+    await api.runPackAction('import', file, {
+      mode: 'merge',
+      filename: 'declared.zip',
+      b64: 'declared',
+    })
 
     expect(mocks.runVdfsAction).toHaveBeenCalledWith(MODEL_DIR, 'import', {
+      mode: 'merge',
       filename: 'demo.zip',
       b64: 'UEsDBA==',
     })
@@ -974,6 +979,91 @@ describe('useVdfs 草稿上的动作（「导入整包」）：载荷编码 + �
     await api.runAction('import', { filename: 'demo.zip', b64: 'UEsDBA==' })
 
     expect(api.selectedNode.value).toBeNull()
+    wrapper.unmount()
+  })
+
+  it('草稿测试成功即使回传 id 也保留草稿，不能把未保存的配置清空', async () => {
+    const { api, wrapper } = await draft()
+    mocks.runVdfsAction.mockResolvedValue({
+      action: 'test',
+      ok: true,
+      message: '校验通过',
+      data: { id: 'provider-id' },
+    })
+
+    await api.runAction('test', { model: 'draft-model' })
+
+    expect(mocks.runVdfsAction).toHaveBeenCalledWith(MODEL_DIR, 'test', {
+      model: 'draft-model',
+    })
+    expect(api.selectedNode.value?.path).toBe('')
+    wrapper.unmount()
+  })
+
+  it('草稿保存回传新 id ⇒ 刷新后选中新资源，不清成空详情', async () => {
+    const { api, wrapper } = await draft()
+    const created: VdfsItem = {
+      path: `${MODEL_DIR}/offline`,
+      name: 'offline',
+      title: '离线 Provider',
+      kind: 'model',
+      status: '',
+      access: 'rw',
+      ext: 'form',
+    }
+    mocks.listVdfs.mockResolvedValue({ path: MODEL_DIR, node: dirNode(), items: [created] })
+    mocks.readVdfs.mockResolvedValue({
+      text: JSON.stringify({ name: '离线 Provider', provider: 'openai' }),
+    })
+    mocks.runVdfsAction.mockResolvedValue({
+      action: 'save',
+      ok: true,
+      message: '已保存',
+      data: { id: 'offline' },
+    })
+
+    await api.runAction('save', { fields: { name: '离线 Provider' }, skip_validation: true })
+    await settle()
+
+    expect(api.selectedNode.value?.path).toBe(created.path)
+    expect(api.formData.value).toEqual({ name: '离线 Provider', provider: 'openai' })
+    wrapper.unmount()
+  })
+
+  it('草稿保存回传新 id 但刷新未命中 ⇒ 退出草稿，避免重复新建', async () => {
+    const { api, wrapper } = await draft()
+    mocks.runVdfsAction.mockResolvedValue({
+      action: 'save',
+      ok: true,
+      message: '已保存',
+      data: { id: 'not-visible' },
+    })
+
+    await api.runAction('save', { fields: { name: '已保存' }, skip_validation: true })
+
+    expect(api.selectedNode.value).toBeNull()
+    wrapper.unmount()
+  })
+
+  it('在途保存后已换新草稿，旧回执不得清空或选中旧落点', async () => {
+    const { api, wrapper } = await draft()
+    const firstDraft = api.selectedNode.value
+    let resolveAction!: (value: { action: string; ok: boolean; data: { id: string } }) => void
+    mocks.runVdfsAction.mockReturnValue(new Promise((resolve) => {
+      resolveAction = resolve
+    }))
+
+    const pending = api.runAction('save', { fields: { name: '旧草稿' } })
+    api.startNew()
+    await settle()
+    const secondDraft = api.selectedNode.value
+    expect(secondDraft).not.toBe(firstDraft)
+
+    resolveAction({ action: 'save', ok: true, data: { id: 'old' } })
+    await pending
+    await settle()
+
+    expect(api.selectedNode.value).toBe(secondDraft)
     wrapper.unmount()
   })
 

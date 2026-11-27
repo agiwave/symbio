@@ -9,7 +9,7 @@ use std::collections::HashMap;
 use std::sync::{Arc, RwLock};
 
 pub use symbio_platform::kernel::plugin::PluginPayloadWire;
-use symbio_plugin_api::{PluginChannel, PluginMessageWire, PluginPayload};
+use symbio_plugin_api::{PluginChannel, PluginMessageWire, PluginPayload, VdfsCaller};
 
 pub mod ingress_policy;
 mod server;
@@ -123,10 +123,11 @@ pub trait Ingress: Send + Sync + 'static {
 /// 运行时调用分发桥：让入站 transport 不必持有具体宿主即可走同一条 worker / 控制面路由。
 #[async_trait]
 pub trait InvokeDispatcher: Send + Sync {
-    /// 只接管归 worker 的会话调用；返回 `None` 让 ingress 保留自己的控制面边界。
+    /// 接管 worker 会话调用与 `vdfs/*`；返回 `None` 让 ingress 保留自己的控制面边界。
     async fn invoke_session(
         &self,
         _message: PluginMessageWire,
+        _caller: VdfsCaller,
     ) -> Option<Result<PluginPayload, String>> {
         None
     }
@@ -149,12 +150,13 @@ pub fn clear_invoke_dispatcher() {
 /// `None` = 该分发器不接管这条会话调用；调用方保留自己的控制面边界。
 pub async fn dispatch_session_invoke(
     message: PluginMessageWire,
+    caller: VdfsCaller,
 ) -> Option<Result<PluginPayload, String>> {
     let dispatcher = INVOKE_DISPATCHER
         .read()
         .unwrap_or_else(|poisoned| poisoned.into_inner())
         .clone()?;
-    dispatcher.invoke_session(message).await
+    dispatcher.invoke_session(message, caller).await
 }
 
 /// 普通 HTTP 请求的处理结果。

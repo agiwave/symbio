@@ -696,6 +696,26 @@ describe('DetailForm option 绑定（VDFS）：异步 values 到达触发预填'
     await w.find('button[title="保存"]').trigger('click')
     const payload = w.emitted('save')![0][0] as Record<string, unknown>
     expect(payload).toEqual({ interval: 7 })
+    expect(w.emitted('save')![0][1]).toEqual({ skip_validation: true })
+  })
+
+  it('测试连接上交当前草稿，不写回已保存值', async () => {
+    const w = mount(DetailForm, {
+      props: {
+        definition: def({
+          binding: 'option',
+          sections: [{ fields: [{ key: 'model', label: '模型', widget: 'text' }] }],
+          actions: [{ id: 'test', label: '测试连接', style: 'secondary' }],
+        }),
+        node: vdfsNode,
+        values: { model: 'saved-model' },
+        capabilities: { mutable: true },
+      },
+    })
+    await w.find('input').setValue('draft-model')
+    await w.find('button[title="测试连接"]').trigger('click')
+    expect(w.emitted('test')![0][0]).toEqual({ model: 'draft-model' })
+    expect(w.emitted('save')).toBeUndefined()
   })
 })
 

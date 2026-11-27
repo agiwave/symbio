@@ -43,7 +43,7 @@
         class="new-btn"
         :title="`新建 ${creatableType?.title ?? ''}`"
         :aria-label="`新建 ${creatableType?.title ?? ''}`"
-        :disabled="loading || saving"
+        :disabled="loading || saving || actionBusy"
         @click="startNewFromButton()"
       >
         <svg viewBox="0 0 24 24" width="15" height="15" fill="none" stroke="currentColor" stroke-width="2.25" stroke-linecap="round">
@@ -194,7 +194,7 @@
           v-if="canCreate"
           class="empty-action primary"
           type="button"
-          :disabled="loading || saving"
+          :disabled="loading || saving || actionBusy"
           @click="startNewFromButton()"
         >
           新建第一个{{ creatableType?.title ?? '条目' }}
@@ -552,6 +552,7 @@ function cancelLeave() {
 
 /** 用户点「新建」：也是离开当前详情，过闸；自动备草稿不经过这里 */
 function startNewFromButton() {
+  if (loading.value || saving.value || actionBusy.value) return
   guardLeave(() => startNew())
 }
 
@@ -882,25 +883,33 @@ const rendererData = computed<unknown>(() => {
 
 const rendererRef = ref<{ markSaved?: () => void; currentTitle?: () => string } | null>(null)
 
-function onSave(payload: unknown) {
+function onSave(values: unknown, actionPayload?: Record<string, unknown>) {
   const r = renderer.value
+  const sourceNode = selectedNode.value
+  const sourceDraftSeq = draftSeq.value
   const done = isFormRenderer(r)
-    ? saveFields((payload ?? {}) as Record<string, unknown>)
+    ? actionPayload
+      ? runAction('save', { ...actionPayload, fields: values })
+      : saveFields((values ?? {}) as Record<string, unknown>)
     : r && rendererReadsNodeSchema(r)
       ? // 市场这类选择器页：候选在 `schema`，保存载荷是用户选中的项；写回当前
         // 目录由 `write` 按草稿规则完成（无需读正文，见 useVdfs.write）
-      write(payload as Record<string, unknown>)
+      write(values as Record<string, unknown>)
       : r && rendererPayloadIsText(r)
         ? // 外观面板：载荷已是偏好配置的 JSON 文本，原样写回
-        write(String(payload ?? ''))
+        write(String(values ?? ''))
         : saveText()
   // 保存成功后 renderer 重新读入同一节点，身份门闩不会重跑预填 ⇒ 表单基线仍停在旧值，
   // dirty 会误留。显式把新值树立为基线，dirty 归零，避免保存后又弹「放弃修改」。
   void done.then((ok) => {
-    if (ok) {
-      rendererRef.value?.markSaved?.()
-      detailDirty.value = false
-    }
+    if (!ok || !sourceNode) return
+    const current = selectedNode.value
+    const sameSelection = isVdfsDraft(sourceNode)
+      ? current === sourceNode && draftSeq.value === sourceDraftSeq
+      : current?.path === sourceNode.path
+    if (!sameSelection) return
+    rendererRef.value?.markSaved?.()
+    detailDirty.value = false
   })
 }
 
@@ -938,17 +947,11 @@ function cancelDelete() {
   deleteTarget.value = null
 }
 
-/**
- * 节点动作（如「测试连接」「导出」「导入整包」）：标识由详情定义声明、由
- * provider 解释，控件只负责转发并呈现结果。
- *
- * `file` 只在动作声明了 `pack` 时带上（渲染器取到本地文件后上抛）——载荷怎么
- * 编码是机制层的事，控件把它交给 `runPackAction`。于是「导入」（取文件）与
- * 「导出」（给文件）在控件这一层恰是一对逆操作，两边都不认识对方的动作名。
- */
-function onAction(id: string, file?: File) {
-  if (file) void runPackAction(id, file)
-  else void runAction(id)
+/** 转发动作标识、声明载荷与可选文件；文件编码归 useVdfs。 */
+function onAction(id: string, payload?: unknown, file?: File) {
+  if (file) void runPackAction(id, file, payload)
+  else if (payload === undefined) void runAction(id)
+  else void runAction(id, payload)
 }
 
 /**

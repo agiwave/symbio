@@ -467,7 +467,12 @@ pub fn model_detail_definition() -> DetailDefinition {
                     },
                     DetailField {
                         placeholder: Some("输入 API Key".into()),
-                        ..field("api_key", "API Key", "保存在本机配置文件中", "password")
+                        ..field(
+                            "api_key",
+                            "API Key",
+                            "留空保留现有密钥；新密钥只保存在本机配置文件中",
+                            "password"
+                        )
                     },
                     DetailField {
                         default: Some(serde_json::json!(true)),
@@ -597,11 +602,6 @@ pub fn model_detail_definition() -> DetailDefinition {
                 when: Some(DetailCondition {
                     key: COND_CAP_TEST_CONNECTION.into(),
                     equals: Some(serde_json::json!(true)),
-                    ..Default::default()
-                }),
-                disabled_when: Some(DetailCondition {
-                    key: "is_existing".into(),
-                    equals: Some(serde_json::json!(false)),
                     ..Default::default()
                 }),
                 busy_label: Some("校验中…".into()),

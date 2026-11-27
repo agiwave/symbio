@@ -4,6 +4,7 @@ use std::sync::{Arc, Mutex};
 use async_trait::async_trait;
 use serde_json::json;
 use symbio_platform::kernel::plugin::{PluginFrame, PluginMessageWire};
+use symbio_plugin_api::VdfsCaller;
 
 use super::protocol::{read_line, write_line, WorkerLine, MAX_LINE_BYTES};
 use super::*;
@@ -25,6 +26,45 @@ fn allocate(temp: &std::path::Path, tag: u8) -> WorkerId {
 
 fn request(id: &str, text: &str) -> InboxRequest {
     InboxRequest::new(id, json!({ "text": text }), json!({}), None).expect("request")
+}
+
+#[test]
+fn inbox_request_preserves_caller_and_defaults_legacy_records_to_model() {
+    let temp = tempfile::tempdir().expect("tempdir");
+    let inbox = DurableInbox::new("session-1", temp.path()).expect("inbox");
+    inbox
+        .enqueue(request("caller-request", "hello").with_caller(VdfsCaller::Manager))
+        .expect("enqueue");
+    let recovered = inbox.recover().expect("recover");
+    assert_eq!(recovered.pending.len(), 1);
+    assert_eq!(recovered.pending[0].request().caller(), VdfsCaller::Manager);
+
+    let mut legacy = serde_json::to_value(request("legacy-request", "hello")).expect("request");
+    legacy
+        .as_object_mut()
+        .expect("request object")
+        .remove("caller");
+    let legacy: InboxRequest = serde_json::from_value(legacy).expect("legacy request");
+    assert_eq!(legacy.caller(), VdfsCaller::Model);
+}
+
+#[test]
+fn worker_request_frame_preserves_trusted_caller() {
+    let line = WorkerLine::Request {
+        id: RequestId::parse("caller-frame").expect("id"),
+        worker: worker(1, 1),
+        message: PluginMessageWire {
+            metadata: json!({ "path": "vdfs/write" }),
+            payload: json!({}),
+        },
+        caller: VdfsCaller::Model,
+    };
+    let encoded = serde_json::to_string(&line).expect("encode");
+    let decoded: WorkerLine = serde_json::from_str(&encoded).expect("decode");
+    let WorkerLine::Request { caller, .. } = decoded else {
+        panic!("expected request frame");
+    };
+    assert_eq!(caller, VdfsCaller::Model);
 }
 
 #[test]
@@ -70,7 +110,7 @@ fn fenced_frames_reject_old_epoch_build_and_session() {
 }
 
 #[test]
-fn epoch_registry_persists_monotonic_epochs_and_excludes_concurrent_allocators() {
+fn epoch_registry_persists_monotonic_epochs_and_serializes_allocators() {
     let temp = tempfile::tempdir().expect("tempdir");
     let registry = EpochRegistry::new("session-1", temp.path()).expect("registry");
     let first = registry.allocate(build(1)).expect("first epoch");
@@ -82,11 +122,23 @@ fn epoch_registry_persists_monotonic_epochs_and_excludes_concurrent_allocators()
     assert_eq!(reopened.current().expect("current"), Some(second));
 
     let worker_dir = temp.path().join("worker");
-    let _lock = try_exclusive_lock(&worker_dir.join("epoch.lock")).expect("hold epoch lock");
+    let lock = try_exclusive_lock(&worker_dir.join("epoch.lock")).expect("hold epoch lock");
+    let session_dir = temp.path().to_path_buf();
+    let (tx, rx) = std::sync::mpsc::channel();
+    let allocator = std::thread::spawn(move || {
+        let result = EpochRegistry::new("session-1", session_dir)
+            .expect("registry")
+            .allocate(build(1));
+        tx.send(result).expect("allocation result");
+    });
     assert!(matches!(
-        registry.allocate(build(1)),
-        Err(WorkerError::Busy)
+        rx.recv_timeout(std::time::Duration::from_millis(100)),
+        Err(std::sync::mpsc::RecvTimeoutError::Timeout)
     ));
+    drop(lock);
+    allocator.join().expect("allocator");
+    let third = rx.recv().expect("allocation result").expect("third epoch");
+    assert_eq!(third.epoch().value(), 3);
 }
 
 #[test]
@@ -444,11 +496,11 @@ async fn ready_holds_the_worker_lease_without_blocking_inbox_or_epoch_checks() {
     inbox.complete(&first_worker, item.id()).expect("complete");
     assert!(matches!(
         recovery_probe.recover(&first_worker).await,
-        Err(WorkerError::Busy)
+        Err(WorkerError::Busy { path }) if path == lock_path
     ));
     assert!(matches!(
         registry.allocate(build(1)),
-        Err(WorkerError::Busy)
+        Err(WorkerError::Busy { path }) if path == temp.path().join("worker/worker.lock")
     ));
     drop(recovery_probe);
     drop(first);
@@ -624,6 +676,7 @@ async fn subagent_and_event_lines_round_trip_over_stdio() {
                 metadata: json!({ "path": "vdfs/write", "session_id": "session-2" }),
                 payload: json!({ "path": "session/session-2/inbox", "text": "hello" }),
             },
+            caller: VdfsCaller::Model,
         },
         WorkerLine::SubagentStarted {
             id: RequestId::parse("sub1").expect("id"),
@@ -682,7 +735,9 @@ impl WorkerRecovery for WalLockRecovery {
             .truncate(false)
             .open(&self.lock_path)
             .map_err(|error| io_error("打开测试 WAL 锁", &self.lock_path, error))?;
-        file.try_lock().map_err(|_| WorkerError::Busy)?;
+        file.try_lock().map_err(|_| WorkerError::Busy {
+            path: self.lock_path.clone(),
+        })?;
         *self.held.lock().expect("held lock") = Some(file);
         Ok(RecoveryReport::default())
     }

@@ -32,6 +32,7 @@ fn workspace_fs() -> PhysicalFs {
             workspace_only: true,
             allowed_roots: Vec::new(),
             forbidden_paths: Vec::new(),
+            ..Default::default()
         },
     }
 }
@@ -229,6 +230,89 @@ async fn unix_target_symlink_is_rejected_for_all_mutations() {
         .await
         .is_err());
     assert_eq!(std::fs::read_to_string(&outside).unwrap(), "keep");
+}
+
+#[cfg(windows)]
+#[tokio::test]
+async fn windows_ads_aliases_are_rejected_before_canonicalization() {
+    use std::io::Write as _;
+
+    let tmp = tempfile::tempdir().unwrap();
+    let base = tmp.path().join("workspace");
+    std::fs::create_dir_all(&base).unwrap();
+    let config = base.join("PLUGIN.yml");
+    std::fs::write(&config, "base config").unwrap();
+    let stream = base.join("PLUGIN.yml:secret");
+    std::fs::OpenOptions::new()
+        .write(true)
+        .create_new(true)
+        .open(&stream)
+        .unwrap()
+        .write_all(b"stream config")
+        .unwrap();
+    assert_eq!(std::fs::read_to_string(&stream).unwrap(), "stream config");
+    assert_eq!(
+        std::fs::read_to_string(base.join("PLUGIN.yml::$DATA")).unwrap(),
+        "base config"
+    );
+
+    let fs = workspace_fs();
+    let ctx = ctx_in(&base);
+    for addr in ["PLUGIN.yml:secret", "PLUGIN.yml::$DATA"] {
+        assert!(matches!(
+            fs.dispatch(&ctx, addr, VdfsRequest::Read).await,
+            Err(VdfsError::Forbidden(_))
+        ));
+    }
+    assert_eq!(std::fs::read_to_string(&config).unwrap(), "base config");
+}
+
+#[tokio::test]
+async fn protected_plugin_storage_rejects_direct_physical_access() {
+    let tmp = tempfile::tempdir().unwrap();
+    let base = tmp.path().join("workspace");
+    let protected = base.join("plugins");
+    std::fs::create_dir_all(protected.join("model/p1")).unwrap();
+    let manifest = protected.join("model/p1/provider.json");
+    std::fs::write(&manifest, r#"{"api_key":"secret"}"#).unwrap();
+    std::fs::create_dir_all(base.join("plugins-other")).unwrap();
+    std::fs::write(base.join("plugins-other/readme.txt"), "keep").unwrap();
+    let fs = PhysicalFs::with_protected_roots(vec![protected.clone()]);
+    let ctx = ctx_in(&base);
+
+    for req in [
+        VdfsRequest::Read,
+        VdfsRequest::List {},
+        VdfsRequest::Stat,
+        VdfsRequest::Write {
+            content: VdfsContent::text("changed"),
+        },
+        VdfsRequest::Delete { recursive: false },
+        VdfsRequest::Mkdir,
+    ] {
+        assert!(matches!(
+            fs.dispatch(&ctx, "plugins/model/p1/provider.json", req)
+                .await,
+            Err(VdfsError::Forbidden(_))
+        ));
+    }
+    assert!(matches!(
+        fs.dispatch(&ctx, "plugins/model/p1/new.json", VdfsRequest::Read)
+            .await,
+        Err(VdfsError::Forbidden(_))
+    ));
+    assert_eq!(
+        std::fs::read_to_string(&manifest).unwrap(),
+        r#"{"api_key":"secret"}"#
+    );
+    let VdfsResponse::Read(content) = fs
+        .dispatch(&ctx, "plugins-other/readme.txt", VdfsRequest::Read)
+        .await
+        .unwrap()
+    else {
+        panic!("应为 Read 响应");
+    };
+    assert_eq!(content.text.as_deref(), Some("keep"));
 }
 
 /// Windows：junction 父目录必须按重解析点拒绝，不能靠 canonicalize 跟随。

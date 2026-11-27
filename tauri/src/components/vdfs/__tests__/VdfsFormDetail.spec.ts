@@ -147,6 +147,32 @@ describe('VdfsFormDetail 传参基线（通道适配 + 直通）', () => {
     expect(w.emitted('dirty-change')).toContainEqual([true])
   })
 
+  it('保存字段与动作载荷分别原样上抛，测试草稿走 action 通道', async () => {
+    const w = mount(VdfsFormDetail, {
+      props: { node: formNode({}), data: {} },
+    })
+    const form = w.findComponent(DetailForm)
+    form.vm.$emit('save', { name: '离线' }, { skip_validation: true })
+    form.vm.$emit('test', { model: '草稿模型' })
+    expect(w.emitted('save')).toEqual([[{ name: '离线' }, { skip_validation: true }]])
+    expect(w.emitted('action')).toEqual([['test', { model: '草稿模型' }]])
+  })
+
+  it('动作忙态也禁用保存，避免带 payload 的保存失去表单忙态', async () => {
+    const w = mount(VdfsFormDetail, {
+      props: {
+        node: formNode({ actions: [{ id: 'save', label: '保存', style: 'primary' }] }),
+        data: {},
+      },
+    })
+    const button = w.find<HTMLButtonElement>('button[title="保存"]')
+    expect(button.element.disabled).toBe(false)
+
+    await w.setProps({ testing: true })
+
+    expect(button.element.disabled).toBe(true)
+  })
+
   it('set-default 经现有 action 通道转发，testing 忙态禁用动作', async () => {
     const w = mount(VdfsFormDetail, {
       props: {
@@ -177,6 +203,26 @@ describe('VdfsFormDetail 传参基线（通道适配 + 直通）', () => {
     node.path = ''
     const w = mount(VdfsFormDetail, { props: { node, data: null } })
     expect(w.findComponent(DetailForm).props('definition').actions?.map((a) => a.id)).toEqual(['save'])
+  })
+
+  it('草稿保留测试连接，并上交当前字段而非已保存值', async () => {
+    const node = formNode({
+      sections: [{ fields: [{ key: 'model', label: '模型', widget: 'text' }] }],
+      actions: [
+        { id: 'test', label: '测试连接', style: 'secondary' },
+        { id: 'save', label: '保存', style: 'primary' },
+      ],
+    })
+    node.path = ''
+    const w = mount(VdfsFormDetail, { props: { node, data: null } })
+    await w.find<HTMLInputElement>('input[aria-label="模型"]').setValue('draft-model')
+    const button = w.find<HTMLButtonElement>('button[title="测试连接"]')
+    expect(button.element.disabled).toBe(false)
+
+    await button.trigger('click')
+
+    expect(w.emitted('action')).toEqual([['test', { model: 'draft-model' }]])
+    expect(w.emitted('save')).toBeUndefined()
   })
 
   it('表格字段错误展示行号与中文列名，未知机器 key 原样保留', () => {

@@ -49,12 +49,12 @@
       :mechanism-busy="mechanismBusy"
       :saving="saving"
       :testing="testing"
-      @save="(v) => $emit('save', v)"
+      @save="(v, payload) => $emit('save', v, payload)"
       @delete="$emit('delete')"
       @set-default="$emit('action', 'set-default')"
       @open-container="$emit('browse')"
-      @test="$emit('action', 'test')"
-      @action="(id, file) => $emit('action', id, file)"
+      @test="(draft) => $emit('action', 'test', draft)"
+      @action="(id, payload, file) => $emit('action', id, payload, file)"
       @dirty-change="(dirty) => $emit('dirty-change', dirty)"
     />
   </div>
@@ -86,16 +86,10 @@ const props = withDefaults(defineProps<VdfsRendererProps>(), {
 })
 
 defineEmits<{
-  (e: 'save', values: Record<string, unknown>): void
+  (e: 'save', values: Record<string, unknown>, payload?: Record<string, unknown>): void
   (e: 'delete'): void
-  /**
-   * 执行**节点动作**（详情定义声明的动作，如「测试连接」）。
-   * 本组件只把动作标识上抛——执行与结果呈现归页面层（`vdfs/action`）。
-   *
-   * `file` 只在动作声明了 `pack` 时带上（DetailForm 取到本地文件后原样交给
-   * 本层，本层再原样上抛）：载荷编码是机制层的事，中间两层都不认识它。
-   */
-  (e: 'action', id: string, file?: File): void
+  /** 转发节点动作标识、声明载荷与可选文件；执行与结果归页面层。 */
+  (e: 'action', id: string, payload?: unknown, file?: File): void
   /**
    * 进入节点内部（容器寻址：`<id>/<子类别>`）。由**详情定义**声明
    * （`open-container` 动作）触发——是否有内部结构是 provider 的知识，
@@ -122,16 +116,9 @@ function fieldLabelOf(key: string): string {
   return key
 }
 
-/**
- * 草稿节点（机制「新建」态）——判据与页面同源（`schemas/vdfs.isVdfsDraft`）。
- *
- * 草稿态**不成立**的定义动作：它们都以「这个资源已经存在」为前提。保存本身
- * （`save`）当然保留——草稿的保存就是「新建」。其余动作点下去只会打到一个
- * 不存在的地址上：删除没有目标、测试连接没有配置、浏览内部没有内部、导出没有内容。
- */
+/** 草稿只禁用依赖已存在资源的动作；测试连接可验证当前字段。 */
 const DRAFT_UNAVAILABLE_ACTIONS = new Set<string>([
   'delete',
-  VDFS_ACTION_TEST,
   VDFS_ACTION_EXPORT,
   'open-container',
   'copy',

@@ -71,11 +71,16 @@ const CONTROL_PREFIXES: &[&str] = &[
     "heartbeat/",
 ];
 
+pub(crate) fn is_worker_session_route(path: &str) -> bool {
+    path.starts_with("session/") && !CONTROL_PLANE_SESSION_READS.contains(&path)
+}
+
 #[derive(Debug)]
 enum Outgoing {
     Request {
         id: RequestId,
         message: PluginMessageWire,
+        caller: VdfsCaller,
     },
     Event {
         frame: PluginFrame,
@@ -225,6 +230,7 @@ impl WorkerSupervisor {
     pub async fn invoke(
         &self,
         message: PluginMessageWire,
+        caller: VdfsCaller,
     ) -> Result<Option<PluginMessageWire>, String> {
         let routing = self.inner.routing.read().await;
         ensure_running(&self.inner)?;
@@ -238,7 +244,7 @@ impl WorkerSupervisor {
             .ok_or_else(|| format!("会话 {session_id} 目录不存在"))?;
         let worker = get_or_spawn_at(&self.inner, &session_id, session_dir.clone()).await?;
         let id = self.next_request_id();
-        let reply_rx = deliver(&session_id, session_dir, &worker, id, message).await?;
+        let reply_rx = deliver(&session_id, session_dir, &worker, id, message, caller).await?;
         drop(routing);
         let result = reply_rx.await.map_err(|_| "worker 已退出".to_string())??;
         Ok(Some(PluginMessageWire {
@@ -251,6 +257,7 @@ impl WorkerSupervisor {
         &self,
         message: PluginMessageWire,
         root: &Arc<dyn Plugin>,
+        caller: VdfsCaller,
     ) -> Result<Option<PluginPayload>, String> {
         let route = message
             .metadata
@@ -266,11 +273,18 @@ impl WorkerSupervisor {
             .map_err(|error| error.to_string())?
             .ok_or_else(|| "删除请求缺少会话归属".to_string())?;
         self.stop_session_tree(session_id).await;
+        let homedir = self
+            .inner
+            .homedir
+            .read()
+            .unwrap_or_else(|poisoned| poisoned.into_inner())
+            .clone();
         let context = Arc::new(PluginSimpleRequest::from_parts(
             message.payload,
             message.metadata.as_object(),
         ));
-        context.set(VDFS_CALLER, VdfsCaller::Manager);
+        crate::runtime::attach_vdfs_protected_roots(context.as_ref(), &homedir);
+        context.set(VDFS_CALLER, caller);
         root.clone()
             .route(context)
             .await
@@ -452,7 +466,7 @@ fn session_for_message<'a>(
         .get(PATH.name())
         .and_then(Value::as_str)
         .unwrap_or_default();
-    if !route.starts_with("session/") {
+    if !is_worker_session_route(route) {
         return Ok(None);
     }
     let session_id =
@@ -581,6 +595,7 @@ async fn deliver(
     worker: &Arc<WorkerState>,
     id: RequestId,
     message: PluginMessageWire,
+    caller: VdfsCaller,
 ) -> Result<oneshot::Receiver<Result<Value, String>>, String> {
     let inbox = DurableInbox::new(session_id, session_dir).map_err(|error| error.to_string())?;
     inbox
@@ -595,7 +610,8 @@ async fn deliver(
                     .and_then(Value::as_str)
                     .map(str::to_string),
             )
-            .map_err(|error| error.to_string())?,
+            .map_err(|error| error.to_string())?
+            .with_caller(caller),
         )
         .map_err(|error| error.to_string())?;
     let (reply_tx, reply_rx) = oneshot::channel();
@@ -606,6 +622,7 @@ async fn deliver(
         Outgoing::Request {
             id: cleanup.id.clone(),
             message,
+            caller,
         },
     )
     .await?;
@@ -648,6 +665,7 @@ async fn start_subagent(
     parent: &WorkerId,
     child_session_id: &str,
     message: PluginMessageWire,
+    caller: VdfsCaller,
     cancel: &CancellationToken,
     dispatched: &AtomicBool,
 ) -> Result<(), String> {
@@ -724,7 +742,7 @@ async fn start_subagent(
             inner.serial.fetch_add(1, Ordering::Relaxed),
         ],
     );
-    let reply_rx = deliver(child_session_id, child_dir, &handle, id, message).await?;
+    let reply_rx = deliver(child_session_id, child_dir, &handle, id, message, caller).await?;
     dispatched.store(true, Ordering::SeqCst);
     drop(routing);
     let _ = tokio::select! {
@@ -771,7 +789,16 @@ async fn abort_started_subagent(inner: &SupervisorInner, child_session_id: &str,
         metadata: json!({ "path": ROUTE_VDFS_ACTION, "session_id": child_session_id }),
         payload: json!({ "path": prefix, "action": "abort" }),
     };
-    let Ok(reply_rx) = deliver(child_session_id, session_dir, &worker, id, message).await else {
+    let Ok(reply_rx) = deliver(
+        child_session_id,
+        session_dir,
+        &worker,
+        id,
+        message,
+        VdfsCaller::Model,
+    )
+    .await
+    else {
         return;
     };
     match tokio::time::timeout(WORKER_SHUTDOWN_TIMEOUT, reply_rx).await {
@@ -941,10 +968,15 @@ async fn spawn_worker(
                 },
             };
             let line = match out {
-                Outgoing::Request { id, message } => WorkerLine::Request {
+                Outgoing::Request {
+                    id,
+                    message,
+                    caller,
+                } => WorkerLine::Request {
                     id,
                     worker: writer_worker.clone(),
                     message,
+                    caller,
                 },
                 Outgoing::Event { frame } => WorkerLine::DeliverEvent {
                     frame: mark_relayed(frame),
@@ -1093,7 +1125,12 @@ async fn read_worker(reader: WorkerReader, stop: CancellationToken) {
                     WorkerLine::Event { frame } => {
                         route_worker_event(&inner, &state, &expected, frame).await;
                     }
-                    WorkerLine::StartSubagent { id, child_session_id, message } => {
+                    WorkerLine::StartSubagent {
+                        id,
+                        child_session_id,
+                        message,
+                        caller,
+                    } => {
                         if let Err(error) = ensure_running(&inner) {
                             if let Err(error) = send_outgoing(
                                 &state,
@@ -1124,6 +1161,7 @@ async fn read_worker(reader: WorkerReader, stop: CancellationToken) {
                                 &parent,
                                 &child_session_id,
                                 message,
+                                caller,
                                 &cancel,
                                 &dispatched,
                             )

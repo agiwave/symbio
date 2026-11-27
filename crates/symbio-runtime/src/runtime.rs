@@ -1,25 +1,83 @@
-use std::path::PathBuf;
+use std::path::{Path, PathBuf};
 use std::sync::{Arc, OnceLock, Weak};
 
 use async_trait::async_trait;
 use serde_json::{json, Value};
 use symbio_http::{clear_invoke_dispatcher, set_invoke_dispatcher, InvokeDispatcher};
 use symbio_platform::kernel::plugin::{
-    Plugin, PluginError, PluginInvokeRequestExt, PluginMessageWire, PluginPayload,
-    PluginPayloadWire, PluginSimpleRequest, PluginStopReason,
+    Plugin, PluginError, PluginInvokeRequest, PluginInvokeRequestExt, PluginMessageWire,
+    PluginPayload, PluginPayloadWire, PluginSimpleRequest, PluginStopReason,
 };
 use symbio_platform::sdk::keys::{PATH, TRACE_ID};
 use symbio_plugin_api::routes::{ROUTE_HOME_GET_HOMEDIR, ROUTE_HOME_RELOAD};
-use symbio_plugin_api::{SymbioKey, VdfsCaller, VDFS_CALLER};
+use symbio_plugin_api::{SymbioKey, VdfsCaller, PLUGIN_FILE, VDFS_CALLER};
 use tracing::{debug, error};
 
 use crate::root_factory::RootFactory;
-use crate::worker::WorkerSupervisor;
+use crate::worker::{is_worker_session_route, WorkerSupervisor};
 
 /// One runtime tree shared by embedded clients and the standalone Server.
 pub struct RuntimeHost {
     root: Arc<dyn Plugin>,
     supervisor: Option<Arc<WorkerSupervisor>>,
+    homedir: Arc<tokio::sync::RwLock<PathBuf>>,
+}
+
+const HOST_VDFS_PROTECTED_ROOTS: &str = "vdfs_protected_roots";
+
+fn fallback_homedir() -> PathBuf {
+    std::env::var_os("SYMBIO_HOMEDIR")
+        .map(PathBuf::from)
+        .or_else(|| dirs::home_dir().map(|home| home.join(".symbio")))
+        .unwrap_or_else(|| PathBuf::from(".symbio"))
+}
+
+fn vdfs_protected_roots(homedir: &Path) -> Vec<String> {
+    let mut roots = Vec::new();
+    let home_manifest = homedir.join(PLUGIN_FILE);
+    if home_manifest.is_file() {
+        roots.push(home_manifest);
+    }
+    if let Ok(entries) = std::fs::read_dir(homedir) {
+        for entry in entries.flatten() {
+            let path = entry.path();
+            if !path.is_dir() {
+                continue;
+            }
+            let manifest = path.join(PLUGIN_FILE);
+            if !manifest.is_file() {
+                continue;
+            }
+            if path.file_name().is_some_and(|name| name == "work") {
+                roots.push(manifest);
+            } else {
+                roots.push(path);
+            }
+        }
+    }
+    let worker = homedir.join("worker");
+    if worker.is_dir() {
+        roots.push(worker);
+    }
+    roots.sort();
+    roots.dedup();
+    roots
+        .into_iter()
+        .map(|path| path.to_string_lossy().into_owned())
+        .collect()
+}
+
+pub(crate) fn attach_vdfs_protected_roots(ctx: &dyn PluginInvokeRequest, homedir: &Path) {
+    ctx.set_raw(
+        HOST_VDFS_PROTECTED_ROOTS,
+        Arc::new(vdfs_protected_roots(homedir)),
+    );
+}
+
+pub(crate) fn attach_vdfs_protected_roots_from_env(ctx: &dyn PluginInvokeRequest) {
+    if let Some(homedir) = std::env::var_os("SYMBIO_HOMEDIR") {
+        attach_vdfs_protected_roots(ctx, Path::new(&homedir));
+    }
 }
 
 struct RuntimeDispatcher {
@@ -40,11 +98,23 @@ impl InvokeDispatcher for RuntimeDispatcher {
     async fn invoke_session(
         &self,
         message: PluginMessageWire,
+        caller: VdfsCaller,
     ) -> Option<Result<PluginPayload, String>> {
         let Some(host) = self.host.get().and_then(Weak::upgrade) else {
             return Some(Err("运行时尚未就绪或已停止".to_string()));
         };
-        host.route_session_invoke(message).await
+        let path = message
+            .metadata
+            .get("path")
+            .and_then(Value::as_str)
+            .unwrap_or_default();
+        if caller == VdfsCaller::Model
+            && !path.starts_with("vdfs/")
+            && !is_worker_session_route(path)
+        {
+            return None;
+        }
+        Some(host.route_invoke(message, caller).await)
     }
 }
 
@@ -64,6 +134,7 @@ impl RuntimeHost {
         let bootstrap = Self {
             root,
             supervisor: None,
+            homedir: Arc::new(tokio::sync::RwLock::new(fallback_homedir())),
         };
         let homedir = bootstrap
             .homedir()
@@ -75,17 +146,14 @@ impl RuntimeHost {
                     .map(PathBuf::from)
             })
             .filter(|path| path.is_absolute())
-            .unwrap_or_else(|| {
-                std::env::var_os("SYMBIO_HOMEDIR")
-                    .map(PathBuf::from)
-                    .or_else(|| dirs::home_dir().map(|home| home.join(".symbio")))
-                    .unwrap_or_else(|| PathBuf::from(".symbio"))
-            });
-        let supervisor =
-            WorkerSupervisor::new(homedir, root_factory).map_err(|error| error.to_string())?;
+            .unwrap_or_else(fallback_homedir);
+        std::env::set_var("SYMBIO_HOMEDIR", &homedir);
+        let supervisor = WorkerSupervisor::new(homedir.clone(), root_factory)
+            .map_err(|error| error.to_string())?;
         let host = Arc::new(Self {
             root: bootstrap.root,
             supervisor: Some(Arc::new(supervisor)),
+            homedir: Arc::new(tokio::sync::RwLock::new(homedir)),
         });
         let _ = dispatcher.host.set(Arc::downgrade(&host));
         Ok(host)
@@ -95,6 +163,7 @@ impl RuntimeHost {
         Self {
             root,
             supervisor: None,
+            homedir: Arc::new(tokio::sync::RwLock::new(fallback_homedir())),
         }
     }
 
@@ -103,18 +172,22 @@ impl RuntimeHost {
     }
 
     pub async fn invoke(&self, message: PluginMessageWire) -> Result<PluginPayload, String> {
-        self.route_invoke(message).await
+        self.route_invoke(message, VdfsCaller::Manager).await
     }
 
-    async fn route_invoke(&self, message: PluginMessageWire) -> Result<PluginPayload, String> {
+    async fn route_invoke(
+        &self,
+        message: PluginMessageWire,
+        caller: VdfsCaller,
+    ) -> Result<PluginPayload, String> {
         if let Some(supervisor) = &self.supervisor {
             if let Some(payload) = supervisor
-                .invoke_delete(message.clone(), &self.root)
+                .invoke_delete(message.clone(), &self.root, caller)
                 .await?
             {
                 return Ok(payload);
             }
-            if let Some(reply) = supervisor.invoke(message.clone()).await? {
+            if let Some(reply) = supervisor.invoke(message.clone(), caller).await? {
                 return worker_reply_to_payload(reply);
             }
         }
@@ -133,7 +206,8 @@ impl RuntimeHost {
             message.payload,
             message.metadata.as_object(),
         ));
-        context.set(VDFS_CALLER, VdfsCaller::Manager);
+        attach_vdfs_protected_roots(context.as_ref(), &self.homedir.read().await);
+        context.set(VDFS_CALLER, caller);
         let is_reload = path == ROUTE_HOME_RELOAD;
         debug!(trace_id = %trace_id, path = %path, "RuntimeHost route");
         let result = self.root.clone().route(context).await.map_err(|e| {
@@ -141,10 +215,13 @@ impl RuntimeHost {
             e.to_string()
         });
         if is_reload && result.is_ok() {
-            if let Some(supervisor) = &self.supervisor {
-                if let Ok(info) = self.control(ROUTE_HOME_GET_HOMEDIR).await {
-                    if let Some(home) = info.get("homedir").and_then(Value::as_str) {
-                        supervisor.set_homedir(PathBuf::from(home)).await;
+            if let Ok(info) = self.control(ROUTE_HOME_GET_HOMEDIR).await {
+                if let Some(home) = info.get("homedir").and_then(Value::as_str) {
+                    let homedir = PathBuf::from(home);
+                    *self.homedir.write().await = homedir.clone();
+                    std::env::set_var("SYMBIO_HOMEDIR", &homedir);
+                    if let Some(supervisor) = &self.supervisor {
+                        supervisor.set_homedir(homedir).await;
                     }
                 }
             }
@@ -152,25 +229,9 @@ impl RuntimeHost {
         result
     }
 
-    async fn route_session_invoke(
-        &self,
-        message: PluginMessageWire,
-    ) -> Option<Result<PluginPayload, String>> {
-        let supervisor = self.supervisor.as_ref()?;
-        match supervisor.invoke_delete(message.clone(), &self.root).await {
-            Ok(Some(payload)) => return Some(Ok(payload)),
-            Ok(None) => {}
-            Err(error) => return Some(Err(error.to_string())),
-        }
-        match supervisor.invoke(message.clone()).await {
-            Ok(Some(reply)) => Some(worker_reply_to_payload(reply)),
-            Ok(None) => None,
-            Err(error) => Some(Err(error.to_string())),
-        }
-    }
-
     async fn control(&self, path: &str) -> Result<Value, String> {
         let context = Arc::new(PluginSimpleRequest::new(None, None));
+        attach_vdfs_protected_roots(context.as_ref(), &self.homedir.read().await);
         context.set(PATH, path.to_string());
         context.set(VDFS_CALLER, VdfsCaller::Manager);
         context
@@ -189,6 +250,7 @@ impl RuntimeHost {
         &self,
     ) -> Result<symbio_platform::kernel::plugin::PluginChannel, String> {
         let context = Arc::new(PluginSimpleRequest::new(None, None));
+        attach_vdfs_protected_roots(context.as_ref(), &self.homedir.read().await);
         context.set(VDFS_CALLER, VdfsCaller::Manager);
         context.set(
             symbio_plugin_api::PATH,
@@ -222,3 +284,7 @@ impl RuntimeHost {
         result
     }
 }
+
+#[cfg(test)]
+#[path = "runtime.test.rs"]
+mod tests;

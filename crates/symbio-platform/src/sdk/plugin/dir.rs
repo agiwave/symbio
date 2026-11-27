@@ -741,7 +741,7 @@ impl PluginConfigFile {
         encode(&value)
     }
 
-    /// 写：**校验 → 落内存 → 落自己的文件 → 广播**（插件写配置的唯一路径）
+    /// 写：**校验 → 原子落自己的文件 → 发布内存 → 广播**（插件写配置的唯一路径）
     ///
     /// 需要副作用的插件（如网关重启监听）在本方法返回后再做——那件事只有插件
     /// 自己知道，因此不引入任何回调抽象。
@@ -756,10 +756,12 @@ impl PluginConfigFile {
         let value = self.decode(content)?;
         let next: C = serde_json::from_value(value.clone())
             .map_err(|e| VdfsError::invalid(format!("配置结构与当前版本不符：{e}")))?;
-        *slot.write().await = next;
+        let mut slot = slot.write().await;
         self.dir
             .save(&value)
             .map_err(|e| VdfsError::internal(format!("配置落盘失败：{e}")))?;
+        *slot = next;
+        drop(slot);
         self.announce();
         Ok(VdfsWriteResponse {
             // 具名写：写的就是本插件那份配置文档，名字是调用方给的
@@ -819,7 +821,7 @@ impl PluginConfigFile {
 /// ```
 ///
 /// 需要副作用的插件（网关 / 本地工具）**额外**覆写 [`Self::after_write`]：
-/// `apply` 已完成「校验 → 落内存 → 落盘 → 广播」，副作用在它之后跑，
+/// `apply` 已完成「校验 → 原子落盘 → 发布内存 → 广播」，副作用在它之后跑，
 /// 因此「热更没生效」不可能来自顺序问题。
 ///
 /// ## 边界（有意不做的事）

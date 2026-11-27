@@ -4,7 +4,9 @@ use std::path::PathBuf;
 use serde::{Deserialize, Serialize};
 
 use super::id::{validate_session_id, BuildId, Epoch, WorkerId};
-use super::{read_optional_json, try_exclusive_lock, write_json_atomic, WorkerError};
+use super::{
+    exclusive_lock, read_optional_json, try_exclusive_lock, write_json_atomic, WorkerError,
+};
 
 const EPOCH_FILE: &str = "epoch.json";
 const EPOCH_LOCK: &str = "epoch.lock";
@@ -85,7 +87,8 @@ impl EpochRegistry {
     }
 
     fn lock(&self) -> Result<File, WorkerError> {
-        try_exclusive_lock(&self.worker_dir().join(EPOCH_LOCK))
+        // epoch 校验必须串行等待；Busy 只表示跨 epoch 的 worker 租约仍被持有。
+        exclusive_lock(&self.worker_dir().join(EPOCH_LOCK))
     }
 
     fn current_unlocked(&self) -> Result<Option<WorkerId>, WorkerError> {

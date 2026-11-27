@@ -30,6 +30,8 @@ fn definition_covers_model_form_surface() {
     // 选该预设新建时应自动校正到能测通的协议，而非 anthropic_messages。
     let lm = spec.presets.iter().find(|p| p.value == "lmstudio").unwrap();
     assert_eq!(lm.set_always["api_protocol"], "openai_chat");
+    let test = def.actions.iter().find(|a| a.id == "test").unwrap();
+    assert!(test.disabled_when.is_none());
     // 动作：test/save/divider/set-default/delete 全齐
     let ids: Vec<&str> = def.actions.iter().map(|a| a.id.as_str()).collect();
     assert!(

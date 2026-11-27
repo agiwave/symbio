@@ -190,6 +190,24 @@ async fn apply_writes_the_plugins_own_file() {
     assert!(text.contains("plugin_provider: demo"), "{text}");
 }
 
+/// 落盘失败不能留下“内存已生效、重启又回退”的半提交。
+#[tokio::test]
+async fn apply_keeps_the_old_state_when_the_file_cannot_be_replaced() {
+    let tmp = tempfile::TempDir::new().unwrap();
+    let f = PluginConfigFile::new(dir_at(tmp.path()), "演示", definition());
+    let slot = RwLock::new(json!({ "port": 1 }));
+    f.dir().save(&json!({ "port": 1 })).unwrap();
+    std::fs::remove_file(f.dir().config_path()).unwrap();
+    std::fs::create_dir(f.dir().config_path()).unwrap();
+
+    assert!(f
+        .apply(&slot, &VdfsContent::text(r#"{"port": 8080}"#))
+        .await
+        .is_err());
+    assert_eq!(*slot.read().await, json!({ "port": 1 }));
+    assert!(f.dir().config_path().is_dir(), "失败不能替换原目标");
+}
+
 // ==================== 身份 ====================
 
 /// 从未落位过的目录（manifest 里没有身份键）→ 身份全空，消费方按目录名兜底

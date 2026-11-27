@@ -123,7 +123,8 @@ define_vdfs_key!(WorkspaceVdfsKey, WORKSPACE_VDFS, "workspace_vdfs_provider");
 define_vdfs_key!(SessionVdfsKey, SESSION_VDFS, "session_vdfs_provider");
 
 /// VDFS 调用主体。只有宿主入口能写入，模型经元数据提供的同名字符串不会通过类型检查。
-#[derive(Debug, Clone, Copy, PartialEq, Eq)]
+#[derive(Debug, Clone, Copy, PartialEq, Eq, serde::Serialize, serde::Deserialize)]
+#[serde(rename_all = "lowercase")]
 pub enum VdfsCaller {
     Manager,
     Model,

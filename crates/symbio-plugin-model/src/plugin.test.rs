@@ -6,6 +6,7 @@
 use super::*;
 use crate::model_providers::ModelPricing;
 use crate::round::ModelUsage;
+use symbio_plugin_api::VdfsChange;
 
 /// 路径末段才是 id：`<根>/model/<id>.model` 与裸 `<id>` 同解
 #[test]
@@ -62,7 +63,7 @@ fn node_carries_presentation_differential() {
     assert_eq!(node_of(&off, None).status, VDFS_STATUS_DISABLED);
 }
 
-/// 清单缺 `id` 时以磁盘段名补全（编辑链路的不变量），已有值原样保留
+/// 清单缺 `id` 时以磁盘段名补全；写入时地址身份覆盖请求中的旧 id
 #[test]
 fn config_of_falls_back_to_the_path_segment() {
     let bare = serde_json::json!({
@@ -84,9 +85,8 @@ fn config_of_falls_back_to_the_path_segment() {
     })
     .to_string();
     assert_eq!(config_of("seg-2", &blank).unwrap().name, "seg-2");
-    // 已有值原样保留
     let full = serde_json::to_string(&sample()).unwrap();
-    assert_eq!(config_of("other", &full).unwrap().id, "openai-1");
+    assert_eq!(config_of("other", &full).unwrap().id, "other");
     assert_eq!(config_of("other", &full).unwrap().name, "我的 OpenAI");
     // 坏清单不是配置：不产出节点（列表宁可少一项）
     assert!(config_of("x", "not json").is_none());
@@ -101,8 +101,8 @@ fn config_of_falls_back_to_the_path_segment() {
         with_id(&sample_value(), "p9")
             .get("id")
             .and_then(|v| v.as_str()),
-        Some("openai-1"),
-        "已有 id 不被路径段覆盖"
+        Some("p9"),
+        "地址身份覆盖请求中的 id"
     );
 }
 
@@ -194,7 +194,7 @@ fn nameless_write_generates_an_id() {
 }
 
 /// `load_from_storage` 的唯一来源是**本插件自己目录**下的条目：
-/// 注册表与内存镜像一次填满，`default_provider_id` 按 `is_default` 标记推定。
+/// 注册表与内存镜像一次填满，显式默认指针来自 PLUGIN.yml，有效默认按启用项回落。
 #[tokio::test]
 async fn load_fills_registry_and_mirror_from_its_own_dir() {
     let tmp = tempfile::tempdir().unwrap();
@@ -203,10 +203,10 @@ async fn load_fills_registry_and_mirror_from_its_own_dir() {
         PluginDir::at(tmp.path().join("model"), "model"),
     );
     let store = plugin.store();
-    let mut marked = sample_value();
-    marked["is_default"] = serde_json::json!(true);
+    let mut stored = sample_value();
+    stored["future_extension"] = json!({ "keep": true });
     store
-        .write_text("openai-1", &serde_json::to_string_pretty(&marked).unwrap())
+        .write_text("openai-1", &serde_json::to_string_pretty(&stored).unwrap())
         .await
         .unwrap();
     // 坏条目：跳过而不是让整批加载失败
@@ -219,7 +219,613 @@ async fn load_fills_registry_and_mirror_from_its_own_dir() {
     assert_eq!(plugin.entries.ids(), vec!["openai-1".to_string()]);
     let providers = plugin.providers.read().await;
     assert_eq!(providers.providers.len(), 1);
-    assert_eq!(providers.default_provider_id.as_deref(), Some("openai-1"));
+    assert!(providers.default_provider_id.is_none());
+    assert_eq!(
+        providers.resolve(None).map(|provider| provider.id.as_str()),
+        Some("openai-1")
+    );
+}
+
+async fn load_storage(plugin: &ModelPlugin) {
+    let ctx: std::sync::Arc<dyn symbio_plugin_api::PluginInvokeRequest> =
+        std::sync::Arc::new(symbio_plugin_api::PluginSimpleRequest::new(None, None));
+    plugin.load_from_storage(&ctx).await;
+}
+
+/// 显式默认指针不会因停用、删除而改写；有效默认与重建后的重启结果一致。
+#[tokio::test]
+async fn default_fallback_is_stable_across_disable_delete_recreate_and_restart() {
+    let tmp = tempfile::tempdir().unwrap();
+    let dir = PluginDir::at(tmp.path().join("model"), "model");
+    dir.save(&ModelConfig {
+        default_provider_id: Some("a-provider".into()),
+    })
+    .unwrap();
+    for id in ["a-provider", "b-provider"] {
+        let mut value = sample_value();
+        value["id"] = json!(id);
+        std::fs::create_dir_all(dir.dir().join(id)).unwrap();
+        std::fs::write(
+            dir.dir().join(id).join("provider.json"),
+            serde_json::to_string_pretty(&value).unwrap(),
+        )
+        .unwrap();
+    }
+    let config = dir.load::<ModelConfig>().unwrap().unwrap();
+    let plugin = ModelPlugin::new(
+        ModelProvidersConfig {
+            default_provider_id: config.default_provider_id,
+            ..Default::default()
+        },
+        dir.clone(),
+    );
+    load_storage(&plugin).await;
+    let ctx = VdfsContext::empty();
+
+    plugin
+        .dispatch(
+            &ctx,
+            "a-provider",
+            VdfsRequest::Write {
+                content: VdfsContent::text(
+                    json!({ "enabled": false, "skip_validation": true }).to_string(),
+                ),
+            },
+        )
+        .await
+        .unwrap();
+    let providers = plugin.providers.read().await;
+    assert_eq!(providers.default_provider_id.as_deref(), Some("a-provider"));
+    assert_eq!(
+        providers.resolve(None).map(|provider| provider.id.as_str()),
+        Some("b-provider")
+    );
+    drop(providers);
+
+    plugin
+        .dispatch(&ctx, "a-provider", VdfsRequest::Delete { recursive: false })
+        .await
+        .unwrap();
+    let providers = plugin.providers.read().await;
+    assert_eq!(providers.default_provider_id.as_deref(), Some("a-provider"));
+    assert_eq!(
+        providers.resolve(None).map(|provider| provider.id.as_str()),
+        Some("b-provider")
+    );
+    drop(providers);
+
+    let mut recreated = sample_value();
+    recreated["id"] = json!("a-provider");
+    recreated["skip_validation"] = json!(true);
+    plugin
+        .dispatch(
+            &ctx,
+            "a-provider",
+            VdfsRequest::Write {
+                content: VdfsContent::text(serde_json::to_string(&recreated).unwrap()),
+            },
+        )
+        .await
+        .unwrap();
+    let nodes = plugin.mirrored_nodes().await;
+    for node in nodes {
+        let expected = node.name == "a-provider";
+        assert_eq!(node.attributes["is_default"], json!(expected));
+    }
+
+    let restarted = ModelPlugin::new(
+        ModelProvidersConfig {
+            default_provider_id: dir
+                .load::<ModelConfig>()
+                .unwrap()
+                .unwrap()
+                .default_provider_id,
+            ..Default::default()
+        },
+        dir.clone(),
+    );
+    load_storage(&restarted).await;
+    let providers = restarted.providers.read().await;
+    assert_eq!(providers.default_provider_id.as_deref(), Some("a-provider"));
+    assert_eq!(
+        providers.resolve(None).map(|provider| provider.id.as_str()),
+        Some("a-provider")
+    );
+    assert_eq!(
+        dir.load::<ModelConfig>()
+            .unwrap()
+            .unwrap()
+            .default_provider_id
+            .as_deref(),
+        Some("a-provider")
+    );
+}
+
+/// 加载、保存、删除与显式默认动作必须加入同一个资源 mutation lock。
+#[tokio::test]
+async fn cross_entry_operations_wait_for_the_resource_mutation_lock() {
+    use std::time::Duration;
+    use tokio::time::timeout;
+
+    let tmp = tempfile::tempdir().unwrap();
+    let dir = PluginDir::at(tmp.path().join("model"), "model");
+    let plugin = ModelPlugin::new(ModelProvidersConfig::default(), dir);
+    for id in ["a-provider", "b-provider"] {
+        let mut value = sample_value();
+        value["id"] = json!(id);
+        plugin
+            .store()
+            .write_text(id, &serde_json::to_string_pretty(&value).unwrap())
+            .await
+            .unwrap();
+    }
+    load_storage(&plugin).await;
+    let guard = plugin.store().mutation_guard().await;
+
+    let mut loading = {
+        let plugin = plugin.clone();
+        tokio::spawn(async move { load_storage(&plugin).await })
+    };
+    let mut saving = {
+        let plugin = plugin.clone();
+        tokio::spawn(async move {
+            plugin
+                .dispatch(
+                    &VdfsContext::empty(),
+                    "b-provider",
+                    VdfsRequest::Write {
+                        content: VdfsContent::text(
+                            json!({ "name": "并发保存", "skip_validation": true }).to_string(),
+                        ),
+                    },
+                )
+                .await
+        })
+    };
+    let mut deleting = {
+        let plugin = plugin.clone();
+        tokio::spawn(async move {
+            plugin
+                .dispatch(
+                    &VdfsContext::empty(),
+                    "a-provider",
+                    VdfsRequest::Delete { recursive: false },
+                )
+                .await
+        })
+    };
+    let mut setting_default = {
+        let plugin = plugin.clone();
+        tokio::spawn(async move {
+            plugin
+                .dispatch(
+                    &VdfsContext::empty(),
+                    "b-provider",
+                    VdfsRequest::Action {
+                        action: "set-default".into(),
+                        payload: None,
+                    },
+                )
+                .await
+        })
+    };
+
+    assert!(timeout(Duration::from_millis(50), &mut loading)
+        .await
+        .is_err());
+    assert!(timeout(Duration::from_millis(50), &mut saving)
+        .await
+        .is_err());
+    assert!(timeout(Duration::from_millis(50), &mut deleting)
+        .await
+        .is_err());
+    assert!(timeout(Duration::from_millis(50), &mut setting_default)
+        .await
+        .is_err());
+    drop(guard);
+    loading.await.unwrap();
+    saving.await.unwrap().unwrap();
+    deleting.await.unwrap().unwrap();
+    setting_default.await.unwrap().unwrap();
+    assert_eq!(
+        plugin.providers.read().await.default_provider_id.as_deref(),
+        Some("b-provider")
+    );
+}
+
+/// 编辑保存是补丁：隐藏字段、未知扩展与现有密钥不被空值抹掉。
+#[tokio::test]
+async fn write_patches_existing_provider_without_erasing_hidden_fields() {
+    let tmp = tempfile::tempdir().unwrap();
+    let plugin = ModelPlugin::new(
+        ModelProvidersConfig::default(),
+        PluginDir::at(tmp.path().join("model"), "model"),
+    );
+    let mut stored = sample_value();
+    stored["id"] = json!("wrong-old-id");
+    stored["api_key"] = json!("test-only-secret");
+    stored["timeout_secs"] = json!(17);
+    stored["reasoning"] = json!({ "effort": "high" });
+    stored["future_extension"] = json!({ "keep": true });
+    plugin
+        .store()
+        .write_text("openai-1", &serde_json::to_string_pretty(&stored).unwrap())
+        .await
+        .unwrap();
+
+    let response = plugin
+        .dispatch(
+            &VdfsContext::empty(),
+            "openai-1",
+            VdfsRequest::Write {
+                content: VdfsContent::text(
+                    json!({
+                        "id": "wrong-new-id",
+                        "name": "改名",
+                        "api_key": null,
+                        "skip_validation": true,
+                        "is_default": true
+                    })
+                    .to_string(),
+                ),
+            },
+        )
+        .await
+        .unwrap();
+    assert!(!response.into_write().unwrap().created);
+
+    let saved: Value =
+        serde_json::from_str(&plugin.store().read_text("openai-1").await.unwrap()).unwrap();
+    assert_eq!(saved["id"], json!("openai-1"));
+    assert_eq!(saved["name"], json!("改名"));
+    assert_eq!(saved["api_key"], json!("test-only-secret"));
+    assert_eq!(saved["timeout_secs"], json!(17));
+    assert_eq!(saved["reasoning"], json!({ "effort": "high" }));
+    assert_eq!(saved["future_extension"], json!({ "keep": true }));
+    assert!(saved.get("skip_validation").is_none());
+    assert!(saved.get("is_default").is_none());
+}
+
+#[tokio::test]
+async fn failed_provider_write_keeps_registry_and_mirror_unchanged() {
+    let tmp = tempfile::tempdir().unwrap();
+    let dir = PluginDir::at(tmp.path().join("model"), "model");
+    let plugin = ModelPlugin::new(ModelProvidersConfig::default(), dir.clone());
+    let original = serde_json::to_string_pretty(&sample_value()).unwrap();
+    plugin
+        .store()
+        .write_text("openai-1", &original)
+        .await
+        .unwrap();
+    let provider: crate::model_providers::ModelProviderConfig =
+        serde_json::from_str(&original).unwrap();
+    plugin
+        .publish_uploaded("openai-1", &provider, &original)
+        .await;
+
+    let manifest = dir.dir().join("openai-1").join("provider.json");
+    std::fs::remove_file(&manifest).unwrap();
+    std::fs::create_dir(&manifest).unwrap();
+    let failed = plugin
+        .dispatch(
+            &VdfsContext::empty(),
+            "openai-1",
+            VdfsRequest::Write {
+                content: VdfsContent::text(
+                    json!({ "name": "不应发布", "skip_validation": true }).to_string(),
+                ),
+            },
+        )
+        .await;
+
+    assert!(failed.is_err());
+    assert_eq!(
+        plugin.providers.read().await.providers["openai-1"].name,
+        "我的 OpenAI"
+    );
+    assert_eq!(
+        plugin.entries.get("openai-1").as_deref(),
+        Some(original.as_str())
+    );
+}
+
+#[tokio::test]
+async fn save_action_skips_connection_without_persisting_control_keys() {
+    let tmp = tempfile::tempdir().unwrap();
+    let plugin = ModelPlugin::new(
+        ModelProvidersConfig::default(),
+        PluginDir::at(tmp.path().join("model"), "model"),
+    );
+    let mut stored = sample_value();
+    stored["api_key"] = json!("test-only-secret");
+    stored["future_extension"] = json!({ "keep": true });
+    plugin
+        .store()
+        .write_text("openai-1", &serde_json::to_string_pretty(&stored).unwrap())
+        .await
+        .unwrap();
+
+    let result = plugin
+        .dispatch(
+            &VdfsContext::empty(),
+            "openai-1",
+            VdfsRequest::Action {
+                action: "save".into(),
+                payload: Some(json!({
+                    "fields": {
+                        "name": "离线配置",
+                        "api_base": "http://127.0.0.1:1/v1",
+                        "api_key": null,
+                        "is_default": true
+                    },
+                    "skip_validation": true
+                })),
+            },
+        )
+        .await
+        .unwrap()
+        .into_action()
+        .unwrap();
+    assert!(result.ok);
+
+    let saved: Value =
+        serde_json::from_str(&plugin.store().read_text("openai-1").await.unwrap()).unwrap();
+    assert_eq!(saved["name"], json!("离线配置"));
+    assert_eq!(saved["api_key"], json!("test-only-secret"));
+    assert_eq!(saved["future_extension"], json!({ "keep": true }));
+    assert!(saved.get("skip_validation").is_none());
+    assert!(saved.get("is_default").is_none());
+    assert_eq!(
+        plugin.providers.read().await.providers["openai-1"].name,
+        "离线配置"
+    );
+}
+
+/// 连接测试消费当前草稿；失败结果不改变磁盘配置。
+#[tokio::test]
+async fn test_action_validates_the_draft_without_saving_it() {
+    let tmp = tempfile::tempdir().unwrap();
+    let plugin = ModelPlugin::new(
+        ModelProvidersConfig::default(),
+        PluginDir::at(tmp.path().join("model"), "model"),
+    );
+    let original = serde_json::to_string_pretty(&sample_value()).unwrap();
+    plugin
+        .store()
+        .write_text("openai-1", &original)
+        .await
+        .unwrap();
+
+    let result = plugin
+        .dispatch(
+            &VdfsContext::empty(),
+            "openai-1",
+            VdfsRequest::Action {
+                action: VDFS_ACTION_TEST.into(),
+                payload: Some(json!({ "api_protocol": "not-a-protocol" })),
+            },
+        )
+        .await
+        .unwrap()
+        .into_action()
+        .unwrap();
+    assert!(!result.ok);
+    assert!(result.message.contains("not-a-protocol"));
+    assert_eq!(
+        plugin.store().read_text("openai-1").await.unwrap(),
+        original
+    );
+}
+
+#[tokio::test]
+async fn draft_test_action_validates_without_creating_an_entry() {
+    let tmp = tempfile::tempdir().unwrap();
+    let plugin = ModelPlugin::new(
+        ModelProvidersConfig::default(),
+        PluginDir::at(tmp.path().join("model"), "model"),
+    );
+    let mut draft = sample_value();
+    draft["api_protocol"] = serde_json::json!("not-a-protocol");
+
+    let result = plugin
+        .dispatch(
+            &VdfsContext::empty(),
+            "",
+            VdfsRequest::Action {
+                action: VDFS_ACTION_TEST.into(),
+                payload: Some(draft),
+            },
+        )
+        .await
+        .unwrap()
+        .into_action()
+        .unwrap();
+
+    assert!(!result.ok);
+    assert!(result.message.contains("not-a-protocol"));
+    assert!(plugin.store().entries().await.unwrap().is_empty());
+    assert!(plugin.providers.read().await.providers.is_empty());
+}
+
+/// 默认动作先持久化再发布；停用项不能成为默认。
+#[tokio::test]
+async fn set_default_persists_before_publishing_and_rejects_disabled() {
+    let tmp = tempfile::tempdir().unwrap();
+    let dir = PluginDir::at(tmp.path().join("model"), "model");
+    let plugin = ModelPlugin::new(ModelProvidersConfig::default(), dir.clone());
+    for id in ["a-provider", "b-provider", "c-provider"] {
+        let mut value = sample_value();
+        value["id"] = json!(id);
+        value["enabled"] = json!(id != "a-provider");
+        plugin
+            .store()
+            .write_text(id, &serde_json::to_string_pretty(&value).unwrap())
+            .await
+            .unwrap();
+    }
+
+    let rejected = plugin
+        .dispatch(
+            &VdfsContext::empty(),
+            "a-provider",
+            VdfsRequest::Action {
+                action: "set-default".into(),
+                payload: None,
+            },
+        )
+        .await;
+    assert!(rejected.is_err());
+    assert!(plugin.providers.read().await.default_provider_id.is_none());
+
+    let result = plugin
+        .dispatch(
+            &VdfsContext::empty(),
+            "b-provider",
+            VdfsRequest::Action {
+                action: "set-default".into(),
+                payload: None,
+            },
+        )
+        .await
+        .unwrap()
+        .into_action()
+        .unwrap();
+    assert!(result.ok);
+    assert_eq!(
+        dir.load::<ModelConfig>()
+            .unwrap()
+            .unwrap()
+            .default_provider_id
+            .as_deref(),
+        Some("b-provider")
+    );
+    assert_eq!(
+        plugin.providers.read().await.default_provider_id.as_deref(),
+        Some("b-provider")
+    );
+
+    let config_path = dir.dir().join("PLUGIN.yml");
+    std::fs::remove_file(&config_path).unwrap();
+    std::fs::create_dir(&config_path).unwrap();
+    let failed = plugin
+        .dispatch(
+            &VdfsContext::empty(),
+            "c-provider",
+            VdfsRequest::Action {
+                action: "set-default".into(),
+                payload: None,
+            },
+        )
+        .await;
+    assert!(failed.is_err());
+    assert_eq!(
+        plugin.providers.read().await.default_provider_id.as_deref(),
+        Some("b-provider")
+    );
+}
+
+/// 默认标记属于节点状态，切换默认必须同时广播新旧两个节点。
+#[tokio::test]
+async fn set_default_announces_both_changed_default_markers() {
+    let tmp = tempfile::tempdir().unwrap();
+    let plugin = ModelPlugin::new(
+        ModelProvidersConfig::default(),
+        PluginDir::at(tmp.path(), "model"),
+    );
+    for id in ["a-default", "b-default"] {
+        let mut value = sample_value();
+        value["id"] = json!(id);
+        plugin
+            .store()
+            .write_text(id, &serde_json::to_string_pretty(&value).unwrap())
+            .await
+            .unwrap();
+    }
+    load_storage(&plugin).await;
+
+    let seen = Arc::new(std::sync::Mutex::new(Vec::<String>::new()));
+    let ctx = VdfsContext::empty();
+    for id in ["a-default", "b-default"] {
+        let sink = {
+            let seen = seen.clone();
+            Arc::new(move |change: VdfsChange| seen.lock().unwrap().push(change.path))
+        };
+        plugin
+            .dispatch(&ctx, id, VdfsRequest::Watch { sink })
+            .await
+            .unwrap();
+    }
+
+    plugin
+        .dispatch(
+            &ctx,
+            "b-default",
+            VdfsRequest::Action {
+                action: "set-default".into(),
+                payload: None,
+            },
+        )
+        .await
+        .unwrap();
+
+    for _ in 0..50 {
+        let ready = {
+            let seen = seen.lock().unwrap();
+            seen.contains(&"a-default".to_string()) && seen.contains(&"b-default".to_string())
+        };
+        if ready {
+            break;
+        }
+        tokio::time::sleep(std::time::Duration::from_millis(10)).await;
+    }
+    let paths = seen.lock().unwrap().clone();
+    assert!(paths.contains(&"a-default".to_string()));
+    assert!(paths.contains(&"b-default".to_string()));
+    for node in plugin.mirrored_nodes().await {
+        assert_eq!(
+            node.attributes["is_default"],
+            json!(node.name == "b-default")
+        );
+    }
+    for id in ["a-default", "b-default"] {
+        plugin
+            .dispatch(&ctx, id, VdfsRequest::Unwatch)
+            .await
+            .unwrap();
+    }
+}
+
+/// 通用读取只返回脱敏投影，磁盘上的执行凭据不被改写。
+#[tokio::test]
+async fn read_redacts_api_key_without_touching_storage() {
+    let tmp = tempfile::tempdir().unwrap();
+    let plugin = ModelPlugin::new(
+        ModelProvidersConfig::default(),
+        PluginDir::at(tmp.path().join("model"), "model"),
+    );
+    let mut stored = sample_value();
+    stored["api_key"] = json!("test-only-secret");
+    stored["future_extension"] = json!({ "keep": true });
+    let original = serde_json::to_string_pretty(&stored).unwrap();
+    plugin
+        .store()
+        .write_text("openai-1", &original)
+        .await
+        .unwrap();
+
+    let content = plugin
+        .dispatch(&VdfsContext::empty(), "openai-1", VdfsRequest::Read)
+        .await
+        .unwrap()
+        .into_read()
+        .unwrap();
+    let projected: Value = serde_json::from_str(content.as_text().unwrap()).unwrap();
+    assert_eq!(projected["api_key"], Value::Null);
+    assert_eq!(projected["future_extension"], json!({ "keep": true }));
+    assert_eq!(
+        plugin.store().read_text("openai-1").await.unwrap(),
+        original
+    );
 }
 
 // ── 计价：规范化与折算 ─────────────────────────────────────────────────

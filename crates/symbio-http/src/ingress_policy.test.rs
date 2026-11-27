@@ -29,6 +29,53 @@ fn readonly_allowlist() {
 }
 
 #[test]
+fn readonly_rejects_normalized_config_aliases() {
+    let read =
+        |addr: &str| is_readonly_allowed("vdfs/read", &json!({ "path": format!("@vfs/{addr}") }));
+    for addr in [
+        "gateway/PLUGIN.yml/.",
+        "gateway//PLUGIN.yml",
+        r"gateway\PLUGIN.yml",
+        "gateway/nested/../PLUGIN.yml",
+        "gateway/nested/ .. /PLUGIN.yml",
+        " gateway / PLUGIN.yml ",
+        "PLUGIN.yml",
+        " plugin_manager / gateway ",
+        "plugin_manager/gateway",
+        r"plugin_manager\gateway",
+        "plugin_manager/appearance",
+        "plugin_manager/gateway/anything",
+    ] {
+        assert!(!read(addr), "配置地址必须拒绝：{addr}");
+    }
+    assert!(read("gateway/PLUGIN.yml.backup"));
+    assert!(read("plugin_managerish/gateway"));
+    #[cfg(windows)]
+    {
+        for addr in [
+            "gateway/PLUGIN.yml::$DATA",
+            "gateway/PLUGIN.yml:secret",
+            r"C:\gateway\PLUGIN.yml::$DATA",
+            "gateway/PLUGIN.yml.backup:secret",
+            "gateway/PLUGIN.yml.",
+            "gateway/PLUGIN.yml...",
+            "plugin_manager./gateway",
+            r"C:\gateway\PLUGIN.yml.",
+        ] {
+            assert!(!read(addr), "Windows 流别名必须拒绝：{addr}");
+        }
+        assert!(
+            is_readonly_allowed("vdfs/read", &json!({ "path": "C:/docs/readme.txt" })),
+            "标准盘符不是备用数据流"
+        );
+        assert!(!is_readonly_allowed(
+            "vdfs/read",
+            &json!({ "path": "C:readme.txt" })
+        ));
+    }
+}
+
+#[test]
 fn idempotency_rejects_duplicates_until_released() {
     let table = Idempotency::new();
     let ticket = table.reserve("k-1").expect("first reservation");

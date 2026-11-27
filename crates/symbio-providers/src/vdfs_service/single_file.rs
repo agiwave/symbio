@@ -11,6 +11,7 @@
 
 use super::entry;
 use async_trait::async_trait;
+use std::future::Future;
 use std::path::{Path, PathBuf};
 use symbio_platform::kernel::vdfs::{
     VdfsAccess, VdfsActionResult, VdfsContent, VdfsContext, VdfsError, VdfsNode, VdfsProvider,
@@ -19,6 +20,7 @@ use symbio_platform::kernel::vdfs::{
 use symbio_platform::sdk::vdfs::host::{
     vdfs_notify_change, vdfs_unwatch_changes, vdfs_watch_changes,
 };
+use tokio::sync::OwnedMutexGuard;
 
 struct ImportGuard {
     root: PathBuf,
@@ -164,9 +166,24 @@ impl SingleFileVdfs {
         Ok(out)
     }
 
+    /// 调用方已持有同一 base 的 mutation guard，避免递归加锁。
+    pub async fn entries_locked(&self) -> VdfsResult<Vec<entry::Entry>> {
+        let ids = entry::list_entry_ids(&self.base).await?;
+        let mut out = Vec::with_capacity(ids.len());
+        for id in ids {
+            out.push(entry::read_entry_tolerant_locked(&self.base, &id, &self.manifest).await);
+        }
+        Ok(out)
+    }
+
     /// 单个条目（存在性校验 + 原文 + 时间戳）
     pub async fn entry(&self, id: &str) -> VdfsResult<entry::Entry> {
         entry::read_entry(&self.base, id, &self.manifest).await
+    }
+
+    /// 调用方已持有同一 base 的 mutation guard，避免递归加锁。
+    pub async fn entry_locked(&self, id: &str) -> VdfsResult<entry::Entry> {
+        entry::read_entry_locked(&self.base, id, &self.manifest).await
     }
 
     /// 条目主文件原文
@@ -195,22 +212,85 @@ impl SingleFileVdfs {
         self.write_text(id, &text).await
     }
 
+    /// 读/合并/写盘与内存发布共用锁；提交任务不随调用方取消。
+    pub async fn update_json<T, F, Fut, P, Pfut>(
+        &self,
+        id: &str,
+        update: F,
+        publish: P,
+    ) -> VdfsResult<(bool, T)>
+    where
+        F: FnOnce(Option<String>) -> Fut + Send + 'static,
+        Fut: Future<Output = VdfsResult<(serde_json::Value, T)>> + Send + 'static,
+        P: FnOnce(T) -> Pfut + Send + 'static,
+        Pfut: Future<Output = ()> + Send + 'static,
+        T: Clone + Send + 'static,
+    {
+        let base = self.base.clone();
+        let manifest = self.manifest.clone();
+        let id = id.to_string();
+        let task = tokio::spawn(async move {
+            let _guard = entry::mutation_guard(&base).await;
+            let previous = match entry::read_entry_locked(&base, &id, &manifest).await {
+                Ok(entry) => Some(entry.raw.ok_or_else(|| {
+                    VdfsError::internal(format!("条目「{id}」的主文件不可用，无法合并更新"))
+                })?),
+                Err(VdfsError::NotFound(_)) => None,
+                Err(e) => return Err(e),
+            };
+            let (next, published) = update(previous).await?;
+            let created = entry::write_entry_locked(
+                &base,
+                &id,
+                &manifest,
+                &serde_json::to_string_pretty(&next)
+                    .map_err(|e| VdfsError::internal(format!("序列化主文件失败：{e}")))?,
+            )
+            .await?;
+            publish(published.clone()).await;
+            Ok((created, published))
+        });
+        task.await
+            .map_err(|e| VdfsError::internal(format!("存储提交任务失败：{e}")))?
+    }
+
+    /// 删除条目目录，在释放锁前发布内存清理；提交任务不随调用方取消。
+    pub async fn remove_with<F, Fut>(&self, id: &str, publish: F) -> VdfsResult<()>
+    where
+        F: FnOnce() -> Fut + Send + 'static,
+        Fut: Future<Output = ()> + Send + 'static,
+    {
+        let base = self.base.clone();
+        let kind = self.kind.clone();
+        let id = id.to_string();
+        let task = tokio::spawn(async move {
+            let _guard = entry::mutation_guard(&base).await;
+            match entry::remove_entry_locked(&base, &id).await {
+                Ok(()) => {}
+                Err(VdfsError::NotFound(_)) => {
+                    symbio_platform::sdk::plugin_warn!(
+                        &kind,
+                        "磁盘上已无条目 {id} 目录，仅清理内存"
+                    );
+                }
+                Err(e) => return Err(e),
+            }
+            publish().await;
+            vdfs_notify_change(&kind, &id);
+            Ok(())
+        });
+        task.await
+            .map_err(|e| VdfsError::internal(format!("存储删除任务失败：{e}")))?
+    }
+
+    /// 供同一 provider 的加载、默认指针等跨条目操作加入资源变更的同一串行边界。
+    pub async fn mutation_guard(&self) -> OwnedMutexGuard<()> {
+        entry::mutation_guard(&self.base).await
+    }
+
     /// 删除条目目录 + 变更广播（磁盘上已无目录时告警而非报错——**幂等**）
     pub async fn remove(&self, id: &str) -> VdfsResult<()> {
-        let lock = entry::mutation_lock(&self.base);
-        let _guard = lock.lock().await;
-        match entry::remove_entry_locked(&self.base, id).await {
-            Ok(()) => {}
-            Err(VdfsError::NotFound(_)) => {
-                symbio_platform::sdk::plugin_warn!(
-                    &self.kind,
-                    "磁盘上已无条目 {id} 目录，仅清理内存"
-                );
-            }
-            Err(e) => return Err(e),
-        }
-        vdfs_notify_change(&self.kind, id);
-        Ok(())
+        self.remove_with(id, || async {}).await
     }
 
     /// 条目是否存在

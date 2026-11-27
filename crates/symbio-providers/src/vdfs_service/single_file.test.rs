@@ -161,6 +161,184 @@ async fn cloned_and_reconstructed_stores_serialize_writes() {
     assert_eq!(names, vec![std::ffi::OsString::from("provider.json")]);
 }
 
+/// 补丁读—合并—写共用一把锁，两个并发更新不能互相覆盖。
+#[tokio::test]
+async fn updates_merge_against_the_latest_committed_value() {
+    let tmp = tempfile::tempdir().unwrap();
+    let s = store_in(tmp.path());
+    s.write_text("p1", r#"{"left":0,"right":0}"#).await.unwrap();
+    let mut tasks = Vec::new();
+    for key in ["left", "right"] {
+        let store = s.clone();
+        tasks.push(tokio::spawn(async move {
+            store
+                .update_json(
+                    "p1",
+                    move |previous| async move {
+                        tokio::task::yield_now().await;
+                        let mut value: serde_json::Value =
+                            serde_json::from_str(&previous.unwrap()).unwrap();
+                        value[key] = serde_json::json!(1);
+                        Ok((value, ()))
+                    },
+                    |()| async {},
+                )
+                .await
+                .unwrap()
+        }));
+    }
+    for task in tasks {
+        task.await.unwrap();
+    }
+    let value: serde_json::Value = serde_json::from_str(&s.read_text("p1").await.unwrap()).unwrap();
+    assert_eq!(value, serde_json::json!({ "left": 1, "right": 1 }));
+}
+
+/// 发布内存视图必须占住同一个串行边界，否则并发删除会把已落盘资源从内存里抹掉。
+#[tokio::test]
+async fn mutations_publish_before_releasing_the_storage_lock() {
+    use std::time::Duration;
+    use tokio::sync::oneshot;
+    use tokio::time::timeout;
+
+    let tmp = tempfile::tempdir().unwrap();
+    let s = store_in(tmp.path());
+    s.write_text("p1", r#"{"value":0}"#).await.unwrap();
+
+    let (save_entered, save_entered_rx) = oneshot::channel();
+    let (save_release, save_release_rx) = oneshot::channel();
+    let saving = s.clone();
+    let save = tokio::spawn(async move {
+        saving
+            .update_json(
+                "p1",
+                |_| async { Ok((serde_json::json!({ "value": 1 }), ())) },
+                |()| async move {
+                    save_entered.send(()).unwrap();
+                    save_release_rx.await.unwrap();
+                },
+            )
+            .await
+    });
+    save_entered_rx.await.unwrap();
+
+    let removing = s.clone();
+    let mut remove = tokio::spawn(async move { removing.remove("p1").await });
+    assert!(timeout(Duration::from_millis(50), &mut remove)
+        .await
+        .is_err());
+    save_release.send(()).unwrap();
+    save.await.unwrap().unwrap();
+    remove.await.unwrap().unwrap();
+    assert!(!s.exists("p1"));
+
+    s.write_text("p1", r#"{"value":0}"#).await.unwrap();
+    let (remove_entered, remove_entered_rx) = oneshot::channel();
+    let (remove_release, remove_release_rx) = oneshot::channel();
+    let removing = s.clone();
+    let remove = tokio::spawn(async move {
+        removing
+            .remove_with("p1", || async move {
+                remove_entered.send(()).unwrap();
+                remove_release_rx.await.unwrap();
+            })
+            .await
+    });
+    remove_entered_rx.await.unwrap();
+
+    let saving = s.clone();
+    let mut save = tokio::spawn(async move {
+        saving
+            .update_json(
+                "p1",
+                |_| async { Ok((serde_json::json!({ "value": 2 }), ())) },
+                |()| async {},
+            )
+            .await
+    });
+    assert!(timeout(Duration::from_millis(50), &mut save).await.is_err());
+    remove_release.send(()).unwrap();
+    remove.await.unwrap().unwrap();
+    save.await.unwrap().unwrap();
+    assert_eq!(
+        serde_json::from_str::<serde_json::Value>(&s.read_text("p1").await.unwrap()).unwrap(),
+        serde_json::json!({ "value": 2 })
+    );
+}
+
+#[tokio::test]
+async fn update_commit_finishes_publication_after_the_caller_is_cancelled() {
+    use std::time::Duration;
+    use tokio::sync::oneshot;
+    use tokio::time::timeout;
+
+    let tmp = tempfile::tempdir().unwrap();
+    let s = store_in(tmp.path());
+    s.write_text("p1", r#"{"value":0}"#).await.unwrap();
+    let (entered_tx, entered_rx) = oneshot::channel();
+    let (release_tx, release_rx) = oneshot::channel();
+    let (published_tx, published_rx) = oneshot::channel();
+    let saving = s.clone();
+    let caller = tokio::spawn(async move {
+        saving
+            .update_json(
+                "p1",
+                |_| async { Ok((serde_json::json!({ "value": 1 }), ())) },
+                |()| async move {
+                    entered_tx.send(()).unwrap();
+                    release_rx.await.unwrap();
+                    published_tx.send(()).unwrap();
+                },
+            )
+            .await
+    });
+    entered_rx.await.unwrap();
+    caller.abort();
+    assert!(caller.await.unwrap_err().is_cancelled());
+    release_tx.send(()).unwrap();
+    timeout(Duration::from_secs(2), published_rx)
+        .await
+        .unwrap()
+        .unwrap();
+    assert_eq!(
+        serde_json::from_str::<serde_json::Value>(&s.read_text("p1").await.unwrap()).unwrap(),
+        serde_json::json!({ "value": 1 })
+    );
+}
+
+#[tokio::test]
+async fn delete_commit_finishes_publication_after_the_caller_is_cancelled() {
+    use std::time::Duration;
+    use tokio::sync::oneshot;
+    use tokio::time::timeout;
+
+    let tmp = tempfile::tempdir().unwrap();
+    let s = store_in(tmp.path());
+    s.write_text("p1", r#"{"value":0}"#).await.unwrap();
+    let (entered_tx, entered_rx) = oneshot::channel();
+    let (release_tx, release_rx) = oneshot::channel();
+    let (published_tx, published_rx) = oneshot::channel();
+    let removing = s.clone();
+    let caller = tokio::spawn(async move {
+        removing
+            .remove_with("p1", || async move {
+                entered_tx.send(()).unwrap();
+                release_rx.await.unwrap();
+                published_tx.send(()).unwrap();
+            })
+            .await
+    });
+    entered_rx.await.unwrap();
+    caller.abort();
+    assert!(caller.await.unwrap_err().is_cancelled());
+    release_tx.send(()).unwrap();
+    timeout(Duration::from_secs(2), published_rx)
+        .await
+        .unwrap()
+        .unwrap();
+    assert!(!s.exists("p1"));
+}
+
 fn zip_bytes(entries: &[(&str, &[u8])]) -> Vec<u8> {
     use std::io::Write as _;
     let mut cursor = std::io::Cursor::new(Vec::new());

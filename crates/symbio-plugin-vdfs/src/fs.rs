@@ -51,6 +51,7 @@
 
 use super::physical::PhysicalFs;
 use async_trait::async_trait;
+use std::path::PathBuf;
 use std::sync::Arc;
 use symbio_plugin_api::{
     vdfs_has_parent_segment, DynVdfsProvider, VdfsChange, VdfsChangeSink, VdfsContext, VdfsError,
@@ -168,9 +169,15 @@ pub struct UnifiedFs {
 }
 
 impl UnifiedFs {
-    /// 以容器注册的虚拟根构造，物理层用默认的 [`PhysicalFs`]
-    pub fn new(virtual_root: DynVdfsProvider) -> Self {
-        Self::with_physical(virtual_root, Arc::new(PhysicalFs::new()))
+    /// 为物理层注入宿主保护的存储根；绝对路径直读不得绕过虚拟 provider 的投影。
+    pub fn with_protected_roots(
+        virtual_root: DynVdfsProvider,
+        protected_roots: Vec<PathBuf>,
+    ) -> Self {
+        Self::with_physical(
+            virtual_root,
+            Arc::new(PhysicalFs::with_protected_roots(protected_roots)),
+        )
     }
 
     /// 显式注入物理层（测试可换成内存实现）

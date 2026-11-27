@@ -614,7 +614,7 @@ async fn physical_half_reads_and_writes_disk() {
     ));
     std::fs::create_dir_all(&dir).unwrap();
 
-    let fs: DynVdfsProvider = Arc::new(UnifiedFs::new(empty_root()));
+    let fs: DynVdfsProvider = Arc::new(UnifiedFs::with_protected_roots(empty_root(), Vec::new()));
     let mk_ctx = |payload: Value| {
         let c: Arc<dyn PluginInvokeRequest> = Arc::new(PluginSimpleRequest::new(None, None));
         c.set(WORKDIR, dir.to_string_lossy().into_owned());
@@ -683,6 +683,37 @@ async fn resolve_fs_degrades_to_empty_vfs() {
         dispatch(&fs, VDFS_LIST, &ctx).await.unwrap(),
         Err(PluginError::InternalError(_))
     ));
+}
+
+#[tokio::test]
+async fn resolve_fs_carries_host_protected_roots_without_blocking_the_workspace() {
+    let tmp = tempfile::tempdir().unwrap();
+    let base = tmp.path().join("workspace");
+    let protected = base.join("plugins");
+    std::fs::create_dir_all(protected.join("model/p1")).unwrap();
+    let manifest = protected.join("model/p1/provider.json");
+    std::fs::write(&manifest, r#"{"api_key":"secret"}"#).unwrap();
+    std::fs::create_dir_all(base.join("work")).unwrap();
+    std::fs::write(base.join("work/notes.md"), "workspace").unwrap();
+
+    let ctx: Arc<dyn PluginInvokeRequest> = Arc::new(PluginSimpleRequest::new(None, None));
+    ctx.set(WORKDIR, base.to_string_lossy().into_owned());
+    ctx.set_raw(
+        HOST_VDFS_PROTECTED_ROOTS,
+        Arc::new(vec![protected.to_string_lossy().into_owned()]),
+    );
+    let fs = resolve_fs(None, &ctx).await;
+    let vctx = VdfsContext::empty().with_params(call_params(&ctx));
+    let absolute = manifest.to_string_lossy().replace('\\', "/");
+
+    assert!(matches!(
+        fs.dispatch(&vctx, &absolute, VdfsRequest::Read).await,
+        Err(VdfsError::Forbidden(_))
+    ));
+    assert!(fs
+        .dispatch(&vctx, "work/notes.md", VdfsRequest::Read)
+        .await
+        .is_ok());
 }
 
 /// `ctx` 已带能力管理器 → 直接读其中的根（LLM 链路）

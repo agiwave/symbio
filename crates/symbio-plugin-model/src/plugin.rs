@@ -50,7 +50,7 @@ pub struct ModelPlugin {
     /// VDFS 侧条目清单（内存镜像：`id → provider.json` 原文）
     ///
     /// 规范 §13.4：model 的列表来自内存。镜像与注册表**同一处更新**
-    /// （`after_uploaded`），因此不存在第二个写入者。
+    /// （`publish_uploaded`），因此不存在第二个写入者。
     entries: MemoryVdfs,
 }
 
@@ -101,7 +101,8 @@ impl ModelPlugin {
     /// 注册表与 VDFS 镜像一次性同构填充——两份视图同源，任一时刻不会各说各话。
     pub async fn load_from_storage(&self, _ctx: &Arc<dyn PluginInvokeRequest>) {
         let store = self.store();
-        let entries = match store.entries().await {
+        let _guard = store.mutation_guard().await;
+        let entries = match store.entries_locked().await {
             Ok(v) => v,
             Err(e) => {
                 plugin_warn!("model", "list models 失败: {e}");
@@ -111,30 +112,19 @@ impl ModelPlugin {
 
         let mut new_providers = std::collections::HashMap::new();
         let mut mirror = Vec::with_capacity(entries.len());
-        let mut marked_default: Option<String> = None;
         for e in &entries {
             let Some(text) = e.raw.as_deref() else {
                 plugin_warn!("model", "读取 provider {} 失败：主文件不可用", e.id);
                 continue;
             };
-            // 先解析为 Value 提取 is_default 标记，再解析为强类型配置
+            // 地址段是身份权威；旧文件里的 id 不改变资源落点。
             let parsed = serde_json::from_str::<Value>(text).and_then(|v| {
-                serde_json::from_value::<ModelProviderConfig>(v.clone()).map(|p| (v, p))
+                serde_json::from_value::<ModelProviderConfig>(with_id(&v, &e.id)).map(|p| (v, p))
             });
             match parsed {
-                Ok((raw, mut p)) => {
-                    if p.id.is_empty() {
-                        p.id = e.id.clone();
-                    }
+                Ok((_, mut p)) => {
                     if p.name.is_empty() {
                         p.name = e.id.clone();
-                    }
-                    if raw
-                        .get("is_default")
-                        .and_then(|v| v.as_bool())
-                        .unwrap_or(false)
-                    {
-                        marked_default = Some(e.id.clone());
                     }
                     new_providers.insert(e.id.clone(), p);
                     mirror.push((e.id.clone(), text.to_string()));
@@ -143,23 +133,11 @@ impl ModelPlugin {
             }
         }
 
-        // 推算 default_provider_id（显式 is_default 标记 > 现有指向 > 首个可用）
-        let existing_default = self.providers.read().await.default_provider_id.clone();
-        let default_id = marked_default
-            .or(existing_default)
-            .or_else(|| {
-                new_providers
-                    .values()
-                    .find(|p| p.enabled)
-                    .map(|p| p.id.clone())
-            })
-            .or_else(|| new_providers.keys().next().cloned());
-
+        // PLUGIN.yml 只保存显式指针；失效指针不落盘改写，由启用项按 id 顺序计算有效默认。
         let mut cfg = self.providers.write().await;
         cfg.providers = new_providers;
-        cfg.default_provider_id = default_id;
-        drop(cfg);
         self.entries.replace_all(mirror);
+        drop(cfg);
         plugin_info!(
             "model",
             "从 <本插件目录>/ 加载了 {} 个 Model Provider",
@@ -177,13 +155,10 @@ impl ModelPlugin {
         }
     }
 
-    /// 把自己的跨条目配置写回**自己的** `PLUGIN.yml`（不再经父插件）
-    ///
-    /// 只写 `default_provider_id`：单个 Provider 的明细是资源，落在
-    /// `<本插件目录>/<id>/provider.json`，不进配置文件。
-    async fn persist(&self) -> PluginInvokeResponse<()> {
+    /// 默认指针的唯一持久权威是插件自己的 `PLUGIN.yml`。
+    fn persist_default(&self, id: &str) -> Result<(), PluginError> {
         let cfg = ModelConfig {
-            default_provider_id: self.providers.read().await.default_provider_id.clone(),
+            default_provider_id: Some(id.to_string()),
         };
         self.dir.save(&cfg).map_err(PluginError::InternalError)
     }
@@ -426,24 +401,55 @@ fn node_of(p: &ModelProviderConfig, updated_at: Option<i64>) -> VdfsNode {
     n
 }
 
-/// manifest 缺 `id`（或空串）时以路径段补全，已有值原样保留
-///
-/// 这是**读写两条路径共同的不变量**：`DetailForm` 的 option 绑定只回纯字段值
-/// （id 不在表单字段里），而 `ModelProviderConfig.id` 无 serde 缺省 ⇒ 不补就会
-/// 报「missing field `id`」（编辑已有 Provider 保存失败即为该症状）。
+fn with_default(mut node: VdfsNode, is_default: bool) -> VdfsNode {
+    node.attributes
+        .insert("is_default".to_string(), Value::Bool(is_default));
+    node
+}
+
+/// 地址中的 id 是身份权威，表单省略 id 时也无需调用方另行补齐。
 fn with_id(manifest: &Value, id: &str) -> Value {
     let mut m = manifest.clone();
-    let missing = m
-        .get("id")
-        .and_then(|v| v.as_str())
-        .unwrap_or("")
-        .is_empty();
-    if missing {
-        if let Value::Object(map) = &mut m {
-            map.insert("id".to_string(), json!(id));
-        }
+    if let Value::Object(map) = &mut m {
+        map.insert("id".to_string(), json!(id));
     }
     m
+}
+
+/// 既有资源的顶层补丁：省略保留、显式替换；敏感空值与旧标记有专门语义。
+fn merge_manifest(id: &str, previous: Option<&str>, patch: &Value) -> Result<Value, PluginError> {
+    let previous = previous
+        .map(serde_json::from_str::<Value>)
+        .transpose()
+        .map_err(|e| PluginError::ValidationError(format!("既有 Provider 配置无效: {e}")))?
+        .unwrap_or_else(|| json!({}));
+    let previous = previous
+        .as_object()
+        .ok_or_else(|| PluginError::ValidationError("既有 Provider 配置必须是对象".into()))?;
+    let patch = patch
+        .as_object()
+        .ok_or_else(|| PluginError::ValidationError("Provider 补丁必须是对象".into()))?;
+    let mut merged = previous.clone();
+    for (key, value) in patch {
+        if key != "is_default" {
+            merged.insert(key.clone(), value.clone());
+        }
+    }
+    let blank_key = patch.get("api_key").is_none_or(|value| {
+        value.is_null() || value.as_str().is_some_and(|key| key.trim().is_empty())
+    });
+    if blank_key {
+        match previous.get("api_key") {
+            Some(value) => {
+                merged.insert("api_key".to_string(), value.clone());
+            }
+            None => {
+                merged.remove("api_key");
+            }
+        }
+    }
+    merged.insert("id".to_string(), json!(id));
+    Ok(Value::Object(merged))
 }
 
 /// 主文件原文 → 配置（标题回落磁盘段名）
@@ -463,10 +469,15 @@ impl ModelPlugin {
     /// 点开就是坏详情的入口。
     async fn mirrored_nodes(&self) -> Vec<VdfsNode> {
         let mut out = Vec::new();
+        let providers = self.providers.read().await;
+        let default_id = providers.resolve(None).map(|provider| provider.id.clone());
         for id in self.entries.ids() {
             let text = self.entries.get(&id).unwrap_or_default();
             if let Some(p) = config_of(&id, &text) {
-                out.push(node_of(&p, self.entries.updated_at(&id)));
+                out.push(with_default(
+                    node_of(&p, self.entries.updated_at(&id)),
+                    default_id.as_deref() == Some(id.as_str()),
+                ));
             }
         }
         out
@@ -513,13 +524,14 @@ impl ModelPlugin {
 
         let mut v =
             serde_json::to_value(&provider).map_err(|e| PluginError::ParseError(e.to_string()))?;
-        // 保留「设为默认」标记（写盘 + 内存同步时读取；skip_validation 不落盘）
-        if manifest
-            .get("is_default")
-            .and_then(|b| b.as_bool())
-            .unwrap_or(false)
-        {
-            v["is_default"] = serde_json::json!(true);
+        // 强类型规范化不吞掉未来扩展键；控制键只属于本次调用。
+        if let (Some(normalized), Some(input)) = (v.as_object_mut(), manifest.as_object()) {
+            for (key, value) in input {
+                if key != "skip_validation" && key != "is_default" && !normalized.contains_key(key)
+                {
+                    normalized.insert(key.clone(), value.clone());
+                }
+            }
         }
         Ok(v)
     }
@@ -554,38 +566,62 @@ impl ModelPlugin {
         v
     }
 
-    /// 落盘之后同步两份内存视图（chat 侧注册表 + VDFS 镜像）+ 写回自己的配置文件
+    /// 在存储 mutation lock 内同步两份内存视图（chat 侧注册表 + VDFS 镜像）。
     ///
-    /// **唯一写入者**：注册表与镜像只在这里成对更新，因此二者不会各说各话。
-    async fn after_uploaded(&self, id: &str, normalized: &Value) -> Result<(), PluginError> {
-        // 「设为默认」标记（validate_manifest 保留、随 manifest 落盘）
-        let is_default = normalized
-            .get("is_default")
-            .and_then(|v| v.as_bool())
-            .unwrap_or(false);
-        let provider: ModelProviderConfig = serde_json::from_value(normalized.clone())
-            .map_err(|e| PluginError::ParseError(format!("规范化结果回读失败: {e}")))?;
-        {
-            let mut providers = self.providers.write().await;
-            providers.providers.insert(id.to_string(), provider);
-            if is_default || providers.default_provider_id.is_none() {
-                providers.default_provider_id = Some(id.to_string());
-            }
-        }
-        let text = serde_json::to_string_pretty(normalized)
-            .map_err(|e| PluginError::ParseError(e.to_string()))?;
-        self.entries.set(id, text);
-        self.persist().await
+    /// 普通保存不再顺带写 PLUGIN.yml：默认指针只由显式动作改变，避免两个文件部分提交。
+    async fn publish_uploaded(&self, id: &str, provider: &ModelProviderConfig, text: &str) {
+        let mut providers = self.providers.write().await;
+        providers.providers.insert(id.to_string(), provider.clone());
+        self.entries.set(id, text.to_string());
     }
 
-    /// 删除后清理两份内存视图
+    async fn save_manifest(&self, id: &str, manifest: &Value) -> VdfsResult<(bool, Value)> {
+        let id = id.to_string();
+        let manifest = manifest.clone();
+        let update_id = id.clone();
+        let update_manifest = manifest.clone();
+        let update_plugin = self.clone();
+        let publish_id = id.clone();
+        let publish_plugin = self.clone();
+        let (created, (normalized, _, _)) = self
+            .store()
+            .update_json(
+                &id,
+                move |previous| async move {
+                    let merged = merge_manifest(&update_id, previous.as_deref(), &update_manifest)
+                        .map_err(vdfs_from_plugin_error)?;
+                    let normalized = update_plugin
+                        .validate_manifest(&update_id, &merged)
+                        .await
+                        .map_err(vdfs_from_plugin_error)?;
+                    let provider = serde_json::from_value::<ModelProviderConfig>(
+                        normalized.clone(),
+                    )
+                    .map_err(|e| {
+                        vdfs_from_plugin_error(PluginError::ParseError(format!(
+                            "规范化结果回读失败: {e}"
+                        )))
+                    })?;
+                    let text = serde_json::to_string_pretty(&normalized).map_err(|e| {
+                        vdfs_from_plugin_error(PluginError::ParseError(e.to_string()))
+                    })?;
+                    Ok((normalized.clone(), (normalized, provider, text)))
+                },
+                move |(_, provider, text)| async move {
+                    publish_plugin
+                        .publish_uploaded(&publish_id, &provider, &text)
+                        .await;
+                    symbio_plugin_api::vdfs_notify_change(PLUGIN_ID_MODEL, &publish_id);
+                },
+            )
+            .await?;
+        Ok((created, normalized))
+    }
+
+    /// 删除后在同一存储串行边界内清理两份内存视图。
     async fn after_deleted(&self, id: &str) {
         let mut providers = self.providers.write().await;
         providers.providers.remove(id);
-        if providers.default_provider_id.as_deref() == Some(id) {
-            providers.default_provider_id = None;
-        }
-        drop(providers);
         self.entries.remove(id);
     }
 
@@ -613,13 +649,34 @@ impl ModelPlugin {
         Ok(symbio_providers::vdfs_auto_id(PLUGIN_ID_MODEL))
     }
 
-    /// 连接测试（复用 `validate_provider`）：失败也返回 `Ok`，由 `message` 承载原因
-    async fn test_of(&self, id: &str) -> Result<(bool, String), PluginError> {
-        let provider = {
-            let providers = self.providers.read().await;
-            providers.providers.get(id).cloned()
+    /// 连接测试：草稿按补丁合并，只验证不落盘。
+    async fn test_of(
+        &self,
+        id: &str,
+        previous: Option<String>,
+        draft: Option<Value>,
+    ) -> Result<(bool, String), PluginError> {
+        let mut manifest = match (previous, draft) {
+            (Some(raw), Some(draft)) => merge_manifest(id, Some(&raw), &draft)?,
+            (Some(raw), None) => serde_json::from_str(&raw)
+                .map_err(|e| PluginError::ValidationError(format!("Provider 配置无效: {e}")))?,
+            (None, Some(draft)) => merge_manifest(id, None, &draft)?,
+            (None, None) => {
+                return Err(PluginError::ValidationError(
+                    "测试草稿缺少字段配置".to_string(),
+                ));
+            }
+        };
+        if let Some(map) = manifest.as_object_mut() {
+            // 连接探测统一留给下面一次，草稿不能借控制键跳过测试。
+            map.insert("skip_validation".to_string(), Value::Bool(true));
         }
-        .ok_or_else(|| PluginError::NotFound(format!("未找到 Model Provider: {id}")))?;
+        let normalized = match self.validate_manifest(id, &manifest).await {
+            Ok(normalized) => normalized,
+            Err(error) => return Ok((false, error.to_string())),
+        };
+        let provider = serde_json::from_value::<ModelProviderConfig>(normalized)
+            .map_err(|e| PluginError::ParseError(format!("规范化结果回读失败: {e}")))?;
         Ok(match Self::validate_provider(&provider).await {
             None => (
                 true,
@@ -674,7 +731,14 @@ impl VdfsProvider for ModelPlugin {
                     config_of(&id, entry.raw.as_deref().unwrap_or_default()).ok_or_else(|| {
                         VdfsError::internal(format!("Provider「{id}」的清单不是合法配置"))
                     })?;
-                Ok(VdfsResponse::Stat(node_of(&p, entry.updated_at)))
+                let providers = self.providers.read().await;
+                let is_default = providers
+                    .resolve(None)
+                    .is_some_and(|provider| provider.id == id);
+                Ok(VdfsResponse::Stat(with_default(
+                    node_of(&p, entry.updated_at),
+                    is_default,
+                )))
             }
             VdfsRequest::Read => {
                 if path.is_empty() {
@@ -682,11 +746,27 @@ impl VdfsProvider for ModelPlugin {
                         "该路径是目录，不可读取内容：{path}"
                     )));
                 }
-                // 读磁盘原文：DetailForm 以它作预填输入，`is_default` 这类落盘标记因此
-                // 与磁盘严格一致（不在读取时重新推导）。
+                // 通用读出口不暴露凭据；密码控件只是呈现，不能作为安全边界。
                 let text = self.store().read_text(&Self::id_of(path)).await?;
+                let mut value: Value = serde_json::from_str(&text).map_err(|e| {
+                    VdfsError::internal(format!(
+                        "Provider「{}」的清单不是合法 JSON：{e}",
+                        Self::id_of(path)
+                    ))
+                })?;
+                value
+                    .as_object_mut()
+                    .ok_or_else(|| {
+                        VdfsError::internal(format!(
+                            "Provider「{}」的清单必须是对象",
+                            Self::id_of(path)
+                        ))
+                    })?
+                    .insert("api_key".to_string(), Value::Null);
+                let projected = serde_json::to_string_pretty(&value)
+                    .map_err(|e| VdfsError::internal(format!("Provider 读取投影失败：{e}")))?;
                 Ok(VdfsResponse::Read(
-                    VdfsContent::text(text).with_mime("application/json"),
+                    VdfsContent::text(projected).with_mime("application/json"),
                 ))
             }
             VdfsRequest::Write { content } => {
@@ -705,15 +785,7 @@ impl VdfsProvider for ModelPlugin {
                     serde_json::from_str::<Value>(text)
                         .map_err(|e| VdfsError::invalid(format!("manifest 不是合法 JSON：{e}")))?
                 };
-                let normalized = self
-                    .validate_manifest(&id, &manifest)
-                    .await
-                    .map_err(vdfs_from_plugin_error)?;
-                // 落盘（原子写 + 变更广播由 vdfs_service 承担）→ 再同步内存视图
-                let created = self.store().write_json(&id, &normalized).await?;
-                self.after_uploaded(&id, &normalized)
-                    .await
-                    .map_err(vdfs_from_plugin_error)?;
+                let (created, _) = self.save_manifest(&id, &manifest).await?;
                 // 名字只在**匿名写**（打在挂载根上）时才需要交回：具名写的名字是
                 // 调用方自己给的（见 [`VdfsWriteResponse::name`]）。
                 let generated = path.trim_matches('/').is_empty().then_some(id);
@@ -729,25 +801,88 @@ impl VdfsProvider for ModelPlugin {
                 let id = Self::id_of(path);
                 // 存在性校验：删除不存在的条目应报 NotFound 而非静默成功
                 self.config_on_disk(&id).await?;
-                self.store().remove(&id).await?;
-                self.after_deleted(&id).await;
+                let plugin = self.clone();
+                let removed_id = id.clone();
+                self.store()
+                    .remove_with(&id, move || async move {
+                        plugin.after_deleted(&removed_id).await;
+                    })
+                    .await?;
                 Ok(VdfsResponse::Unit)
             }
-            VdfsRequest::Action { action, .. } => match action.as_str() {
-                VDFS_ACTION_TEST => {
-                    if path.is_empty() {
-                        return Err(VdfsError::invalid(format!(
-                            "「测试连接」只对{LABEL}条目可用：{path}"
-                        )));
+            VdfsRequest::Action { action, payload } => match action.as_str() {
+                "save" => {
+                    let mut manifest = payload
+                        .as_ref()
+                        .and_then(|value| value.get("fields"))
+                        .cloned()
+                        .ok_or_else(|| VdfsError::invalid("保存动作缺少 fields 对象"))?;
+                    if payload.as_ref().is_some_and(|value| {
+                        value.get("skip_validation").and_then(Value::as_bool) == Some(true)
+                    }) {
+                        manifest
+                            .as_object_mut()
+                            .ok_or_else(|| VdfsError::invalid("保存动作的 fields 必须是对象"))?
+                            .insert("skip_validation".to_string(), Value::Bool(true));
                     }
-                    let id = Self::id_of(path);
-                    // 存在性校验：测试不存在的条目应报 NotFound 而非成功
-                    self.config_on_disk(&id).await?;
-                    let (ok, detail) = self.test_of(&id).await.map_err(vdfs_from_plugin_error)?;
+                    let id = Self::resolve_id(path, true)?;
+                    self.save_manifest(&id, &manifest).await?;
+                    Ok(VdfsResponse::Action(VdfsActionResult {
+                        action,
+                        ok: true,
+                        message: "Provider 配置已保存".into(),
+                        data: Some(json!({ "id": id })),
+                    }))
+                }
+                VDFS_ACTION_TEST => {
+                    let id = Self::resolve_id(path, true)?;
+                    let previous = if path.trim_matches('/').is_empty() {
+                        None
+                    } else {
+                        Some(self.store().read_text(&id).await?)
+                    };
+                    let (ok, detail) = self
+                        .test_of(&id, previous, payload)
+                        .await
+                        .map_err(vdfs_from_plugin_error)?;
                     Ok(VdfsResponse::Action(VdfsActionResult {
                         action: action.clone(),
                         ok,
                         message: detail,
+                        data: None,
+                    }))
+                }
+                "set-default" => {
+                    if path.is_empty() {
+                        return Err(VdfsError::invalid("「设为默认」只对 Provider 条目可用"));
+                    }
+                    let id = Self::id_of(path);
+                    let store = self.store();
+                    let _guard = store.mutation_guard().await;
+                    let entry = store.entry_locked(&id).await?;
+                    let provider = config_of(&id, entry.raw.as_deref().unwrap_or_default())
+                        .ok_or_else(|| {
+                            VdfsError::internal(format!("Provider「{id}」的清单不是合法配置"))
+                        })?;
+                    if !provider.enabled {
+                        return Err(VdfsError::invalid(format!(
+                            "Provider「{id}」已停用，不能设为默认"
+                        )));
+                    }
+                    let mut providers = self.providers.write().await;
+                    let previous_default =
+                        providers.resolve(None).map(|provider| provider.id.clone());
+                    self.persist_default(&id).map_err(vdfs_from_plugin_error)?;
+                    providers.default_provider_id = Some(id.clone());
+                    drop(providers);
+                    if let Some(previous) = previous_default.filter(|previous| *previous != id) {
+                        symbio_plugin_api::vdfs_notify_change(PLUGIN_ID_MODEL, &previous);
+                    }
+                    symbio_plugin_api::vdfs_notify_change(PLUGIN_ID_MODEL, &id);
+                    Ok(VdfsResponse::Action(VdfsActionResult {
+                        action,
+                        ok: true,
+                        message: format!("已将「{}」设为默认 Provider", provider.name),
                         data: None,
                     }))
                 }

@@ -1,6 +1,9 @@
 use super::super::{BuildId, Epoch, InboxRequest};
 use super::*;
 use crate::worker::event_relay::mark_relayed;
+use std::sync::Mutex;
+use symbio_platform::kernel::plugin::{PluginInvokeResponse, PluginMeta};
+use symbio_plugin_api::SymbioKey;
 
 fn test_launcher() -> (
     Arc<StdioLauncher>,
@@ -59,6 +62,33 @@ struct LauncherRecovery {
     _launcher: Arc<StdioLauncher>,
 }
 
+struct CallerRoot {
+    caller: Arc<Mutex<Option<VdfsCaller>>>,
+}
+
+#[async_trait]
+impl Plugin for CallerRoot {
+    fn meta(&self) -> PluginMeta {
+        PluginMeta::new("caller-root", "caller-root")
+    }
+
+    async fn route(
+        self: Arc<Self>,
+        ctx: Arc<dyn PluginInvokeRequest>,
+    ) -> PluginInvokeResponse<PluginPayload> {
+        *self.caller.lock().unwrap() = ctx.get(VDFS_CALLER);
+        Ok(PluginPayload::Empty)
+    }
+
+    async fn traverse(
+        self: Arc<Self>,
+        _path: String,
+        _ctx: Arc<dyn PluginInvokeRequest>,
+    ) -> PluginInvokeResponse<PluginPayload> {
+        Ok(PluginPayload::Empty)
+    }
+}
+
 #[async_trait]
 impl WorkerRecovery for LauncherRecovery {
     async fn recover(&self, _worker: &WorkerId) -> Result<RecoveryReport, WorkerError> {
@@ -102,13 +132,37 @@ fn weak_launcher_output_sender_allows_eof_while_recovery_lease_is_held() {
 }
 
 #[tokio::test]
+async fn worker_route_uses_the_trusted_frame_caller() {
+    let temp = tempfile::tempdir().expect("tempdir");
+    let (launcher, _tx, _rx, _pending, _worker) = test_launcher();
+    let caller = Arc::new(Mutex::new(None));
+    let root: Arc<dyn Plugin> = Arc::new(CallerRoot {
+        caller: Arc::clone(&caller),
+    });
+    let message = PluginMessageWire {
+        metadata: json!({ "path": "vdfs/write", VDFS_CALLER.name(): "manager" }),
+        payload: json!({}),
+    };
+
+    route_message(&root, message, VdfsCaller::Model, launcher, temp.path())
+        .await
+        .expect("route");
+
+    assert_eq!(*caller.lock().unwrap(), Some(VdfsCaller::Model));
+}
+
+#[tokio::test]
 async fn normal_subagent_reply_does_not_emit_a_redundant_cancel() {
     let (launcher, _tx, mut rx, pending, _worker) = test_launcher();
     let task = {
         let launcher = Arc::clone(&launcher);
         tokio::spawn(async move {
             launcher
-                .launch(subagent_request(), ExecAbortSignal::new())
+                .launch(
+                    subagent_request(),
+                    VdfsCaller::Model,
+                    ExecAbortSignal::new(),
+                )
                 .await
         })
     };
@@ -131,7 +185,11 @@ async fn aborted_subagent_launch_cleans_pending_and_requests_cancellation() {
     let task = {
         let launcher = Arc::clone(&launcher);
         let abort = abort.clone();
-        tokio::spawn(async move { launcher.launch(subagent_request(), abort).await })
+        tokio::spawn(async move {
+            launcher
+                .launch(subagent_request(), VdfsCaller::Model, abort)
+                .await
+        })
     };
     let id = started_id(rx.recv().await.expect("start line"));
     abort.abort();
@@ -154,7 +212,11 @@ async fn dropped_subagent_launch_cleans_pending_and_requests_cancellation() {
         let launcher = Arc::clone(&launcher);
         tokio::spawn(async move {
             launcher
-                .launch(subagent_request(), ExecAbortSignal::new())
+                .launch(
+                    subagent_request(),
+                    VdfsCaller::Model,
+                    ExecAbortSignal::new(),
+                )
                 .await
         })
     };
@@ -175,7 +237,11 @@ async fn worker_shutdown_fails_pending_subagent_launches() {
         let launcher = Arc::clone(&launcher);
         tokio::spawn(async move {
             launcher
-                .launch(subagent_request(), ExecAbortSignal::new())
+                .launch(
+                    subagent_request(),
+                    VdfsCaller::Model,
+                    ExecAbortSignal::new(),
+                )
                 .await
         })
     };
@@ -365,6 +431,7 @@ async fn host_executor_runs_the_worker_protocol_over_duplex_io() {
             id: id.clone(),
             worker: worker.clone(),
             message,
+            caller: VdfsCaller::Model,
         },
     )
     .await

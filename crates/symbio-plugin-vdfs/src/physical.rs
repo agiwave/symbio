@@ -33,8 +33,9 @@ use std::path::{Path, PathBuf};
 use std::sync::{Mutex as StdMutex, OnceLock};
 use std::time::{SystemTime, UNIX_EPOCH};
 use symbio_plugin_api::{
-    vdfs_has_parent_segment, vdfs_path_within, VdfsAccess, VdfsContent, VdfsContext, VdfsError,
-    VdfsNode, VdfsProvider, VdfsResult, VdfsValidationError, VdfsWriteResponse, VDFS_PARAM_WORKDIR,
+    vdfs_has_parent_segment, vdfs_normalize_path, vdfs_path_within, VdfsAccess, VdfsContent,
+    VdfsContext, VdfsError, VdfsNode, VdfsProvider, VdfsResult, VdfsValidationError,
+    VdfsWriteResponse, VDFS_PARAM_WORKDIR,
 };
 use symbio_plugin_api::{VdfsRequest, VdfsResponse};
 use tokio::io::AsyncWriteExt as _;
@@ -107,10 +108,22 @@ fn starts_with_normalized(base: &Path, prefix: &Path) -> bool {
     normalize_for_comparison(base).starts_with(normalize_for_comparison(prefix))
 }
 
+#[cfg(windows)]
+fn has_alternate_data_stream(path: &str) -> bool {
+    let path = vdfs_normalize_path(path);
+    path.split('/').enumerate().any(|(index, segment)| {
+        let drive_prefix = index == 0
+            && segment.len() == 2
+            && segment.as_bytes()[0].is_ascii_alphabetic()
+            && segment.as_bytes()[1] == b':';
+        segment.contains(':') && !drive_prefix
+    })
+}
+
 /// 物理文件层的访问策略。
 ///
-/// 只有两类规则：`forbidden_paths` 黑名单，以及可选的「限定在工作区 /
-/// 白名单根之内」（[`FsPolicy::workspace_only`]，缺省关闭 = 全盘可读，
+/// 只有三类规则：`forbidden_paths` 黑名单、宿主注入的 `protected_roots`，以及可选的
+/// 「限定在工作区 / 白名单根之内」（[`FsPolicy::workspace_only`]，缺省关闭 = 全盘可读，
 /// 仅黑名单兜底）。
 ///
 /// 黑名单按**路径段**比，认的正是 `/` 打头与 `~` 打头的形态：`/etc/passwd` 命中
@@ -124,6 +137,8 @@ pub struct FsPolicy {
     pub allowed_roots: Vec<PathBuf>,
     /// 黑名单前缀（支持 `~`，命中即拒绝读与写）
     pub forbidden_paths: Vec<String>,
+    /// 宿主注入的受保护物理根；命中即拒绝读、列、`stat` 与所有变更。
+    pub protected_roots: Vec<PathBuf>,
 }
 
 impl Default for FsPolicy {
@@ -139,6 +154,7 @@ impl Default for FsPolicy {
                 "~/.gnupg".into(),
                 "~/.aws".into(),
             ],
+            protected_roots: Vec::new(),
         }
     }
 }
@@ -153,12 +169,24 @@ impl FsPolicy {
         if vdfs_has_parent_segment(&s) {
             return false;
         }
+        #[cfg(windows)]
+        if has_alternate_data_stream(&s) {
+            return false;
+        }
         for forbidden in &self.forbidden_paths {
             let expanded = shellexpand::tilde(forbidden);
             let forbidden = normalize_for_comparison(Path::new(expanded.as_ref()))
                 .to_string_lossy()
                 .into_owned();
             if vdfs_path_within(&s, &forbidden) {
+                return false;
+            }
+        }
+        for protected in &self.protected_roots {
+            let protected = normalize_for_comparison(protected)
+                .to_string_lossy()
+                .into_owned();
+            if vdfs_path_within(&s, &protected) {
                 return false;
             }
         }
@@ -560,8 +588,19 @@ impl Default for PhysicalFs {
 
 impl PhysicalFs {
     pub fn new() -> Self {
+        Self::with_protected_roots(Vec::new())
+    }
+
+    pub fn with_protected_roots(protected_roots: Vec<PathBuf>) -> Self {
+        let protected_roots = protected_roots
+            .into_iter()
+            .map(|root| std::fs::canonicalize(&root).unwrap_or(root))
+            .collect();
         Self {
-            policy: FsPolicy::default(),
+            policy: FsPolicy {
+                protected_roots,
+                ..FsPolicy::default()
+            },
         }
     }
 

@@ -66,6 +66,7 @@ import {
   isVdfsDraft,
   isVdfsUnder,
   parseVdfsValidation,
+  VDFS_ACTION_TEST,
   vdfsAccessOf,
   vdfsBase,
   vdfsJoin,
@@ -983,6 +984,7 @@ export function useVdfs(opts: UseVdfsOptions) {
     const node = selectedNode.value
     if (!node) return false
     const target = isVdfsDraft(node) ? cwd.value : node.path
+    const draftToken = draftSeq.value
     actionBusy.value = true
     detailError.value = ''
     try {
@@ -997,17 +999,26 @@ export function useVdfs(opts: UseVdfsOptions) {
       }
       // 动作可能改变条目集合（导入建出一条、清空删掉一片）→ 重拉收敛
       await refresh()
-      const data = r?.data
-      const createdId = data && typeof data === 'object' && 'id' in data
-        ? (data as { id?: unknown }).id
-        : undefined
-      if (r?.ok && typeof createdId === 'string' && createdId) {
-        const target = items.value.find((n) => n.path === vdfsJoin(cwd.value, createdId))
-        if (target) void select(target)
+      const current = selectedNode.value
+      const selectionUnchanged = isVdfsDraft(node)
+        ? current === node && draftSeq.value === draftToken
+        : current?.path === node.path
+      if (r?.ok && action !== VDFS_ACTION_TEST && selectionUnchanged) {
+        const data = r.data
+        const createdId = data && typeof data === 'object' && 'id' in data
+          ? (data as { id?: unknown }).id
+          : undefined
+        if (typeof createdId === 'string' && createdId) {
+          const target = items.value.find((n) => n.path === vdfsJoin(cwd.value, createdId))
+          if (target) void select(target)
+          else if (isVdfsDraft(node)) {
+            clearSelection()
+            showToast('info', '已保存，但未能在列表中定位，请从列表中选择')
+          }
+        } else if (isVdfsDraft(node)) {
+          clearSelection()
+        }
       }
-      // 草稿是**瞬态**：动作在草稿上成功 = 它已经落盘（如「导入整包」建出一条），
-      // 草稿页的使命到此结束——继续留着它，等于显示一个并不存在的资源的详情。
-      if (r?.ok && isVdfsDraft(node)) clearSelection()
       return r?.ok === true
     } catch (err) {
       detailError.value = captureError(err)
@@ -1104,7 +1115,7 @@ export function useVdfs(opts: UseVdfsOptions) {
    *
    * 目标地址由 `runAction` 决定（草稿态 = 当前目录，与 `write` 同一条规则）。
    */
-  async function runPackAction(action: string, file: File): Promise<boolean> {
+  async function runPackAction(action: string, file: File, payload?: unknown): Promise<boolean> {
     let b64: string
     try {
       b64 = arrayBufferToBase64(await file.arrayBuffer())
@@ -1113,7 +1124,10 @@ export function useVdfs(opts: UseVdfsOptions) {
       showToast('error', detailError.value)
       return false
     }
-    return runAction(action, { filename: file.name, b64 })
+    const declared = payload && typeof payload === 'object' && !Array.isArray(payload)
+      ? payload as Record<string, unknown>
+      : {}
+    return runAction(action, { ...declared, filename: file.name, b64 })
   }
 
   // ==================== 实时（总线 vdfs 频道，非轮询） ====================

@@ -4,7 +4,9 @@
 
 use super::*;
 
-use symbio_plugin_api::{VdfsAccess, VdfsContent, VdfsContext, VdfsNode, VdfsWriteResponse};
+use symbio_plugin_api::{
+    VdfsAccess, VdfsContent, VdfsContext, VdfsNode, VdfsWriteResponse, VDFS_PARAM_WORKDIR,
+};
 
 /// 记录收到路径与形状的虚拟层替身
 struct V {
@@ -245,6 +247,31 @@ async fn bare_address_goes_to_physical_untouched() {
         .await
         .unwrap();
     assert_eq!(p3.seen(), vec!["/etc/hosts"]);
+}
+
+#[tokio::test]
+async fn protected_storage_cannot_be_read_through_an_absolute_physical_path() {
+    let tmp = tempfile::tempdir().unwrap();
+    let base = tmp.path().join("workspace");
+    let protected = base.join("plugins");
+    std::fs::create_dir_all(protected.join("model/p1")).unwrap();
+    let manifest = protected.join("model/p1/provider.json");
+    std::fs::write(&manifest, r#"{"api_key":"secret"}"#).unwrap();
+    let ctx =
+        VdfsContext::empty().with_param(VDFS_PARAM_WORKDIR, base.to_string_lossy().into_owned());
+    let fs = UnifiedFs::with_protected_roots(crate::host::empty_root(), vec![protected.clone()]);
+    let absolute = manifest.to_string_lossy().replace('\\', "/");
+
+    for path in [absolute.as_str(), "plugins/model/p1/provider.json"] {
+        assert!(matches!(
+            fs.dispatch(&ctx, path, VdfsRequest::Read).await,
+            Err(VdfsError::Forbidden(_))
+        ));
+    }
+    assert_eq!(
+        std::fs::read_to_string(&manifest).unwrap(),
+        r#"{"api_key":"secret"}"#
+    );
 }
 
 /// 写入回执**不带地址**，门面因此原样透出

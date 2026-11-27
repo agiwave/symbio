@@ -39,6 +39,7 @@ pub use super::fs::{normalize_addr, UnifiedFs, VDFS_ADDR_ROOT};
 use super::protocol::*;
 use async_trait::async_trait;
 use std::collections::VecDeque;
+use std::path::PathBuf;
 use std::sync::Arc;
 use symbio_plugin_api::routes::{
     ROUTE_VDFS_ACTION, ROUTE_VDFS_ROOT, ROUTE_VDFS_UNWATCH, ROUTE_VDFS_WATCH,
@@ -59,6 +60,15 @@ use symbio_plugin_api::{VdfsRequest, VdfsResponse};
 
 // 变更事件的 `kind` 不自持：取自词表的家 `symbio_plugin_api::event_bus::EVENT_BUS_KIND_VDFS`
 // （前端 `subscribe({ kind: 'vdfs' })`，见 004-PROTOCOLS.md §事件总线频道）。
+
+const HOST_VDFS_PROTECTED_ROOTS: &str = "vdfs_protected_roots";
+
+pub(crate) fn protected_roots(ctx: &Arc<dyn PluginInvokeRequest>) -> Vec<PathBuf> {
+    ctx.get_raw(HOST_VDFS_PROTECTED_ROOTS)
+        .and_then(|value| value.downcast::<Vec<String>>().ok())
+        .map(|roots| roots.iter().map(PathBuf::from).collect())
+        .unwrap_or_default()
+}
 
 // ==================== 统一文件系统 ====================
 
@@ -114,11 +124,6 @@ pub async fn root_of(visitor: &Arc<dyn Registry>) -> DynVdfsProvider {
         .unwrap_or_else(empty_root)
 }
 
-/// 构造本次调用的统一文件系统（虚拟层 + 物理层）。
-pub async fn unified_fs(visitor: &Arc<dyn Registry>) -> DynVdfsProvider {
-    Arc::new(UnifiedFs::new(root_of(visitor).await))
-}
-
 /// 取本次调用的统一文件系统（前端链路入口）。
 ///
 /// - `ctx` 已带能力管理器（LLM 链路）→ 直接用其中的根（`Registry` 收集）；
@@ -128,8 +133,12 @@ pub async fn resolve_fs(
     parent: Option<&Arc<dyn Plugin>>,
     ctx: &Arc<dyn PluginInvokeRequest>,
 ) -> DynVdfsProvider {
+    let protected_roots = protected_roots(ctx);
     if let Some(visitor) = ctx.get(CAPABILITY_VISITOR) {
-        return unified_fs(&visitor).await;
+        return Arc::new(UnifiedFs::with_protected_roots(
+            root_of(&visitor).await,
+            protected_roots,
+        ));
     }
 
     // 前端链路：系统 vfs provider 经 `Plugin` 接口直接取（与 LLM 链路的
@@ -138,7 +147,7 @@ pub async fn resolve_fs(
         Some(p) => Arc::clone(p).get_vfs_provider().unwrap_or_else(empty_root),
         None => empty_root(),
     };
-    Arc::new(UnifiedFs::new(root))
+    Arc::new(UnifiedFs::with_protected_roots(root, protected_roots))
 }
 
 // ==================== 变更投递 ====================

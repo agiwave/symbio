@@ -261,7 +261,7 @@ inbound_max_connections: 64
 >
 > 只读白名单（精确匹配，源码 `symbio-http/src/ingress_policy.rs::is_readonly_allowed`）：`vdfs/root`、`vdfs/list`、`vdfs/tree`、`vdfs/stat`、`vdfs/read`、`vdfs/search`。资源一律经 VDFS，故放行的是它的**读操作**——`vdfs/write` / `delete` / `mkdir` / `edit` 与节点动作 `vdfs/action` 都不在列；`vdfs/watch` / `unwatch` 是长连接订阅而非一次性读，同样不在列（取舍见共享策略模块）；SSE 实时面（`GET /api/v1/events`）是同一订阅面的另一种传输，只读模式下直接 `403`。**白名单与可达面必须一致**：home 的四条臂（`home/get_homedir` · `home/reload` · `home/set_workspace` · `home/get_workspace`）不登记——gateway 的入站 router 是 worker composite，`Composite::route` 不向上转发，这些臂经入站走不到（e2e t69 ⑦ 实测 400），放进白名单只是永不生效的死条目；撤销条件见 `symbio-http/src/ingress_policy.rs` 的注释。设计定位是**兜底而非完整安全边界**：即便令牌泄露到可信内网，也只能读取而无法触发写操作与命令执行。
 >
-> **配置文件本身不在白名单内**：`vdfs/read` 只要地址落在任一插件的 `PLUGIN.yml` 上就一律拒绝（`reads_config_document`）——配置可能含凭据（网关访问令牌、搜索服务 API Key），放行等于只读模式下就能把它们读走。网关自身的 `gateway/*` 接口也恒走 native（前端不经 HTTP 访问本插件）。
+> **配置文件本身不在白名单内**：`vdfs/read` 只要地址落在任一插件的 `PLUGIN.yml` 或 `plugin_manager/<插件名>` 配置别名上就一律拒绝（`reads_config_document`）——配置可能含凭据（网关访问令牌、搜索服务 API Key），放行等于只读模式下就能把它们读走。判定先做共享 VDFS 词法归一化，`PLUGIN.yml/.`、反斜杠和重复分隔符与规范地址同禁；Windows 的 NTFS 备用数据流别名（如 `PLUGIN.yml::$DATA`）也在文件 I/O 前拒绝，`canonicalize` 会隐藏流名，不能作为唯一判据；虚拟根名运行期取自 `vdfs/root`，不写字面量。模型 `provider.json` 的 `api_key` 由 provider 在通用 `read` 出口投影为空，HTTP 层不维护资源类型表；插件配置目录与运行期数据目录另由宿主注入物理层保护，绝对路径直读不能绕过该投影。网关自身的 `gateway/*` 接口也恒走 native（前端不经 HTTP 访问本插件）。
 
 ---
 
@@ -284,7 +284,7 @@ inbound_max_connections: 64
 
 | 配置 | 热加载方式 |
 |------|-----------|
-| 插件配置（`PLUGIN.yml`） | 一次 `vdfs/write` → `PluginConfigFile::apply` = **校验 → 落内存 → 落自己的文件 → 广播**，订阅方（前端 / LLM）随事件收敛；需要副作用的插件（如网关重建监听）在自己的 `write` 返回后执行 |
+| 插件配置（`PLUGIN.yml`） | 一次 `vdfs/write` → `PluginConfigFile::apply` = **校验 → 原子落自己的文件 → 发布内存 → 广播**；落盘失败时内存与事件均不变。订阅方（前端 / LLM）随事件收敛；需要副作用的插件（如网关重建监听）在自己的 `write` 返回后执行 |
 | 插件集合 | 容器**不缓存**子插件清单——每次现取（`children_of`），因此新增 / 移除插件目录即时可见 |
 | 资源条目 | 走 VDFS 的 `watch` / `unwatch` 事件，前端按路径防抖刷新（**禁止轮询**） |
 

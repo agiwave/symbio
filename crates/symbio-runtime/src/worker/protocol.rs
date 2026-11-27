@@ -1,6 +1,7 @@
 use super::{RequestId, WorkerError, WorkerId};
 use serde::{Deserialize, Serialize};
 use symbio_platform::kernel::plugin::{PluginFrame, PluginMessageWire};
+use symbio_plugin_api::VdfsCaller;
 use tokio::io::{AsyncBufReadExt, AsyncWriteExt};
 
 /// 单帧上限。事件正文与工具结果都可能很大，但无上限的 stdio 会让坏 worker 无限吃内存。
@@ -17,6 +18,7 @@ pub enum WorkerLine {
         id: RequestId,
         worker: WorkerId,
         message: PluginMessageWire,
+        caller: VdfsCaller,
     },
     Response {
         id: RequestId,
@@ -34,6 +36,7 @@ pub enum WorkerLine {
         id: RequestId,
         child_session_id: String,
         message: PluginMessageWire,
+        caller: VdfsCaller,
     },
     SubagentStarted {
         id: RequestId,

@@ -34,6 +34,7 @@ const hoisted = vi.hoisted(() => {
     loadMore: vi.fn(),
     refresh: vi.fn(),
     retryDetail: vi.fn(),
+    markSaved: vi.fn(),
   }
   /** 每次 `startNew()` 实际开出的**类型**——断言的是"开了哪一类"，不只是"开了几次" */
   const newTypes: (string | null)[] = []
@@ -83,7 +84,9 @@ registerVdfsRenderer('session', RendererStub)
 const FormRendererStub = defineComponent({
   name: 'FormRendererStub',
   props: { data: { type: Object, default: null }, error: { type: String, default: '' } },
-  setup(props) {
+  emits: ['save'],
+  setup(props, { expose }) {
+    expose({ markSaved: () => hoisted.fns.markSaved() })
     const name = ref('')
     watch(
       () => props.data,
@@ -138,6 +141,8 @@ let stubRefs: {
   items: Ref<VdfsItem[]>
   treeNodes: Ref<VdfsTreeNode[]>
   loading: Ref<boolean>
+  saving: Ref<boolean>
+  actionBusy: Ref<boolean>
   pinnedAtAddr: Ref<boolean>
   loadingDetail: Ref<boolean>
   detailLoadError: Ref<string>
@@ -184,6 +189,8 @@ function installStub(
   const items = ref<VdfsItem[]>(opts.items ?? [])
   const treeNodes = shallowRef(opts.treeNodes ?? [])
   const loading = ref(opts.loading ?? false)
+  const saving = ref(false)
+  const actionBusy = ref(false)
   const pinnedAtAddr = ref(opts.pinnedAtAddr ?? false)
   const loadingDetail = ref(opts.loadingDetail ?? false)
   const detailLoadError = ref(opts.detailLoadError ?? '')
@@ -198,7 +205,7 @@ function installStub(
   // 一致 = 「自述已经跟上当前目录」；换目录的用例可以把两者拆开，复刻那一步滞后。
   const cwdAddr = ref(opts.cwd ?? '@vfs')
   stubRefs = {
-    cwd, cwdNode, cwdAddr, selectedNode, items, treeNodes, loading, pinnedAtAddr,
+    cwd, cwdNode, cwdAddr, selectedNode, items, treeNodes, loading, saving, actionBusy, pinnedAtAddr,
     loadingDetail, detailLoadError, detailError, formData, nodeText,
   }
   /** 筛选词：真实现是 ref + computed 投影；桩里复刻成同一个形状，
@@ -255,8 +262,8 @@ function installStub(
     formData,
     loadingDetail,
     detailLoadError,
-    saving: ref(false),
-    actionBusy: ref(false),
+    saving,
+    actionBusy,
     detailError,
     fieldErrors: ref([]),
     // 机制动作（当前只有「删除」）由页面算好注入渲染器；可写节点才有它
@@ -299,8 +306,8 @@ function newButton(w: VueWrapper) {
 }
 
 /** 从渲染器桩上抛一个动作（`file` 有值 = 该动作声明了 `pack`） */
-async function emitAction(w: VueWrapper, id: string, file?: File) {
-  w.findComponent({ name: 'RendererStub' }).vm.$emit('action', id, file)
+async function emitAction(w: VueWrapper, id: string, file?: File, payload?: unknown) {
+  w.findComponent({ name: 'RendererStub' }).vm.$emit('action', id, payload, file)
   await w.vm.$nextTick()
 }
 
@@ -320,6 +327,21 @@ describe('VdfsWorkbench 新建入口', () => {
     const btn = newButton(w)
     expect(btn, '声明了 new_type 就该有新建按钮').toBeTruthy()
     expect(btn?.attributes('title')).toBe('新建 技能')
+  })
+
+  it('动作忙态禁用新建入口，不能留在途保存旁再开一张草稿', async () => {
+    installStub({ newType: SKILL })
+    const w = bench()
+    hoisted.fns.startNew.mockClear()
+    const btn = newButton(w)!
+    expect(btn.element.disabled).toBe(false)
+
+    stubRefs!.actionBusy.value = true
+    await nextTick()
+
+    expect(btn.element.disabled).toBe(true)
+    await btn.trigger('click')
+    expect(hoisted.fns.startNew).not.toHaveBeenCalled()
   })
 
   it('未声明可新建类型 ⇒ 没有按钮（机制只认节点声明，不做任何回退）', () => {
@@ -390,6 +412,14 @@ describe('VdfsWorkbench 动作转发：按**载荷形状**分流', () => {
     expect(hoisted.fns.runPackAction).not.toHaveBeenCalled()
   })
 
+  it('动作参数原样交给 runAction，普通文件动作仍走 pack 通道', async () => {
+    installStub({ selected: makeNode('s1') })
+    const w = bench()
+    const draft = { model: 'draft-model' }
+    await emitAction(w, 'test', undefined, draft)
+    expect(hoisted.fns.runAction).toHaveBeenCalledWith('test', draft)
+  })
+
   it('带 File 的上抛 ⇒ runPackAction（如「导入整包」）', async () => {
     installStub({ selected: makeNode('s1') })
     const w = bench()
@@ -397,7 +427,7 @@ describe('VdfsWorkbench 动作转发：按**载荷形状**分流', () => {
     await emitAction(w, 'import', file)
 
     // 动作名与文件原样转交：控件不认识「导入」，只认「这个动作的载荷是文件」
-    expect(hoisted.fns.runPackAction).toHaveBeenCalledWith('import', file)
+    expect(hoisted.fns.runPackAction).toHaveBeenCalledWith('import', file, undefined)
     expect(hoisted.fns.runAction).not.toHaveBeenCalled()
   })
 })
@@ -448,6 +478,55 @@ describe('VdfsWorkbench 详情槽', () => {
     expect(w.findComponent({ name: 'FormRendererStub' }).exists()).toBe(false)
     await w.find('.vdfs-detail-error button').trigger('click')
     expect(hoisted.fns.retryDetail).toHaveBeenCalledTimes(1)
+  })
+
+  it('表单普通保存只写字段，带动作参数的保存改走 vdfs/action', async () => {
+    const node: VdfsItem = { ...makeNode('m1'), kind: 'model', ext: 'form' }
+    installStub({ selected: node, formData: { name: '服务端值' } })
+    const saveFields = vi.mocked(hoisted.stub.saveFields as ReturnType<typeof vi.fn>)
+    saveFields.mockResolvedValue(true)
+    hoisted.fns.runAction.mockResolvedValue(true)
+    const w = bench()
+    const form = w.findComponent({ name: 'FormRendererStub' })
+
+    form.vm.$emit('save', { name: '普通保存' })
+    expect(saveFields).toHaveBeenCalledWith({ name: '普通保存' })
+    expect(hoisted.fns.runAction).not.toHaveBeenCalled()
+
+    form.vm.$emit('save', { name: '离线保存' }, {
+      fields: { name: '动作声明值' },
+      skip_validation: true,
+    })
+    expect(saveFields).toHaveBeenCalledTimes(1)
+    expect(hoisted.fns.runAction).toHaveBeenCalledWith('save', {
+      fields: { name: '离线保存' },
+      skip_validation: true,
+    })
+    await nextTick()
+  })
+
+  it('旧保存回执不得把新选中的表单标记为已保存', async () => {
+    const first: VdfsItem = { ...makeNode('m1'), kind: 'model', ext: 'form' }
+    const second: VdfsItem = { ...makeNode('m2'), kind: 'model', ext: 'form' }
+    installStub({ selected: first, formData: { name: 'first' } })
+    let resolveSave!: (ok: boolean) => void
+    hoisted.fns.runAction.mockReturnValue(new Promise<boolean>((resolve) => {
+      resolveSave = resolve
+    }))
+    const w = bench()
+
+    w.findComponent({ name: 'FormRendererStub' }).vm.$emit(
+      'save',
+      { name: 'saved' },
+      { skip_validation: true },
+    )
+    stubRefs!.selectedNode.value = second
+    await nextTick()
+    resolveSave(true)
+    await Promise.resolve()
+    await nextTick()
+
+    expect(hoisted.fns.markSaved).not.toHaveBeenCalled()
   })
 
   it('★ 保存失败仍保留当前表单与用户输入，只展示操作错误', async () => {

@@ -45,28 +45,37 @@ pub struct WorkerBootstrap {
     pub session_dir: PathBuf,
 }
 
-struct PluginRecovery {
+struct WorkerRuntime {
     root: Arc<dyn Plugin>,
     inbox: Arc<DurableInbox>,
+    worker: WorkerId,
     launcher: Arc<StdioLauncher>,
+    homedir: PathBuf,
+}
+
+struct PluginRecovery {
+    runtime: Arc<WorkerRuntime>,
 }
 
 #[async_trait]
 impl WorkerRecovery for PluginRecovery {
     async fn recover(&self, worker: &WorkerId) -> Result<RecoveryReport, WorkerError> {
+        let runtime = &self.runtime;
         let ctx = Arc::new(PluginSimpleRequest::new(None, None));
+        crate::runtime::attach_vdfs_protected_roots(ctx.as_ref(), &runtime.homedir);
         ctx.set(PATH, ROUTE_SESSION_WORKER_READY.to_string());
         ctx.set(SESSION_ID, worker.session_id().to_string());
         ctx.set(VDFS_CALLER, VdfsCaller::Manager);
         ctx.set_payload(json!({}))
             .map_err(|error| WorkerError::Invalid(error.to_string()))?;
-        install_worker_ports(&ctx, Arc::clone(&self.launcher));
-        self.root
+        install_worker_ports(&ctx, Arc::clone(&runtime.launcher));
+        runtime
+            .root
             .clone()
             .route(ctx)
             .await
             .map_err(|error| WorkerError::Invalid(error.to_string()))?;
-        let snapshot = reconcile_interrupted(&self.inbox, worker, &self.inbox.recover()?)?;
+        let snapshot = reconcile_interrupted(&runtime.inbox, worker, &runtime.inbox.recover()?)?;
         Ok(RecoveryReport { snapshot })
     }
 }
@@ -90,16 +99,19 @@ fn reconcile_interrupted(
     Ok(recovered)
 }
 
-async fn route(
+async fn route_message(
     root: &Arc<dyn Plugin>,
     message: PluginMessageWire,
+    caller: VdfsCaller,
     launcher: Arc<StdioLauncher>,
+    homedir: &Path,
 ) -> Result<PluginPayloadWire, String> {
     let ctx = Arc::new(PluginSimpleRequest::from_parts(
         message.payload,
         message.metadata.as_object(),
     ));
-    ctx.set(VDFS_CALLER, VdfsCaller::Manager);
+    crate::runtime::attach_vdfs_protected_roots(ctx.as_ref(), homedir);
+    ctx.set(VDFS_CALLER, caller);
     install_worker_ports(&ctx, launcher);
     match root
         .clone()
@@ -113,20 +125,29 @@ async fn route(
     }
 }
 
-async fn execute(
-    root: &Arc<dyn Plugin>,
-    inbox: &DurableInbox,
-    worker: &WorkerId,
-    id: &super::RequestId,
-    message: PluginMessageWire,
-    launcher: Arc<StdioLauncher>,
-) -> Result<PluginPayloadWire, String> {
-    inbox.claim(worker, id).map_err(|error| error.to_string())?;
-    let result = route(root, message, launcher).await;
-    inbox
-        .complete(worker, id)
-        .map_err(|error| error.to_string())?;
-    result
+impl WorkerRuntime {
+    async fn execute(
+        &self,
+        id: &super::RequestId,
+        message: PluginMessageWire,
+        caller: VdfsCaller,
+    ) -> Result<PluginPayloadWire, String> {
+        self.inbox
+            .claim(&self.worker, id)
+            .map_err(|error| error.to_string())?;
+        let result = route_message(
+            &self.root,
+            message,
+            caller,
+            Arc::clone(&self.launcher),
+            &self.homedir,
+        )
+        .await;
+        self.inbox
+            .complete(&self.worker, id)
+            .map_err(|error| error.to_string())?;
+        result
+    }
 }
 
 #[derive(serde::Deserialize)]
@@ -152,7 +173,12 @@ impl StdioLauncher {
         }
     }
 
-    async fn launch(&self, request: SubagentRequest, abort: ExecAbortSignal) -> Result<(), String> {
+    async fn launch(
+        &self,
+        request: SubagentRequest,
+        caller: VdfsCaller,
+        abort: ExecAbortSignal,
+    ) -> Result<(), String> {
         let id = RequestId::generated(
             's',
             &[
@@ -185,6 +211,7 @@ impl StdioLauncher {
                     id: id.clone(),
                     child_session_id: request.child_session_id,
                     message: request.message,
+                    caller,
                 })
                 .await
                 .map_err(|_| "worker 输出通道已关闭".to_string())?;
@@ -245,8 +272,13 @@ impl PortExecutor for StdioLauncher {
                 );
             }
         };
+        let caller = ctx
+            .ctx
+            .as_ref()
+            .and_then(|ctx| ctx.get(VDFS_CALLER))
+            .unwrap_or(VdfsCaller::Model);
         port_result(
-            self.launch(request, ctx.abort)
+            self.launch(request, caller, ctx.abort)
                 .await
                 .map(|_| Value::Null)
                 .map_err(PluginError::InternalError),
@@ -297,24 +329,28 @@ where
     let homedir = std::fs::canonicalize(&homedir)
         .map_err(|error| format!("解析系统目录失败 {}: {error}", homedir.display()))?;
     let session_dir = resolve_session_dir(&homedir, &session_dir, worker.session_id())?;
-    let root = root_factory
-        .create_root(Arc::new(PluginSimpleRequest::new(None, None)))
-        .await;
+    let root_ctx = Arc::new(PluginSimpleRequest::new(None, None));
+    crate::runtime::attach_vdfs_protected_roots(root_ctx.as_ref(), &homedir);
+    let root = root_factory.create_root(root_ctx).await;
     let inbox = Arc::new(
         DurableInbox::new(worker.session_id(), &session_dir).map_err(|error| error.to_string())?,
     );
     let (out_tx, mut out_rx) = mpsc::channel::<WorkerLine>(EVENT_CHANNEL_CAPACITY);
     let out_tx = Arc::new(out_tx);
     let subagent_pending: SubagentReplies = Arc::new(StdMutex::new(HashMap::new()));
-    let launcher = Arc::new(StdioLauncher {
-        tx: Arc::downgrade(&out_tx),
-        pending: Arc::clone(&subagent_pending),
-        worker: worker.clone(),
-    });
-    let recovery: Arc<dyn WorkerRecovery> = Arc::new(PluginRecovery {
+    let runtime = Arc::new(WorkerRuntime {
         root: Arc::clone(&root),
         inbox: Arc::clone(&inbox),
-        launcher: Arc::clone(&launcher),
+        worker: worker.clone(),
+        launcher: Arc::new(StdioLauncher {
+            tx: Arc::downgrade(&out_tx),
+            pending: Arc::clone(&subagent_pending),
+            worker: worker.clone(),
+        }),
+        homedir: homedir.clone(),
+    });
+    let recovery: Arc<dyn WorkerRecovery> = Arc::new(PluginRecovery {
+        runtime: Arc::clone(&runtime),
     });
     let ready = WorkerStartup::new(
         recovery,
@@ -333,7 +369,7 @@ where
             }
         }
     });
-    let event_rx = worker_events(&root, &worker).await?;
+    let event_rx = worker_events(&root, &worker, &homedir).await?;
     let broker = if std::env::var_os("SYMBIO_BROKER_TOKEN").is_some() {
         let token = std::env::var("SYMBIO_BROKER_TOKEN").map_err(|e| e.to_string())?;
         if token.len() < 32 || token.chars().any(char::is_whitespace) {
@@ -378,10 +414,7 @@ where
     let execution = Arc::new(tokio::sync::Mutex::new(()));
     let recovery_gate = Arc::clone(&execution).lock_owned().await;
     let mut tasks = JoinSet::new();
-    let recovery_root = Arc::clone(&root);
-    let recovery_inbox = Arc::clone(&inbox);
-    let recovery_worker = worker.clone();
-    let recovery_launcher = Arc::clone(&launcher);
+    let recovery_runtime = Arc::clone(&runtime);
     tasks.spawn(async move {
         let _gate = recovery_gate;
         for pending in ready.recovery().snapshot.pending.clone() {
@@ -389,15 +422,9 @@ where
                 metadata: pending.request().message().clone(),
                 payload: pending.request().params().clone(),
             };
-            if let Err(error) = execute(
-                &recovery_root,
-                &recovery_inbox,
-                &recovery_worker,
-                pending.request().id(),
-                message,
-                recovery_launcher.clone(),
-            )
-            .await
+            if let Err(error) = recovery_runtime
+                .execute(pending.request().id(), message, pending.request().caller())
+                .await
             {
                 warn!(%error, "恢复请求执行失败");
             }
@@ -419,19 +446,17 @@ where
                 id,
                 worker: claimed,
                 message,
+                caller,
             } => {
                 claimed
                     .validate(&worker)
                     .map_err(|error| error.to_string())?;
-                let root = Arc::clone(&root);
-                let inbox = Arc::clone(&inbox);
-                let worker = worker.clone();
+                let runtime = Arc::clone(&runtime);
                 let execution = Arc::clone(&execution);
                 let out_tx = out_tx.clone();
-                let launcher = Arc::clone(&launcher);
                 tasks.spawn(async move {
                     let _gate = execution.lock().await;
-                    let result = execute(&root, &inbox, &worker, &id, message, launcher).await;
+                    let result = runtime.execute(&id, message, caller).await;
                     let result = result.and_then(|payload| {
                         serde_json::to_value(payload).map_err(|e| e.to_string())
                     });
@@ -477,7 +502,7 @@ where
         }
     }
 
-    launcher.fail_all("worker 已停止");
+    runtime.launcher.fail_all("worker 已停止");
     if let Some((client, stop, server)) = broker {
         client.cancel_all().await;
         stop.cancel();
@@ -491,7 +516,7 @@ where
             warn!(%error, "worker 请求任务异常退出");
         }
     }
-    drop(launcher);
+    drop(runtime);
     drop(out_tx);
     if let Err(error) = events.await {
         warn!(%error, "worker 事件任务异常退出");
@@ -505,8 +530,10 @@ where
 async fn worker_events(
     root: &Arc<dyn Plugin>,
     worker: &WorkerId,
+    homedir: &Path,
 ) -> Result<mpsc::Receiver<PluginFrame>, String> {
     let ctx = Arc::new(PluginSimpleRequest::new(None, None));
+    crate::runtime::attach_vdfs_protected_roots(ctx.as_ref(), homedir);
     ctx.set(PATH, ROUTE_VDFS_ROOT.to_string());
     ctx.set(VDFS_CALLER, VdfsCaller::Manager);
     ctx.set_payload(json!({}))
@@ -528,6 +555,7 @@ async fn worker_events(
     let address = session_address(&root_addr, worker.session_id())?;
 
     let ctx = Arc::new(PluginSimpleRequest::new(None, None));
+    crate::runtime::attach_vdfs_protected_roots(ctx.as_ref(), homedir);
     ctx.set(PATH, ROUTE_VDFS_WATCH.to_string());
     ctx.set(SESSION_ID, worker.session_id().to_string());
     ctx.set(VDFS_CALLER, VdfsCaller::Manager);
@@ -539,6 +567,7 @@ async fn worker_events(
         .map_err(|error| format!("订阅会话变更失败: {error}"))?;
 
     let ctx = Arc::new(PluginSimpleRequest::new(None, None));
+    crate::runtime::attach_vdfs_protected_roots(ctx.as_ref(), homedir);
     ctx.set(PATH, ROUTE_EVENT_BUS_SUBSCRIBE.to_string());
     ctx.set(VDFS_CALLER, VdfsCaller::Manager);
     ctx.set_payload(json!({}))

@@ -145,7 +145,8 @@ impl ToolVdfs {
     ) -> VdfsResult<(DynVdfsProvider, VdfsContext)> {
         Self::ensure_allowed(ctx, path, write)?;
         let root = super::host::root_of(&self.visitor).await;
-        let fs: DynVdfsProvider = Arc::new(UnifiedFs::new(root));
+        let protected_roots = super::host::protected_roots(ctx);
+        let fs: DynVdfsProvider = Arc::new(UnifiedFs::with_protected_roots(root, protected_roots));
         Ok((fs, vdfs_context(ctx).with_params(call_params(ctx))))
     }
 

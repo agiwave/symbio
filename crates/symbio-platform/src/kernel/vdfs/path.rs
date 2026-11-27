@@ -10,14 +10,28 @@
 /// 只查 `/` 会让 Windows 的 `src\..\..\..\Windows` 绕过守卫；只查带分隔符的
 /// `../../` / `..\` 前缀会放过 `a/..`（`..` 收尾）。因此按**段**判定，与分隔符无关。
 pub fn vdfs_has_parent_segment(path: &str) -> bool {
-    path.split(['/', '\\']).any(|seg| seg == "..")
+    path.split(['/', '\\']).any(|seg| seg.trim() == "..")
 }
 
-/// 地址的词法归一化：统一分隔符、折叠重复分隔符与 `.`，保留绝对锚点和 `..`。
+/// Windows 词法判定：路径段是否携带 NTFS 备用数据流名。
+///
+/// 只放过首段的标准盘符；`canonicalize` 会隐藏流名，因此调用方必须在 I/O 前判定。
+pub fn vdfs_has_alternate_data_stream(path: &str) -> bool {
+    let path = vdfs_normalize_path(path);
+    path.split('/').enumerate().any(|(index, segment)| {
+        let drive_prefix = index == 0
+            && segment.len() == 2
+            && segment.as_bytes()[0].is_ascii_alphabetic()
+            && segment.as_bytes()[1] == b':';
+        segment.contains(':') && !drive_prefix
+    })
+}
+
+/// 地址的词法归一化：统一分隔符、逐段去除首尾空白、折叠重复分隔符与 `.`，保留绝对锚点和 `..`。
 ///
 /// 这里**不解析** `..`：事实层必须让穿越意图继续可见，物理层再按自己的边界拒绝。
 pub fn vdfs_normalize_path(path: &str) -> String {
-    let mut value = path.replace('\\', "/");
+    let mut value = path.trim().replace('\\', "/");
     if let Some(rest) = value.strip_prefix("//?/") {
         value = rest.to_string();
     } else if let Some(rest) = value.strip_prefix("//./") {
@@ -30,6 +44,7 @@ pub fn vdfs_normalize_path(path: &str) -> String {
     let (anchor, body) = value.split_at(anchor_len);
     let mut segments: Vec<String> = body
         .split('/')
+        .map(str::trim)
         .filter(|segment| !segment.is_empty() && *segment != ".")
         .map(str::to_string)
         .collect();

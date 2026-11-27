@@ -368,9 +368,9 @@ pub struct VdfsNewType {
 | 层 | 职责 |
 |---|---|
 | `schemas/vdfs.ts` | `VdfsNewType`（含 `node_ext` / `schema`）+ `new_type` 字段 + 动作常量（`VDFS_ACTION_IMPORT` / `VDFS_ACTION_EXPORT`）+ `actionFileOf`（认「结果里带文件」这个形状） |
-| `composables/useVdfs.ts` | `creatableType` / `canCreate`；新建 = `startNew` 选中一张**草稿节点**（`path === ''`）；`write` 对草稿打到 `cwd` 并带 `create: true`；`runPackAction(action, file)` 把本地文件编成动作载荷 `{filename, b64}`；`draftSeq` 是草稿的临时身份（`:key` 用） |
-| `components/vdfs/DetailForm.vue` | 动作声明 `pack` 时唤起原生文件选择器，把 `File` 原样上抛（载荷编码归机制层） |
-| `components/vdfs/VdfsWorkbench.vue` | 添加按钮可见性 + 动作转发（按**载荷形状**分流：带 `File` → `runPackAction`，否则 → `runAction`） |
+| `composables/useVdfs.ts` | `creatableType` / `canCreate`；新建 = `startNew` 选中一张**草稿节点**（`path === ''`）；`write` 对草稿打到 `cwd` 并带 `create: true`；`runPackAction(action, file, payload?)` 把声明 payload 与本地文件编码 `{filename, b64}` 合并，实际文件字段优先；`draftSeq` 是草稿的临时身份（`:key` 用） |
+| `components/vdfs/DetailForm.vue` | 保存分别交出字段值与动作 payload，测试上交当前草稿；动作声明 `pack` 时唤起原生文件选择器，把声明 payload 与 `File` 分别上抛（载荷编码归机制层） |
+| `components/vdfs/VdfsWorkbench.vue` | 添加按钮可见性 + 动作转发（按**载荷形状**分流：带 `File` → `runPackAction`，否则 → `runAction`）；表单保存另接动作 payload，普通 option 保存仍只写字段值 |
 
 **草稿节点**的形状（`draftNodeOf`）：`path: ''`、`name: ''`、`access: 'w'`，
 加上 `ext = type.node_ext ?? type.ext`、`schema = type.schema`、`kind = type.ext`
@@ -380,6 +380,19 @@ pub struct VdfsNewType {
 
 - `select` 对草稿**直接返回**（没有内容可读，去读只会落到目录地址上）；
 - `refresh` 清理选中态时**跳过草稿**（它本来就不在清单里）。
+
+### 5.5 表单动作与草稿载荷
+
+- `DetailForm` 的保存事件分别交出**字段值**与**动作 payload**，两种绑定都不把二者合并。
+  页面在没有动作 payload 时走 `vdfs/write`；有 payload 时把字段值放入 `fields`，与动作
+  payload 一起交给 `vdfs/action` 的 `save` 动作，实际字段值优先于声明 payload 中的同名字段。
+  中间层不解释具体控制键。
+- 「测试连接」等自检动作上抛当前表单草稿。页面把它作为动作 payload 发送；provider 先按
+  自身更新语义合并草稿再验证，验证不落盘、不改运行期状态。
+- 动作结果与保存结果走同一条忙态、错误与焦点恢复通道；动作失败不得伪装成保存成功。
+- 非创建动作（如测试连接）成功只更新反馈，不得清空草稿；创建动作成功并回传新 id 时，
+  刷新后优先选中该落点；当前列表未命中时也必须退出草稿，明确提示已保存但暂未定位，
+  避免再次提交造成重复新建。
 
 ---
 

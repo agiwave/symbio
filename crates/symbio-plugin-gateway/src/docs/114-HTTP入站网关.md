@@ -73,16 +73,23 @@ crates/symbio-plugin-gateway/src/
 拿不到 root（`HomePlugin`）。第三方经 HTTP 能到达哪些地址，就由此划定。
 `reload` 时 root 还会整个重建，捕获的 `Arc<dyn Plugin>` 会变成"旧 root"。
 
-**做法**：网关不取 root，而是持有构造期登记的 `Weak` 父级（worker `Composite`），
-每次请求 `parent.route(ctx)` —— `Composite` 按首段在**已挂载子插件**里分发，
+**做法**：网关不取 root，而是持有构造期登记的 `Weak` 父级（worker `Composite`）。
+普通插件路由仍走 `parent.route(ctx)` —— `Composite` 按首段在**已挂载子插件**里分发，
 未命中直接 `NotFound`（源码 `crates/symbio-plugin-composite/src/composite.rs` 的 `route`）。
 父级以 `Weak` 保存，不产生循环引用；`home/reload` 重建插件树时网关实例随之重建，
 转发目标恒为当前树。
 
+生产环境另有一条宿主分发桥：`RuntimeHost` 只接管**会话 worker 调用**与
+`vdfs/*`。前者复用 worker 的写入令牌与恢复语义，后者由宿主注入物理保护根；
+其余路由返回 `None`，继续落到上面的 `parent.route`。分发桥接收宿主侧构造的
+`VdfsCaller`，网关入口固定传 `Model`，客户端 metadata 中的同名字段不参与授权。
+该身份随 worker 请求帧与收件箱记录传递，进程内执行体与容器执行体都不重新提升权限。
+
 **由此划定的可达面**：入站请求到得了 worker 子树里的每条插件路由，**到不了 home
 自己的四条臂**（`home/get_homedir` · `home/reload` · `home/set_workspace` ·
 `home/get_workspace`）——home 是 composite 的**父**，而 `Composite::route` 不向上
-转发（实测回 400，判据 e2e `t69` ⑦）。那四条臂的生产驱动面是前端的**进程内**
+转发（实测回 400，判据 e2e `t69` ⑦）。RuntimeHost 的接管清单不包含这些控制面路由，
+因此分发桥不会把可达面抬到 root。那四条臂的生产驱动面是前端的**进程内**
 `callPlugin`（`tauri/src/services/home.ts` ⇒ `root.route`），不经 HTTP。
 若将来要把边界抬到 root，先重审只读白名单（[RE-001](../../../../docs/004-ref/001-CONFIGURATION.md "RE-001-CONFIGURATION") 的「白名单与可达面必须一致」）再改这里。
 
@@ -98,8 +105,8 @@ crates/symbio-plugin-gateway/src/
 
 > ⚠️ 注意：改配置**不会**自动触发 `home/reload`（`reload` 只在切 homedir 时用）。
 > 所以"开关/端口热生效"必须由插件自己在写配置之后完成，这是插件自治，符合机制
-> ——机制不引入回调抽象，`PluginConfigFile::apply` 只管「校验 → 落内存 → 落自己的文件 →
-> 广播」。
+> ——机制不引入回调抽象，`PluginConfigFile::apply` 只管「校验 → 原子落自己的文件 →
+> 发布内存 → 广播」。
 
 ---
 
@@ -178,7 +185,8 @@ Authorization: Bearer <token>
  这是有意的：**令牌不能靠「被选中」回显**。
 - 两者都给时以 `Authorization` 为准；都不给且已配置令牌 ⇒ `401`。
 
-服务端内部：首帧 → `build_ctx`（`metadata` 逐键注入上下文）→ `parent.route(ctx)` →
+服务端内部：首帧 → `build_ctx`（`metadata` 逐键注入上下文，并强制 `VdfsCaller::Model`）→
+宿主分发桥（仅 worker 会话调用与 `vdfs/*`）→ 未接管时 `parent.route(ctx)` →
 按 `PluginPayload` 四态分派（见 §4.1）。
 
 ### 5.3 ⚠️ AI 流式输出：WebSocket 之后还必须**再开一条** `vdfs/watch`
@@ -293,7 +301,15 @@ data: {"type":"bus_event","data":{"kind":"system","session_id":null,"data":{"eve
 - **只读模式**（`inbound_readonly`）：仅放行 `is_readonly_allowed` 白名单
  （清单见 [配置参考](../../../../docs/004-ref/001-CONFIGURATION.md "RE-001-CONFIGURATION")），其余 403/拒绝；
  `gateway/*` 一律拒绝，`GET /api/v1/events` 也拒绝（长连接广播），且 `vdfs/read`
- 只要落在任何插件的 `PLUGIN.yml` 上就拒绝（配置含 `inbound_token` 等凭据）。
+ 只要落在任何插件的 `PLUGIN.yml` 或 `plugin_manager/<插件名>` 配置别名上就拒绝
+ （配置含 `inbound_token` 等凭据）。判断先经共享 VDFS 词法归一化，逐段空白、重复分隔符、反斜杠与
+ 尾随 `/.` 不构成绕过；Windows 的尾点 / 尾空格路径段与 NTFS 备用数据流别名（如
+ `PLUGIN.yml::$DATA`）在任何 I/O 前失败关闭，不能依赖 `canonicalize` 识别，因为它会隐藏流名。
+ 根名仍由 `vdfs/root` 运行期提供，入站策略不硬编码。模型条目的凭据由 provider 在通用 `read`
+ 出口投影，插件配置目录与运行期数据目录另由宿主注入物理层保护，绝对路径直读不能绕过该投影。
+ 生产调用经 RuntimeHost 分发桥接管 worker 会话调用与 `vdfs/*`，统一注入宿主上下文并保留
+ `VdfsCaller::Model`；其余路由仍由 worker 子树裁决。只有没有运行时的独立 ingress 测试才走
+ 构造期插件树兜底，网关不自行推导 homedir 或维护第二套保护根。
 - 危险操作分级（`local/cmd`（Windows）/ `local/sh` 类、`vdfs/write|delete` 归为
  `danger`）：**预留**，现行只有只读白名单一层。home 的臂不在任何分级里——它经入站
  根本走不到（§4.1）。

@@ -20,7 +20,7 @@ pub use inbox::{
 pub use process::{run_worker, WorkerBootstrap};
 // protocol lines are implementation details; tests import the module directly.
 pub use recovery::{RecoveryReport, WorkerReady, WorkerRecovery, WorkerStartup};
-pub(crate) use supervisor::WorkerSupervisor;
+pub(crate) use supervisor::{is_worker_session_route, WorkerSupervisor};
 
 use serde::de::DeserializeOwned;
 use serde::Serialize;
@@ -34,7 +34,9 @@ use std::time::{SystemTime, UNIX_EPOCH};
 #[derive(Debug)]
 pub enum WorkerError {
     Invalid(String),
-    Busy,
+    Busy {
+        path: PathBuf,
+    },
     Io {
         op: &'static str,
         path: PathBuf,
@@ -64,7 +66,9 @@ impl fmt::Display for WorkerError {
     fn fmt(&self, f: &mut fmt::Formatter<'_>) -> fmt::Result {
         match self {
             Self::Invalid(message) => write!(f, "worker 协议无效: {message}"),
-            Self::Busy => write!(f, "worker 资源已被其他持有者占用"),
+            Self::Busy { path } => {
+                write!(f, "worker 资源已被其他持有者占用（{}）", path.display())
+            }
             Self::Io {
                 op,
                 path,
@@ -237,7 +241,11 @@ pub(super) fn exclusive_lock(path: &Path) -> Result<File, WorkerError> {
         .truncate(false)
         .open(path)
         .map_err(|error| io_error("打开锁", path, error))?;
-    file.lock().map_err(|_| WorkerError::Busy).map(|()| file)
+    file.lock()
+        .map_err(|_| WorkerError::Busy {
+            path: path.to_path_buf(),
+        })
+        .map(|()| file)
 }
 
 pub(super) fn try_exclusive_lock(path: &Path) -> Result<File, WorkerError> {
@@ -252,7 +260,9 @@ pub(super) fn try_exclusive_lock(path: &Path) -> Result<File, WorkerError> {
         .open(path)
         .map_err(|error| io_error("打开锁", path, error))?;
     file.try_lock()
-        .map_err(|_| WorkerError::Busy)
+        .map_err(|_| WorkerError::Busy {
+            path: path.to_path_buf(),
+        })
         .map(|()| file)
 }
 

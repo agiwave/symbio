@@ -32,7 +32,10 @@ pub use content::VdfsContent;
 pub use context::{VdfsContext, VdfsParams};
 pub use error::{VdfsError, VdfsFieldError, VdfsResult, VdfsValidationError};
 pub use node::{vdfs_derive_ext, VdfsItem, VdfsNewType, VdfsNode};
-pub use path::{vdfs_has_parent_segment, vdfs_normalize_path, vdfs_path_within, vdfs_resolve_path};
+pub use path::{
+    vdfs_has_alternate_data_stream, vdfs_has_parent_segment, vdfs_normalize_path, vdfs_path_within,
+    vdfs_resolve_path,
+};
 pub use provider::{DynVdfsProvider, VdfsProvider};
 pub use request::{
     VdfsActionResult, VdfsListResponse, VdfsRequest, VdfsResponse, VdfsWriteResponse,

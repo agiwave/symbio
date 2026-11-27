@@ -275,7 +275,10 @@ impl ModelProvidersConfig {
                 }
             }
         }
-        // 兜底：第一个 enabled 的 provider
-        self.providers.values().find(|p| p.enabled)
+        // 兜底：按 id 取首个启用者，重启与运行期结果一致。
+        self.providers
+            .values()
+            .filter(|p| p.enabled)
+            .min_by(|left, right| left.id.cmp(&right.id))
     }
 }

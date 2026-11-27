@@ -53,6 +53,10 @@ symbio-cli serve --bind 127.0.0.1 --port 9231 --homedir <系统根> --frontend-d
 审批、审计与事实语义不随落点改变，目标拓扑见
 [DE-060](../../docs/003-design/060-Server运行时与会话执行.md)。
 
+Supervisor 的 `epoch.lock` 只保护短暂的 epoch 记录校验与分配，竞争时阻塞等待；
+`worker.lock` 是跨 epoch 的执行体租约，仍以非阻塞方式快速失败。`Busy` 的正常含义
+因此是租约冲突，不再把 epoch 记录锁的短暂竞争作为预期错误返回。
+
 ## 容器 worker
 
 宿主以 `SYMBIO_WORKER_MODE=container` 显式选择容器落点，配置项见

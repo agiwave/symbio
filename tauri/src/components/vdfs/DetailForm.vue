@@ -14,8 +14,8 @@
                  节点自身不携带正文——正文只有 `vdfs/read` 这一条来源。
 
   绑定模式（definition.binding）：
-  - upload  ：清单型资源。保存 emit `save`，载荷含派生/回显的 id 与全部字段值，
-              由页面写回 `vdfs/write`（后端 validate_manifest 兜底）。
+  - upload  ：清单型资源。保存 emit `save`，首个参数含派生/回显的 id 与全部字段值；
+              动作 payload 作为第二个参数独立交出，不混入字段值。
   - info    ：只读概览。无保存，static 字段取值优先来自 `values`，
               缺省时取节点顶层的扩展字段，动作仅限 open-container / delete 等
               机制通道动作（如 agent 目录概览）。
@@ -466,26 +466,15 @@ const props = withDefaults(
 )
 
 const emit = defineEmits<{
-  /**
-   * 统一保存入口：字段值对象（已按 widget 序列化）。
-   * upload 绑定额外带上 `id`（节点名或按定义派生）与动作 payload 的附加键
-   * （如 `skip_validation`）；其余绑定只交回纯字段值。
-   */
-  save: [values: Record<string, unknown>]
-  test: []
+  /** 保存字段值与动作载荷分离；upload 绑定额外派生 id。 */
+  save: [values: Record<string, unknown>, actionPayload?: Record<string, unknown>]
+  test: [draft: Record<string, unknown>]
   delete: []
   'set-default': []
   /** 机制导航动作：进入节点内部（payload.kind 指定子类别） */
   'open-container': [kind: string]
-  /**
-   * **未在本渲染器内实现**的动作：原样上抛动作标识（如 VDFS 节点动作
-   * `export` / `import`）。动作语义归 provider，渲染器不做拦截——新增动作
-   * 无需改动这里。
-   *
-   * `file` 只在动作声明了 `pack` 时带上（见下方「机制原生取值原语」）：那是
-   * **本地文件载荷**，本渲染器只能把它取到手，怎么编码由机制层决定。
-   */
-  action: [id: string, file?: File]
+  /** 转发未内置动作的标识、声明载荷与可选文件；语义归 provider。 */
+  action: [id: string, payload?: Record<string, unknown>, file?: File]
   cancel: []
   /**
    * 表单是否有未保存改动。页面据此在切换节点 / 目录离开前弹确认，避免静默丢弃。
@@ -579,11 +568,14 @@ function onDirectorySelected(path: string) {
 // `pack` 的结果是**动作载荷**：本渲染器只把 `File` 原样上抛，载荷怎么编码
 // 是机制层的事（见 `useVdfs.runPackAction`），渲染器不认识任何具体动作。
 const packInput = ref<HTMLInputElement | null>(null)
-/** 正在等文件的动作 id（原生文件选择器是系统模态，一次只服务一个动作） */
-const pendingPack = ref('')
+/** 待文件动作及其声明载荷；原生选择器一次只服务一个动作。 */
+const pendingPack = ref<{ id: string; payload?: Record<string, unknown> } | null>(null)
 
 function openPack(action: DetailAction) {
-  pendingPack.value = action.id
+  pendingPack.value = {
+    id: action.id,
+    payload: action.payload as Record<string, unknown> | undefined,
+  }
   const el = packInput.value
   if (!el) return
   // 逐次设置而非绑在模板上：`accept` 要在 `click()` 之前就位，而模板更新是
@@ -596,9 +588,9 @@ function openPack(action: DetailAction) {
 
 function onPackChange(e: Event) {
   const file = (e.target as HTMLInputElement).files?.[0]
-  const id = pendingPack.value
-  pendingPack.value = ''
-  if (file && id) emit('action', id, file)
+  const pending = pendingPack.value
+  pendingPack.value = null
+  if (file && pending) emit('action', pending.id, pending.payload, file)
 }
 
 // ==================== 结构化子对象（widget = form） ====================
@@ -867,7 +859,7 @@ const visibleActions = computed<DetailAction[]>(() =>
  * 页面层的单一动作忙态——同一时刻只可能有一个动作在执行。
  */
 function actionBusy(a: DetailAction): boolean {
-  if (a.id === 'save') return props.saving
+  if (a.id === 'save') return props.saving || props.testing
   if (a.id === 'delete') return props.mechanismBusy === 'delete'
   return props.testing
 }
@@ -918,20 +910,14 @@ function runAction(a: DetailAction) {
         }
       }
       const values = buildSave(saveCtx())
-      if (!isUpload.value) {
-        // 数据来自外部的绑定：只交回纯字段值，不让动作载荷污染它
-        emit('save', values)
-        return
-      }
-      // upload 绑定：动作 payload（如 skip_validation）作为附加键并入
-      emit('save', { ...values, ...((a.payload ?? {}) as Record<string, unknown>) })
+      emit('save', values, a.payload as Record<string, unknown> | undefined)
       return
     }
     case 'cancel':
       emit('cancel')
       return
     case 'test':
-      emit('test')
+      emit('test', buildSave(saveCtx()))
       return
     case 'delete':
       emit('delete')
@@ -946,7 +932,7 @@ function runAction(a: DetailAction) {
       // 未内置的动作：原样上抛（VDFS 节点动作走这里，如 `export` / `import`）。
       // 声明了 `pack` 的动作先取本地文件——载荷形状归机制层，本渲染器只交 File。
       if (a.pack) openPack(a)
-      else emit('action', a.id)
+      else emit('action', a.id, a.payload as Record<string, unknown> | undefined)
   }
 }
 
