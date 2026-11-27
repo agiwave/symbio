@@ -162,7 +162,6 @@ const ATTR_FIVE_WAY = {
 export const TASKS = [
   // ---- select：工具面上选对工具 ----
   { id: 'sel-list-dir', face: 'select', tool: 'vdfs_list', ask: '列出 src 目录下的直接子项，只要一层。' },
-  { id: 'sel-tree', face: 'select', tool: 'vdfs_tree', ask: '整体看下 docs 目录的层级结构，深度到 2 层就够。' },
   { id: 'sel-read-file', face: 'select', tool: 'vdfs_read', ask: '把 Cargo.toml 的内容读给我看。' },
   { id: 'sel-stat', face: 'select', tool: 'vdfs_stat', ask: 'README.md 这个文件现在多大、最后什么时候改的？只看元数据别读内容。' },
   { id: 'sel-glob', face: 'select', tool: 'vdfs_search', ask: '找出仓库里所有的 .rs 源文件，按文件名匹配就行。' },

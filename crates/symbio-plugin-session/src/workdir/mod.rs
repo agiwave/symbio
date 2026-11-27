@@ -70,9 +70,9 @@ pub fn sub_sessions_dir_node() -> symbio_platform::kernel::vdfs::VdfsNode {
 /// 工作目录树根节点（`list` 与 `stat` 共用同一份形状）。理由同上。
 ///
 /// 访问位用 `lwt`（list + write + traverse）里的 **`lt`**：工作目录是会话的工作区，
-/// 中栏以**目录树**呈现（而非扁平列表），树形递归走机制级 `vdfs/tree`——它只下钻
-/// 声明了 `t` 位的目录（见 `docs/003-design/009-VDFS规范.md`）。缺 `t` 时 `vdfs/tree`
-/// 只返回第一层，子目录永远打不开。`w` 不给：目录的写由具体文件节点承载。
+/// 中栏以**目录树**呈现（而非扁平列表）。前端进入时只列当前层，目录首次展开时再按
+/// 该目录地址调用 `vdfs/list`；`t` 声明这棵目录值得按树浏览，不触发整棵子树预取。
+/// `w` 不给：目录的写由具体文件节点承载。
 pub fn workdir_dir_node() -> symbio_platform::kernel::vdfs::VdfsNode {
     let mut n = symbio_platform::kernel::vdfs::VdfsNode::dir(
         SEG_WORKDIR,
@@ -187,9 +187,9 @@ pub async fn list_children(
 
 /// 文件 / 目录元数据 → 节点（列与 stat 共用同一份形状，两条链路不会分叉）。
 ///
-/// 目录带 `lt`：中栏目录树经机制级 `vdfs/tree` 递归，它只下钻声明 `t` 位的目录，
-/// 缺 `t` 则子目录永远打不开（工作目录与物理盘目录在这点必须对齐，见
-/// `crates/symbio-plugin-vdfs/src/physical.rs` 的 `VdfsAccess::dir`）。
+/// 目录带 `lt`：中栏把它呈现为可展开节点，首次展开时用同一目录地址回读
+/// `vdfs/list`，只取这一层的直接子项。缺 `t` 则不进入树形态；工作目录与物理盘目录
+/// 在这点必须对齐（见 `crates/symbio-plugin-vdfs/src/physical.rs` 的 `VdfsAccess::dir`）。
 ///
 /// 文件显式声明 `ext = "text"`：前端按 `ext` 选详情渲染器（显式 ext 优先于文件名
 /// 后缀推导），工作目录里的文件是 UTF-8 文本（`read_content` 用 `read_to_string`），

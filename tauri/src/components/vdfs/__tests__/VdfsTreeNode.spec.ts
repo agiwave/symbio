@@ -34,10 +34,10 @@ function tree(): TreeNode {
 
 function mountNode(
   selectedId: string | null = null,
-  extra: { tabStop?: boolean; focusPath?: string; level?: number } = {},
+  extra: { tabStop?: boolean; focusPath?: string; level?: number; node?: TreeNode } = {},
 ) {
   return mount(VdfsTreeNode, {
-    props: { node: tree(), selectedId, ...extra },
+    props: { node: extra.node ?? tree(), selectedId, ...extra },
     attachTo: document.body,
   })
 }
@@ -152,5 +152,80 @@ describe('VdfsTreeNode：默认收拢', () => {
     await fileRow.trigger('keydown', { key: 'Enter' })
     await fileRow.trigger('keydown', { key: ' ' })
     expect(w.emitted('activate')).toHaveLength(2)
+  })
+})
+
+describe('VdfsTreeNode：子层按需加载', () => {
+  function lazyTree(): TreeNode {
+    return { item: dir('@vfs/wd', 'wd'), children: [], loaded: false }
+  }
+
+  it('首次展开请求直接子项；加载后收起再展开不重复请求', async () => {
+    const lazy = lazyTree()
+    const w = mountNode(null, { node: lazy })
+    const root = w.get('[role="treeitem"]')
+
+    await root.find('.tree-row').trigger('click')
+    expect(root.attributes('aria-expanded')).toBe('true')
+    expect(w.emitted('load-children')).toEqual([['@vfs/wd']])
+
+    await w.setProps({
+      node: {
+        ...lazy,
+        loading: true,
+      },
+    })
+    expect(root.attributes('aria-busy')).toBe('true')
+    expect(w.get('.tree-loading').text()).toContain('加载中')
+
+    await w.setProps({
+      node: {
+        ...lazy,
+        loaded: true,
+        children: [{ item: file('@vfs/wd/a.txt', 'a.txt'), children: [] }],
+      },
+    })
+    expect(w.text()).toContain('a.txt')
+    expect(w.find('.tree-loading').exists()).toBe(false)
+
+    await root.find('.tree-row').trigger('click')
+    expect(w.text()).not.toContain('a.txt')
+    await root.find('.tree-row').trigger('click')
+    expect(w.text()).toContain('a.txt')
+    expect(w.emitted('load-children')).toHaveLength(1)
+  })
+
+  it('失败保留目录与错误，点击再次展开可重试', async () => {
+    const failed: TreeNode = { ...lazyTree(), loadError: '加载失败：连接中断' }
+    const w = mountNode(null, { node: failed })
+    const root = w.get('[role="treeitem"]')
+
+    await root.find('.tree-row').trigger('click')
+    expect(w.get('.tree-load-error').text()).toContain('连接中断')
+    expect(w.emitted('load-children')).toEqual([['@vfs/wd']])
+
+    await root.find('.tree-row').trigger('click')
+    expect(w.emitted('load-children')).toEqual([['@vfs/wd'], ['@vfs/wd']])
+  })
+
+  it('右键先发起加载，子层就绪后才把焦点移入首项', async () => {
+    const lazy = lazyTree()
+    const w = mountNode(null, { node: lazy })
+    const root = w.get('[role="treeitem"]')
+    ;(root.element as HTMLElement).focus()
+
+    await root.trigger('keydown', { key: 'ArrowRight' })
+    expect(w.emitted('load-children')).toEqual([['@vfs/wd']])
+    expect(document.activeElement).toBe(root.element)
+
+    await w.setProps({
+      node: {
+        ...lazy,
+        loaded: true,
+        children: [{ item: file('@vfs/wd/a.txt', 'a.txt'), children: [] }],
+      },
+    })
+    const child = w.get('[role="group"]').find('[role="treeitem"]')
+    expect(document.activeElement).toBe(child.element)
   })
 })

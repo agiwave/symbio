@@ -54,14 +54,12 @@ import {
   readVdfs,
   runVdfsAction,
   statVdfs,
-  treeVdfs,
   writeVdfs,
 } from '@/services/vdfs'
 import { READBACK_REASON } from '@/services/readback'
 import { subscribeVdfsChanged } from '@/services/eventBus'
 import {
   actionFileOf,
-  assembleVdfsTree,
   isVdfsDir,
   isVdfsDraft,
   isVdfsUnder,
@@ -265,20 +263,149 @@ export function useVdfs(opts: UseVdfsOptions) {
   // 判据只有一条：**当前目录声明了 `t`（traverse）位**。这是后端对「这棵目录
   // 值得递归呈现」的声明（工作目录的目录节点带 `lt`，见 workdir/mod.rs），前端
   // 不认识任何类型 / 段名——加一个新树目录只要后端声明 `t`，这里零改动。
-  // 扁平 items 仍是列表形态的数据源（筛选 / 徽标 / 选中记忆都用它），树是**另存**
-  // 的一份投影：一次目录加载里，先拿 list 更新 cwdNode，再按它的访问位决定是否
-  // 额外取一次 vdfs/tree。
+  // 树只装当前层的 items；目录首次展开时才按该目录地址 list 一次，绝不预取整棵子树。
   const treeMode = computed(() => vdfsAccessOf(cwdNode.value).traverse)
   const treeNodes = shallowRef<VdfsTreeNode[]>([])
-  const treeTruncated = ref(false)
-  const treeMessage = ref('')
-  const treeError = ref('')
+  let treeGeneration = 0
+  const treeRequestTokens = new Map<string, number>()
+  const treeRefreshTimers = new Map<string, ReturnType<typeof setTimeout>>()
 
-  /** 当前视图里是否看得到这条路径（列表只看本页；树看整棵已取回的树） */
+  function lazyTreeNode(item: VdfsItem): VdfsTreeNode {
+    return { item, children: [], loaded: isVdfsDir(item) ? false : true }
+  }
+
+  function updateTreeNode(
+    nodes: VdfsTreeNode[],
+    path: string,
+    update: (node: VdfsTreeNode) => VdfsTreeNode,
+  ): VdfsTreeNode[] {
+    return nodes.map((node) => {
+      if (node.item.path === path) return update(node)
+      return { ...node, children: updateTreeNode(node.children, path, update) }
+    })
+  }
+
+  /** 目录层重拉时保留已加载分支；加载中的分支回到可重试态。 */
+  function mergeTreeLevel(fresh: VdfsItem[], previous: VdfsTreeNode[]): VdfsTreeNode[] {
+    const oldByPath = new Map(previous.map((node) => [node.item.path, node]))
+    return fresh.map((item) => {
+      const old = oldByPath.get(item.path)
+      if (!old || !isVdfsDir(item)) return lazyTreeNode(item)
+      return {
+        ...old,
+        item,
+        loading: false,
+        loadError: old.loading ? '' : old.loadError,
+        loaded: old.loaded === true,
+      }
+    })
+  }
+
+  function resetTreeRequests() {
+    treeGeneration += 1
+    treeRequestTokens.clear()
+    for (const timer of treeRefreshTimers.values()) clearTimeout(timer)
+    treeRefreshTimers.clear()
+  }
+
+  /** 目录首次展开 / 失败重试 / 已加载目录实时收敛都走同一个按层读取口。 */
+  async function loadTreeChildren(path: string, force = false) {
+    if (!treeMode.value || !isVdfsUnder(path, cwd.value) || path === cwd.value) return
+    const current = findTreeNode(treeNodes.value, path)
+    if (!current || !isVdfsDir(current.item) || current.loading) return
+    if (!force && current.loaded === true) return
+    // `vdfs/tree` 预装节点的 loaded 缺省视为已加载；懒加载节点显式为 false。
+    if (!force && current.loaded !== false) return
+
+    const token = (treeRequestTokens.get(path) ?? 0) + 1
+    treeRequestTokens.set(path, token)
+    const generation = treeGeneration
+    const requestedCwd = cwd.value
+    treeNodes.value = updateTreeNode(treeNodes.value, path, (node) => ({
+      ...node,
+      loading: true,
+      loadError: '',
+    }))
+    try {
+      let readErr: unknown
+      const resp = await listVdfs(
+        READBACK_REASON.VDFS_BROWSER,
+        path,
+        undefined,
+        (err) => { readErr = err },
+      )
+      if (readErr) throw readErr
+      if (
+        generation !== treeGeneration
+        || requestedCwd !== cwd.value
+        || treeRequestTokens.get(path) !== token
+      ) return
+      treeNodes.value = updateTreeNode(treeNodes.value, path, (node) => ({
+        ...node,
+        item: { ...resp.node, path: resp.path },
+        children: mergeTreeLevel(resp.items, node.children),
+        loaded: true,
+        loading: false,
+        loadError: '',
+      }))
+    } catch (err) {
+      if (
+        generation !== treeGeneration
+        || requestedCwd !== cwd.value
+        || treeRequestTokens.get(path) !== token
+      ) return
+      treeNodes.value = updateTreeNode(treeNodes.value, path, (node) => ({
+        ...node,
+        loading: false,
+        loadError: `加载失败：${readableError(err)}`,
+      }))
+      logger.error('useVdfs', `加载目录子项失败 ${path}:`, err)
+    }
+  }
+
+  /** 已加载目录的变更只重拉那一层，不重新预取整棵树。 */
+  function scheduleTreeRefresh(path: string) {
+    const parent = vdfsParent(path)
+    if (parent === cwd.value) return
+    const node = findTreeNode(treeNodes.value, parent)
+    if (!node || node.loaded === false) return
+    const pending = treeRefreshTimers.get(parent)
+    if (pending) clearTimeout(pending)
+    treeRefreshTimers.set(parent, setTimeout(() => {
+      treeRefreshTimers.delete(parent)
+      void loadTreeChildren(parent, true)
+    }, 400))
+  }
+
+  /** 选中深层文件时按路径补齐尚未加载的祖先，让选择在树中可见。 */
+  async function revealTreePath(path: string) {
+    if (!treeMode.value || !isVdfsUnder(path, cwd.value)) return
+    const dirs: string[] = []
+    let parent = vdfsParent(path)
+    while (parent !== cwd.value) {
+      if (!isVdfsUnder(parent, cwd.value)) return
+      dirs.unshift(parent)
+      parent = vdfsParent(parent)
+    }
+    for (const dir of dirs) {
+      if (dir !== cwd.value && !isVdfsUnder(dir, cwd.value)) return
+      const node = findTreeNode(treeNodes.value, dir)
+      if (!node) return
+      if (node.loaded === false) await loadTreeChildren(dir)
+    }
+  }
+
+  /** 当前视图里是否看得到这条路径；未加载分支不等于“项已删除”。 */
   function isVisibleInCwd(path: string): boolean {
     if (!treeMode.value) return items.value.some((n) => n.path === path)
-    // 树没取回 / 被截断时不能据此判「项已删除」——那只说明本页没看全。
-    if (treeNodes.value.length === 0 || treeTruncated.value) return true
+    if (vdfsParent(path) === cwd.value) return items.value.some((n) => n.path === path)
+    let ancestor = vdfsParent(path)
+    while (ancestor !== cwd.value) {
+      const node = findTreeNode(treeNodes.value, ancestor)
+      if (node) return node.loaded !== false && findTreeNode(treeNodes.value, path) !== null
+      if (!isVdfsUnder(ancestor, cwd.value)) return true
+      ancestor = vdfsParent(ancestor)
+    }
     return findTreeNode(treeNodes.value, path) !== null
   }
 
@@ -303,10 +430,11 @@ export function useVdfs(opts: UseVdfsOptions) {
   async function refresh() {
     const token = listGuard.advance()
     const requestedCwd = cwd.value
+    const previousTree = treeNodes.value
+    resetTreeRequests()
     loading.value = true
     loadError.value = ''
     loadMoreError.value = ''
-    treeError.value = ''
     try {
       const resp = await listVdfs(
         READBACK_REASON.VDFS_BROWSER,
@@ -326,30 +454,7 @@ export function useVdfs(opts: UseVdfsOptions) {
       // 自述与请求地址同源登记（见 `cwdAddr` 的说明）
       cwdAddr.value = resp.path
       hasMore.value = resp.items.length >= VDFS_PAGE_SIZE
-
-      // 目录声明了 `t` ⇒ 额外取一次机制级 vdfs/tree，把扁平回执组装成树供中栏
-      // 渲染。树失败只清空树、退回列表形态，不牵连已经拿到的 list（树是增强）。
-      if (treeMode.value) {
-        try {
-          const tree = await treeVdfs(READBACK_REASON.VDFS_BROWSER, requestedCwd)
-          if (listGuard.revision() !== token || requestedCwd !== cwd.value) return
-          treeNodes.value = assembleVdfsTree(tree.nodes, requestedCwd)
-          treeTruncated.value = tree.truncated
-          treeMessage.value = tree.message ?? ''
-        } catch (err) {
-          if (listGuard.revision() !== token || requestedCwd !== cwd.value) return
-          treeNodes.value = []
-          treeTruncated.value = false
-          treeMessage.value = ''
-          treeError.value = `加载目录树失败：${readableError(err)}`
-          logger.error('useVdfs', `加载目录树失败 ${requestedCwd}:`, err)
-        }
-      } else {
-        treeNodes.value = []
-        treeTruncated.value = false
-        treeMessage.value = ''
-        treeError.value = ''
-      }
+      treeNodes.value = treeMode.value ? mergeTreeLevel(resp.items, previousTree) : []
 
       // 选中项若已不在当前目录（被删/被移走），清理选中态。
       // ⚠️ 有界列表下**不能**仅凭「不在这页里」就判它没了——它可能只是落在更早的
@@ -364,6 +469,7 @@ export function useVdfs(opts: UseVdfsOptions) {
       if (listGuard.revision() !== token || requestedCwd !== cwd.value) return
       loadError.value = readableError(err)
       items.value = []
+      treeNodes.value = []
       hasMore.value = false
       logger.error('useVdfs', `加载目录失败 ${requestedCwd}:`, err)
     } finally {
@@ -389,14 +495,19 @@ export function useVdfs(opts: UseVdfsOptions) {
     loadingMore.value = true
     loadMoreError.value = ''
     try {
-      const resp = await listVdfs(READBACK_REASON.VDFS_BROWSER, requestedCwd, {
-        limit: VDFS_PAGE_SIZE,
-        before: last.name,
-      })
+      let readErr: unknown
+      const resp = await listVdfs(
+        READBACK_REASON.VDFS_BROWSER,
+        requestedCwd,
+        { limit: VDFS_PAGE_SIZE, before: last.name },
+        (err) => { readErr = err },
+      )
+      if (readErr) throw readErr
       if (listGuard.revision() !== token || requestedCwd !== cwd.value) return
       const known = new Set(items.value.map((n) => n.path))
       const fresh = resp.items.filter((n) => !known.has(n.path))
       items.value = items.value.concat(fresh)
+      if (treeMode.value) treeNodes.value = mergeTreeLevel(items.value, treeNodes.value)
       hasMore.value = fresh.length > 0 && resp.items.length >= VDFS_PAGE_SIZE
     } catch (err) {
       if (listGuard.revision() !== token || requestedCwd !== cwd.value) return
@@ -501,11 +612,23 @@ export function useVdfs(opts: UseVdfsOptions) {
     const found = treeMode.value
       ? findTreeNode(treeNodes.value, memo.path)?.item
       : items.value.find((n) => n.path === memo.path)
-    if (!found) {
+    if (found) {
+      await select(found)
+      return
+    }
+    if (!treeMode.value || !isVdfsUnder(memo.path, cwd.value)) {
       selectedNodeMemo.delete(key)
       return
     }
-    await select(found)
+    // 懒加载树尚未展开到记忆项时，不能据“当前没装进树”判它已删除；用 stat 确认，
+    // select 会顺带按路径补齐祖先层。
+    const node = await statVdfs(READBACK_REASON.VDFS_BROWSER, memo.path)
+    if (cwd.value !== key) return
+    if (!node) {
+      selectedNodeMemo.delete(key)
+      return
+    }
+    await select({ ...node, path: memo.path })
   }
 
   /**
@@ -562,13 +685,11 @@ export function useVdfs(opts: UseVdfsOptions) {
     () => cwd.value,
     (dir) => {
       listGuard.advance()
+      resetTreeRequests()
       items.value = []
       cwdNode.value = null
       cwdAddr.value = ''
       treeNodes.value = []
-      treeTruncated.value = false
-      treeMessage.value = ''
-      treeError.value = ''
       hasMore.value = false
       loadMoreError.value = ''
       loadingMore.value = false
@@ -797,6 +918,7 @@ export function useVdfs(opts: UseVdfsOptions) {
     fieldErrors.value = []
     // 记住这一层当时在看什么；换目录 / 进下一级只是暂时收起，返回时按此恢复。
     if (!isVdfsDraft(node)) selectedNodeMemo.set(cwd.value, node)
+    if (!isVdfsDraft(node) && treeMode.value) void revealTreePath(node.path)
 
     // 草稿（新建态）**没有内容可读**：它还没落盘，路径是空的——去读它只会落到
     // 目录地址上。详情渲染器自己知道怎么呈现「还没有的东西」（表单给默认值、
@@ -1207,6 +1329,7 @@ export function useVdfs(opts: UseVdfsOptions) {
     // ③ 其余变更（资源信号 / 只有状态的消息帧）：只有真的影响本目录的条目集合
     //    才重拉。
     if (affects(cwd.value, change.path)) scheduleRefresh()
+    else scheduleTreeRefresh(change.path)
     // 左栏数据源那一层（子目录增删）→ 导航跟着变
     if (change.path === navDir.value || vdfsParent(change.path) === navDir.value) {
       void refreshNav()
@@ -1247,6 +1370,7 @@ export function useVdfs(opts: UseVdfsOptions) {
 
   onBeforeUnmount(() => {
     releaseChanges?.()
+    resetTreeRequests()
     if (refreshTimer) clearTimeout(refreshTimer)
   })
 
@@ -1269,9 +1393,7 @@ export function useVdfs(opts: UseVdfsOptions) {
     // 目录树模式（当前目录声明 `t` 位时，中栏改渲染树）
     treeMode,
     treeNodes,
-    treeTruncated,
-    treeMessage,
-    treeError,
+    loadTreeChildren,
     loading,
     loadError,
     hasMore,

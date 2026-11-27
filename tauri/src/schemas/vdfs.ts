@@ -434,6 +434,12 @@ export interface VdfsTreeResponse {
 export interface VdfsTreeNode {
   item: VdfsItem
   children: VdfsTreeNode[]
+  /** 目录直接子项是否已加载；缺省视为已加载（兼容 `vdfs/tree` 的预装树）。 */
+  loaded?: boolean
+  /** 当前目录是否正在按需读取直接子项。 */
+  loading?: boolean
+  /** 直接子项读取失败；空串 = 没有失败。 */
+  loadError?: string
 }
 
 /**

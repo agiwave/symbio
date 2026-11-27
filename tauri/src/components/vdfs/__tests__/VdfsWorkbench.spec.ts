@@ -32,6 +32,7 @@ const hoisted = vi.hoisted(() => {
     runPackAction: vi.fn(),
     removeSelected: vi.fn(),
     loadMore: vi.fn(),
+    loadTreeChildren: vi.fn(),
     refresh: vi.fn(),
     retryDetail: vi.fn(),
     markSaved: vi.fn(),
@@ -164,12 +165,9 @@ function installStub(
     cwdNode?: VdfsNode | null
     /** 左栏类别（挂载层的目录名，按顺序）——键盘「切到第 N 个类别」的判据取自这里 */
     nav?: string[]
-    /** 目录树形态与树读取失败态 */
+    /** 目录树形态；子层由节点按需加载，失败保留在节点内。 */
     treeMode?: boolean
     treeNodes?: VdfsTreeNode[]
-    treeError?: string
-    treeTruncated?: boolean
-    treeMessage?: string
     /** 是否还有更早的一页 */
     hasMore?: boolean
     /** 目录列表是否仍在加载 */
@@ -239,9 +237,6 @@ function installStub(
     items,
     treeMode: ref(opts.treeMode ?? false),
     treeNodes,
-    treeTruncated: ref(opts.treeTruncated ?? false),
-    treeMessage: ref(opts.treeMessage ?? ''),
-    treeError: ref(opts.treeError ?? ''),
     filteredItems,
     // 筛选入口是否在场：与真实现**同源** —— `cwdNode.search === true`（服务端
     // 声明，裁决在 list 响应里已做好）。前端不自判「条目够不够多」。
@@ -714,31 +709,47 @@ describe('VdfsWorkbench 列表筛选', () => {
     expect(hoisted.fns.loadMore).toHaveBeenCalledTimes(1)
   })
 
-  it('目录树读取失败 ⇒ 显示错误与重试，不伪装成空目录', async () => {
-    installStub({ treeMode: true, treeError: '加载目录树失败：连接中断' })
+  it('目录子层读取失败 ⇒ 就地显示错误，点击节点重试', async () => {
+    const dir: VdfsItem = { ...makeNode('docs'), kind: 'dir', access: 'lt', ext: 'dir' }
+    installStub({
+      treeMode: true,
+      treeNodes: [{ item: dir, children: [], loaded: false, loadError: '加载失败：连接中断' }],
+    })
     const w = bench()
 
-    expect(w.find('.tree-error').text()).toContain('连接中断')
+    await w.get('.tree-row').trigger('click')
+    expect(w.get('.tree-load-error').text()).toContain('连接中断')
+    expect(w.find('.tree-error').exists()).toBe(false)
     expect(w.find('.empty-state').exists()).toBe(false)
-    await w.find('.tree-error .more-btn').trigger('click')
-    expect(hoisted.fns.refresh).toHaveBeenCalledTimes(1)
+    expect(hoisted.fns.loadTreeChildren).toHaveBeenCalledWith(dir.path)
   })
 
-  it('树截断只显示用户可读说明，不泄漏后端路径或模型指令', () => {
-    // grep-audit-allow S-010: 负向回归夹具必须覆盖真实内部根路径
-    const internalRoot = '.vdfsv2'
+  it('懒加载目录显示局部加载态，不伪装成空目录', async () => {
+    const dir: VdfsItem = { ...makeNode('docs'), kind: 'dir', access: 'lt', ext: 'dir' }
+    installStub({
+      treeMode: true,
+      treeNodes: [{ item: dir, children: [], loaded: false, loading: true }],
+    })
+    const w = bench()
+
+    await w.get('.tree-row').trigger('click')
+    expect(w.get('.tree-loading').text()).toContain('加载中')
+    expect(w.get('[role="treeitem"]').attributes('aria-busy')).toBe('true')
+    expect(w.find('.empty-state').exists()).toBe(false)
+  })
+
+  it('树模式也保留当前层续页入口，不再提示整树截断', async () => {
     installStub({
       treeMode: true,
       treeNodes: [{ item: makeNode('a'), children: [] }],
-      treeTruncated: true,
-      treeMessage: `[树已截断] ${internalRoot}/internal/path；不要推断文件名`,
+      hasMore: true,
     })
     const w = bench()
-    const status = w.get('.tree-truncated')
-    expect(status.text()).toBe('目录过大，仅显示部分层级')
-    expect(status.text()).not.toContain(internalRoot)
-    expect(status.text()).not.toContain('不要推断')
-    expect(w.find('.vdfs-list .tree-truncated').exists()).toBe(false)
+
+    expect(w.find('.list-more').exists()).toBe(true)
+    expect(w.text()).not.toContain('目录过大，仅显示部分层级')
+    await w.find('.more-btn').trigger('click')
+    expect(hoisted.fns.loadMore).toHaveBeenCalledTimes(1)
   })
 
   it('Esc 与 × 都能清除筛选', async () => {

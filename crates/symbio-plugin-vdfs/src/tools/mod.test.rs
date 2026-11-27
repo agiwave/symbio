@@ -44,7 +44,7 @@ fn metas_are_llm_ready() {
     }
 }
 
-/// 每个工具名与操作一一对应（工具集完整性）
+/// LLM 工具面固定名单：`vdfs_list` 保留逐层列举，递归树只存在于宿主协议。
 ///
 /// **没有 `vdfs_move`**：移动整条下线了（见 `VdfsRequest` 的「没有 `Move`」一节）
 /// ——核心层不收「两个地址」的操作，要用移动由外层组合，当前外层没提供。
@@ -58,7 +58,6 @@ fn tools_cover_all_ops() {
         names,
         vec![
             "vdfs_list",
-            "vdfs_tree",
             "vdfs_stat",
             "vdfs_read",
             "vdfs_edit",

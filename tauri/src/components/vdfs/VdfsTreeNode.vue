@@ -1,8 +1,8 @@
 <!--
   VdfsTreeNode — 中栏「目录树」的递归节点（列表之外的第二种呈现形态）
 
-  数据源是 useVdfs.treeNodes：后端 `vdfs/tree` 的扁平回执按 path 组装出的树。
-  本组件只做两件事：
+  数据源是 useVdfs.treeNodes：当前层只装直接子项，目录首次展开时由父组件调用
+  `vdfs/list` 读取该目录的直接子项。本组件只做两件事：
 
   - **目录**：点击就地展开 / 折叠（**默认收拢**，选中项所在那几层自动展开），
     不再 push 新地址页——中栏就是树，钻入 = 展开。这与扁平列表「点目录换地址页」
@@ -18,10 +18,12 @@
 -->
 <template>
   <div
+    ref="element"
     class="tree-node"
     role="treeitem"
     :aria-label="node.item.title || node.item.name"
     :aria-expanded="isDir ? expanded : undefined"
+    :aria-busy="isDir && node.loading ? true : undefined"
     :aria-selected="selectedId === node.item.path"
     :aria-level="level"
     :tabindex="tabStop ? 0 : -1"
@@ -46,7 +48,16 @@
       <span v-if="badge" class="tree-badge">{{ badge }}</span>
     </div>
 
-    <!-- 子层：仅目录展开时渲染；缩进由 CSS 变量逐层累加，左侧引导竖线表达层级 -->
+    <!-- 子层：仅目录展开时渲染；直接子项由父组件按需加载，未加载分支不发整树请求。 -->
+    <div v-if="isDir && expanded && node.loading && !node.children.length" class="tree-loading" role="status">
+      加载中…
+    </div>
+    <div v-if="isDir && expanded && node.loadError" class="tree-load-error" role="alert">
+      {{ node.loadError }} · 点击重试
+    </div>
+    <div v-else-if="isDir && expanded && !node.loading && node.loaded === true && !node.children.length" class="tree-empty">
+      空目录
+    </div>
     <div v-if="isDir && expanded && node.children.length" class="tree-children" role="group">
       <VdfsTreeNode
         v-for="child in node.children"
@@ -57,13 +68,14 @@
         :tab-stop="focusPath ? focusPath === child.item.path : selectedId === child.item.path"
         :level="level + 1"
         @activate="emit('activate', $event)"
+        @load-children="emit('load-children', $event)"
       />
     </div>
   </div>
 </template>
 
 <script setup lang="ts">
-import { computed, nextTick, ref, watch } from 'vue'
+import { computed, nextTick, onMounted, ref, watch } from 'vue'
 import {
   cardBadgeOf,
   cardIconOf,
@@ -86,6 +98,8 @@ const props = withDefaults(
 const emit = defineEmits<{
   /** 请求激活条目：文件 → 右栏选中；目录 → 父组件决定（此处仅展开） */
   activate: [item: VdfsItem]
+  /** 目录首次展开或失败重试：父组件按路径读取直接子项。 */
+  'load-children': [path: string]
 }>()
 
 const isDir = computed(() => vdfsAccessOf(props.node.item).list)
@@ -101,6 +115,9 @@ const badge = computed(() => cardBadgeOf(props.node.item))
  * 目录里，用户会以为选择丢了。
  */
 const expanded = ref(hasSelectedWithin(props.node, props.selectedId ?? ''))
+const element = ref<HTMLElement | null>(null)
+/** 键盘进入懒加载目录：等子层就绪后再移动焦点。 */
+const focusAfterLoad = ref(false)
 
 watch(
   () => props.selectedId,
@@ -109,18 +126,49 @@ watch(
   },
 )
 
+watch(
+  () => [props.node.loaded, props.node.children.length],
+  ([loaded]) => {
+    if (!focusAfterLoad.value || !expanded.value || loaded === false) return
+    focusAfterLoad.value = false
+    element.value?.querySelector<HTMLElement>('.tree-children .tree-node')?.focus()
+  },
+  { flush: 'post' },
+)
+
+onMounted(() => {
+  if (expanded.value) requestChildren()
+})
+
 /** 选中项是否在**子孙**里（自身不算——自己是文件时该由父层判断） */
 function hasSelectedWithin(n: VdfsTreeNode, id: string): boolean {
   if (!id) return false
   return n.children.some((c) => c.item.path === id || hasSelectedWithin(c, id))
 }
 
+function requestChildren(): void {
+  if (!isDir.value || props.node.loading || props.node.loaded !== false) return
+  emit('load-children', props.node.item.path)
+}
+
 function onActivate() {
-  if (isDir.value) {
-    // 目录：就地展开 / 折叠，不钻入新页——树导航的核心约定
-    expanded.value = !expanded.value
-  } else {
+  if (!isDir.value) {
     emit('activate', props.node.item)
+    return
+  }
+  if (!expanded.value) {
+    expanded.value = true
+    focusAfterLoad.value = false
+    requestChildren()
+  } else if (props.node.loading) {
+    expanded.value = false
+    focusAfterLoad.value = false
+  } else if (props.node.loaded === false || props.node.loadError) {
+    requestChildren()
+  } else {
+    // 目录：就地展开 / 折叠，不钻入新页——树导航的核心约定
+    expanded.value = false
+    focusAfterLoad.value = false
   }
 }
 
@@ -136,10 +184,14 @@ async function onTreeKeydown(event: KeyboardEvent) {
   const current = event.currentTarget as HTMLElement
   if (event.key === 'ArrowRight' && isDir.value) {
     event.preventDefault()
-    if (!expanded.value) {
+    event.stopPropagation()
+    if (!expanded.value || props.node.loaded === false) {
       expanded.value = true
+      focusAfterLoad.value = props.node.loaded === false && !props.node.loading
+      requestChildren()
       return
     }
+    if (props.node.loading) return
     await nextTick()
     current.querySelector<HTMLElement>('.tree-children .tree-node')?.focus()
     return
@@ -147,8 +199,10 @@ async function onTreeKeydown(event: KeyboardEvent) {
 
   if (event.key === 'ArrowLeft') {
     event.preventDefault()
+    event.stopPropagation()
     if (isDir.value && expanded.value) {
       expanded.value = false
+      focusAfterLoad.value = false
       return
     }
     current.parentElement?.closest<HTMLElement>('.tree-node')?.focus()
@@ -162,6 +216,19 @@ async function onTreeKeydown(event: KeyboardEvent) {
   margin-left: 0.55rem;
   padding-left: 0.55rem;
   border-left: 1px solid var(--border-default);
+}
+
+.tree-loading,
+.tree-empty,
+.tree-load-error {
+  margin: 0.2rem 0 0.35rem 1.45rem;
+  padding: 0.25rem 0.4rem;
+  color: var(--text-muted);
+  font-size: 0.78rem;
+}
+
+.tree-load-error {
+  color: var(--danger-fg);
 }
 
 .tree-row {

@@ -788,7 +788,7 @@ async fn resolve_fs_fetches_root_via_trait_method() {
 
 // ── 截断必须自带续查地址（2026-10-13，`d781a6c7` 号会话）────────────────────
 //
-// 那次会话一次 `vdfs_tree({"depth":3})` 用 500 个配额打根目录，长度被
+// 那次会话一次递归树调用用 500 个配额打根目录，长度被
 // `.workbuddy-ai` 这类噪声吃掉大半，`docs/adr` 只剩一个目录节点——回执却只说
 // `truncated: true`，没说缺了什么。于是模型开始**猜**文件名（一路猜到 `.md`），
 // 132 次「找不到文件」后被用户中止，会话零产出。
@@ -815,6 +815,11 @@ async fn a_truncated_tree_names_what_it_did_not_expand() {
     assert!(
         t.message.contains("pending") && t.message.contains("vdfs_list"),
         "message 要指明续查办法（用什么工具、看哪个字段），写着截断两个字不够：{:?}",
+        t.message
+    );
+    assert!(
+        !t.message.contains("vdfs_tree"),
+        "LLM 树工具已删除，截断提示不得再推荐它：{:?}",
         t.message
     );
     assert!(

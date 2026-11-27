@@ -829,8 +829,8 @@ async fn tree(
         pending.extend(queue.into_iter().map(|(addr, _)| addr));
     }
 
-    // 文案口径与 `tools::spec` 的 vdfs_tree 共用 `VdfsTreeResponse::finish`（同一份实现
-    // 有两份拷贝，98% 逐字相同——最危险的就是这种：改一处会以为改全了）
+    // 截断提示由 `VdfsTreeResponse::finish` 统一给出；LLM 工具面已移除树工具，
+    // 续查只推荐逐目录 `vdfs_list`，避免模型重新触发递归展开。
     Ok(PluginPayload::new(&VdfsTreeResponse::finish(
         out,
         truncated,

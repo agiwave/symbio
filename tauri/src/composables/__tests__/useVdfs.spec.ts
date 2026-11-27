@@ -32,7 +32,6 @@ const mocks = vi.hoisted(() => ({
   readVdfs: vi.fn(),
   writeVdfs: vi.fn(),
   statVdfs: vi.fn(),
-  treeVdfs: vi.fn(),
   subscribeVdfsChanged: vi.fn(),
   // 动作通道：草稿上的「导入整包」要走它（载荷编码 + 目标地址在下面两条用例里钉住）
   runVdfsAction: vi.fn(),
@@ -45,7 +44,6 @@ vi.mock('@/services/vdfs', () => ({
   readVdfs: mocks.readVdfs,
   writeVdfs: mocks.writeVdfs,
   statVdfs: mocks.statVdfs,
-  treeVdfs: mocks.treeVdfs,
   runVdfsAction: mocks.runVdfsAction,
   deleteVdfs: mocks.deleteVdfs,
   arrayBufferToBase64: mocks.arrayBufferToBase64,
@@ -152,7 +150,6 @@ beforeEach(() => {
     items: [],
   })
   mocks.readVdfs.mockResolvedValue({ path: '', text: '', binary: false, size: 0 })
-  mocks.treeVdfs.mockResolvedValue({ nodes: [], truncated: false })
   mocks.subscribeVdfsChanged.mockReturnValue(() => {})
 })
 
@@ -560,10 +557,27 @@ describe('useVdfs 有界列表（中栏只取最新一页 + 加载更早）', ()
     expect(mocks.listVdfs).toHaveBeenLastCalledWith(READBACK_REASON.VDFS_BROWSER, MSG_DIR, {
       limit: 100,
       before: 'm99',
-    })
+    }, expect.any(Function))
     expect(api.items.value).toHaveLength(103)
     expect(api.items.value[102].name).toBe('m102')
     expect(api.hasMore.value, '续页不满 ⇒ 到底了').toBe(false)
+
+    wrapper.unmount()
+  })
+
+  it('续页读取失败保留入口与已加载条目，不伪装成已经到底', async () => {
+    listReturns(page(0, 100))
+    const { api, wrapper } = mountHost(MSG_DIR)
+    await settle()
+    mocks.listVdfs.mockImplementation(async (_reason, _path, _opts, onFallback) => {
+      onFallback?.(new Error('续页不可达'))
+      return { path: MSG_DIR, node: { ...msgNode('__dir'), access: 'l', ext: undefined }, items: [] }
+    })
+
+    await api.loadMore()
+    expect(api.items.value).toHaveLength(100)
+    expect(api.hasMore.value).toBe(true)
+    expect(api.loadMoreError.value).toContain('加载更早的条目失败')
 
     wrapper.unmount()
   })
@@ -1653,16 +1667,34 @@ describe('useVdfs 返回选中记忆（进入下一级 → 返回）', () => {
 })
 
 /**
- * 目录树里的文件是**孙辈**：中栏列表只拿到第一层，右栏详情却可以是整棵树里的
- * 任意一层。刷新时若只拿「直接子项在不在 items 里」判失效，会把正在看的文件清空，
- * 连带作废在途 read——表现就是点开任何文件都只显示空的编辑器。
+ * 工作区树只装当前层。这里覆盖按需加载、缓存、失败重试、并发去重、迟到响应、
+ * 深层选中与实时刷新；任何一条都不能退化成进入目录时预取整棵树。
  */
-describe('useVdfs 目录树详情（树里的文件不能被列表口径误清空）', () => {
-  const TREE_ROOT = '@vfs/session/tree-abc/workdir'
+describe('useVdfs 工作区树按需加载', () => {
+  const TREE_PARENT = '@vfs/session/tree-abc'
+  const TREE_ROOT = `${TREE_PARENT}/workdir`
+  const workdirItem: VdfsItem = {
+    path: TREE_ROOT,
+    name: 'workdir',
+    title: 'workdir',
+    kind: 'dir',
+    status: '',
+    access: 'lt',
+    ext: 'dir',
+  }
   const dirItem: VdfsItem = {
     path: `${TREE_ROOT}/docs`,
     name: 'docs',
     title: 'docs',
+    kind: 'dir',
+    status: '',
+    access: 'lt',
+    ext: 'dir',
+  }
+  const productItem: VdfsItem = {
+    path: `${TREE_ROOT}/docs/product`,
+    name: 'product',
+    title: 'product',
     kind: 'dir',
     status: '',
     access: 'lt',
@@ -1678,74 +1710,286 @@ describe('useVdfs 目录树详情（树里的文件不能被列表口径误清�
     ext: 'text',
   }
 
-  it('树读取失败保留明确错误，重试成功后清除', async () => {
-    mocks.listVdfs.mockImplementation(async (_reason: unknown, path: string) => ({
+  function listResponse(path: string, items: VdfsItem[]) {
+    return {
       path,
-      node: { path, name: 'workdir', kind: 'dir', status: '', access: 'lt' },
-      items: [],
-    }))
-    mocks.treeVdfs.mockRejectedValueOnce(new Error('tree offline'))
+      node: {
+        path,
+        name: path.split('/').pop() ?? '',
+        kind: 'dir',
+        status: '',
+        access: path === TREE_ROOT ? 'lt' : 'l',
+      },
+      items,
+    }
+  }
 
-    const { api, wrapper } = mountHost(TREE_ROOT)
+  function installTreeListing(
+    branches: Record<string, VdfsItem[]> = {},
+    rootItems: VdfsItem[] = [dirItem],
+  ) {
+    mocks.listVdfs.mockImplementation(async (_reason: unknown, path: string) =>
+      listResponse(path, path === TREE_ROOT ? rootItems : path === TREE_PARENT ? [workdirItem] : branches[path] ?? []),
+    )
+    return branches
+  }
+
+  function callsFor(path: string): number {
+    return mocks.listVdfs.mock.calls.filter((call) => call[1] === path).length
+  }
+
+  it('进入工作区只读当前层，不预取目录子树', async () => {
+    installTreeListing()
+    const { api, wrapper } = mountHost(TREE_PARENT)
+    await settle()
     await settle()
 
+    expect(api.cwd.value).toBe(TREE_ROOT)
     expect(api.treeMode.value).toBe(true)
-    expect(api.treeNodes.value).toEqual([])
-    expect(api.treeError.value).toContain('tree offline')
-
-    mocks.treeVdfs.mockResolvedValueOnce({ nodes: [dirItem, fileItem], truncated: false })
-    await api.refresh()
-    expect(api.treeError.value).toBe('')
-    expect(api.treeNodes.value).toHaveLength(2)
+    expect(api.treeNodes.value).toHaveLength(1)
+    expect(api.treeNodes.value[0]).toMatchObject({ item: dirItem, children: [], loaded: false })
+    expect(callsFor(dirItem.path)).toBe(0)
+    expect(callsFor(productItem.path)).toBe(0)
     wrapper.unmount()
   })
 
-  it('★ 树里的文件选中后，后台刷新不得清空正文', async () => {
+  it('展开只挂直接子项，已加载目录不重复读取', async () => {
+    const branches = installTreeListing({ [dirItem.path]: [productItem] })
+    const { api, wrapper } = mountHost(TREE_PARENT)
+    await settle()
+    await settle()
+
+    const pending = api.loadTreeChildren(dirItem.path)
+    expect(api.treeNodes.value[0].loading).toBe(true)
+    await pending
+
+    expect(api.treeNodes.value[0]).toMatchObject({
+      loaded: true,
+      loading: false,
+      children: [{ item: productItem, children: [], loaded: false }],
+    })
+    expect(callsFor(dirItem.path)).toBe(1)
+    expect(callsFor(productItem.path)).toBe(0)
+
+    await api.loadTreeChildren(dirItem.path)
+    expect(callsFor(dirItem.path)).toBe(1)
+    expect(branches[dirItem.path]).toEqual([productItem])
+    wrapper.unmount()
+  })
+
+  it('读取失败与空目录分开，失败节点保留并允许重试', async () => {
+    const branches = installTreeListing()
+    mocks.listVdfs.mockImplementation(async (_reason, path, _opts, onFallback) => {
+      if (path === dirItem.path && !branches[path]) {
+        onFallback?.(new Error('offline'))
+        return listResponse(path, [])
+      }
+      return listResponse(path, path === TREE_ROOT ? [dirItem] : path === TREE_PARENT ? [workdirItem] : branches[path] ?? [])
+    })
+    const { api, wrapper } = mountHost(TREE_PARENT)
+    await settle()
+    await settle()
+
+    await api.loadTreeChildren(dirItem.path)
+    expect(api.treeNodes.value[0]).toMatchObject({ loaded: false, loading: false })
+    expect(api.treeNodes.value[0].loadError).toContain('offline')
+
+    branches[dirItem.path] = [productItem]
+    await api.loadTreeChildren(dirItem.path)
+    expect(api.treeNodes.value[0].loaded).toBe(true)
+    expect(api.treeNodes.value[0].loadError).toBe('')
+    expect(api.treeNodes.value[0].children[0].item.path).toBe(productItem.path)
+    wrapper.unmount()
+  })
+
+  it('同目录并发展开只发一个请求', async () => {
+    installTreeListing()
+    let release!: (value: ReturnType<typeof listResponse>) => void
+    const gate = new Promise<ReturnType<typeof listResponse>>((resolve) => { release = resolve })
+    mocks.listVdfs.mockImplementation(async (_reason: unknown, path: string) => {
+      if (path === dirItem.path) return gate
+      return listResponse(path, path === TREE_ROOT ? [dirItem] : path === TREE_PARENT ? [workdirItem] : [])
+    })
+    const { api, wrapper } = mountHost(TREE_PARENT)
+    await settle()
+    await settle()
+
+    const first = api.loadTreeChildren(dirItem.path)
+    const second = api.loadTreeChildren(dirItem.path)
+    expect(callsFor(dirItem.path)).toBe(1)
+
+    release(listResponse(dirItem.path, [productItem]))
+    await Promise.all([first, second])
+    expect(api.treeNodes.value[0].children).toHaveLength(1)
+    wrapper.unmount()
+  })
+
+  it('换目录后迟到的子层响应不得挂回旧树', async () => {
+    installTreeListing()
+    let release!: (value: ReturnType<typeof listResponse>) => void
+    const gate = new Promise<ReturnType<typeof listResponse>>((resolve) => { release = resolve })
+    mocks.listVdfs.mockImplementation(async (_reason: unknown, path: string) => {
+      if (path === dirItem.path) return gate
+      return listResponse(path, path === TREE_ROOT ? [dirItem] : path === TREE_PARENT ? [workdirItem] : [])
+    })
+    const addrRef = ref(TREE_PARENT)
+    const { api, wrapper } = mountHost(addrRef)
+    await settle()
+    await settle()
+
+    const pending = api.loadTreeChildren(dirItem.path)
+    addrRef.value = '@vfs/session/other'
+    await settle()
+    release(listResponse(dirItem.path, [productItem]))
+    await pending
+    await settle()
+
+    expect(api.cwd.value).not.toBe(TREE_ROOT)
+    expect(api.treeNodes.value).toEqual([])
+    wrapper.unmount()
+  })
+
+  it('当前层刷新保留已加载分支及其缓存', async () => {
+    installTreeListing({ [dirItem.path]: [productItem] })
+    const { api, wrapper } = mountHost(TREE_PARENT)
+    await settle()
+    await settle()
+    await api.loadTreeChildren(dirItem.path)
+
+    await api.refresh()
+    expect(api.treeNodes.value[0]).toMatchObject({
+      loaded: true,
+      children: [{ item: productItem, children: [], loaded: false }],
+    })
+    wrapper.unmount()
+  })
+
+  it('已加载目录局部刷新保留更深层的展开缓存', async () => {
     vi.useFakeTimers()
     try {
-      mocks.listVdfs.mockImplementation(async (reasonOrPath: string, maybePath?: string) => {
-        const path = maybePath ?? reasonOrPath
-        return {
-          path,
-          node: {
-            path,
-            name: path.split('/').pop() ?? '',
-            kind: 'dir',
-            status: '',
-            access: path === TREE_ROOT ? 'lt' : 'l',
-          },
-          // 左栏无子目录 ⇒ cwd 定在树根；树的内容由 treeVdfs 单独给（含孙辈）。
-          items: [],
-        }
+      const nestedItem: VdfsItem = {
+        path: `${productItem.path}/nested`,
+        name: 'nested',
+        title: 'nested',
+        kind: 'dir',
+        status: '',
+        access: 'lt',
+        ext: 'dir',
+      }
+      installTreeListing({
+        [dirItem.path]: [productItem],
+        [productItem.path]: [nestedItem],
+        [nestedItem.path]: [fileItem],
       })
-      mocks.treeVdfs.mockResolvedValue({ nodes: [dirItem, fileItem], truncated: false })
-      mocks.readVdfs.mockResolvedValue({ path: '', text: '# 正文', binary: false, size: 8 })
-
-      const { api, wrapper } = mountHost(TREE_ROOT)
+      const { api, wrapper } = mountHost(TREE_PARENT)
       await settle()
-      expect(api.treeMode.value).toBe(true)
+      await settle()
+      await api.loadTreeChildren(dirItem.path)
+      await api.loadTreeChildren(productItem.path)
+      await api.loadTreeChildren(nestedItem.path)
+      const productCalls = callsFor(productItem.path)
+      const nestedCalls = callsFor(nestedItem.path)
 
-      await api.select(fileItem)
-      expect(api.selectedNode.value?.path).toBe(fileItem.path)
-      expect(api.nodeText.value).toBe('# 正文')
-
-      // 工作目录 watcher 的一次普通信号 ⇒ scheduleRefresh；树里的孙辈不能被当掉。
-      emitChange({ path: TREE_ROOT })
+      emitChange({ path: `${dirItem.path}/new.md` })
       await vi.advanceTimersByTimeAsync(500)
       await settle()
 
-      expect(api.selectedNode.value?.path, '刷新后仍停在刚打开的文件').toBe(fileItem.path)
-      expect(api.nodeText.value, '在途 read 也不得被误作废').toBe('# 正文')
-      expect(mocks.readVdfs).toHaveBeenCalledWith(
-        READBACK_REASON.VDFS_BROWSER,
-        fileItem.path,
-        expect.any(Function),
-      )
-
+      expect(callsFor(dirItem.path)).toBe(2)
+      expect(callsFor(productItem.path)).toBe(productCalls)
+      expect(callsFor(nestedItem.path)).toBe(nestedCalls)
+      expect(api.treeNodes.value[0].children[0]).toMatchObject({
+        loaded: true,
+        children: [{
+          item: { path: nestedItem.path },
+          loaded: true,
+          children: [{ item: fileItem }],
+        }],
+      })
       wrapper.unmount()
     } finally {
       vi.useRealTimers()
     }
+  })
+
+  it('深层文件选中后，当前目录刷新不得清空正文', async () => {
+    vi.useFakeTimers()
+    try {
+      installTreeListing({
+        [dirItem.path]: [productItem],
+        [productItem.path]: [fileItem],
+      })
+      mocks.readVdfs.mockResolvedValue({ path: '', text: '# 正文', binary: false, size: 8 })
+      const { api, wrapper } = mountHost(TREE_PARENT)
+      await settle()
+      await settle()
+
+      await api.select(fileItem)
+      await settle()
+      expect(api.selectedNode.value?.path).toBe(fileItem.path)
+      expect(api.nodeText.value).toBe('# 正文')
+
+      emitChange({ path: TREE_ROOT })
+      await vi.advanceTimersByTimeAsync(500)
+      await settle()
+
+      expect(api.selectedNode.value?.path).toBe(fileItem.path)
+      expect(api.nodeText.value).toBe('# 正文')
+      wrapper.unmount()
+    } finally {
+      vi.useRealTimers()
+    }
+  })
+
+  it('实时变更只刷新实际受影响的已加载目录', async () => {
+    vi.useFakeTimers()
+    try {
+      installTreeListing({
+        [dirItem.path]: [productItem],
+        [productItem.path]: [fileItem],
+      })
+      const { api, wrapper } = mountHost(TREE_PARENT)
+      await settle()
+      await settle()
+      await api.loadTreeChildren(dirItem.path)
+      await api.loadTreeChildren(productItem.path)
+      const rootCalls = callsFor(TREE_ROOT)
+      const productCalls = callsFor(productItem.path)
+
+      emitChange({ path: fileItem.path })
+      await vi.advanceTimersByTimeAsync(500)
+      await settle()
+
+      expect(callsFor(TREE_ROOT)).toBe(rootCalls)
+      expect(callsFor(productItem.path)).toBe(productCalls + 1)
+      wrapper.unmount()
+    } finally {
+      vi.useRealTimers()
+    }
+  })
+
+  it('返回工作区时用 stat 恢复深层记忆项，并补齐尚未加载的祖先', async () => {
+    installTreeListing({
+      [dirItem.path]: [productItem],
+      [productItem.path]: [fileItem],
+    })
+    mocks.statVdfs.mockResolvedValue(fileItem)
+    const addrRef = ref(TREE_PARENT)
+    const { api, wrapper } = mountHost(addrRef)
+    await settle()
+    await settle()
+    await api.select(fileItem)
+    await settle()
+
+    addrRef.value = '@vfs/session/other'
+    await settle()
+    addrRef.value = TREE_PARENT
+    await settle()
+    await settle()
+
+    expect(mocks.statVdfs).toHaveBeenCalledWith(READBACK_REASON.VDFS_BROWSER, fileItem.path)
+    expect(api.selectedNode.value?.path).toBe(fileItem.path)
+    expect(api.treeNodes.value[0].children[0].children[0].item.path).toBe(fileItem.path)
+    wrapper.unmount()
   })
 })
 

@@ -2,7 +2,7 @@
 //!
 //! ## 为什么有本模块
 //!
-//! VDFS 的九个工具里，有七个的形状**逐字相同**：一个持 `Arc<ToolVdfs>` 的结构体、
+//! VDFS 的工具里，有六个的形状**逐字相同**：一个持 `Arc<ToolVdfs>` 的结构体、
 //! 一个 `meta()`（名字 / 描述 / schema / 示例 / 保留策略）、一个 `execute()`
 //! （`ensure_required` → 取参数 → 调 provider 的某个方法 → 拼一个回执 JSON）。
 //! 它们真正不同的只有四样东西：
@@ -12,17 +12,17 @@
 //! 3. **上下文保留策略**（`LastOnly` / 无）；
 //! 4. **调用哪个 provider 方法、怎么把结果拼成回执**——这是唯一的**真逻辑**。
 //!
-//! 此前这四样散在七个文件里，而第 1~3 样之外的部分（结构体声明、`new`、`impl`、
+//! 此前这四样散在独立文件里，而第 1~3 样之外的部分（结构体声明、`new`、`impl`、
 //! 导入行）是纯复制。新增一个工具 = 新建一个文件、抄一遍骨架、填四个洞。
 //!
 //! 本模块把「骨架」抽成 [`VdfsTool`]（**唯一**的 `PortExecutor` 实现），把「四个洞」
 //! 抽成 [`ToolSpec`]（静态表 + 一个异步闭包）。于是每个工具退化成**一条表项**。
 //!
-//! ## 边界：为什么不是九个全收
+//! ## 边界：为什么不是八个全收
 //!
 //! `vdfs_read`（行号 + 分页）与 `vdfs_list`（ignore glob 过滤 + 目录优先排序）带
 //! **可读的呈现加工**，不是「转发 + 包一层回执」；把它们塞进表会逼出一个
-//! 「按工具名分支」的大 `execute`——那等于把七个文件的样板换成一份带七个分支的
+//! 「按工具名分支」的大 `execute`——那等于把独立文件的样板换成一份带六个分支的
 //! 函数，**没有消除任何东西**。故这两者保留为独立文件。
 //!
 //! 判据是「有没有表装不下的呈现逻辑」，不是「行数够不够少」。
@@ -34,7 +34,7 @@ use serde_json::Value;
 use std::sync::Arc;
 use symbio_plugin_api::{
     missing_caller, port_result, CapabilityMeta, CapabilityRiskLevel, ExecEnv, PluginError,
-    PluginInvokeRequest, PortExecContext, PortExecutor, PortInput, PortOutcome, VdfsItem,
+    PluginInvokeRequest, PortExecContext, PortExecutor, PortInput, PortOutcome,
 };
 
 /// 工具的真逻辑签名：`(provider, 已拆好的参数, ctx) -> 回执 JSON`。
@@ -112,7 +112,7 @@ impl VdfsTool {
     }
 }
 
-// ==================== 七个同形工具的规格表 ====================
+// ==================== 六个同形工具的规格表 ====================
 //
 // 每条 `call` 是一个**普通 `fn` 指针**，指向一个返回 `BoxFuture` 的 async 块。
 // 这样表可以在 `static` 里直接写（async 闭包不能），且每个工具的「真逻辑」集中
@@ -310,31 +310,6 @@ pub static SPECS: &[ToolSpec] = &[
             })
         },
     },
-    ToolSpec {
-        name: "vdfs_tree",
-        description: "递归展开一棵子树（只下钻访问位含 t 的目录）。一次拿到层级结构，适合先整体了解工作目录布局。",
-        schema: || {
-            serde_json::json!({
-                "type": "object",
-                "properties": {
-                    "path": { "type": "string", "description": super::PATH_SHORT },
-                    "depth": { "type": "integer", "description": "最大深度，缺省 3；0 表示不限" },
-                    "limit": { "type": "integer", "description": "最多返回节点数，缺省 500" }
-                },
-                "required": ["path"]
-            })
-        },
-        examples: &["{\"path\":\".\",\"depth\":2}", "{\"path\":\"src\",\"depth\":2}"],
-        risk: CapabilityRiskLevel::Low,
-        behaviors: &[],
-        call: |p, args, ctx| {
-            Box::pin(async move {
-                super::ensure_required(&args, "path")?;
-                let req: super::super::protocol::VdfsTreeRequest = request_of(&args);
-                tree_receipt(p, ctx, req).await
-            })
-        },
-    },
 ];
 
 /// `vdfs_search` 的回执封装（结果列表 + 总计 + 截断提示）。
@@ -367,82 +342,4 @@ fn search_receipt(mut data: super::super::protocol::VdfsSearchResult) -> Value {
         "truncated": truncated,
         "message": message,
     })
-}
-
-/// `vdfs_tree` 的回执：BFS 展开（`t` 位控制下钻），深度与数量上限防爆炸，
-/// 单分支失败跳过不拖垮整体。逻辑与拆表之前逐字一致。
-async fn tree_receipt(
-    provider: Arc<ToolVdfs>,
-    ctx: Arc<dyn PluginInvokeRequest>,
-    req: super::super::protocol::VdfsTreeRequest,
-) -> Result<Value, PluginError> {
-    use std::collections::VecDeque;
-
-    let depth_limit = req.depth.unwrap_or(3); // 0 = 不限
-    let count_limit = req.limit.unwrap_or(500).max(1) as usize;
-
-    let mut out: Vec<VdfsItem> = Vec::new();
-    let mut pending: Vec<String> = Vec::new();
-    let mut truncated = false;
-
-    // 队列元素 = (目录地址, 深度)；地址始终是大模型地址空间，由封装 provider 翻译
-    let mut queue: VecDeque<(String, u32)> = VecDeque::new();
-    queue.push_back((req.path.clone(), 0));
-
-    while let Some((dir, depth)) = queue.pop_front() {
-        let children = match provider.list(&ctx, &dir).await {
-            Ok(c) => c,
-            // 单分支失败降级：不让一棵子树拖垮整个遍历
-            Err(e) => {
-                symbio_plugin_api::plugin_warn!("vdfs", "vdfs_tree: 列出 {dir} 失败，已跳过: {e}");
-                continue;
-            }
-        };
-
-        // 子地址 = 父目录 + 子名，拼接走全项目那一份规则（`join_addr`）：
-        // 父段带绝对锚点（`/docs`）时子段必须带走，否则遍历交出相对地址、
-        // 把绝对子树读成工作目录下的影子树
-        let mut listed_all = true;
-        for mut item in children {
-            if out.len() >= count_limit {
-                truncated = true;
-                listed_all = false;
-                break;
-            }
-            let child_addr = symbio_plugin_api::join_addr(&dir, &item.node.name);
-            // 访问层通常已按同一规则回填；留空时兜一个，保证每个条目都带地址
-            if item.path.is_empty() {
-                item.path = child_addr.clone();
-            }
-            let descend =
-                item.node.access.traverse && (depth_limit == 0 || depth + 1 < depth_limit);
-            out.push(item);
-            if descend {
-                queue.push_back((child_addr, depth + 1));
-            }
-        }
-        // 这一层没列完 ⇒ 它是续查入口，要出现在回执上而不是被静默吞掉
-        if !listed_all {
-            pending.push(dir.clone());
-        }
-        if truncated {
-            break;
-        }
-    }
-
-    // 配额耗尽时队列里剩下的目录**一次都没展开过**，一并报出：它们的子条目是全缺的，
-    // 比「某个目录没列完」更彻底、更需要点名。
-    if truncated {
-        pending.extend(queue.into_iter().map(|(addr, _)| addr));
-    }
-
-    Ok(serde_json::to_value(
-        super::super::protocol::VdfsTreeResponse::finish(
-            out,
-            truncated,
-            pending,
-            count_limit,
-            &req.path,
-        ),
-    )?)
 }

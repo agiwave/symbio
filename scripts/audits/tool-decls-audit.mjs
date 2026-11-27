@@ -79,7 +79,6 @@ const DEFAULT_BASELINE = [
   'vdfs_read',
   'vdfs_search',
   'vdfs_stat',
-  'vdfs_tree',
   'vdfs_write',
   'web_fetch',
   'web_search',

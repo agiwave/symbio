@@ -32,9 +32,9 @@ impl: done
 ## 两条链路，同一批 provider
 
 前端与 LLM 消费**同一批**注册的挂载 provider，因此不存在「前端支持而 LLM 不支持」的资源；
-差异只在呈现——前端拿域响应原样渲染，工具在 `execute` 内封装。工具集是操作的**子集**
-（`watch` / `unwatch` / `action` 不经 LLM 工具暴露：实时订阅归宿主前端，动作由详情
-`actions` 声明后按需触发）。
+差异只在呈现——前端拿域响应原样渲染，工具在 `execute` 内封装。工具集是操作的**子集**：
+递归 `tree` 只保留宿主协议供命令面板等组合查询使用；`watch` / `unwatch` / `action` 不经 LLM 工具暴露，
+实时订阅归宿主前端，动作由详情 `actions` 声明后按需触发。
 
 **操作与工具清单以 [docs/004-ref/006-当前事实表.md](../../docs/004-ref/006-当前事实表.md "RE-006-当前事实表") §3 为准**（操作闭集
 `protocol.rs::VDFS_OPS` 有测试锁计数；工具集完整性由 `tools/mod.rs` 的
@@ -52,7 +52,7 @@ impl: done
 | `provider.rs` | `ToolVdfs` 封装 provider（工具链路） |
 | `protocol.rs` | 线路信封（`vdfs/*` 请求响应 + `VDFS_OPS`） |
 | `plugin.rs` | 插件装配（`route` 分发 + `traverse` 注册工具） |
-| `tools/` | 10 个工具，一操作一文件（见上表） |
+| `tools/` | LLM 工具端口执行体（表驱动同形工具 + 独立呈现工具） |
 
 ## 关键不变量
 
@@ -69,10 +69,11 @@ impl: done
  读上限 10MB、列目录上限 2000 项、非 UTF-8 名称跳过；`list` 目录在前、各自按名
  升序，文件 `rw` / 目录 `wlt`；图片扩展名映射为 `binary = true` + MIME，`read`
  返回 base64（多模态）。
-- **组合操作只写一次**：`VdfsProvider` 只含原子操作，`tree` / `edit` / `search`
+- **组合操作只写一次**：`VdfsProvider` 只含原子操作，`edit` / `search`
  由访问层组合（`host::edit_via` / `host::search_via`）——读改写、遍历过滤属组合
  逻辑，放 trait 里会逼每个实现方重复实现；前端协议入口与 LLM 工具链路共用同一份
- 实现，`VdfsEditResponse` / `VdfsSearchResult` 因此属于访问层形状。
+ 实现，`VdfsEditResponse` / `VdfsSearchResult` 因此属于访问层形状。递归 `tree` 的 BFS
+ 只保留宿主协议，不进入 LLM 工具面。
 
 ## 关联
 

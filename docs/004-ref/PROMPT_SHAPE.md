@@ -5,15 +5,15 @@
 > 口径与「什么进基线、什么只作观测」见本脚本文件头，
 > 提取实现在 `scripts/audits/prompt-shape-audit.mjs`。
 
-场景 `full-主线装配-工具轮-对话面关闭` · 重生成于 2026-11-21 · 请求数 3
+场景 `full-主线装配-工具轮-对话面关闭` · 重生成于 2026-11-27 · 请求数 3
 
 ## 判据列（逐字段比，PS-001）
 
 | 请求 | 消息数 | 消息序列（role + 结构载体） | system 小节标签序列 | 工具数 |
 |---|---|---|---|---|
-| req0 | 2 | system → user | 【工作区记忆】【会话记忆】  | 20 |
-| req1 | 4 | system → user → assistant[calls=1] → tool[id] | 【工作区记忆】【会话记忆】    | 20 |
-| req2 | 6 | system → user → assistant[calls=1] → tool[id] → assistant → user | 【工作区记忆】【会话记忆】【长期记忆】      | 20 |
+| req0 | 2 | system → user | 【工作区记忆】【会话记忆】  | 19 |
+| req1 | 4 | system → user → assistant[calls=1] → tool[id] | 【工作区记忆】【会话记忆】    | 19 |
+| req2 | 6 | system → user → assistant[calls=1] → tool[id] → assistant → user | 【工作区记忆】【会话记忆】【长期记忆】      | 19 |
 
 ## 规模观测（**不进判据**：同一列里既有装配代码的字，也有负载的字）
 
@@ -22,9 +22,9 @@
 
 | 请求 | 消息数 | 消息序列 | system 小节标签 | 工具数 | 正文字节 | 工具 schema 字节 | 请求体总字节 |
 |---|---|---|---|---|---|---|---|
-| req0 | 2 | system → user | 【工作区记忆】【会话记忆】  | 20 | 1514 | 14416 | 16174 |
-| req1 | 4 | system → user → assistant[calls=1] → tool[id] | 【工作区记忆】【会话记忆】    | 20 | 1570 | 14416 | 16466 |
-| req2 | 6 | system → user → assistant[calls=1] → tool[id] → assistant → user | 【工作区记忆】【会话记忆】【长期记忆】      | 20 | 2004 | 14416 | 16967 |
+| req0 | 2 | system → user | 【工作区记忆】【会话记忆】  | 19 | 1514 | 13841 | 15598 |
+| req1 | 4 | system → user → assistant[calls=1] → tool[id] | 【工作区记忆】【会话记忆】    | 19 | 1570 | 13841 | 15890 |
+| req2 | 6 | system → user → assistant[calls=1] → tool[id] → assistant → user | 【工作区记忆】【会话记忆】【长期记忆】      | 19 | 2004 | 13841 | 16391 |
 
 ## 基线（判据本体）
 
@@ -70,7 +70,7 @@
         []
       ],
       "tools": {
-        "count": 20,
+        "count": 19,
         "names": [
           "<shell>",
           "content_search",
@@ -81,7 +81,6 @@
           "mcp__mockserv__add",
           "agent_run",
           "vdfs_list",
-          "vdfs_tree",
           "vdfs_stat",
           "vdfs_read",
           "vdfs_edit",
@@ -93,7 +92,7 @@
           "web_search",
           "http_request"
         ],
-        "schema_bytes": 14416
+        "schema_bytes": 13841
       }
     },
     {
@@ -147,7 +146,7 @@
         []
       ],
       "tools": {
-        "count": 20,
+        "count": 19,
         "names": [
           "<shell>",
           "content_search",
@@ -158,7 +157,6 @@
           "mcp__mockserv__add",
           "agent_run",
           "vdfs_list",
-          "vdfs_tree",
           "vdfs_stat",
           "vdfs_read",
           "vdfs_edit",
@@ -170,7 +168,7 @@
           "web_search",
           "http_request"
         ],
-        "schema_bytes": 14416
+        "schema_bytes": 13841
       }
     },
     {
@@ -242,7 +240,7 @@
         []
       ],
       "tools": {
-        "count": 20,
+        "count": 19,
         "names": [
           "<shell>",
           "content_search",
@@ -253,7 +251,6 @@
           "mcp__mockserv__add",
           "agent_run",
           "vdfs_list",
-          "vdfs_tree",
           "vdfs_stat",
           "vdfs_read",
           "vdfs_edit",
@@ -265,7 +262,7 @@
           "web_search",
           "http_request"
         ],
-        "schema_bytes": 14416
+        "schema_bytes": 13841
       }
     }
   ]

@@ -48,7 +48,6 @@ fn read_family_annotates_nothing() {
         "vdfs_list",
         "vdfs_stat",
         "vdfs_search",
-        "vdfs_tree",
         "shell",
         "mcp__srv__vdfs_write",
     ] {

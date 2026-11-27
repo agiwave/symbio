@@ -30,7 +30,7 @@
 //!
 //! ## 同形工具走表（[`spec`]）
 //!
-//! 九个工具里，**七个**是「转发到 provider 的某个方法 + 包一层回执」的同形体，
+//! 八个工具里，**六个**是「转发到 provider 的某个方法 + 包一层回执」的同形体，
 //! 差异只有「名字 / 描述 / schema / 示例 / 保留策略 / 调哪个方法」六样。
 //! 它们由 [`spec::SPECS`] 一张表驱动，`PortExecutor` 实现**只有一份**
 //! （[`spec::VdfsTool`]）——不再一个工具一个文件。
@@ -127,7 +127,7 @@ pub fn tool(
 /// 构造全部 VDFS 工具：每个工具持有**同一个**封装 provider（无状态，可复用）。
 ///
 /// 顺序固定（`tools_cover_all_ops` 测试锁死）：表装不下的两个（`list` / `read`）
-/// 手动插入到它们在原清单里的位置，其余七条由 [`spec::SPECS`] 按表序展开。
+/// 手动插入到它们在原清单里的位置，其余六条由 [`spec::SPECS`] 按表序展开。
 /// 返回 `(meta, 执行体)` 二元组：meta 供注册点静态交档，执行体经 `register_tool`
 /// 落进装配期容器。
 pub fn vdfs_tools(provider: Arc<ToolVdfs>) -> Vec<(CapabilityMeta, Arc<dyn PortExecutor>)> {
@@ -144,14 +144,13 @@ pub fn vdfs_tools(provider: Arc<ToolVdfs>) -> Vec<(CapabilityMeta, Arc<dyn PortE
     let read_tool = read::ReadTool::new(provider.clone());
     vec![
         (list_tool.meta(), Arc::new(list_tool)), // 1. vdfs_list
-        by_name("vdfs_tree"),                    // 2. vdfs_tree
-        by_name("vdfs_stat"),                    // 3. vdfs_stat
-        (read_tool.meta(), Arc::new(read_tool)), // 4. vdfs_read
-        by_name("vdfs_edit"),                    // 5. vdfs_edit
-        by_name("vdfs_search"),                  // 6. vdfs_search
-        by_name("vdfs_write"),                   // 7. vdfs_write
-        by_name("vdfs_delete"),                  // 8. vdfs_delete
-        by_name("vdfs_mkdir"),                   // 9. vdfs_mkdir
+        by_name("vdfs_stat"),                    // 2. vdfs_stat
+        (read_tool.meta(), Arc::new(read_tool)), // 3. vdfs_read
+        by_name("vdfs_edit"),                    // 4. vdfs_edit
+        by_name("vdfs_search"),                  // 5. vdfs_search
+        by_name("vdfs_write"),                   // 6. vdfs_write
+        by_name("vdfs_delete"),                  // 7. vdfs_delete
+        by_name("vdfs_mkdir"),                   // 8. vdfs_mkdir
     ]
 }
 

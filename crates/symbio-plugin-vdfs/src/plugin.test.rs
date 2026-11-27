@@ -64,7 +64,7 @@ async fn list_unknown_dir_errors() {
     assert!(matches!(err, PluginError::NotFound(_)));
 }
 
-/// 工具集：每个 VDFS 操作恰好一个工具（无 `vdfs_move`——移动已整条下线）
+/// LLM 工具面固定名单：`vdfs_list` 保留逐层列举，递归树只存在于宿主协议。
 #[test]
 fn tools_cover_all_ops() {
     let visitor: Arc<dyn symbio_plugin_api::Registry> =
@@ -77,7 +77,6 @@ fn tools_cover_all_ops() {
         names,
         vec![
             "vdfs_list",
-            "vdfs_tree",
             "vdfs_stat",
             "vdfs_read",
             "vdfs_edit",

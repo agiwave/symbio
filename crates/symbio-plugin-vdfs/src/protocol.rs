@@ -204,7 +204,7 @@ pub struct VdfsTreeResponse {
     pub truncated: bool,
     /// 因**配额耗尽**而没能展开的目录（截断时才非空）。
     ///
-    /// 为什么必须回这一份：`d781a6c7` 号会话里，一次 `vdfs_tree({"depth":3})` 的 500 个
+    /// 为什么必须回这一份：`d781a6c7` 号会话里，一次递归树调用的 500 个
     /// 配额被 `.workbuddy-ai`(180) + `.git`(73) + `.symbio`(60) 吃掉大半，`docs/adr`
     /// 只剩一个目录节点——那 63 个 ADR 一个都没有，而回执**只说 `truncated: true`，
     /// 没说缺了什么**。于是模型开始**猜** ADR 编号（`../../../../docs/003-design/014-单环一表.md` …一路猜到 doc-link-allow D-010: 同行反引号路径是历史叙述——记录 d781a6c7 会话里模型实际猜过的编号（仓库只到，该文件当时不存在），非入链。
@@ -227,10 +227,8 @@ pub struct VdfsTreeResponse {
 impl VdfsTreeResponse {
     /// 收尾构造——**文案口径只有这一处**。
     ///
-    /// 本仓 tree 有两份实现（`agent tools` 的 vdfs_tree 与 `host` 的 tree handler），
-    /// 遍历部分各自 parent 走不同 provider，但**截断该怎么说**必须一个答案：两份各自
-    /// 写一遍文案的结果是口径漂移（`PROTOCOL.md` 里那种「两个地方解释同一件事」的老
-    /// 毛病），终有一天只有一份会带上新加的续查指引。
+    /// 递归 BFS 只保留在宿主协议的 tree handler；LLM 工具面已移除树工具，
+    /// 截断后的续查统一推荐逐目录 `vdfs_list`，不再推荐模型递归展开子树。
     pub fn finish(
         nodes: Vec<VdfsItem>,
         truncated: bool,
@@ -243,9 +241,9 @@ impl VdfsTreeResponse {
         } else {
             format!(
                 "[树已截断：本次最多返回 {count_limit} 个节点，部分目录未展开或只列了一部分]\n\
-                 未展开的目录列在 `pending` 字段里——请对它们逐个 `vdfs_list`（或对子树单独\n\
-                 `vdfs_tree` 并调大 limit）来补全。**不要凭这份输出推断里面有哪些文件名**：\n\
-                 本次 {root} 的结果不完整，照编号或名字猜子路径必然出错。"
+                 未展开的目录列在 `pending` 字段里——请对它们逐个 `vdfs_list` 来补全。\n\
+                 **不要凭这份输出推断里面有哪些文件名**：本次 {root} 的结果不完整，\n\
+                 照编号或名字猜子路径必然出错。"
             )
         };
         Self {

@@ -136,7 +136,6 @@ export const FACTORY_TOOLS = Object.freeze([
   'content_search',
   'todo_write',
   'vdfs_list',
-  'vdfs_tree',
   'vdfs_stat',
   'vdfs_read',
   'vdfs_edit',

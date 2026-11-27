@@ -7,8 +7,8 @@ use super::*;
 use serde_json::json;
 use tempfile::TempDir;
 
-/// 工作目录树根节点声明 `t`：中栏目录树经 `vdfs/tree` 递归，它只下钻含 `t` 的目录。
-/// 缺这一位的表现是——左栏能看到「工作目录」，但子目录一层也打不开。
+/// 工作目录树根节点声明 `t`：中栏进入目录树形态，子层由节点展开时按需 list。
+/// 缺这一位的表现是——左栏能看到「工作目录」，但只能看到扁平清单。
 #[test]
 fn workdir_root_declares_traverse_for_tree_walk() {
     let node = workdir_dir_node();
@@ -16,7 +16,7 @@ fn workdir_root_declares_traverse_for_tree_walk() {
     assert_eq!(node.access.flags(), "lt");
     assert!(
         node.access.traverse,
-        "根也必须可递归，vdfs/tree 才下钻第一层"
+        "根也必须声明可树浏览，中栏才会进入树形态"
     );
 }
 
@@ -114,7 +114,7 @@ async fn root_children_skip_hidden_and_sort_dirs_first() {
     assert_eq!(
         nodes[0].access.flags(),
         "lt",
-        "目录带 `t`，vdfs/tree 才能递归下钻"
+        "目录带 `t`，展开时才能继续按需 list 子层"
     );
     assert!(!nodes[1].is_dir(), "文件 → 不可列");
     assert_eq!(nodes[1].access.flags(), "rw");

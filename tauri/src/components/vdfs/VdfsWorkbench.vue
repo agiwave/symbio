@@ -20,7 +20,7 @@
   <Workbench
     :rail-items="navItems"
     :title="title"
-    :has-list-content="filteredItems.length > 0 || (treeMode && treeNodes.length > 0) || Boolean(treeError)"
+    :has-list-content="filteredItems.length > 0 || (treeMode && treeNodes.length > 0)"
     :has-detail="hasDetail"
     :has-draft="isDraftSelected"
     :can-create="canCreate"
@@ -96,12 +96,6 @@
       </div>
 
       <div class="vdfs-list-region">
-        <!-- 树读取失败不属于 listbox/tree 的选项集合，放在滚动区外并单独播报。 -->
-        <div v-if="treeMode && treeError" class="tree-error" role="alert">
-          <p>{{ treeError }}</p>
-          <button class="more-btn" type="button" :disabled="loading" @click="refresh">重试</button>
-        </div>
-
         <div
           v-overlay-scrollbar
           ref="listRef"
@@ -114,7 +108,7 @@
         >
           <!-- 目录树形态：当前目录声明 `t` 位时，中栏改渲染可展开的树。
                点目录就地展开 / 折叠，点文件走与列表项相同的 onItemClick（右栏出详情）。 -->
-          <template v-if="treeMode && !treeError">
+          <template v-if="treeMode">
             <VdfsTreeNode
               v-for="(n, index) in treeNodes"
               :key="n.item.path"
@@ -123,6 +117,7 @@
               :focus-path="focusedPath"
               :tab-stop="isTreeTabStop(n.item.path, index === 0)"
               @activate="onItemClick"
+              @load-children="loadTreeChildren"
             />
           </template>
 
@@ -150,13 +145,8 @@
           </template>
         </div>
 
-        <!-- 截断说明不属于 treeitem 集合，单独播报并与续页控件一样留在滚动区外。 -->
-        <p v-if="treeMode && treeTruncated" class="tree-truncated" role="status">
-          目录过大，仅显示部分层级
-        </p>
-
         <!-- 续页控件放在 listbox/tree 外：复合组件里只允许选项，不允许混入按钮。 -->
-        <div v-if="!treeMode && hasMore" class="list-more">
+        <div v-if="hasMore" class="list-more">
           <!-- 续页失败不能把入口藏起来：保留按钮就是保留重试，错误行说明为什么没动。 -->
           <p v-if="loadMoreError" class="list-more-error" role="alert">{{ loadMoreError }}</p>
           <button
@@ -371,8 +361,7 @@ const {
   items,
   treeMode,
   treeNodes,
-  treeTruncated,
-  treeError,
+  loadTreeChildren,
   filteredItems,
   searchable,
   filter,
@@ -1152,8 +1141,7 @@ defineExpose({ confirmRouteLeave })
   background: var(--accent-subtle-bg);
 }
 
-/* 有界列表的收尾（滚到底可见；也提供显式入口） */
-.tree-error,
+/* 详情读取失败与有界列表的续页入口 */
 .vdfs-detail-error {
   display: flex;
   flex-direction: column;
@@ -1164,7 +1152,6 @@ defineExpose({ confirmRouteLeave })
   font-size: 0.78rem;
   text-align: center;
 }
-.tree-error p,
 .vdfs-detail-error p {
   margin: 0;
 }
@@ -1201,17 +1188,6 @@ defineExpose({ confirmRouteLeave })
 
 .more-hint {
   font-size: 0.8125rem;
-  color: var(--text-muted);
-}
-
-/* 目录树被截断的如实说明（不是错误，故用 muted 色；位于 tree 集合之外） */
-.tree-truncated {
-  flex-shrink: 0;
-  margin: 0;
-  padding: 0.5rem 0.75rem;
-  border-top: 1px solid var(--border-default);
-  font-size: 0.74rem;
-  line-height: 1.5;
   color: var(--text-muted);
 }
 
