@@ -20,7 +20,7 @@
   <Workbench
     :rail-items="navItems"
     :title="title"
-    :has-list-content="filteredItems.length > 0 || Boolean(treeError)"
+    :has-list-content="filteredItems.length > 0 || (treeMode && treeNodes.length > 0) || Boolean(treeError)"
     :has-detail="hasDetail"
     :has-draft="isDraftSelected"
     :can-create="canCreate"
@@ -51,12 +51,20 @@
           <line x1="5" y1="12" x2="19" y2="12" />
         </svg>
       </button>
-      <button class="icon-btn" title="刷新" aria-label="刷新" :disabled="loading" @click="refresh">
+      <button
+        class="icon-btn refresh-btn"
+        :class="{ 'is-loading': loading }"
+        :title="loading ? '正在刷新' : '刷新'"
+        :aria-label="loading ? '正在刷新' : '刷新'"
+        :disabled="loading"
+        @click="refresh"
+      >
         <svg viewBox="0 0 24 24" width="16" height="16" fill="none" stroke="currentColor" stroke-width="2">
           <path d="M21 12a9 9 0 1 1-3-6.7L21 8" />
           <polyline points="21 3 21 8 16 8" />
         </svg>
       </button>
+      <span class="sr-only" role="status">{{ loading ? '正在刷新资源列表' : '' }}</span>
     </template>
 
     <template #list>
@@ -87,59 +95,67 @@
         </button>
       </div>
 
-      <div
-        v-overlay-scrollbar
-        ref="listRef"
-        class="vdfs-list"
-        role="listbox"
-        aria-label="资源列表"
-        @scroll.passive="onListScroll"
-      >
-        <!-- 目录树形态：当前目录声明 `t` 位时，中栏改渲染可展开的树。
-             点目录就地展开 / 折叠，点文件走与列表项相同的 onItemClick（右栏出详情）。 -->
-        <template v-if="treeMode">
-          <div v-if="treeError" class="tree-error" role="alert">
-            <p>{{ treeError }}</p>
-            <button class="more-btn" type="button" :disabled="loading" @click="refresh">重试</button>
-          </div>
-          <template v-else>
+      <div class="vdfs-list-region">
+        <!-- 树读取失败不属于 listbox/tree 的选项集合，放在滚动区外并单独播报。 -->
+        <div v-if="treeMode && treeError" class="tree-error" role="alert">
+          <p>{{ treeError }}</p>
+          <button class="more-btn" type="button" :disabled="loading" @click="refresh">重试</button>
+        </div>
+
+        <div
+          v-overlay-scrollbar
+          ref="listRef"
+          class="vdfs-list"
+          :role="treeMode ? 'tree' : 'listbox'"
+          :aria-label="treeMode ? '资源目录树' : '资源列表'"
+          :aria-busy="loading"
+          @scroll.passive="onListScroll"
+          @focusin="onListFocusIn"
+        >
+          <!-- 目录树形态：当前目录声明 `t` 位时，中栏改渲染可展开的树。
+               点目录就地展开 / 折叠，点文件走与列表项相同的 onItemClick（右栏出详情）。 -->
+          <template v-if="treeMode && !treeError">
             <VdfsTreeNode
-              v-for="n in treeNodes"
+              v-for="(n, index) in treeNodes"
               :key="n.item.path"
               :node="n"
               :selected-id="selectedId"
+              :focus-path="focusedPath"
+              :tab-stop="isTreeTabStop(n.item.path, index === 0)"
               @activate="onItemClick"
             />
-            <!-- 树被深度 / 数量上限截断时如实告知：别把「还没展开完」读成「就这些」。 -->
-            <p v-if="treeTruncated" class="tree-truncated" role="status">
-              {{ treeMessage || '目录过大，仅显示部分层级' }}
-            </p>
           </template>
-        </template>
 
-        <!-- 扁平列表形态（未声明 `t` 位的目录）。
-             徽标只给目录（子项数）。⚠️ 文件不给徽标：`ext` 是**渲染器键**
-             （`form` / `session` 之类），属机制细节，不该出现在给用户看的列表里。 -->
-        <template v-else>
-          <VdfsCard
-            v-for="n in filteredItems"
-            :key="n.path"
-            :title="n.title || n.name"
-            :subtitle="n.description"
-            :status="cardStatusOf(n)"
-            :status-title="cardStatusTextOf(n)"
-            :show-status="Boolean(n.status)"
-            :badge="cardBadgeOf(n)"
-            badge-kind="primary"
-            :tags="cardTagsOf(n)"
-            :icon="cardIconOf(n)"
-            :is-active="selectedId === n.path"
-            @click="onItemClick(n)"
-          />
-        </template>
-        <!-- 有界列表的收尾：滚到底自动续页，也留一个显式入口。
-             ⚠️ 筛选态下**必须保留**：命中可能落在更早的页里，去掉这个入口
-             就会把「还没找到」误报成「不存在」。 -->
+          <!-- 扁平列表形态（未声明 `t` 位的目录）。
+               徽标只给目录（子项数）。⚠️ 文件不给徽标：`ext` 是**渲染器键**
+               （`form` / `session` 之类），属机制细节，不该出现在给用户看的列表里。 -->
+          <template v-else-if="!treeMode">
+            <VdfsCard
+              v-for="(n, index) in filteredItems"
+              :key="n.path"
+              :title="n.title || n.name"
+              :subtitle="n.description"
+              :status="cardStatusOf(n)"
+              :status-title="cardStatusTextOf(n)"
+              :show-status="Boolean(n.status)"
+              :badge="cardBadgeOf(n)"
+              badge-kind="primary"
+              :tags="cardTagsOf(n, now)"
+              :icon="cardIconOf(n)"
+              :is-active="selectedId === n.path"
+              :tab-stop="isListTabStop(n.path, index === 0)"
+              :data-path="n.path"
+              @click="onItemClick(n)"
+            />
+          </template>
+        </div>
+
+        <!-- 截断说明不属于 treeitem 集合，单独播报并与续页控件一样留在滚动区外。 -->
+        <p v-if="treeMode && treeTruncated" class="tree-truncated" role="status">
+          目录过大，仅显示部分层级
+        </p>
+
+        <!-- 续页控件放在 listbox/tree 外：复合组件里只允许选项，不允许混入按钮。 -->
         <div v-if="!treeMode && hasMore" class="list-more">
           <!-- 续页失败不能把入口藏起来：保留按钮就是保留重试，错误行说明为什么没动。 -->
           <p v-if="loadMoreError" class="list-more-error" role="alert">{{ loadMoreError }}</p>
@@ -270,7 +286,7 @@
 </template>
 
 <script setup lang="ts">
-import { computed, onBeforeUnmount, onMounted, ref, shallowRef, watch } from 'vue'
+import { computed, nextTick, onBeforeUnmount, onMounted, ref, shallowRef, watch } from 'vue'
 import { vOverlayScrollbar } from '@/directives/overlayScrollbar'
 import Workbench from '@/components/common/Workbench.vue'
 import VdfsCard from '@/components/common/VdfsCard.vue'
@@ -306,6 +322,7 @@ import {
   vdfsJoin,
   vdfsParent,
   type VdfsItem,
+  type VdfsTreeNode as VdfsTreeNodeData,
 } from '@/schemas/vdfs'
 import { vdfsRoot } from '@/schemas/vdfsRoot'
 import { useSessionsStore } from '@/stores/sessions'
@@ -347,7 +364,6 @@ const {
   treeMode,
   treeNodes,
   treeTruncated,
-  treeMessage,
   treeError,
   filteredItems,
   searchable,
@@ -360,7 +376,7 @@ const {
   hasMore,
   loadingMore,
   loadMoreError,
-  refresh,
+  refresh: refreshVdfs,
   loadMore,
   select,
   atMountLevel,
@@ -573,13 +589,24 @@ function onBeforeUnload(event: BeforeUnloadEvent) {
   event.returnValue = true
 }
 
+const now = ref(Date.now())
+let relativeClock: number | undefined
+
+function syncRelativeClock() {
+  now.value = Date.now()
+}
+
 onMounted(() => {
   window.addEventListener(NEW_RESOURCE_EVENT, onNewResourceRequest)
   window.addEventListener('beforeunload', onBeforeUnload)
+  document.addEventListener('visibilitychange', syncRelativeClock)
+  relativeClock = window.setInterval(syncRelativeClock, 60_000)
 })
 onBeforeUnmount(() => {
   window.removeEventListener(NEW_RESOURCE_EVENT, onNewResourceRequest)
   window.removeEventListener('beforeunload', onBeforeUnload)
+  document.removeEventListener('visibilitychange', syncRelativeClock)
+  if (relativeClock !== undefined) window.clearInterval(relativeClock)
   pendingNewTarget = undefined
   resetLeave()
 })
@@ -632,6 +659,20 @@ function onListScroll(e: Event) {
 // ==================== 键盘（绑定声明在这里，机制在 useHotkeys） ====================
 
 const listRef = ref<HTMLElement | null>(null)
+const focusedPath = ref('')
+
+async function refresh(event?: Event) {
+  const trigger = event?.currentTarget as HTMLElement | null
+  const restoreFocus = Boolean(trigger && document.activeElement === trigger)
+  try {
+    await refreshVdfs()
+  } finally {
+    if (restoreFocus && trigger?.isConnected && document.activeElement === document.body) {
+      await nextTick()
+      trigger.focus({ preventScroll: true })
+    }
+  }
+}
 
 /**
  * 焦点是否落在这份列表里。
@@ -644,22 +685,83 @@ function listHasFocus(): boolean {
   return Boolean(active && listRef.value?.contains(active))
 }
 
+function onListFocusIn(event: FocusEvent) {
+  const target = (event.target as HTMLElement | null)?.closest<HTMLElement>('[data-path]')
+  if (target?.dataset.path) focusedPath.value = target.dataset.path
+}
+
+const listPaths = computed(() => {
+  const paths = new Set<string>()
+  if (treeMode.value) {
+    const visit = (nodes: VdfsTreeNodeData[]) => {
+      for (const node of nodes) {
+        paths.add(node.item.path)
+        visit(node.children)
+      }
+    }
+    visit(treeNodes.value)
+  } else {
+    for (const node of filteredItems.value) paths.add(node.path)
+  }
+  return paths
+})
+
+function hasListPath(path: string): boolean {
+  return listPaths.value.has(path)
+}
+
+/** roving tabindex：整份长列表只保留一个 Tab 停靠点。 */
+function isListTabStop(path: string, first: boolean): boolean {
+  if (focusedPath.value && hasListPath(focusedPath.value)) return focusedPath.value === path
+  if (selectedId.value && hasListPath(selectedId.value)) return selectedId.value === path
+  return first
+}
+
+function isTreeTabStop(path: string, first: boolean): boolean {
+  return isListTabStop(path, first)
+}
+
+watch(filteredItems, (nodes) => {
+  if (treeMode.value || !focusedPath.value) return
+  if (!nodes.some((node) => node.path === focusedPath.value)) focusedPath.value = ''
+})
+
+watch(treeNodes, () => {
+  if (!treeMode.value || !focusedPath.value) return
+  if (!listPaths.value.has(focusedPath.value)) focusedPath.value = ''
+})
+
+watch([cwd, treeMode], () => {
+  focusedPath.value = ''
+})
+
+watch(selectedId, (id) => {
+  if (id && !focusedPath.value) focusedPath.value = id
+})
+
 /**
  * 焦点在卡片之间移动（不改变选中）。
  *
- * 只挪焦点、不开详情，是 listbox 的常规分工：移动是浏览，`Enter` 才是决定
- * （卡片自己已绑 `keydown.enter` → 选中）。焦点越界时**停住**不绕回：长列表里
- * 绕回会把人甩到看不见的位置，比多按一次键更糟。
+ * 只挪焦点、不开详情，是 listbox 的常规分工：移动是浏览，`Enter` 才是决定。
+ * 焦点越界时**停住**不绕回：长列表里绕回会把人甩到看不见的位置。
  */
+function focusCardAt(index: number) {
+  const selector = treeMode.value ? '.tree-node' : '.vdfs-card'
+  const cards = Array.from(listRef.value?.querySelectorAll<HTMLElement>(selector) ?? [])
+  if (cards.length === 0) return
+  const target = cards[Math.min(cards.length - 1, Math.max(0, index))]
+  focusedPath.value = target.dataset.path ?? ''
+  target.focus()
+}
+
 function moveCardFocus(step: number) {
-  const selector = treeMode.value ? '.tree-row' : '.vdfs-card'
+  const selector = treeMode.value ? '.tree-node' : '.vdfs-card'
   const cards = Array.from(listRef.value?.querySelectorAll<HTMLElement>(selector) ?? [])
   if (cards.length === 0) return
   const active = document.activeElement as HTMLElement | null
   const at = active ? cards.indexOf(active) : -1
-  // 焦点在容器本身（不在任何卡片上）⇒ 从这一头进场
   const next = at < 0 ? (step > 0 ? 0 : cards.length - 1) : Math.min(cards.length - 1, Math.max(0, at + step))
-  cards[next].focus()
+  focusCardAt(next)
 }
 
 useHotkeys('vdfs-workbench', [
@@ -690,6 +792,22 @@ useHotkeys('vdfs-workbench', [
     label: '上一条',
     when: listHasFocus,
     run: () => moveCardFocus(-1),
+  },
+  {
+    id: 'list-home',
+    keys: 'home',
+    group: '资源列表',
+    label: '第一项',
+    when: listHasFocus,
+    run: () => focusCardAt(0),
+  },
+  {
+    id: 'list-end',
+    keys: 'end',
+    group: '资源列表',
+    label: '最后一项',
+    when: listHasFocus,
+    run: () => focusCardAt(Number.MAX_SAFE_INTEGER),
   },
 ])
 
@@ -884,6 +1002,17 @@ defineExpose({ confirmRouteLeave })
   cursor: not-allowed;
 }
 
+.refresh-btn.is-loading svg {
+  animation: refresh-spin 0.9s linear infinite;
+}
+.refresh-btn.is-loading:disabled {
+  opacity: 0.75;
+  cursor: progress;
+}
+@keyframes refresh-spin {
+  to { transform: rotate(360deg); }
+}
+
 /* ============== 筛选 ============== */
 .vdfs-filter {
   position: relative;
@@ -974,8 +1103,15 @@ defineExpose({ confirmRouteLeave })
 }
 
 /* ============== 列表 ============== */
+.vdfs-list-region {
+  flex: 1;
+  min-height: 0;
+  display: flex;
+  flex-direction: column;
+}
 .vdfs-list {
   flex: 1;
+  min-height: 0;
   overflow-y: auto;
   padding: 0.25rem 0;
 }
@@ -998,7 +1134,9 @@ defineExpose({ confirmRouteLeave })
 }
 .list-more {
   display: flex;
-  justify-content: center;
+  flex-direction: column;
+  align-items: center;
+  flex-shrink: 0;
   padding: 0.75rem 0 1rem;
 }
 .more-btn {
@@ -1030,9 +1168,12 @@ defineExpose({ confirmRouteLeave })
   color: var(--text-muted);
 }
 
-/* 目录树被截断的如实说明（不是错误，故用 muted 色） */
+/* 目录树被截断的如实说明（不是错误，故用 muted 色；位于 tree 集合之外） */
 .tree-truncated {
-  margin: 0.5rem 0.4rem;
+  flex-shrink: 0;
+  margin: 0;
+  padding: 0.5rem 0.75rem;
+  border-top: 1px solid var(--border-default);
   font-size: 0.74rem;
   line-height: 1.5;
   color: var(--text-muted);
@@ -1069,5 +1210,30 @@ defineExpose({ confirmRouteLeave })
   flex-direction: column;
   gap: 0.85rem;
   padding: 0.75rem 1rem;
+}
+
+@media (pointer: coarse) {
+  .new-btn {
+    width: 2.75rem;
+    height: 2.75rem;
+  }
+
+  .vdfs-filter-input {
+    min-height: 2.75rem;
+    padding-right: 2.4rem;
+    font-size: 1rem;
+  }
+
+  .filter-clear {
+    right: 0.35rem;
+    width: 2.75rem;
+    height: 2.75rem;
+  }
+
+  .empty-action,
+  .more-btn {
+    min-width: 2.75rem;
+    min-height: 2.75rem;
+  }
 }
 </style>

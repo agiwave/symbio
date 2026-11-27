@@ -124,4 +124,10 @@ async function onReloaded() {
   border-radius: 50%;
   background: var(--danger-fg, #e5484d);
 }
+
+@media (pointer: coarse) {
+  .nav-footer {
+    padding: 0.125rem;
+  }
+}
 </style>

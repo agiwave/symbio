@@ -122,6 +122,19 @@ afterEach(() => {
   mounted = null
 })
 
+describe('全局地标与跳转', () => {
+  it('只有一个 main 地标，跳过导航链接指向可聚焦的主内容', async () => {
+    const w = await bench()
+    const skip = w.get('.skip-link')
+    const main = w.get('main#main-content')
+
+    expect(skip.text()).toBe('跳到主要内容')
+    expect(skip.attributes('href')).toBe('#main-content')
+    expect(main.attributes('tabindex')).toBe('-1')
+    expect(w.findAll('main')).toHaveLength(1)
+  })
+})
+
 describe('全局键（外壳这张表）', () => {
   it('Ctrl+K 打开命令面板（Windows/Linux 口径）', async () => {
     const w = await bench()

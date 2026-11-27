@@ -149,6 +149,7 @@ describe('未知地址一次性提示', () => {
 
 describe('VdfsView 未保存保护', () => {
   it('一级页提供可见命令入口并向外壳抛出打开请求', async () => {
+    expect(wrapper!.find('.rail-command').attributes('aria-keyshortcuts')).toBe('Control+k Meta+k')
     await wrapper!.find('.rail-command').trigger('click')
     expect(wrapper!.emitted('open-command-palette')).toHaveLength(1)
   })

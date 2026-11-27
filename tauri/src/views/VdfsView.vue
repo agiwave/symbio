@@ -59,6 +59,7 @@
         class="rail-command"
         title="命令面板（Ctrl/Cmd+K）"
         aria-label="打开命令面板"
+        aria-keyshortcuts="Control+k Meta+k"
         @click="emit('open-command-palette')"
       >
         <svg viewBox="0 0 24 24" width="18" height="18" fill="none" stroke="currentColor" stroke-width="1.8" stroke-linecap="round" stroke-linejoin="round">

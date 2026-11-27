@@ -129,7 +129,7 @@ describe('cardTagsOf', () => {
     expect(tags[1]).toEqual({
       label: '1 分钟前',
       kind: 'muted',
-      title: new Date(updatedAt).toLocaleString(),
+      title: `更新于 ${new Date(updatedAt).toLocaleString()}`,
     })
   })
 

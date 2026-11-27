@@ -8,7 +8,7 @@
  * 唯一的例外是「当前选中项就在这棵子树里」（重新挂载 / 换目录回来时的到达态）：
  * 那时把沿途展开，否则选中的文件藏在收起的目录里，用户会以为选择丢了。
  */
-import { describe, expect, it } from 'vitest'
+import { afterEach, describe, expect, it } from 'vitest'
 import { mount } from '@vue/test-utils'
 import VdfsTreeNode from '../VdfsTreeNode.vue'
 import type { VdfsItem, VdfsTreeNode as TreeNode } from '@/schemas/vdfs'
@@ -32,9 +32,19 @@ function tree(): TreeNode {
   }
 }
 
-function mountNode(selectedId: string | null = null) {
-  return mount(VdfsTreeNode, { props: { node: tree(), selectedId } })
+function mountNode(
+  selectedId: string | null = null,
+  extra: { tabStop?: boolean; focusPath?: string; level?: number } = {},
+) {
+  return mount(VdfsTreeNode, {
+    props: { node: tree(), selectedId, ...extra },
+    attachTo: document.body,
+  })
 }
+
+afterEach(() => {
+  document.body.replaceChildren()
+})
 
 describe('VdfsTreeNode：默认收拢', () => {
   it('挂载时子层不渲染（第一屏只有顶层结构）', () => {
@@ -42,24 +52,24 @@ describe('VdfsTreeNode：默认收拢', () => {
 
     expect(w.text()).toContain('wd')
     expect(w.text(), '收起的目录里不渲染子项').not.toContain('a.txt')
-    expect(w.get('[role="button"]').attributes('aria-expanded')).toBe('false')
+    expect(w.get('[role="treeitem"]').attributes('aria-expanded')).toBe('false')
   })
 
   it('点目录才展开，再点收起', async () => {
     const w = mountNode()
-    const row = w.get('[role="button"]')
+    const row = w.get('[role="treeitem"]')
 
-    await row.trigger('click')
+    await row.find('.tree-row').trigger('click')
     expect(w.text()).toContain('a.txt')
     // 逐层展开：下一层目录（`sub`）仍是收着的——「默认全展开」正是要去掉的那件事
     expect(w.text()).not.toContain('b.txt')
     expect(row.attributes('aria-expanded')).toBe('true')
 
-    const subRow = w.findAll('[role="button"]').find((r) => r.text() === 'sub')!
-    await subRow.trigger('click')
+    const subRow = w.findAll('[role="treeitem"]').find((r) => r.text() === 'sub')!
+    await subRow.find('.tree-row').trigger('click')
     expect(w.text(), '展开下一层才看得到它的子项').toContain('b.txt')
 
-    await row.trigger('click')
+    await row.find('.tree-row').trigger('click')
     expect(w.text()).not.toContain('a.txt')
   })
 
@@ -67,17 +77,80 @@ describe('VdfsTreeNode：默认收拢', () => {
     const w = mountNode('@vfs/wd/a.txt')
 
     expect(w.text()).toContain('a.txt')
-    expect(w.get('[role="button"]').attributes('aria-expanded')).toBe('true')
+    expect(w.get('[role="treeitem"]').attributes('aria-expanded')).toBe('true')
   })
 
   it('文件行没有展开箭头，点击上抛 activate（交给父组件选中）', async () => {
     const w = mountNode()
-    await w.get('[role="button"]').trigger('click') // 先展开
+    await w.get('[role="treeitem"]').find('.tree-row').trigger('click') // 先展开
 
-    const fileRow = w.findAll('[role="button"]').find((r) => r.text() === 'a.txt')!
+    const fileRow = w.findAll('[role="treeitem"]').find((r) => r.text() === 'a.txt')!
     expect(fileRow.attributes('aria-expanded')).toBeUndefined()
-    await fileRow.trigger('click')
+    await fileRow.find('.tree-row').trigger('click')
 
     expect(w.emitted('activate')?.[0]).toEqual([expect.objectContaining({ path: '@vfs/wd/a.txt' })])
+  })
+
+  it('treeitem 暴露层级与选中态，子层使用 group 语义', async () => {
+    const w = mountNode('@vfs/wd/a.txt')
+    const root = w.get('[role="treeitem"]')
+    expect(root.attributes('aria-level')).toBe('1')
+    expect(root.attributes('aria-selected')).toBe('false')
+    expect(root.attributes('tabindex')).toBe('0')
+
+    const children = w.get('[role="group"]').findAll('[role="treeitem"]')
+    expect(children.map((row) => row.attributes('aria-level'))).toEqual(['2', '2'])
+    expect(children[0].attributes('aria-selected')).toBe('true')
+  })
+
+  it('父级传入 focusPath 后，唯一 Tab 停靠点随 roving focus 下沉', async () => {
+    const w = mountNode(null, { tabStop: false, focusPath: '@vfs/wd/a.txt' })
+    const root = w.get('[role="treeitem"]')
+    expect(root.attributes('tabindex')).toBe('-1')
+    await root.find('.tree-row').trigger('click')
+
+    const children = w.get('[role="group"]').findAll('[role="treeitem"]')
+    expect(children.map((row) => row.attributes('tabindex'))).toEqual(['0', '-1'])
+  })
+
+  it('ArrowRight 展开目录，再按一次进入第一个子项', async () => {
+    const w = mountNode()
+    const root = w.get('[role="treeitem"]')
+    ;(root.element as HTMLElement).focus()
+
+    await root.trigger('keydown', { key: 'ArrowRight' })
+    expect(root.attributes('aria-expanded')).toBe('true')
+    expect(document.activeElement).toBe(root.element)
+
+    await root.trigger('keydown', { key: 'ArrowRight' })
+    const firstChild = w.get('[role="group"]').find('[role="treeitem"]')
+    expect(document.activeElement).toBe(firstChild.element)
+  })
+
+  it('ArrowLeft 从叶子回到父目录，再按一次折叠父目录', async () => {
+    const w = mountNode('@vfs/wd/a.txt')
+    const root = w.get('[role="treeitem"]')
+    const child = w.get('[role="group"]').find('[role="treeitem"]')
+    ;(child.element as HTMLElement).focus()
+
+    await child.trigger('keydown', { key: 'ArrowLeft' })
+    expect(document.activeElement).toBe(root.element)
+    expect(root.attributes('aria-expanded')).toBe('true')
+
+    await root.trigger('keydown', { key: 'ArrowLeft' })
+    expect(root.attributes('aria-expanded')).toBe('false')
+    expect(w.find('[role="group"]').exists()).toBe(false)
+  })
+
+  it('Enter / Space 仍等价于点击：目录展开，文件上抛激活', async () => {
+    const w = mountNode()
+    const root = w.get('[role="treeitem"]')
+    await root.trigger('keydown', { key: 'Enter' })
+    expect(root.attributes('aria-expanded')).toBe('true')
+
+    const fileRow = w.findAll('[role="treeitem"]').find((row) => row.text() === 'a.txt')!
+    await fileRow.trigger('keydown', { key: 'Enter' })
+    await fileRow.trigger('keydown', { key: ' ' })
+    expect(w.emitted('activate')).toHaveLength(2)
   })
 })

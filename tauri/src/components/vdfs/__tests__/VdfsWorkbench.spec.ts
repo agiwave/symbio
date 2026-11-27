@@ -13,7 +13,7 @@
  *   悄悄退化成一条不带载荷的动作、或者前端又开始按动作名分支。
  * - **自动草稿 / 空态即引导 / 中栏收起 / 筛选**：都取「节点自述」为判据，
  *   新增一类资源前端零改动。
- * - **键盘**（`Ctrl+数字` 切类别、`↑↓` 移动焦点）：绑定声明在控件里，
+ * - **键盘**（`Ctrl+数字` 切类别、`↑↓` 移动焦点、`Home/End` 跳首尾）：绑定声明在控件里，
  *   判键与让路的机制在 `useHotkeys`（那里另有单测）。
  *
  * 环境说明：`useVdfs` 被整体替换为可控桩（它经 `services/vdfs` 出站），
@@ -136,6 +136,7 @@ let stubRefs: {
   cwdAddr: Ref<string>
   selectedNode: Ref<VdfsNode | null>
   items: Ref<VdfsItem[]>
+  treeNodes: Ref<VdfsTreeNode[]>
   loading: Ref<boolean>
   pinnedAtAddr: Ref<boolean>
   loadingDetail: Ref<boolean>
@@ -161,6 +162,8 @@ function installStub(
     treeMode?: boolean
     treeNodes?: VdfsTreeNode[]
     treeError?: string
+    treeTruncated?: boolean
+    treeMessage?: string
     /** 是否还有更早的一页 */
     hasMore?: boolean
     /** 目录列表是否仍在加载 */
@@ -179,6 +182,7 @@ function installStub(
 ) {
   const selectedNode = ref<VdfsNode | null>(opts.selected ?? null)
   const items = ref<VdfsItem[]>(opts.items ?? [])
+  const treeNodes = shallowRef(opts.treeNodes ?? [])
   const loading = ref(opts.loading ?? false)
   const pinnedAtAddr = ref(opts.pinnedAtAddr ?? false)
   const loadingDetail = ref(opts.loadingDetail ?? false)
@@ -194,7 +198,7 @@ function installStub(
   // 一致 = 「自述已经跟上当前目录」；换目录的用例可以把两者拆开，复刻那一步滞后。
   const cwdAddr = ref(opts.cwd ?? '@vfs')
   stubRefs = {
-    cwd, cwdNode, cwdAddr, selectedNode, items, loading, pinnedAtAddr,
+    cwd, cwdNode, cwdAddr, selectedNode, items, treeNodes, loading, pinnedAtAddr,
     loadingDetail, detailLoadError, detailError, formData, nodeText,
   }
   /** 筛选词：真实现是 ref + computed 投影；桩里复刻成同一个形状，
@@ -225,9 +229,9 @@ function installStub(
     title: computed(() => '资源'),
     items,
     treeMode: ref(opts.treeMode ?? false),
-    treeNodes: shallowRef(opts.treeNodes ?? []),
-    treeTruncated: ref(false),
-    treeMessage: ref(''),
+    treeNodes,
+    treeTruncated: ref(opts.treeTruncated ?? false),
+    treeMessage: ref(opts.treeMessage ?? ''),
     treeError: ref(opts.treeError ?? ''),
     filteredItems,
     // 筛选入口是否在场：与真实现**同源** —— `cwdNode.search === true`（服务端
@@ -608,6 +612,7 @@ describe('VdfsWorkbench 列表筛选', () => {
 
     expect(w.find('.empty-state').text()).toContain('没有匹配')
     expect(w.find('.list-more').exists()).toBe(true)
+    expect(w.find('.vdfs-list .list-more').exists()).toBe(false)
     await w.find('.more-btn').trigger('click')
     expect(hoisted.fns.loadMore).toHaveBeenCalledTimes(1)
   })
@@ -620,6 +625,23 @@ describe('VdfsWorkbench 列表筛选', () => {
     expect(w.find('.empty-state').exists()).toBe(false)
     await w.find('.tree-error .more-btn').trigger('click')
     expect(hoisted.fns.refresh).toHaveBeenCalledTimes(1)
+  })
+
+  it('树截断只显示用户可读说明，不泄漏后端路径或模型指令', () => {
+    // grep-audit-allow S-010: 负向回归夹具必须覆盖真实内部根路径
+    const internalRoot = '.vdfsv2'
+    installStub({
+      treeMode: true,
+      treeNodes: [{ item: makeNode('a'), children: [] }],
+      treeTruncated: true,
+      treeMessage: `[树已截断] ${internalRoot}/internal/path；不要推断文件名`,
+    })
+    const w = bench()
+    const status = w.get('.tree-truncated')
+    expect(status.text()).toBe('目录过大，仅显示部分层级')
+    expect(status.text()).not.toContain(internalRoot)
+    expect(status.text()).not.toContain('不要推断')
+    expect(w.find('.vdfs-list .tree-truncated').exists()).toBe(false)
   })
 
   it('Esc 与 × 都能清除筛选', async () => {
@@ -920,7 +942,7 @@ describe('VdfsWorkbench 空态即引导', () => {
 })
 
 /**
- * 键盘：三条绑定**声明在本控件**（机制与守卫在 `useHotkeys`，那里另有单测）。
+ * 键盘：五条绑定**声明在本控件**（机制与守卫在 `useHotkeys`，那里另有单测）。
  *
  * 本文件钉的是控件这一层的分工：
  *
@@ -928,14 +950,15 @@ describe('VdfsWorkbench 空态即引导', () => {
  *   ——`Ctrl+9` 是浏览器自己的「跳到最后一个标签页」，被一条空转的死键吃掉
  *   比没有这条键更糟；
  * - ↑↓ 只**移动焦点**、不改变选中：浏览与决定是两件事（`Enter` 才开详情）；
+ * - Home/End 跳到首尾，并把唯一的 Tab 停靠点同步过去；
  * - ↑↓ 的 `when` 判据是「焦点在这份列表里」，不是「本页是 VDFS 页」——
  *   焦点在详情栏或聊天输入框时抢走方向键会直接破坏滚动与输入。
  *
  * ⚠️ 必须 `attachTo: document.body`：焦点判据读的是 `document.activeElement`，
- * 而脱离文档的元素拿不到焦点（VTU 默认挂在游离节点上，那样这三条全测不到）。
+ * 而脱离文档的元素拿不到焦点（VTU 默认挂在游离节点上，那样这些用例全测不到）。
  * ⚠️ 必须 `unmount`：登记表是模块级单例，注销走 `onScopeDispose`。
  */
-describe('VdfsWorkbench 键盘', () => {
+describe('VdfsWorkbench 键盘与动态反馈', () => {
   let w: VueWrapper | null = null
 
   function mountAttached(opts: Parameters<typeof installStub>[0] = {}) {
@@ -956,6 +979,7 @@ describe('VdfsWorkbench 键盘', () => {
   afterEach(() => {
     w?.unmount()
     w = null
+    vi.useRealTimers()
     document.body.replaceChildren()
   })
 
@@ -976,6 +1000,66 @@ describe('VdfsWorkbench 键盘', () => {
 
     expect(pressKey({ key: '9', ctrlKey: true })).toEqual({ consumed: false, prevented: false })
     expect(hoisted.stub.selectDir).not.toHaveBeenCalled()
+  })
+
+  it('长列表只有一个 Tab 停靠点，↑↓ 同步移动 roving tabindex', async () => {
+    mountAttached({ items: [makeNode('a'), makeNode('b'), makeNode('c')] })
+    expect(cards().map((card) => card.tabIndex)).toEqual([0, -1, -1])
+
+    const list = document.querySelector<HTMLElement>('.vdfs-list')!
+    Object.defineProperty(list, 'clientHeight', { configurable: true, value: 100 })
+    Object.defineProperty(list, 'scrollHeight', { configurable: true, value: 1000 })
+    list.dispatchEvent(new Event('scroll'))
+    expect(list.querySelector<HTMLElement>('[role="scrollbar"]')?.tabIndex).toBe(-1)
+
+    cards()[0].focus()
+
+    expect(pressKey({ key: 'ArrowDown' }).consumed).toBe(true)
+    await nextTick()
+    expect(document.activeElement).toBe(cards()[1])
+    expect(cards().map((card) => card.tabIndex)).toEqual([-1, 0, -1])
+    expect(hoisted.stub.select).not.toHaveBeenCalled()
+  })
+
+  it('深链选中项成为唯一的初始 Tab 停靠点', async () => {
+    mountAttached({ items: [makeNode('a'), makeNode('b'), makeNode('c')], selected: makeNode('b') })
+    await nextTick()
+    expect(cards().map((card) => card.tabIndex)).toEqual([-1, 0, -1])
+  })
+
+  it('Home / End 跳到首尾并同步 Tab 停靠点', async () => {
+    mountAttached({ items: [makeNode('a'), makeNode('b'), makeNode('c')] })
+    cards()[1].focus()
+
+    expect(pressKey({ key: 'End' }).consumed).toBe(true)
+    await nextTick()
+    expect(document.activeElement).toBe(cards()[2])
+    expect(cards().map((card) => card.tabIndex)).toEqual([-1, -1, 0])
+
+    expect(pressKey({ key: 'Home' }).consumed).toBe(true)
+    await nextTick()
+    expect(document.activeElement).toBe(cards()[0])
+    expect(cards().map((card) => card.tabIndex)).toEqual([0, -1, -1])
+  })
+
+  it('筛选移除当前浏览项后，Tab 停靠点回落到可见首项', async () => {
+    const mounted = mountAttached({
+      items: [makeNode('alpha'), makeNode('beta'), makeNode('gamma')],
+      selected: makeNode('beta'),
+      cwdNode: { path: '@vfs/session', name: 'session', title: '会话', kind: 'dir', status: '', access: 'l', search: true },
+    })
+    cards()[1].focus()
+    await mounted.find('.vdfs-filter-input').setValue('gamma')
+    await nextTick()
+
+    expect(cards()).toHaveLength(1)
+    expect(cards()[0].tabIndex).toBe(0)
+  })
+
+  it('深链选中项不在当前页时，可见首项仍可 Tab 到达', () => {
+    mountAttached({ items: [makeNode('gamma')], selected: makeNode('beta') })
+    expect(cards()).toHaveLength(1)
+    expect(cards()[0].tabIndex).toBe(0)
   })
 
   it('↑↓ 只移动焦点、不改选中', () => {
@@ -999,7 +1083,7 @@ describe('VdfsWorkbench 键盘', () => {
     expect(document.activeElement).toBe(cards()[1])
   })
 
-  it('树模式 ↑↓ 在 .tree-row 之间移动焦点', () => {
+  it('树模式使用 tree/treeitem 语义，↑↓ 在可见 .tree-node 之间移动焦点', async () => {
     mountAttached({
       treeMode: true,
       treeNodes: [
@@ -1007,14 +1091,88 @@ describe('VdfsWorkbench 键盘', () => {
         { item: makeNode('b'), children: [] },
       ],
     })
-    const rows = Array.from(document.querySelectorAll<HTMLElement>('.tree-row'))
+    const list = document.querySelector<HTMLElement>('.vdfs-list')!
+    const rows = Array.from(document.querySelectorAll<HTMLElement>('.tree-node'))
+    expect(list.getAttribute('role')).toBe('tree')
+    expect(list.getAttribute('aria-label')).toBe('资源目录树')
+    expect(rows.map((row) => row.getAttribute('role'))).toEqual(['treeitem', 'treeitem'])
     rows[0].focus()
 
     expect(pressKey({ key: 'ArrowDown' }).consumed).toBe(true)
+    await nextTick()
     expect(document.activeElement).toBe(rows[1])
 
     expect(pressKey({ key: 'ArrowUp' }).consumed).toBe(true)
     expect(document.activeElement).toBe(rows[0])
+  })
+
+  it('树深链选中后代文件时，祖先展开且只有该文件是 Tab 停靠点', async () => {
+    const selected = makeNode('nested/b.txt')
+    mountAttached({
+      treeMode: true,
+      selected,
+      treeNodes: [{
+        item: {
+          path: '@vfs/session/nested', name: 'nested', title: 'nested',
+          kind: 'dir', status: '', access: 'lt', ext: 'dir',
+        },
+        children: [
+          { item: makeNode('nested/a.txt'), children: [] },
+          { item: selected, children: [] },
+        ],
+      }],
+    })
+    await nextTick()
+
+    const rows = Array.from(document.querySelectorAll<HTMLElement>('.tree-node'))
+    expect(rows).toHaveLength(3)
+    expect(rows[0].getAttribute('aria-expanded')).toBe('true')
+    expect(rows.map((row) => row.tabIndex)).toEqual([-1, -1, 0])
+    expect(rows[2].getAttribute('aria-selected')).toBe('true')
+
+    rows[2].focus()
+    expect(pressKey({ key: 'ArrowUp' }).consumed).toBe(true)
+    await nextTick()
+    expect(rows.map((row) => row.tabIndex)).toEqual([-1, 0, -1])
+    expect(rows[2].getAttribute('aria-selected')).toBe('true')
+  })
+
+  it('树刷新更新扁平 items 时不清除深层浏览焦点', async () => {
+    const selected = makeNode('nested/b.txt')
+    mountAttached({
+      treeMode: true,
+      selected,
+      treeNodes: [{
+        item: {
+          path: '@vfs/session/nested', name: 'nested', title: 'nested',
+          kind: 'dir', status: '', access: 'lt', ext: 'dir',
+        },
+        children: [
+          { item: makeNode('nested/a.txt'), children: [] },
+          { item: selected, children: [] },
+        ],
+      }],
+    })
+    await nextTick()
+    const rows = Array.from(document.querySelectorAll<HTMLElement>('.tree-node'))
+    rows[1].focus()
+    await nextTick()
+    expect(rows.map((row) => row.tabIndex)).toEqual([-1, 0, -1])
+
+    stubRefs!.items.value = [makeNode('nested/a.txt'), selected]
+    await nextTick()
+
+    expect(document.activeElement).toBe(rows[1])
+    expect(rows.map((row) => row.tabIndex)).toEqual([-1, 0, -1])
+    expect(rows[2].getAttribute('aria-selected')).toBe('true')
+  })
+
+  it('扁平列表保持 listbox/option 语义', () => {
+    mountAttached({ items: [makeNode('a'), makeNode('b')] })
+    const list = document.querySelector<HTMLElement>('.vdfs-list')!
+    expect(list.getAttribute('role')).toBe('listbox')
+    expect(list.getAttribute('aria-label')).toBe('资源列表')
+    expect(Array.from(list.querySelectorAll('[role="option"]'))).toHaveLength(2)
   })
 
   it('★ 焦点不在列表里 ⇒ ↑↓ 还给页面（详情栏与聊天输入的滚动不被抢走）', () => {
@@ -1026,6 +1184,59 @@ describe('VdfsWorkbench 键盘', () => {
     expect(pressKey({ key: 'ArrowDown' })).toEqual({ consumed: false, prevented: false })
     expect(document.activeElement).toBe(outside)
     expect(mounted.exists()).toBe(true)
+  })
+
+  it('刷新中同时给出禁用态、旋转反馈与读屏状态', async () => {
+    mountAttached({ items: [makeNode('a')], loading: true })
+    const refresh = document.querySelector<HTMLButtonElement>('.refresh-btn')!
+    expect(refresh.disabled).toBe(true)
+    expect(refresh.classList.contains('is-loading')).toBe(true)
+    expect(refresh.getAttribute('aria-label')).toBe('正在刷新')
+    expect(document.querySelector('[role="status"]')?.textContent).toContain('正在刷新资源列表')
+
+    stubRefs!.loading.value = false
+    await nextTick()
+    expect(refresh.disabled).toBe(false)
+    expect(refresh.classList.contains('is-loading')).toBe(false)
+    expect(refresh.getAttribute('aria-label')).toBe('刷新')
+    expect(document.querySelector('[role="status"]')?.textContent).toBe('')
+  })
+
+  it('刷新按钮进入忙态后仍把焦点还给触发者', async () => {
+    installStub({ items: [makeNode('a')] })
+    let finish!: () => void
+    hoisted.fns.refresh.mockImplementationOnce(() => new Promise<void>((resolve) => {
+      finish = resolve
+    }))
+    const w = mountAttached({ items: [makeNode('a')] })
+    const refresh = document.querySelector<HTMLButtonElement>('.refresh-btn')!
+    refresh.focus()
+    void w.find('.refresh-btn').trigger('click')
+
+    stubRefs!.loading.value = true
+    await nextTick()
+    expect(refresh.disabled).toBe(true)
+    document.body.tabIndex = -1
+    document.body.focus()
+    document.body.removeAttribute('tabindex')
+    expect(document.activeElement).toBe(document.body)
+
+    stubRefs!.loading.value = false
+    finish()
+    await vi.waitFor(() => expect(document.activeElement).toBe(refresh))
+    expect(refresh.disabled).toBe(false)
+  })
+
+  it('相对时间随分钟时钟自动老化，无需刷新页面', async () => {
+    vi.useFakeTimers()
+    const now = new Date(2026, 10, 26, 12, 0, 0).getTime()
+    vi.setSystemTime(now)
+    mountAttached({ items: [{ ...makeNode('a'), updated_at: now / 1000 }] })
+    expect(document.querySelector('.vdfs-card')?.textContent).toContain('刚刚')
+
+    vi.advanceTimersByTime(60_000)
+    await nextTick()
+    expect(document.querySelector('.vdfs-card')?.textContent).toContain('1 分钟前')
   })
 })
 

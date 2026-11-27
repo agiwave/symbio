@@ -102,7 +102,7 @@ export function cardBadgeOf(n: VdfsNode): string | undefined {
  * `meta_tags` 是后端决定的语义（会话的工作目录名 / 消息数之类），前端原样渲染、
  * 不加解释；非字符串与空串一律丢弃（脏数据不该变成空白小方块）。
  */
-export function cardTagsOf(n: VdfsNode): CardTag[] {
+export function cardTagsOf(n: VdfsNode, now = Date.now()): CardTag[] {
   const out: CardTag[] = []
   const tags = n.meta_tags
   if (Array.isArray(tags)) {
@@ -110,8 +110,8 @@ export function cardTagsOf(n: VdfsNode): CardTag[] {
       if (typeof label === 'string' && label) out.push({ label, kind: 'muted' })
     }
   }
-  const t = relativeTime(n.updated_at)
-  if (t) out.push({ label: t, kind: 'muted', title: formatDateTime(n.updated_at) })
+  const t = relativeTime(n.updated_at, now)
+  if (t) out.push({ label: t, kind: 'muted', title: `更新于 ${formatDateTime(n.updated_at)}` })
   return out
 }
 

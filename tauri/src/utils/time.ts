@@ -25,9 +25,9 @@ function toMillis(ts: number): number {
  *
  * 未来时间戳或无效值返回**空串**——宁可不显示，也不要显示「-3 分钟前」。
  */
-export function relativeTime(ts?: number | null): string {
+export function relativeTime(ts?: number | null, now = Date.now()): string {
   if (!ts) return ''
-  const diff = Date.now() - toMillis(ts)
+  const diff = now - toMillis(ts)
   if (diff < 0) return ''
   if (diff < 60_000) return '刚刚'
   if (diff < 3_600_000) return `${Math.floor(diff / 60_000)} 分钟前`

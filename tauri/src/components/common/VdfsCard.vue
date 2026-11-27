@@ -14,7 +14,7 @@
     class="vdfs-card"
     :class="{ active: isActive, disabled }"
     role="option"
-    :tabindex="disabled ? -1 : 0"
+    :tabindex="disabled || !tabStop ? -1 : 0"
     :aria-selected="isActive"
     :aria-disabled="disabled"
     :aria-label="accessibleLabel"
@@ -72,6 +72,8 @@ interface VdfsCardProps {
   icon?: Component
   /** 是否显示状态点（由节点 status 决定；无状态的类型由调用方关闭） */
   showStatus?: boolean
+  /** 长列表按 roving tabindex：只有当前浏览项进入 Tab 顺序 */
+  tabStop?: boolean
 }
 
 const props = withDefaults(defineProps<VdfsCardProps>(), {
@@ -82,6 +84,7 @@ const props = withDefaults(defineProps<VdfsCardProps>(), {
   disabled: false,
   tags: () => [],
   showStatus: true,
+  tabStop: true,
 })
 
 const emit = defineEmits<{

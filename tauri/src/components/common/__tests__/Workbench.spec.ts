@@ -93,6 +93,16 @@ describe('Workbench — 侧边栏形态', () => {
     expect(sessions.find('.nav-label').exists()).toBe(false)
   })
 
+  it('纯图标类别按钮向辅助技术暴露 Ctrl/Cmd+数字快捷键', () => {
+    const w = mount(Workbench, {
+      props: { railItems: [rail({ key: 'a' }), rail({ key: 'b' })] },
+    })
+    expect(w.findAll('.nav-btn').map((b) => b.attributes('aria-keyshortcuts'))).toEqual([
+      'Control+1 Meta+1',
+      'Control+2 Meta+2',
+    ])
+  })
+
   it('计数角标：有 count 才渲染，0 不渲染', () => {
     const w = mount(Workbench, {
       props: { railItems: [rail({ key: 'a', count: 3 }), rail({ key: 'b', count: 0 }), rail({ key: 'c' })] },

@@ -11,14 +11,17 @@
 -->
 <template>
   <div class="main-layout">
+    <a class="skip-link" href="#main-content">跳到主要内容</a>
     <!-- 不加 :key：路由变化由 VdfsView 依 route.params 换算数据地址，
          控件（VdfsWorkbench）按绑定的数据地址自行重载 -->
-    <RouterView v-slot="{ Component }">
-      <component
-        :is="Component"
-        @open-command-palette="paletteOpen = true"
-      />
-    </RouterView>
+    <main id="main-content" class="route-main" tabindex="-1">
+      <RouterView v-slot="{ Component }">
+        <component
+          :is="Component"
+          @open-command-palette="paletteOpen = true"
+        />
+      </RouterView>
+    </main>
     <!-- 全局浮动消息浮层 -->
     <Toast />
     <!-- 首启引导（全 App 仅渲染一次；可见性由自己的 store 决定，
@@ -296,5 +299,35 @@ onBeforeUnmount(() => {
   width: 100%;
   height: 100vh;
   overflow: hidden;
+}
+
+.route-main {
+  flex: 1;
+  min-width: 0;
+  min-height: 0;
+  display: flex;
+}
+
+.route-main:focus {
+  outline: none;
+}
+
+.skip-link {
+  position: fixed;
+  top: 0.5rem;
+  left: 0.5rem;
+  z-index: var(--z-toast);
+  transform: translateY(-180%);
+  padding: 0.65rem 0.9rem;
+  border: 1px solid var(--border-strong);
+  border-radius: var(--radius-md);
+  background: var(--surface-overlay);
+  color: var(--text-primary);
+  box-shadow: var(--shadow-2);
+  white-space: nowrap;
+}
+
+.skip-link:focus {
+  transform: translateY(0);
 }
 </style>

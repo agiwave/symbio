@@ -9,22 +9,29 @@
     是同一资源的不同呈现约定。
   - **文件**：点击 emit `activate`，由父组件走与列表项完全相同的选中逻辑
     （脱页确认 + useVdfs.select → 右栏详情）。
+  - **键盘**：使用标准 treeitem 语义；← 折叠 / 回父级，→ 展开 / 进入首个子项，
+    焦点按 roving tabindex 在整棵树中只有一个 Tab 停靠点。
 
   展示映射（图标 / 徽标 / 状态 / 标签）复用 `registry/vdfsCards`，与 VdfsCard
   同源——同一个节点在列表与树里长得一样，只有层级缩进与展开箭头是树独有的。
   递归引用自己在渲染函数内（ESM 环在模块求值期不触碰），与 MessageChildren 同手法。
 -->
 <template>
-  <div>
+  <div
+    class="tree-node"
+    role="treeitem"
+    :aria-label="node.item.title || node.item.name"
+    :aria-expanded="isDir ? expanded : undefined"
+    :aria-selected="selectedId === node.item.path"
+    :aria-level="level"
+    :tabindex="tabStop ? 0 : -1"
+    :data-path="node.item.path"
+    @keydown="onTreeKeydown"
+  >
     <div
       class="tree-row"
       :class="{ active: selectedId === node.item.path }"
-      role="button"
-      tabindex="0"
-      :aria-expanded="isDir ? expanded : undefined"
       @click="onActivate"
-      @keydown.enter.prevent="onActivate"
-      @keydown.space.prevent="onActivate"
     >
       <!-- 目录用展开箭头（纯 UI，不参与能力判定）；文件用占位保持左缘对齐 -->
       <span class="tree-toggle" :class="{ leaf: !isDir }">
@@ -40,12 +47,15 @@
     </div>
 
     <!-- 子层：仅目录展开时渲染；缩进由 CSS 变量逐层累加，左侧引导竖线表达层级 -->
-    <div v-if="isDir && expanded && node.children.length" class="tree-children">
+    <div v-if="isDir && expanded && node.children.length" class="tree-children" role="group">
       <VdfsTreeNode
         v-for="child in node.children"
         :key="child.item.path"
         :node="child"
         :selected-id="selectedId"
+        :focus-path="focusPath"
+        :tab-stop="focusPath ? focusPath === child.item.path : selectedId === child.item.path"
+        :level="level + 1"
         @activate="emit('activate', $event)"
       />
     </div>
@@ -53,18 +63,25 @@
 </template>
 
 <script setup lang="ts">
-import { computed, ref } from 'vue'
+import { computed, nextTick, ref, watch } from 'vue'
 import {
   cardBadgeOf,
   cardIconOf,
 } from '@/registry/vdfsCards'
 import { vdfsAccessOf, type VdfsItem, type VdfsTreeNode } from '@/schemas/vdfs'
 
-const props = defineProps<{
-  node: VdfsTreeNode
-  /** 右栏当前选中的条目地址（高亮用） */
-  selectedId: string | null
-}>()
+const props = withDefaults(
+  defineProps<{
+    node: VdfsTreeNode
+    /** 右栏当前选中的条目地址（高亮用） */
+    selectedId: string | null
+    /** 当前浏览项：整棵树只有一个 Tab 停靠点 */
+    focusPath?: string
+    tabStop?: boolean
+    level?: number
+  }>(),
+  { focusPath: '', tabStop: true, level: 1 },
+)
 
 const emit = defineEmits<{
   /** 请求激活条目：文件 → 右栏选中；目录 → 父组件决定（此处仅展开） */
@@ -85,6 +102,13 @@ const badge = computed(() => cardBadgeOf(props.node.item))
  */
 const expanded = ref(hasSelectedWithin(props.node, props.selectedId ?? ''))
 
+watch(
+  () => props.selectedId,
+  (id) => {
+    if (id && hasSelectedWithin(props.node, id)) expanded.value = true
+  },
+)
+
 /** 选中项是否在**子孙**里（自身不算——自己是文件时该由父层判断） */
 function hasSelectedWithin(n: VdfsTreeNode, id: string): boolean {
   if (!id) return false
@@ -97,6 +121,37 @@ function onActivate() {
     expanded.value = !expanded.value
   } else {
     emit('activate', props.node.item)
+  }
+}
+
+/** 子树自己的按键先处理，父 treeitem 不重复应答冒泡上来的同一个键。 */
+async function onTreeKeydown(event: KeyboardEvent) {
+  if (event.target !== event.currentTarget) return
+  if (event.key === 'Enter' || event.key === ' ') {
+    event.preventDefault()
+    onActivate()
+    return
+  }
+
+  const current = event.currentTarget as HTMLElement
+  if (event.key === 'ArrowRight' && isDir.value) {
+    event.preventDefault()
+    if (!expanded.value) {
+      expanded.value = true
+      return
+    }
+    await nextTick()
+    current.querySelector<HTMLElement>('.tree-children .tree-node')?.focus()
+    return
+  }
+
+  if (event.key === 'ArrowLeft') {
+    event.preventDefault()
+    if (isDir.value && expanded.value) {
+      expanded.value = false
+      return
+    }
+    current.parentElement?.closest<HTMLElement>('.tree-node')?.focus()
   }
 }
 </script>
@@ -127,7 +182,10 @@ function onActivate() {
   background: var(--accent-subtle-bg, var(--surface-hover));
   color: var(--accent);
 }
-.tree-row:focus-visible {
+.tree-node:focus-visible {
+  outline: none;
+}
+.tree-node:focus-visible .tree-row {
   outline: 2px solid var(--accent);
   outline-offset: -2px;
 }
@@ -166,5 +224,11 @@ function onActivate() {
   font-size: 0.68rem;
   color: var(--text-muted);
   font-variant-numeric: tabular-nums;
+}
+
+@media (pointer: coarse) {
+  .tree-row {
+    min-height: 2.75rem;
+  }
 }
 </style>

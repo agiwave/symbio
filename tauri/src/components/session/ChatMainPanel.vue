@@ -95,7 +95,7 @@
       </div>
     </header>
 
-    <main class="chat-body">
+    <div class="chat-body">
       <template v-if="!hasActive">
         <div class="no-session">
           <p class="no-session-title">未选择会话</p>
@@ -154,7 +154,7 @@
           />
         </div>
       </template>
-    </main>
+    </div>
 
     <!-- 读数抽屉（P4）。**滑出式**而不是占版面：读数是要「按一下看一眼」的东西，
          常驻会把对话区挤窄，而对话才是这个面板的主体。

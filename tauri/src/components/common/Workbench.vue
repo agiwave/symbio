@@ -30,12 +30,13 @@
 
       <div v-overlay-scrollbar class="nav-items">
         <button
-          v-for="it in railItems"
+          v-for="(it, index) in railItems"
           :key="it.key"
           class="nav-btn"
           :class="{ active: it.active }"
           :aria-label="it.label"
           :aria-current="it.active ? 'page' : undefined"
+          :aria-keyshortcuts="`Control+${index + 1} Meta+${index + 1}`"
           :title="it.label"
           @click="$emit('rail-select', it.key)"
         >
@@ -352,6 +353,16 @@ defineEmits<{
 
 .workbench-detail.no-list {
   grid-row: 1 / span 2;
+}
+
+@media (pointer: coarse) {
+  .nav-items {
+    padding: 0.125rem;
+  }
+
+  .panel-header {
+    padding: 0.125rem 0.5rem;
+  }
 }
 
 @supports (backdrop-filter: blur(1px)) or (-webkit-backdrop-filter: blur(1px)) {

@@ -3,6 +3,13 @@ import type { Directive } from 'vue'
 let nextScrollbarId = 0
 const cleanups = new WeakMap<HTMLElement, () => void>()
 const MIN_THUMB_HEIGHT = 24
+const FOCUSABLE =
+  'a[href], button:not([disabled]), input:not([disabled]), select:not([disabled]), textarea:not([disabled]), [contenteditable="true"], [tabindex]:not([tabindex="-1"])'
+
+function hasKeyboardTarget(el: HTMLElement): boolean {
+  return el.tabIndex >= 0 || Array.from(el.querySelectorAll<HTMLElement>(FOCUSABLE))
+    .some((target) => !target.closest('.overlay-scrollbar-rail'))
+}
 
 function detach(el: HTMLElement): void {
   cleanups.get(el)?.()
@@ -47,7 +54,8 @@ function attach(el: HTMLElement): void {
     const { viewport, scrollMax, thumbHeight, travel } = metrics()
     const overflowing = scrollMax > 1
     rail.hidden = !overflowing
-    thumb.tabIndex = overflowing ? 0 : -1
+    const tabIndex = overflowing && !hasKeyboardTarget(el) ? 0 : -1
+    if (thumb.tabIndex !== tabIndex) thumb.tabIndex = tabIndex
     if (!overflowing) return
 
     rail.style.top = `${el.scrollTop}px`
@@ -136,7 +144,13 @@ function attach(el: HTMLElement): void {
     typeof ResizeObserver === 'undefined' ? null : new ResizeObserver(scheduleUpdate)
   resizeObserver?.observe(el)
   const mutationObserver = new MutationObserver(scheduleUpdate)
-  mutationObserver.observe(el, { childList: true, subtree: true, characterData: true })
+  mutationObserver.observe(el, {
+    childList: true,
+    subtree: true,
+    characterData: true,
+    attributes: true,
+    attributeFilter: ['tabindex', 'disabled', 'contenteditable'],
+  })
 
   cleanups.set(el, () => {
     onPointerUp()

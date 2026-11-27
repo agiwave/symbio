@@ -50,6 +50,14 @@ describe('v-overlay-scrollbar', () => {
     expect(thumb.getAttribute('aria-valuenow')).toBe('38')
   })
 
+  it('宿主已有键盘目标时，滚动条不额外占用 Tab 顺序', () => {
+    const { el } = mountScroller()
+    el.appendChild(document.createElement('button'))
+    el.dispatchEvent(new Event('scroll'))
+    const thumb = el.querySelector<HTMLElement>('[role="scrollbar"]')!
+    expect(thumb.tabIndex).toBe(-1)
+  })
+
   it('支持方向键、PageUp/PageDown 与 Home/End', () => {
     const { el } = mountScroller()
     const thumb = el.querySelector<HTMLElement>('[role="scrollbar"]')!

@@ -67,6 +67,11 @@ describe('VdfsCard — 激活', () => {
     expect(off.attributes('aria-selected')).toBe('false')
   })
 
+  it('tabStop=false 时移出 Tab 序，但仍可由 roving focus 编程聚焦', () => {
+    const w = mountCard({ tabStop: false })
+    expect(w.attributes('tabindex')).toBe('-1')
+  })
+
   it('禁用态移出 Tab 序且不可由点击或键盘激活', async () => {
     const w = mountCard({ disabled: true })
     expect(w.attributes('tabindex')).toBe('-1')
