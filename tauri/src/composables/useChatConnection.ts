@@ -55,15 +55,12 @@ export interface UseChatConnectionOptions {
  * （子智能体里的 user_prompt、失败工具骨架的重试按钮），逐层透传要把一个
  * 回调穿过多层与本组件无关的容器。要收敛的是**契约的类型**，不是传递方式。
  */
-export const RESUME_KEY: InjectionKey<(payload: ResumePayload) => void> = Symbol('chat-resume')
+export const RESUME_KEY: InjectionKey<(payload: ResumePayload) => Promise<boolean>> = Symbol('chat-resume')
 
 /** 会话恢复载荷（retry_subtree/retry_compaction/retry/approve/reject/supply/answer 统一接口） */
 export interface ResumePayload {
-  /** 目标消息 ID（恢复锚点）
-   *  - retry_subtree：指向 Failed 运行骨架（`type=skeleton`，无父节点）
-   *  - retry_compaction：指向 Failed 压缩节点（`type=notice`）
-   *  - 其他 action：指向工具调用骨架（`type=skeleton`，有父节点）
-   *  「运行 / 工具」的区分住在后端 `meta.style_tag`，前端不读它、只按形状定位锚点。 */
+  /** 恢复锚点：`retry_subtree` 指向用户轮锚；其它动作指向后端声明该动作的节点。
+   *  前端只把后端给出的动作与稳定 id 交回，不推断业务类型。 */
   targetId: string
   /** 恢复动作——词表在 `schemas/chat_node.ts`（后端 `ResumeAction` 的镜像，
    *  由 `scripts/audits/protocol-mirror-audit.mjs` 的 C 组守着）。此处**不**再抄一份
@@ -98,7 +95,7 @@ export interface UseChatConnectionReturn {
   send: (message: ChatNode) => Promise<boolean>
   abort: () => Promise<void>
   removeMessage: (messageId: string) => void
-  resume: (payload: ResumePayload) => void
+  resume: (payload: ResumePayload) => Promise<boolean>
   /** 按需重取一个已折叠释放骨架的子树（[] 只读动作） */
   expandSkeleton: (mid: string, depth?: '1' | 'all') => Promise<void>
   /**
@@ -682,11 +679,12 @@ export function useChatConnection(options: UseChatConnectionOptions): UseChatCon
    * 为什么不入队（不像发言那样写 inbox）：恢复必须落在**当时那条消息**上，
    * 而队列项的 id 是新的；入队会丢掉锚点。。
    *
-   * 后端语义（删除-重建模式）：
-   * - retry_subtree：删除 Failed 骨架及其所有子孙节点 → 重新走 LLM 请求
-   * - retry_compaction：删除 Failed 压缩节点 → 重新执行一次上下文压缩
-   *   （**不动历史**：压缩失败从不丢消息，重试只是再试一次 LLM 摘要）
-   * - retry/approve/reject/supply/answer：删除旧子节点 → 重新执行工具或生成结果 → 创建新子节点
+   * 后端语义：
+   * - retry_subtree：以用户消息轮锚另开一支，旧支与已产生的外部副作用不被撤销；
+   * - retry_compaction：移除失败压缩节点后重新执行压缩，不动历史正文；
+   * - retry / approve / reject / supply / answer：由后端按目标节点与动作事实续接。
+   *
+   * 是否被受理作为布尔结果返回，供“保存并重试”决定是否关闭编辑浮层。
    *
    * 前端不在此处构造新消息——后端经 `vdfs` 频道广播（帧语义全在字段上：
    * `status = removed` 删旧节点，`content` / `delta` 写新节点与父节点状态），
@@ -730,7 +728,7 @@ export function useChatConnection(options: UseChatConnectionOptions): UseChatCon
         store.setSessionStatus(sid, VDFS_STATUS_FAILED)
       }
       showToast('error', `${failPrefix}：会话地址未就绪，请稍后重试`)
-      return
+      return false
     }
 
     try {
@@ -761,11 +759,14 @@ export function useChatConnection(options: UseChatConnectionOptions): UseChatCon
           store.putStatus(sid, { status: VDFS_STATUS_ACTIVE, activity: '会话忙' })
           store.setSessionStatus(sid, VDFS_STATUS_ACTIVE)
         }
+        return false
       } else if (!resp.ok) {
         // 其它「没做」的如实报告（如目标消息已不在）：不静默，也不冒充失败终态
         logger.warn('useChatConnection', `[${sid}] resume 未生效：${resp.message}`)
         showToast('error', `${failPrefix}：${resp.message || '目标消息已不存在，请重试'}`)
+        return false
       }
+      return true
     } catch (err: unknown) {
       logger.error('useChatConnection', 'Failed to resume:', err)
       if (targetSid === sid) {
@@ -773,6 +774,7 @@ export function useChatConnection(options: UseChatConnectionOptions): UseChatCon
         store.setSessionStatus(sid, VDFS_STATUS_FAILED)
       }
       showToast('error', `${failPrefix}：${err instanceof Error ? err.message : '未知错误'}`)
+      return false
     }
   }
 

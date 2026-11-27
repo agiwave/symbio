@@ -65,6 +65,22 @@ fn message_node_serialized_name_is_node_id_not_tool_name() {
     assert_eq!(v["tool_name"], serde_json::json!("local/ls"));
 }
 
+#[test]
+fn message_node_carries_declared_recovery_actions() {
+    let m = present_message(cm::ChatNode {
+        id: "u1".into(),
+        msg_type: Some(cm::NodeKind::Body),
+        principal: Some(principal_for(cm::NodeRole::User)),
+        status: Some(cm::NodeStatus::Failed),
+        ..Default::default()
+    });
+    let node = message_node(&m);
+    assert_eq!(
+        node.attributes.get("actions"),
+        Some(&json!(["retry_subtree"]))
+    );
+}
+
 /// 会话节点：`ext = session`（前端据此选聊天工作区渲染器）、
 /// kind / 状态 / 更新时间 / 摘要与 `session_node` 的单点形状同源
 #[test]

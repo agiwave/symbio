@@ -512,7 +512,7 @@ describe('abort — 两个动作，作用在两个对象上', () => {
 describe('resume — 会话恢复', () => {
   it('缺省目标 = 本会话；动作落在 `<A>/message/<targetId>` 上', async () => {
     const c = conn()
-    await c.resume({ targetId: 't1', action: 'retry' })
+    expect(await c.resume({ targetId: 't1', action: 'retry' })).toBe(true)
     expect(hoisted.actions).toHaveLength(1)
     const a = hoisted.actions[0]
     expect(a.path).toBe(`${ADDR}/message/t1`)
@@ -569,6 +569,16 @@ describe('resume — 会话恢复', () => {
     expect(hoisted.store.setSessionError).toHaveBeenCalledWith('s1', null)
   })
 
+  it('地址未就绪或后端拒绝时返回 false，不冒充已受理', async () => {
+    hoisted.ensureSessionScheme.mockRejectedValueOnce(new Error('not ready'))
+    const unavailable = conn({ sessionAddr: '' })
+    expect(await unavailable.resume({ targetId: 't1', action: 'retry' })).toBe(false)
+    expect(hoisted.actions).toHaveLength(0)
+
+    hoisted.runVdfsAction.mockResolvedValueOnce({ action: 'retry', ok: false, message: '目标已不存在' })
+    expect(await conn().resume({ targetId: 't1', action: 'retry' })).toBe(false)
+  })
+
   it('session_busy 回落 active，绝不置 failed（它是现状不是失败）', async () => {
     hoisted.runVdfsAction.mockResolvedValueOnce({
       action: 'retry',
@@ -577,7 +587,7 @@ describe('resume — 会话恢复', () => {
       data: { session_id: 's1', status: 'session_busy' },
     })
     const c = conn()
-    await c.resume({ targetId: 't1', action: 'retry' })
+    expect(await c.resume({ targetId: 't1', action: 'retry' })).toBe(false)
     expect(hoisted.store.putStatus).toHaveBeenLastCalledWith(
       's1',
       expect.objectContaining({ status: VDFS_STATUS_ACTIVE }),
@@ -591,7 +601,7 @@ describe('resume — 会话恢复', () => {
   it('出站失败 → 同会话置 failed，跨会话不置', async () => {
     hoisted.runVdfsAction.mockRejectedValueOnce(new Error('x'))
     const c = conn()
-    await c.resume({ targetId: 't1', action: 'retry' })
+    expect(await c.resume({ targetId: 't1', action: 'retry' })).toBe(false)
     expect(hoisted.store.putStatus).toHaveBeenLastCalledWith(
       's1',
       expect.objectContaining({ status: VDFS_STATUS_FAILED }),

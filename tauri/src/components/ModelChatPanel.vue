@@ -3,13 +3,14 @@
     <!-- 编辑单条消息的浮层。外壳走 `BaseModal`：ESC 可关、焦点被陷阱锁在框内、
          遮罩底色与层级走 token（原实现写死 `z-index: 100` + `rgba(0,0,0,0.45)`，
          层级低于其它浮层且不跟随主题）。 -->
-    <BaseModal :visible="!!editing" panel-class="edit-box" @close="editing = null">
+    <BaseModal :visible="!!editing" panel-class="edit-box" :dismissable="!savingEdit" @close="closeEdit">
       <template v-if="editing">
-        <div class="edit-title">编辑消息</div>
+        <div class="edit-title">{{ editing.retryAfterSave ? '修改并重试' : '编辑消息' }}</div>
         <textarea
           v-model="editing.content"
           class="edit-area"
           aria-label="编辑消息内容"
+          :disabled="savingEdit"
           :placeholder="editing.isJson ? 'JSON 内容' : '消息内容'"
         />
         <div v-if="editing.attachments.length > 0" class="edit-attachments">
@@ -24,9 +25,14 @@
             >×</button>
           </div>
         </div>
+        <p v-if="editing.retryAfterSave" class="edit-retry-note">
+          保存后会保留旧对话并另开一支；已执行的外部操作不会撤销。
+        </p>
         <div class="edit-btns">
-          <button class="edit-save" @click="saveEdit">保存</button>
-          <button class="edit-cancel" @click="editing = null">取消</button>
+          <button class="edit-save" :disabled="savingEdit" @click="saveEdit">
+            {{ savingEdit ? '处理中…' : editing.retryAfterSave ? '保存并重试' : '保存' }}
+          </button>
+          <button class="edit-cancel" :disabled="savingEdit" @click="closeEdit">取消</button>
         </div>
       </template>
     </BaseModal>
@@ -104,20 +110,18 @@
                本块随之消失，不会出现两份。 -->
           <InboxPending :entries="inboxEntries" />
 
-          <!-- 会话级错误条（兜底：无失败根级骨架、但会话整体因错误中止时展示；
-               有失败骨架时错误由根级骨架节点承载，不在此重复显示）。
-
-               位置在**流内末尾**而不是页面顶部：错误是这一轮的结果，它属于会话流的
-               时间轴——挂在流的尾部，用户的视线本来就在那里，重试按钮也就在手边。
-               顶部横幅会把一次“这轮没跑完”的景象抬成“页面级故障”，与刚刚过去的
-               对话脱节（看门狗定稿的失败也走流内，两者观感因此一致）。 -->
+          <!-- 会话级错误条：本地传输错误或现代失败轮由同一份转写派生；
+               有节点内恢复入口时不重复显示。位置在流内末尾，重试入口紧跟本轮结果。 -->
           <MessageErrorBox
             v-if="sessionError"
             :text="sessionError"
-            retryable
-            dismissible
+            :retryable="!!lastFailedSend || !!roundRetryAnchor"
+            :modifiable="!!roundRetryAnchor && !lastFailedSend"
+            :disabled="sessionRetryBusy"
+            :dismissible="canDismissSessionError"
             variant="skeleton"
             @retry="handleSessionRetry"
+            @modify="handleSessionModify"
             @dismiss="sessionsStore.setSessionError(props.sessionId, null)"
           />
         </div>
@@ -167,6 +171,7 @@ import {
   PRINCIPAL_KIND_PERSON,
   PRINCIPAL_USER,
   messageTextOf,
+  isUnsettledNodeStatus,
 } from '@/schemas/chat_node'
 import type { ImageAttachment } from '@/types'
 import type { DetailDefinition } from '@/schemas/vdfs'
@@ -177,14 +182,16 @@ import { useSessionsStore } from '@/stores/sessions'
 import { grantToolForever } from '@/services/sessionGrant'
 import { useSessionUiStateStore } from '@/stores/sessionUiState'
 import { needsTypingRow } from '@/stores/sessionLive'
+import { dropUnselectedBranches } from '@/stores/sessionTranscript'
 import { CHAT_ROLE_USER } from '@/schemas/chat_node'
 // 消息级判定与业务规则全部来自 registry（本组件不解释消息词表，也不读后端 meta 字段）
 import {
-  isFailedStatus,
+  latestRoundRetryAnchorOf,
   messageRetryTargetOf,
   messageRoleOf,
   messageStatusOf,
 } from '@/registry/messageTypes'
+import { messageErrorTextOf } from '@/composables/useMessageContent'
 
 import MessageNode from './MessageNode.vue'
 import MessageErrorBox from './message/MessageErrorBox.vue'
@@ -271,7 +278,12 @@ const editing = ref<{
   content: string
   isJson: boolean
   attachments: ImageContentPart[]
+  retryAfterSave: boolean
 } | null>(null)
+const savingEdit = ref(false)
+const retryingFailedSend = ref(false)
+const roundResumePendingId = ref<string | null>(null)
+const roundResumeVersion = ref(0)
 
 function imagePartsOf(content: MessageContent | undefined): ImageContentPart[] {
   if (!Array.isArray(content)) return []
@@ -332,14 +344,9 @@ const chat = useChatConnection({
 
 // 向下级组件（MessageNode 内联交互卡提问 / 失败工具骨架重试/补充）提供
 // 会话恢复接口（retry_subtree/retry/approve/reject/supply/answer 统一入口）。
-// 内部走统一 chat/send 接口的 resume 分支：target_id 为稳定锚点（失败根级骨架或工具骨架），
-// targetSessionId 用于子会话工具调用的恢复路由（子智能体的交互卡提问通过
-// parent_session_id 指回子会话）。
-// 智能体 / 模型 / 运行模式 / 风险等级等会话参数由后端按 session.metadata 解析
-// （写入统一经会话选项栏落库），故此处不再透传任何前端业务选择。
-provide(RESUME_KEY, (payload: ResumePayload) => {
-  chat.resume(payload)
-})
+// target_id 使用后端声明的用户轮锚、工具骨架或其它稳定节点；子会话工具调用的
+// 恢复路由仍由 targetSessionId 指回子会话。会话参数由后端按 session.metadata 解析。
+provide(RESUME_KEY, (payload: ResumePayload) => chat.resume(payload))
 
 // 骨架惰性重取面（[] 前端半）：折叠态变化 → 释放 / 重取子树。与 RESUME_KEY 同一条
 // 理由用注入而非 props——相遇点（NodeShell 的折叠开关）在组件树深层，而「哪个会话」
@@ -454,8 +461,8 @@ const optionScope = computed<Record<string, unknown>>(() => ({
   // 会话级错误条（"错误是状态、不是节点"的兜底展示）。
   //
   // 两个来源：会话节点的 `attributes.error`（服务端权威）与 send / resume 的本地乐观
-  // 错误。但**有失败节点时一律不显示**——那时错误由根级骨架承载（⚠ + 重试），
-  // 再显示一条会话级错误就是同一条错误报两遍。
+  // 错误。已有可恢复动作的失败节点时由节点承载；现代失败轮只有 body 节点，
+  // 因此从同一份转写补出流内错误条，避免“有失败事实但没有重试入口”。
   //
   // 呈现位置是**流尾**（模板里紧跟消息列表，与「等待骨架」同排），不是页面顶部：
   // 它是「这一轮的结果」，属于会话流的时间轴。
@@ -464,15 +471,40 @@ const optionScope = computed<Record<string, unknown>>(() => ({
   // "错误事件到达的那一刻恰好能看到失败节点"，而两条通道的先后无法保证。
   // 从节点表派生则没有这个问题——同一份节点表必然得到同一个结论
   // （`018-node-state-streaming.md` §5.2「派生是纯函数」）。
+  const roundRetryAnchor = computed(() =>
+    latestRoundRetryAnchorOf(dropUnselectedBranches(sessionsStore.getSessionMessages(props.sessionId))),
+  )
+  const sessionRetryBusy = computed(() =>
+    retryingFailedSend.value
+    || (!!roundRetryAnchor.value && roundResumePendingId.value === roundRetryAnchor.value.id),
+  )
+  const canDismissSessionError = computed(() =>
+    !roundRetryAnchor.value && !!sessionsStore.getSessionError(props.sessionId),
+  )
+  watch(roundRetryAnchor, (anchor) => {
+    roundResumeVersion.value += 1
+    if (roundResumePendingId.value && anchor?.id !== roundResumePendingId.value) {
+      roundResumePendingId.value = null
+    }
+  })
   const sessionError = computed(() => {
     const err = sessionsStore.getSessionError(props.sessionId)
-    if (!err) return null
-    const hasFailedNode = sessionsStore
-      .getSessionMessages(props.sessionId)
-      // 「失败节点」的判据与后端 meta 字段的读取都收在 registry/messageTypes：
-      // 本组件不解释 `status` 取值，也不碰任何 meta 字段名。
-      .some((m) => isFailedStatus(messageStatusOf(m)))
-    return hasFailedNode ? null : err
+    const messages = dropUnselectedBranches(sessionsStore.getSessionMessages(props.sessionId))
+    const anchor = roundRetryAnchor.value
+    const roundMessages = anchor ? messages.slice(messages.indexOf(anchor) + 1) : messages
+    const hasInlineRetry = roundMessages.some((message) =>
+      messageRoleOf(message) !== CHAT_ROLE_USER
+      && isUnsettledNodeStatus(messageStatusOf(message))
+      && messageRetryTargetOf(message, messages) !== null,
+    )
+    if (hasInlineRetry) return null
+    if (err) return err
+    if (!anchor) return null
+    const failure = [...roundMessages].reverse().find((message) =>
+      messageRoleOf(message) !== CHAT_ROLE_USER
+      && isUnsettledNodeStatus(messageStatusOf(message)),
+    )
+    return failure ? messageErrorTextOf(failure) : '这一轮未完成，请重试。'
   })
 
   /**
@@ -504,12 +536,9 @@ const optionScope = computed<Record<string, unknown>>(() => ({
    */
   const inboxEntries = computed(() => sessionsStore.getInboxItems(props.sessionId))
 
-  /** 会话级错误重试：重新发送用户最后一条消息。
-   *
-   *  复用原 user 消息 id：这是"同一条消息重发"而不是新增一条，后端落库回包也
-   *  带这个 id（前端按 id 合并，不会出现两份）。
-   *  仅用于"无失败根级骨架"的兜底错误；有失败根级骨架时错误由其节点承载、走 handleRetry。 */
+  /** 会话级错误重试：未入队失败重发原消息；已落库失败对用户轮锚执行建支重试。 */
   function handleSessionRetry() {
+    if (sessionRetryBusy.value) return
     sessionsStore.setSessionError(props.sessionId, null)
 
     // 优先重发**刚才没入队的那一条**。此前这里只回看转写里最后一条 user 消息：
@@ -518,6 +547,7 @@ const optionScope = computed<Record<string, unknown>>(() => ({
     const failed = lastFailedSend.value
     if (failed) {
       lastFailedSend.value = null
+      retryingFailedSend.value = true
       // 失败时内容已经还给输入区；重试成功后再留着就等于同一内容可以发两次。
       // 只在输入区未被用户改过时清空（改过就说明他正在写别的）。
       const failedText = messageTextOf(failed.message.content)
@@ -529,23 +559,34 @@ const optionScope = computed<Record<string, unknown>>(() => ({
         claimImages(retryImages)
       }
       void (async () => {
-        const ok = await dispatchSend(failed.message, retryImages)
-        if (ok) releaseClaimedImages(retryImages)
-        else returnClaimedImages(retryImages)
+        try {
+          const ok = await dispatchSend(failed.message, retryImages)
+          if (ok) releaseClaimedImages(retryImages)
+          else returnClaimedImages(retryImages)
+        } finally {
+          retryingFailedSend.value = false
+        }
       })()
       return
     }
 
-    const msgs = sessionsStore.getSessionMessages(props.sessionId)
-    const lastUser = [...msgs].reverse().find((m) => messageRoleOf(m) === CHAT_ROLE_USER)
-    if (!lastUser) return
-    const retryMsg: ChatNode = {
-      id: lastUser.id, // 复用原 user 消息 id：重发而非新建节点
-      principal: { kind: PRINCIPAL_KIND_PERSON, id: PRINCIPAL_USER },
-      content: lastUser.content,
-      timestamp: Date.now(),
-    }
-    void dispatchSend(retryMsg)
+    const anchor = roundRetryAnchor.value
+    if (!anchor) return
+    sessionsStore.setSessionError(props.sessionId, null)
+    const pendingId = anchor.id
+    const pendingVersion = ++roundResumeVersion.value
+    roundResumePendingId.value = pendingId
+    void chat.resume({ targetId: pendingId, action: 'retry_subtree' }).then((accepted) => {
+      if (!accepted && roundResumeVersion.value === pendingVersion) roundResumePendingId.value = null
+    })
+  }
+
+  /** 已落库的失败轮：编辑用户轮锚，保存成功后继续同一套建支重试。 */
+  function handleSessionModify() {
+    if (sessionRetryBusy.value) return
+    const anchor = roundRetryAnchor.value
+    if (!anchor) return
+    handleEdit(anchor.id, true)
   }
 
   // --- 方法 ---
@@ -687,14 +728,16 @@ function jumpToBottom() {
 
 /**
  * 重试入口：分派规则在 `registry/messageTypes.messageRetryTargetOf`——
- * 「工具调用失败 → 单工具重试」「其余失败 → 整轮重试（叶子回溯到父骨架）」
- * 是**消息级业务规则**，不属于面板。本面板只负责取节点 + 发恢复请求。
+ * 「工具调用失败 → 单工具重试」「整轮失败 → 用户轮锚另开一支」是消息级规则，
+ * 不属于面板。本面板只负责取节点 + 发恢复请求。
  */
 function handleRetry(messageId: string) {
-  const msg = sessionsStore.getSessionMessages(props.sessionId).find(m => m.id === messageId)
+  const messages = sessionsStore.getSessionMessages(props.sessionId)
+  const msg = messages.find(m => m.id === messageId)
   if (!msg) return
-  const target = messageRetryTargetOf(msg)
-  chat.resume({ targetId: target.targetId, action: target.action })
+  const target = messageRetryTargetOf(msg, messages)
+  if (!target) return
+  void chat.resume({ targetId: target.targetId, action: target.action })
 }
 
 const { showToast } = useToast()
@@ -767,15 +810,20 @@ async function confirmDelete() {
   }
 }
 
-/** 打开编辑浮层：把消息内容载入文本框 */
-function handleEdit(messageId: string) {
+/** 打开编辑浮层；整轮恢复可要求保存成功后立即另开一支。 */
+function handleEdit(messageId: string, retryAfterSave = false) {
   const msg = sessionsStore.getSessionMessages(props.sessionId).find(m => m.id === messageId)
   if (!msg) return
   const c = msg.content
   const isJson = typeof c === 'string' && /^[\\[{]/.test(c.trim())
   const text = messageTextOf(c)
   // 文本可编辑，现有图片分片同时展示并允许逐张移除。
-  editing.value = { id: messageId, content: text, isJson, attachments: imagePartsOf(c) }
+  editing.value = { id: messageId, content: text, isJson, attachments: imagePartsOf(c), retryAfterSave }
+}
+
+function closeEdit() {
+  if (savingEdit.value) return
+  editing.value = null
 }
 
 /**
@@ -787,8 +835,9 @@ function handleEdit(messageId: string) {
  * 让用户能重试。
  */
 async function saveEdit() {
-  if (!editing.value) return
-  const { id, content, attachments } = editing.value
+  const edit = editing.value
+  if (!edit || savingEdit.value) return
+  const { id, content, attachments, retryAfterSave } = edit
   const msg = sessionsStore.getSessionMessages(props.sessionId).find(m => m.id === id)
   if (!msg) {
     editing.value = null
@@ -799,6 +848,7 @@ async function saveEdit() {
   const newContent: MessageContent = attachments.length > 0
     ? [{ type: 'text', text: content }, ...attachments]
     : content
+  savingEdit.value = true
   try {
     await sessionsStore.updateMessage(props.sessionId, {
       ...msg,
@@ -806,11 +856,17 @@ async function saveEdit() {
     } as ChatNode)
   } catch (e) {
     sessionsStore.applyTranscriptMessage(props.sessionId, msg)
+    savingEdit.value = false
     logger.error('ModelChatPanel', 'updateMessage 失败', e)
     showToast('error', `保存失败：${e instanceof Error ? e.message : String(e)}`)
     return
   }
+  if (retryAfterSave && !await chat.resume({ targetId: id, action: 'retry_subtree' })) {
+    savingEdit.value = false
+    return
+  }
   editing.value = null
+  savingEdit.value = false
   nextTick(() => scrollToBottom())
 }
 
@@ -1031,6 +1087,13 @@ watch(sessionError, (now) => {
   border-color: var(--accent);
 }
 
+.edit-retry-note {
+  margin: 0;
+  color: var(--text-secondary);
+  font-size: var(--font-size-sm);
+  line-height: 1.5;
+}
+
 .edit-attachments {
   display: flex;
   flex-wrap: wrap;
@@ -1089,6 +1152,13 @@ watch(sessionError, (now) => {
 .edit-save:hover {
   background: var(--accent-hover);
   border-color: var(--accent-hover);
+}
+
+.edit-save:disabled,
+.edit-cancel:disabled,
+.edit-area:disabled {
+  opacity: 0.6;
+  cursor: not-allowed;
 }
 
 .edit-cancel {

@@ -34,7 +34,7 @@ vi.mock('@/composables/useChatConnection', async () => {
     send: vi.fn(),
     abort: vi.fn(),
     removeMessage: vi.fn(),
-    resume: vi.fn(),
+    resume: vi.fn().mockResolvedValue(true),
     expandSkeleton: vi.fn(),
     switchBranch: vi.fn(),
     skeletonLazy: { onCollapse: vi.fn(), isReleased: vi.fn(() => false), summaryOf: vi.fn(() => undefined) },
@@ -160,6 +160,8 @@ beforeEach(() => {
   chat.isStopping.value = false
   chat.stopNotice.value = null
   chat.messageTree.value = []
+  chat.send.mockClear()
+  chat.resume.mockClear()
 })
 
 afterEach(() => {
@@ -243,6 +245,186 @@ describe('ModelChatPanel 多模态消息编辑', () => {
     await flushPromises()
 
     expect(update).toHaveBeenCalledWith(SID, expect.objectContaining({ content: '原正文' }))
+  })
+})
+
+describe('ModelChatPanel 失败轮恢复', () => {
+  function failedRound() {
+    const message: ChatNode = {
+      ...userMessage('原始问题'),
+      status: 'failed',
+      actions: ['retry_subtree'],
+    }
+    useSessionsStore().setSessionError(SID, '模型服务暂时不可用')
+    return message
+  }
+
+  it('已落库失败轮一键重试走用户轮锚建支，不复用 id 重发 inbox', async () => {
+    panel(failedRound())
+    expect(w!.get('.stop-live').text()).toBe('')
+    expect(w!.get('.error-box').text()).toContain('模型服务暂时不可用')
+    expect(w!.find('.error-box .dismiss').exists()).toBe(false)
+    await w!.get('.error-box .retry').trigger('click')
+    await flushPromises()
+
+    expect(chatStub().resume).toHaveBeenCalledWith({ targetId: 'u1', action: 'retry_subtree' })
+    expect(chatStub().send).not.toHaveBeenCalled()
+  })
+
+  it('恢复在途禁止重复建支，后端拒绝后重新开放入口', async () => {
+    let settle!: (accepted: boolean) => void
+    chatStub().resume.mockReturnValueOnce(new Promise<boolean>((resolve) => { settle = resolve }))
+    panel(failedRound())
+    const retry = w!.get('.error-box .retry')
+    await retry.trigger('click')
+    await nextTick()
+    expect(retry.attributes('disabled')).toBeDefined()
+    await retry.trigger('click')
+    expect(chatStub().resume).toHaveBeenCalledOnce()
+
+    settle(false)
+    await flushPromises()
+    expect(w!.get('.error-box .retry').attributes('disabled')).toBeUndefined()
+  })
+
+  it('旧轮恢复的迟到回执不会解锁新轮的在途重试', async () => {
+    let settleOld!: (accepted: boolean) => void
+    let settleNew!: (accepted: boolean) => void
+    chatStub().resume
+      .mockReturnValueOnce(new Promise<boolean>((resolve) => { settleOld = resolve }))
+      .mockReturnValueOnce(new Promise<boolean>((resolve) => { settleNew = resolve }))
+    panel(failedRound())
+    await w!.get('.error-box .retry').trigger('click')
+
+    useSessionsStore().applyTranscriptMessage(SID, {
+      ...userMessage('新失败轮'),
+      id: 'u2',
+      status: 'failed',
+      actions: ['retry_subtree'],
+    })
+    await nextTick()
+    await w!.get('.error-box .retry').trigger('click')
+    expect(chatStub().resume).toHaveBeenLastCalledWith({ targetId: 'u2', action: 'retry_subtree' })
+
+    settleOld(false)
+    await flushPromises()
+    expect(w!.get('.error-box .retry').attributes('disabled')).toBeDefined()
+
+    settleNew(false)
+    await flushPromises()
+    expect(w!.get('.error-box .retry').attributes('disabled')).toBeUndefined()
+  })
+
+  it('错误条只读当前失败轮，旧支的工具重试不遮住当前轮恢复入口', () => {
+    const store = useSessionsStore()
+    store.applyTranscriptMessage(SID, {
+      ...userMessage('旧问题'),
+      id: 'old-tool',
+      type: 'skeleton',
+      principal: { kind: 'agent', id: 'session/main' },
+      status: 'failed',
+      actions: ['retry'],
+    })
+    store.applyTranscriptMessage(SID, failedRound())
+    store.applyTranscriptMessage(SID, {
+      ...userMessage(''),
+      id: 'a1',
+      parent_id: 'u1',
+      principal: { kind: 'agent', id: 'session/main' },
+      status: 'failed',
+      error: '当前轮模型失败',
+    })
+    store.setSessionError(SID, null)
+    panel()
+
+    expect(w!.get('.error-box').text()).toContain('当前轮模型失败')
+    expect(w!.find('.error-box .retry').exists()).toBe(true)
+    expect(w!.find('.error-box .modify').exists()).toBe(true)
+  })
+
+  it('最新用户轮成功时，保留的旧失败支不再显示会话级错误条', () => {
+    const store = useSessionsStore()
+    store.applyTranscriptMessage(SID, failedRound())
+    store.applyTranscriptMessage(SID, { ...userMessage('新问题'), id: 'u2', status: 'completed' })
+    store.setSessionError(SID, null)
+    panel()
+
+    expect(w!.find('.error-box').exists()).toBe(false)
+    expect(w!.get('.stop-live').text()).toBe('')
+  })
+
+  it('切回旧失败支时，错误条跟随当前读法而不是全局最新轮', () => {
+    const store = useSessionsStore()
+    const branch = (index: number, selected: boolean) => ({
+      group: 'u1', candidates: ['u1', 'u2'], index, total: 2, selected,
+    })
+    store.applyTranscriptMessage(SID, {
+      ...failedRound(),
+      meta: { branch: branch(0, true) },
+    })
+    store.applyTranscriptMessage(SID, {
+      ...userMessage(''),
+      id: 'old-reply',
+      parent_id: 'u1',
+      principal: { kind: 'agent', id: 'session/main' },
+      status: 'failed',
+      error: '旧支失败原因',
+    })
+    store.applyTranscriptMessage(SID, {
+      ...userMessage('新问题'),
+      id: 'u2',
+      status: 'completed',
+      meta: { branch: branch(1, false) },
+    })
+    store.setSessionError(SID, null)
+    panel()
+
+    expect(w!.get('.error-box').text()).toContain('旧支失败原因')
+    expect(w!.find('.error-box .retry').exists()).toBe(true)
+  })
+
+  it('修改后重试先持久化正文，再对同一用户轮锚建支', async () => {
+    const update = vi.spyOn(useSessionsStore(), 'updateMessage').mockResolvedValue(undefined)
+    chatStub().resume.mockResolvedValue(true)
+    panel(failedRound())
+    await w!.get('.error-box .modify').trigger('click')
+
+    expect(w!.get('.edit-title').text()).toBe('修改并重试')
+    expect(w!.get('.edit-retry-note').text()).toContain('已执行的外部操作不会撤销')
+    await w!.get('.edit-area').setValue('修改后的问题')
+    await w!.get('.edit-save').trigger('click')
+    await flushPromises()
+
+    expect(update).toHaveBeenCalledWith(SID, expect.objectContaining({ content: '修改后的问题' }))
+    expect(chatStub().resume).toHaveBeenCalledWith({ targetId: 'u1', action: 'retry_subtree' })
+    expect(w!.find('.edit-box').exists()).toBe(false)
+  })
+
+  it('保存失败不发起重试，并保留编辑内容', async () => {
+    vi.spyOn(useSessionsStore(), 'updateMessage').mockRejectedValue(new Error('写入失败'))
+    panel(failedRound())
+    await w!.get('.error-box .modify').trigger('click')
+    await w!.get('.edit-area').setValue('修改后的问题')
+    await w!.get('.edit-save').trigger('click')
+    await flushPromises()
+
+    expect(chatStub().resume).not.toHaveBeenCalled()
+    expect((w!.get('.edit-area').element as HTMLTextAreaElement).value).toBe('修改后的问题')
+    expect(hoisted.showToast).toHaveBeenCalledWith('error', '保存失败：写入失败')
+  })
+
+  it('重试未被受理时保留编辑浮层，不把已保存内容伪装成已开轮', async () => {
+    vi.spyOn(useSessionsStore(), 'updateMessage').mockResolvedValue(undefined)
+    chatStub().resume.mockResolvedValue(false)
+    panel(failedRound())
+    await w!.get('.error-box .modify').trigger('click')
+    await w!.get('.edit-area').setValue('修改后的问题')
+    await w!.get('.edit-save').trigger('click')
+    await flushPromises()
+
+    expect(chatStub().resume).toHaveBeenCalledOnce()
+    expect(w!.find('.edit-box').exists()).toBe(true)
+    expect(w!.get('.edit-save').attributes('disabled')).toBeUndefined()
   })
 })
 

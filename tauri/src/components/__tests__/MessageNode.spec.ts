@@ -87,6 +87,7 @@ describe('MessageNode：根级骨架（skeleton）容器三形态', () => {
         type: 'skeleton',
         status: 'failed',
         error: '请求失败',
+        actions: ['retry_subtree'],
         children: [msg({ id: 'x1', type: 'body', status: 'failed', content: '', error: '请求失败', parent_id: 't1' })],
       }),
     )
@@ -115,6 +116,7 @@ describe('MessageNode：根级骨架（skeleton）容器三形态', () => {
         id: 't1',
         type: 'skeleton',
         status: 'aborted',
+        actions: ['retry_subtree'],
         children: [msg({ id: 'x1', type: 'body', content: '半截', parent_id: 't1' })],
       }),
     )

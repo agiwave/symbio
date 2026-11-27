@@ -58,6 +58,8 @@ import {
   messageIcon,
   messageIsHeartbeat,
   messageIsRunningAction,
+  messageHasRetryAction,
+  latestRoundRetryAnchorOf,
   messagePreviewFollowsLiveEdge,
   messageRendererKey,
   messageTypeOf,
@@ -555,17 +557,48 @@ describe('messageShowsLiveBadge：「回复中…」只在正文流式时显示'
   })
 })
 
-describe('messageRetryTargetOf：重试分派（动作由后端 actions 决定，无 actions 走状态兜底）', () => {
+describe('messageRetryTargetOf：重试分派（动作由后端 actions 决定，整轮靶子解析到用户轮锚）', () => {
+  const user = (id: string, parentId?: string): ChatNode => ({
+    id,
+    type: NODE_KIND_BODY,
+    status: NODE_STATUS_FAILED,
+    principal: { kind: 'person', id: 'person/local' },
+    parent_id: parentId,
+    actions: ['retry_subtree'] as ChatNode['actions'],
+  })
+
   it('后端下发 retry → 单工具重试，锚点是它自己', () => {
     expect(
       messageRetryTargetOf({ id: 'tc1', status: NODE_STATUS_FAILED, actions: ['retry'] as ChatNode['actions'] }),
     ).toEqual({ action: 'retry', targetId: 'tc1' })
   })
 
-  it('后端下发 retry_subtree → 整轮重试，锚点是骨架自己', () => {
-    expect(
-      messageRetryTargetOf({ id: 't1', status: NODE_STATUS_FAILED, actions: ['retry_subtree'] as ChatNode['actions'] }),
-    ).toEqual({ action: 'retry_subtree', targetId: 't1' })
+  it('现代用户 body 轮锚 → 整轮重试锚点是它自己', () => {
+    expect(messageRetryTargetOf(user('u1'))).toEqual({ action: 'retry_subtree', targetId: 'u1' })
+  })
+
+  it('旧式轮骨架 → 解析到直接子级用户轮锚，不把骨架 id 交给后端', () => {
+    const run = { id: 't1', status: NODE_STATUS_FAILED, actions: ['retry_subtree'] as ChatNode['actions'] } as const
+    const anchor = user('u1', 't1')
+    expect(messageRetryTargetOf(run, [run, anchor] as ChatNode[])).toEqual({
+      action: 'retry_subtree',
+      targetId: 'u1',
+    })
+  })
+
+  it('flat 档升根节点 → 沿 scope_root 找回用户轮锚', () => {
+    const anchor = user('u1')
+    const child = {
+      id: 'a1',
+      status: NODE_STATUS_FAILED,
+      parent_id: undefined,
+      meta: { scope_root: 'u1' },
+      actions: ['retry_subtree'] as ChatNode['actions'],
+    } as const
+    expect(messageRetryTargetOf(child, [anchor, child] as ChatNode[])).toEqual({
+      action: 'retry_subtree',
+      targetId: 'u1',
+    })
   })
 
   it('后端下发 retry_compaction → 压缩粒度，锚点是压缩节点自己', () => {
@@ -574,26 +607,37 @@ describe('messageRetryTargetOf：重试分派（动作由后端 actions 决定�
     ).toEqual({ action: 'retry_compaction', targetId: 'cp1' })
   })
 
-  it('兜底：无 actions 的失败叶子 → 整轮重试并回溯到父骨架', () => {
-    expect(
-      messageRetryTargetOf({ id: 'x1', status: NODE_STATUS_FAILED, parent_id: 't1' }),
-    ).toEqual({ action: 'retry_subtree', targetId: 't1' })
-    expect(
-      messageRetryTargetOf({ id: 'r1', status: NODE_STATUS_FAILED, parent_id: 't1' }),
-    ).toEqual({ action: 'retry_subtree', targetId: 't1' })
+  it('没有后端动作声明 → 不补造重试', () => {
+    expect(messageRetryTargetOf({ id: 'x1', status: NODE_STATUS_FAILED, parent_id: 't1' })).toBeNull()
   })
 
-  it('兜底：无父可回溯时退回自身（不发出空 targetId）', () => {
-    expect(messageRetryTargetOf({ id: 'x1', status: NODE_STATUS_FAILED })).toEqual({
-      action: 'retry_subtree',
-      targetId: 'x1',
-    })
+  it('整轮动作找不到用户轮锚 → 不发出必然被拒绝的骨架靶子', () => {
+    expect(messageRetryTargetOf({
+      id: 't1',
+      status: NODE_STATUS_FAILED,
+      actions: ['retry_subtree'] as ChatNode['actions'],
+    })).toBeNull()
   })
 
-  it('兜底：中止态同样回溯到父骨架', () => {
-    expect(
-      messageRetryTargetOf({ id: 'tc1', status: NODE_STATUS_ABORTED, parent_id: 't1' }),
-    ).toEqual({ action: 'retry_subtree', targetId: 't1' })
+  it('最近的可恢复用户轮锚优先；成功轮与无动作失败轮跳过', () => {
+    const old = user('u-old')
+    const done: ChatNode = { ...user('u-done'), status: NODE_STATUS_COMPLETED }
+    const silent = { ...user('u-silent'), actions: undefined }
+    const current = user('u-current')
+    expect(latestRoundRetryAnchorOf([old, done, silent, current])).toBe(current)
+  })
+
+  it('最新用户轮成功时，不把仍保留的旧失败支误报成当前错误', () => {
+    const old = user('u-old')
+    const current: ChatNode = { ...user('u-current'), status: NODE_STATUS_COMPLETED }
+    expect(latestRoundRetryAnchorOf([old, current])).toBeNull()
+  })
+
+  it('节点声明任一重试动作才显示重试按钮', () => {
+    expect(messageHasRetryAction({ actions: ['retry'] as ChatNode['actions'] })).toBe(true)
+    expect(messageHasRetryAction({ actions: ['retry_subtree'] as ChatNode['actions'] })).toBe(true)
+    expect(messageHasRetryAction({ actions: [] as ChatNode['actions'] })).toBe(false)
+    expect(messageHasRetryAction({})).toBe(false)
   })
 })
 

@@ -101,6 +101,7 @@ pub fn message_of_node(node: &crate::kernel::vdfs::VdfsNode, text: String) -> Op
         tool_call_id: attr(&node.attributes, "tool_call_id"),
         seq: attr(&node.attributes, "seq"),
         error: attr(&node.attributes, "error"),
+        actions: attr(&node.attributes, "actions"),
         principal,
         // `message_node` 把「没有 meta」写成 `null`；这里还原成"没有"
         meta,
@@ -182,7 +183,7 @@ fn derive_actions(node: &ChatNode) -> Option<Vec<ResumeAction>> {
         } else {
             vec![]
         }
-    } else if node.is_run() {
+    } else if node.is_run() || (node.is_text() && node.node_role() == Some(NodeRole::User)) {
         if failed || aborted {
             vec![ResumeAction::RetrySubtree]
         } else {

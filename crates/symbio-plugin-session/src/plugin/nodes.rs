@@ -744,6 +744,7 @@ pub(crate) fn message_node(m: &cm::ChatNode) -> VdfsNode {
         ("tool_call_id", json!(m.tool_call_id)),
         ("seq", json!(m.seq)),
         ("error", json!(m.error)),
+        ("actions", json!(m.actions)),
         // 谁说的：与 `message_of_node` 成对演进——属性表增字段
         // 不可能只改一边。`null` = 未标身份，反序列化回 `None`。
         ("principal", json!(m.principal)),

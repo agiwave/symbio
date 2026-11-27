@@ -62,7 +62,7 @@
         v-if="isUnsettled"
         :text="errorText"
         :aborted="isAborted"
-        retryable
+        :retryable="hasRetryAction"
         variant="skeleton"
         @retry="emit('retry', node.id)"
       />
@@ -107,6 +107,7 @@ import {
   childStreamOf,
   isAbortedStatus,
   isStreamingStatus,
+  messageHasRetryAction,
   messageParentSessionId,
   messageTypeLabel,
   missingResultNoteOf,
@@ -174,6 +175,7 @@ const realChildren = computed<ChatNode[]>(() => renderableChildrenOf(props.node)
 const isAborted = computed(() => isAbortedStatus(props.facets.status))
 /** 需要向用户交代的非正常终态（失败 / 中止） */
 const isUnsettled = computed(() => isUnsettledNodeStatus(props.facets.status))
+const hasRetryAction = computed(() => messageHasRetryAction(props.node))
 
 const { errorText } = useMessageContent(
   () => props.node,

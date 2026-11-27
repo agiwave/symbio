@@ -5,10 +5,8 @@
   （`ModelChatPanel` 的流尾兜底）。同一套观感与「重试」入口，因此只有一份实现——
   原先这几处各写了一遍 `.error-box` 结构。
 
-  会话级那处是**唯一带关闭按钮的**（`dismissible`）：节点级错误由节点状态承载，
-  「关掉它」只是把状态藏起来，下一帧重渲染又回来；而会话级兜底错误没有节点可依，
-  用户需要一个方式清掉它（它本身也会在下一轮开始时被节点状态覆盖，见
-  `sessions.ts::applySessionState`）。
+  会话级那处可带关闭按钮（`dismissible`）：仅用于清掉本地传输错误；持久化轮次错误
+  由节点状态承载，关闭后会从同一份事实立即重算，因此不提供无效关闭入口。
 
   中止（`aborted`）**不是故障**：图标与配色都与失败区分开（中性色而非故障红），
   但**重试入口照给**——这一轮只跑了一半，用户中止后通常就想重跑它。
@@ -23,7 +21,8 @@
   >
     <span class="err-icon" aria-hidden="true">{{ aborted ? '⏹' : '⚠' }}</span>
     <span class="err-text">{{ aborted ? MESSAGE_ABORTED_NOTE : text }}</span>
-    <button v-if="retryable" class="retry" @click="emit('retry')">重试</button>
+    <button v-if="retryable" class="retry" :disabled="disabled" @click="emit('retry')">重试</button>
+    <button v-if="modifiable" class="modify" :disabled="disabled" @click="emit('modify')">修改后重试</button>
     <button v-if="dismissible" class="dismiss" title="关闭" aria-label="关闭" @click="emit('dismiss')">×</button>
   </div>
 </template>
@@ -39,15 +38,19 @@ withDefaults(
     aborted?: boolean
     /** 是否给出「重试」入口 */
     retryable?: boolean
+    /** 是否给出「修改后重试」入口（仅整轮恢复提供） */
+    modifiable?: boolean
+    /** 恢复请求在途时禁用动作，避免重复建支或重复执行 */
+    disabled?: boolean
     /** 容器级错误条（骨架）：需要额外的上下间距 */
     variant?: 'plain' | 'skeleton'
     /** 是否给出「关闭」入口（仅会话级兜底错误需要，见文件头注） */
     dismissible?: boolean
   }>(),
-  { aborted: false, retryable: false, variant: 'plain', dismissible: false },
+  { aborted: false, retryable: false, modifiable: false, disabled: false, variant: 'plain', dismissible: false },
 )
 
-const emit = defineEmits<{ retry: []; dismiss: [] }>()
+const emit = defineEmits<{ retry: []; modify: []; dismiss: [] }>()
 </script>
 
 <style scoped>
@@ -94,6 +97,22 @@ const emit = defineEmits<{ retry: []; dismiss: [] }>()
   padding: 0.2rem 0.6rem;
   font-size: 0.76rem;
   cursor: pointer;
+}
+.modify {
+  flex-shrink: 0;
+  min-height: 1.5rem;
+  background: transparent;
+  border: 1px solid var(--color-error-border);
+  color: var(--color-error-fg);
+  border-radius: 0.375rem;
+  padding: 0.2rem 0.6rem;
+  font-size: 0.76rem;
+  cursor: pointer;
+}
+.retry:disabled,
+.modify:disabled {
+  opacity: 0.6;
+  cursor: not-allowed;
 }
 /* 关闭（×）：与「重试」同排，但视觉上更低一级——它不是主操作。 */
 .dismiss {

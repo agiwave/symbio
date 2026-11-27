@@ -496,6 +496,9 @@ impl Convergence {
                         .collect();
                 let failed_node = cm::ChatNode {
                     id: format!("failed:{}", failed.event_id),
+                    // 失败正文属于本轮子树；不挂父节点会在切支后留下孤立错误，
+                    // 也使按轮装配请求时无法排除未选中支。
+                    parent_id: Some(root_id.to_string()),
                     msg_type: Some(cm::NodeKind::Body),
                     content: Some(cm::MessageContent::Text(why.clone())),
                     status: Some(cm::NodeStatus::Failed),

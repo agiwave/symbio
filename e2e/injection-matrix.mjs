@@ -137,7 +137,7 @@ export const KINDS = [
  */
 export const CELLS = [
   // ── dialog ──────────────────────────────────────────────────────────
-  { kind: 'llm.status', face: 'dialog', cases: ['t5', 't53'] },
+  { kind: 'llm.status', face: 'dialog', cases: ['t5', 't53', 't101'] },
   { kind: 'llm.failTimes', face: 'dialog', na: '瞬时失败的重试语义由 `llm.status` 的多轮失败用例覆盖；`failTimes` 的独有形态是「同一会话第 N 轮坏」，落在 session 面（t47）' },
   { kind: 'llm.rateLimit', face: 'dialog', cases: ['t50'] },
   { kind: 'llm.latencyMs', face: 'dialog', cases: ['t52'] },

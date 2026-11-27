@@ -546,27 +546,47 @@ export type MessageRetryAction = Extract<
  * 失败重试的分派结果（resume 的 `action` + `targetId`）。
  *
  * 三个粒度，**粒度由后端下发的 `actions` 决定**：
- * - `retry`            —— 只重跑**这一个工具**（删除该工具的失败结果 → 原参数重新执行）；
- * - `retry_subtree`       —— 重跑**整轮**（删除响应子树 → 重新走 LLM 请求）；
- * - `retry_compaction` —— 重跑**这一次压缩**（删除失败压缩节点 → 重新压缩）。
+ * - `retry`            —— 只重跑**这一个工具**；
+ * - `retry_subtree`    —— 保留旧支并另开一支，靶子是用户轮锚；
+ * - `retry_compaction` —— 重跑**这一次压缩**。
  */
 export interface MessageRetryTarget {
   action: MessageRetryAction
   targetId: string
 }
 
-/**
- * 由失败节点推出该发哪种重试（**重试分派的唯一实现**）。
- *
- * 动作种类**优先读后端下发的 `actions`**——工具节点带 `retry`、压缩节点带
- * `retry_compaction`、运行骨架带 `retry_subtree`，粒度与靶子都由数据给出，前端不再 `switch(type)`。
- * `actions` 缺席（历史数据、合成节点、或尚未走到交互面的本地视图）时退回一条**不认业务类型**
- * 的兜底：失败 / 中止一律整轮重试，叶子回溯到父骨架（后端 `process_retry_subtree` 要求
- * `target_id` 指向运行骨架，叶子自身作靶会被拒绝）——这条兜底只吃 `status` + `parent_id`。
- */
+type RetryNode = Pick<ChatNode, 'id' | 'status' | 'parent_id' | 'actions' | 'principal' | 'meta'>
+
+/** `retry_subtree` 只认用户轮锚；旧式轮骨架沿父链或直接子级解析，绝不把骨架 id 交给后端。 */
+function retrySubtreeAnchorOf(node: RetryNode, messages: readonly ChatNode[]): string | null {
+  if (messageRoleOf(node) === CHAT_ROLE_USER) return node.id
+  const byId = new Map(messages.map((message) => [message.id, message]))
+  const visited = new Set<string>()
+  let current: RetryNode | undefined = node
+  while (current && !visited.has(current.id)) {
+    visited.add(current.id)
+    if (messageRoleOf(current) === CHAT_ROLE_USER) return current.id
+    const parentId: string | null | undefined = current.parent_id || messageScopeRoot(current)
+    current = parentId ? byId.get(parentId) : undefined
+  }
+  return messages.find((message) =>
+    messageRoleOf(message) === CHAT_ROLE_USER
+    && (message.parent_id === node.id || messageScopeRoot(message) === node.id),
+  )?.id ?? null
+}
+
+/** 节点是否声明了任一重试动作；靶子解析另由 `messageRetryTargetOf` 完成。 */
+export function messageHasRetryAction(node: Pick<ChatNode, 'actions'>): boolean {
+  return hasAction(node.actions, RESUME_ACTION_RETRY)
+    || hasAction(node.actions, RESUME_ACTION_RETRY_COMPACTION)
+    || hasAction(node.actions, RESUME_ACTION_RETRY_SUBTREE)
+}
+
+/** 由失败节点推出该发哪种重试；没有后端声明动作时返回 `null`，不补造恢复语义。 */
 export function messageRetryTargetOf(
-  node: Pick<ChatNode, 'id' | 'status' | 'parent_id' | 'actions'>,
-): MessageRetryTarget {
+  node: RetryNode,
+  messages: readonly ChatNode[] = [],
+): MessageRetryTarget | null {
   const actions = node.actions
   if (hasAction(actions, RESUME_ACTION_RETRY)) {
     return { action: RESUME_ACTION_RETRY, targetId: node.id }
@@ -575,10 +595,22 @@ export function messageRetryTargetOf(
     return { action: RESUME_ACTION_RETRY_COMPACTION, targetId: node.id }
   }
   if (hasAction(actions, RESUME_ACTION_RETRY_SUBTREE)) {
-    return { action: RESUME_ACTION_RETRY_SUBTREE, targetId: node.id }
+    const targetId = retrySubtreeAnchorOf(node, messages)
+    return targetId ? { action: RESUME_ACTION_RETRY_SUBTREE, targetId } : null
   }
-  // 兜底（无 `actions`）：整轮粒度，叶子回溯到父骨架，无父退回自身。
-  return { action: RESUME_ACTION_RETRY_SUBTREE, targetId: node.parent_id || node.id }
+  return null
+}
+
+/** 流内整轮恢复只认最新用户轮；旧支失败不得在后续成功轮之后继续显示错误条。 */
+export function latestRoundRetryAnchorOf(messages: readonly ChatNode[]): ChatNode | null {
+  let latestUser: ChatNode | undefined
+  for (const message of messages) {
+    if (messageRoleOf(message) === CHAT_ROLE_USER) latestUser = message
+  }
+  if (!latestUser) return null
+  const status = messageStatusOf(latestUser)
+  if (status !== NODE_STATUS_FAILED && status !== NODE_STATUS_ABORTED) return null
+  return messageRetryTargetOf(latestUser)?.action === RESUME_ACTION_RETRY_SUBTREE ? latestUser : null
 }
 
 // 后端失败类别：本批剩余调用被跳过，实际未执行（见后端 `not_executed_result`）

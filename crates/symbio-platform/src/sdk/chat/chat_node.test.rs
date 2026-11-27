@@ -460,6 +460,17 @@ fn derived_actions_from_shape_status_meta() {
     .with_derived_presentation();
     assert!(has(&run_failed, ResumeAction::RetrySubtree));
 
+    // 现代轮锚就是用户 body；失败 / 中止必须直接声明整轮重试。
+    let user_failed = ChatNode {
+        id: "u".into(),
+        msg_type: Some(NodeKind::Body),
+        principal: Some(Principal::from_legacy(crate::sdk::keys::PRINCIPAL_USER)),
+        status: Some(NodeStatus::Failed),
+        ..Default::default()
+    }
+    .with_derived_presentation();
+    assert!(has(&user_failed, ResumeAction::RetrySubtree));
+
     // 压缩失败 → RetryCompaction
     let comp_failed = ChatNode {
         id: "c".into(),

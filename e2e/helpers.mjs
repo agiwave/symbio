@@ -1151,8 +1151,9 @@ export async function abortSession(cli, sid, metadata = {}) {
  * 经 HTTP 边界**回填一次恢复**（`action(<sid>/message/<mid>, <动作词>)`）。
  *
  * 曾经的入口是 `session/chat/send` 的 `resume` 字段（输入面双轨退役）。
- * 落点是**目标消息自身**：恢复不产生新用户消息，它就落在当时那条消息上
- * （删除-重建），而入队会让它排到新消息之后、候选早已被改写。
+ * 落点是**目标消息自身**。`retry_subtree` 的目标必须是用户轮锚：后端保留旧支、
+ * 复制用户内容另开新支；其它动作由后端按目标节点与动作事实续接。
+ * 入队会产生新 id 并丢掉恢复锚点，因此恢复不能走发言入口。
  *
  * 动作词取 `ResumeAction` 的线上词形（snake_case）：`answer` / `approve` /
  * `reject` / `supply` / `retry` / `retry_subtree` / `retry_compaction`。载荷
