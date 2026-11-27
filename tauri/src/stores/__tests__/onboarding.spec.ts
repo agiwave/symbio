@@ -15,9 +15,15 @@ import { createPinia, setActivePinia } from 'pinia'
 const hoisted = vi.hoisted(() => ({
   listVdfs: vi.fn(),
   findMountDirByNewTypeExt: vi.fn(),
+  listSessions: vi.fn(),
+  readSessionTranscript: vi.fn(),
 }))
 
 vi.mock('@/services/vdfs', () => ({ listVdfs: hoisted.listVdfs }))
+vi.mock('@/services/session', () => ({
+  listSessions: hoisted.listSessions,
+  readSessionTranscript: hoisted.readSessionTranscript,
+}))
 vi.mock('@/services/vdfsScheme', () => ({
   findMountDirByNewTypeExt: hoisted.findMountDirByNewTypeExt,
 }))
@@ -37,8 +43,9 @@ const MODEL_DIR = '@vfs/model'
 const SESSION_DIR = '@vfs/session'
 
 /** 默认：模型类别认得出、会话类别认得出、模型目录有 1 个条目（= 已配好） */
-function arrange(opts: { models?: number; modelDir?: string | null } = {}) {
+function arrange(opts: { models?: number; modelDir?: string | null; firstExchange?: boolean } = {}) {
   const models = opts.models ?? 1
+  const firstExchange = opts.firstExchange ?? false
   const modelDir = opts.modelDir === undefined ? MODEL_DIR : opts.modelDir
   hoisted.findMountDirByNewTypeExt.mockImplementation(async (ext: string) =>
     ext === 'model' ? modelDir : SESSION_DIR,
@@ -56,6 +63,14 @@ function arrange(opts: { models?: number; modelDir?: string | null } = {}) {
       ext: 'form',
     })),
   })
+  hoisted.listSessions.mockResolvedValue([
+    {
+      id: 's1',
+      message_count: firstExchange ? 2 : 0,
+      has_first_exchange: firstExchange,
+      metadata: {},
+    },
+  ])
 }
 
 beforeEach(() => {
@@ -131,7 +146,25 @@ describe('onboarding 三步判据', () => {
     expect(s.sessionReady).toBe(false)
   })
 
-  it('某一步读取失败不炸整体：只把那一步判为未就绪，会话那步照常判定', async () => {
+  it('第三步只认后端首轮对话投影，不按消息数或摘要推断，也不读转写', async () => {
+    arrange({ models: 1, firstExchange: false })
+    hoisted.listSessions.mockResolvedValue([
+      { id: 'failed', message_count: 20, summary: '失败兜底', has_first_exchange: false, metadata: {} },
+    ])
+    const s = useOnboardingStore()
+    await s.refresh()
+    expect(s.sessionReady).toBe(false)
+    expect(hoisted.readSessionTranscript).not.toHaveBeenCalled()
+
+    hoisted.listSessions.mockResolvedValue([
+      { id: 'done', message_count: 2, has_first_exchange: true, metadata: {} },
+    ])
+    await s.refresh()
+    expect(s.sessionReady).toBe(true)
+  })
+
+  it('某一步读取失败不炸整体：只把那步判为未就绪，会话那步照常判定', async () => {
+    arrange({ models: 0, firstExchange: true })
     hoisted.findMountDirByNewTypeExt.mockImplementation(async (ext: string) => {
       if (ext === 'model') throw new Error('IPC 断了')
       return SESSION_DIR

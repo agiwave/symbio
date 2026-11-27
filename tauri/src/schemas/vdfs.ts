@@ -802,11 +802,13 @@ export interface SessionRuntime {
  * `SessionStateChange` 写进节点、前端却读不出来，UI 永远看不到它，且不报错。
  * 两个属性（`outcome` / `error`）都必须在此落地。
  */
-export function sessionRuntimeOf(node: VdfsNode): SessionRuntime {
+export function sessionRuntimeOf(
+  node: Partial<Pick<VdfsNode, 'status' | 'outcome' | 'error'>>,
+): SessionRuntime {
   const attrs = node as unknown as Record<string, unknown>
   const outcome = attrs.outcome
   const error = attrs.error
-  const rt: SessionRuntime = { status: node.status }
+  const rt: SessionRuntime = { status: node.status ?? 'active' }
   if (outcome === OUTCOME_COMPLETED || outcome === OUTCOME_ABORTED || outcome === OUTCOME_FAILED) {
     rt.outcome = outcome
   }

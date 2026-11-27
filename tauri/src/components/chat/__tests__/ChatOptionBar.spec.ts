@@ -35,6 +35,9 @@ const hoisted = vi.hoisted(() => ({
 
 vi.mock('@/services/session', () => ({ updateSession: hoisted.updateSession }))
 vi.mock('@/services/nativePick', () => ({ pickPath: hoisted.pickPath }))
+vi.mock('@/services/home', () => ({
+  getWorkspacePath: vi.fn(async () => ({ workdir: '', expanded_path: '', recent_workspaces: [] })),
+}))
 vi.mock('@/services/hostDirectories', () => ({
   getHostRuntime: vi.fn(async () => ({
     homedir: '/srv/home/me', bootstrap_path: '/srv/bootstrap', deployment: 'server',

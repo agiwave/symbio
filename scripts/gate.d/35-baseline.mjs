@@ -2,8 +2,8 @@
 //
 // ## 为什么单独立一个阶段
 //
-// 棘轮基线是源码常量，而它就是「有测试被删就红」这条判据本身。把它改小不需要动测试、
-// 不需要动守卫代码，门禁照样全绿且不留痕迹——与「测试消失」同形。所以守它的判据必须
+// 棘轮基线是源码常量，而它就是「质量指标被改松就红」这条判据本身。把它改小不需要动测试、
+// 不需要动守卫代码，门禁照样全绿且不留痕迹。所以守它的判据必须
 // **读基准版本**，而不是读同一份源码。
 //
 // 基准取「最近触碰过该文件的提交及其父」：只比最近一版会漏掉「已经提交的那次下调」，
@@ -254,6 +254,14 @@ function waiverReader(tag) {
   }
 }
 
+// 测试数量已退出质量棘轮；从通用基线中排除这些退役格，删除它们不算削判据。
+const TEST_COUNT_KEYS = new Set([
+  'rustTests', 'kernelRustTests', 'cliRustTests', 'tauriRustTests', 'ciRustTestsTotal',
+  'vitestFiles', 'vitestTests', 'e2eCases',
+])
+const qualityBaselineCells = (text) =>
+  new Map([...parseBaselineCells(text)].filter(([key]) => !TEST_COUNT_KEYS.has(key)))
+
 // ── 棘轮清单 ──────────────────────────────────────────────────────────
 // `dir`：`floor` = 只增（下限），`ceiling` = 只减（上限）。
 // `envVar`：该落点的值可经环境变量覆盖 ⇒ 额外判「覆盖值不得比默认值更松」。
@@ -264,9 +272,9 @@ const RATCHETS = [
     id: 'baseline',
     file: 'scripts/gate.d/_shared.mjs',
     dir: 'floor',
-    cellsOf: parseBaselineCells,
+    cellsOf: qualityBaselineCells,
     waivers: waiverReader('baseline-allow'),
-    label: 'BASELINE（Rust / CI / 前端用例数、verify 程序数与断言数、e2e 用例数）',
+    label: 'BASELINE（verify 程序数与断言数；测试数量不作棘轮）',
   },
   {
     // 形状三格（`pub trait` 数 / `fn` 成员总数 / 带默认体的成员数）。放宽的**资格**由

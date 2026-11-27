@@ -87,6 +87,14 @@ fn assistant_msg(text: &str) -> ChatNode {
     }
 }
 
+fn legacy_text_pair() -> [ChatNode; 2] {
+    serde_json::from_value(json!([
+        { "id": "legacy-user", "role": "user", "content": "旧问题" },
+        { "id": "legacy-assistant", "role": "assistant", "content": "旧回答" },
+    ]))
+    .expect("合法 rootless legacy 文本应可反序列化")
+}
+
 #[test]
 fn summary_takes_last_assistant_reply() {
     // 摘要 = 最新一条**助手**回复（标题给用户最后说的话，摘要给助手最后的回答）
@@ -197,6 +205,148 @@ fn merge_metadata_empty_object_is_a_noop() {
 
 /// 写方（模型执行体）把 `context` 交在终答载荷上后，重建出来的 Turn 骨架能让
 /// 读侧读到水位——这是「链在」的那一节；读方本身只是投影。
+#[test]
+fn summary_skips_failed_and_internal_assistant_text() {
+    use symbio_platform::kernel::chat::chat_node as cm;
+    let mut failed = assistant_msg("请求失败，请稍后重试");
+    failed.status = Some(cm::NodeStatus::Failed);
+    failed.error = Some("上游不可用".into());
+    let mut internal = assistant_msg("内部摘要");
+    internal.meta = Some(json!({ "exclude_from_context": true }));
+    let mut reasoning = assistant_msg("思考过程");
+    reasoning.msg_type = Some(cm::NodeKind::Notice);
+    reasoning.meta = Some(json!({ "style_tag": cm::CHAT_STYLE_TAG_REASONING }));
+
+    assert_eq!(
+        derive_session_summary(&[
+            assistant_msg("真正的回答"),
+            user_msg("再问"),
+            failed,
+            internal,
+            reasoning
+        ]),
+        Some("真正的回答".into())
+    );
+}
+
+#[test]
+fn first_exchange_requires_a_successful_text_reply_in_the_same_round() {
+    use symbio_platform::kernel::chat::chat_node as cm;
+    let user = user_msg("第一问");
+    let mut reply = assistant_msg("第一答");
+    reply.parent_id = Some(user.id.clone());
+    reply.msg_type = Some(cm::NodeKind::Body);
+    reply.status = Some(cm::NodeStatus::Completed);
+
+    assert!(!has_first_exchange(std::slice::from_ref(&user)));
+    let mut unrelated = assistant_msg("不属于这一轮");
+    unrelated.parent_id = Some("another-root".into());
+    unrelated.msg_type = Some(cm::NodeKind::Body);
+    unrelated.status = Some(cm::NodeStatus::Completed);
+    assert!(!has_first_exchange(&[user.clone(), unrelated]));
+    assert!(has_first_exchange(&[user.clone(), reply.clone()]));
+
+    reply.content = Some(cm::MessageContent::Text("  ".into()));
+    assert!(!has_first_exchange(&[user.clone(), reply.clone()]));
+    reply.content = Some(cm::MessageContent::Text("第一答".into()));
+    reply.status = Some(cm::NodeStatus::Failed);
+    assert!(!has_first_exchange(&[user, reply]));
+}
+
+#[test]
+fn first_exchange_accepts_adjacent_rootless_legacy_text() {
+    use symbio_platform::kernel::chat::chat_node as cm;
+
+    let legacy = legacy_text_pair();
+    assert!(has_first_exchange(&legacy));
+
+    let mut separated = legacy.to_vec();
+    separated.insert(1, ChatNode::default());
+    assert!(!has_first_exchange(&separated), "兼容只认相邻文本");
+
+    let mut modern_rootless = legacy;
+    modern_rootless[1].msg_type = Some(cm::NodeKind::Body);
+    modern_rootless[1].status = Some(cm::NodeStatus::Completed);
+    assert!(
+        !has_first_exchange(&modern_rootless),
+        "现代有类型回复仍必须挂到同一用户根下"
+    );
+}
+
+#[test]
+fn first_exchange_legacy_compatibility_still_rejects_non_conversation_nodes() {
+    use symbio_platform::kernel::chat::chat_node as cm;
+
+    let legacy = legacy_text_pair();
+    let mut reply = legacy[1].clone();
+    reply.msg_type = Some(cm::NodeKind::Notice);
+    reply.meta = Some(json!({ "style_tag": cm::CHAT_STYLE_TAG_REASONING }));
+    assert!(!has_first_exchange(&[legacy[0].clone(), reply]));
+
+    let mut reply = legacy[1].clone();
+    reply.meta = Some(json!({ "style_tag": cm::CHAT_STYLE_TAG_REASONING }));
+    assert!(!has_first_exchange(&[legacy[0].clone(), reply]));
+
+    let mut reply = legacy[1].clone();
+    reply.msg_type = Some(cm::NodeKind::Skeleton);
+    reply.meta = Some(json!({ "style_tag": cm::CHAT_STYLE_TAG_TOOL }));
+    assert!(!has_first_exchange(&[legacy[0].clone(), reply]));
+
+    let mut reply = legacy[1].clone();
+    reply.meta = Some(json!({ "style_tag": cm::CHAT_STYLE_TAG_TOOL }));
+    assert!(!has_first_exchange(&[legacy[0].clone(), reply]));
+
+    let mut reply = legacy[1].clone();
+    reply.meta = Some(json!({ "exclude_from_context": true }));
+    assert!(!has_first_exchange(&[legacy[0].clone(), reply]));
+
+    let mut reply = legacy[1].clone();
+    reply.status = Some(cm::NodeStatus::Failed);
+    assert!(!has_first_exchange(&[legacy[0].clone(), reply]));
+
+    let mut user = legacy[0].clone();
+    user.meta = Some(json!({ "compacted": true }));
+    assert!(!has_first_exchange(&[user, legacy[1].clone()]));
+
+    let mut reply = legacy[1].clone();
+    reply.content = Some(cm::MessageContent::Text("  ".into()));
+    assert!(!has_first_exchange(&[legacy[0].clone(), reply]));
+}
+
+#[test]
+fn first_exchange_accepts_attachments_but_rejects_internal_triggers_and_compaction() {
+    use symbio_platform::kernel::chat::chat_node as cm;
+    let mut attachment = user_msg("");
+    attachment.content = Some(cm::MessageContent::Parts(vec![cm::ContentPart::ImageUrl {
+        image_url: cm::ImageUrl {
+            url: "file:///tmp/a.png".into(),
+            detail: None,
+        },
+    }]));
+    let mut reply = assistant_msg("看到了");
+    reply.parent_id = Some(attachment.id.clone());
+    reply.msg_type = Some(cm::NodeKind::Body);
+    reply.status = Some(cm::NodeStatus::Completed);
+    assert!(has_first_exchange(&[attachment.clone(), reply.clone()]));
+
+    let mut trigger = attachment.clone();
+    trigger.meta = Some(json!({ "trigger": { "kind": "heartbeat" } }));
+    assert!(!has_first_exchange(&[trigger, reply.clone()]));
+    let mut compacted = attachment;
+    compacted.meta = Some(json!({ "compacted": true }));
+    assert!(!has_first_exchange(&[compacted, reply]));
+}
+
+#[test]
+fn first_exchange_projection_defaults_false_only_for_unknown_legacy_summaries() {
+    let legacy: serde_json::Value = serde_json::from_str(
+        r#"{"id":"s","title":"旧会话","created_at":1,"updated_at":2,"metadata":{},"message_count":2,"summary":null,"meta_tags":[],"context":null}"#,
+    )
+    .unwrap();
+    let summary: SessionSummary = serde_json::from_value(legacy).unwrap();
+    assert!(!summary.has_first_exchange);
+}
+
 #[test]
 fn latest_context_watermark_reads_what_the_writer_put_on_the_final_fact() {
     use symbio_platform::kernel::event::{Entity, Verb};

@@ -2,7 +2,7 @@
 //
 // 这里覆盖 `autoWork`（门禁的「自动执行的工作」原语）、它的整链版 `autoChain`
 // （只在**末态**判差异，理由见下面那族用例的第一条注释）、**棘轮判据一族**
-// （`ratchetVerdict` / `cargoTestRatchet` / `BASELINE` 只增）与**源码区间扫描**
+// （`ratchetVerdict` / `cargoTestRun` / 质量 `BASELINE` 只增）与**源码区间扫描**
 // （`codeSpansOf` / `stringLiteralsOf` / `codeTextOf`）。前两者值得有回归
 // 测试的理由，与 `30-docs.mjs` 开头那句是同一个：**一个只会亮绿灯的机制等于没有机制**。
 // `autoWork` 的失效方式恰恰是「看起来在修、其实没把修复带进提交」，而这一点
@@ -23,7 +23,7 @@ import {
   autoWork,
   canonicalPath,
   codeTextOf,
-  cargoTestRatchet,
+  cargoTestRun,
   inTrees,
   legacyPathspecs,
   BASELINE,
@@ -716,103 +716,54 @@ test('gate：e2e 失败详情不能按 ci 模式关掉（CI 上日志文件看�
   )
 })
 
-// ── cargoTestRatchet：两个独立 workspace 共用的「跑测试 + 通过数棘轮」 ──────
-//
-// 抽成共享函数就是为了让 `symbio` 与 `cli` 是**同一套判据**，所以这里钉的是
-// **判据本身**，不是某一侧的调用：三条分支（低于 / 等于 / 高于基线）加上两条
-// 退化路径（解析不到 / 命令失败）。其中「解析不到不判红」尤其要钉住——那是
-// 刻意的：宁可漏报，也不因为**解析**失败把门禁变红（必然红的门禁比没有门禁更糟）。
-const fakeCtx = (output, { ci = false, ok = true } = {}) => ({
+// ── cargoTestRun：执行测试，数量只作信息 ────────────────────────────────
+const fakeCtx = (output, { ci = true, ok = true } = {}) => ({
   ci,
   run: async () => ({ ok, output, code: ok ? 0 : 1, timedOut: false }),
 })
-const ratchet = (output, opts, { baseline = 10, ciBaseline } = {}) =>
-  cargoTestRatchet(fakeCtx(output, opts), {
+const cargoTest = (output, opts) =>
+  cargoTestRun(fakeCtx(output, opts), {
     label: 'cargo test',
     cwd: '.',
-    args: ['test'],
-    baseline,
-    baselineName: 'rustTests',
-    // 关键：**不传就把这个键整个省掉**（而不是传 undefined 占位）——被测函数判的是
-    // `ciBaseline === undefined`，两种「没给」必须走同一条路径。
-    ...(ciBaseline === undefined ? {} : { ciBaseline, ciBaselineName: 'ciRustTestsTotal' }),
+    args: ['test', '--workspace'],
   })
 
-test('cargoTestRatchet：通过数等于基线 ⇒ 通过且无 note', async () => {
-  const r = await ratchet('test result: ok. 10 passed; 0 failed').run()
+test('cargoTestRun：通过数减少仍通过，测试数量不是质量棘轮', async () => {
+  const r = await cargoTest('test result: ok. 1 passed; 0 failed').run()
+  assert.equal(r.ok, true)
+})
+
+test('cargoTestRun：通过数增加不要求更新基线', async () => {
+  const r = await cargoTest('test result: ok. 999 passed; 0 failed').run()
   assert.equal(r.ok, true)
   assert.equal(r.note, undefined)
 })
-test('cargoTestRatchet：通过数低于基线 ⇒ 判红（有测试被删或失败）', async () => {
-  const r = await ratchet('test result: ok. 9 passed; 0 failed').run()
-  assert.equal(r.ok, false)
-  assert.match(r.note, /9 < 基线 10/)
-})
-test('cargoTestRatchet：通过数高于基线 ⇒ 通过但提示同步基线', async () => {
-  const r = await ratchet('test result: ok. 11 passed; 0 failed').run()
+
+test('cargoTestRun：解析不到通过数仍通过，不因日志格式判红', async () => {
+  const r = await cargoTest('no summary here').run()
   assert.equal(r.ok, true)
-  assert.match(r.note, /基线待更新/)
 })
-test('cargoTestRatchet：解析不到通过数 ⇒ 通过并标注，不因解析失败判红', async () => {
-  const r = await ratchet('no summary here').run()
-  assert.equal(r.ok, true)
-  assert.match(r.note, /未能解析/)
-})
-test('cargoTestRatchet：命令失败 ⇒ 判红并带退出码', async () => {
-  const r = await ratchet('', { ok: false }).run()
+
+test('cargoTestRun：命令失败仍判红并带退出码', async () => {
+  const r = await cargoTest('', { ok: false }).run()
   assert.equal(r.ok, false)
   assert.match(r.note, /exit=1/)
 })
-// ── CI 分支：2026-10-07 从「只信退出码」改为与 `ciBaseline` 比对 ────────────
-//
-// 原实现是 `if (ctx.ci) return { ok: true }`（注释还写着「数字仅作信息展示」）——
-// **CI 这一侧从来没有棘轮**。本地删掉测试会被分包基线拦下，推上去 CI 却只信退出码，
-// 照样绿。这正是「测试失败」与「测试消失」的分界：后者**不留任何痕迹**，退出码恒为 0。
-// 而两条分支判据必须一致（抽成共享函数就是为了这个），否则本地与 CI 各自演化成两条规范。
-test('cargoTestRatchet：CI 全量等于基线 ⇒ 通过且无 note', async () => {
-  const r = await ratchet('test result: ok. 10 passed; 0 failed', { ci: true }, { ciBaseline: 10 }).run()
+
+test('cargoTestRun：workspace 多个测试目标按各行求和展示', async () => {
+  const r = await cargoTest('test result: ok. 7 passed; 0 failed\ntest result: ok. 3 passed; 0 failed').run()
   assert.equal(r.ok, true)
-  assert.equal(r.note, undefined)
 })
-test('cargoTestRatchet：CI 全量低于基线 ⇒ 判红（测试消失在 CI 也拦得住）', async () => {
-  const r = await ratchet('test result: ok. 10 passed; 0 failed', { ci: true }, { ciBaseline: 12 }).run()
-  assert.equal(r.ok, false)
-  assert.match(r.note, /10 < 基线 12/)
-})
-test('cargoTestRatchet：CI 全量高于基线 ⇒ 通过但提示同步基线', async () => {
-  const r = await ratchet('test result: ok. 11 passed; 0 failed', { ci: true }, { ciBaseline: 10 }).run()
-  assert.equal(r.ok, true)
-  assert.match(r.note, /基线待更新/)
-})
-// ⚠️ 这一条是本组的重点：**少写一个参数不该让守卫消失**。
-// 「退回只信退出码」是这条守卫唯一会**静默**失效的方式——调用方漏写 `ciBaseline`，
-// 不报错、不变慢、日志里只少一行字，CI 就此变回抓不住「测试消失」的状态。
-test('cargoTestRatchet：CI 模式缺 ciBaseline ⇒ 判红（省略参数不让棘轮消失）', async () => {
-  const r = await ratchet('test result: ok. 10 passed; 0 failed', { ci: true }).run()
-  assert.equal(r.ok, false)
-  assert.match(r.note, /缺 ciBaseline/)
-})
-// 解析不到 ⇒ 仍不判红，与本地同一口径（宁可漏报，也不因**解析**失败变红）。
-test('cargoTestRatchet：CI 解析不到通过数 ⇒ 通过并标注', async () => {
-  const r = await ratchet('no summary here', { ci: true }, { ciBaseline: 10 }).run()
-  assert.equal(r.ok, true)
-  assert.match(r.note, /未能解析/)
-})
-// CI 的实际输出形状是**多个测试目标各一行**，判据按求和而非首行——口径不同于本地
-// 分包（那条取首个 result 行）。求和算错会让 1347 这类基线判在错误的数上。
-test('cargoTestRatchet：CI 全量按各行求和（不是首行）', async () => {
-  const out = 'test result: ok. 7 passed; 0 failed\ntest result: ok. 3 passed; 0 failed'
-  const sum = await ratchet(out, { ci: true }, { ciBaseline: 10 }).run()
-  assert.equal(sum.ok, true)
-  assert.equal(sum.note, undefined)
-  const low = await ratchet(out, { ci: true }, { ciBaseline: 11 }).run()
-  assert.equal(low.ok, false)
-  assert.match(low.note, /10 < 基线 11/)
-})
-test('cargoTestRatchet：高出基线（无论是否超容差） ⇒ 判绿并自动上调（不再因「未回填」判红）', async () => {
-  const r = await ratchet(`test result: ok. ${10 + BASELINE_GRACE + 1} passed; 0 failed`).run()
-  assert.equal(r.ok, true)
-  assert.match(r.note, /基线待更新|自动上调/)
+
+test('测试数量基线已退出 BASELINE 与各测试阶段', () => {
+  for (const key of [
+    'rustTests', 'kernelRustTests', 'cliRustTests', 'tauriRustTests', 'ciRustTestsTotal',
+    'vitestFiles', 'vitestTests', 'e2eCases',
+  ]) assert.equal(BASELINE[key], undefined, `${key} 不应继续作为质量棘轮`)
+  for (const file of ['10-backend.mjs', '20-frontend-static.mjs', '58-e2e.mjs']) {
+    const src = fs.readFileSync(path.join(repoRoot, 'scripts/gate.d', file), 'utf8')
+    assert.doesNotMatch(src, /BASELINE\.|ratchetOrBump|cargoTestRatchet/, `${file} 仍引用数量棘轮`)
+  }
 })
 
 // ================= 棘轮三态判定的唯一定义：`ratchetVerdict` =================
@@ -821,7 +772,7 @@ test('cargoTestRatchet：高出基线（无论是否超容差） ⇒ 判绿并�
 // 「低于基线怎么办」必然演化成两套口径。四态各钉一条，外加容差边界：
 // 差一格就从黄变红，边界不钉住则容差会在无人察觉时被改动。
 
-const v = (actual, baseline) => ratchetVerdict({ actual, baseline, name: 'rustTests' })
+const v = (actual, baseline) => ratchetVerdict({ actual, baseline, name: 'verifyPrograms' })
 
 test('ratchetVerdict：低于 ⇒ 红', () => {
   assert.equal(v(9, 10).ok, false)
@@ -841,7 +792,7 @@ test('ratchetVerdict：高出但在容差内 ⇒ 绿 + warn（给「先加测试
 test('ratchetVerdict：高出且越过容差 ⇒ 红，且点名要改哪一格', () => {
   const r = v(10 + BASELINE_GRACE + 1, 10)
   assert.equal(r.ok, false)
-  assert.match(r.note, /BASELINE\.rustTests/)
+  assert.match(r.note, /BASELINE\.verifyPrograms/)
 })
 
 // ================= BASELINE 只增：`parseBaselineCells` / `baselineErosion` =================
@@ -864,12 +815,12 @@ test('parseBaselineCells：真实源码每格都取到，且与导出的 BASELIN
 
 test('parseBaselineCells：只认对象体内的格——注释里的历史数字不是基线', () => {
   const text = baselineText(
-    [['rustTests', 5]],
+    [['verifyPrograms', 5]],
     '  // 回填 `1339 → 1341`（2026-10-06 实测）\n  // verifyPrograms: 14,\n',
   )
   const cells = parseBaselineCells(text)
   assert.equal(cells.size, 1, '把注释里的数字当一格 ⇒ 历史值冒充基线')
-  assert.equal(cells.get('rustTests'), 5)
+  assert.equal(cells.get('verifyPrograms'), 5)
 })
 
 test('parseBaselineCells：对象体在 `\\n}` 处结束，体外不扫', () => {

@@ -7,6 +7,10 @@
 use serde::{Deserialize, Serialize};
 
 pub use symbio_platform::kernel::chat::chat_node::ChatNode;
+use symbio_platform::kernel::chat::chat_node::{
+    NodeKind, NodeRole, NodeStatus, CHAT_STYLE_TAG_COMPRESSION, CHAT_STYLE_TAG_REASONING,
+    CHAT_STYLE_TAG_RUN, CHAT_STYLE_TAG_TOOL,
+};
 
 /// 会话列表一行摘要：**最新一条助手回复**的首行（压缩空白、限长 60 字符）。
 ///
@@ -23,10 +27,16 @@ pub fn derive_session_summary(messages: &[ChatNode]) -> Option<String> {
         .iter()
         .rev()
         .filter(|m| {
-            matches!(
-                m.node_role(),
-                Some(symbio_platform::kernel::chat::chat_node::NodeRole::Assistant)
-            )
+            matches!(m.node_role(), Some(NodeRole::Assistant))
+                && (m.msg_type.is_none() || m.is_text())
+                && !matches!(m.status, Some(NodeStatus::Failed | NodeStatus::Aborted))
+                && m.error.is_none()
+                && !m
+                    .meta
+                    .as_ref()
+                    .and_then(|meta| meta.get("exclude_from_context"))
+                    .and_then(serde_json::Value::as_bool)
+                    .unwrap_or(false)
         })
         .filter_map(|m| m.content.as_ref().map(|c| c.to_text()))
         .map(|t| t.trim().to_string())
@@ -46,6 +56,71 @@ pub fn derive_session_summary(messages: &[ChatNode]) -> Option<String> {
         }
     }
     Some(format!("{}…", out.trim_end()))
+}
+
+/// 是否已经完成一轮真实用户发言 → Agent 非空成功回复。
+///
+/// 用户附件也算发言；内部触发、压缩快照、纯工具/推理和失败回复不算。
+/// 现代回复必须挂在同一用户节点的子树下，不能把别轮的成功回复借给失败轮；
+/// 旧布局没有 parent/type/status，只能认**相邻**的 rootless user → assistant 文本。
+pub(crate) fn has_first_exchange(messages: &[ChatNode]) -> bool {
+    messages.iter().any(|user| {
+        is_real_user(user)
+            && messages.iter().any(|reply| {
+                reply.parent_id.as_deref() == Some(user.id.as_str())
+                    && reply.msg_type == Some(NodeKind::Body)
+                    && reply.status == Some(NodeStatus::Completed)
+                    && is_nonempty_assistant_text(reply)
+            })
+    }) || messages.windows(2).any(|pair| {
+        let user = &pair[0];
+        let reply = &pair[1];
+        is_rootless_legacy_text(user)
+            && is_rootless_legacy_text(reply)
+            && is_real_user(user)
+            && is_nonempty_assistant_text(reply)
+    })
+}
+
+fn is_real_user(node: &ChatNode) -> bool {
+    node.node_role() == Some(NodeRole::User)
+        && !matches!(node.status, Some(NodeStatus::Removed))
+        && node.content.is_some()
+        && !is_internal_or_compacted(node)
+}
+
+fn is_nonempty_assistant_text(node: &ChatNode) -> bool {
+    node.node_role() == Some(NodeRole::Assistant)
+        && node.error.is_none()
+        && node
+            .content
+            .as_ref()
+            .is_some_and(|content| !content.to_text().trim().is_empty())
+        && !matches!(
+            node.style_tag(),
+            Some(
+                CHAT_STYLE_TAG_REASONING
+                    | CHAT_STYLE_TAG_TOOL
+                    | CHAT_STYLE_TAG_COMPRESSION
+                    | CHAT_STYLE_TAG_RUN
+            )
+        )
+        && !is_internal_or_compacted(node)
+}
+
+fn is_internal_or_compacted(node: &ChatNode) -> bool {
+    node.meta.as_ref().is_some_and(|meta| {
+        meta.get("trigger").is_some()
+            || meta.get("compacted").and_then(serde_json::Value::as_bool) == Some(true)
+            || meta
+                .get("exclude_from_context")
+                .and_then(serde_json::Value::as_bool)
+                == Some(true)
+    })
+}
+
+fn is_rootless_legacy_text(node: &ChatNode) -> bool {
+    node.parent_id.is_none() && node.msg_type.is_none() && node.status.is_none()
 }
 
 /// 会话的通用元信息标签（工作目录名 + 消息数）。
@@ -103,6 +178,9 @@ pub struct SessionSummary {
     /// （`stats_reading::context_reading_of`），呈现不是事实。
     #[serde(default)]
     pub context: Option<serde_json::Value>,
+    /// 是否已经完成一轮真实用户发言 → Agent 非空成功回复。
+    #[serde(default)]
+    pub has_first_exchange: bool,
 }
 
 impl SessionSummary {
@@ -118,6 +196,7 @@ impl SessionSummary {
             summary: derive_session_summary(&s.messages),
             meta_tags: session_meta_tags(&s.metadata, s.messages.len()),
             context: latest_context_watermark(&s.messages),
+            has_first_exchange: has_first_exchange(&s.messages),
         }
     }
 }

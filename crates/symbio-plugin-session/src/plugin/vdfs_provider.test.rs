@@ -541,7 +541,7 @@ async fn session_list_carries_the_option_definition() {
         "定义要能自述——它是 `node.schema` 上唯一的呈现契约"
     );
     // 本 fixture 未装配容器 ⇒ 收集不到贡献方 ⇒ 字段表为空；生产路径由容器广播出
-    // 工作目录 / 智能体 / Model / 风险 / 模式 / 心跳 六项
+    // 工作目录 / Model / 心跳 / 沙箱；子智能体绑定不占会话选项。
     assert_eq!(schema["sections"][0]["fields"], serde_json::json!([]));
 
     // 当前值走 `attributes.metadata`（新形态的值载体）：写一次 metadata，

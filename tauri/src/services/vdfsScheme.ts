@@ -61,6 +61,14 @@ import { logger } from '@/utils/logger'
 
 const MODULE_TAG = 'vdfs-scheme'
 
+/** 零会话是合法状态；调用方等首个会话出现后再解析集合段。 */
+export class NoSessionForSchemeError extends Error {
+  constructor(mountDir: string) {
+    super(`集合段未解析：${mountDir} 下没有任何会话可供推导`)
+    this.name = 'NoSessionForSchemeError'
+  }
+}
+
 /**
  * 节点的**全路径**。
  *
@@ -238,7 +246,7 @@ async function resolveSegs(mountDir: string): Promise<{ messagesSeg: string; inb
   const sessions = (await listVdfs(READBACK_REASON.BOOTSTRAP, mountDir)).items ?? []
   const first = sessions.find(isSessionNode)
   if (!first) {
-    throw new Error(`集合段未解析：${mountDir} 下没有任何会话可供推导`)
+    throw new NoSessionForSchemeError(mountDir)
   }
   const sessionPath = fullAddr(mountDir, first)
   // 段目录在导航里是隐藏的（转写已在会话正文显示，收件箱是内部机制），因此这一次

@@ -19,7 +19,8 @@ vi.mock('@/services/vdfs', () => ({
 vi.mock('@/services/eventBus', () => ({
   subscribeVdfsChanged: vi.fn(),
 }))
-vi.mock('@/services/vdfsScheme', () => ({
+vi.mock('@/services/vdfsScheme', async (importOriginal) => ({
+  ...(await importOriginal<typeof import('@/services/vdfsScheme')>()),
   ensureSessionScheme: mocks.ensureSessionScheme,
 }))
 vi.mock('@/utils/logger', () => ({
@@ -39,10 +40,13 @@ import { subscribeVdfsChanged } from '@/services/eventBus'
 import type { VdfsChange, VdfsNode } from '@/schemas/vdfs'
 // 回读理由是**词表**（独立模块，未被替身），断言按它取值——替身里不抄第二份
 import { READBACK_REASON } from '@/services/readback'
+import { NoSessionForSchemeError } from '@/services/vdfsScheme'
+import { logger } from '@/utils/logger'
 
 // 订阅接线打桩：捕获 handler 与 resync 回调，测试直接派发变更
 let dispatch: ((c: VdfsChange) => void) | null = null
 let fireResync: (() => void) | null = null
+let unsubscribes: Array<ReturnType<typeof vi.fn>> = []
 
 const MOUNT = '/root/session'
 const SEG = 'inbox'
@@ -95,6 +99,7 @@ beforeEach(() => {
   resetSessionInboxSyncForTest()
   dispatch = null
   fireResync = null
+  unsubscribes = []
   mocks.ensureSessionScheme.mockResolvedValue({
     mountDir: MOUNT,
     messagesSeg: 'message',
@@ -104,11 +109,47 @@ beforeEach(() => {
   vi.mocked(subscribeVdfsChanged).mockImplementation(((_scope: unknown, handler: (c: VdfsChange) => void, onResync?: () => void) => {
     dispatch = handler
     fireResync = onResync ?? null
-    return () => {}
+    const unsubscribe = vi.fn()
+    unsubscribes.push(unsubscribe)
+    return unsubscribe
   }) as never)
 })
 afterEach(() => {
   stopSessionInboxSync()
+})
+
+describe('零会话冷启动', () => {
+  it('没有会话时静默等待；首个会话出现后可登记并接收入队帧', async () => {
+    const spy = spySink()
+    mocks.ensureSessionScheme.mockRejectedValueOnce(new NoSessionForSchemeError(MOUNT))
+    await expect(startSessionInboxSync(spy.sink)).resolves.toBeUndefined()
+    expect(logger.error).not.toHaveBeenCalled()
+    expect(subscribeVdfsChanged).not.toHaveBeenCalled()
+
+    await startSessionInboxSync(spy.sink)
+    dispatch!(itemFrame('s1', 'i1', { name: 'i1', description: '待发送' }))
+    expect(spy.applied).toEqual([{ sid: 's1', id: 'i1', label: '待发送' }])
+  })
+})
+
+describe('订阅生命周期', () => {
+  it('每个挂载目录恰好一份订阅，停止时全部退订', async () => {
+    const spy = spySink()
+    await startSessionInboxSync(spy.sink)
+    await expect(registerInboxMount(MOUNT)).resolves.toBe(false)
+    await expect(registerInboxMount('/root/sub/session')).resolves.toBe(true)
+
+    expect(subscribeVdfsChanged).toHaveBeenCalledTimes(2)
+    expect(vi.mocked(subscribeVdfsChanged).mock.calls.map(([scope]) => scope)).toEqual([
+      { prefix: MOUNT },
+      { prefix: '/root/sub/session' },
+    ])
+
+    stopSessionInboxSync()
+
+    expect(unsubscribes).toHaveLength(2)
+    for (const unsubscribe of unsubscribes) expect(unsubscribe).toHaveBeenCalledTimes(1)
+  })
 })
 
 describe('入队帧：带节点视图 ⇒ 加一条「待发送」气泡', () => {
@@ -166,6 +207,35 @@ describe('出队帧：无载荷 ⇒ 回读只分辨删除与否', () => {
 
     expect(spy.removed).toEqual([])
   })
+
+  it('删除回读在飞时同 id 重新入队 ⇒ 旧 null 不得删掉新条目', async () => {
+    const spy = spySink()
+    await startSessionInboxSync(spy.sink)
+    let resolveStat!: (node: VdfsNode | null) => void
+    mocks.statVdfs.mockReturnValueOnce(new Promise((resolve) => { resolveStat = resolve }))
+
+    dispatch!(itemFrame('s1', 'i1', null))
+    dispatch!(itemFrame('s1', 'i1', { name: 'i1', description: '待消费 · 重新入队' }))
+    resolveStat(null)
+    await settle()
+
+    expect(spy.applied).toEqual([{ sid: 's1', id: 'i1', label: '待消费 · 重新入队' }])
+    expect(spy.removed).toEqual([])
+  })
+
+  it('删除回读跨越停止/重启 ⇒ 旧响应不得写入新订阅代际', async () => {
+    const spy = spySink()
+    await startSessionInboxSync(spy.sink)
+    let resolveStat!: (node: VdfsNode | null) => void
+    mocks.statVdfs.mockReturnValueOnce(new Promise((resolve) => { resolveStat = resolve }))
+
+    dispatch!(itemFrame('s1', 'i1', null))
+    await startSessionInboxSync(spy.sink)
+    resolveStat(null)
+    await settle()
+
+    expect(spy.removed).toEqual([])
+  })
 })
 
 describe('职责边界：地址形状不对不归本模块', () => {
@@ -219,6 +289,20 @@ describe('职责边界：地址形状不对不归本模块', () => {
 })
 
 describe('作用域与 resync', () => {
+  it('旧订阅的 resync 回调跨越重启后不得重列新会话', async () => {
+    const oldSpy = spySink()
+    const newSpy = spySink(['new'])
+    await startSessionInboxSync(oldSpy.sink)
+    const oldResync = fireResync!
+
+    await startSessionInboxSync(newSpy.sink)
+    oldResync()
+    await settle()
+
+    expect(oldSpy.reloaded).toEqual([])
+    expect(newSpy.reloaded).toEqual([])
+  })
+
   it('resync ⇒ 按见过的会话整份重列（漏一帧 = 幽灵气泡或少一个气泡）', async () => {
     const spy = spySink()
     await startSessionInboxSync(spy.sink)

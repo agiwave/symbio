@@ -64,7 +64,6 @@ import { writeVdfs, runVdfsAction, listVdfs } from '@/services/vdfs'
 import { riskRankOf } from '@/schemas/session_meta'
 import {
   VDFS_ACTION_ABORT,
-  VDFS_STATUS_WORKING,
   chimeKindOfOutcome,
   isWorkingStatus,
   parseVdfsSessionAddr,
@@ -83,6 +82,8 @@ import { READBACK_REASON } from '@/services/readback'
 import { logger } from '@/utils/logger'
 import { useToast } from '@/composables/useToast'
 import {
+  NODE_STATUS_ABORTED,
+  NODE_STATUS_COMPLETED,
   NODE_STATUS_REMOVED,
   type ChatNode,
 } from '@/schemas/chat_node'
@@ -103,14 +104,12 @@ import { useReleasedSkeletonsStore, subtreeOf } from './skeletonLazy'
 import { messageTypeOf } from '@/registry/messageTypes'
 // 会话实时状态的派生规则（纯逻辑）：清单条目 / 运行态 / 选项回填
 import {
-  ACTIVITY_WORKING,
   listItemPatchOf,
   liveStatusPatchOf,
   mergeListWithLive,
   modeRiskBackfillOf,
   titleOf,
   workdirOf,
-  workingUpgradesOf,
   type SessionMode,
   type SessionRiskLevel,
 } from './sessionLive'
@@ -127,6 +126,19 @@ import type { InboxEntry } from './sessionInboxSync'
 export const useSessionsStore = defineStore('sessions', () => {
   // 列表（来自后端 list + 本地状态镜像）
   const list = ref<SessionListItem[]>([])
+  /** 会话状态代际：清单请求期间发生的新迁移必须晚于该请求的快照。 */
+  const sessionStateRevisions = new Map<string, number>()
+  const deletedSessionIds = new Set<string>()
+  let listRequestSequence = 0
+  const transcriptLoadSequences = new Map<string, number>()
+  const transcriptMutations = new Map<string, Map<string, number>>()
+  let transcriptMutationClock = 0
+  const inboxLiveRevisions = new Map<string, number>()
+  const inboxLoadSequences = new Map<string, number>()
+  const inboxRemovedIds = new Map<string, Set<string>>()
+  function touchSessionState(id: string): void {
+    sessionStateRevisions.set(id, (sessionStateRevisions.get(id) ?? 0) + 1)
+  }
   const activeId = ref<string | null>(null)
   const loading = ref(false)
   const error = ref<string | null>(null)
@@ -376,6 +388,13 @@ export const useSessionsStore = defineStore('sessions', () => {
    *    **已存在的节点保留原序号**——否则任何一次"不带 seq 的更新"（状态迁移 /
    *    压缩后重发）都会把消息顶到列表末尾。
    */
+  function markTranscriptMutations(sessionId: string, messageIds: string[]): void {
+    if (messageIds.length === 0) return
+    const mutations = transcriptMutations.get(sessionId) ?? new Map<string, number>()
+    for (const id of messageIds) mutations.set(id, ++transcriptMutationClock)
+    transcriptMutations.set(sessionId, mutations)
+  }
+
   function applyTranscriptMessages(sessionId: string, messages: ChatNode[]): void {
     if (!sessionId || messages.length === 0) return
 
@@ -394,6 +413,8 @@ export const useSessionsStore = defineStore('sessions', () => {
       effective.push(message)
     }
     if (effective.length === 0) return
+    // 写入代际也记录幂等删除：本地尚无该 id 的 removed 仍必须作废在飞旧快照。
+    markTranscriptMutations(sessionId, effective.map((message) => message.id))
 
     // 全是空操作时不提交：`updateMessages` 会白拷贝整份字典并推一次版本号，
     // 而「删除一个本地不存在的节点」正是幂等收口的常见路径（截断删除会连带
@@ -441,8 +462,11 @@ export const useSessionsStore = defineStore('sessions', () => {
         if (message.timestamp != null) node.timestamp = message.timestamp
         // 状态迁移。
         if (message.status != null) node.status = message.status
-        // 错误信息：有则覆盖（不清除——清除走"非 Failed 的终态帧"）。
         if (message.error != null) node.error = message.error
+        else if (
+          message.status === NODE_STATUS_COMPLETED ||
+          message.status === NODE_STATUS_ABORTED
+        ) delete node.error
         // 正文：增量追加 / 完整替换，互斥（违例已在上面拒绝）。
         // 图里只留**累积后的 `content`**：`delta` 是传输形态，不是节点形态。
         // 追加规则走纯逻辑层唯一实现（`appendContent`），store 只负责状态落地。
@@ -512,6 +536,8 @@ export const useSessionsStore = defineStore('sessions', () => {
 
   /** 清空某个 session 的实时状态（删除时调用） */
   function dropSessionState(sessionId: string) {
+    transcriptMutations.delete(sessionId)
+    transcriptLoadSequences.set(sessionId, (transcriptLoadSequences.get(sessionId) ?? 0) + 1)
     const mnext = { ...sessionMessages.value }
     delete mnext[sessionId]
     commitMessages(mnext)
@@ -739,56 +765,77 @@ export const useSessionsStore = defineStore('sessions', () => {
 
   /** 刷新会话列表（合并持久化 + 实时状态） */
   async function refreshList() {
+    const request = ++listRequestSequence
+    const requestedSpace = sessionSpace.value
+    const deletedAtStart = new Set(deletedSessionIds)
     loading.value = true
     error.value = null
     try {
-      // 清单读**当前空间**：根空间（默认挂载目录）或子智能体空间
-      // （`<根>/subagent/<id>/session`）。`sessionSpace` 为空时交给服务层回退默认。
-      const mountDir = sessionSpace.value || undefined
+      const mountDir = requestedSpace || undefined
+      const revisionsAtStart = new Map(sessionStateRevisions)
       const items = await listSessions(undefined, mountDir)
-      // 清单到手 ⇒ 本空间的挂载目录已确定（服务层刚解析出来的那个）
       const dir = mountDir ?? (await ensureSessionMountDir())
+      if (request !== listRequestSequence) return
+      if (requestedSpace
+        ? sessionSpace.value !== requestedSpace
+        : sessionSpace.value !== '' && sessionSpace.value !== dir) return
+
+      const deletedDuringRequest = new Set(
+        [...deletedSessionIds].filter((id) => !deletedAtStart.has(id)),
+      )
+      const visibleItems = items.filter((it) => !deletedDuringRequest.has(it.id))
+      const changedIds = new Set(
+        [...new Set([
+          ...revisionsAtStart.keys(),
+          ...sessionStateRevisions.keys(),
+          ...visibleItems.map((it) => it.id),
+          ...list.value.map((it) => it.id),
+        ])].filter((id) => sessionStateRevisions.get(id) !== revisionsAtStart.get(id)),
+      )
+      const incomingIds = new Set(visibleItems.map((it) => it.id))
+      const locallyAdded = list.value.filter((it) => changedIds.has(it.id) && !incomingIds.has(it.id))
       if (!sessionSpace.value) sessionSpace.value = dir
-      // 「这个会话住在哪个空间」在此落定——叶子操作（读 / 删 / 改 / 清空 / 发送）
-      // 全靠它寻址，缺了就只能回退根空间（那正是「发到父智能体」的成因）。
-      rememberMounts(items.map((it) => it.id), dir)
-      // 清单到手 ⇒ 若有会话，转写段现在推导得出来。补一次解析，关掉「引导窗口」
-      // （方案未就绪时转写变更无法路由）。失败不打断清单刷新——零会话时会失败，
-      // 那正是预期；等新建会话时再补。
-      if (items.length > 0) {
+      rememberMounts(visibleItems.map((it) => it.id), dir)
+      if (visibleItems.length > 0) {
         void ensureSessionScheme(dir).catch((e: unknown) =>
           logger.warn('[sessions]', '转写段解析失败', e),
         )
       }
-      // 同步 lastUsedWorkdir 与标题缓存（后端 vdfs/list 的 title 已按 display_title
-      // 下发：metadata.title 优先，否则从会话内容自动生成——前端不再自行拉消息推导）
-      for (const it of items) {
+      for (const it of visibleItems) {
         const wd = workdirOf(it)
         if (wd) lastUsedWorkdir.value = wd
         const t = titleOf(it)
         if (t) titles.value[it.id] = t
       }
-      // 回填会话级选择（mode / risk_level）到 store map（机制见 backfillSessionMaps）
-      backfillSessionMaps(items)
+      backfillSessionMaps(visibleItems)
 
-      // 合并运行态：list 接口返回的是后端 ActiveSessionManager 的权威状态；
-      // 本地镜像说「运行中」的条目保留（乐观置位不能被稍早的 list 快照打回）
       const liveStatuses = sessionStatuses.value
-      list.value = mergeListWithLive(items, liveStatuses)
-
-      // 关键：把后端权威 status 回填到 sessionStatuses（isLoading 的唯一来源）。
-      // 否则页面重载/视图挂载后，运行中的会话在输入框显示为禁用的"发送"按钮，
-      // 用户无法点击停止（stop 按钮失效 bug）。
-      // 仅做 false→true 的升级：true→false 的收敛交给节点状态变更，
-      // 避免 list 快照与实时变更竞争时误降级。
-      for (const id of workingUpgradesOf(items, liveStatuses)) {
-        putStatus(id, { status: VDFS_STATUS_WORKING, activity: ACTIVITY_WORKING })
+      list.value = [...locallyAdded, ...mergeListWithLive(visibleItems, liveStatuses, changedIds)]
+      for (const item of list.value) {
+        if (locallyAdded.includes(item)) continue
+        const live = changedIds.has(item.id) ? liveStatuses[item.id] : undefined
+        applySessionState(item.id, {
+          ...item,
+          title: item.name,
+          ...(live
+            ? {
+                status: live.status,
+                outcome: live.outcome,
+                error: getSessionError(item.id) ?? undefined,
+              }
+            : {}),
+        }, false)
+      }
+      for (const id of deletedAtStart) {
+        if (!incomingIds.has(id)) deletedSessionIds.delete(id)
       }
     } catch (e) {
-      error.value = e instanceof Error ? e.message : String(e)
-      logger.error('[sessions]', 'refreshList 失败', e)
+      if (request === listRequestSequence && (!requestedSpace || sessionSpace.value === requestedSpace)) {
+        error.value = e instanceof Error ? e.message : String(e)
+        logger.error('[sessions]', 'refreshList 失败', e)
+      }
     } finally {
-      loading.value = false
+      if (request === listRequestSequence) loading.value = false
     }
   }
 
@@ -843,6 +890,8 @@ export const useSessionsStore = defineStore('sessions', () => {
       metadata: meta
     }
     list.value = [local, ...list.value]
+    deletedSessionIds.delete(id)
+    touchSessionState(id)
     titles.value[id] = '新对话'
     activeId.value = id
     // 回填会话级选择（mode / risk_level）到 store map，使选择器即时反映草稿
@@ -1004,6 +1053,8 @@ export const useSessionsStore = defineStore('sessions', () => {
    * 后端 deleted 事件订阅共用，保证两条路径行为一致。
    */
   function removeSessionLocal(id: string) {
+    touchSessionState(id)
+    deletedSessionIds.add(id)
     list.value = list.value.filter(s => s.id !== id)
     delete titles.value[id]
     // 清理 in-memory 状态
@@ -1087,6 +1138,7 @@ export const useSessionsStore = defineStore('sessions', () => {
    * 入参是**节点状态**（`VDFS_STATUS_*`）而非布尔——「忙不忙」由
    * `isWorkingStatus()` 派生，这里只负责把状态值落到两处镜像上。 */
   function setSessionStatus(id: string, status?: string) {
+    touchSessionState(id)
     const idx = list.value.findIndex(s => s.id === id)
     if (idx >= 0) {
       list.value[idx] = { ...list.value[idx], status }
@@ -1115,21 +1167,44 @@ export const useSessionsStore = defineStore('sessions', () => {
    * LLM 在**同一地址**上读同一份数据（`session/get_messages` 自此不再是
    * 前端的读入口）。
    *
-   * 增量由 `stores/sessionTranscriptSync`（VDFS 变更消费端）补上——本函数
-   * 只负责整份替换（切换会话 / 显式刷新）。
+   * 增量由 `stores/sessionTranscriptSync`（VDFS 变更消费端）补上；整份读取返回时，
+   * 快照铺历史基线，读取期间发生冲突的节点由实时新事实接管。
    *
    * 修复（CHAT_FLOW_ANALYSIS E-13）：失败时**抛出错误**而不是 swallow，
    * 让 ChatMainPanel 能显示错误状态 + 提供重试按钮。
    */
   async function loadMessages(id: string): Promise<ChatNode[]> {
-    // 读入口是会话域的 VDFS 门面：文档形状的解析不在 store 里
+    const request = (transcriptLoadSequences.get(id) ?? 0) + 1
+    transcriptLoadSequences.set(id, request)
+    const localAtStart = { ...(sessionMessages.value[id] ?? {}) }
+    const mutationsAtStart = new Map(transcriptMutations.get(id))
     const msgs = await readSessionTranscript(id, mountDirOf(id))
-    hydrateFromHistory(id, msgs)
+    if (request !== transcriptLoadSequences.get(id)) return getSessionMessages(id)
+
+    // 快照负责历史基线；读取期间被实时改写或删除的 id 由本地新事实接管。
+    // 只冲突节点让位，避免冷启动先到一条增量时把整份旧历史一起丢掉。
+    const localNow = sessionMessages.value[id] ?? {}
+    const mutationsNow = transcriptMutations.get(id) ?? new Map<string, number>()
+    const changedDuringRead = new Set(
+      [...new Set([
+        ...Object.keys(localAtStart),
+        ...Object.keys(localNow),
+        ...mutationsNow.keys(),
+        ...msgs.map((message) => message.id),
+      ])].filter((mid) =>
+        localAtStart[mid] !== localNow[mid] || mutationsAtStart.get(mid) !== mutationsNow.get(mid),
+      ),
+    )
+    const merged = [
+      ...msgs.filter((message) => !changedDuringRead.has(message.id)),
+      ...Object.values(localNow).filter((message) => changedDuringRead.has(message.id)),
+    ]
+    hydrateFromHistory(id, merged)
     // 同步 list message_count / updated_at
     const idx = list.value.findIndex(s => s.id === id)
     if (idx >= 0) {
       const now = Math.floor(Date.now() / 1000)
-      list.value[idx] = { ...list.value[idx], message_count: msgs.length, updated_at: now }
+      list.value[idx] = { ...list.value[idx], message_count: merged.length, updated_at: now }
     }
     return getSessionMessages(id)
   }
@@ -1140,6 +1215,7 @@ export const useSessionsStore = defineStore('sessions', () => {
    */
   function removeMessages(sessionId: string, ids: string[]) {
     if (ids.length === 0) return
+    markTranscriptMutations(sessionId, ids)
     updateMessages(sessionId, (cur) => {
       for (const id of ids) delete cur[id]
     })
@@ -1172,12 +1248,14 @@ export const useSessionsStore = defineStore('sessions', () => {
       }
     })
     if (removed.length === 0) return []
+    markTranscriptMutations(sessionId, removed.map((message) => message.id))
     return removed
   }
 
   /** 把一批消息放回局部状态（`removeFrom` 的回滚口，仅在写后端失败时使用） */
   function restoreMessages(sessionId: string, msgs: ChatNode[]) {
     if (msgs.length === 0) return
+    markTranscriptMutations(sessionId, msgs.map((message) => message.id))
     updateMessages(sessionId, (cur) => {
       for (const m of msgs) cur[m.id] = m
     })
@@ -1264,6 +1342,8 @@ export const useSessionsStore = defineStore('sessions', () => {
    */
   function applyInboxItem(sessionId: string, entry: InboxEntry): void {
     if (!sessionId || !entry?.id) return
+    inboxRemovedIds.get(sessionId)?.delete(entry.id)
+    inboxLiveRevisions.set(sessionId, (inboxLiveRevisions.get(sessionId) ?? 0) + 1)
     const cur = inboxItems.value[sessionId] ?? []
     const idx = cur.findIndex((e) => e.id === entry.id)
     const next = idx >= 0 ? cur.map((e, i) => (i === idx ? entry : e)) : [...cur, entry]
@@ -1272,6 +1352,10 @@ export const useSessionsStore = defineStore('sessions', () => {
 
   /** 出队 / 取消 / 清空一条（回读确认已不在队列后才调到这里） */
   function removeInboxItem(sessionId: string, itemId: string): void {
+    const removed = inboxRemovedIds.get(sessionId) ?? new Set<string>()
+    removed.add(itemId)
+    inboxRemovedIds.set(sessionId, removed)
+    inboxLiveRevisions.set(sessionId, (inboxLiveRevisions.get(sessionId) ?? 0) + 1)
     const cur = inboxItems.value[sessionId]
     if (!cur || cur.length === 0) return
     const next = cur.filter((e) => e.id !== itemId)
@@ -1295,6 +1379,9 @@ export const useSessionsStore = defineStore('sessions', () => {
    * 关键路径上，不该被一条可选的可视化带崩）。
    */
   async function refreshInbox(sessionId: string): Promise<void> {
+    const request = (inboxLoadSequences.get(sessionId) ?? 0) + 1
+    inboxLoadSequences.set(sessionId, request)
+    const revision = inboxLiveRevisions.get(sessionId) ?? 0
     const mountDir = mountDirOf(sessionId)
     try {
       const scheme = await ensureSessionScheme(mountDir)
@@ -1308,7 +1395,13 @@ export const useSessionsStore = defineStore('sessions', () => {
           id: n.name,
           label: (typeof n.description === 'string' && n.description.trim()) || '待发送',
         }))
-      setInboxItems(sessionId, entries)
+      if (request !== inboxLoadSequences.get(sessionId)) return
+      const merged = new Map(entries.map((entry) => [entry.id, entry]))
+      if (revision !== (inboxLiveRevisions.get(sessionId) ?? 0)) {
+        for (const entry of inboxItems.value[sessionId] ?? []) merged.set(entry.id, entry)
+      }
+      for (const id of inboxRemovedIds.get(sessionId) ?? []) merged.delete(id)
+      setInboxItems(sessionId, [...merged.values()])
     } catch (e) {
       logger.warn('[sessions]', `补列收件箱失败：${sessionId}`, e)
     }
@@ -1321,9 +1414,9 @@ export const useSessionsStore = defineStore('sessions', () => {
   // 收敛动作（`removeSessionLocal` / `refreshList`），不自己挂监听器，
   // 因此可被独立构造与测试。
   //
-  // **运行态在这条链路上**（ 后实时面只有一条通道）：`<sid>` 的变更
-  // 经 `sessionTranscriptSync` 回读 `stat` → `applySessionState`；清单订阅
-  // （`sessionNodeSync`）对同一批变更做防抖重拉——两条收敛路径幂等且同源。
+  // **运行态在这条链路上**：`<sid>` 的变更由 `sessionNodeSync` 收敛；
+  // 带视图直接落地，无视图回读完整节点，`NotFound` 即时删除。
+  // 同一批变更另做防抖重拉清单，两条路径幂等且同源。
 
   /**
    * 应用一帧**会话运行态**（带全量节点视图，幂等）：
@@ -1347,7 +1440,12 @@ export const useSessionsStore = defineStore('sessions', () => {
    * 迁移判定放在 store 是因为**上一状态只有这里有**——它本来就是节点表的一部分，
    * 不是"上一条事件"。
    */
-  function applySessionState(id: string, node: VdfsNode): void {
+  function applySessionState(
+    id: string,
+    node: VdfsNode | (SessionListItem & { title?: string }),
+    touchState = true,
+  ): void {
+    if (touchState) touchSessionState(id)
     const rt = sessionRuntimeOf(node)
     const prev = sessionStatuses.value[id]
     const wasWorking = isWorkingStatus(prev?.status)
@@ -1357,12 +1455,15 @@ export const useSessionsStore = defineStore('sessions', () => {
     const title = typeof node.title === 'string' ? node.title : ''
     const idx = list.value.findIndex((s) => s.id === id)
     if (idx >= 0) {
-      list.value[idx] = listItemPatchOf(node, list.value[idx], rt.status)
+      const next = listItemPatchOf(node, list.value[idx], rt.status)
+      next.outcome = rt.outcome
+      next.error = rt.error
+      list.value[idx] = next
     }
     if (title) titles.value[id] = title
 
     // ② 运行态镜像：节点状态 / 结局直通；activity 只在迁移时改写（见 liveStatusPatchOf）
-    putStatus(id, liveStatusPatchOf(rt, wasWorking, nowWorking))
+    putStatus(id, liveStatusPatchOf(rt, wasWorking, nowWorking, prev))
 
     // ③ 会话级错误 = 节点属性（覆盖「错误发生在任何消息节点创建之前」的场景）。
     //    新一轮开始（working）时节点不带 error ⇒ 自动清空上一轮的残留。

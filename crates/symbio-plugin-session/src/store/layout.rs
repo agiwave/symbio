@@ -95,6 +95,9 @@ pub(super) struct SessionMetaFile {
     /// 后加的字段 ⇒ 存量文件里没有，`#[serde(default)]` 读成 `None`。
     #[serde(default)]
     context: Option<serde_json::Value>,
+    /// 缺失表示旧投影尚未回放，不能用 `false` 冒充“没有对话”。
+    #[serde(default)]
+    has_first_exchange: Option<bool>,
     /// 旧布局把消息内联在这里。新布局**不写**该字段；读的时候仍要认，
     /// 否则存量会话会读成空。
     #[serde(default, skip_serializing_if = "Option::is_none")]
@@ -113,6 +116,7 @@ impl SessionMetaFile {
             summary: s.summary.clone(),
             meta_tags: s.meta_tags.clone(),
             context: s.context.clone(),
+            has_first_exchange: Some(s.has_first_exchange),
             messages: None,
         }
     }
@@ -133,7 +137,7 @@ impl SessionMetaFile {
     /// ⚠️ 存量文件没有投影字段（`title` 空 / `message_count` 0 / `summary` None），
     /// 此时用**内联消息就地补算**——少了这段，清单会静默退化成显示会话 id
     /// （一串短 guid），且不报任何错。
-    fn into_summary(self) -> SessionSummary {
+    fn into_summary(self, dir: &Path) -> SessionSummary {
         let projection_missing = self.title.is_empty();
         if projection_missing {
             if let Some(messages) = self.messages.as_ref() {
@@ -147,6 +151,21 @@ impl SessionMetaFile {
                 return SessionSummary::of(&s);
             }
         }
+        let has_first_exchange = self.has_first_exchange.unwrap_or_else(|| {
+            rebuild_from_wal_dir(dir)
+                .or_else(|| read_messages_sync(dir))
+                .or_else(|| self.messages.clone())
+                .is_some_and(|messages| {
+                    SessionSummary::of(&Session {
+                        id: self.id.clone(),
+                        messages,
+                        created_at: self.created_at,
+                        updated_at: self.updated_at,
+                        metadata: self.metadata.clone(),
+                    })
+                    .has_first_exchange
+                })
+        });
         SessionSummary {
             id: self.id,
             title: self.title,
@@ -157,6 +176,7 @@ impl SessionMetaFile {
             summary: self.summary,
             meta_tags: self.meta_tags,
             context: self.context,
+            has_first_exchange,
         }
     }
 }
@@ -401,7 +421,7 @@ pub(super) fn read_summaries_in(dir: &Path) -> Vec<SessionSummary> {
     let mut out = Vec::new();
     for child in session_dirs_under(dir) {
         if let Some(meta) = read_meta(&child) {
-            out.push(meta.into_summary());
+            out.push(meta.into_summary(&child));
         }
     }
     out
@@ -453,19 +473,31 @@ pub(super) async fn split_inline_messages(dir: &Path) -> Result<(), PluginError>
     // 「有内联消息」是唯一的迁移触发条件：`messages.json` 停写后，一份**既无**
     // 消息文件、**又无**内联消息的目录就是新布局的正常态，绝不能因此补写空缓存。
     let needs_split = inline.as_ref().is_some_and(|m| !m.is_empty());
-    let projection_missing = meta.title.is_empty();
+    let projection_missing = meta.title.is_empty() || meta.has_first_exchange.is_none();
     if !needs_split && !projection_missing {
         return Ok(());
     }
 
-    let messages = if has_split {
-        // 消息文件读不出来时**不猜**：宁可留着旧投影，也不要把空写进元数据
-        match read_messages_sync(dir) {
-            Some(m) => m,
-            None => return Ok(()),
+    let messages = if needs_split {
+        if has_split {
+            // 消息文件读不出来时**不猜**：宁可留着旧投影，也不要把空写进元数据
+            match read_messages_sync(dir) {
+                Some(m) => m,
+                None => return Ok(()),
+            }
+        } else {
+            inline.unwrap_or_default()
         }
     } else {
-        inline.unwrap_or_default()
+        // 没有任何可读消息来源时，不能用空列表冒充「这个会话确实没有消息」：
+        // 那会用空投影覆盖旧元数据，还会把未知的首轮对话状态误写成 false。
+        let Some(messages) = rebuild_from_wal_dir(dir)
+            .or_else(|| read_messages_sync(dir))
+            .or(inline)
+        else {
+            return Ok(());
+        };
+        messages
     };
 
     // 只在**确有内联消息要拆**时才落 `messages.json`（停写后不再凭空补一份空缓存）。

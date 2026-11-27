@@ -120,6 +120,7 @@
       :visible="true"
       :title="`选择${pickerField.label}`"
       :initial-path="String(effectiveValue(pickerField) ?? '')"
+      :recent-paths="recentPaths"
       @close="pickerField = null"
       @select="onDirectorySelected"
     />
@@ -141,6 +142,7 @@ import DirectoryPicker from '@/components/common/DirectoryPicker.vue'
 import { useSessionOptionBar } from '@/composables/useSessionOptionBar'
 import { fieldIcon } from '@/registry/vdfsIcons'
 import { pickPath } from '@/services/nativePick'
+import { getWorkspacePath } from '@/services/home'
 import { useToast } from '@/composables/useToast'
 import {
   compactFieldText,
@@ -234,6 +236,7 @@ const menuTop = ref(0)
 const menuMaxHeight = ref<number | null>(null)
 const formField = ref<DetailField | null>(null)
 const pickerField = ref<DetailField | null>(null)
+const recentPaths = ref<string[]>([])
 /** 打开菜单的触发按钮：关闭时焦点要回到它，而不是丢到 body 上 */
 const menuTrigger: Ref<HTMLElement | null> = ref(null)
 /** 忙态期间触发器被原生 disabled，保存结束后再尝试还焦点。 */
@@ -413,7 +416,12 @@ async function onFieldClick(f: DetailField, ev: MouseEvent) {
     try {
       const picked = await pickPath(f.pick as DetailPick, {
         initialPath: String(effectiveValue(f) ?? ''),
-        onBrowserPick: () => { pickerField.value = f },
+        onBrowserPick: () => {
+          pickerField.value = f
+          void getWorkspacePath()
+            .then((info) => { recentPaths.value = info.recent_workspaces ?? [] })
+            .catch(() => undefined)
+        },
       })
       if (picked != null) await commit(f, picked)
     } catch (e) {

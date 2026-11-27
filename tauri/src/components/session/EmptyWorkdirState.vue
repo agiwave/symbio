@@ -30,6 +30,7 @@
     :visible="true"
     title="选择工作目录"
     :initial-path="store.lastUsedWorkdir || undefined"
+    :recent-paths="recentPaths"
     @close="pickerOpen = false"
     @select="onDirectorySelected"
   />
@@ -39,12 +40,14 @@
 import { ref } from 'vue'
 import { useSessionsStore } from '@/stores/sessions'
 import { pickPath } from '@/services/nativePick'
+import { getWorkspacePath } from '@/services/home'
 import DirectoryPicker from '@/components/common/DirectoryPicker.vue'
 
 const store = useSessionsStore()
 const picking = ref(false)
 const pickerOpen = ref(false)
 const lastError = ref('')
+const recentPaths = ref<string[]>([])
 
 async function onPick() {
   if (!store.activeId) {
@@ -53,6 +56,9 @@ async function onPick() {
   }
   picking.value = true
   lastError.value = ''
+  void getWorkspacePath()
+    .then((info) => { recentPaths.value = info.recent_workspaces ?? [] })
+    .catch(() => undefined)
   try {
     const selected = await pickPath('directory', {
       title: '选择工作目录',

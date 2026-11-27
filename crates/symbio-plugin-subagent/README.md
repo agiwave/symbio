@@ -25,8 +25,9 @@ impl: done
 | 职责 | 机制 |
 |---|---|
 | agent 目录管理 | `impl VdfsProvider`（`<根>/subagent`：浏览 / 整包导入 / 导出 / 删除），目录自管（`AgentDirStore`：唯一来源是本插件自己的目录 `{homedir}/subagent`，与 `WORKDIR` 无关；zip-slip 防护、导入即校验） |
-| 子树装配 | 会话选定子智能体（`ctx[AGENT_ID]`）时构造该目录的插件树并转发能力收集；注册经 `SubAgentVisitor` 加来源前缀（`agent/<id>/…`），与系统树**并集**且不撞名 |
-| 选项贡献 | `traverse(agent/available_options)` 提供会话页的「子智能体」选择项 |
+| 子树装配 | 会话已绑定子智能体（`ctx[AGENT_ID]`）时构造该目录的插件树并转发能力收集；注册经 `SubAgentVisitor` 加来源前缀（`agent/<id>/…`），与系统树**并集**且不撞名 |
+
+子智能体目录不向会话界面贡献选择字段；会话绑定只来自既有权威元数据或子会话派生事实，避免把“会话属于父智能体还是子智能体”变成可由输入栏随时改写的第二身份。
 
 委托工具是会话级原语，本插件不持有它的注册或执行。本插件只提供地址面：经 VDFS 视图列
 `subagent` 挂载点得到 `agent_id` 候选、执行期以 `Stat subagent/<id>` 校验存在性。

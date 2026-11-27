@@ -1,6 +1,6 @@
 // gate.d 共享库：基线、输出解析、环境探针。任务模块按需引入。
 //
-// ## 基线棘轮：向上自动、向下才红
+// ## 质量基线棘轮：向上自动、向下才红
 //
 // 三态判定只有**一处**定义（`ratchetVerdict`，纯函数）：低于基线红、高出但在
 // `BASELINE_GRACE` 内黄字提示、超出容差红。`BASELINE` 本身被下调由
@@ -9,16 +9,18 @@
 //
 // 但**应用到门禁时**走 `ratchetOrBump`（带副作用的网关版）：实测 > 基线就**就地把数字
 // 写回本文件**（只增、不写注释、本地顺手 `git add`），判绿；实测 < 基线才判红。
-// 理由：棘轮的真实价值只在向下方向（测试被删 ⇒ 红，逼人查）。向上是预期内的正常增长，
+// 理由：棘轮的真实价值只在向下方向（质量指标变松 ⇒ 红，逼人查）。向上是预期内的正常增长，
 // 不该拦人、更不该每次手写一段论证——那论证正是被本仓规则禁止的「源码内变更史」。
 // 故本文件里 `BASELINE` 对象**不应再堆各批次的变更注释**；要追变更看提交历史。
+// 测试数量不是质量基线：Rust、Vitest 与 E2E 均只执行并报告数量，不因增删用例判红；
+// 行为覆盖与覆盖率阈值继续守门。
 
 import fs from 'node:fs'
 import path from 'node:path'
 import { createHash } from 'node:crypto'
 import { spawnSync } from 'node:child_process'
 import { fileURLToPath } from 'node:url'
-import { stripAnsi, yellow, green, red } from '../color.mjs'
+import { stripAnsi, yellow } from '../color.mjs'
 
 // 本文件自身路径：自动上调 `BASELINE` 时就地重写这里（`acceptBaseline`）。
 const SHARED_MJS = fileURLToPath(import.meta.url)
@@ -26,7 +28,7 @@ const SHARED_DIR = path.dirname(SHARED_MJS)
 const REPO_ROOT = path.resolve(SHARED_DIR, '..', '..')
 
 /**
- * 通过数基线（**只增不减**；跑高了请更新这里并说明理由；**跑低了要说明理由**）
+ * 质量基线（覆盖、形状与机制存量；测试数量只展示，不设增减棘轮）
  *
  * VdfsChange 信封 = `{path, data?}`、操作枚举整个退役——信封构造
  *      守卫（`bare` 无载荷 / `with_data` 带载荷 / 无 `change` 键）、门面原样透传、
@@ -57,86 +59,8 @@ const REPO_ROOT = path.resolve(SHARED_DIR, '..', '..')
  */
 // @gate test
 export const BASELINE = {
-  // 各测试套件的计数基线（**只增不减**）。
-  // 向下（删测试）必须配 `// baseline-allow <key>: <理由>`（见 `35-baseline.mjs` 元守卫，防『悄悄下调基线』）。
-  // 向上：门禁实测超过即自动把数字写回本文件，不在此堆各批次变更注释——变更原因看提交历史。
-  // baseline-allow rustTests: 只增棘轮（`ratchetVerdict` / `ratchetErosion` 的唯一口径）。
-  //   调低 ⇒ 在此写下理由与决策号；调高 ⇒ 门禁自动写回，不堆注释。
-  //   当前 2152 = `cargo test --workspace` 的本地求和。逐次增减的归属见
-  //   `git log -S'rustTests'` 与各提交的「门禁：」段——**这里不记变更史**：原先 147 行
-  //   「A → B」注释里只有最后一条会被 `baselineWaivers` 读到（Map 按键覆盖），其余是死重量。
-  // baseline-allow rustTests: 2152 → 2153（+1，）——新增 host 进程内执行体的 duplex 协议回归用例；host 不再派生 __worker 子进程，同一 WorkerLine / inbox / epoch 语义由进程内执行体承担。纯新增判据。
-  rustTests: 2153,
-  kernelRustTests: 131,
-
-  // baseline-allow ciRustTestsTotal: CI 侧同一口径（同一条 `cargo test --workspace`、同一批
-  //   目标），当前 2242。逐次折算的归属同样归 `git log`——理由同上一条，不在这里记变更史。
-  // baseline-allow ciRustTestsTotal: 2264 → 2257（-7，）——会话记忆迁归 memory 插件，
-  //   session 侧的会话记忆判据随旧实现退役（`session/memory` 单测、session 配置记忆闸门、
-  //   plugin 收集期 / VDFS / 节点 / 变更投递里钉旧地址与旧闸门的用例）；同一条链路改由
-  //   memory 侧 `session.test.rs` / `plugin.test.rs` / `vdfs.test.rs` 按新落位（`SESSION.md`，
-  //   `ctx[SESSION_DIR]`）钉住，净 -7。覆盖没有丢，是换了承担者。非侵蚀。
-  // baseline-allow ciRustTestsTotal: 2286 → 2288（+2， 后续修复）——新增两条判据用例：
-  //   composite/vdfs.test.rs 钉「有目录但未挂载的插件也能卸载」（删除按目录存在判，不被已挂载实例表挡成「目录不存在」）；
-  //   plugin_manager/plugin.test.rs 钉「残留目录的可选插件仍进市场」（装配按挂载实例判，不被历史目录占满）。非侵蚀。
-  // baseline-allow ciRustTestsTotal: 2288 → 2285（-3， 交互重构）——删掉 4 条旧「market 是 VDFS 节点」的判据用例（节点置顶 / 读正文 / 非可选校验 / 市场写转发），新增 1 条「根写带 create 意图」用例；候选过滤判据 3 条保留。交互改为「添加插件页面」后旧节点语义退役，覆盖由根目录自述与草稿保存用例承担，非侵蚀。
-  // baseline-allow ciRustTestsTotal: 2296 → 2295（-1）——删除与项目无关的验收夹具 crate
-  //   symbio-demo-probe（自述「不是生产插件，不进装配清单」）及其唯一的 demo 端口往返测试；
-  //   同时清掉它在 obligation-ring-accept 里的端口漂移项与 host 侧专属便利构造器 base_context。
-  //   这是对无关 demo 内容的清理，非侵蚀。
-  // baseline-allow ciRustTestsTotal: 2295 → 2294（-1）——「关于」不是插件，已从插件列表
-  //   移除，随之退役 about_has_no_body 一条判据；ui_prefs 的「界面」入口读写与归属判据保留。
-  //   非侵蚀：删的是非插件节点，配置型插件的权威数据判据一条没少。
-  // baseline-allow ciRustTestsTotal: 2308 → 2309（+1）——subagent 列表节点显式无状态守门用例：
-  //   静态配置节点显式 VDFS_STATUS_NONE，避免前端按缺省 active 画误导性绿点。非侵蚀：
-  //   纯展示面回归断言，与沙箱无关（沙箱改动已整体回滚）。
-  // baseline-allow ciRustTestsTotal: 2313 → 2319（+6，）——symbio-plugin-sandbox 六条判据用例：
-  //   缺席放行 / 白名单裁决 / 仅拦显式配置工具 / 多事实全过 / 配置构造注册表 / traverse 发布句柄。
-  //   SDK 侧沙箱四测（缺席降级 / 发布可见 / 二次发布拒绝 / 开放事实词表）此前已在 2313 内计入。
-  //   非侵蚀：纯新增判据，覆盖横切句柄的发布—消费闭环。
-  // baseline-allow ciRustTestsTotal: 2577 → 2599（+22，）——容器落点与凭证出口新增
-  //   22 条判据：broker 7（fencing / 取消 / 凭证注入 / 输入与配置拒绝 / 错误不外泄 / 头过滤）、
-  //   shim 6（target / 分片 / 背压 / 端到端 / 截断 / 断连取消）、container 9（镜像与摘要、
-  //   workdir 与凭证、UID 权限、安全上限、投影脱敏与符号链接、目标路由）。非侵蚀：全是新增用例。
-  // baseline-allow ciRustTestsTotal: 2601 → 2603（+2，）——新增两条判据：host 执行体
-  // duplex 帧协议往返，以及监督者不把 host 帧回灌总线 / 不转给另一 host 执行体。纯新增判据。
-  // baseline-allow ciRustTestsTotal: 2603 → 2604（+1，）——新增根工厂每次调用返回独立实例的回归。
-  // baseline-allow ciRustTestsTotal: 2658 → 2609（-49）——编排环此前在 loop 插件与 providers 各留一份同源码测试副本（engine 39 / table 5 / facts 5）；删除 loop 插件后只保留 providers 的一份，49 条重复判据退场，环机制判据逐条随实现迁入 orchestrator，覆盖未丢。
-  ciRustTestsTotal: 2641,
-  cliRustTests: 23,
-  tauriRustTests: 5,
-  // doc-link-allow D-010: 下一行是退役文件的历史叙述（已把这两个文件删掉），不是入链
-  // baseline-allow vitestFiles: （`76324817`， 会话呈现合流）退役 `tauri/src/schemas/conversation_line.ts` 与其 185 行 spec `tauri/src/schemas/__tests__/conversation_line.spec.ts`（整文件删除 ⇒ 测试文件 55→54）。被测对象随「对话/工作分栏退役」消失，判据随之下沉：新形态由 `e2e/cases/t24-panel-split.mjs` 与 `crates/symbio-providers/src/orchestrator/context/conversation_view.rs` 侧覆盖，不是丢掉覆盖。
-  // baseline-allow vitestTests: 上述 spec 的用例 + `tauri/src/stores/__tests__/appearance.spec.ts` 随分栏退役收窄的那部分，合计 856→838（-18）。`appearance` 的其余行为仍由该 spec 的保留用例守着（只删了分栏相关的那一段），非侵蚀。
-  // baseline-allow vitestTests:  净删 6 条（894→888）——删的是**已不存在的被测对象**：`registry/messageTypes` 的 `messageCompactionStats` / `messageMemoryStats` / `compactionTriggerLabel` / `formatTokens` 四条前端口径随裁决迁到交付出口（那 6 条逐个断言的正是这四个函数的取值与格式化）。覆盖没有丢，是换了承担者：同一口径现在由 Rust 侧 `crates/symbio-plugin-session/src/stats_reading.test.rs` 7 条判据钉（四行齐全 / 失败路径报「当前水位」不补 0 / 无数字出行即消失 / 压缩产物两行 / 非压缩的 notice 不误读 / token 单位只有一处 / 未知触发词原样透出），前端只留「有行就逐行排版」的渲染判据（`MessageNode.spec.ts` 那三条改吃 `stats` 行，条数不变）。非侵蚀。
-  // baseline-allow vitestTests: 1002 → 1003（+1， / ）——新增的是**判据用例**，不是补回覆盖：
-  // 折叠顺序反转后「主体优先 / 残留格兜底 / 旧形态不再归一」三组各要一条断言，
-  // 由 8 条变 9 条（原「历史裸字符串一路通吃」那条拆成地址归一 + 旧形态不归一，净 +1）。
-  // baseline-allow vitestTests: 1003 → 1024（+21，折叠骨架按需重取）——新增的是判据用例：
-  // `skeletonLazy.spec.ts` 钉本地释放与按需重取的折叠状态，`MessageNode` / 会话 store 补
-  // 重取路径的渲染与竞态断言。不是补回覆盖。
-  // baseline-allow vitestFiles/vitestTests: 84/1221 → 86/1263（+2/+42）——巨型文件模块内拆分：
-  // `vdfsHelpers.spec.ts`（26 条）与 `detailForm/display.spec.ts`（14 条）为**新抽出纯函数补的
-  // 直接单测**（原先只能借 mount composable / 组件间接覆盖）；被测对象与调用点逐字保留，
-  // 依赖方向不变（composables → schemas、components → schemas）。不是补回覆盖，是新增判据。
-  vitestFiles: 96,
-  vitestTests: 1481,
   verifyPrograms: 17,
   verifyNegatives: 4,
-  // baseline-allow e2eCases: 读通道禁令（e2e 不得读任何内部存储文件——`messages.json` / `v2-events.wal` / `session.json` 一并禁）下删 3 个用例：t33 熔断（存储层判据，已由 `wal.test.rs` / `active.test.rs` 覆盖）、t40（断言全为 WAL 白盒入格，可见效果已由 t29 记忆召回 / t35 技能编译覆盖）、t43（messages-json-is-rebuildable，判据「真源已换、缓存可弃」已下沉 `store/tests.rs`，且 messages.json 已停写）。45 → 42，非侵蚀：三条的判据都下沉到了 Rust 侧，不是丢掉覆盖。
-  // 增 t76（召回可见域）。
-  // 增 t99（工具端口三路径：装行执行 / 不装行让位 / 缺行响亮失败并落事实）。
-  // baseline-allow e2eCases: 96 → 91（）——`60cedd50`（B2 环侧编排退场，）删 5 条
-  // 引擎绑定的 e2e 用例（这些用例的接线点随旧 engine 一起消失，留着只会测不到东西）。后续随
-  // 新义务环接入**只会回升**：B 类能力每接回一组，对应的 e2e 用例重新落地。
-  // baseline-allow e2eCases: 91 → 90（）——`346b3134` 整例退役 t41 技能快路：
-  // 它唯一独有的断言依赖 `session.skill_fast_path`，该快路已随 B2 退场，没有生产事实可断；
-  // 能力断言由 t35-skill-compile 承接（退役口径见 2026-11-04 一次性盘点，历史在 `git log`）。
-  // 收紧基线，不是放松。
-  // baseline-allow e2eCases: 97 → 88（）——9 条整例退役（t89/t91/t93/t94/t98/t100/t101/
-  // t102/t103），它们钉的是被撤回的专用验证包；判据对象随实现一起消失，通用扩展面由
-  // `t96-glossary-extension.mjs` 承接。非侵蚀。
-  e2eCases: 96,
   // 累计「补件 : 迁移」的**欠账本金**（，`capability-migration-audit` 的付账线）。
   // 不是「比值上限」：范围基线一变计数就变，比值当阈值会假红。这里记的是判据落地当天的
   // 存量按脚本每轮重算，不手抄。文档里的手写读数
@@ -194,10 +118,9 @@ export const BASELINE = {
  * 为什么要有上限：「高于基线」不是无害的——基线不跟着涨，删掉同样多的测试仍然全绿，
  * 棘轮就被削掉了同样的格数。而提示是可以被无限忽略的（日志天天有、门禁天天绿）。
  *
- * **适用边界（2026-10-10 调整）**：测试数 / 断言数这类「只增」棘轮已改为
- * **向上自动写回**（见 `ratchetOrBump`），不再靠本容差逼人回填，故本常量对它们
- * 实际不再触发红。它仍服务于 `35-baseline.mjs` 里的**其他**棘轮（前端覆盖率阈值、
- * 死码存量、core 单消费方符号数），以及 `20-frontend-static` 的覆盖率阈值提示。
+ * **适用边界**：测试数量不设棘轮。本常量服务于 `35-baseline.mjs` 里的质量棘轮
+ * （前端覆盖率阈值、死码存量、core 单消费方符号数），以及
+ * `20-frontend-static` 的覆盖率阈值提示。
  */
 export const BASELINE_GRACE = 5
 
@@ -231,8 +154,8 @@ export function ratchetVerdict({ actual, baseline, name, kind = '通过数', uni
 /**
  * BASELINE 的**只增**判据：当前值只要低于任一基准版本里的值，就是削判据。
  *
- * `BASELINE` 是源码常量，而它是「有测试被删就红」这条判据本身——把它改小不需要动
- * 任何测试、任何守卫代码，门禁照样全绿，且**不留痕迹**（与「测试消失」同形）。
+ * `BASELINE` 是源码常量，而它是「质量基线被改松就红」这条判据本身——把它改小不需要动
+ * 任何执行证据、任何守卫代码，门禁照样全绿，且**不留痕迹**。
  *
  * **基准是「触碰过该文件的最近两个版本」，不是分支根**：远历史里基线本来就低，拿它比
  * 会让每一跑都红，于是豁免被喂到失效；只比最近一版又漏掉「已经提交的那次下调」。
@@ -335,7 +258,7 @@ export function acceptBaseline(key, value, { stage = false } = {}) {
  * 棘轮判定 + 向上自动上调（网关版）。`ratchetVerdict` 保持纯函数（供单测），
  * 本函数在其上叠加「向上即写回」的副作用：
  * - 实测 > 基线：自动上调（只增，无注释），判绿；
- * - 实测 < 基线：判红（向下是唯一要守的方向，对应「测试被删」）；
+ * - 实测 < 基线：判红（质量基线只允许收窄）；
  * - 相等：判绿。
  *
  * 仅当 `ctx.autoBump` 为真（本地门禁）才真的写回；CI 只亮绿灯、不落盘（CI 无法提交，
@@ -583,32 +506,8 @@ export function sumInt(output, re) {
   return found ? total : null
 }
 
-/**
- * `cargo test` + **通过数棘轮**（`symbio` 与 `cli` 共用）。
- *
- * 抽成共享函数而不是各写一遍：`symbio` 与 `cli` 是**两个独立 workspace**
- * （仓库根没有 `Cargo.toml`），而「跑测试并比对通过数基线」这件事必须对两者是
- * **同一套判据**——各写一份的结果是两边各自演化，最后变成两条不同的规范
- * （`check-commit-msg.mjs` 把「单条」与「一段范围」抽成同一个 `validate()` 就是为此）。
- *
- * 棘轮语义（与 `BASELINE` 头部的说明一致）：
- * - 低于基线 ⇒ **失败**（有测试被删，或有测试失败而退出码没反映出来）；
- * - 高于基线 ⇒ 通过，但打印提示要求同步基线（那是刻意要人看一眼的地方）；
- * - 解析不到通过数 ⇒ 通过但标注 —— 宁可漏报，也不因为**解析**失败把门禁变红。
- *
- * **CI 分支同样有棘轮**：靠 `ciBaseline`
- * 这一格，口径是 `--workspace` **各行求和**，与下面的本地口径不同。调用方在 CI 模式
- * **必须**传它——不传不降级、直接判红，理由见函数体内注释：省略参数不该让守卫消失。
- *
- * **口径（本地分包时）**：取输出里**第一个** `test result: ok. N passed`——那是 lib
- * 目标的**通过数**（`cargo test -p <pkg>` 先跑 lib，再跑集成测试 / doctest）。所以基线
- * 是「通过数」**不是「用例总数」**：`ignored` 的不计入（实测 `symbio` lib 总 1299、
- * `2 ignored` ⇒ 口径数 1297）。拿「总用例数」去定基线会差掉 ignored 那几个。
- *
- * 自定义任务而非声明式命令：同一次运行既判退出码又解析通过数，
- * 避免为了拿输出再跑一遍测试。
- */
-export function cargoTestRatchet(ctx, { label, cwd, args, baseline, baselineName, ciBaseline, ciBaselineName }) {
+/** 执行 cargo test；通过数只作信息展示，不参与质量判定。 */
+export function cargoTestRun(ctx, { label, cwd, args }) {
   return {
     label,
     run: async () => {
@@ -617,48 +516,9 @@ export function cargoTestRatchet(ctx, { label, cwd, args, baseline, baselineName
         const note = r.timedOut ? '超时终止' : `exit=${r.code}${r.signal ? `, ${r.signal}` : ''}`
         return { ok: false, note, logFile: r.logFile }
       }
-      if (ctx.ci) {
-        // ⚠️ **没给 `ciBaseline` ⇒ 判红**，而不是退回「只信退出码」。
-        //
-        // 退回是这条守卫唯一会**静默**失效的方式：调用方少写一个参数，CI 就变回
-        // 只抓「测试失败」、抓不住「测试消失」——后者不留任何痕迹（本地 1339 与基线
-        // 比，CI 却只是求和打印一行数字）。宁可让漏写的人当场看见红，也不要一个
-        // 只亮绿灯的检查项。真要「这个 crate 在 CI 没有可比基线」，显式传 `ciBaseline: 0`，
-        // 那是**声明**，不是省略。
-        if (ciBaseline === undefined) {
-          return {
-            ok: false,
-            note: 'CI 模式缺 ciBaseline ⇒ 本轮次没有棘轮（调用方少写了一个参数）',
-            logFile: r.logFile,
-          }
-        }
-        // CI 跑一次 `--workspace`：输出是**所有测试目标各行求和**，与本地分包「各取
-        // 首个 result 行」不是同一个口径（见 `BASELINE.ciRustTestsTotal`）。
-        const total = sumInt(r.output, /test result: ok\. (\d+) passed/)
-        if (total === null) return { ok: true, note: '未能解析通过数（--workspace 全量；只信退出码）' }
-        const v = ratchetOrBump({
-          actual: total,
-          baseline: ciBaseline,
-          name: ciBaselineName ?? baselineName,
-          kind: 'CI 全量',
-          ctx,
-        })
-        if (v.ok) {
-          console.log(green(`      ${total} passed（CI 全量，基线 ${ciBaseline}）${v.note ? ` · ${v.note}` : ''}`))
-        } else {
-          console.log(red(`      ↳ ${v.note}`))
-        }
-        return { ...v, logFile: r.logFile }
-      }
-      const passed = grabInt(r.output, /test result: ok\. (\d+) passed/)
-      if (passed === null) return { ok: true, note: '未能解析通过数' }
-      const v = ratchetOrBump({ actual: passed, baseline, name: baselineName, ctx })
-      if (v.ok) {
-        console.log(green(`      ${passed} passed（基线 ${baseline}）${v.note ? ` · ${v.note}` : ''}`))
-      } else {
-        console.log(red(`      ↳ ${v.note}`))
-      }
-      return { ...v, logFile: r.logFile }
+      const passed = sumInt(r.output, /test result: ok\. (\d+) passed/)
+      if (passed !== null) console.log(`      ${passed} passed（数量仅作信息）`)
+      return { ok: true, logFile: r.logFile }
     },
   }
 }

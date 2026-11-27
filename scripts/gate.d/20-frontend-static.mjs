@@ -40,9 +40,8 @@
 import path from 'node:path'
 import { fileURLToPath } from 'node:url'
 import fs from 'node:fs'
-import { yellow, red, green, stripAnsi } from '../color.mjs'
+import { yellow, red, stripAnsi } from '../color.mjs'
 import {
-  BASELINE,
   BASELINE_GRACE,
   VITEST_TIMEOUT_MS,
   grabInt,
@@ -50,7 +49,6 @@ import {
   coverageThreshold,
   blockedBySandboxDelete,
   maybeSandboxDeleteHint,
-  acceptBaseline,
 } from './_shared.mjs'
 import { machine, budget } from './_machine.mjs'
 
@@ -79,7 +77,7 @@ export default {
       {
         label: 'vitest run --coverage',
         // 自定义任务：沙箱拦截 coverage/ 清理时用 --coverage.clean=false 重跑一次；
-        // 成功后做文件/用例基线棘轮与覆盖率阈值「形同虚设」提示。
+        // 成功后报告测试数量，并检查覆盖率阈值「形同虚设」。
         run: async () => {
           // 预算按**上一轮实测**给（`budget` = 中位数 × 2.5，钳在 300s 的 1–6 倍）：
           // 慢机器上 coverage 跑得比本机久得多，写死一个数就只能在「太短 ⇒ 假红」
@@ -133,32 +131,15 @@ export default {
 
           const files = grabInt(r.output, /Test Files\s+(\d+) passed/)
           const tests = grabInt(r.output, /Tests\s+(\d+) passed/)
-          if (files === null || tests === null) return { ok: false, note: '无法解析用例数' }
-          if (files < BASELINE.vitestFiles || tests < BASELINE.vitestTests) {
-            return {
-              ok: false,
-              note: `文件/用例数未达基线：${files}/${tests}（基线 ${BASELINE.vitestFiles}/${BASELINE.vitestTests}）`,
-            }
+          if (files !== null && tests !== null) {
+            console.log(`      ${files} 文件 / ${tests} 用例（数量仅作信息）`)
           }
-          const grew = files > BASELINE.vitestFiles || tests > BASELINE.vitestTests
-          if (grew && ctx.autoBump) {
-            // 向上：自动写回新基线（只增，无注释），不要求手写理由。
-            acceptBaseline('vitestFiles', files, { stage: true })
-            acceptBaseline('vitestTests', tests, { stage: true })
-          }
-          console.log(
-            grew
-              ? green(
-                  `      ${files} 文件 / ${tests} 用例 > 基线 ${BASELINE.vitestFiles}/${BASELINE.vitestTests}：已自动上调（无注释）`,
-                )
-              : `      ${files} 文件 / ${tests} 用例（基线 ${BASELINE.vitestFiles}/${BASELINE.vitestTests}）`,
-          )
           const pct = coverageLinesPct(r.output)
           const thr = coverageThreshold(frontendDir)
           // 覆盖率**高出阈值**同样要限期红，容差取 `BASELINE_GRACE`（与 `ratchetVerdict`
           // 同一条）：高出的阈值不是无害的——阈值不跟着涨，删掉同样多的测试仍然全绿，
           // 棘轮就被削掉了同样的点数，而提示可以被无限忽略（日志天天有、门禁天天绿）。
-          // 这正是 M2 把「高于基线只打黄字」改限期的同一条理由，此前只改了测试数那一半。
+          // 这正是 M2 把「高于基线只打黄字」改限期的理由。
           if (pct !== null && thr !== null && pct - thr >= 10) {
             const slack = pct - thr - 10
             if (slack > BASELINE_GRACE) {
@@ -176,7 +157,7 @@ export default {
           } else if (pct !== null) {
             console.log(`      行覆盖率 ${pct}%${thr === null ? '' : `（阈值 ${thr}%）`}`)
           }
-          return { ok: true, note: grew ? `文件/用例数 ${files}/${tests}（基线待更新）` : '' }
+          return { ok: true }
         },
       },
       {

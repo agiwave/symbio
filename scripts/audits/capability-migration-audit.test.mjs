@@ -149,6 +149,8 @@ test('generatedPaths：读不出目录时返回空集，不报错也不假装有
 test('isCapabilitySource：测试与生成物都不算可迁移源码', () => {
   assert.equal(isCapabilitySource(LOOP), true)
   assert.equal(isCapabilitySource('crates/symbio-plugin-loop/src/loop_rows.test.rs'), false)
+  assert.equal(isCapabilitySource('crates/symbio-platform/src/kernel/vdfs/tests.rs'), false)
+  assert.equal(isCapabilitySource('crates/symbio-platform/src/kernel/vdfs/tests/path.rs'), false)
   assert.equal(isCapabilitySource('crates/symbio-platform/src/sdk/authz/rows.gen.rs'), false)
   assert.equal(isCapabilitySource('crates/symbio-plugin-api/src/events.rs'), false)
   assert.equal(isCapabilitySource('crates/symbio-plugin-api/src/context.rs'), true)
@@ -972,13 +974,20 @@ test('DEBT_EXEMPTIONS：真仓条目有可读日期 / 非空理由', () => {
 
 // ── 真仓冒烟 ──────────────────────────────────────────────────────────────
 
-test('真仓冒烟：夹具读得出、--last 跑绿且点名夹具', () => {
-  const r = spawnSync(process.execPath, [script, '--last'], { cwd: repoRoot, encoding: 'utf8', shell: false })
+test('真仓冒烟：固定迁移夹具读得出、范围判绿且点名补件夹具', () => {
+  // HEAD 是否欠账随开发进度变化；回归用固定正例，真实分支范围仍由 30-docs 单独审计。
+  const migrationFixture = 'a1f525011'
+  const r = spawnSync(process.execPath, [script, '--range', `${migrationFixture}^..${migrationFixture}`], {
+    cwd: repoRoot,
+    encoding: 'utf8',
+    shell: false,
+  })
   assert.equal(r.status, 0, r.stderr || r.stdout)
   assert.match(r.stdout, new RegExp(FIXTURE.sha.slice(0, 8)))
+  assert.match(r.stdout, /1 个迁移批次/)
   assert.match(r.stdout, /全部只搬运/)
   // 期限线必须每轮打印（不手抄数字）：欠账 / 今日允许 / 下一台阶。
-  // 欠账可为负：`--last` 只看最后一笔时，若它本身是迁移，净补件为 −1 —— 输出照实打印。
+  // 欠账可为负：固定夹具本身是迁移，净补件为 −1 —— 输出照实打印。
   assert.match(r.stdout, /累计欠账 -?\d+ 笔/)
   assert.match(r.stdout, /今日（\d{4}-\d{2}-\d{2}）允许 ≤\d+/)
 })

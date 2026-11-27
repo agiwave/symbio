@@ -80,7 +80,7 @@ use std::collections::HashSet;
 use crate::projections::mutations::added_messages;
 use crate::projections::mutations::is_reader_reply;
 use symbio_platform::kernel::chat::chat_node::{
-    ChatNode, MessageContent, NodeKind, NodeStatus, CHAT_STYLE_TAG_COMPRESSION,
+    ChatNode, MessageContent, NodeKind, NodeRole, NodeStatus, CHAT_STYLE_TAG_COMPRESSION,
     CHAT_STYLE_TAG_REASONING, CHAT_STYLE_TAG_RUN,
 };
 use symbio_platform::kernel::event::event_payload_node_id;
@@ -267,10 +267,14 @@ pub fn rebuild(events: &[Event], c: &ChatVocab, m: &MessageVocab) -> Vec<ChatNod
                 continue;
             }
         }
-        // 产物格是**同一逻辑节点的新状态**（待用户动作的卡 → 恢复后的答复）：
-        // 后来的事实覆盖先前的，位置与顺序锚保留。其余格子仍是「同 id 只认首次」
-        // ——那里的重复是**引用**（收束的 `tool_calls[]`），不是状态推进。
-        let carries_state = slot_of(e, c, m) == Some(ChatSlot::ArtifactAdded);
+        // 产物格与模型应答格是**同一逻辑节点的新状态**（待用户动作的卡 → 恢复后的
+        // 答复、失败正文 → 同 id 成功正文）：后来的事实覆盖先前的，位置与顺序锚保留。
+        // 其余格子仍是「同 id 只认首次」——那里的重复是引用，不是状态推进。
+        let slot = slot_of(e, c, m);
+        let model_output = e.entity == Entity::Scope
+            && e.verb == Verb::Asserted
+            && (e.kind == EVENT_RESPONSE || e.kind == EVENT_FAILED);
+        let carries_state = slot == Some(ChatSlot::ArtifactAdded) || model_output;
         for mut node in nodes_of(e, &denied_speech, &group_of_call, &node_of_call, c, m) {
             if gone.contains(&node.id) {
                 continue;
@@ -284,10 +288,12 @@ pub fn rebuild(events: &[Event], c: &ChatVocab, m: &MessageVocab) -> Vec<ChatNod
                 // 终态移交的两格先取下来：`carries_state` 分支会把 `node` 整个搬走，
                 // 之后不能再借它。
                 //
-                // 移交的判据是**状态不是 `Completed`**，不是「有没有 `error`」：中止轮
-                // 没有错误信息（它没失败），但它的终态仍必须写到轮根上，否则这一轮
-                // 「被用户按停」在读面与「正常结束」同形（中止轮不再为这件事
-                // 造一条空正文节点）。成功轮不移交——既有节点自己的状态不被覆盖。
+                // 失败 / 中止的终态必须写到轮根上；中止没有错误信息，因此判据不能
+                // 只看 `error`。同 root 的 Completed 终答则只收回先前失败 / 中止的
+                // 状态与错误，保留正常成功轮的形状（用户根仍无 status，独立骨架仍
+                // 为 Completed）。进展格的 Completed 不是终答，不能提前收束。
+                let completed_final = (slot == Some(ChatSlot::FinalReply) || model_output)
+                    && node.status == Some(NodeStatus::Completed);
                 let terminal = (node.status != Some(NodeStatus::Completed))
                     .then(|| (node.status.clone(), node.error.clone()));
                 if carries_state {
@@ -308,12 +314,25 @@ pub fn rebuild(events: &[Event], c: &ChatVocab, m: &MessageVocab) -> Vec<ChatNod
                 // 收束格的骨架与用户节点同 id（ 之后 `root_id` 就是用户消息
                 // 事实 id）：这一轮的终态必须补到既有节点上，否则「以失败 / 中止结束」
                 // 在读面不可见（失败那一半； 把中止那一半补上）。
-                // `error` 缺席时**不覆盖**既有那格（中止没有错误信息，见上）。
-                if let Some((status, error)) = terminal {
-                    out[i].status = status;
-                    if error.is_some() {
-                        out[i].error = error;
+                // `error` 随终态一起移交：重试成功或中止后，上一轮的失败不应继续挂在
+                // 同一个用户根节点上。
+                if completed_final {
+                    out[i].error = None;
+                    if matches!(
+                        out[i].status,
+                        Some(NodeStatus::Failed | NodeStatus::Aborted)
+                    ) {
+                        out[i].status = if out[i].msg_type == Some(NodeKind::Skeleton)
+                            || out[i].node_role() == Some(NodeRole::Assistant)
+                        {
+                            Some(NodeStatus::Completed)
+                        } else {
+                            None
+                        };
                     }
+                } else if let Some((status, error)) = terminal {
+                    out[i].status = status;
+                    out[i].error = error;
                 }
                 continue;
             }

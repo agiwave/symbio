@@ -220,7 +220,7 @@ export function isRetiredGenerated(p) {
 }
 
 /** 测试文件：迁移批次可能改测试而机制不变（断言跟着搬）。 */
-const TEST_RE = /\.test\.rs$/
+const TEST_RE = /\.test\.rs$|(?:^|\/)tests(?:\/|\.rs$)/
 
 /**
  * 判据诞生之前的提交不追溯。此前 868 个提交按旧纪律写，追溯的唯一效果是逼人

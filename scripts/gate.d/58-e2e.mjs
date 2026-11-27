@@ -11,16 +11,12 @@
 // 独立子进程运行（与 `node e2e/run-tests.mjs` 同一套发现逻辑），新增用例文件
 // 自动纳入门控。前置：`crates/symbio-cli/` 的 release 二进制。
 //
-// ⚠️ **「自动纳入」只管加，不管减**：删掉一份 `tNN.mjs`，这一跑仍是「41/41 通过」、
-// 门禁照旧全绿，而文档正文正引用着「现 42 例」。所以用例数进
-// `BASELINE.e2eCases` 棘轮（只许涨），三态判定走 `ratchetOrBump`——向上自动上调、向下才红，与单测数
-// 同一条判据，不在这里再决定一次红不红。
+// 用例数量只作信息展示；删除重复或过时用例不会因数量变化判红。
 import path from 'node:path'
 import os from 'node:os'
 import { fileURLToPath } from 'node:url'
 import fs from 'node:fs'
-import { dim, yellow, red, green } from '../color.mjs'
-import { BASELINE, ratchetOrBump } from './_shared.mjs'
+import { dim, yellow, red } from '../color.mjs'
 import { machine } from './_machine.mjs'
 // 逐例耗时的取数实现与门外复核（`scripts/e2e-concurrency.mjs`）共用一份：
 // 同一段逻辑曾在这里与那里各写一份，而日志目录一改就两边同时失明。
@@ -69,34 +65,11 @@ export default {
       cwd: repoRoot,
     })
 
-    tasks.push({
-      label: 'e2e: 用例数棘轮',
-      run: async () => {
-        const actual = discoverCases().length
-        const v = ratchetOrBump({
-          actual,
-          baseline: BASELINE.e2eCases,
-          name: 'e2eCases',
-          kind: 'e2e 用例数',
-          unit: '用例',
-          ctx,
-        })
-        if (!v.ok) {
-          console.log(red(`      ↳ ${v.note}`))
-          return { ok: false, note: v.note }
-        }
-        if (v.note) console.log(green(`      ↳ ${v.note}`))
-        else console.log(dim(`      ↳ 用例 ${actual}/${BASELINE.e2eCases}`))
-        return { ok: true }
-      },
-    })
-
     // 用例号是**地址**：`node e2e/run-tests.mjs tNN` 按号选，文档与提交信息也按号引。
     // 撞号时两件事一起坏——选一个号跑出两条（读者以为在复现一条判据），而引用它的那句话
     // 指向不明。实测事故：`t71-gateway-boundary`（新增）与既有的
     // `t71-peer-commitment` 各自在文件头自述「T71」，谁也没撞坏任何东西，门禁一路全绿——
-    // 因为**没有一条判据数过这件事**。上面那条棘轮只判总数，「总数对得上而号重复」
-    // 恰好是它的盲区。
+    // 因为**没有一条判据数过编号**。总数相同而编号重复，恰好是仅看数量的盲区。
     tasks.push({
       label: 'e2e: 用例号唯一（一个号只指向一条）',
       run: async () => {

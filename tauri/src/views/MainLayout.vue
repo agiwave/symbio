@@ -38,9 +38,9 @@
 <script setup lang="ts">
 import { computed, nextTick, onBeforeUnmount, onMounted, ref, watch } from 'vue'
 import { RouterView, useRouter } from 'vue-router'
-import { startSessionTranscriptSync, registerTranscriptMount } from '@/stores/sessionTranscriptSync'
-import { startSessionNodeSync, registerSessionMount } from '@/stores/sessionNodeSync'
-import { startSessionInboxSync, registerInboxMount } from '@/stores/sessionInboxSync'
+import { startSessionTranscriptSync, stopSessionTranscriptSync, registerTranscriptMount } from '@/stores/sessionTranscriptSync'
+import { startSessionNodeSync, stopSessionNodeSync, registerSessionMount } from '@/stores/sessionNodeSync'
+import { startSessionInboxSync, stopSessionInboxSync, registerInboxMount } from '@/stores/sessionInboxSync'
 import { setChimeSettingsSource } from '@/services/completionChime'
 import { getWorkspacePath } from '@/services/home'
 import { ensureSessionMountDir } from '@/services/vdfsScheme'
@@ -64,6 +64,7 @@ import HotkeySheet from '@/components/common/HotkeySheet.vue'
 
 const router = useRouter()
 const sessions = useSessionsStore()
+let disposed = false
 
 /**
  * 全局浮层的显隐（全 App 唯一一份）。
@@ -184,13 +185,14 @@ useHotkeys('main-layout', [
  * 登记表，启动时按表逐份订阅），因此这里不必关心与 `onMounted` 的先后。
  */
 watch(
-  () => sessions.sessionSpace,
-  async (dir) => {
+  () => [sessions.sessionSpace, sessions.list.length] as const,
+  async ([dir]) => {
     if (!dir) return
     // 只有**会话挂载点**才能推导 `<sid>/<集合段>`。会话内部路径（`<sid>/session`
     // / `<sid>/workdir` 等）也曾从这里流进来，结果三个消费端各自去 list 它、各自
     // 报「下没有任何会话可供推导」。登记前按节点自述核一次，错的地址就地挡住。
     const node = await statVdfs(READBACK_REASON.BOOTSTRAP, dir)
+    if (disposed) return
     if (!isSessionExt(node?.new_type?.ext)) {
       logger.warn('MainLayout', `会话空间 ${dir} 不是会话挂载点，跳过实时订阅登记`)
       return
@@ -237,6 +239,7 @@ onMounted(async () => {
   // 于是 HMR / 测试不会叠监听器，订阅的启停也看得见。
   // 现在是 async：订阅前缀（会话挂载目录）要按数据认出来，不是常量。
   await startSessionNodeSync(sessions)
+  if (disposed) return
 
   // 启动**收件箱同步**（排队中的用户消息 → 「待发送」气泡； 步③）
   //
@@ -268,6 +271,7 @@ onMounted(async () => {
   // sessions store 清单供聊天组件查元数据
   try {
     await getWorkspacePath()
+    if (disposed) return
   } catch (err) {
     logger.warn('MainLayout', '恢复全局工作区失败:', err)
   }
@@ -289,7 +293,11 @@ onMounted(async () => {
 // （`useHotkeys` 走 onScopeDispose，作用域一结束绑定就消失）。
 window.addEventListener('keydown', dispatchHotkeys)
 onBeforeUnmount(() => {
+  disposed = true
   window.removeEventListener('keydown', dispatchHotkeys)
+  stopSessionTranscriptSync()
+  stopSessionNodeSync()
+  stopSessionInboxSync()
 })
 </script>
 

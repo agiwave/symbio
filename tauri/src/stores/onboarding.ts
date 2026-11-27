@@ -13,7 +13,7 @@
  * |---|---|
  * | 系统目录 | `services/systemLocation` 的 `locationError` 为空 |
  * | 配一个模型 | `<根>/model` 里有条目（`vdfs/list` 非空） |
- * | 发第一条消息 | 会话挂载点认得出（`ensureSessionMountDir` 不抛） |
+ * | 发第一条消息 | 会话清单的持久投影 `has_first_exchange` 为真 |
  *
  * 因此它**不会**给已经配好的用户弹一张「请去配置」的空话卡片：`maybeOpen()` 只在
  * 第②步未就绪时自动打开。判据全来自后端数据，新增一类资源不需要改这里。
@@ -28,6 +28,7 @@
 import { defineStore } from 'pinia'
 import { computed, ref } from 'vue'
 import { listVdfs } from '@/services/vdfs'
+import { listSessions } from '@/services/session'
 import { subscribeVdfsChanged } from '@/services/eventBus'
 import { READBACK_REASON } from '@/services/readback'
 import { findMountDirByNewTypeExt } from '@/services/vdfsScheme'
@@ -107,7 +108,11 @@ export const useOnboardingStore = defineStore('onboarding', () => {
     }
     try {
       sessionDir.value = await findMountDirByNewTypeExt(VDFS_EXT_SESSION)
-      sessionReady.value = Boolean(sessionDir.value)
+      sessionReady.value = false
+      if (sessionDir.value) {
+        const sessions = await listSessions(undefined, sessionDir.value)
+        sessionReady.value = sessions.some((item) => item.has_first_exchange === true)
+      }
     } catch (e) {
       logger.warn(MODULE_TAG, '判定「会话是否就绪」失败:', e)
       sessionReady.value = false

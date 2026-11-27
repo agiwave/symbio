@@ -74,7 +74,7 @@
 import { subscribeVdfsChanged } from '@/services/eventBus'
 import { statVdfs, readVdfs } from '@/services/vdfs'
 import { READBACK_REASON, type ReadbackReason } from '@/services/readback'
-import { ensureSessionScheme } from '@/services/vdfsScheme'
+import { ensureSessionScheme, NoSessionForSchemeError } from '@/services/vdfsScheme'
 import { type VdfsChange, type VdfsNode } from '@/schemas/vdfs'
 import { NODE_STATUS_REMOVED, nodeKindOf, type ChatNode } from '@/schemas/chat_node'
 import { isSkeletonKind } from '@/registry/messageTypes'
@@ -107,6 +107,8 @@ const FLUSH_INTERVAL_MS = 48
 interface SyncState {
   sink: TranscriptSyncSink | null
   unsubscribes: Array<() => void>
+  subscribedMounts: Set<string>
+  generation: number
   /**
    * **已登记的挂载目录 → 转写段名**。
    *
@@ -124,6 +126,8 @@ interface SyncState {
  * 增量落地、全量替换落地各 +1；回读发起时记下起点，返回时比对。
  */
   deltaGen: Map<string, number>
+  /** 已删除消息地址：作废同生命周期内尚未返回的 stat/read，防止旧回读重建节点 */
+  removed: Set<string>
   /** 收到过消息变更的会话（resync 时按它整份重读） */
   seenSessions: Set<string>
 }
@@ -139,16 +143,22 @@ const _G = globalThis as typeof globalThis & { __symTranscriptSyncState?: SyncSt
 const S: SyncState = _G.__symTranscriptSyncState ?? (_G.__symTranscriptSyncState = {
   sink: null,
   unsubscribes: [],
+  subscribedMounts: new Set(),
+  generation: 0,
   mounts: new Map(),
   pending: new Map(),
   flushTimer: null,
   deltaGen: new Map(),
+  removed: new Set(),
   seenSessions: new Set(),
 })
 // HMR：模块重载后复用旧 state 对象，新字段可能不存在——补齐而不是让它变成 undefined。
 S.deltaGen ??= new Map()
+S.removed ??= new Set()
 S.seenSessions ??= new Set()
 S.unsubscribes ??= []
+S.subscribedMounts ??= new Set()
+S.generation ??= 0
 S.mounts ??= new Map()
 
 /** 消息节点的展示地址（订阅 handler 的路径过滤与守卫键共用这一种拼法） */
@@ -297,6 +307,7 @@ async function readMessage(
 ): Promise<void> {
   const sink = S.sink
   if (!sink) return
+  const generation = S.generation
   const addr = messageAddr(mountDir, sid, mid)
   // 正文写入代际快照：读取期间若本端正文又变过（增量 / 全量），本地比这次响应新
   const gen = deltaGenOf(addr)
@@ -305,6 +316,7 @@ async function readMessage(
       statVdfs(reason, addr),
       readVdfs(reason, addr),
     ])
+    if (generation !== S.generation || sink !== S.sink || S.removed.has(addr)) return
     if (!node) return // 已删（或会话没了）：删除另有 `status = removed` 帧兜底
     const changed = deltaGenOf(addr) !== gen
     const text = content?.text ?? ''
@@ -317,6 +329,11 @@ async function readMessage(
         return
       }
       delete identity.content
+      delete identity.status
+      delete identity.error
+      delete identity.meta
+      delete identity.timestamp
+      delete identity.seq
       sink.applyTranscriptMessages(sid, [identity])
       return
     }
@@ -383,11 +400,14 @@ export function handleVdfsChange(change: VdfsChange): void {
     logger.warn('[transcript-sync]', `帧身份与地址不一致（按地址落地）：${path}`)
   }
   const msg: ChatNode = payload.id === mid ? (payload as ChatNode) : { ...payload, id: mid }
+  const addr = messageAddr(mountDir, sid, mid)
   S.seenSessions.add(sid)
 
   // ① 删除：`status = removed`（消息词汇的删除语义——信封上没有 deleted 取值）。
   //    立即落地，不等合帧窗口：删除后本地不该再多出正文。
   if (msg.status === NODE_STATUS_REMOVED) {
+    S.removed.add(addr)
+    S.deltaGen.set(addr, deltaGenOf(addr) + 1)
     dropQueuedDelta(sid, mid)
     try {
       sink.applyTranscriptMessages(sid, [msg])
@@ -396,9 +416,10 @@ export function handleVdfsChange(change: VdfsChange): void {
     }
     return
   }
+  // 同 id 再次出现即恢复生命周期；旧删除墓碑只作废在飞回读，不永久拉黑该地址。
+  S.removed.delete(addr)
 
   // ② 增量帧：窄载荷（只有 `delta`），流式正文的主干道。
-  const addr = messageAddr(mountDir, sid, mid)
   if (typeof msg.delta === 'string') {
     // 代际先于落地推进：回读的判定基准是「正文被写过几次」，与是否合帧无关
     S.deltaGen.set(addr, deltaGenOf(addr) + 1)
@@ -424,6 +445,7 @@ export function handleVdfsChange(change: VdfsChange): void {
   //    前缀，逐字段合并只迁移状态（`applyTranscriptMessages` 不碰没带的字段），
   //    **零回读**。
   if (sink.hasMessage(sid, mid)) {
+    S.deltaGen.set(addr, deltaGenOf(addr) + 1)
     sink.applyTranscriptMessages(sid, [msg])
     return
   }
@@ -441,6 +463,7 @@ export function handleVdfsChange(change: VdfsChange): void {
   // 回读确实能补回本端漏掉的正文，那一次是必要的。这也正是每轮会话都会多出
   // 一对 `vdfs/stat` + `vdfs/read` 的成因（骨架根节点的首帧就是「无正文」）。
   if (isSkeletonKind(nodeKindOf(msg.type))) {
+    S.deltaGen.set(addr, deltaGenOf(addr) + 1)
     sink.applyTranscriptMessages(sid, [msg])
     return
   }
@@ -464,29 +487,40 @@ export function handleVdfsChange(change: VdfsChange): void {
  */
 export async function registerTranscriptMount(mountDir: string): Promise<boolean> {
   if (!mountDir || S.mounts.has(mountDir)) return false
+  const sink = S.sink
+  const generation = S.generation
   let messagesSeg: string
   try {
     messagesSeg = (await ensureSessionScheme(mountDir)).messagesSeg
   } catch (err) {
+    if (err instanceof NoSessionForSchemeError) return false
     logger.warn('[transcript-sync]', `会话挂载目录 ${mountDir} 的转写段未解析`, err)
     return false
   }
   // 解析期间可能已被另一次调用登记（同一个目录并发进入）——后到者不重复挂
-  if (S.mounts.has(mountDir)) return false
+  if (S.mounts.has(mountDir) || generation !== S.generation || sink !== S.sink) return false
   S.mounts.set(mountDir, messagesSeg)
-  if (S.sink) S.unsubscribes.push(subscribeMount(mountDir, S.sink))
+  if (sink) attachMount(mountDir, sink)
   logger.info('[transcript-sync]', '登记会话挂载目录', mountDir)
   return true
 }
 
 /** 为一个挂载目录挂订阅（每个目录一份：前缀不同，登记也不同） */
+function attachMount(mountDir: string, sink: TranscriptSyncSink): void {
+  if (S.subscribedMounts.has(mountDir)) return
+  S.subscribedMounts.add(mountDir)
+  S.unsubscribes.push(subscribeMount(mountDir, sink))
+}
+
 function subscribeMount(mountDir: string, sink: TranscriptSyncSink): () => void {
+  const generation = S.generation
   return subscribeVdfsChanged(
     // 订阅范围 = 会话挂载目录的**整棵子树**（消息项在 `<sid>/<集合段>/<项 id>`，
     // 不在直接子节点上，故不能用 directChildren）。
     { prefix: mountDir },
     handleVdfsChange,
     () => {
+      if (generation !== S.generation || sink !== S.sink) return
       logger.warn('[transcript-sync]', '收到重同步信号，整份重读在途会话')
       // 先丢弃待落地增量再重读：权威快照会覆盖它们，不丢就会把同一段正文追加两次。
       dropPending()
@@ -511,30 +545,30 @@ function subscribeMount(mountDir: string, sink: TranscriptSyncSink): () => void 
 export async function startSessionTranscriptSync(sink: TranscriptSyncSink): Promise<void> {
   stopSessionTranscriptSync()
   S.sink = sink
+  const generation = S.generation
 
   // 默认挂载目录（根空间那份）。地址方案是运行期数据（段名是展示名，随后端下发），
   // 解析失败就不订阅：宁可没有订阅，也不要订到一个拼错的 prefix 上。
-  let mountDir: string
+  let scheme: Awaited<ReturnType<typeof ensureSessionScheme>>
   try {
-    mountDir = (await ensureSessionScheme()).mountDir
+    scheme = await ensureSessionScheme()
   } catch (err) {
+    if (err instanceof NoSessionForSchemeError) return
     logger.error('[transcript-sync]', '会话挂载目录解析失败，订阅未启动', err)
     return
   }
-  // 已登记的其它空间（此前进入过子智能体空间）一并挂上——只挂根那份会让子空间
-  // 的转写变更整片收不到。
-  if (!S.mounts.has(mountDir)) {
-    const messagesSeg = (await ensureSessionScheme(mountDir)).messagesSeg
-    S.mounts.set(mountDir, messagesSeg)
-  }
-  S.unsubscribes = [...S.mounts.keys()].map((m) => subscribeMount(m, sink))
+  if (generation !== S.generation || S.sink !== sink) return
+  if (!S.mounts.has(scheme.mountDir)) S.mounts.set(scheme.mountDir, scheme.messagesSeg)
+  for (const m of S.mounts.keys()) attachMount(m, sink)
   logger.info('[transcript-sync]', '会话转写同步已启动', [...S.mounts.keys()])
 }
 
 /** 停止会话转写同步（重复启动 / HMR / 测试时调用） */
 export function stopSessionTranscriptSync(): void {
+  S.generation += 1
   for (const u of S.unsubscribes) u()
   S.unsubscribes = []
+  S.subscribedMounts.clear()
   if (S.flushTimer) {
     clearTimeout(S.flushTimer)
     S.flushTimer = null
@@ -543,6 +577,7 @@ export function stopSessionTranscriptSync(): void {
   S.sink = null
   // S.mounts 保留：地址方案与订阅无关，重启动省一次解析（`resetSessionTranscriptSyncForTest` 才清）
   // deltaGen 保留：代际是「路径级」事实，不随订阅生命周期作废
+  S.removed.clear()
   S.seenSessions.clear()
 }
 
@@ -550,6 +585,7 @@ export function stopSessionTranscriptSync(): void {
 export function resetSessionTranscriptSyncForTest(): void {
   stopSessionTranscriptSync()
   S.deltaGen.clear()
+  S.removed.clear()
   S.seenSessions.clear()
   S.mounts.clear()
 }

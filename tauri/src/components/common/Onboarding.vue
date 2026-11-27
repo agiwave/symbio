@@ -24,7 +24,7 @@
   >
     <h2 id="onboarding-title" class="ob-title">三步开始</h2>
     <p class="ob-sub">
-      把下面三件做完，就能开始对话。配置都在左侧的插件管理里（齿轮图标），每一项对应一个插件。
+      完成下面三步，就能开始第一段对话。每一步都会告诉你下一步去哪里。
     </p>
 
     <ol class="ob-steps">
@@ -43,7 +43,7 @@
           <p class="ob-step-desc">
             {{
               store.modelReady
-                ? '已经有可用的模型了。'
+                ? '已经配置好模型了。'
                 : '模型是对话的引擎：在模型目录下新建一个条目，填入服务商与 API Key。'
             }}
           </p>
@@ -57,9 +57,13 @@
         <span class="ob-mark" aria-hidden="true">{{ store.sessionReady ? '✓' : '3' }}</span>
         <div class="ob-body">
           <p class="ob-step-title">发第一条消息</p>
-          <p class="ob-step-desc">在会话目录里点右上角「新建」，写下第一句话。发送后可以随时中止。</p>
+          <p class="ob-step-desc">
+            {{ store.sessionReady
+              ? '第一段对话已经完成，可以直接开始使用了。'
+              : '进入会话目录，直接输入第一句话。发送后才会创建会话，不留下空会话。' }}
+          </p>
         </div>
-        <button class="ob-btn" type="button" @click="goSession">开始第一段对话</button>
+        <button v-if="!store.sessionReady" class="ob-btn" type="button" @click="goSession">开始第一段对话</button>
       </li>
     </ol>
 

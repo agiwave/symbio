@@ -124,6 +124,10 @@ pub(crate) fn session_node(s: &SessionSummary, rt: &SessionRuntime) -> VdfsNode 
     let _ = n
         .attributes
         .insert("meta_tags".to_string(), json!(s.meta_tags));
+    let _ = n.attributes.insert(
+        "has_first_exchange".to_string(),
+        json!(s.has_first_exchange),
+    );
     // 上一轮结局：只在知道时出现（不写成 null——「还不知道」与「上一轮正常结束」
     // 是两件事，不该在线上形状里混为一谈）
     if let Some(outcome) = &rt.outcome {

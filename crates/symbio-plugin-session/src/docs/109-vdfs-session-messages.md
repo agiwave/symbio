@@ -198,6 +198,18 @@ read(<根>/session/<sid>/message/<mid>)
 处理：读取期间若本端正文又变过，本地比这次响应新，该响应作废（`useVdfs` 的详情视图与
 `sessionTranscriptSync` 各持一个实例——两者的作废时机不同，不共用）。
 
+### 3.5 首轮对话完成事实
+
+`SessionSummary.has_first_exchange` 是会话清单的持久投影，由 `SessionSummary::of`
+从已落库消息单点计算，并作为会话节点属性 `has_first_exchange` 下发。判据必须是
+同一轮真实的用户发言 → 模型完成回复：用户消息排除 `meta.trigger` / `compacted`
+之类的内部触发，纯附件发言也算；回复必须是 Agent 主体、非空正文、`Completed`，
+工具调用、推理与失败兜底不算。入队但未落库的 inbox 项不算。
+
+该字段带 `#[serde(default)]`；存量摘要缺字段时，存储必须从 WAL 回放重建投影，
+不能把“没有字段”当成“没有对话”。前端首启第三步只读清单属性，不逐个读取转写，
+也不按消息数或摘要非空推断。
+
 ---
 
 ## 4. 变更语义（实时链路）

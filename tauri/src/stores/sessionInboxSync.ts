@@ -56,7 +56,7 @@
 import { subscribeVdfsChanged } from '@/services/eventBus'
 import { statVdfs } from '@/services/vdfs'
 import { READBACK_REASON } from '@/services/readback'
-import { ensureSessionScheme } from '@/services/vdfsScheme'
+import { ensureSessionScheme, NoSessionForSchemeError } from '@/services/vdfsScheme'
 import { type VdfsChange, type VdfsNode } from '@/schemas/vdfs'
 import { logger } from '@/utils/logger'
 
@@ -90,10 +90,14 @@ export interface SessionInboxSink {
 interface InboxSyncState {
   sink: SessionInboxSink | null
   unsubscribes: Array<() => void>
+  subscribedMounts: Set<string>
+  generation: number
   /** 已登记的挂载目录 → 收件箱段名（按挂载目录缓存，与另两个消费端同由） */
   mounts: Map<string, string>
   /** 见过收件箱变更的会话（resync 时按它重列） */
   seenSessions: Set<string>
+  /** 条目地址 → 本地状态代际（旧删除回读不得删掉重新入队的同 id 条目） */
+  itemRevisions: Map<string, number>
 }
 
 /**
@@ -106,12 +110,18 @@ const _G = globalThis as typeof globalThis & { __symInboxSyncState?: InboxSyncSt
 const S: InboxSyncState = _G.__symInboxSyncState ?? (_G.__symInboxSyncState = {
   sink: null,
   unsubscribes: [],
+  subscribedMounts: new Set(),
+  generation: 0,
   mounts: new Map(),
   seenSessions: new Set(),
+  itemRevisions: new Map(),
 })
 S.mounts ??= new Map()
 S.seenSessions ??= new Set()
+S.itemRevisions ??= new Map()
 S.unsubscribes ??= []
+S.subscribedMounts ??= new Set()
+S.generation ??= 0
 
 /**
  * 变更地址落在哪个已登记的挂载目录下（没有就是不属于本消费端）。
@@ -165,15 +175,26 @@ export function handleVdfsChange(change: VdfsChange): void {
     if (node.name !== undefined && node.name !== iid) {
       logger.warn('[inbox-sync]', `帧身份与地址不一致（按地址落地）：${path}`)
     }
+    S.itemRevisions.set(path, (S.itemRevisions.get(path) ?? 0) + 1)
     sink.applyInboxItem(sid, { id: iid, label: inboxLabelOf(node) })
     return
   }
 
   // 无载荷 = 出队 / 取消 / 清空。回读只分辨**删除与否**——条目已不在队列里，
   // 读不到正文也不该读（IPC 换不来任何要显示的东西）。
+  const revision = S.itemRevisions.get(path) ?? 0
+  const generation = S.generation
   void statVdfs(READBACK_REASON.RESOURCE_SIGNAL, path)
     .then((node) => {
-      if (!node) sink.removeInboxItem(sid, iid)
+      if (
+        generation !== S.generation ||
+        sink !== S.sink ||
+        revision !== (S.itemRevisions.get(path) ?? 0)
+      ) return
+      if (!node) {
+        S.itemRevisions.set(path, revision + 1)
+        sink.removeInboxItem(sid, iid)
+      }
     })
     .catch((err: unknown) =>
       logger.warn('[inbox-sync]', `回读收件箱条目失败：${path}`, err),
@@ -193,11 +214,19 @@ function inboxLabelOf(node: VdfsNode): string {
 }
 
 /** 为一个挂载目录挂订阅（每个目录一份：前缀不同，登记也不同） */
+function attachMount(mountDir: string, sink: SessionInboxSink): void {
+  if (S.subscribedMounts.has(mountDir)) return
+  S.subscribedMounts.add(mountDir)
+  S.unsubscribes.push(subscribeMount(mountDir, sink))
+}
+
 function subscribeMount(mountDir: string, sink: SessionInboxSink): () => void {
+  const generation = S.generation
   return subscribeVdfsChanged(
     { prefix: mountDir },
     handleVdfsChange,
     () => {
+      if (generation !== S.generation || sink !== S.sink) return
       // 重同步：漏帧会让本地多一个幽灵气泡或少一个气泡——与本端已知全部会话
       // 取并集整份重列，权威清单直接替换本地（与转写消费端的 resync 同构）。
       // 断线期间完全没有帧的会话不在 seenSessions 里，不能漏。
@@ -225,17 +254,20 @@ function subscribeMount(mountDir: string, sink: SessionInboxSink): () => void {
  */
 export async function registerInboxMount(mountDir: string): Promise<boolean> {
   if (!mountDir || S.mounts.has(mountDir)) return false
+  const sink = S.sink
+  const generation = S.generation
   let inboxSeg: string
   try {
     inboxSeg = (await ensureSessionScheme(mountDir)).inboxSeg
   } catch (err) {
+    if (err instanceof NoSessionForSchemeError) return false
     logger.warn('[inbox-sync]', `会话挂载目录 ${mountDir} 的收件箱段未解析`, err)
     return false
   }
   // 解析期间可能已被另一次调用登记（同一个目录并发进入）——后到者不重复挂
-  if (S.mounts.has(mountDir)) return false
+  if (S.mounts.has(mountDir) || generation !== S.generation || sink !== S.sink) return false
   S.mounts.set(mountDir, inboxSeg)
-  if (S.sink) S.unsubscribes.push(subscribeMount(mountDir, S.sink))
+  if (sink) attachMount(mountDir, sink)
   logger.info('[inbox-sync]', '登记会话挂载目录', mountDir)
   return true
 }
@@ -249,6 +281,7 @@ export async function registerInboxMount(mountDir: string): Promise<boolean> {
 export async function startSessionInboxSync(sink: SessionInboxSink): Promise<void> {
   stopSessionInboxSync()
   S.sink = sink
+  const generation = S.generation
 
   // 默认挂载目录（根空间那份）。段名是运行期数据，解析失败就不订阅：
   // 宁可没有订阅，也不要订到一个拼错的 prefix 上（那样侧栏的待发送气泡
@@ -257,22 +290,25 @@ export async function startSessionInboxSync(sink: SessionInboxSink): Promise<voi
   try {
     scheme = await ensureSessionScheme()
   } catch (err) {
+    if (err instanceof NoSessionForSchemeError) return
     logger.error('[inbox-sync]', '会话挂载目录解析失败，订阅未启动', err)
     return
   }
-  if (!S.mounts.has(scheme.mountDir)) {
-    S.mounts.set(scheme.mountDir, scheme.inboxSeg)
-  }
-  S.unsubscribes = [...S.mounts.keys()].map((m) => subscribeMount(m, sink))
+  if (generation !== S.generation || S.sink !== sink) return
+  if (!S.mounts.has(scheme.mountDir)) S.mounts.set(scheme.mountDir, scheme.inboxSeg)
+  for (const m of S.mounts.keys()) attachMount(m, sink)
   logger.info('[inbox-sync]', '收件箱同步已启动', [...S.mounts.keys()])
 }
 
 /** 停止收件箱同步（重复启动 / HMR / 测试时调用） */
 export function stopSessionInboxSync(): void {
+  S.generation += 1
   for (const u of S.unsubscribes) u()
   S.unsubscribes = []
+  S.subscribedMounts.clear()
   S.sink = null
   S.seenSessions.clear()
+  S.itemRevisions.clear()
   // S.mounts 保留：地址方案与订阅无关，重启动省一次解析
   // （`resetSessionInboxSyncForTest` 才清）
 }

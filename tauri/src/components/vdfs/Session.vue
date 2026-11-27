@@ -10,7 +10,7 @@
     详情页——经机制动作「进入下一级」进入会话同名目录
     `<id>/workdir[/<rel>]`，与子会话并列，见 docs/003-design/009-VDFS规范.md）；
   - node 无 id（机制「新建」态 = **草稿节点**，见 `useVdfs.startNew`）：新建会话
-    引导——输入区与现有会话完全一致（`ChatComposer` 草稿态：目录/Agent/模型/模式/
+    引导——输入区与现有会话完全一致（`ChatComposer` 草稿态：目录/模型/模式/
     风险等级/心跳均可选，由会话选项栏（后端随节点下发定义）渲染，暂存于机制内部的 metadata 缓冲，
     发送首条消息时经 `createSessionWithFirstMessage` **一次 `vdfs/write`** 创建并
     落库——id 由后端生成）。
@@ -41,9 +41,9 @@
 
   <div v-else class="session-create">
     <div class="create-card">
-      <h3 class="create-title">开始新会话</h3>
+      <h3 class="create-title">开始新对话</h3>
       <p class="create-desc">
-        输入区与现有会话完全一致——工作目录、智能体、模型、运行模式与风险等级均可在发送前选择；发送第一条消息时才会真正创建会话（懒创建，不产生空会话）。
+        写下第一句话，发送后自动创建会话。工作目录、模型、运行模式与风险等级都可以先调整。
       </p>
       <ChatComposer
         ref="draftComposerRef"

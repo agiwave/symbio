@@ -4,7 +4,7 @@
 //!
 //! | 模块 | 职责 |
 //! |---|---|
-//! | [`plugin`] | 插件主体：装配子智能体插件树（托管）+ manifest 门槛 + 选项行 |
+//! | [`plugin`] | 插件主体：装配子智能体插件树（托管）+ manifest 门槛 |
 //! | [`store`] | agent 目录存储：**本插件自己的目录**、zip 导入（zip-slip 防护）、导出、条目枚举 |
 //! | [`manifest`] | `manifest.yaml` 的读取与接入校验（§5 / §10） |
 //! | [`scope`] | `SubAgentVisitor` 代理层：把子树的注册加 `agent/<id>/` 前缀并进系统树（§8.2） |

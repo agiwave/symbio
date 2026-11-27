@@ -24,6 +24,7 @@ const hoisted = vi.hoisted(() => ({
   maybeOpen: vi.fn(),
   ensureSessionMountDir: vi.fn(),
   sessionDir: '@vfs/session' as string | null,
+  sessionsState: { sessionSpace: '', list: [] as Array<{ id: string }> },
 }))
 
 vi.mock('vue-router', () => ({
@@ -32,14 +33,17 @@ vi.mock('vue-router', () => ({
 }))
 vi.mock('@/stores/sessionTranscriptSync', () => ({
   startSessionTranscriptSync: vi.fn(),
+  stopSessionTranscriptSync: vi.fn(),
   registerTranscriptMount: vi.fn(),
 }))
 vi.mock('@/stores/sessionNodeSync', () => ({
   startSessionNodeSync: vi.fn(),
+  stopSessionNodeSync: vi.fn(),
   registerSessionMount: vi.fn(),
 }))
 vi.mock('@/stores/sessionInboxSync', () => ({
   startSessionInboxSync: vi.fn(),
+  stopSessionInboxSync: vi.fn(),
   registerInboxMount: vi.fn(),
 }))
 vi.mock('@/services/completionChime', () => ({ setChimeSettingsSource: vi.fn() }))
@@ -59,9 +63,10 @@ vi.mock('@/services/vdfsScheme', () => ({
       : Promise.resolve(hoisted.sessionDir),
 }))
 vi.mock('@/services/home', () => ({ getWorkspacePath: vi.fn(async () => ({ path: '/tmp/w' })) }))
-vi.mock('@/stores/sessions', () => ({
-  useSessionsStore: () => ({
-    sessionSpace: '',
+vi.mock('@/stores/sessions', async () => {
+  const { reactive } = await import('vue')
+  const store = reactive(hoisted.sessionsState)
+  Object.assign(store, {
     refreshList: vi.fn(),
     hasMessage: vi.fn(),
     applyTranscriptMessages: vi.fn(),
@@ -70,8 +75,9 @@ vi.mock('@/stores/sessions', () => ({
     removeInboxItem: vi.fn(),
     refreshInbox: vi.fn(),
     setSessionSpace: vi.fn(),
-  }),
-}))
+  })
+  return { useSessionsStore: () => store }
+})
 vi.mock('@/stores/soundSettings', () => ({
   useSoundSettingsStore: () => ({ isKindEnabled: vi.fn(), volume: 0.5 }),
 }))
@@ -83,6 +89,11 @@ import MainLayout from '../MainLayout.vue'
 import CommandPalette from '@/components/common/CommandPalette.vue'
 import HotkeySheet from '@/components/common/HotkeySheet.vue'
 import { setVdfsRoot } from '@/schemas/vdfsRoot'
+import { registerSessionMount, stopSessionNodeSync } from '@/stores/sessionNodeSync'
+import { registerTranscriptMount, stopSessionTranscriptSync } from '@/stores/sessionTranscriptSync'
+import { registerInboxMount, stopSessionInboxSync } from '@/stores/sessionInboxSync'
+import { statVdfs } from '@/services/vdfs'
+import { useSessionsStore } from '@/stores/sessions'
 
 setVdfsRoot('@vfs')
 
@@ -115,6 +126,15 @@ async function bench() {
 beforeEach(() => {
   hoisted.push.mockClear()
   hoisted.maybeOpen.mockClear()
+  hoisted.sessionsState.sessionSpace = ''
+  hoisted.sessionsState.list.length = 0
+  vi.mocked(statVdfs).mockClear()
+  vi.mocked(registerSessionMount).mockClear()
+  vi.mocked(registerTranscriptMount).mockClear()
+  vi.mocked(registerInboxMount).mockClear()
+  vi.mocked(stopSessionNodeSync).mockClear()
+  vi.mocked(stopSessionTranscriptSync).mockClear()
+  vi.mocked(stopSessionInboxSync).mockClear()
 })
 
 afterEach(() => {
@@ -132,6 +152,36 @@ describe('全局地标与跳转', () => {
     expect(skip.attributes('href')).toBe('#main-content')
     expect(main.attributes('tabindex')).toBe('-1')
     expect(w.findAll('main')).toHaveLength(1)
+  })
+})
+
+describe('实时订阅登记', () => {
+  it('零会话不登记；首个会话出现后按挂载目录字符串登记三个消费端', async () => {
+    const w = await bench()
+    expect(statVdfs).not.toHaveBeenCalled()
+
+    const sessionStore = useSessionsStore() as unknown as {
+      sessionSpace: string
+      list: Array<{ id: string }>
+    }
+    sessionStore.sessionSpace = '@vfs/session'
+    sessionStore.list.push({ id: 's1' })
+    await flushPromises()
+
+    expect(statVdfs).toHaveBeenCalledWith(expect.anything(), '@vfs/session')
+    expect(registerSessionMount).toHaveBeenCalledWith('@vfs/session')
+    expect(registerTranscriptMount).toHaveBeenCalledWith('@vfs/session')
+    expect(registerInboxMount).toHaveBeenCalledWith('@vfs/session')
+    w.unmount()
+  })
+
+  it('卸载时停止三个实时消费端，避免监听器成为孤儿', async () => {
+    const w = await bench()
+    w.unmount()
+
+    expect(stopSessionTranscriptSync).toHaveBeenCalledTimes(1)
+    expect(stopSessionNodeSync).toHaveBeenCalledTimes(1)
+    expect(stopSessionInboxSync).toHaveBeenCalledTimes(1)
   })
 })
 

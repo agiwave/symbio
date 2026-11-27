@@ -22,7 +22,8 @@ vi.mock('@/services/vdfs', () => ({
 vi.mock('@/services/eventBus', () => ({
   subscribeVdfsChanged: vi.fn(),
 }))
-vi.mock('@/services/vdfsScheme', () => ({
+vi.mock('@/services/vdfsScheme', async (importOriginal) => ({
+  ...(await importOriginal<typeof import('@/services/vdfsScheme')>()),
   ensureSessionScheme: vi.fn(async () => ({
     mountDir: '/root/session',
     messagesSeg: 'message',
@@ -37,6 +38,7 @@ import {
   startSessionTranscriptSync,
   stopSessionTranscriptSync,
   resetSessionTranscriptSyncForTest,
+  registerTranscriptMount,
   type TranscriptSyncSink,
 } from '../sessionTranscriptSync'
 import { subscribeVdfsChanged } from '@/services/eventBus'
@@ -44,10 +46,13 @@ import type { VdfsChange, VdfsNode } from '@/schemas/vdfs'
 import { NODE_KIND_SKELETON } from '@/schemas/chat_node'
 // 回读理由是**词表**（独立模块，未被替身），断言按它取值——替身里不抄第二份
 import { READBACK_REASON } from '@/services/readback'
+import { ensureSessionScheme, NoSessionForSchemeError } from '@/services/vdfsScheme'
+import { logger } from '@/utils/logger'
 
 // 订阅接线打桩：捕获 handler 与 resync 回调，测试直接派发变更
 let dispatch: ((c: VdfsChange) => void) | null = null
 let fireResync: (() => void) | null = null
+let unsubscribes: Array<ReturnType<typeof vi.fn>> = []
 
 const MOUNT = '/root/session'
 const MSG = `${MOUNT}/s1/message`
@@ -103,15 +108,52 @@ beforeEach(() => {
   resetSessionTranscriptSyncForTest()
   dispatch = null
   fireResync = null
+  unsubscribes = []
   vi.mocked(subscribeVdfsChanged).mockImplementation(((_scope: unknown, handler: (c: VdfsChange) => void, onResync?: () => void) => {
     dispatch = handler
     fireResync = onResync ?? null
-    return () => {}
+    const unsubscribe = vi.fn()
+    unsubscribes.push(unsubscribe)
+    return unsubscribe
   }) as never)
 })
 afterEach(() => {
   stopSessionTranscriptSync()
   vi.useRealTimers()
+})
+
+describe('零会话冷启动', () => {
+  it('没有会话时静默等待；首个会话出现后可登记并接收首帧', async () => {
+    const spy = spySink()
+    vi.mocked(ensureSessionScheme).mockRejectedValueOnce(new NoSessionForSchemeError(MOUNT))
+    await expect(startSessionTranscriptSync(spy.sink)).resolves.toBeUndefined()
+    expect(logger.error).not.toHaveBeenCalled()
+    expect(subscribeVdfsChanged).not.toHaveBeenCalled()
+
+    await startSessionTranscriptSync(spy.sink)
+    dispatch!(frame('s1', 'm1', { id: 'm1', content: '首帧', status: 'completed' }))
+    expect(spy.calls).toEqual(['message:s1:m1:首帧'])
+  })
+})
+
+describe('订阅生命周期', () => {
+  it('每个挂载目录恰好一份订阅，停止时全部退订', async () => {
+    const spy = spySink()
+    await startSessionTranscriptSync(spy.sink)
+    await expect(registerTranscriptMount(MOUNT)).resolves.toBe(false)
+    await expect(registerTranscriptMount('/root/sub/session')).resolves.toBe(true)
+
+    expect(subscribeVdfsChanged).toHaveBeenCalledTimes(2)
+    expect(vi.mocked(subscribeVdfsChanged).mock.calls.map(([scope]) => scope)).toEqual([
+      { prefix: MOUNT },
+      { prefix: '/root/sub/session' },
+    ])
+
+    stopSessionTranscriptSync()
+
+    expect(unsubscribes).toHaveLength(2)
+    for (const unsubscribe of unsubscribes) expect(unsubscribe).toHaveBeenCalledTimes(1)
+  })
 })
 
 describe('消息帧：语义全在 data 的字段上（信封没有操作枚举）', () => {
@@ -288,9 +330,64 @@ describe('读与流的协调（appendGuard 的代际记法）', () => {
 
     // 回读的 content 被丢弃（只落地身份），窗口内落地的增量照常应用
     expect(spy.calls).toEqual([
-      'message:s1:m1:streaming',
+      'message:s1:m1:',
       'message:s1:m1:窗口内的增量',
     ])
+  })
+
+  it('回读期间到达终态帧 ⇒ 旧 stat 不得把 streaming 写回', async () => {
+    vi.useFakeTimers()
+    const spy = spySink()
+    await startSessionTranscriptSync(spy.sink)
+    let resolveStat: (n: VdfsNode) => void = () => {}
+    mocks.statVdfs.mockReturnValue(new Promise((res) => (resolveStat = res)))
+    mocks.readVdfs.mockResolvedValue({ path: `${MSG}/m1`, text: '旧快照', binary: false, size: 3 })
+
+    dispatch!(frame('s1', 'm1', { id: 'm1' }))
+    await settle()
+    spy.has['s1/m1'] = true
+    dispatch!(frame('s1', 'm1', { id: 'm1', status: 'failed', error: 'boom' }))
+    resolveStat(messageNode({ status: 'streaming' }))
+    await vi.advanceTimersByTimeAsync(0)
+
+    expect(spy.calls).toEqual(['message:s1:m1:failed', 'message:s1:m1:'])
+  })
+
+  it('回读在飞时收到删除 ⇒ 旧 stat/read 不得重新建立已删节点', async () => {
+    vi.useFakeTimers()
+    const spy = spySink()
+    await startSessionTranscriptSync(spy.sink)
+    let resolveStat!: (node: VdfsNode) => void
+    mocks.statVdfs.mockReturnValueOnce(new Promise((resolve) => { resolveStat = resolve }))
+    mocks.readVdfs.mockResolvedValue({ path: `${MSG}/m1`, text: '旧全量', binary: false, size: 3 })
+
+    dispatch!(frame('s1', 'm1', { id: 'm1' }))
+    await settle()
+    spy.has['s1/m1'] = true
+    dispatch!(frame('s1', 'm1', { id: 'm1', status: 'removed' }))
+    resolveStat(messageNode({ status: 'completed' }))
+    await settle()
+
+    expect(spy.calls).toEqual(['message:s1:m1:removed'])
+  })
+
+  it('回读跨越停止/重启 ⇒ 旧全量响应不得覆盖新订阅的转写', async () => {
+    vi.useFakeTimers()
+    const oldSpy = spySink()
+    const newSpy = spySink()
+    await startSessionTranscriptSync(oldSpy.sink)
+    let resolveStat!: (node: VdfsNode) => void
+    mocks.statVdfs.mockReturnValueOnce(new Promise((resolve) => { resolveStat = resolve }))
+    mocks.readVdfs.mockResolvedValue({ path: `${MSG}/m1`, text: '旧全量', binary: false, size: 3 })
+
+    dispatch!(frame('s1', 'm1', { id: 'm1', status: 'completed' }))
+    await settle()
+    await startSessionTranscriptSync(newSpy.sink)
+    resolveStat(messageNode({ status: 'completed' }))
+    await settle()
+
+    expect(oldSpy.calls).toEqual([])
+    expect(newSpy.calls).toEqual([])
   })
 
   it('重复回读的代际各记各的：增量只对**读取窗口内**的响应生效', async () => {
@@ -350,6 +447,20 @@ describe('职责边界：会话节点与别的集合归各自的消费端', () =
 })
 
 describe('作用域与 resync', () => {
+  it('旧订阅的 resync 回调跨越重启后不得重读新会话', async () => {
+    const oldSpy = spySink()
+    const newSpy = spySink(['new'])
+    await startSessionTranscriptSync(oldSpy.sink)
+    const oldResync = fireResync!
+
+    await startSessionTranscriptSync(newSpy.sink)
+    oldResync()
+    await settle()
+
+    expect(oldSpy.reloaded).toEqual([])
+    expect(newSpy.reloaded).toEqual([])
+  })
+
   it('resync ⇒ 按见过的会话整份重读，并丢弃待落地增量', async () => {
     vi.useFakeTimers()
     const spy = spySink()

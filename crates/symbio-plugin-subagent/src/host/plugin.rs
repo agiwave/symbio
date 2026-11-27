@@ -54,13 +54,12 @@ use symbio_plugin_api::AgentScope;
 use symbio_plugin_api::VdfsAccess;
 use symbio_plugin_api::ASSEMBLY_CORE_PLUGINS;
 use symbio_plugin_api::{
-    capability_report_error, creator_create_object, descend_addr, plugin_dir_from_ctx,
-    CapabilityRow, Plugin, PluginDir, PluginError, PluginInvokeRequest, PluginInvokeRequestExt,
-    PluginInvokeResponse, PluginMeta, PluginPayload, PluginSimpleRequest, Registry, AGENT_ID,
-    AGENT_VDFS, CAPABILITY_VISITOR, PATH, PLUGIN_DIR, REQUIRED_PLUGINS, TRAVERSE_AVAILABLE_OPTIONS,
-    TRAVERSE_AVAILABLE_TOOLS, VDFS_PARENT_ADDR,
+    capability_report_error, creator_create_object, descend_addr, plugin_dir_from_ctx, Plugin,
+    PluginDir, PluginError, PluginInvokeRequest, PluginInvokeRequestExt, PluginInvokeResponse,
+    PluginMeta, PluginPayload, PluginSimpleRequest, Registry, AGENT_ID, AGENT_VDFS,
+    CAPABILITY_VISITOR, PATH, PLUGIN_DIR, REQUIRED_PLUGINS, TRAVERSE_AVAILABLE_TOOLS,
+    VDFS_PARENT_ADDR,
 };
-use symbio_plugin_api::{DetailField, DetailOption};
 use symbio_plugin_api::{PLUGIN_ID_COMPOSITE, PLUGIN_ID_SUBAGENT};
 
 /// 规范标识（见 `docs/003-design/011-Agent目录规范.md`）
@@ -328,61 +327,6 @@ impl AgentPlugin {
             // 空壳再填字段」的形态），清单由 provider 自持（见 `super::vdfs`）
             .with_root_access(VdfsAccess::LIST)
     }
-
-    /// 参与 `available_options` 收集：贡献「子智能体」字段。
-    ///
-    /// 候选 = 「不使用子智能体」 + 各可用 agent 目录（值 = `agent_id`，空串 = 显式解绑）。
-    ///
-    /// **不回填当前值**：「值 → 标签」由 `field.options` 承担，前端查表即得；当前值
-    /// 来自会话 `metadata.agent_id`。因此这里既不读 `ctx[AGENT_ID]`，也不算
-    /// `current_label`。
-    async fn contribute_options(&self, ctx: &Arc<dyn PluginInvokeRequest>) {
-        let Some(visitor) = ctx.get(symbio_plugin_api::OPTION_VISITOR) else {
-            return;
-        };
-
-        // 展示顺序号段约定：20 = 子智能体（见 session::options 模块文档）
-        const ORDER: i32 = 20;
-
-        let store = AgentDirStore::new(self.dir().dir());
-        let agent_dirs = store.list();
-
-        visitor
-            .put(CapabilityRow::option(ORDER, agent_field(&agent_dirs)))
-            .await;
-    }
-}
-
-/// 「子智能体」选项的字段声明（`node.schema` 用）。
-///
-/// 候选 = 「不使用子智能体」（空串 = 显式解绑，后端 orchestrator 对空值按「未选择」
-/// 处理）+ 各可用 agent 目录。`default` 也取空串：会话 metadata 里没有
-/// `agent_id` 时，前端按 `default` 显示「不使用子智能体」。
-fn agent_field(agent_dirs: &[crate::host::store::AgentDirRecord]) -> DetailField {
-    let mut options = vec![DetailOption {
-        value: String::new(),
-        label: "不使用子智能体".to_string(),
-        description: Some("纯工具模式：直接与 Model 对话，可用文件/搜索等基础工具".to_string()),
-    }];
-    options.extend(agent_dirs.iter().map(|record| {
-        let m = &record.manifest;
-        DetailOption {
-            value: m.id.clone(),
-            label: m.name.clone(),
-            description: (!m.description.is_empty()).then(|| m.description.clone()),
-        }
-    }));
-
-    DetailField {
-        key: "agent_id".to_string(),
-        label: "子智能体".to_string(),
-        description: Some("选择认知人格（可不选）".to_string()),
-        widget: "select".to_string(),
-        icon: Some("subagent".to_string()),
-        default: Some(serde_json::json!("")),
-        options,
-        ..Default::default()
-    }
 }
 
 #[cfg(test)]
@@ -409,11 +353,6 @@ impl Plugin for AgentPlugin {
     ) -> PluginInvokeResponse<PluginPayload> {
         let sub_path = ctx.get(PATH).unwrap_or_default();
         match sub_path.as_str() {
-            // 选项收集（与能力收集同一广播机制的第二通道）：贡献「智能体」选择项
-            TRAVERSE_AVAILABLE_OPTIONS => {
-                self.contribute_options(&ctx).await;
-                return Ok(PluginPayload::new(&Vec::<serde_json::Value>::new()));
-            }
             TRAVERSE_AVAILABLE_TOOLS => {}
             other => {
                 return Err(PluginError::NotFound(format!("未知遍历路径: {other}")));

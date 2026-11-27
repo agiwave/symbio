@@ -80,6 +80,10 @@ fn session_node_carries_renderer_ext_and_presentation() {
     assert_eq!(idle.updated_at, Some(1_700_000_000_000));
     assert_eq!(idle.access.flags(), "rw", "会话可读可写");
     assert!(!idle.is_dir(), "会话是文档而非目录");
+    assert_eq!(
+        idle.attributes.get("has_first_exchange"),
+        Some(&json!(false))
+    );
 
     let busy = session_node(&SessionSummary::of(&s), &SessionRuntime::working());
     assert_eq!(busy.status, VDFS_STATUS_WORKING);

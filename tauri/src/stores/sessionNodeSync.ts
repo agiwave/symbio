@@ -23,19 +23,16 @@
  * | 会话节点上变的东西 | 收敛方式 |
  * |---|---|
  * | **运行态**（`working` / 终态 / 结局 / 警告 / 错误） | 随 `data` 的全量节点视图 → `applySessionState` **零回读**就地落定 |
- * | **资源**（创建 / 删除 / 改名 / 标题 / metadata） | 无载荷 ⇒ 回读 `stat` **只分辨删除**（`NotFound` 即时移除）；其余防抖重拉清单 |
+ * | **资源**（创建 / 删除 / 改名 / 标题 / metadata） | 无载荷 ⇒ 回读 `stat`，存在则落地完整视图，缺失则移除；另防抖重拉清单 |
  *
- * ## 载荷怎么用：视图帧就地落定，无载荷回读分辨
+ * ## 载荷怎么用：视图帧就地落定，无载荷回读完整视图
  *
  * 信封没有操作枚举，分派只看载荷形状。运行态帧随 `data` 带节点视图
  * （后端与 `stat` 同一构造点构造，不是缓存副本）⇒ 直接落地，一次状态迁移
- * **零 IPC**。资源信号是**无载荷**变更——它们不携带视图，回读 `stat` 分辨
- * 删除与否；运行态不会被一条迟到的改名信号打回旧值（信号上根本没有状态可打，
- * 回读的 `message_count` / `updated_at` 又取自落库的会话摘要，一轮进行中会落后）。
+ * **零 IPC**。资源信号是无载荷变更，回读 `stat` 取得同一构造点的完整视图：
+ * 存在就落地，`NotFound` 就移除。每条路径独立代际，旧回包不能覆盖新视图帧。
  *
- * **回读只服务于删除判定**：会话转写订阅（`sessionTranscriptSync`）在同一个
- * `<sid>` 上另发一次 `stat` 做同一件事是多余的——同一路径同一时刻的两次 IPC。
- * 会话节点归本模块，转写模块只认集合项。
+ * 会话节点归本模块，转写模块只认集合项；两者不在同一路径上重复回读。
  *
  * ## 清单同步的双模式
  *
@@ -75,6 +72,9 @@ export interface SessionNodeSink {
 const _mounts = new Set<string>()
 let _sink: SessionNodeSink | null = null
 let _unsubs: Array<() => void> = []
+let _subscribedMounts = new Set<string>()
+let _generation = 0
+const _readGenerations = new Map<string, number>()
 let _listRefreshTimer: ReturnType<typeof setTimeout> | null = null
 
 /** 防抖重拉：只给地址的无载荷资源变更，用于收敛排序与完整字段 */
@@ -97,20 +97,29 @@ function scheduleListRefresh(sink: SessionNodeSink): void {
 export async function registerSessionMount(mountDir: string): Promise<boolean> {
   if (!mountDir || _mounts.has(mountDir)) return false
   _mounts.add(mountDir)
-  if (_sink) _unsubs.push(subscribeMount(mountDir, _sink))
+  if (_sink) attachMount(mountDir, _sink)
   logger.info('[session-node-sync]', '登记会话挂载目录', mountDir)
   return true
 }
 
 /** 停止会话节点同步（重复启动 / HMR / 测试时调用；无订阅则空操作） */
 export function stopSessionNodeSync(): void {
+  _generation += 1
   for (const u of _unsubs) u()
   _unsubs = []
+  _subscribedMounts.clear()
+  _readGenerations.clear()
   if (_listRefreshTimer) {
     clearTimeout(_listRefreshTimer)
     _listRefreshTimer = null
   }
   _sink = null
+}
+
+function attachMount(mountDir: string, sink: SessionNodeSink): void {
+  if (_subscribedMounts.has(mountDir)) return
+  _subscribedMounts.add(mountDir)
+  _unsubs.push(subscribeMount(mountDir, sink))
 }
 
 /** 为一个挂载目录挂订阅（每个目录一份：前缀不同，登记也不同） */
@@ -125,19 +134,20 @@ function subscribeMount(mountDir: string, sink: SessionNodeSink): () => void {
       // ① `data` = 全量节点视图（与 `stat` 同源构造）⇒ **零回读**就地落定
       //    状态 / 标题 / 计数——运行态是最需要即时的路径，一次状态迁移一次 IPC
       //    恰恰是最不该省的那一步。删除不在这条分支上：已删的会话取不到视图。
-      // ② `data` 缺失（资源信号 / 删除）⇒ 回读 `stat` 只分辨**删除与否**：
-      //    `NotFound` ⇒ 本地即时移除；有节点则**什么也不落**——运行态只有一个
-      //    来源（随载荷的节点视图），一条迟到的改名信号不该把状态打回它那一刻
-      //    的旧值（`stat` 的 `message_count` / `updated_at` 取自落库的会话摘要，
-      //    一轮进行中会落后于本地）。其余收敛交给防抖重拉清单。
+      // ② `data` 缺失（资源信号 / 删除）⇒ 回读 `stat` 取完整视图；缺失即删除。
+      //    代际守卫确保旧回包不会覆盖新视图帧或更新一次的回包。
       const view = change.data
+      const generation = (_readGenerations.get(change.path) ?? 0) + 1
+      _readGenerations.set(change.path, generation)
       if (view != null && typeof view === 'object') {
         sink.applySessionState(id, view as VdfsNode)
         return
       }
       void statVdfs(READBACK_REASON.RESOURCE_SIGNAL, change.path)
         .then((node) => {
-          if (!node) sink.removeSessionLocal(id)
+          if (_readGenerations.get(change.path) !== generation) return
+          if (node) sink.applySessionState(id, node)
+          else sink.removeSessionLocal(id)
         })
         .catch((err: unknown) =>
           logger.warn('[session-node-sync]', `回读会话节点失败：${change.path}`, err),
@@ -158,6 +168,7 @@ function subscribeMount(mountDir: string, sink: SessionNodeSink): () => void {
 export async function startSessionNodeSync(sink: SessionNodeSink): Promise<void> {
   stopSessionNodeSync()
   _sink = sink
+  const generation = _generation
 
   // 挂载目录是运行期数据（按「可新建 ext=session 的挂载点」认出来），不是常量
   let mountDir: string
@@ -169,6 +180,7 @@ export async function startSessionNodeSync(sink: SessionNodeSink): Promise<void>
     logger.error('[session-node-sync]', '会话挂载目录解析失败，订阅未启动', err)
     return
   }
+  if (generation !== _generation || _sink !== sink) return
   if (!_mounts.has(mountDir)) _mounts.add(mountDir)
-  _unsubs = [..._mounts].map((m) => subscribeMount(m, sink))
+  for (const m of _mounts) attachMount(m, sink)
 }

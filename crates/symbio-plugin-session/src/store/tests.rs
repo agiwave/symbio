@@ -442,6 +442,90 @@ async fn save_persists_the_list_projection() {
     assert_eq!(p.message_count, 2);
     assert_eq!(p.summary.as_deref(), Some("好的，我先看一下目录。"));
     assert_eq!(p.meta_tags, vec!["demo".to_string(), "2 条".to_string()]);
+    assert!(
+        p.has_first_exchange,
+        "相邻的 rootless user → assistant 文本构成一轮完整对话"
+    );
+}
+
+#[tokio::test]
+async fn missing_first_exchange_projection_is_rebuilt_from_wal() {
+    use symbio_platform::kernel::event::{Entity, Event, Verb};
+    use symbio_platform::kernel::store::Store as _;
+    use symbio_plugin_api::events::EVENT_CHAT_ASSISTANT_FINAL;
+
+    let tmp = TempDir::new().unwrap();
+    let store = SessionStore::new(tmp.path().to_path_buf());
+    let dir = dir_for(tmp.path(), "sess_wal");
+    std::fs::create_dir_all(&dir).unwrap();
+    std::fs::write(
+        dir.join(SESSION_FILE),
+        r#"{"id":"sess_wal","title":"真实对话","created_at":1,"updated_at":2,"metadata":{},"message_count":2,"summary":"旧摘要","meta_tags":[],"context":null}"#,
+    )
+    .unwrap();
+    {
+        let wal = EventWalStore::open(dir.join(crate::paths::V2_WAL_FILE)).unwrap();
+        wal.append(user_event("e1", "u1", "你好", 1)).unwrap();
+        wal.append(
+            Event::pending(
+                "e2",
+                EVENT_CHAT_ASSISTANT_FINAL,
+                Entity::Scope,
+                Verb::Closed,
+                "session/main",
+            )
+            .with_ts(2_000)
+            .with_produced_by(1)
+            .with_payload(json!({
+                "text": "你好，我在。",
+                "root_id": "u1",
+                "text_id": "u1-text",
+                "status": "completed",
+            })),
+        )
+        .unwrap();
+    }
+
+    let listed = store.list_sessions_window(None, None).await.unwrap();
+    assert!(
+        listed[0].has_first_exchange,
+        "缺字段必须回放 WAL，不能当成 false"
+    );
+
+    store.migrate_split_messages().await.unwrap();
+    let persisted: serde_json::Value =
+        serde_json::from_str(&std::fs::read_to_string(dir.join(SESSION_FILE)).unwrap()).unwrap();
+    assert_eq!(persisted["has_first_exchange"], json!(true));
+}
+
+#[tokio::test]
+async fn projection_only_migration_without_readable_messages_preserves_old_meta() {
+    let tmp = TempDir::new().unwrap();
+    let store = SessionStore::new(tmp.path().to_path_buf());
+    let dir = dir_for(tmp.path(), "sess_unreadable");
+    std::fs::create_dir_all(&dir).unwrap();
+    // WAL 路径不可读；messages.json 已存在但内容损坏；session.json 也没有内联消息。
+    std::fs::create_dir_all(dir.join(crate::paths::V2_WAL_FILE)).unwrap();
+    std::fs::write(dir.join(MESSAGES_FILE_NAME), "{ not json").unwrap();
+    let original = r#"{"id":"sess_unreadable","title":"旧投影","created_at":1,"updated_at":2,"metadata":{"workdir":"/tmp/legacy","custom":"keep"},"message_count":2,"summary":"旧摘要","meta_tags":["legacy","2 条"],"context":{"request_tokens":64}}"#;
+    std::fs::write(dir.join(SESSION_FILE), original).unwrap();
+
+    store.migrate_split_messages().await.unwrap();
+
+    assert_eq!(
+        std::fs::read_to_string(dir.join(SESSION_FILE)).unwrap(),
+        original,
+        "没有消息来源时必须原样保留旧投影，不能拿空消息重算"
+    );
+    let persisted: serde_json::Value =
+        serde_json::from_str(&std::fs::read_to_string(dir.join(SESSION_FILE)).unwrap()).unwrap();
+    assert_eq!(
+        persisted["metadata"],
+        json!({ "workdir": "/tmp/legacy", "custom": "keep" })
+    );
+    assert_eq!(persisted["message_count"], json!(2));
+    assert_eq!(persisted["summary"], json!("旧摘要"));
+    assert!(persisted.get("has_first_exchange").is_none());
 }
 
 /// **存量文件**（消息内联、没有投影字段）照样可读，且清单给的是友好名，
@@ -468,6 +552,10 @@ async fn legacy_inline_session_keeps_a_friendly_title() {
     );
     assert_ne!(listed[0].title, listed[0].id);
     assert_eq!(listed[0].message_count, 2);
+    assert!(
+        listed[0].has_first_exchange,
+        "rootless legacy user → assistant 文本应判为已完成首轮对话"
+    );
 
     // 消息也读得回来（旧布局没有 messages.json）
     let loaded = store.load_session("sess_legacy").await.unwrap();

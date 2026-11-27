@@ -453,6 +453,151 @@ fn fallback_carries_the_failure_reason_onto_the_turn_node() {
     );
 }
 
+#[test]
+fn final_completed_clears_the_previous_failure_on_the_same_user_root() {
+    let final_payload = serde_json::json!({
+        "text": "最终回答",
+        "model": "m",
+        "root_id": "u-node",
+        "text_id": "u-node-text",
+        "reasoning_id": null,
+        "rounds": [],
+        "status": "completed",
+    });
+    let normal = rebuild(
+        &[
+            user_event("u-node", "问"),
+            final_event(final_payload.clone()),
+        ],
+        &CHAT,
+        &MESSAGE,
+    );
+    let events = vec![
+        user_event("u-node", "问"),
+        Event::pending(
+            "fb-old",
+            events::EVENT_CHAT_ASSISTANT_FALLBACK,
+            Entity::Scope,
+            Verb::Closed,
+            "session/main",
+        )
+        .with_ts(2_000)
+        .with_payload(serde_json::json!({
+            "text": "",
+            "model": "m",
+            "root_id": "u-node",
+            "text_id": null,
+            "reasoning_id": null,
+            "rounds": [],
+            "status": "failed",
+            "reason": "fallback",
+            "detail": "model returned empty text",
+        })),
+        final_event(final_payload).with_ts(3_000),
+    ];
+
+    let got = rebuild(&events, &CHAT, &MESSAGE);
+    assert_eq!(
+        shapes(&got),
+        shapes(&normal),
+        "失败后最终成功应与正常成功轮同形，不能留下 Failed/error"
+    );
+    let root = got
+        .iter()
+        .find(|m| m.id == "u-node")
+        .expect("用户节点即轮节点");
+    assert_eq!(root.status, None, "正常用户根不补 Completed 状态");
+    assert_eq!(root.error, None, "最终成功必须清除上一轮失败原因");
+    let reply = got
+        .iter()
+        .find(|m| m.id == "u-node-text")
+        .expect("最终回答子节点");
+    assert_eq!(reply.status, Some(NodeStatus::Completed));
+}
+
+#[test]
+fn final_completed_restores_a_failed_assistant_text_node() {
+    let payload = |status: &str| {
+        serde_json::json!({
+            "text": "回答",
+            "model": "m",
+            "root_id": "u-node",
+            "text_id": "u-node-text",
+            "reasoning_id": null,
+            "rounds": [],
+            "status": status,
+        })
+    };
+    let got = rebuild(
+        &[
+            user_event("u-node", "问"),
+            final_event(payload("failed")).with_ts(2_000),
+            final_event(payload("completed")).with_ts(3_000),
+        ],
+        &CHAT,
+        &MESSAGE,
+    );
+
+    let root = got.iter().find(|m| m.id == "u-node").expect("轮根");
+    assert_eq!(root.status, None);
+    assert_eq!(root.error, None);
+    let reply = got
+        .iter()
+        .find(|m| m.id == "u-node-text")
+        .expect("同 id 最终回答");
+    assert_eq!(reply.status, Some(NodeStatus::Completed));
+    assert!(
+        crate::types::has_first_exchange(&got),
+        "成功正文必须计入首轮激活"
+    );
+}
+
+#[test]
+fn response_completed_restores_the_same_failed_text_node() {
+    let failed = model_output_event(
+        symbio_platform::kernel::event::EVENT_FAILED,
+        "failed-model-1",
+        1_500,
+        serde_json::json!({
+            "port": "model", "stamp": { "role": "reader" },
+            "root_id": "u-node", "text_id": "u-node-text",
+            "answer": "半截回答", "calls": [], "status": "failed",
+        }),
+    );
+    let completed = model_output_event(
+        symbio_platform::kernel::event::EVENT_RESPONSE,
+        "response-model-2",
+        2_500,
+        serde_json::json!({
+            "port": "model", "stamp": { "role": "reader" },
+            "root_id": "u-node", "text_id": "u-node-text",
+            "answer": "完整回答", "calls": [],
+        }),
+    );
+    let got = rebuild(
+        &[user_event("u-node", "问"), failed, completed],
+        &CHAT,
+        &MESSAGE,
+    );
+
+    let replies: Vec<_> = got.iter().filter(|node| node.id == "u-node-text").collect();
+    assert_eq!(replies.len(), 1, "同 id 应答不得产出重复正文");
+    assert_eq!(replies[0].status, Some(NodeStatus::Completed));
+    assert_eq!(
+        replies[0]
+            .content
+            .as_ref()
+            .map(|content| content.to_text())
+            .as_deref(),
+        Some("完整回答"),
+        "后到的成功应答必须覆盖同 id 失败正文"
+    );
+    assert!(
+        crate::types::has_first_exchange(&got),
+        "协议应答成功也必须计入首轮激活"
+    );
+}
+
 /// 中止轮的终态落在**轮根**上。
 ///
 /// 中止没有错误信息（它不是失败），所以「有没有 `error`」不能当移交的判据——中止轮
@@ -500,6 +645,46 @@ fn aborted_status_lands_on_the_round_root() {
         0,
         "空正文不再造节点：终态由轮根承担"
     );
+}
+
+#[test]
+fn later_aborted_round_clears_the_previous_failure_on_the_same_root() {
+    let events = vec![
+        user_event("u-node", "重试"),
+        Event::pending(
+            "fb-old",
+            events::EVENT_CHAT_ASSISTANT_FALLBACK,
+            Entity::Scope,
+            Verb::Closed,
+            "session/main",
+        )
+        .with_ts(2_000)
+        .with_payload(serde_json::json!({
+            "text": "", "model": "m", "root_id": "u-node",
+            "text_id": null, "reasoning_id": null, "rounds": [],
+            "why": "old failure"
+        })),
+        Event::pending(
+            "af-new",
+            events::EVENT_CHAT_ASSISTANT_FINAL,
+            Entity::Scope,
+            Verb::Closed,
+            "session/main",
+        )
+        .with_ts(3_000)
+        .with_payload(serde_json::json!({
+            "root_id": "u-node", "status": "aborted", "text": "",
+            "text_id": null, "reasoning_id": null, "model": "m", "rounds": []
+        })),
+    ];
+
+    let got = rebuild(&events, &CHAT, &MESSAGE);
+    let root = got
+        .iter()
+        .find(|m| m.id == "u-node")
+        .expect("用户节点即轮节点");
+    assert_eq!(root.status, Some(NodeStatus::Aborted));
+    assert_eq!(root.error, None, "新一轮中止后不再显示上一轮的失败");
 }
 
 /// 发起一批工具调用的那条事实：载荷带 `root_id` 与 `calls[]`。

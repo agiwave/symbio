@@ -24,9 +24,9 @@ function listing(path = '/srv/home/me') {
   }
 }
 
-function mountPicker(initialPath = '') {
+function mountPicker(initialPath = '', recentPaths: string[] = []) {
   return mount(DirectoryPicker, {
-    props: { visible: true, initialPath },
+    props: { visible: true, initialPath, recentPaths },
   })
 }
 
@@ -50,7 +50,7 @@ describe('DirectoryPicker', () => {
   })
 
   it('无初始绝对路径时从 Server runtime homedir 开始，并显示根目录', async () => {
-    const w = mountPicker('~/local-shell-path')
+    const w = mountPicker('local-shell-path')
     await flushPromises()
 
     expect(H.getHostRuntime).toHaveBeenCalled()
@@ -93,6 +93,35 @@ describe('DirectoryPicker', () => {
     await flushPromises()
     expect(w.find('.current-path').text()).toBe('/srv/home/me')
     expect(w.find('.btn-primary').attributes('disabled')).toBeUndefined()
+  })
+
+  it('可直接粘贴绝对路径或 ~/ 路径前往，非法相对路径在原地说明', async () => {
+    const w = mountPicker('/srv/home/me')
+    await flushPromises()
+    const input = w.get('.path-input')
+    await input.setValue('projects')
+    await w.find('.path-form').trigger('submit')
+    expect(w.get('[role="alert"]').text()).toContain('绝对路径')
+    expect(H.listHostDirectories).toHaveBeenCalledTimes(1)
+
+    await input.setValue('~/projects')
+    await w.find('.path-form').trigger('submit')
+    await flushPromises()
+    expect(H.listHostDirectories).toHaveBeenLastCalledWith('~/projects')
+
+    await input.setValue('C:\\work\\project')
+    await w.find('.path-form').trigger('submit')
+    await flushPromises()
+    expect(H.listHostDirectories).toHaveBeenLastCalledWith('C:\\work\\project')
+  })
+
+  it('最近目录可一键前往，不必从根逐层浏览', async () => {
+    const w = mountPicker('/srv/home/me', ['/srv/projects', '/opt/repo'])
+    await flushPromises()
+    expect(w.findAll('.recent .root-btn')).toHaveLength(2)
+    await w.findAll('.recent .root-btn')[1].trigger('click')
+    await flushPromises()
+    expect(H.listHostDirectories).toHaveBeenLastCalledWith('/opt/repo')
   })
 
   it('取消只发 close，不提交路径', async () => {

@@ -11,7 +11,7 @@
  * 映射可以逐条断言（见 `__tests__/sessionLive.spec.ts`）。
  */
 
-import { isWorkingStatus, type SessionOutcome } from '@/schemas/vdfs'
+import type { SessionOutcome } from '@/schemas/vdfs'
 import { readingSectionOf } from '@/schemas/reading'
 import { isBlankContentNode, isInProgressMessage } from './sessionTranscript'
 import type { ChatNode } from '@/schemas/chat_node'
@@ -85,7 +85,7 @@ export interface SessionRuntime {
  * 场景扩展字段（flatten 到顶层），不在 `VdfsNode` 的声明键里，只有索引签名能取到。
  */
 export function listItemPatchOf(
-  node: { title?: unknown; updated_at?: number; message_count?: unknown; context_watermark?: unknown },
+  node: { title?: unknown; updated_at?: number; message_count?: unknown; has_first_exchange?: unknown; context_watermark?: unknown },
   cur: SessionListItem,
   status: string | undefined,
 ): SessionListItem {
@@ -95,6 +95,10 @@ export function listItemPatchOf(
     status,
     updated_at: node.updated_at ?? cur.updated_at,
     message_count: typeof node.message_count === 'number' ? node.message_count : cur.message_count,
+    has_first_exchange:
+      typeof node.has_first_exchange === 'boolean'
+        ? node.has_first_exchange
+        : cur.has_first_exchange,
     metadata: title ? { ...(cur.metadata || {}), title } : cur.metadata,
     // 水位随运行态帧一起到位（一轮收束 = 一次水位更新）；节点没带就保留上一次的值，
     // 把它当「没有水位」会让侧栏那条水位条在一次标题更新后凭空消失。
@@ -105,20 +109,22 @@ export function listItemPatchOf(
 /**
  * 运行态镜像补丁（节点状态 / 结局直通）。
  *
- * `activity` 只在 working ↔ 非 working **迁移**时改写：否则一次标题更新就会把消息
- * 节点派生的「正在思考…」顶掉，造成闪动。进入 working 时顺带清掉审批角标
+ * `activity` 只在 working ↔ 非 working **迁移**或失败后恢复时改写：否则一次标题更新
+ * 就会把消息节点派生的「正在思考…」顶掉，造成闪动。进入 working 时顺带清掉审批角标
  * （新一轮开始，上一轮的待审批已作废）。
  */
 export function liveStatusPatchOf(
   rt: SessionRuntime,
   wasWorking: boolean,
   nowWorking: boolean,
+  previous?: Pick<SessionLiveStatus, 'outcome'>,
 ): Partial<SessionLiveStatus> {
   const patch: Partial<SessionLiveStatus> = {
     status: rt.status,
     outcome: rt.outcome,
   }
-  if (wasWorking !== nowWorking) {
+  const recovered = !nowWorking && previous?.outcome === 'failed' && rt.outcome !== 'failed'
+  if (wasWorking !== nowWorking || recovered) {
     if (nowWorking) patch.is_waiting_approval = false
     patch.activity = nowWorking
       ? '处理中…'
@@ -159,34 +165,18 @@ export function modeRiskBackfillOf(items: SessionListItem[]): {
 /**
  * 清单快照与本地实时状态的合并。
  *
- * 本地镜像说「运行中」就**保留**：send 的乐观置位不能被一次稍早的 list 快照打回
- * （否则发送按钮会闪回「发送」）。其余一律以服务端 `status` 为准。
+ * 清单是服务端权威快照，运行与终态都双向收敛。只有读取发起后本地又发生过
+ * 状态迁移的会话才保留本地值，防止旧回包覆盖新的发送/恢复操作。
  */
 export function mergeListWithLive(
   items: SessionListItem[],
   liveStatuses: Record<string, SessionLiveStatus>,
+  changedIds: ReadonlySet<string> = new Set(),
 ): SessionListItem[] {
   return items.map((it) => {
-    const live = liveStatuses[it.id]
-    return live && isWorkingStatus(live.status) ? { ...it, status: live.status } : it
+    const live = changedIds.has(it.id) ? liveStatuses[it.id] : undefined
+    return live ? { ...it, status: live.status } : it
   })
-}
-
-/**
- * 需要**升级**为运行中的会话 id。
- *
- * 仅做 false→true 的升级：true→false 的收敛交给节点状态变更，
- * 避免 list 快照与实时变更竞争时误降级。
- * 缺了这一步，页面重载/视图挂载后运行中的会话在输入框显示为禁用的「发送」按钮，
- * 用户无法点击停止（stop 按钮失效 bug）。
- */
-export function workingUpgradesOf(
-  items: SessionListItem[],
-  liveStatuses: Record<string, SessionLiveStatus>,
-): string[] {
-  return items
-    .filter((it) => isWorkingStatus(it.status) && !isWorkingStatus(liveStatuses[it.id]?.status))
-    .map((it) => it.id)
 }
 
 /** 清单项 → 标题（`metadata.title` 优先，回退节点名；都没有返回空串） */
@@ -248,6 +238,3 @@ export function needsTypingRow(
   // 「有东西可看」= 有节点在跑**且它能渲染出内容**（空壳不算，见上）
   return !messages.some((m) => isInProgressMessage(m) && !isBlankContentNode(m))
 }
-
-/** 状态字面量：进入运行中时的活动文字（与 `liveStatusPatchOf` 保持一致） */
-export const ACTIVITY_WORKING = '处理中…'

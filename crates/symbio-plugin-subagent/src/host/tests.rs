@@ -22,7 +22,8 @@ use symbio_plugin_api::PLUGIN_ID_SUBAGENT;
 use symbio_plugin_api::{
     capability_prompts, family, CapabilityMeta, Plugin, PluginDir, PluginInvokeRequest,
     PluginInvokeRequestExt, PluginSimpleRequest, Registry, AGENT_ID, CAPABILITY_VISITOR, PATH,
-    TRAVERSE_AVAILABLE_TOOLS, VDFS_PARENT_ADDR, WORKDIR, WORKSPACE_VDFS,
+    TRAVERSE_AVAILABLE_OPTIONS, TRAVERSE_AVAILABLE_TOOLS, VDFS_PARENT_ADDR, WORKDIR,
+    WORKSPACE_VDFS,
 };
 use symbio_plugin_api::{vdfs_context, VdfsProvider};
 
@@ -111,6 +112,19 @@ fn ctx_with(
         Arc::clone(&manager) as Arc<dyn symbio_plugin_api::Registry>,
     );
     (ctx, manager)
+}
+
+#[tokio::test]
+async fn subagent_does_not_contribute_session_options() {
+    let plugin = Arc::new(AgentPlugin::new());
+    let (ctx, _manager) = ctx_with(None, None);
+    ctx.set(PATH, TRAVERSE_AVAILABLE_OPTIONS.to_string());
+
+    let error = plugin.traverse(String::new(), ctx).await.unwrap_err();
+    assert!(
+        matches!(error, symbio_plugin_api::PluginError::NotFound(_)),
+        "子智能体绑定不得在会话界面提供选择字段: {error:?}"
+    );
 }
 
 #[tokio::test]

@@ -45,6 +45,7 @@ import {
   type VdfsItem,
 } from '@/schemas/vdfs'
 import { isSessionNode } from '@/registry/vdfsTypes'
+import { sessionRuntimeOf } from '@/schemas/vdfs'
 import { ChatNode as SessionMessage } from '../schemas/chat_node'
 import { readingSectionOf } from '../schemas/reading'
 import * as SessionList from '../schemas/session_list'
@@ -108,14 +109,18 @@ export async function listSessions(
 export function sessionListItemOf(n: VdfsItem): SessionList.SessionListItem | null {
   if (!isSessionNode(n)) return null
   const v = n as Record<string, any>
+  const runtime = sessionRuntimeOf(n)
   return {
     id: n.name,
     // 后端 display_title：metadata.title 优先，否则从会话内容自动生成
     name: n.title ?? '',
     message_count: Number(v.message_count ?? 0),
+    has_first_exchange: v.has_first_exchange === true,
     updated_at: n.updated_at ?? 0,
     // 直接透传节点状态，不在边界上压缩成布尔（否则 error / disabled 会丢）
-    status: n.status,
+    status: runtime.status,
+    outcome: runtime.outcome,
+    error: runtime.error,
     metadata: v.metadata ?? {},
     // 选项定义随节点下发（`node.schema`）；清单一次取全，面板零回读
     schema: v.schema,

@@ -4,13 +4,10 @@
  *
  * 覆盖两条**互不重叠**的约定：
  *
- * 1. **清单只认无载荷的资源信号**：作用域按**展示地址前缀**分流（`@vfs/session`
- *    的直接子项 = 会话叶子；转写列表项 / 子会话的变更不进侧栏）。
- *    - 有地址、无载荷 → 防抖重拉清单（**不看载荷**：这条通道不带节点快照）；
- *    - 回读 `stat` 得 `NotFound` → 本地即时移除；
- *    - 且资源信号**不得**改运行态（快照只有有序来源，见 `sessionNodeSync` 文档）。
- * 2. **运行态只认带全量视图的节点帧**（`applySessionState`）：状态 / 结局 / 错误 /
- *    告警 / 提示音全在这里收敛，**零回读、零整表重拉**。
+ * 1. **会话节点只认完整节点视图**：有载荷直接收敛；无载荷回读 `stat` 后同样
+ *    收敛完整视图，`NotFound` 即时移除，并防抖重拉清单。
+ * 2. **运行态统一走 `applySessionState`**：状态 / 结局 / 错误 / 告警 / 提示音
+ *    都在这里收敛；完整视图帧零回读、零整表重拉。
  */
 import { describe, it, expect, beforeEach, vi } from 'vitest'
 import { setActivePinia, createPinia } from 'pinia'
@@ -24,6 +21,7 @@ import { statsOf, useReleasedSkeletonsStore } from '../skeletonLazy'
 const captured = vi.hoisted(() => ({
   scopes: [] as Array<{ prefix: string; directChildren?: boolean }>,
   handlers: [] as Array<(e: unknown) => void>,
+  unsubscribes: [] as Array<ReturnType<typeof vi.fn>>,
 }))
 
 vi.mock('@/services/eventBus', () => ({
@@ -33,7 +31,9 @@ vi.mock('@/services/eventBus', () => ({
   ) => {
     captured.scopes.push(scope)
     captured.handlers.push(handler)
-    return () => {}
+    const unsubscribe = vi.fn()
+    captured.unsubscribes.push(unsubscribe)
+    return unsubscribe
   },
   publishVdfsChangedLocal: vi.fn(),
 }))
@@ -42,6 +42,7 @@ const vdfsApi = vi.hoisted(() => ({
   readVdfs: vi.fn(),
   statVdfs: vi.fn(),
   writeVdfs: vi.fn(),
+  listVdfs: vi.fn(async (): Promise<{ items: Array<Record<string, unknown>> }> => ({ items: [] })),
   watchVdfs: vi.fn(async () => {}),
   unwatchVdfs: vi.fn(async () => {}),
 }))
@@ -81,6 +82,7 @@ vi.mock('@/services/vdfs', () => ({
   readVdfs: vdfsApi.readVdfs,
   statVdfs: vdfsApi.statVdfs,
   writeVdfs: vdfsApi.writeVdfs,
+  listVdfs: vdfsApi.listVdfs,
   watchVdfs: vdfsApi.watchVdfs,
   unwatchVdfs: vdfsApi.unwatchVdfs,
 }))
@@ -111,7 +113,7 @@ vi.mock('@/services/vdfsScheme', () => ({
 
 import { getLastWorkdir } from '@/services/plugin'
 import { useSessionsStore } from '../sessions'
-import { startSessionNodeSync, stopSessionNodeSync } from '../sessionNodeSync'
+import { startSessionNodeSync, stopSessionNodeSync, registerSessionMount } from '../sessionNodeSync'
 import { VDFS_STATUS_WORKING } from '@/schemas/vdfs'
 // 回读理由是**词表**（独立模块，未被替身），断言按它取值——替身里不抄第二份
 import { READBACK_REASON } from '@/services/readback'
@@ -146,14 +148,15 @@ function sessionNode(over: Record<string, unknown> = {}) {
 describe('sessions store — VDFS 变更的清单收敛', () => {
   let store: ReturnType<typeof useSessionsStore>
 
-  beforeEach(() => {
+  beforeEach(async () => {
     setActivePinia(createPinia())
     captured.scopes.length = 0
     captured.handlers.length = 0
+    captured.unsubscribes.length = 0
     // 订阅现在由外壳显式建立（生产侧是 MainLayout）
     stopSessionNodeSync()
     store = useSessionsStore()
-    startSessionNodeSync(store)
+    await startSessionNodeSync(store)
     sessionApi.listSessions.mockClear()
     chime.playCompletionChime.mockClear()
     vdfsApi.statVdfs.mockReset()
@@ -246,10 +249,28 @@ describe('sessions store — VDFS 变更的清单收敛', () => {
     })
   })
 
-  it('重复启动不再叠加订阅（幂等）', () => {
-    startSessionNodeSync(store)
-    startSessionNodeSync(store)
-    expect(captured.handlers).toHaveLength(1)
+  it('重复启动不再叠加订阅（幂等）', async () => {
+    stopSessionNodeSync()
+    captured.handlers.length = 0
+    captured.unsubscribes.length = 0
+    await startSessionNodeSync(store)
+    await startSessionNodeSync(store)
+    expect(captured.handlers).toHaveLength(2)
+    expect(captured.unsubscribes[0]).toHaveBeenCalledTimes(1)
+  })
+
+  it('同一挂载目录只登记一次；停止时回收全部订阅', async () => {
+    await expect(registerSessionMount(SCHEME.mountDir)).resolves.toBe(false)
+    await expect(registerSessionMount('@vfs/sub/session')).resolves.toBe(true)
+    expect(captured.scopes.map((scope) => scope.prefix)).toEqual([
+      SCHEME.mountDir,
+      '@vfs/sub/session',
+    ])
+
+    stopSessionNodeSync()
+
+    expect(captured.unsubscribes).toHaveLength(2)
+    for (const unsubscribe of captured.unsubscribes) expect(unsubscribe).toHaveBeenCalledTimes(1)
   })
 
   it('未启动订阅时 store 是纯状态容器（建 store 不产生任何监听器）', () => {
@@ -282,18 +303,36 @@ describe('sessions store — VDFS 变更的清单收敛', () => {
     }
   })
 
-  it('资源信号（无载荷）**不**改运行态：状态只有一个来源（随载荷的节点视图）', async () => {
+  it('无载荷信号回读到权威终态 ⇒ 就地恢复，不等页面刷新', async () => {
     const store = useSessionsStore()
     store.list.push({ id: 's1', message_count: 0, updated_at: 0, status: 'working', metadata: {} } as never)
     store.putStatus('s1', { status: 'working' })
+    vdfsApi.statVdfs.mockResolvedValue(sessionNode({ status: 'failed', outcome: 'failed', error: '429' }))
 
-    // 一次迟到的资源变更（如自动命名）是**无载荷**信号——信号上根本没有状态
-    // 可打，运行态不会被它打回任何旧值（见 sessionNodeSync 模块文档）。
     emit({ path: '@vfs/session/s1' })
     await flushPromises()
 
-    expect(store.getSessionStatus('s1').status).toBe('working')
-    expect(store.list[0].status).toBe('working')
+    expect(store.list[0].status).toBe('failed')
+    expect(store.getSessionStatus('s1').status).toBe('failed')
+    expect(store.getSessionError('s1')).toBe('429')
+  })
+
+  it('无载荷 stat 的旧回包不能覆盖后续到达的权威视图', async () => {
+    const store = useSessionsStore()
+    store.list.push({ id: 's1', message_count: 0, updated_at: 0, status: 'working', metadata: {} } as never)
+    let resolveStat!: (node: unknown) => void
+    vdfsApi.statVdfs.mockReturnValue(new Promise((resolve) => { resolveStat = resolve }))
+
+    emit({ path: '@vfs/session/s1' })
+    emit({
+      path: '@vfs/session/s1',
+      data: sessionNode({ status: 'failed', outcome: 'failed', error: '新终态' }),
+    })
+    resolveStat(sessionNode({ status: 'active', outcome: 'completed' }))
+    await flushPromises()
+
+    expect(store.list[0].status).toBe('failed')
+    expect(store.getSessionError('s1')).toBe('新终态')
   })
 
   it('无载荷变更（新建）→ 防抖重拉清单（收敛排序与完整字段）', async () => {
@@ -450,14 +489,12 @@ describe('sessions store — 删除消息的级联（目标 + 其后全部）', 
 })
 
 /**
- * `hydrateFromHistory` 的**快照直载语义**（快照即权威）。
+ * `hydrateFromHistory` 的快照基线语义与 `loadMessages` 的在途冲突保护。
  *
- * 转写的权威副本在存储：`loadMessages` 以此整表装载，增量由
- * `sessionTranscriptSync` 持续收敛——装载与增量消费是同一条数据链路的
- * 两个入口，不存在需要"合并"的两个真相来源。旧合并语义（保留本地在途节点）
- * 已删除：那是双数据源混写的补丁层。
+ * 转写的权威副本在存储：没有实时冲突时，整份快照替换本地旧副本；读取期间
+ * 被实时改写或删除的 id 才由本地新事实接管，其余历史仍从快照铺入。
  */
-describe('sessions store — 历史水合是快照直载', () => {
+describe('sessions store — 历史快照与在途冲突收敛', () => {
   const SID = 's1'
   const snapshot = (messages: unknown[]) => {
     vdfsApi.readVdfs.mockResolvedValue({ text: JSON.stringify({ messages }) })
@@ -513,6 +550,80 @@ describe('sessions store — 历史水合是快照直载', () => {
     const [a1] = store.getSessionMessages(SID)
     expect(a1.content).toBe('完整')
     expect(a1.status).toBe('completed')
+  })
+
+  it('整份读取期间到达的实时消息保留，快照里的其余历史仍铺入', async () => {
+    const store = useSessionsStore()
+    let resolveRead!: (messages: unknown[]) => void
+    sessionApi.readSessionTranscript.mockReturnValueOnce(new Promise((resolve) => { resolveRead = resolve }))
+
+    const pending = store.loadMessages(SID)
+    store.applyTranscriptMessage(SID, { id: 'live', type: 'body', seq: 2, content: '实时消息' } as never)
+    resolveRead([{ id: 'old', type: 'body', seq: 1, content: '旧快照' }])
+    await pending
+
+    expect(ids(store)).toEqual(['old', 'live'])
+  })
+
+  it('读取期间只保护发生冲突的节点：更新保留、删除不复活、未冲突旧节点被快照纠正', async () => {
+    const store = useSessionsStore()
+    store.hydrateFromHistory(SID, [
+      { id: 'u1', type: 'body', seq: 1, content: '旧问题' },
+      { id: 'u2', type: 'body', seq: 2, content: '待删除' },
+      { id: 'stale', type: 'body', seq: 3, content: '本地陈旧' },
+    ] as never)
+    let resolveRead!: (messages: unknown[]) => void
+    sessionApi.readSessionTranscript.mockReturnValueOnce(new Promise((resolve) => { resolveRead = resolve }))
+
+    const pending = store.loadMessages(SID)
+    store.applyTranscriptMessage(SID, { id: 'u1', type: 'body', content: '实时更新' } as never)
+    store.applyTranscriptMessage(SID, { id: 'u2', status: 'removed' } as never)
+    store.applyTranscriptMessage(SID, { id: 'live', type: 'body', seq: 4, content: '实时新增' } as never)
+    resolveRead([
+      { id: 'u1', type: 'body', seq: 1, content: '旧快照' },
+      { id: 'u2', type: 'body', seq: 2, content: '旧快照' },
+      { id: 'stale', type: 'body', seq: 3, content: '快照纠正' },
+      { id: 'history', type: 'body', seq: 5, content: '新历史' },
+    ])
+    await pending
+
+    expect(ids(store)).toEqual(['u1', 'stale', 'live', 'history'])
+    expect(store.getSessionMessages(SID).find((m) => m.id === 'u1')?.content).toBe('实时更新')
+    expect(store.getSessionMessages(SID).find((m) => m.id === 'stale')?.content).toBe('快照纠正')
+  })
+
+  it('冷启动读取期间删除本地尚不存在的节点，旧快照不得将其复活', async () => {
+    const store = useSessionsStore()
+    let resolveRead!: (messages: unknown[]) => void
+    sessionApi.readSessionTranscript.mockReturnValueOnce(new Promise((resolve) => { resolveRead = resolve }))
+
+    const pending = store.loadMessages(SID)
+    store.applyTranscriptMessage(SID, { id: 'ghost', status: 'removed' } as never)
+    resolveRead([
+      { id: 'ghost', type: 'body', seq: 1, content: '已删除的旧快照' },
+      { id: 'history', type: 'body', seq: 2, content: '仍应加载的历史' },
+    ])
+    await pending
+
+    expect(ids(store)).toEqual(['history'])
+  })
+
+  it('两次整份读取乱序返回时，只有最新请求可以落地', async () => {
+    const store = useSessionsStore()
+    let resolveFirst!: (messages: unknown[]) => void
+    let resolveSecond!: (messages: unknown[]) => void
+    sessionApi.readSessionTranscript
+      .mockReturnValueOnce(new Promise((resolve) => { resolveFirst = resolve }))
+      .mockReturnValueOnce(new Promise((resolve) => { resolveSecond = resolve }))
+
+    const first = store.loadMessages(SID)
+    const second = store.loadMessages(SID)
+    resolveSecond([{ id: 'new', type: 'body', content: '新快照' }])
+    await second
+    resolveFirst([{ id: 'old', type: 'body', content: '旧快照' }])
+    await first
+
+    expect(ids(store)).toEqual(['new'])
   })
 })
 
@@ -723,6 +834,115 @@ describe('sessions store — 实时状态的唯一变更通道', () => {
   })
 })
 
+describe('sessions store — 清单刷新的权威收敛与竞态保护', () => {
+  const SID = 's1'
+  const serverItem = (status: string, extra: Record<string, unknown> = {}) => ({
+    id: SID,
+    message_count: 2,
+    updated_at: 10,
+    status,
+    metadata: {},
+    ...extra,
+  })
+  let store: ReturnType<typeof useSessionsStore>
+
+  beforeEach(() => {
+    setActivePinia(createPinia())
+    store = useSessionsStore()
+    store.list.push(serverItem('active') as never)
+    chime.playCompletionChime.mockClear()
+  })
+
+  it.each([
+    ['active', 'completed'],
+    ['active', 'aborted'],
+    ['failed', 'failed'],
+  ])('清单 %s / %s 终态清掉陈旧 working，并同步错误与结局', async (status, outcome) => {
+    store.putStatus(SID, { status: 'working' })
+    store.list[0] = { ...store.list[0], status: 'working' }
+    sessionApi.listSessions.mockResolvedValue([
+      serverItem(status, { outcome, ...(status === 'failed' ? { error: '上游 429' } : {}) }),
+    ] as never)
+
+    await store.refreshList()
+
+    expect(store.list[0].status).toBe(status)
+    expect(store.list[0].outcome).toBe(outcome)
+    expect(store.getSessionStatus(SID).status).toBe(status)
+    expect(store.isSessionWorking(SID)).toBe(false)
+    expect(store.getSessionError(SID)).toBe(status === 'failed' ? '上游 429' : null)
+    expect(chime.playCompletionChime).toHaveBeenCalledWith(outcome, SID)
+  })
+
+  it('清单读取期间新建会话不会被旧快照丢掉', async () => {
+    let resolve!: (items: never[]) => void
+    sessionApi.listSessions.mockImplementation(() => new Promise<never[]>((done) => { resolve = done }))
+    const pending = store.refreshList()
+    store.setSessionStatus('new', 'active')
+    resolve([])
+
+    await pending
+
+    expect(store.list.map((it) => it.id)).toEqual(['new'])
+  })
+
+  it('旧清单回包不能打回请求期间新开始的发送 / 恢复', async () => {
+    let resolve!: (items: never[]) => void
+    sessionApi.listSessions.mockImplementation(() => new Promise<never[]>((done) => { resolve = done }))
+    const pending = store.refreshList()
+    store.setSessionStatus(SID, 'working')
+    resolve([serverItem('active')] as never)
+
+    await pending
+
+    expect(store.list[0].status).toBe('working')
+    expect(store.getSessionStatus(SID).status).toBe('working')
+  })
+
+  it('旧清单回包不能覆盖请求期间更新的失败终态', async () => {
+    let resolve!: (items: never[]) => void
+    sessionApi.listSessions.mockImplementation(() => new Promise<never[]>((done) => { resolve = done }))
+    const pending = store.refreshList()
+    store.applySessionState(SID, sessionNode({ status: 'failed', outcome: 'failed', error: 'boom' }) as never)
+    resolve([serverItem('working')] as never)
+
+    await pending
+
+    expect(store.list[0].status).toBe('failed')
+    expect(store.getSessionError(SID)).toBe('boom')
+  })
+
+  it('清单读取期间删除的会话不会被旧快照复活', async () => {
+    let resolve!: (items: never[]) => void
+    sessionApi.listSessions.mockImplementation(() => new Promise<never[]>((done) => { resolve = done }))
+    const pending = store.refreshList()
+    store.removeSessionLocal(SID)
+    resolve([serverItem('active')] as never)
+
+    await pending
+
+    expect(store.list).toEqual([])
+  })
+
+  it('跨空间切换后，旧空间的清单回包不会写入新空间', async () => {
+    store.sessionSpace = '@vfs/session'
+    store.list = []
+    let resolveOld!: (items: never[]) => void
+    sessionApi.listSessions
+      .mockImplementationOnce(() => new Promise<never[]>((done) => { resolveOld = done }))
+      .mockResolvedValueOnce([] as never)
+
+    const oldRequest = store.refreshList()
+    store.setSessionSpace('@vfs/sub/session')
+    resolveOld([serverItem('active')] as never)
+    await oldRequest
+    await flushPromises()
+
+    expect(store.sessionSpace).toBe('@vfs/sub/session')
+    expect(store.list).toEqual([])
+  })
+})
+
 /**
  * 会话运行态 —— 唯一来源是**会话节点的变更帧**
  * （落地口 `applySessionState`，全量节点视图 ⇒ 零回读）。
@@ -787,6 +1007,26 @@ describe('sessions store — 会话运行态（节点视图帧）', () => {
 
     expect(store.getSessionError(SID)).toBeNull()
     expect(store.isSessionFailed(SID)).toBe(false)
+  })
+
+  it('失败后直接恢复成功 ⇒ 错误与「错误」活动文字都清除', () => {
+    store.applySessionState(SID, sessionNode({ status: 'working' }) as never)
+    store.applySessionState(
+      SID,
+      sessionNode({ status: 'failed', outcome: 'failed', error: 'boom' }) as never,
+    )
+    expect(store.getSessionStatus(SID).activity).toBe('错误')
+
+    store.applySessionState(
+      SID,
+      sessionNode({ status: 'active', outcome: 'completed' }) as never,
+    )
+
+    expect(store.getSessionError(SID)).toBeNull()
+    expect(store.getSessionStatus(SID).activity).toBeUndefined()
+    expect(store.getSessionStatus(SID).outcome).toBe('completed')
+    expect(store.list[0].outcome).toBe('completed')
+    expect(store.list[0].error).toBeUndefined()
   })
 
   it('提示音只在 working → 非 working 的**迁移**上响，音色取 outcome', () => {
@@ -1076,6 +1316,8 @@ describe('sessions store — 收件箱气泡的收敛动作', () => {
   beforeEach(() => {
     setActivePinia(createPinia())
     store = useSessionsStore()
+    vdfsApi.listVdfs.mockReset()
+    vdfsApi.listVdfs.mockResolvedValue({ items: [] })
   })
 
   it('applyInboxItem 按到达顺序追加，且空 id / 空 entry 不入账', () => {
@@ -1119,5 +1361,18 @@ describe('sessions store — 收件箱气泡的收敛动作', () => {
 
     expect(store.getInboxItems('s1')).toEqual([{ id: 'new', label: '权威清单' }])
     expect(store.getInboxItems('s2')).toEqual([{ id: 'keep', label: '保留' }])
+  })
+
+  it('补列期间实时新增保留、实时删除不会被旧快照复活', async () => {
+    let resolveList!: (value: { items: Array<Record<string, unknown>> }) => void
+    vdfsApi.listVdfs.mockReturnValue(new Promise((resolve) => { resolveList = resolve }))
+
+    const pending = store.refreshInbox('s1')
+    store.applyInboxItem('s1', { id: 'live', label: '实时新增' })
+    store.removeInboxItem('s1', 'gone')
+    resolveList({ items: [{ name: 'gone', description: '旧快照' }] })
+    await pending
+
+    expect(store.getInboxItems('s1')).toEqual([{ id: 'live', label: '实时新增' }])
   })
 })

@@ -15,7 +15,6 @@ import {
   needsTypingRow,
   titleOf,
   workdirOf,
-  workingUpgradesOf,
   type SessionLiveStatus,
 } from '../sessionLive'
 import type { SessionListItem } from '@/services/session'
@@ -85,6 +84,17 @@ describe('liveStatusPatchOf：运行态镜像', () => {
     })
   })
 
+  it('失败后恢复成功会清掉「错误」活动文字，即使没有经过 working', () => {
+    const patch = liveStatusPatchOf(
+      { status: 'active', outcome: 'completed' },
+      false,
+      false,
+      { outcome: 'failed' },
+    )
+    expect(patch.activity).toBeUndefined()
+    expect(patch.outcome).toBe('completed')
+  })
+
   it('activity 只在迁移时改写（否则一次标题更新会顶掉「正在思考…」造成闪动）', () => {
     const noChange = liveStatusPatchOf({ status: 'active' }, false, false)
     expect('activity' in noChange).toBe(false)
@@ -123,39 +133,32 @@ describe('modeRiskBackfillOf：只回填合法取值', () => {
   })
 })
 
-describe('mergeListWithLive：清单快照与本地镜像', () => {
+describe('mergeListWithLive：服务端快照权威，仅保护请求期间的新迁移', () => {
   const live = (status?: string): SessionLiveStatus => ({ is_waiting_approval: false, last_event_at: 0, status })
 
-  it('本地说「运行中」就保留（乐观置位不能被稍早的快照打回）', () => {
-    const out = mergeListWithLive([item({ id: 'a', status: 'active' })], { a: live('working') })
-    expect(out[0].status).toBe('working')
+  it.each([
+    { status: 'active', outcome: 'completed' },
+    { status: 'failed', outcome: 'failed' },
+    { status: 'active', outcome: 'aborted' },
+  ] as const)('服务端终态 $status/$outcome 不被陈旧 working 镜像覆盖', (runtime) => {
+    const out = mergeListWithLive([item({ id: 'a', ...runtime })], { a: live('working') })
+    expect(out[0].status).toBe(runtime.status)
   })
 
-  it('本地非运行中 → 以服务端 status 为准', () => {
-    const out = mergeListWithLive([item({ id: 'a', status: 'active' })], { a: live('failed') })
-    expect(out[0].status).toBe('active')
+  it('服务端 working 回填到本地未知 / 非运行中', () => {
+    expect(mergeListWithLive([item({ id: 'a', status: 'working' })], {})[0].status).toBe('working')
+    expect(mergeListWithLive([item({ id: 'a', status: 'working' })], { a: live('active') })[0].status).toBe('working')
+  })
+
+  it('请求期间发生过状态迁移才保留本地值（保护新的发送 / 恢复）', () => {
+    const items = [item({ id: 'a', status: 'active' })]
+    expect(mergeListWithLive(items, { a: live('working') }, new Set(['a']))[0].status).toBe('working')
+    expect(mergeListWithLive(items, { a: live('working') })[0].status).toBe('active')
   })
 
   it('本地没有该会话 → 原样保留服务端条目', () => {
     const src = item({ id: 'a', status: 'active' })
     expect(mergeListWithLive([src], {})[0]).toEqual(src)
-  })
-})
-
-describe('workingUpgradesOf：只做 false→true 的升级', () => {
-  const live = (status?: string): SessionLiveStatus => ({ is_waiting_approval: false, last_event_at: 0, status })
-
-  it('服务端说运行中、本地未知 → 需要升级（否则停止按钮失效）', () => {
-    expect(workingUpgradesOf([item({ id: 'a', status: 'working' })], {})).toEqual(['a'])
-  })
-
-  it('本地已是运行中 → 不重复写；本地非运行中也不降级', () => {
-    expect(workingUpgradesOf([item({ id: 'a', status: 'working' })], { a: live('working') })).toEqual([])
-    expect(workingUpgradesOf([item({ id: 'a', status: 'working' })], { a: live('active') })).toEqual(['a'])
-  })
-
-  it('服务端非运行中 → 不升级（true→false 的收敛交给节点状态变更）', () => {
-    expect(workingUpgradesOf([item({ id: 'a', status: 'active' })], {})).toEqual([])
   })
 })
 

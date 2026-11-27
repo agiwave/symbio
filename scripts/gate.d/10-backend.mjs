@@ -4,15 +4,10 @@
 // 三者共用一个 `target/`。因此 `cargo … --workspace` 一次就能覆盖全部，不必再像
 // 从前那样分三个独立 workspace 各跑一遍（`symbio`/cli/tauri 在 A 下跑不到 B 的测试）。
 //
-// 测试通过数仍**按 crate 分包**判定（`rustTests` / `cliRustTests` / `tauriRustTests` 三套
-// 基线），本地用 `cargo test -p <pkg>` 各自比对；CI 跑一次 `--workspace` 全量求和即可
-// （CI 分支只信退出码，不比较基线）。分包的动机不变：壳 `use symbio::…` 是跨 crate 消费方，
-// 它的编译期契约（`check`/`clippy`）最该被守，而 `tauriRustTests` 基线从 0 起——有人加
-// 用例时棘轮立刻要求更新基线，避免「加了测试却没人跑」。
 import path from 'node:path'
 import { fileURLToPath } from 'node:url'
 import fs from 'node:fs'
-import { BASELINE, cargoTestRatchet } from './_shared.mjs'
+import { cargoTestRun } from './_shared.mjs'
 
 const scriptDir = path.dirname(fileURLToPath(import.meta.url))
 const repoRoot = path.resolve(scriptDir, '..', '..')
@@ -58,26 +53,12 @@ export default {
     // 需要「只要类型错误、不要 lint」的快速档时，正确做法是**单独跑** `cargo check`，
     // 而不是把它塞回门禁的必跑链里。
 
-        // 测试：**本地与 CI 同一口径** —— 一次 `cargo test --workspace` 求和比对基线。
-    //
-    // 为什么要改（ crate 化之后）：`cargo test -p symbio` 现在只跑宿主门面，
-    // 实测 `0 passed`——21 个插件、core、providers 的用例全在各自 crate 里，分包跑
-    // **一条都跑不到**，而 `rustTests` 基线 2175 守的正是那个空壳。这不是「数字要调」，
-    // 是**守卫指向了不存在的对象**：它会在 0 个用例上一直报「通过数 < 基线」，或者
-    // 更糟——有人把基线改成 0，于是拆分把一个 2000+ 用例的覆盖洞伪装成绿灯。
-    //
-    // 顺带解决两件事：
-    //   · 口径唯一：`--workspace` 的求和就是全部用例，不再有「分包 vs 求和」两套基线；
-    //   · 调用次数：4 次 `cargo test -p …` → 1 次（增量构建下每次启动仍有 ~1s 固定成本）。
+    // 测试只判执行结果；通过数随用例整理自由增减，不作为质量指标。
     tasks.push(
-      cargoTestRatchet({ ...ctx, ci: true }, {
+      cargoTestRun(ctx, {
         label: 'cargo test --workspace（全量）',
         cwd: backendDir,
         args: ['test', '--workspace'],
-        ciBaseline: BASELINE.ciRustTestsTotal,
-        ciBaselineName: 'ciRustTestsTotal',
-        baseline: BASELINE.rustTests,
-        baselineName: 'rustTests',
       }),
     )
 

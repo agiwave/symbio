@@ -18,9 +18,40 @@
 
       <div class="picker-body" :aria-busy="loading ? 'true' : undefined">
         <div class="current-path-wrap">
-          <span class="path-label">当前目录</span>
+          <label class="path-label" :for="pathInputId">目录绝对路径</label>
+          <form class="path-form" @submit.prevent="goToPath">
+            <input
+              :id="pathInputId"
+              v-model="pathDraft"
+              class="path-input"
+              type="text"
+              spellcheck="false"
+              autocomplete="off"
+              :disabled="loading"
+              placeholder="粘贴 Server 绝对路径"
+              aria-describedby="pathHelpId"
+            >
+            <button type="submit" class="btn" :disabled="loading">前往</button>
+          </form>
+          <span :id="pathHelpId" class="path-help">支持 Windows、Unix 与 UNC 路径</span>
           <div class="current-path" role="status" aria-live="polite">
             {{ loading ? '加载中…' : listing?.path || '尚未加载' }}
+          </div>
+          <p v-if="pathError" class="error" role="alert">{{ pathError }}</p>
+        </div>
+
+        <div v-if="recentPaths.length" class="recent" aria-label="最近使用的目录">
+          <span class="path-label">最近使用</span>
+          <div class="recent-list">
+            <button
+              v-for="path in recentPaths"
+              :key="path"
+              type="button"
+              class="root-btn"
+              :disabled="loading"
+              :title="path"
+              @click="navigate(path)"
+            >{{ path }}</button>
           </div>
         </div>
 
@@ -95,9 +126,11 @@ const props = withDefaults(defineProps<{
   visible: boolean
   title?: string
   initialPath?: string
+  recentPaths?: string[]
 }>(), {
   title: '选择目录',
   initialPath: '',
+  recentPaths: () => [],
 })
 
 const emit = defineEmits<{
@@ -106,6 +139,10 @@ const emit = defineEmits<{
 }>()
 
 const titleId = useId()
+const pathInputId = `${titleId}-path`
+const pathHelpId = `${titleId}-help`
+const pathDraft = ref('')
+const pathError = ref('')
 const listing = ref<HostDirectoryListing | null>(null)
 const roots = ref<HostDirectoryRoot[]>([])
 const entries = ref<HostDirectoryListing['entries']>([])
@@ -113,10 +150,10 @@ const loading = ref(false)
 const error = ref('')
 let requestSequence = 0
 
-/** 后端只接受 Server 绝对路径；~/… 等本地 shell 简写不能直接透传。 */
+/** 接受 Server 绝对路径与后端支持的 `~` / `~/` 简写。 */
 function absoluteServerPath(path: string | undefined): string | undefined {
   const trimmed = path?.trim()
-  return trimmed && /^(?:[A-Za-z]:[\\/]|\/|\\\\)/.test(trimmed) ? trimmed : undefined
+  return trimmed && /^(?:[A-Za-z]:[\\/]|\/|\\\\|~(?:[\\/]|$))/.test(trimmed) ? trimmed : undefined
 }
 
 async function load(requestedPath?: string): Promise<void> {
@@ -136,6 +173,7 @@ async function load(requestedPath?: string): Promise<void> {
     const next = await listHostDirectories(path)
     if (sequence !== requestSequence) return
     listing.value = next
+    pathDraft.value = next.path
     roots.value = next.roots
     entries.value = next.entries
   } catch (cause) {
@@ -146,7 +184,18 @@ async function load(requestedPath?: string): Promise<void> {
   }
 }
 
+function goToPath(): void {
+  pathError.value = ''
+  const path = absoluteServerPath(pathDraft.value)
+  if (!path) {
+    pathError.value = '请输入 Server 绝对路径或 ~/ 路径，例如 C:\\projects 或 /srv/projects'
+    return
+  }
+  void load(path)
+}
+
 function navigate(path: string): void {
+  pathError.value = ''
   if (!loading.value) void load(path)
 }
 
@@ -164,8 +213,11 @@ function selectCurrent(): void {
 watch(
   () => props.visible,
   (visible) => {
-    if (visible) void load(props.initialPath)
-    else requestSequence += 1
+    if (visible) {
+      pathError.value = ''
+      pathDraft.value = props.initialPath
+      void load(props.initialPath)
+    } else requestSequence += 1
   },
   { immediate: true },
 )
@@ -228,6 +280,38 @@ watch(
   font-family: var(--font-mono);
   overflow-wrap: anywhere;
   user-select: text;
+}
+.path-form {
+  display: flex;
+  gap: var(--space-2);
+}
+.path-input {
+  flex: 1;
+  min-width: 0;
+  padding: var(--space-2) var(--space-3);
+  border: 1px solid var(--border-default);
+  border-radius: var(--radius-md);
+  background: var(--surface-sunken);
+  color: var(--text-primary);
+  font-family: var(--font-mono);
+}
+.path-input:focus-visible {
+  outline: 2px solid var(--accent);
+  outline-offset: 2px;
+}
+.path-help {
+  color: var(--text-muted);
+  font-size: var(--font-size-xs);
+}
+.recent {
+  display: flex;
+  flex-direction: column;
+  gap: var(--space-2);
+}
+.recent-list {
+  display: flex;
+  flex-wrap: wrap;
+  gap: var(--space-2);
 }
 .roots,
 .toolbar {
