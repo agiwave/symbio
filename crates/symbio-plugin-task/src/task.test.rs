@@ -3,8 +3,8 @@
 //! （声明不变 ⇒ 不补事件；降级 ⇒ 不产事实；成环 ⇒ `invariants` 必须报出来）。
 
 use super::{
-    prompt_section, ScheduleContributor, ScheduleDecider, TaskItem, TaskStatus, TaskTable,
-    TASK_TABLE_BEHAVIOR,
+    overview_panel, overview_value, prompt_section, ScheduleContributor, ScheduleDecider, TaskItem,
+    TaskStatus, TaskTable, TASK_TABLE_BEHAVIOR,
 };
 use symbio_plugin_api::effects::{
     BeforeDecision, BeforeReadings, BeforeRequest, EffectEnv, EffectInput, ToolBehavior,
@@ -16,8 +16,8 @@ use symbio_plugin_api::PRINCIPAL_SCHEDULER;
 use symbio_plugin_api::{actor_can_assign_work, Entity, Event, EventDecl, Pattern, Scope, Verb};
 
 use crate::decl::{
-    EVENT_TASK_ASSERTED, EVENT_TASK_ASSIGNED, EVENT_TASK_OPENED, EVENT_TASK_PROGRESS,
-    EVENT_TASK_READY, EVENT_TASK_REWORK_CREATED,
+    EVENT_TASK_ASSERTED, EVENT_TASK_ASSIGNED, EVENT_TASK_HELD, EVENT_TASK_OPENED,
+    EVENT_TASK_PROGRESS, EVENT_TASK_READY, EVENT_TASK_REWORK_CREATED,
 };
 use crate::readyset::{ready_all, ready_view};
 use symbio_plugin_api::testkit::trivial_actor_spec;
@@ -1048,5 +1048,124 @@ fn a_second_declaration_of_the_same_task_event_is_rejected() {
             name: EVENT_TASK_OPENED
         }),
         "缺口里必须点名 `{EVENT_TASK_OPENED}` 重名：{gaps:?}"
+    );
+}
+
+#[test]
+fn overview_reports_goals_dependencies_and_distinct_states() {
+    let store = EventStore::new();
+    write_all(
+        &store,
+        0,
+        &[decl(vec![
+            item("done", "完成分析", &[], TaskStatus::Completed),
+            item("active", "实现功能", &[], TaskStatus::InProgress),
+            item("waiting", "编写文档", &["active"], TaskStatus::Pending),
+            item("ready", "运行验收", &["done"], TaskStatus::Pending),
+        ])],
+    );
+    store
+        .append(
+            Event::pending(
+                "hold-active",
+                EVENT_TASK_HELD,
+                Entity::Task,
+                Verb::Held,
+                PRINCIPAL_MAIN,
+            )
+            .with_payload(serde_json::json!({ "task_id": "active", "reason": "interrupted" })),
+        )
+        .expect("挂起事实入格");
+    store
+        .append(
+            Event::pending(
+                "future-waiting",
+                EVENT_TASK_ASSERTED,
+                Entity::Task,
+                Verb::Asserted,
+                PRINCIPAL_MAIN,
+            )
+            .with_ts(10_000)
+            .with_produced_by(0)
+            .with_payload(serde_json::json!({ "task_id": "waiting" })),
+        )
+        .expect("未来事实入格");
+
+    let snapshot = store.range(Seq::new(0));
+    let got = overview_value(&snapshot, 9_999);
+    assert_eq!(got["total"], 4);
+    assert_eq!(got["completed"], 1);
+    assert_eq!(got["held"], 1);
+    assert_eq!(got["blocked"], 1);
+    assert_eq!(got["pending"], 1);
+    assert_eq!(got["in_progress"], 0);
+    let items = got["items"].as_array().expect("任务项");
+    let active = items
+        .iter()
+        .find(|item| item["id"] == "active")
+        .expect("进行中项");
+    assert_eq!(active["goal"], "实现功能");
+    assert_eq!(active["status"], "held");
+    let waiting = items
+        .iter()
+        .find(|item| item["id"] == "waiting")
+        .expect("阻塞项");
+    assert_eq!(waiting["status"], "blocked");
+    assert_eq!(waiting["waiting_on"], serde_json::json!(["active"]));
+    let ready = items
+        .iter()
+        .find(|item| item["id"] == "ready")
+        .expect("就绪项");
+    assert_eq!(ready["status"], "pending");
+    assert_eq!(ready["waiting_on"], serde_json::json!([]));
+}
+
+#[test]
+fn overview_keeps_rework_history_and_renders_owner_panel() {
+    let store = EventStore::new();
+    write_all(
+        &store,
+        0,
+        &[decl(vec![item(
+            "t1",
+            "修复缺陷",
+            &[],
+            TaskStatus::Completed,
+        )])],
+    );
+    write_all(
+        &store,
+        1,
+        &[decl(vec![item(
+            "t1",
+            "修复缺陷",
+            &[],
+            TaskStatus::InProgress,
+        )])],
+    );
+    let snapshot = store.range(Seq::new(0));
+    let got = overview_value(&snapshot, 9_999);
+    assert_eq!(got["total"], 1);
+    assert_eq!(got["in_progress"], 1);
+    assert_eq!(got["items"][0]["id"], "t1");
+    assert_eq!(got["items"][0]["rounds"], 1);
+
+    let ctx = symbio_plugin_api::reports::ReportCtx {
+        principal: PRINCIPAL_MAIN,
+        readable: true,
+    };
+    let panel = overview_panel(&got, &ctx);
+    assert_eq!(panel["title"], "任务");
+    assert_eq!(panel["rows"].as_array().expect("展示行").len(), 2);
+    assert_eq!(panel["rows"][1]["label"], "t1");
+    assert!(panel["rows"][1]["hint"]
+        .as_str()
+        .unwrap_or("")
+        .contains("返工 1 轮"));
+    assert!(
+        overview_panel(&serde_json::json!({ "total": 0 }), &ctx)["rows"]
+            .as_array()
+            .expect("空展示行")
+            .is_empty()
     );
 }

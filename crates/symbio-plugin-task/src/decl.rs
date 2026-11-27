@@ -1,4 +1,4 @@
-//! 任务族的事件声明（DE-024 ）与对外的那条视图。
+//! 任务族的事件声明（DE-024 ）与对外的两条读视图。
 //!
 //! 名字、格位与角色都在这里：写方（[`crate::task::TaskTable`] / 调度者）与读方
 //! （本包的 [`crate::readyset`] 折叠、core 的不变量判据 `acyclic_deps` / `rework_bounded`，
@@ -75,6 +75,9 @@ pub(crate) const OWNER: &str = "crates/symbio-plugin-task";
 /// 同一份单源读法，[`crate::task::readyset_cap`]），读方不带、也无法再带一份。
 pub(crate) const READYSET_VIEW: &str = "task.readyset";
 
+/// 完整任务概览：目标、状态、依赖与返工。与就绪集不同，它不受调度容量截断。
+pub(crate) const OVERVIEW_VIEW: &str = "task.overview";
+
 /// 扫描成本上界（事件条数）。它是环内窗口求值的预算；跨插件读口不查它——读侧按
 /// 调用方给的切片全量折。
 ///
@@ -82,35 +85,56 @@ pub(crate) const READYSET_VIEW: &str = "task.readyset";
 /// 所以这里不按「任务通常没几条」调小——调小会改整张表的切点。
 const COST: u32 = 4096;
 
-pub(crate) const VIEWS: &[ViewDecl] = &[ViewDecl {
-    name: READYSET_VIEW,
-    ver: 1,
-    // 折叠读的就是上面那五格的 `task_id`，外加开节点那条的 `depends_on` 与租约那条的
-    // `until_ms`。任务族有 `EventDecl` 但没有 `FactDecl`（这一族不属于义务环），所以这
-    // 七对按第二种读法登记：名字由 `EventDecl` 保证拼对，字段无从校验——
-    // 装载期进 `Frozen::assertion_reads()` 的名单，不是静默跳过。
-    reads: &[
-        (EVENT_TASK_OPENED, "task_id"),
-        (EVENT_TASK_OPENED, "depends_on"),
-        (EVENT_TASK_PROGRESS, "task_id"),
-        (EVENT_TASK_HELD, "task_id"),
-        (EVENT_TASK_ASSERTED, "task_id"),
-        (EVENT_TASK_ASSIGNED, "task_id"),
-        (EVENT_TASK_ASSIGNED, "until_ms"),
-        // 容量的来源：`session.config` 的贡献键与本包的调度段读同一格。
-        // `session.config` 只有事件格位、没有事实声明 ⇒ 按第二种读法登记，装载期
-        // 进 `assertion_reads()` 的名单（报告项，不是缺口）。
-        (EVENT_SESSION_CONFIG, "readyset_cap"),
-    ],
-    // 就绪集是读数，不替任何事实关门：调度者落的 `task.ready` / `task.assigned` 由
-    // 写侧的 [`crate::task::ScheduleDecider`] 自己负责。
-    evidence: &[],
-    cost: COST,
-    eval: crate::readyset::readyset_value,
-    // 没有跨会话合并的那一半：就绪集是**当前**候选集，把两个会话的候选集并起来不是
-    // 任何一个读数的口径（与 `memory.live` 同一族判断）。
-    agg: None,
-}];
+pub(crate) const VIEWS: &[ViewDecl] = &[
+    ViewDecl {
+        name: READYSET_VIEW,
+        ver: 1,
+        // 折叠读的就是上面那五格的 `task_id`，外加开节点那条的 `depends_on` 与租约那条的
+        // `until_ms`。任务族有 `EventDecl` 但没有 `FactDecl`（这一族不属于义务环），所以这
+        // 七对按第二种读法登记：名字由 `EventDecl` 保证拼对，字段无从校验——
+        // 装载期进 `Frozen::assertion_reads()` 的名单，不是静默跳过。
+        reads: &[
+            (EVENT_TASK_OPENED, "task_id"),
+            (EVENT_TASK_OPENED, "depends_on"),
+            (EVENT_TASK_PROGRESS, "task_id"),
+            (EVENT_TASK_HELD, "task_id"),
+            (EVENT_TASK_ASSERTED, "task_id"),
+            (EVENT_TASK_ASSIGNED, "task_id"),
+            (EVENT_TASK_ASSIGNED, "until_ms"),
+            // 容量的来源：`session.config` 的贡献键与本包的调度段读同一格。
+            // `session.config` 只有事件格位、没有事实声明 ⇒ 按第二种读法登记，装载期
+            // 进 `assertion_reads()` 的名单（报告项，不是缺口）。
+            (EVENT_SESSION_CONFIG, "readyset_cap"),
+        ],
+        // 就绪集是读数，不替任何事实关门：调度者落的 `task.ready` / `task.assigned` 由
+        // 写侧的 [`crate::task::ScheduleDecider`] 自己负责。
+        evidence: &[],
+        cost: COST,
+        eval: crate::readyset::readyset_value,
+        // 没有跨会话合并的那一半：就绪集是**当前**候选集，把两个会话的候选集并起来不是
+        // 任何一个读数的口径（与 `memory.live` 同一族判断）。
+        agg: None,
+    },
+    ViewDecl {
+        name: OVERVIEW_VIEW,
+        ver: 1,
+        reads: &[
+            (EVENT_TASK_OPENED, "task_id"),
+            (EVENT_TASK_OPENED, "depends_on"),
+            (EVENT_TASK_OPENED, "goal"),
+            (EVENT_TASK_PROGRESS, "task_id"),
+            (EVENT_TASK_HELD, "task_id"),
+            (EVENT_TASK_ASSERTED, "task_id"),
+            (EVENT_TASK_REWORK_CREATED, "task_id"),
+            (EVENT_TASK_REWORK_CREATED, "replaces"),
+            (EVENT_TASK_REWORK_CREATED, "round"),
+        ],
+        evidence: &[],
+        cost: COST,
+        eval: crate::task::overview_value,
+        agg: None,
+    },
+];
 
 pub(crate) const EVENTS: &[EventDecl] = &[
     // ── 任务族 ──
@@ -153,16 +177,28 @@ symbio_plugin_api::submit_declarations!(OWNER, submitted_declarations);
 //
 // 没有 `fleet`：就绪集是**当前**候选集，把两个会话的候选集并起来不是任何一个读数的
 // 口径（与 `memory.live` 同一族判断，见 [`VIEWS`] 的 `agg`）。
-symbio_plugin_api::submit_reports!([ReportDecl {
-    owner: "task",
-    slot: "readyset",
-    order: 80,
-    views: &[READYSET_VIEW],
-    fleet: None,
-    render: readyset_report,
-    fleet_render: None,
-    panel: None,
-}]);
+symbio_plugin_api::submit_reports!([
+    ReportDecl {
+        owner: "task",
+        slot: "readyset",
+        order: 80,
+        views: &[READYSET_VIEW],
+        fleet: None,
+        render: readyset_report,
+        fleet_render: None,
+        panel: None,
+    },
+    ReportDecl {
+        owner: "task",
+        slot: "tasks",
+        order: 80,
+        views: &[OVERVIEW_VIEW],
+        fleet: None,
+        render: tasks_report,
+        fleet_render: None,
+        panel: Some(crate::task::overview_panel),
+    },
+]);
 
 /// 就绪集列的**排版**：owner 的求值口已按事实里的容量截断并报出生效容量
 /// （[`crate::readyset::readyset_value`]），本函数只透传；视图值缺席
@@ -173,6 +209,22 @@ fn readyset_report(views: &[Value], _ctx: &ReportCtx<'_>) -> Value {
         .filter(|value| !value.is_null())
         .cloned()
         .unwrap_or_else(|| json!({ "ready": [], "cap": symbio_plugin_api::TASK_CAP }))
+}
+
+fn tasks_report(views: &[Value], ctx: &ReportCtx<'_>) -> Value {
+    if !ctx.readable {
+        return Value::Null;
+    }
+    views
+        .first()
+        .filter(|value| !value.is_null())
+        .cloned()
+        .unwrap_or_else(|| {
+            json!({
+                "total": 0, "pending": 0, "in_progress": 0, "blocked": 0,
+                "held": 0, "completed": 0, "items": []
+            })
+        })
 }
 
 fn submitted_declarations() -> PluginDeclarations<'static> {

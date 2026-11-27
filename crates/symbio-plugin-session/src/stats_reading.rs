@@ -319,7 +319,7 @@ fn view_unavailable(
 /// 不存在「另算一遍」的可能。反过来若在这里重新扫 WAL 或重算分位数，两份口径就
 /// 可以各自漂移——而判据 `panel_matches_the_columns_it_describes` 只看结果，
 /// 看不住过程。写在这里的转换只有三类：起标签、定单位、挑语气。
-pub(super) fn panel_of(stats: &SessionStats) -> ReadingPanel {
+pub(super) fn panel_of(stats: &SessionStats, ctx: &ReportCtx<'_>) -> ReadingPanel {
     // 档位列 → 一段「时延与兜底」。tiers 已按档位排序，此处原序输出（顺序是
     // 数据给的事实，不是排版选择）。它是报表列里唯一需要反序列化才排得出版的一格
     // （其余各列读的是对象），反序列化失败 = 这一格今天没渲染 ⇒ 一段空表。
@@ -472,6 +472,9 @@ pub(super) fn panel_of(stats: &SessionStats) -> ReadingPanel {
     if let Some(capability) = capability_section(stats) {
         sections.push(capability);
     }
+    if let Ok(reports) = symbio_plugin_api::reports::reports() {
+        sections.extend(owner_panels(stats, reports, ctx));
+    }
 
     ReadingPanel {
         title: "会话读数".into(),
@@ -503,6 +506,22 @@ fn skill_section(stats: &SessionStats) -> Option<ReadingSection> {
         }],
         bar: None,
     })
+}
+
+pub(super) fn owner_panels(
+    stats: &SessionStats,
+    reports: &[&symbio_plugin_api::reports::ReportDecl],
+    ctx: &ReportCtx<'_>,
+) -> Vec<ReadingSection> {
+    reports
+        .iter()
+        .filter_map(|report| {
+            let render = report.panel?;
+            let section: ReadingSection =
+                serde_json::from_value(render(stats.reports.get(report.slot)?, ctx)).ok()?;
+            (!section.rows.is_empty()).then_some(section)
+        })
+        .collect()
 }
 
 /// 能力视图那一段（DE-025 ）：**清单有几条，段里就有几行**。

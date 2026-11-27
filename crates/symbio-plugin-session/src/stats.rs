@@ -368,7 +368,7 @@ pub(crate) fn read(
     // 入参是同一份 `reports`。分别算两次是纯函数，不产生第二份口径。
     let usage = usage_section(&reading.reports);
     Ok(SessionStats {
-        panel: panel_of(&reading),
+        panel: panel_of(&reading, &report_ctx),
         usage,
         ..reading
     })

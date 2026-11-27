@@ -1,10 +1,11 @@
-//! 任务能力：**会话任务清单 → 任务事实 → 三个消费方**。
+//! 任务能力：**会话任务清单 → 任务事实 → 执行与只读消费方**。
 //!
-//! 三个消费方各走一条已存在的扩展面，本模块只提供判据与排版：
+//! 执行与读出口各走一条已存在的扩展面，本模块只提供判据与排版：
 //!
 //! | 消费方 | 形态 | 扩展面 |
 //! |---|---|---|
-//! | 读出口 `session/stats` 的 `readyset` 列 | 事实源读什么算什么 | 报表登记（`task.readyset`， / ） |
+//! | 读出口 `session/stats` 的 `tasks` 列与任务分区 | 目标、状态、依赖与返工的完整概览 | 报表登记（`task.overview`） |
+//! | 读出口 `session/stats` 的 `readyset` 列 | 事实源读什么算什么 | 报表登记（`task.readyset`） |
 //! | 调度段 [`prompt_section`] | 请求视图置顶一段 `role=user` 的提示 | 上下文 provider（`context`） |
 //! | 收束调度 | 就绪集 → `task.ready` / `task.assigned` | 收束贡献（[`ScheduleContributor`]） |
 //!
@@ -55,6 +56,7 @@ use symbio_plugin_api::effects::{
     BeforeDecision, BeforeRefusal, BeforeRequest, EffectCall, FactDraft, ToolBehavior,
 };
 use symbio_plugin_api::events::EVENT_SESSION_CONFIG;
+use symbio_plugin_api::reports::ReportCtx;
 use symbio_plugin_api::settle::{Contribution, Contributor, SettleFace, Settling};
 use symbio_plugin_api::PRINCIPAL_SCHEDULER;
 use symbio_plugin_api::{actor_can_assign_work, Entity, Event, Verb};
@@ -201,6 +203,174 @@ fn rebuild<'a>(events: impl Iterator<Item = &'a Event>) -> BTreeMap<String, Entr
         }
     }
     map
+}
+
+pub(crate) fn overview_value(events: &[Event], now: i64) -> serde_json::Value {
+    let visible = |e: &&Event| e.ts <= now;
+    let mut terminal = BTreeMap::new();
+    let mut held = BTreeMap::new();
+    for e in events.iter().filter(visible) {
+        if e.entity != Entity::Task {
+            continue;
+        }
+        let Some(id) = e.payload.get("task_id").and_then(serde_json::Value::as_str) else {
+            continue;
+        };
+        match e.kind.as_str() {
+            k if k == EVENT_TASK_OPENED => {
+                held.remove(id);
+            }
+            k if k == EVENT_TASK_PROGRESS => {
+                held.remove(id);
+            }
+            k if k == EVENT_TASK_HELD => {
+                held.insert(id.to_string(), ());
+            }
+            k if k == EVENT_TASK_ASSERTED => {
+                terminal.insert(id.to_string(), ());
+                held.remove(id);
+            }
+            _ => {}
+        }
+    }
+
+    let entries = rebuild(events.iter().filter(visible));
+    let mut items = Vec::with_capacity(entries.len());
+    let mut pending = 0usize;
+    let mut in_progress = 0usize;
+    let mut blocked = 0usize;
+    let mut held_count = 0usize;
+    let mut completed = 0usize;
+    for (id, entry) in entries {
+        let waiting_on: Vec<&str> = entry
+            .depends_on
+            .iter()
+            .filter(|dep| !terminal.contains_key(dep.as_str()))
+            .map(String::as_str)
+            .collect();
+        let status = match entry.status {
+            TaskStatus::Completed => {
+                completed += 1;
+                "completed"
+            }
+            _ if held.contains_key(&entry.live) => {
+                held_count += 1;
+                "held"
+            }
+            _ if !waiting_on.is_empty() => {
+                blocked += 1;
+                "blocked"
+            }
+            TaskStatus::InProgress => {
+                in_progress += 1;
+                "in_progress"
+            }
+            TaskStatus::Pending => {
+                pending += 1;
+                "pending"
+            }
+        };
+        items.push(serde_json::json!({
+            "id": id,
+            "goal": entry.goal,
+            "status": status,
+            "depends_on": entry.depends_on,
+            "waiting_on": waiting_on,
+            "rounds": entry.rounds,
+        }));
+    }
+    serde_json::json!({
+        "total": items.len(),
+        "pending": pending,
+        "in_progress": in_progress,
+        "blocked": blocked,
+        "held": held_count,
+        "completed": completed,
+        "items": items,
+    })
+}
+
+pub(crate) fn overview_panel(value: &serde_json::Value, ctx: &ReportCtx<'_>) -> serde_json::Value {
+    if !ctx.readable
+        || value
+            .get("total")
+            .and_then(serde_json::Value::as_u64)
+            .unwrap_or(0)
+            == 0
+    {
+        return serde_json::json!({ "title": null, "rows": [], "bar": null });
+    }
+    let count = |key: &str| {
+        value
+            .get(key)
+            .and_then(serde_json::Value::as_u64)
+            .unwrap_or(0)
+    };
+    let mut summary = vec![format!("{} 项", count("total"))];
+    for (key, label) in [
+        ("in_progress", "进行中"),
+        ("blocked", "阻塞"),
+        ("held", "挂起"),
+        ("pending", "未开始"),
+        ("completed", "已完成"),
+    ] {
+        let n = count(key);
+        if n > 0 {
+            summary.push(format!("{label} {n}"));
+        }
+    }
+    let mut rows = vec![serde_json::json!({
+        "label": "进度",
+        "value": format!("{}/{} 已完成", count("completed"), count("total")),
+        "hint": summary.join(" · "),
+        "tone": "normal",
+    })];
+    if let Some(items) = value.get("items").and_then(serde_json::Value::as_array) {
+        for item in items {
+            let status = item
+                .get("status")
+                .and_then(serde_json::Value::as_str)
+                .unwrap_or("pending");
+            let (label, tone) = match status {
+                "completed" => ("已完成", "normal"),
+                "in_progress" => ("进行中", "normal"),
+                "blocked" => ("阻塞", "warn"),
+                "held" => ("挂起", "warn"),
+                _ => ("未开始", "normal"),
+            };
+            let goal = item
+                .get("goal")
+                .and_then(serde_json::Value::as_str)
+                .unwrap_or_default();
+            let mut hint = if goal.is_empty() {
+                "未填写目标".to_string()
+            } else {
+                format!("目标：{goal}")
+            };
+            if let Some(waiting) = item.get("waiting_on").and_then(serde_json::Value::as_array) {
+                if !waiting.is_empty() {
+                    let ids = waiting
+                        .iter()
+                        .filter_map(serde_json::Value::as_str)
+                        .collect::<Vec<_>>()
+                        .join("、");
+                    hint.push_str(&format!(" · 等待：{ids}"));
+                }
+            }
+            if let Some(rounds) = item.get("rounds").and_then(serde_json::Value::as_u64) {
+                if rounds > 0 {
+                    hint.push_str(&format!(" · 返工 {rounds} 轮"));
+                }
+            }
+            rows.push(serde_json::json!({
+                "label": item.get("id").and_then(serde_json::Value::as_str).unwrap_or("任务"),
+                "value": label,
+                "hint": hint,
+                "tone": tone,
+            }));
+        }
+    }
+    serde_json::json!({ "title": "任务", "rows": rows, "bar": null })
 }
 
 /// 一次声明该补的事件（状态推进的**判定方**：只看观察状态 + 声明态，不看清单全量）。

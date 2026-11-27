@@ -203,6 +203,20 @@ export default defineCase(
           [],
           '就绪任务的依赖必然已全部终态（放进集合时就满足，不是断言时才校验）',
         );
+        assertEq(stats.tasks?.total, 3, '完整任务概览不应被调度容量截断');
+        assertEq(stats.tasks?.in_progress, 1, 't1 是进行中');
+        assertEq(stats.tasks?.blocked, 1, 't2 等待 t1');
+        assertEq(stats.tasks?.pending, 1, 't3 未开始');
+        const overview = Object.fromEntries(stats.tasks.items.map((item) => [item.id, item]));
+        assertEq(overview.t1.goal, '分析架构', '概览必须保留任务目标');
+        assertEq(overview.t2.status, 'blocked', '概览必须解释阻塞');
+        assertEq(overview.t2.waiting_on, ['t1'], '概览必须点名正在等待的依赖');
+        const taskPanel = stats.panel.sections.find((section) => section.title === '任务');
+        assert(taskPanel, 'owner 应通过通用面板扩展面交付任务分区');
+        assert(
+          taskPanel.rows.some((row) => row.label === 't2' && row.value === '阻塞'),
+          '任务分区应把阻塞状态直接展示给用户',
+        );
 
         // 读侧闸：矩阵外主体 ⇒ 就绪集走**四列形态**（空切片 = `{ready: []}`），
         // 不是声誉那列的整列 `{}`——「没有任务」与「不给你看」由 `has_wal` 分辨。
@@ -228,6 +242,11 @@ export default defineCase(
           1,
           '未授权读数的切片里没有配置事实 ⇒ `cap` 交出厂值（`TASK_CAP = 1`' +
             '容量由 owner 从事实读，读不到配置与「这条史还没写过配置」同一处置）',
+        );
+        assertEq(denied.body?.data?.tasks, null, '无读权限 ⇒ 任务概览整列不披露');
+        assert(
+          !denied.body.data.panel.sections.some((section) => section.title === '任务'),
+          '无读权限 ⇒ owner 任务分区必须缺席',
         );
       } finally {
         api.stop();

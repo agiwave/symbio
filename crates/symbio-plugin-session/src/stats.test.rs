@@ -26,7 +26,7 @@
 use super::{fleet_reading, read, TierRow};
 use crate::declarations::{CHAT_VOCAB, COMMITMENT_VOCAB, MESSAGE_VOCAB};
 use crate::projections::transcript::transcript;
-use crate::stats_reading::{panel_of, totals_of};
+use crate::stats_reading::{owner_panels, panel_of, totals_of};
 use crate::store::EventWalStore;
 use std::path::{Path, PathBuf};
 use symbio_platform::kernel::event::{Entity, Event, EventEnvelope as _, Seq, Verb};
@@ -458,6 +458,63 @@ fn fleet_landing_points_are_absent_when_no_owner_is_linked() {
 }
 
 // ── 读数面板（后端下发描述，前端零业务知识）────────────────────────────────
+
+fn fixture_report(
+    _: &[serde_json::Value],
+    _: &symbio_plugin_api::reports::ReportCtx<'_>,
+) -> serde_json::Value {
+    serde_json::Value::Null
+}
+
+fn fixture_panel(
+    value: &serde_json::Value,
+    _: &symbio_plugin_api::reports::ReportCtx<'_>,
+) -> serde_json::Value {
+    serde_json::json!({
+        "title": "owner 分区",
+        "rows": if value.is_null() {
+            Vec::new()
+        } else {
+            vec![serde_json::json!({
+                "label": value["label"].as_str().unwrap_or("任务"),
+                "value": "owner 的值",
+                "hint": null,
+                "tone": "normal",
+            })]
+        },
+        "bar": null,
+    })
+}
+
+#[test]
+fn owner_panels_are_assembled_without_reader_side_business_knowledge() {
+    let wal = seed("owner-panels");
+    let mut got = read_at(&wal, symbio_platform::sdk::authz::PRINCIPAL_MAIN);
+    got.reports
+        .insert("fixture".into(), serde_json::json!({ "label": "任务甲" }));
+    let reports = [&symbio_plugin_api::reports::ReportDecl {
+        owner: "fixture",
+        slot: "fixture",
+        order: 80,
+        views: &["fixture.view"],
+        fleet: None,
+        render: fixture_report,
+        fleet_render: None,
+        panel: Some(fixture_panel),
+    }];
+    let ctx = symbio_plugin_api::reports::ReportCtx {
+        principal: symbio_platform::sdk::authz::PRINCIPAL_MAIN,
+        readable: true,
+    };
+    let panels = owner_panels(&got, &reports, &ctx);
+    assert_eq!(panels.len(), 1);
+    assert_eq!(panels[0].title.as_deref(), Some("owner 分区"));
+    assert_eq!(panels[0].rows[0].label, "任务甲");
+    assert_eq!(panels[0].rows[0].value, "owner 的值");
+
+    got.reports.remove("fixture");
+    assert!(owner_panels(&got, &reports, &ctx).is_empty());
+}
 //
 // ## 这个机制唯一的失效形态
 //
@@ -489,7 +546,13 @@ fn panel_matches_the_columns_it_describes() {
         "tiers".into(),
         serde_json::to_value(&tiers).expect("档位行"),
     );
-    let panel = panel_of(&got);
+    let panel = panel_of(
+        &got,
+        &symbio_plugin_api::reports::ReportCtx {
+            principal: symbio_platform::sdk::authz::PRINCIPAL_MAIN,
+            readable: true,
+        },
+    );
 
     // 分区：时延兜底 / 事实源 / 不变量 / 承诺，再加**能力视图**段
     // （段数随登记面，不是本插件写死的常数——DE-025。技能段也是登记面的一段：

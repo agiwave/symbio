@@ -7,8 +7,9 @@
 //! | 工具执行之后 | 成功的 `todo_write` 声明 → `task.*` 事实草稿（含返工节点） | 效果端口（[`task::TaskTable`]） |
 //! | 请求组装之前 | 就绪集渲染成一段提示 | 上下文 provider（[`context::ReadySetProvider`]） |
 //! | 本轮收束之后 | 就绪集 → `task.ready` / `task.assigned` | 收束贡献（[`task::ScheduleContributor`]） |
+//! | 只读导出 | 完整概览 → `session/stats.tasks` 与展示分区 | 报表登记（`task.overview`） |
 //!
-//! 三者都只**交草稿**：写口仍是宿主的唯一写入口（I1），判断与成格住本插件。
+//! 执行侧三者都只**交草稿**：写口仍是宿主的唯一写入口（I1），判断与成格住本插件。
 //! `core` / `kernel` 不认识「任务」这个词：格位、角色与名字都在 [`decl`]，
 //! 读侧按 [`decl::TASK_VOCAB`] 认名字，跨插件消费经 `PLUGIN.yml` 的 `shared_events`
 //! 投影——本插件不依赖也不认识任何兄弟插件。
@@ -17,7 +18,7 @@
 //!
 //! | 文件 | 职责 |
 //! |---|---|
-//! | [`decl`] | 任务族的事件声明、角色（`CountsRework`）、词汇表与 `task.readyset` 的报表登记 |
+//! | [`decl`] | 任务族的事件声明、角色（`CountsRework`）、词汇表与两条读视图的报表登记 |
 //! | [`readyset`] | 就绪集折叠：谁就绪、什么序（名册 #23）；容量是读者套上的预算 |
 //! | [`task`] | 声明 → 事实的折叠（开 / 推进 / 终态 / 返工）、调度判据、调度段排版、收束贡献 |
 //! | [`context`] | 把调度段交给请求视图（段身份 `READYSET`，prio 70） |

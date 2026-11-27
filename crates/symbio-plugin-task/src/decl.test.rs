@@ -100,6 +100,26 @@ fn the_readyset_report_is_registered_without_a_fleet_axis() {
     );
 }
 
+#[test]
+fn the_tasks_report_is_registered_with_an_owner_panel() {
+    let reports = symbio_plugin_api::reports::reports().expect("登记表应合法");
+    let report = reports
+        .iter()
+        .find(|r| r.slot == "tasks")
+        .expect("任务概览列应有登记项");
+    assert_eq!(report.owner, "task");
+    assert_eq!(report.views, &[super::OVERVIEW_VIEW][..]);
+    assert!(report.fleet.is_none());
+    assert!(report.panel.is_some(), "展示分区必须由 task owner 排版");
+    assert!(
+        symbio_plugin_api::testkit::sealed_declarations()
+            .expect("测试进程的装配表应能冻结")
+            .view(super::OVERVIEW_VIEW)
+            .is_some(),
+        "概览视图必须进入冻结声明"
+    );
+}
+
 /// 容量由读者经 `ReportCtx::cap` 交，owner 套上并报出**生效**值（`cap = 0` 按 1）。
 ///
 /// 这是「容量随配置事实走」在报表这一侧的落点：求值口已按事实里的容量

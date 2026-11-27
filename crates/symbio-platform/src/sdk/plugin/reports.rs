@@ -38,7 +38,6 @@
 use std::fmt;
 
 use crate::kernel::event::Event;
-use crate::kernel::present::ReadingSection;
 use serde_json::Value;
 
 use crate::sdk::declarations::sealed_declarations;
@@ -85,8 +84,9 @@ pub struct ReportDecl {
     pub render: fn(&[Value], &ReportCtx<'_>) -> Value,
     /// 实例级排版：各视图先走 `ViewDecl::agg`，再交给它。
     pub fleet_render: Option<fn(&[Value], &ReportCtx<'_>) -> Value>,
-    /// 面板段：返回 `None` = 这条报表不进面板（仍有 JSON 列）。
-    pub panel: Option<fn(&Value, &ReportCtx<'_>) -> ReadingSection>,
+    /// 面板段：返回通用读数分区的 JSON 描述；`None` = 这条报表不进面板（仍有 JSON 列）。
+    /// 空 `rows` 表示本次不展示，由读方按通用 schema 反序列化后省略。
+    pub panel: Option<fn(&Value, &ReportCtx<'_>) -> Value>,
 }
 
 inventory::collect!(ReportDecl);
