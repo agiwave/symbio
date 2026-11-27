@@ -109,7 +109,8 @@ describe('Onboarding 步态呈现', () => {
     const w = bench()
 
     // 第 2 步（模型）的说明——整体文案里第一段是「系统目录」那步
-    expect(w.findAll('.ob-step')[1].text()).toContain('已经配置好模型了')
+    expect(w.findAll('.ob-step')[1].text()).toContain('已添加启用中的模型配置')
+    expect(w.findAll('.ob-step')[1].text()).toContain('测试连接')
     expect(w.text()).not.toContain('去配置模型')
     // hasPending=false ⇒ 收尾按钮是「开始使用」而不是「跳过引导」
     expect(w.find('button.ob-btn.primary').text()).toBe('开始使用')

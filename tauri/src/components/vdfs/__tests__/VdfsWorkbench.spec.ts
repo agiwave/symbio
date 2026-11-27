@@ -143,6 +143,7 @@ let stubRefs: {
   loading: Ref<boolean>
   saving: Ref<boolean>
   actionBusy: Ref<boolean>
+  testResult: Ref<{ ok: boolean; message: string } | null>
   pinnedAtAddr: Ref<boolean>
   loadingDetail: Ref<boolean>
   detailLoadError: Ref<string>
@@ -191,6 +192,7 @@ function installStub(
   const loading = ref(opts.loading ?? false)
   const saving = ref(false)
   const actionBusy = ref(false)
+  const testResult = ref<{ ok: boolean; message: string } | null>(null)
   const pinnedAtAddr = ref(opts.pinnedAtAddr ?? false)
   const loadingDetail = ref(opts.loadingDetail ?? false)
   const detailLoadError = ref(opts.detailLoadError ?? '')
@@ -205,7 +207,7 @@ function installStub(
   // 一致 = 「自述已经跟上当前目录」；换目录的用例可以把两者拆开，复刻那一步滞后。
   const cwdAddr = ref(opts.cwd ?? '@vfs')
   stubRefs = {
-    cwd, cwdNode, cwdAddr, selectedNode, items, treeNodes, loading, saving, actionBusy, pinnedAtAddr,
+    cwd, cwdNode, cwdAddr, selectedNode, items, treeNodes, loading, saving, actionBusy, testResult, pinnedAtAddr,
     loadingDetail, detailLoadError, detailError, formData, nodeText,
   }
   /** 筛选词：真实现是 ref + computed 投影；桩里复刻成同一个形状，
@@ -264,6 +266,8 @@ function installStub(
     detailLoadError,
     saving,
     actionBusy,
+    testResult,
+    clearTestResult: () => { testResult.value = null },
     detailError,
     fieldErrors: ref([]),
     // 机制动作（当前只有「删除」）由页面算好注入渲染器；可写节点才有它
@@ -410,6 +414,20 @@ describe('VdfsWorkbench 动作转发：按**载荷形状**分流', () => {
 
     expect(hoisted.fns.runAction).toHaveBeenCalledWith('export')
     expect(hoisted.fns.runPackAction).not.toHaveBeenCalled()
+  })
+
+  it('连接测试回执持续显示且不遮住表单，字段变化后作废', async () => {
+    installStub({ renderer: 'session', selected: { path: '@vfs/model/p', name: 'p', title: 'P', kind: 'model', status: 'active', access: 'rw', ext: 'session' } })
+    const w = bench()
+    stubRefs!.testResult.value = { ok: true, message: '连接测试通过：gpt-4o · openai_chat · 18 ms' }
+    await nextTick()
+    expect(w.find('.vdfs-action-result').text()).toContain('连接测试通过')
+    expect(w.findComponent({ name: 'RendererStub' }).exists()).toBe(true)
+
+    w.findComponent({ name: 'RendererStub' }).vm.$emit('dirty-change', true)
+    await nextTick()
+    expect(w.find('.vdfs-action-result').exists()).toBe(false)
+    w.unmount()
   })
 
   it('动作参数原样交给 runAction，普通文件动作仍走 pack 通道', async () => {

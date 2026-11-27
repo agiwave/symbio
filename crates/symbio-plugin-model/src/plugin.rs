@@ -655,7 +655,7 @@ impl ModelPlugin {
         id: &str,
         previous: Option<String>,
         draft: Option<Value>,
-    ) -> Result<(bool, String), PluginError> {
+    ) -> Result<(bool, String, Option<Value>), PluginError> {
         let mut manifest = match (previous, draft) {
             (Some(raw), Some(draft)) => merge_manifest(id, Some(&raw), &draft)?,
             (Some(raw), None) => serde_json::from_str(&raw)
@@ -673,16 +673,28 @@ impl ModelPlugin {
         }
         let normalized = match self.validate_manifest(id, &manifest).await {
             Ok(normalized) => normalized,
-            Err(error) => return Ok((false, error.to_string())),
+            Err(error) => return Ok((false, error.to_string(), None)),
         };
         let provider = serde_json::from_value::<ModelProviderConfig>(normalized)
             .map_err(|e| PluginError::ParseError(format!("规范化结果回读失败: {e}")))?;
+        let started = std::time::Instant::now();
         Ok(match Self::validate_provider(&provider).await {
-            None => (
-                true,
-                format!("校验通过（{} / {}）", provider.provider, provider.model),
-            ),
-            Some(e) => (false, e),
+            None => {
+                let elapsed_ms = started.elapsed().as_millis();
+                (
+                    true,
+                    format!(
+                        "连接测试通过：{} · {} · {elapsed_ms} ms",
+                        provider.model, provider.api_protocol
+                    ),
+                    Some(json!({
+                        "model": provider.model,
+                        "api_protocol": provider.api_protocol,
+                        "elapsed_ms": elapsed_ms
+                    })),
+                )
+            }
+            Some(e) => (false, e, None),
         })
     }
 }
@@ -841,7 +853,7 @@ impl VdfsProvider for ModelPlugin {
                     } else {
                         Some(self.store().read_text(&id).await?)
                     };
-                    let (ok, detail) = self
+                    let (ok, detail, data) = self
                         .test_of(&id, previous, payload)
                         .await
                         .map_err(vdfs_from_plugin_error)?;
@@ -849,7 +861,7 @@ impl VdfsProvider for ModelPlugin {
                         action: action.clone(),
                         ok,
                         message: detail,
-                        data: None,
+                        data,
                     }))
                 }
                 "set-default" => {

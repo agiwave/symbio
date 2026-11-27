@@ -5,7 +5,7 @@
  * 它要钉的是一条「不报错但会烦人」的行为：**只有该做的事还没做时才自动弹**。
  *
  * - 已配好模型的用户不该被一张「请去配置」的空话卡片拦在门口 —— 判据是**数据**
- *   （`<根>/model` 里有没有条目），不是「读没读过引导」；
+ *   （`<根>/model` 里有没有启用中的条目），不是「读没读过引导」；
  * - 用户关掉 / 跳过一次之后不该再弹 —— 这条才是「读没读过」负责的，且要落盘；
  * - 任何一步的读取失败都不得把引导整体炸掉（它是锦上添花的面板，不该成为故障面）。
  */
@@ -95,6 +95,17 @@ describe('onboarding 自动弹出（判据是数据，不是「读过没」）',
     await s.maybeOpen()
     expect(s.modelReady).toBe(true)
     expect(s.open).toBe(false)
+  })
+
+  it('只有停用模型 ⇒ 仍弹，停用配置不能当成可用引擎', async () => {
+    arrange({ models: 1 })
+    hoisted.listVdfs.mockResolvedValue({
+      items: [{ path: `${MODEL_DIR}/off`, status: 'disabled' }],
+    })
+    const s = useOnboardingStore()
+    await s.maybeOpen()
+    expect(s.modelReady).toBe(false)
+    expect(s.open).toBe(true)
   })
 
   it('检查完成前跳过引导 ⇒ 晚到的结果不得重新打开', async () => {

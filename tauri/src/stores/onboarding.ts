@@ -12,7 +12,7 @@
  * | 步 | 判据 |
  * |---|---|
  * | 系统目录 | `services/systemLocation` 的 `locationError` 为空 |
- * | 配一个模型 | `<根>/model` 里有条目（`vdfs/list` 非空） |
+ * | 配一个模型 | `<根>/model` 里有启用中的条目（`vdfs/list`） |
  * | 发第一条消息 | 会话清单的持久投影 `has_first_exchange` 为真 |
  *
  * 因此它**不会**给已经配好的用户弹一张「请去配置」的空话卡片：`maybeOpen()` 只在
@@ -33,7 +33,7 @@ import { subscribeVdfsChanged } from '@/services/eventBus'
 import { READBACK_REASON } from '@/services/readback'
 import { findMountDirByNewTypeExt } from '@/services/vdfsScheme'
 import { locationError } from '@/services/systemLocation'
-import { VDFS_EXT_MODEL, VDFS_EXT_SESSION } from '@/schemas/vdfs'
+import { VDFS_EXT_MODEL, VDFS_EXT_SESSION, VDFS_STATUS_ACTIVE } from '@/schemas/vdfs'
 import { logger } from '@/utils/logger'
 
 const STORAGE_KEY = 'symbio.onboarding'
@@ -70,7 +70,7 @@ export const useOnboardingStore = defineStore('onboarding', () => {
   const checking = ref(false)
   /**
    * 用户点了「去配置模型」⇒ 引导关掉但没读完。此时监听资源变更：一旦模型目录里
-   * 出现了条目（用户配好了），自动把引导带回来继续第③步——否则第②步是死胡同，
+   * 出现了启用中的条目（用户配好了），自动把引导带回来继续第③步——否则第②步是死胡同，
    * 用户配完模型后再也看不到「发第一条消息」的引导。
    */
   const awaitingModel = ref(false)
@@ -98,7 +98,7 @@ export const useOnboardingStore = defineStore('onboarding', () => {
       modelDir.value = dir
       if (dir) {
         const resp = await listVdfs(READBACK_REASON.GUIDE, dir)
-        modelReady.value = (resp.items ?? []).length > 0
+        modelReady.value = (resp.items ?? []).some((item) => item.status === VDFS_STATUS_ACTIVE)
       } else {
         modelReady.value = false
       }

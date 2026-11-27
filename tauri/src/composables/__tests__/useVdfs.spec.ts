@@ -997,6 +997,37 @@ describe('useVdfs 草稿上的动作：载荷、落点与退出规则', () => {
       model: 'draft-model',
     })
     expect(api.selectedNode.value?.path).toBe('')
+    expect(api.testResult.value).toEqual({ ok: true, message: '校验通过' })
+    wrapper.unmount()
+  })
+
+  it('测试回执持续保留，字段变化或切走后作废', async () => {
+    const { api, wrapper } = await draft()
+    mocks.runVdfsAction.mockResolvedValue({ action: 'test', ok: true, message: '连接测试通过' })
+    await api.runAction('test', { model: 'draft-model' })
+    expect(api.testResult.value?.message).toBe('连接测试通过')
+
+    api.clearTestResult()
+    expect(api.testResult.value).toBeNull()
+    mocks.runVdfsAction.mockResolvedValue({ action: 'test', ok: false, message: '认证失败' })
+    await api.runAction('test', { model: 'draft-model' })
+    expect(api.testResult.value).toBeNull()
+    expect(api.detailError.value).toBe('认证失败')
+
+    api.clearSelection()
+    expect(api.testResult.value).toBeNull()
+    wrapper.unmount()
+  })
+
+  it('切走后在途测试回执不得写到新详情', async () => {
+    const { api, wrapper } = await draft()
+    let resolveAction!: (value: { action: string; ok: boolean; message: string }) => void
+    mocks.runVdfsAction.mockReturnValue(new Promise((resolve) => { resolveAction = resolve }))
+    const pending = api.runAction('test', { model: 'old-model' })
+    api.startNew()
+    resolveAction({ action: 'test', ok: true, message: '旧配置通过' })
+    await pending
+    expect(api.testResult.value).toBeNull()
     wrapper.unmount()
   })
 

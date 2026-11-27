@@ -204,6 +204,14 @@
     </template>
 
     <template #detail>
+      <div
+        v-if="testResult && !loadingDetail && !detailLoadError"
+        class="vdfs-action-result is-success"
+        role="status"
+      >
+        <span aria-hidden="true">✓</span>
+        <p>{{ testResult.message }}</p>
+      </div>
       <!-- 详情：渲染器由节点 ext 决定（唯一分发点）。**草稿（新建态）也走这里**
            ——同一个 ext 用同一个渲染器，因此「点新建」与「选中一项」在交互上
            没有第二种形态（key 对草稿另取，保证连续新建时重挂载）。
@@ -392,6 +400,8 @@ const {
   saving,
   actionBusy,
   detailError,
+  testResult,
+  clearTestResult,
   fieldErrors,
   mechanismActions,
   mechanismBusyId,
@@ -496,6 +506,7 @@ let leaveResolver: ((allowed: boolean) => void) | null = null
 
 function onDetailDirty(dirty: boolean) {
   detailDirty.value = dirty
+  if (dirty) clearTestResult()
 }
 
 function resetLeave() {
@@ -1117,6 +1128,28 @@ defineExpose({ confirmRouteLeave })
   min-height: 0;
   overflow-y: auto;
   padding: 0.25rem 0;
+}
+
+.vdfs-action-result {
+  flex-shrink: 0;
+  display: flex;
+  align-items: flex-start;
+  gap: 0.5rem;
+  margin: 0.5rem 1rem 0;
+  padding: 0.55rem 0.75rem;
+  border: 1px solid var(--border-default);
+  border-radius: var(--radius-md);
+  font-size: 0.78rem;
+  line-height: var(--line-height-normal);
+}
+.vdfs-action-result p {
+  margin: 0;
+  overflow-wrap: anywhere;
+}
+.vdfs-action-result.is-success {
+  border-color: var(--accent);
+  color: var(--accent);
+  background: var(--accent-subtle-bg);
 }
 
 /* 有界列表的收尾（滚到底可见；也提供显式入口） */

@@ -675,6 +675,11 @@ export function useVdfs(opts: UseVdfsOptions) {
   const detailError = ref('')
   /** 字段级校验错误（provider 自持校验的产物；机制不解释其含义） */
   const fieldErrors = ref<VdfsFieldError[]>([])
+  /** 连接测试的持久回执；字段一旦修改即作废，不能被误当成新配置的结果。 */
+  const testResult = ref<{ ok: boolean; message: string } | null>(null)
+  function clearTestResult(): void {
+    testResult.value = null
+  }
 
   /**
    * 详情读取的**代次守卫**（机制唯一实现，见 `useGenerationGuard`）。
@@ -763,6 +768,7 @@ export function useVdfs(opts: UseVdfsOptions) {
     detailLoadError.value = ''
     detailError.value = ''
     fieldErrors.value = []
+    clearTestResult()
     if (forget) selectedNodeMemo.delete(memoKey)
   }
 
@@ -781,6 +787,7 @@ export function useVdfs(opts: UseVdfsOptions) {
     if (!sameNode) {
       nodeText.value = ''
       formData.value = null
+      clearTestResult()
     }
     // 新选中项（或同一节点的重读）开始时都不再展示上一条读取失败；骨架优先于
     // 任何旧正文，失败时再由本次回执写入 detailLoadError。
@@ -987,6 +994,7 @@ export function useVdfs(opts: UseVdfsOptions) {
     const draftToken = draftSeq.value
     actionBusy.value = true
     detailError.value = ''
+    clearTestResult()
     try {
       const r = await runVdfsAction(target, action, payload)
       if (r?.ok) {
@@ -1003,6 +1011,9 @@ export function useVdfs(opts: UseVdfsOptions) {
       const selectionUnchanged = isVdfsDraft(node)
         ? current === node && draftSeq.value === draftToken
         : current?.path === node.path
+      if (action === VDFS_ACTION_TEST && r?.ok && selectionUnchanged) {
+        testResult.value = { ok: true, message: r.message }
+      }
       if (r?.ok && action !== VDFS_ACTION_TEST && selectionUnchanged) {
         const data = r.data
         const createdId = data && typeof data === 'object' && 'id' in data
@@ -1291,6 +1302,8 @@ export function useVdfs(opts: UseVdfsOptions) {
     actionBusy,
     detailError,
     fieldErrors,
+    testResult,
+    clearTestResult,
     clearSelection,
     // 机制动作（单一定义点，经控件注入所有渲染器）
     mechanismActions,

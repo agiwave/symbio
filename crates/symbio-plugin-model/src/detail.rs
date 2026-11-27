@@ -597,7 +597,7 @@ pub fn model_detail_definition() -> DetailDefinition {
         actions: vec![
             DetailAction {
                 id: "test".into(),
-                label: "校验连接".into(),
+                label: "测试连接".into(),
                 style: "secondary".into(),
                 when: Some(DetailCondition {
                     key: COND_CAP_TEST_CONNECTION.into(),

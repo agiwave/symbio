@@ -647,6 +647,62 @@ async fn draft_test_action_validates_without_creating_an_entry() {
     assert!(plugin.providers.read().await.providers.is_empty());
 }
 
+#[tokio::test]
+async fn test_action_reports_tested_model_protocol_and_latency() {
+    use tokio::io::{AsyncReadExt, AsyncWriteExt};
+
+    let listener = tokio::net::TcpListener::bind("127.0.0.1:0").await.unwrap();
+    let addr = listener.local_addr().unwrap();
+    let server = tokio::spawn(async move {
+        let (mut socket, _) = listener.accept().await.unwrap();
+        let mut request = Vec::new();
+        let mut chunk = [0_u8; 1024];
+        while !request.windows(4).any(|bytes| bytes == b"\r\n\r\n") {
+            let read = socket.read(&mut chunk).await.unwrap();
+            assert!(read > 0);
+            request.extend_from_slice(&chunk[..read]);
+        }
+        socket
+            .write_all(
+                b"HTTP/1.1 200 OK\r\nContent-Type: application/json\r\nContent-Length: 2\r\nConnection: close\r\n\r\n{}",
+            )
+            .await
+            .unwrap();
+    });
+
+    let tmp = tempfile::tempdir().unwrap();
+    let plugin = ModelPlugin::new(
+        ModelProvidersConfig::default(),
+        PluginDir::at(tmp.path().join("model"), "model"),
+    );
+    let mut draft = sample_value();
+    draft["api_base"] = json!(format!("http://{addr}/v1"));
+    draft["api_protocol"] = json!("openai_chat");
+    let result = plugin
+        .dispatch(
+            &VdfsContext::empty(),
+            "",
+            VdfsRequest::Action {
+                action: VDFS_ACTION_TEST.into(),
+                payload: Some(draft),
+            },
+        )
+        .await
+        .unwrap()
+        .into_action()
+        .unwrap();
+
+    server.await.unwrap();
+    assert!(result.ok, "{}", result.message);
+    assert!(result.message.contains("gpt-4o · openai_chat"));
+    assert!(result.message.contains("ms"));
+    let data = result.data.unwrap();
+    assert_eq!(data["model"], json!("gpt-4o"));
+    assert_eq!(data["api_protocol"], json!("openai_chat"));
+    assert!(data["elapsed_ms"].is_u64());
+    assert!(plugin.store().entries().await.unwrap().is_empty());
+}
+
 /// 默认动作先持久化再发布；停用项不能成为默认。
 #[tokio::test]
 async fn set_default_persists_before_publishing_and_rejects_disabled() {
