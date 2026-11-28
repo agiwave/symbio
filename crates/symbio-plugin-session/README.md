@@ -84,7 +84,9 @@ Session 是会话持久化、事实源、地址面、装配与生命周期中心
 | `progress_lease_ms` | 60000 | 汇报租约时长 |
 | `progress_max_attempts` | 1 | 单轮最大汇报尝试 |
 | `presentation_tree` | `grouped` | 展示树投影形态 |
-| `approval_grants` | 空 | 跨会话工具授权：工具名到最高风险档；写入口为 `session/grant` |
+
+会话只保存 `sandbox_id` 选择与 `risk_level` 自动放行偏好；最终有效阈值、审批范围与永久授权
+由 sandbox 档案策略决定，会话配置不再持有 `approval_grants`。
 
 `context_messages` 不是加载窗口。历史仍从 WAL 读取并投影，只有工具链裁剪以该字段为分水岭。
 

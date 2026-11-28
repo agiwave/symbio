@@ -10,7 +10,6 @@ mod commands;
 pub(crate) mod config;
 mod convergence;
 mod declarations;
-mod grants;
 pub(crate) mod message_events;
 mod opening;
 mod options;

@@ -22,32 +22,33 @@ pub(crate) fn sandbox_option_field(
     warning: Option<&str>,
     has_snapshot: bool,
 ) -> DetailField {
-    let mut options = vec![DetailOption {
-        value: String::new(),
-        label: "禁用沙箱（不启用保护）".to_string(),
-        description: Some("本应用没有容器级隔离；禁用后仅保留工具自身审批".to_string()),
-    }];
-    options.extend(
-        archives
-            .iter()
-            .filter(|(id, _)| !id.is_empty())
-            .map(|(id, name)| DetailOption {
-                value: id.clone(),
-                label: name.clone(),
-                description: None,
-            }),
-    );
+    let mut options = archives
+        .iter()
+        .filter(|(id, _)| !id.is_empty())
+        .map(|(id, name)| DetailOption {
+            value: id.clone(),
+            label: name.clone(),
+            description: None,
+        })
+        .collect::<Vec<_>>();
+    if options.is_empty() {
+        options.push(DetailOption {
+            value: "default".into(),
+            label: "默认".into(),
+            description: None,
+        });
+    }
     if let Some(active) = active.filter(|id| !id.is_empty()) {
         if !archives.iter().any(|(id, _)| id == active) {
             options.push(DetailOption {
                 value: active.to_string(),
                 label: format!("{active}（档案缺失或不可用）"),
-                description: Some("请重新选择可用档案，或禁用沙箱".to_string()),
+                description: Some("请重新选择可用档案，或选择「不限制」".to_string()),
             });
         }
     }
     let mut description =
-        "选择本次会话的安全运行环境（含审批策略）；禁用表示不启用沙箱保护".to_string();
+        "选择本次会话的安全运行环境与审批策略；未选择时使用「默认」，显式选「不限制」才关闭沙箱限制".to_string();
     if let Some(warning) = warning.filter(|value| !value.is_empty()) {
         let impact = if has_snapshot {
             "当前继续使用上一份良好快照"
@@ -62,7 +63,9 @@ pub(crate) fn sandbox_option_field(
         description: Some(description),
         widget: "select".to_string(),
         icon: Some("sandbox".to_string()),
-        default: active.map(|id| serde_json::json!(id)),
+        default: Some(serde_json::json!(active
+            .filter(|id| !id.is_empty())
+            .unwrap_or("default"))),
         options,
         ..Default::default()
     }
@@ -263,6 +266,24 @@ pub(crate) fn sandbox_detail_definition() -> DetailDefinition {
                             "风险阈值",
                             "最大自动放行风险；高于阈值需审批",
                             "select",
+                        )
+                    },
+                    DetailField {
+                        default: Some(serde_json::json!(true)),
+                        ..field(
+                            "allow_session_approval",
+                            "允许本会话免问",
+                            "开启后，本会话可以选择不高于此沙箱阈值的风险档自动放行",
+                            "toggle",
+                        )
+                    },
+                    DetailField {
+                        default: Some(serde_json::json!(true)),
+                        ..field(
+                            "allow_permanent_approval",
+                            "允许永久免问",
+                            "开启后，可保存不高于此沙箱阈值的跨会话授权；严格沙箱建议关闭",
+                            "toggle",
                         )
                     },
                 ],

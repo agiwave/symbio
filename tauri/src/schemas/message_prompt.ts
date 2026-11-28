@@ -11,6 +11,8 @@
  * `components/message/InteractionNode.vue`。
  */
 
+import type { ApprovalPolicyBinding, ApprovalScope } from './chat_node'
+
 /** 提问的可选项 */
 export interface MessagePromptOption {
   label: string
@@ -50,6 +52,12 @@ export interface MessagePromptConfirm {
   risk_level?: string
   description?: string
   approval?: MessagePromptApproval
+  /** 服务端明确允许的授权范围；旧卡缺省，长期范围不由前端推断。 */
+  approval_scopes?: ApprovalScope[]
+  /** 本次需要审批的原因；由沙箱策略给出，前端不重算阈值。 */
+  approval_reason?: string
+  /** 本次审批绑定的沙箱档案快照；永久授权只接受这里的 profile_id。 */
+  policy?: ApprovalPolicyBinding
 }
 
 /** 提问载荷 */

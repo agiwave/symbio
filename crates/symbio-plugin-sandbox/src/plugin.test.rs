@@ -3,6 +3,7 @@
 //! 与实现**同级**分文件（约定：`X.rs` + `X.test.rs`）。
 
 use super::*;
+use symbio_plugin_api::collectors::ApprovalGrants;
 use symbio_plugin_api::{vdfs_context, PluginSimpleRequest, SymbioKey, TOOL_CALL_ID};
 
 fn ctx() -> Arc<dyn PluginInvokeRequest> {
@@ -22,6 +23,14 @@ fn model_ctx() -> VdfsContext {
     vdfs_context(&host)
 }
 
+fn control_ctx(path: &str, payload: serde_json::Value) -> Arc<dyn PluginInvokeRequest> {
+    let host = ctx();
+    host.set(symbio_plugin_api::PATH, path.to_string());
+    host.set(VDFS_CALLER, VdfsCaller::Manager);
+    host.set_payload(payload).unwrap();
+    host
+}
+
 fn test_plugin() -> Arc<SandboxPlugin> {
     test_plugin_in(std::env::temp_dir().join(format!(
         "sandbox-test-{}-{}",
@@ -31,10 +40,16 @@ fn test_plugin() -> Arc<SandboxPlugin> {
 }
 
 fn test_plugin_in(dir: std::path::PathBuf) -> Arc<SandboxPlugin> {
+    let legacy = dir
+        .parent()
+        .map(|parent| parent.join(PLUGIN_ID_SESSION))
+        .unwrap_or_else(|| dir.join(PLUGIN_ID_SESSION));
+    let grants = Arc::new(GrantStore::load(&dir, &legacy));
     Arc::new(SandboxPlugin {
         dir: PluginDir::at(dir, PLUGIN_ID_SANDBOX),
         registry: Arc::new(RwLock::new(SandboxRegistry::default())),
         reload_lock: Arc::new(tokio::sync::Mutex::new(())),
+        grants,
     })
 }
 
@@ -51,6 +66,17 @@ async fn traverse_publishes_a_handle_into_the_shared_slot() {
         symbio_plugin_api::sandbox_of(&*c).is_some(),
         "traverse 后消费方应能读到句柄"
     );
+    assert!(
+        symbio_plugin_api::collectors::approval_policy_of(&*c).is_some(),
+        "traverse 后消费方应能读到审批策略"
+    );
+    assert_eq!(
+        symbio_plugin_api::collectors::ApprovalGrants::parse(
+            &c.get(symbio_plugin_api::collectors::APPROVAL_GRANTS)
+                .unwrap_or_default()
+        ),
+        symbio_plugin_api::collectors::ApprovalGrants::default()
+    );
 }
 
 #[tokio::test]
@@ -58,6 +84,19 @@ async fn reload_seeds_builtin_profiles() {
     let plugin = test_plugin();
     plugin.reload().await;
     let reg = plugin.registry.read().unwrap();
+    assert!(reg.archives().contains_key("none"));
+    assert_eq!(
+        reg.archives()
+            .get("none")
+            .unwrap()
+            .risk_threshold
+            .as_deref(),
+        Some("high")
+    );
+    assert_eq!(
+        reg.archives().get("none").unwrap().approval_mode.as_deref(),
+        Some("auto")
+    );
     assert!(reg.archives().contains_key("default"));
     assert!(reg.archives().contains_key("strict"));
     assert!(reg.archives().contains_key("unattended"));
@@ -90,7 +129,7 @@ async fn reload_seeds_builtin_profiles() {
 
 #[test]
 fn builtin_ids_are_not_writable() {
-    for id in ["default", "strict", "unattended"] {
+    for id in ["none", "default", "strict", "unattended"] {
         assert!(builtin_profiles().iter().any(|(k, _)| k == id));
     }
 }
@@ -682,4 +721,153 @@ async fn invalid_configs_return_field_paths_and_are_not_written() {
         );
         assert!(!plugin.store().exists(&id));
     }
+}
+
+#[tokio::test]
+async fn grant_routes_are_manager_only_profile_scoped_and_threshold_checked() {
+    let plugin = test_plugin();
+    plugin.reload().await;
+
+    let host = control_ctx(
+        "grant",
+        serde_json::json!({"profile_id":"default","tool":"shell","risk":"medium"}),
+    );
+    host.set(VDFS_CALLER, VdfsCaller::Model);
+    assert!(matches!(
+        plugin.clone().route(host).await,
+        Err(PluginError::Forbidden(_))
+    ));
+
+    let granted = plugin
+        .clone()
+        .route(control_ctx(
+            "grant",
+            serde_json::json!({"profile_id":"default","tool":"shell","risk":"medium"}),
+        ))
+        .await
+        .unwrap()
+        .get::<serde_json::Value>()
+        .unwrap();
+    assert_eq!(granted["profile_id"], "default");
+    assert_eq!(granted["grants"], serde_json::json!({"shell":"medium"}));
+
+    assert!(matches!(
+        plugin
+            .clone()
+            .route(control_ctx(
+                "grant",
+                serde_json::json!({"profile_id":"default","tool":"shell","risk":"high"}),
+            ))
+            .await,
+        Err(PluginError::Forbidden(_))
+    ));
+    assert!(matches!(
+        plugin
+            .clone()
+            .route(control_ctx(
+                "grant",
+                serde_json::json!({"profile_id":"strict","tool":"shell","risk":"low"}),
+            ))
+            .await,
+        Err(PluginError::Forbidden(_))
+    ));
+
+    let revoked = plugin
+        .clone()
+        .route(control_ctx(
+            "revoke",
+            serde_json::json!({"profile_id":"default","tool":"shell"}),
+        ))
+        .await
+        .unwrap()
+        .get::<serde_json::Value>()
+        .unwrap();
+    assert_eq!(revoked["grants"], serde_json::json!({}));
+}
+
+#[tokio::test]
+async fn traverse_projects_capped_grants_and_publishes_the_matching_policy() {
+    let plugin = test_plugin();
+    plugin.reload().await;
+    plugin
+        .grants
+        .grant("default", "shell", CapabilityRiskLevel::High)
+        .unwrap();
+    plugin
+        .grants
+        .grant("strict", "shell", CapabilityRiskLevel::High)
+        .unwrap();
+
+    let strict_ctx = ctx();
+    strict_ctx.set(symbio_plugin_api::SANDBOX_ID, "strict".to_string());
+    plugin
+        .clone()
+        .traverse(String::new(), strict_ctx.clone())
+        .await
+        .unwrap();
+    let projected = ApprovalGrants::parse(
+        &strict_ctx
+            .get(symbio_plugin_api::collectors::APPROVAL_GRANTS)
+            .unwrap(),
+    );
+    assert_eq!(projected.ceiling("shell"), Some(CapabilityRiskLevel::Low));
+    let policy = symbio_plugin_api::collectors::approval_policy_of(&*strict_ctx).unwrap();
+    assert!(policy
+        .evaluate(
+            &[],
+            "shell",
+            &serde_json::json!({}),
+            CapabilityRiskLevel::Medium,
+            CapabilityRiskLevel::High,
+        )
+        .needs_approval());
+
+    let default_ctx = ctx();
+    plugin
+        .clone()
+        .traverse(String::new(), default_ctx.clone())
+        .await
+        .unwrap();
+    let policy = symbio_plugin_api::collectors::approval_policy_of(&*default_ctx).unwrap();
+    assert!(policy
+        .evaluate(
+            &[],
+            "shell",
+            &serde_json::json!({}),
+            CapabilityRiskLevel::Medium,
+            CapabilityRiskLevel::Low,
+        )
+        .is_allowed());
+}
+
+#[tokio::test]
+async fn grant_storage_failure_blocks_policy_publication_with_an_allow_fallback() {
+    let dir = std::env::temp_dir().join(format!(
+        "sandbox-bad-grants-{}-{}",
+        std::process::id(),
+        TEST_SEQ.fetch_add(1, std::sync::atomic::Ordering::Relaxed)
+    ));
+    std::fs::create_dir_all(&dir).unwrap();
+    std::fs::write(dir.join("approval-grants.json"), "{broken").unwrap();
+    let plugin = test_plugin_in(dir.clone());
+    plugin.reload().await;
+    assert!(!plugin.registry.read().unwrap().has_snapshot());
+
+    let host = ctx();
+    plugin
+        .clone()
+        .traverse(String::new(), host.clone())
+        .await
+        .unwrap();
+    let policy = symbio_plugin_api::collectors::approval_policy_of(&*host).unwrap();
+    assert!(policy
+        .evaluate(
+            &[],
+            "tool",
+            &serde_json::json!({}),
+            CapabilityRiskLevel::Low,
+            CapabilityRiskLevel::High,
+        )
+        .is_denied());
+    let _ = std::fs::remove_dir_all(dir);
 }

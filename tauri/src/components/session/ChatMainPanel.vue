@@ -585,6 +585,11 @@ function openChange(row: ChangeRow) {
   display: flex;
   align-items: center;
   justify-content: space-between;
+  /* 窄屏换行而不是叠字：标题 + 读数格与右侧工具条的最小宽度加起来会超过
+     可用宽度（实测 ≤768px 的会话详情里读数格压住重命名/变更/读数/删除四个按钮），
+     读数格又刻意 flex-shrink: 0。允许整行换行，右侧工具条落到第二行、靠右对齐。 */
+  flex-wrap: wrap;
+  row-gap: 0.25rem;
   padding: 0.5rem 1rem;
   border-bottom: 1px solid var(--border-default);
   flex-shrink: 0;
@@ -596,6 +601,8 @@ function openChange(row: ChangeRow) {
   align-items: center;
   gap: 0.75rem;
   min-width: 0;
+  /* 换行时先让标题+读数格占满第一行，工具条再整体下移 */
+  flex: 1 1 auto;
 }
 
 .session-name {
@@ -654,6 +661,13 @@ function openChange(row: ChangeRow) {
   display: flex;
   align-items: center;
   gap: 0.25rem;
+  margin-left: auto;
+  /* 320px 回流下限（WCAG 1.4.10）下这一排仍比可用宽度宽，整排被容器裁掉
+     （实测「进入下一级」只露半个字、点不到）。允许它自己再折一行，
+     而不是隐藏任何一个动作。 */
+  flex-wrap: wrap;
+  justify-content: flex-end;
+  row-gap: 0.25rem;
 }
 
 /* 动作区（进入下一级 / 删除）与前面「作用于本页」的小图标按钮之间画一道分隔：

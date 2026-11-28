@@ -64,6 +64,23 @@ impl ApprovalGrants {
         *entry
     }
 
+    pub fn revoke(&mut self, tool: &str) -> bool {
+        self.0.remove(tool).is_some()
+    }
+
+    pub fn capped_at(self, ceiling: CapabilityRiskLevel) -> Self {
+        Self(
+            self.0
+                .into_iter()
+                .map(|(tool, level)| (tool, level.min(ceiling)))
+                .collect(),
+        )
+    }
+
+    pub fn is_empty(&self) -> bool {
+        self.0.is_empty()
+    }
+
     fn from_wire(raw: BTreeMap<String, Value>) -> Self {
         Self(
             raw.into_iter()
@@ -95,6 +112,30 @@ impl<'de> Deserialize<'de> for ApprovalGrants {
     }
 }
 
+/// 当前沙箱档案的稳定 revision；无关档案变化不使旧绑定失效。
+#[derive(Debug, Clone, PartialEq, Eq)]
+pub struct PolicyBinding {
+    profile_id: String,
+    revision: u64,
+}
+
+impl PolicyBinding {
+    pub fn new(profile_id: impl Into<String>, revision: u64) -> Self {
+        Self {
+            profile_id: profile_id.into(),
+            revision,
+        }
+    }
+
+    pub fn profile_id(&self) -> &str {
+        &self.profile_id
+    }
+
+    pub fn revision(&self) -> u64 {
+        self.revision
+    }
+}
+
 /// 宿主为一次已批准调用签发的短期一次性凭据。
 #[derive(Debug, Clone)]
 pub struct ApprovalGrant {
@@ -107,7 +148,7 @@ struct GrantInner {
     tool: String,
     args: Value,
     session_id: Option<String>,
-    profile_version: u64,
+    policy_binding: Option<PolicyBinding>,
     expires_at: SystemTime,
     consumed: AtomicBool,
 }
@@ -118,7 +159,7 @@ impl ApprovalGrant {
         tool: impl Into<String>,
         args: &Value,
         session_id: Option<String>,
-        profile_version: u64,
+        policy_binding: Option<PolicyBinding>,
         ttl: Duration,
     ) -> Self {
         let mut bound_args = args.clone();
@@ -131,7 +172,7 @@ impl ApprovalGrant {
                 tool: tool.into(),
                 args: bound_args,
                 session_id,
-                profile_version,
+                policy_binding,
                 expires_at: SystemTime::now() + ttl,
                 consumed: AtomicBool::new(false),
             }),
@@ -148,7 +189,7 @@ impl ApprovalGrant {
         tool: &str,
         args: &Value,
         session_id: Option<&str>,
-        profile_version: u64,
+        policy_binding: Option<&PolicyBinding>,
     ) -> bool {
         let Some(grant) = ctx
             .get_raw(APPROVAL_GRANT)
@@ -164,7 +205,7 @@ impl ApprovalGrant {
             && grant.inner.tool == tool
             && grant.inner.args == bound_args
             && grant.inner.session_id.as_deref() == session_id
-            && grant.inner.profile_version == profile_version
+            && grant.inner.policy_binding.as_ref() == policy_binding
             && SystemTime::now() <= grant.inner.expires_at;
         valid
             && grant

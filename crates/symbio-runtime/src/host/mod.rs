@@ -20,9 +20,7 @@ use symbio_platform::kernel::event::{Entity, Event, Verb};
 use symbio_platform::kernel::plugin::{Plugin, PluginInvokeRequest, PluginInvokeRequestExt};
 use symbio_platform::kernel::store::MemoryStore;
 use symbio_platform::sdk::capability::CAPABILITY_VISITOR;
-use symbio_platform::sdk::keys::{
-    MODE, PATH, PROVIDER_ID, RISK_LEVEL, SESSION_DIR, SESSION_ID, WORKDIR,
-};
+use symbio_platform::sdk::keys::{PATH, PROVIDER_ID, SESSION_DIR, SESSION_ID, WORKDIR};
 use symbio_platform::sdk::plugin::fact_source::FactSource;
 use symbio_platform::sdk::plugin::TRAVERSE_AVAILABLE_TOOLS;
 use symbio_plugin_api::debt::{
@@ -216,26 +214,15 @@ impl Host {
         // 沙箱句柄共享槽：traverse 前建槽，sandbox 插件在 traverse 里按
         // `ctx[SANDBOX_ID]` 绑定并发布引擎；traverse 后从同一槽读出，解析审批参数。
         symbio_plugin_api::sandbox_init_slot(&ctx);
+        symbio_platform::sdk::collectors::approval_policy_init_slot(&ctx);
 
         Arc::clone(&self.root)
             .traverse(String::new(), Arc::clone(&ctx))
             .await
             .map_err(|e| format!("能力收集失败: {e:?}"))?;
 
-        // 裁决 B：会话只选沙箱，安全语义由沙箱承接。这里经句柄的**通用只读口**
-        // 取该会话选中档案的审批参数（模式/阈值两个普通字符串），写回审批闸门
-        // 一直在读的 MODE / RISK_LEVEL 键——`approval.rs` / `shell.rs` / `ask_user.rs`
-        // 无需认识沙箱。缺席（没装沙箱插件 / 没选中档案）= 不写，闸门按既有默认
-        // （medium + 交互）降级，即「全放行 + 诚实提示」的缺席语义。
-        if let Some(face) = symbio_plugin_api::sandbox_of(ctx.as_ref()) {
-            let (mode, threshold) = face.approval_params();
-            if let Some(mode) = mode {
-                ctx.set(MODE, mode);
-            }
-            if let Some(threshold) = threshold {
-                ctx.set(RISK_LEVEL, threshold);
-            }
-        }
+        // 审批模式与阈值由 sandbox 的 ApprovalPolicy 在执行前统一求值；宿主不再把
+        // profile 参数回写会话 ctx，避免覆盖用户偏好或形成第二份策略真相。
 
         // 执行视图与 session 侧的描述视图由**同一次装配收集**的结果读出：端口集是
         // 插件在 traverse 里申报进容器的绑定，不是能力表的行。快照对冲突

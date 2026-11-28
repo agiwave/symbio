@@ -9,22 +9,29 @@
 //!
 //! 策略与配置全在本 crate 内部（[`crate::engine`] / [`crate::detail`]），不进架构层。
 
+use std::path::PathBuf;
 use std::sync::{Arc, RwLock};
 
 use async_trait::async_trait;
+use serde::Deserialize;
+use symbio_plugin_api::collectors::{
+    approval_policy_init_slot, approval_policy_publish, APPROVAL_GRANTS,
+};
 use symbio_plugin_api::VdfsCaller;
 use symbio_plugin_api::{
     plugin_dir_from_ctx, sandbox_publish, vdfs_host_ctx, vdfs_unwatch_changes, vdfs_watch_changes,
-    Plugin, PluginDir, PluginError, PluginInvokeRequest, PluginInvokeRequestExt,
-    PluginInvokeResponse, PluginMeta, PluginPayload, SandboxFace, VdfsAccess, VdfsActionResult,
-    VdfsContent, VdfsContext, VdfsError, VdfsNewType, VdfsNode, VdfsProvider, VdfsRequest,
-    VdfsResponse, VdfsResult, VdfsValidationError, VdfsWriteResponse, PLUGIN_ID_SANDBOX,
-    VDFS_CALLER, VDFS_EXT_FORM, VDFS_STATUS_NONE,
+    CapabilityRiskLevel, Plugin, PluginDir, PluginError, PluginInvokeRequest,
+    PluginInvokeRequestExt, PluginInvokeResponse, PluginMeta, PluginPayload, SandboxFace,
+    VdfsAccess, VdfsActionResult, VdfsContent, VdfsContext, VdfsError, VdfsNewType, VdfsNode,
+    VdfsProvider, VdfsRequest, VdfsResponse, VdfsResult, VdfsValidationError, VdfsWriteResponse,
+    PLUGIN_ID_SANDBOX, PLUGIN_ID_SESSION, VDFS_CALLER, VDFS_EXT_FORM, VDFS_STATUS_NONE,
 };
 use symbio_providers::{vdfs_id_of, vdfs_safe_segment, SingleFileVdfs};
 
 use crate::detail::sandbox_detail_definition;
 use crate::engine::{Engine, SandboxProfileConfig, SandboxRegistry, SandboxValidationError};
+use crate::grants::GrantStore;
+use crate::policy::Policy;
 
 const LABEL: &str = "沙箱";
 const MANIFEST: &str = "sandbox.json";
@@ -33,6 +40,19 @@ const MANIFEST: &str = "sandbox.json";
 /// 它们是开箱即用的安全档位，承接原 mode/risk_level 的常见组合。
 fn builtin_profiles() -> Vec<(String, SandboxProfileConfig)> {
     vec![
+        (
+            "none".into(),
+            SandboxProfileConfig {
+                name: "不限制".into(),
+                description: Some("显式关闭沙箱限制；仍由平台强制审批闸门执行".into()),
+                builtin: true,
+                approval_mode: Some("auto".into()),
+                risk_threshold: Some("high".into()),
+                allow_session_approval: Some(false),
+                allow_permanent_approval: Some(false),
+                ..Default::default()
+            },
+        ),
         (
             "default".into(),
             SandboxProfileConfig {
@@ -52,6 +72,7 @@ fn builtin_profiles() -> Vec<(String, SandboxProfileConfig)> {
                 builtin: true,
                 approval_mode: Some("interactive".into()),
                 risk_threshold: Some("low".into()),
+                allow_permanent_approval: Some(false),
                 ..Default::default()
             },
         ),
@@ -63,6 +84,8 @@ fn builtin_profiles() -> Vec<(String, SandboxProfileConfig)> {
                 builtin: true,
                 approval_mode: Some("auto".into()),
                 risk_threshold: Some("medium".into()),
+                allow_session_approval: Some(false),
+                allow_permanent_approval: Some(false),
                 ..Default::default()
             },
         ),
@@ -94,6 +117,36 @@ fn invalid_profile(errors: Vec<SandboxValidationError>) -> VdfsError {
     VdfsError::Invalid(validation)
 }
 
+#[derive(Clone, Debug, Deserialize)]
+struct GrantRequest {
+    #[serde(default)]
+    profile_id: Option<String>,
+    tool: String,
+    risk: String,
+}
+
+#[derive(Clone, Debug, Deserialize)]
+struct GrantsRequest {
+    #[serde(default)]
+    profile_id: Option<String>,
+}
+
+#[derive(Clone, Debug, Deserialize)]
+struct RevokeRequest {
+    profile_id: String,
+    tool: String,
+}
+
+fn ensure_control_context(ctx: &dyn PluginInvokeRequest) -> Result<(), PluginError> {
+    if ctx.get(VDFS_CALLER) == Some(VdfsCaller::Manager) {
+        Ok(())
+    } else {
+        Err(PluginError::Forbidden(
+            "只有管理界面可以修改沙箱永久授权".into(),
+        ))
+    }
+}
+
 /// Sandbox 插件本体。
 ///
 /// **无插件级"当前选中项"**：沙箱选择是会话级数据，随 `ctx[SANDBOX_ID]` 传来，
@@ -104,16 +157,24 @@ pub struct SandboxPlugin {
     /// 注册表：内置档 + 用户自定义档，收集期重建，执行期只读。
     registry: Arc<RwLock<SandboxRegistry>>,
     reload_lock: Arc<tokio::sync::Mutex<()>>,
+    grants: Arc<GrantStore>,
 }
 
 impl SandboxPlugin {
     /// 静态工厂（满足 `submit_object_creator!` 协议）。
     pub fn build(ctx: Arc<dyn PluginInvokeRequest>) -> Arc<dyn Plugin> {
         let dir = plugin_dir_from_ctx(&*ctx, PLUGIN_ID_SANDBOX);
+        let legacy_session_dir = dir
+            .dir()
+            .parent()
+            .map(|parent| parent.join(PLUGIN_ID_SESSION))
+            .unwrap_or_else(|| PathBuf::from(PLUGIN_ID_SESSION));
+        let grants = Arc::new(GrantStore::load(dir.dir(), &legacy_session_dir));
         Arc::new(SandboxPlugin {
             dir,
             registry: Arc::new(RwLock::new(SandboxRegistry::default())),
             reload_lock: Arc::new(tokio::sync::Mutex::new(())),
+            grants,
         }) as Arc<dyn Plugin>
     }
 
@@ -184,6 +245,7 @@ impl SandboxPlugin {
     }
 
     async fn reload_locked(&self) -> Result<(), String> {
+        self.grants.ensure_ready()?;
         match self.load_registry().await {
             Ok(next) => {
                 let mut registry = self.registry.write().unwrap_or_else(|p| p.into_inner());
@@ -196,6 +258,27 @@ impl SandboxPlugin {
                 Err(error)
             }
         }
+    }
+
+    fn control_profile(
+        &self,
+        ctx: &dyn PluginInvokeRequest,
+        requested: Option<&str>,
+    ) -> Result<(String, SandboxProfileConfig), PluginError> {
+        ensure_control_context(ctx)?;
+        self.grants
+            .ensure_ready()
+            .map_err(PluginError::InternalError)?;
+        let selected = ctx.get(symbio_plugin_api::SANDBOX_ID);
+        let registry = self.registry.read().unwrap_or_else(|p| p.into_inner());
+        let id = registry
+            .resolved_profile_id(requested.or(selected.as_deref()))
+            .map_err(PluginError::ValidationError)?;
+        let config = registry
+            .profile_config(&id)
+            .cloned()
+            .ok_or_else(|| PluginError::NotFound(format!("未找到沙箱档案：{id}")))?;
+        Ok((id, config))
     }
 
     async fn previous_profile(&self, id: &str) -> VdfsResult<Option<String>> {
@@ -343,9 +426,72 @@ impl Plugin for SandboxPlugin {
         ctx: Arc<dyn PluginInvokeRequest>,
     ) -> PluginInvokeResponse<PluginPayload> {
         let path = ctx.get(symbio_plugin_api::PATH).unwrap_or_default();
-        // 沙箱没有路由臂：它经 ctx 句柄被调用、经 VDFS 被管理，都不走 route。
+        let path = path.strip_prefix('/').unwrap_or(&path);
+        match path {
+            // 控制：为指定沙箱档案保存一条受档案上限约束的永久授权。
+            "grant" => {
+                let req: GrantRequest = ctx.payload()?;
+                let tool = req.tool.trim();
+                if tool.is_empty() {
+                    return Err(PluginError::ValidationError("工具名不能为空".into()));
+                }
+                let risk = CapabilityRiskLevel::parse(req.risk.trim())
+                    .ok_or_else(|| PluginError::ValidationError("风险等级不合法".into()))?;
+                let (id, config) = self.control_profile(ctx.as_ref(), req.profile_id.as_deref())?;
+                if !config
+                    .approval_scopes()
+                    .contains(symbio_plugin_api::collectors::ApprovalScopes::PERMANENT)
+                {
+                    return Err(PluginError::Forbidden("当前沙箱不允许保存永久授权".into()));
+                }
+                let threshold = CapabilityRiskLevel::parse(config.risk_ceiling())
+                    .unwrap_or(CapabilityRiskLevel::Medium);
+                if risk > threshold {
+                    return Err(PluginError::Forbidden(format!(
+                        "当前沙箱的永久授权上限为 {}，不能保存 {} 授权",
+                        threshold.as_str(),
+                        risk.as_str()
+                    )));
+                }
+                let grants = self
+                    .grants
+                    .grant(&id, tool, risk)
+                    .map_err(PluginError::InternalError)?;
+                return Ok(PluginPayload::new(&serde_json::json!({
+                    "profile_id": id,
+                    "grants": grants,
+                })));
+            }
+            // 读数：列出指定沙箱档案当前的永久授权。
+            "grants" => {
+                let req: GrantsRequest = ctx.payload()?;
+                let (id, _) = self.control_profile(ctx.as_ref(), req.profile_id.as_deref())?;
+                return Ok(PluginPayload::new(&serde_json::json!({
+                    "profile_id": id,
+                    "grants": self.grants.list(&id),
+                })));
+            }
+            // 控制：撤销指定沙箱档案对某一工具的永久授权。
+            "revoke" => {
+                let req: RevokeRequest = ctx.payload()?;
+                let tool = req.tool.trim();
+                if tool.is_empty() {
+                    return Err(PluginError::ValidationError("工具名不能为空".into()));
+                }
+                let (id, _) = self.control_profile(ctx.as_ref(), Some(&req.profile_id))?;
+                let grants = self
+                    .grants
+                    .revoke(&id, tool)
+                    .map_err(PluginError::InternalError)?;
+                return Ok(PluginPayload::new(&serde_json::json!({
+                    "profile_id": id,
+                    "grants": grants,
+                })));
+            }
+            _ => {}
+        }
         Err(PluginError::NotFound(format!(
-            "[sandbox] 沙箱是横切句柄，不提供路由子命令：{path}"
+            "[sandbox] 未知沙箱控制路由：{path}"
         )))
     }
 
@@ -401,11 +547,37 @@ impl Plugin for SandboxPlugin {
         // 按本会话选中的 sandbox_id 绑定引擎句柄（裁决 B / 按 id 解析）：
         // 选择随 ctx 来自会话 metadata，插件不留跨会话共享选中态。
         let selected = ctx.get(symbio_plugin_api::SANDBOX_ID);
-        let face: Arc<dyn SandboxFace> = Arc::new(Engine::new(self.registry.clone(), selected));
+        let projected_grants = {
+            let registry = self.registry.read().unwrap_or_else(|p| p.into_inner());
+            registry
+                .resolved_profile_id(selected.as_deref())
+                .ok()
+                .and_then(|id| {
+                    let config = registry.profile_config(&id)?;
+                    let threshold = CapabilityRiskLevel::parse(config.risk_ceiling())
+                        .unwrap_or(CapabilityRiskLevel::Medium);
+                    Some(self.grants.list(&id).capped_at(threshold))
+                })
+                .unwrap_or_default()
+        };
+        ctx.set(
+            APPROVAL_GRANTS,
+            serde_json::to_string(&projected_grants).unwrap_or_else(|_| "{}".into()),
+        );
+        approval_policy_init_slot(&ctx);
+        let face: Arc<dyn SandboxFace> =
+            Arc::new(Engine::new(self.registry.clone(), selected.clone()));
         if !sandbox_publish(&ctx, face) {
             symbio_plugin_api::plugin_warn!(
                 "sandbox",
                 "沙箱句柄已被发布（同一趟收集里两个沙箱插件？）——保留先到的那一份"
+            );
+        }
+        let policy = Policy::create(self.registry.clone(), self.grants.clone(), selected);
+        if !approval_policy_publish(&ctx, policy) {
+            symbio_plugin_api::plugin_warn!(
+                "sandbox",
+                "审批策略已被发布（同一趟收集里两个沙箱插件？）——保留先到的那一份"
             );
         }
         Ok(PluginPayload::new(&Vec::<serde_json::Value>::new()))

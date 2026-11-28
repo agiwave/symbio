@@ -36,19 +36,21 @@
 //!
 //! 每个具名沙箱是一个 `sandbox.json` 档案（见 [`SandboxProfileConfig`]），由
 //! [`crate::plugin`] 的 VDFS provider 管理；本模块从档案列表重建 [`SandboxRegistry`]。
-//! `approval_mode` / `risk_threshold` 承接原会话级 mode/risk_level 的语义（裁决 B），
-//! 但它们是**沙箱内部开关**——其它插件只经通用 ctx 键拿到引擎算出的值，看不到档案本身。
+//! `approval_mode` / `risk_threshold` 是沙箱内部开关；其它插件只经 `ApprovalPolicy`
+//! 拿到本次判断，不读取档案本身。
 //!
-//! ## 缺席与默认：未选择才放行 + 诚实边界
+//! ## 缺席与默认：未选择用 default + 诚实边界
 //!
-//! 本仓当前没有真容器隔离。`selected=None` 保留「无沙箱」语义并放行；
-//! `selected=Some(id)` 但档案缺失时一律拒绝。默认实现不把显式选择失败伪装成放行。
+//! 本仓当前没有真容器、进程或网络隔离。新策略路径的 `selected=None` 解析为内置
+//! `default`；显式 `none` 才不限制。显式档案缺失、损坏或注册表无快照时拒绝。
+//! `SandboxFace::decide(None, ..)` 的放行仅保留给旧兼容调用，不是新执行闸门的缺席语义。
 
 use std::collections::{HashMap, HashSet};
 use std::sync::Arc;
 
 use serde::{Deserialize, Serialize};
 use serde_json::Value;
+use symbio_plugin_api::collectors::{ApprovalScopes, PolicyBinding};
 use symbio_plugin_api::{vdfs_normalize_path, SandboxDecision, SandboxFace, SandboxFact};
 
 /// 匹配模式：开放给所有事实 kind 复用的**通用字符串谓词**。
@@ -237,6 +239,10 @@ pub(crate) struct SandboxProfileConfig {
     pub(crate) approval_mode: Option<String>,
     /// 风险阈值：`low` / `medium` / `high`。
     pub(crate) risk_threshold: Option<String>,
+    /// 是否允许把本会话阈值作为自动放行偏好；缺省 `true`。
+    pub(crate) allow_session_approval: Option<bool>,
+    /// 是否允许保存跨会话永久授权；缺省 `true`。
+    pub(crate) allow_permanent_approval: Option<bool>,
     /// 统一规则表（首个命中生效）。
     #[serde(skip_serializing_if = "Vec::is_empty")]
     pub(crate) rules: Vec<SandboxRule>,
@@ -256,6 +262,21 @@ pub(crate) struct SandboxValidationError {
 }
 
 impl SandboxProfileConfig {
+    pub(crate) fn approval_scopes(&self) -> ApprovalScopes {
+        let mut scopes = ApprovalScopes::ONCE;
+        if self.allow_session_approval.unwrap_or(true) {
+            scopes = scopes.with(ApprovalScopes::SESSION);
+        }
+        if self.allow_permanent_approval.unwrap_or(true) {
+            scopes = scopes.with(ApprovalScopes::PERMANENT);
+        }
+        scopes
+    }
+
+    pub(crate) fn risk_ceiling(&self) -> &str {
+        self.risk_threshold.as_deref().unwrap_or("medium")
+    }
+
     /// 旧档规则迁移 + 新规则，保持稳定顺序并附带可定位的字段路径。
     fn rules_with_fields(&self) -> Vec<(SandboxRule, String)> {
         let mut rules: Vec<_> = self
@@ -414,16 +435,19 @@ struct SandboxProfile {
     /// 审批开关（承接 mode/risk_level），与本次裁决的其它字段在同一快照内返回。
     approval_mode: Option<String>,
     risk_threshold: Option<String>,
+    approval_scopes: ApprovalScopes,
 }
 
 impl SandboxProfile {
     fn from_config(cfg: SandboxProfileConfig) -> Self {
         let rules = cfg.migrated_rules();
+        let approval_scopes = cfg.approval_scopes();
         Self {
             rules,
             blocked_tools: cfg.blocked_tools,
             approval_mode: cfg.approval_mode,
             risk_threshold: cfg.risk_threshold,
+            approval_scopes,
         }
     }
 
@@ -515,7 +539,8 @@ fn risk_rank(risk: &str) -> u8 {
 
 /// 沙箱注册表：档案全集（内部数据）。
 ///
-/// 默认态为空——只有未选择档案（`selected=None`）才放行；显式选中缺失档案会拒绝。
+/// 默认态为空——只有注册表没有快照或显式档案缺失时拒绝。新策略把未选择解析为
+/// 内置 `default`；`SandboxFace::decide(None, ..)` 的无档案放行仅用于旧兼容查询。
 /// **不持有"当前选中项"**：那是会话级选择，随 `ctx[SANDBOX_ID]` 传来并绑定进
 /// [`Engine`]，插件级不能留跨会话共享的可变选中态（否则多会话互相污染）。
 #[derive(Debug, Default)]
@@ -523,8 +548,10 @@ pub struct SandboxRegistry {
     profiles: HashMap<String, SandboxProfile>,
     /// 原始档案（VDFS 列表/详情读的就是它，避免二次投影丢字段）。
     archives: HashMap<String, SandboxProfileConfig>,
-    /// 每次成功的事务性替换递增；裁决与审批恢复凭据据此绑定同一快照。
+    /// 每次成功的事务性替换递增；旧 SandboxFace 兼容裁决仍返回全局快照号。
     version: u64,
+    /// 每个档案独立 revision；只有该档案变化才使一次性审批绑定失效。
+    revisions: HashMap<String, u64>,
     /// 最近一次重载失败；执行仍使用上一份良好快照，管理面必须显式提示。
     pub reload_error: Option<String>,
     initialized: bool,
@@ -568,6 +595,7 @@ impl SandboxRegistry {
             profiles: compiled,
             archives,
             version: 0,
+            revisions: HashMap::new(),
             reload_error: None,
             initialized: true,
         })
@@ -612,9 +640,57 @@ impl SandboxRegistry {
         if self.profiles == next.profiles && self.archives == next.archives {
             return;
         }
+        for id in next.profiles.keys() {
+            let changed = self.profiles.get(id) != next.profiles.get(id);
+            let previous = self.revisions.get(id).copied().unwrap_or(0);
+            self.revisions.insert(
+                id.clone(),
+                if changed {
+                    previous.saturating_add(1)
+                } else {
+                    previous
+                },
+            );
+        }
+        // 删除档案后保留 revision，防止同名档案重建时复用旧审批绑定。
         self.profiles = next.profiles;
         self.archives = next.archives;
         self.version = self.version.saturating_add(1);
+    }
+
+    pub(crate) fn resolved_profile_id(&self, selected: Option<&str>) -> Result<String, String> {
+        if !self.initialized {
+            return Err("sandbox registry has no successfully loaded snapshot".into());
+        }
+        let id = selected
+            .map(str::trim)
+            .filter(|value| !value.is_empty())
+            .unwrap_or("default");
+        if !self.profiles.contains_key(id) {
+            return Err(format!(
+                "selected sandbox profile '{id}' is missing or invalid"
+            ));
+        }
+        Ok(id.to_string())
+    }
+
+    pub(crate) fn profile_config(&self, id: &str) -> Option<&SandboxProfileConfig> {
+        self.archives.get(id)
+    }
+
+    pub(crate) fn policy_binding(&self, id: &str) -> PolicyBinding {
+        PolicyBinding::new(id, self.revisions.get(id).copied().unwrap_or(0))
+    }
+
+    pub(crate) fn decide_policy(
+        &self,
+        selected: Option<&str>,
+        facts: &[SandboxFact],
+        tool_name: &str,
+        args: &Value,
+    ) -> Result<SandboxDecision, String> {
+        let id = self.resolved_profile_id(selected)?;
+        Ok(self.decide(Some(&id), facts, tool_name, args))
     }
 
     /// 在同一注册表快照内完成全部裁决，避免许可、风险、拦截与审批参数跨版本组合。

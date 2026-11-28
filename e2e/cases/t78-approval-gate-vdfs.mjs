@@ -40,7 +40,7 @@ import './_selfrun.mjs';
 //
 // 判据要打在「首轮**就停在卡上**」——判决与措辞开着时，同样的 prompt 可能被
 // 判成先答话再问，走的就不是同一条收束路径；本用例与对话面正交，钉死它。
-import { existsSync, mkdirSync, writeFileSync } from 'node:fs';
+import { existsSync, mkdirSync, readFileSync, writeFileSync } from 'node:fs';
 import { join } from 'node:path';
 import {
   MockLlm,
@@ -50,6 +50,9 @@ import {
   nextPort,
   runCli,
   startLongLivedCli,
+  subscribeSessionRealtime,
+  sendAndSettle,
+  createSession,
   waitFor,
   readFileSyncSafe,
   readSessionMessages,
@@ -66,14 +69,69 @@ import {
 
 const SID_INTERACTIVE = 'e2e-t78-interactive';
 const SID_AUTO = 'e2e-t78-auto';
+const SID_GRANTED = 'e2e-t78-granted';
+const SID_STRICT = 'e2e-t78-strict';
 
 /** 待删文件相对 vdfs 根的路径（vdfs 根 = 会话 `workdir`；与 T10 `vdfs_write` 同一条根）。 */
 const VICTIM_REL = 't78-junk.txt';
+const GRANTED_REL = 't78-granted.txt';
+const GRANTED_RESTART_REL = 't78-granted-after-restart.txt';
+const STRICT_REL = 't78-strict.txt';
+const WRITE_TEXT = '由审批策略放行的真实写入\n';
+
+async function liveSession(homedir, workdir, session, mode, gatewayPort) {
+  const cli = startLongLivedCli({ homedir, workdir, session, mode, provider: PROVIDER_ID, gatewayPort });
+  await cli.waitGatewayReady();
+  const sub = await subscribeSessionRealtime(cli, { sessionId: session, gatewayPort });
+  return { cli, sub };
+}
 
 export default defineCase(
-  'T78 审批闸门覆盖面：vdfs_delete(High) 首轮必停在确认卡，批准后才落删除；auto 模式 PERMISSION_DENIED',
+  'T78 审批闸门：永久授权迁移后跨重启消费，strict 隔离且 High 删除/auto 拒绝仍不可绕过',
   async () => {
     const llm = await new MockLlm([
+      // C 幕：未选沙箱 ⇒ default(interactive/medium)。旧 session 配置里的永久授权
+      // 必须先迁入 sandbox owner，才能让这两笔 Medium 写入免审批。
+      {
+        id: 'granted-write',
+        match: '用永久授权写入首次标记',
+        once: true,
+        content: '首次写入已放行。',
+        toolCalls: [
+          {
+            id: 'call_granted_write',
+            name: 'vdfs_write',
+            arguments: { path: GRANTED_REL, text: WRITE_TEXT },
+          },
+        ],
+      },
+      {
+        id: 'granted-write-restart',
+        match: '重启后用永久授权写入第二个标记',
+        once: true,
+        content: '重启后的写入已放行。',
+        toolCalls: [
+          {
+            id: 'call_granted_write_restart',
+            name: 'vdfs_write',
+            arguments: { path: GRANTED_RESTART_REL, text: WRITE_TEXT },
+          },
+        ],
+      },
+      // D 幕：同工作区、同工具/风险，但独立 strict 会话；default 的永久授权不得继承。
+      {
+        id: 'strict-write',
+        match: '严格沙箱写入第三个标记',
+        once: true,
+        content: '严格沙箱已停在审批。',
+        toolCalls: [
+          {
+            id: 'call_strict_write',
+            name: 'vdfs_write',
+            arguments: { path: STRICT_REL, text: WRITE_TEXT },
+          },
+        ],
+      },
       // 首轮：模型直接请求 vdfs_delete（本用例主题正是要它**先被拦下**）。
       {
         id: 'ask-delete',
@@ -109,7 +167,12 @@ export default defineCase(
 
     const GATEWAY_PORT = nextPort();
     const hd = makeHomedir({
-      providers: [{ id: PROVIDER_ID, config: providerConfig(llm.port) }],
+      providers: [
+        {
+          id: PROVIDER_ID,
+          config: providerConfig(llm.port, { api_key: 'audit-only-key' }),
+        },
+      ],
       pluginConfigs: {
         gateway: {
           inbound_enabled: true,
@@ -119,9 +182,15 @@ export default defineCase(
           inbound_token: '',
           inbound_readonly: false,
         },
-        ...dialogFaceOff(),
+        // 获批的旧配置入口：启动时由 sandbox owner backup-first 迁入 default 档案。
+        ...dialogFaceOff({ session: { approval_grants: { vdfs_write: 'medium' } } }),
+        sandbox: {},
       },
     });
+    const legacyManifest = join(hd.homedir, 'session', 'PLUGIN.yml');
+    const legacyBackup = `${legacyManifest}.approval-grants.bak`;
+    const legacyOriginal = readFileSync(legacyManifest, 'utf8');
+    const grantFile = join(hd.homedir, 'sandbox', 'approval-grants.json');
     // 预置两份待删文件（A/B 幕各一）；两幕走两个独立会话、同一 workdir——**每次跑之前重铺**。
     // `vdfs_delete` 的 `path` 是 vdfs 根相对路径（与 T10 `vdfs_write` 同一条根），
     // 落盘位置即 `<workdir>/<path>`；`tmp/` 段需要先建目录。
@@ -198,6 +267,106 @@ export default defineCase(
 
     let api = null;
     try {
+      // ── C 幕：旧 session 永久授权迁移 → default 自动消费 → 跨重启再消费 ──────
+      // 会话偏好刻意压到 low：否则 Medium <= Medium 会走 threshold，无法证明免问确实
+      // 来自永久授权。CLI 每次启动会补写自己的 Medium 偏好，所以重启后要再次压低。
+      let live = await liveSession(hd.homedir, hd.workdir, SID_GRANTED, 'auto', GATEWAY_PORT);
+      api = live.cli;
+
+      assert(existsSync(grantFile), `启动后必须生成 sandbox owner 的授权文件：${grantFile}`);
+      assertEq(
+        readFileSync(legacyBackup, 'utf8'),
+        legacyOriginal,
+        '迁移必须原样备份旧 session PLUGIN.yml（backup-first 的安全证据）',
+      );
+      assert(
+        !readFileSync(legacyManifest, 'utf8').includes('approval_grants'),
+        '迁移成功后旧 session 配置不得继续持有 approval_grants',
+      );
+      assertEq(
+        JSON.stringify(JSON.parse(readFileSync(grantFile, 'utf8'))),
+        JSON.stringify({ version: 1, profiles: { default: { vdfs_write: 'medium' } } }),
+        '旧授权只能迁入 default 档案，不得提前写入 strict',
+      );
+
+      await createSession(api, SID_GRANTED, { workdir: hd.workdir, mode: 'auto', risk_level: 'low' });
+      await sendAndSettle(live.cli, live.sub, '用永久授权写入首次标记');
+      const grantedPath = join(hd.workdir, GRANTED_REL);
+      assert(existsSync(grantedPath), 'default 首次 Medium vdfs_write 必须真实落盘');
+      assertEq(readFileSync(grantedPath, 'utf8'), WRITE_TEXT, '首次写入内容必须到达磁盘');
+      assert(
+        !readWal(SID_GRANTED).some(
+          (e) => e.kind === 'artifact.added' && e.payload?.needs_user_action === true,
+        ),
+        '永久授权消费不得产审批卡',
+      );
+
+      live.sub.close();
+      api.stop();
+      api = null;
+
+      live = await liveSession(hd.homedir, hd.workdir, SID_GRANTED, 'auto', GATEWAY_PORT);
+      api = live.cli;
+      await createSession(api, SID_GRANTED, { workdir: hd.workdir, mode: 'auto', risk_level: 'low' });
+      await sendAndSettle(live.cli, live.sub, '重启后用永久授权写入第二个标记');
+      const restartedPath = join(hd.workdir, GRANTED_RESTART_REL);
+      assert(existsSync(restartedPath), 'CLI 停止/重启后永久授权必须仍能放行真实写入');
+      assertEq(readFileSync(restartedPath, 'utf8'), WRITE_TEXT, '重启后写入内容必须到达磁盘');
+      assertEq(
+        readFileSync(legacyBackup, 'utf8'),
+        legacyOriginal,
+        '重启消费不得覆盖或丢失旧配置备份',
+      );
+
+      live.sub.close();
+      api.stop();
+      api = null;
+
+      // ── D 幕：同工作区独立 strict 会话，default 授权不继承，偏好也不能破档案上限 ──
+      live = await liveSession(hd.homedir, hd.workdir, SID_STRICT, 'interactive', GATEWAY_PORT);
+      api = live.cli;
+      // 反例偏好开到 high：若消费端错误地信任会话偏好，Medium 写入会直接穿过 strict。
+      await createSession(api, SID_STRICT, {
+        workdir: hd.workdir,
+        sandbox_id: 'strict',
+        mode: 'interactive',
+        risk_level: 'high',
+      });
+      await sendAndSettle(live.cli, live.sub, '严格沙箱写入第三个标记');
+      const strictPath = join(hd.workdir, STRICT_REL);
+      assert(!existsSync(strictPath), 'strict 的 Medium 写入必须停在审批卡，文件不得存在');
+      const strictEvents = readWal(SID_STRICT);
+      const strictCard = strictEvents.find(
+        (e) =>
+          e.kind === 'artifact.added' &&
+          e.payload?.tool_call_id === 'call_strict_write' &&
+          e.payload?.needs_user_action === true,
+      );
+      assert(strictCard, 'strict 必须落下 vdfs_write 审批卡事实');
+      const strictPrompt = strictCard.payload?.prompt;
+      assertEq(strictPrompt?.approval_scopes, ['once'], 'strict 高于档案上限时只允许 once');
+      assertEq(strictPrompt?.policy?.profile_id, 'strict', '审批卡必须绑定 strict 档案');
+      assertEq(strictPrompt?.risk_level, 'medium', 'strict 审批卡必须保留真实 Medium 风险');
+      assert(
+        typeof strictPrompt?.approval_reason === 'string' &&
+          strictPrompt.approval_reason.includes('高于') &&
+          strictPrompt.approval_reason.includes('严格') &&
+          strictPrompt.approval_reason.includes('low'),
+        `审批理由必须指向 strict 档案的 low 上限（实得: ${JSON.stringify(strictPrompt?.approval_reason)}）`,
+      );
+      assertDeniedWithoutSent(SID_STRICT, 'needs_approval');
+      const strictMsgs = await readSessionMessages(api, SID_STRICT);
+      assertTranscriptInvariants(strictMsgs, 'T78-D strict 等待轮');
+      assert(
+        strictMsgs.some(
+          (m) => msgTypeOf(m) === 'user_prompt' && m.status === 'waiting_user_action',
+        ),
+        'strict 必须在转写中停在 waiting_user_action',
+      );
+      live.sub.close();
+      api.stop();
+      api = null;
+
       // ── A 幕：交互模式，首轮必须停在确认卡上（**文件仍在**是修复前后的分水岭）─────
       const victimA = seedVictim();
       assert(existsSync(victimA), `预置文件失败：${victimA}`);
@@ -258,6 +427,7 @@ export default defineCase(
       assertDeniedWithoutSent(SID_INTERACTIVE, 'needs_approval');
 
       // ── 批准恢复：`action(<sid>/message/<tc.id>, "approve")` ⇒ approved:true ⇒ 落删除 ──
+      const requestsBeforeResume = (await llm.requests()).length;
       const inv = await resumeSession(
         api,
         SID_INTERACTIVE,
@@ -272,8 +442,8 @@ export default defineCase(
       );
 
       // 恢复轮真的跑了（模型收到第二次请求 ⇒ 收束）
-      await waitFor(async () => (await llm.requests()).length >= 2, {
-        what: 'T78-A 恢复轮收束（mock 收到第二次请求）',
+      await waitFor(async () => (await llm.requests()).length > requestsBeforeResume, {
+        what: 'T78-A 恢复轮收束（mock 收到恢复后的新请求）',
         timeoutMs: 30_000,
       });
 

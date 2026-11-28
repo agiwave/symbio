@@ -15,12 +15,12 @@ import './_selfrun.mjs';
 // 却会被记成产品缺陷。本用例不需要靶子回包：本地 mock 的价值是**请求留痕**——
 // 守卫拒绝之后，靶子上应当一条请求都没有。错误文案可以照抄，留痕不能。
 //
-// ## 为什么会话要 `risk_level: 'high'`
+// ## 为什么会话要 `risk_level: 'high'` 且显式 `sandbox_id: 'none'`
 //
-// `http_request` 自声明 `risk: High`，而审批闸门的默认阈值是 `Medium`
-// （`risk_level_from_ctx` 的缺省）——**默认档下这个工具根本跑不到出站校验**：
-// auto 模式会直接回「权限不足」错误（`confirm_prompt_payload` 的 auto 分支）。
-// 要验守卫，就得把阈值提到 `high`，让它真的进到 `validate_url`。
+// `http_request` 自声明 `risk: High`，而默认沙箱档案 `default` 的自动放行上限是
+// `Medium`：会话偏好再高也不能突破档案上限（DE-058）。要验出站守卫，必须显式选
+// 不限制的 `none` 档案并把会话偏好提到 `high`，让调用真的进到 `validate_url`；
+// 这也顺带钉住「未选档 default 不会因会话偏好放宽审批」。
 //
 // ## 判据怎么取
 //
@@ -126,7 +126,7 @@ export default defineCase(
         path: sessionAddr,
         create: true,
         text: JSON.stringify({
-          metadata: { workdir: hd.workdir, mode: 'auto', risk_level: 'high' },
+          metadata: { workdir: hd.workdir, mode: 'auto', risk_level: 'high', sandbox_id: 'none' },
         }),
       });
       assertEq(created.status, 200, `创建会话（${JSON.stringify(created.body)?.slice(0, 300)}）`);

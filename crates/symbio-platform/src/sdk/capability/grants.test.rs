@@ -85,12 +85,13 @@ fn null_deserializes_to_empty() {
 fn one_time_grant_is_bound_and_ignores_model_approved_field() {
     let c = ctx();
     let args = serde_json::json!({"command":"git status","approved":true});
+    let binding = PolicyBinding::new("default", 7);
     let grant = ApprovalGrant::issue(
         "call-1",
         "shell",
         &args,
         Some("session-1".into()),
-        7,
+        Some(binding.clone()),
         Duration::from_secs(60),
     );
     grant.attach(&c);
@@ -100,7 +101,7 @@ fn one_time_grant_is_bound_and_ignores_model_approved_field() {
         "shell",
         &serde_json::json!({"command":"git status"}),
         Some("session-1"),
-        7,
+        Some(&binding),
     ));
     assert!(!ApprovalGrant::take(
         c.as_ref(),
@@ -108,27 +109,70 @@ fn one_time_grant_is_bound_and_ignores_model_approved_field() {
         "shell",
         &serde_json::json!({"command":"git status"}),
         Some("session-1"),
-        7,
+        Some(&binding),
     ));
 }
 
 #[test]
-fn grant_rejects_changed_call_tool_args_session_version_and_expiry() {
+fn grant_rejects_changed_call_tool_args_session_binding_and_expiry() {
     let args = serde_json::json!({"command":"git status"});
-    for (index, (call, tool, changed, session, version, ttl)) in [
-        ("other", "shell", args.clone(), "s", 1, 60),
-        ("c", "other", args.clone(), "s", 1, 60),
+    for (index, (call, tool, changed, session, binding, ttl)) in [
+        (
+            "other",
+            "shell",
+            args.clone(),
+            "s",
+            PolicyBinding::new("default", 1),
+            60,
+        ),
+        (
+            "c",
+            "other",
+            args.clone(),
+            "s",
+            PolicyBinding::new("default", 1),
+            60,
+        ),
         (
             "c",
             "shell",
             serde_json::json!({"command":"rm -rf /"}),
             "s",
-            1,
+            PolicyBinding::new("default", 1),
             60,
         ),
-        ("c", "shell", args.clone(), "other", 1, 60),
-        ("c", "shell", args.clone(), "s", 2, 60),
-        ("c", "shell", args.clone(), "s", 1, 0),
+        (
+            "c",
+            "shell",
+            args.clone(),
+            "other",
+            PolicyBinding::new("default", 1),
+            60,
+        ),
+        (
+            "c",
+            "shell",
+            args.clone(),
+            "s",
+            PolicyBinding::new("strict", 1),
+            60,
+        ),
+        (
+            "c",
+            "shell",
+            args.clone(),
+            "s",
+            PolicyBinding::new("default", 2),
+            60,
+        ),
+        (
+            "c",
+            "shell",
+            args.clone(),
+            "s",
+            PolicyBinding::new("default", 1),
+            0,
+        ),
     ]
     .into_iter()
     .enumerate()
@@ -139,12 +183,19 @@ fn grant_rejects_changed_call_tool_args_session_version_and_expiry() {
             "shell",
             &args,
             Some("s".into()),
-            1,
+            Some(PolicyBinding::new("default", 1)),
             Duration::from_secs(ttl),
         )
         .attach(&c);
         assert!(
-            !ApprovalGrant::take(c.as_ref(), call, tool, &changed, Some(session), version,),
+            !ApprovalGrant::take(
+                c.as_ref(),
+                call,
+                tool,
+                &changed,
+                Some(session),
+                Some(&binding),
+            ),
             "case {index} must reject"
         );
     }

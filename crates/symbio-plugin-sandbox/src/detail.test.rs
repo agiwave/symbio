@@ -155,11 +155,22 @@ fn detail_declares_save_and_delete_actions() {
 }
 
 #[test]
-fn sandbox_selector_makes_disabled_and_missing_states_explicit() {
-    let archives = vec![("strict".to_string(), "严格".to_string())];
+fn sandbox_selector_defaults_and_makes_missing_state_explicit() {
+    let archives = vec![
+        ("none".to_string(), "不限制".to_string()),
+        ("default".to_string(), "默认".to_string()),
+        ("strict".to_string(), "严格".to_string()),
+    ];
     let field = sandbox_option_field(&archives, Some("gone"), Some("新档案损坏"), true);
-    assert_eq!(field.options[0].value, "");
-    assert!(field.options[0].label.contains("禁用沙箱"));
+    assert!(!field.options.iter().any(|option| option.value.is_empty()));
+    assert!(field
+        .options
+        .iter()
+        .any(|option| option.value == "default" && option.label.contains("默认")));
+    assert!(field
+        .options
+        .iter()
+        .any(|option| option.value == "none" && option.label.contains("不限制")));
     let missing = field
         .options
         .iter()

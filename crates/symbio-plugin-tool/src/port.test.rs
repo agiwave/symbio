@@ -481,6 +481,13 @@ async fn ctx_with_tool(
         data,
     };
     symbio_plugin_api::collectors::register_tool(&ctx, tool.meta(), None, Arc::new(tool)).await;
+    attach_resume_sandbox(
+        &ctx,
+        symbio_plugin_api::SandboxDecision {
+            permitted: true,
+            ..Default::default()
+        },
+    );
     ctx
 }
 
@@ -575,6 +582,13 @@ async fn dispatch_puts_the_tool_card_node_id_into_the_executor_ctx() {
         },
     };
     symbio_plugin_api::collectors::register_tool(&ctx, tool.meta(), None, Arc::new(tool)).await;
+    attach_resume_sandbox(
+        &ctx,
+        symbio_plugin_api::SandboxDecision {
+            permitted: true,
+            ..Default::default()
+        },
+    );
 
     let exec = PortExecContext {
         abort: ExecAbortSignal::new(),
@@ -800,6 +814,52 @@ fn attach_resume_sandbox(
     sandbox
 }
 
+struct ResumePolicy {
+    binding: symbio_plugin_api::collectors::PolicyBinding,
+    evaluate_calls: AtomicUsize,
+}
+
+impl symbio_plugin_api::collectors::ApprovalPolicy for ResumePolicy {
+    fn evaluate(
+        &self,
+        _facts: &[symbio_plugin_api::SandboxFact],
+        _tool_name: &str,
+        _args: &serde_json::Value,
+        risk: CapabilityRiskLevel,
+        _session_threshold: CapabilityRiskLevel,
+    ) -> symbio_plugin_api::collectors::ApprovalEvaluation {
+        self.evaluate_calls.fetch_add(1, Ordering::SeqCst);
+        symbio_plugin_api::collectors::ApprovalEvaluation::require_approval(
+            risk,
+            "interactive",
+            symbio_plugin_api::collectors::ApprovalScopes::ONCE,
+            None,
+            Some(self.binding.clone()),
+        )
+    }
+
+    fn binding(&self) -> Option<symbio_plugin_api::collectors::PolicyBinding> {
+        Some(self.binding.clone())
+    }
+}
+
+fn attach_resume_policy(
+    ctx: &Arc<dyn PluginInvokeRequest>,
+    profile_id: &str,
+    revision: u64,
+) -> Arc<ResumePolicy> {
+    let policy = Arc::new(ResumePolicy {
+        binding: symbio_plugin_api::collectors::PolicyBinding::new(profile_id, revision),
+        evaluate_calls: AtomicUsize::new(0),
+    });
+    symbio_plugin_api::collectors::approval_policy_init_slot(ctx);
+    assert!(symbio_plugin_api::collectors::approval_policy_publish(
+        ctx,
+        policy.clone()
+    ));
+    policy
+}
+
 fn pending_artifact(
     call_id: &str,
     tool: &str,
@@ -818,6 +878,21 @@ fn pending_artifact(
             "prompt": {"kind": "confirm", "risk_level": "medium"},
         }),
     }
+}
+
+fn policy_pending_artifact(
+    call_id: &str,
+    tool: &str,
+    args: &serde_json::Value,
+    profile_id: &str,
+    revision: u64,
+) -> symbio_plugin_api::port::PortFact {
+    let mut artifact = pending_artifact(call_id, tool, args);
+    artifact.payload["prompt"]["policy"] = serde_json::json!({
+        "profile_id": profile_id,
+        "revision": revision,
+    });
+    artifact
 }
 
 fn answer_fact(call_id: &str, kind: &str) -> symbio_plugin_api::port::PortFact {
@@ -915,6 +990,83 @@ async fn approve_resume_issues_a_bound_grant_without_mutating_session_ctx() {
         ctx.get_raw("approved").is_none(),
         "可信标记不能污染会话 ctx"
     );
+}
+
+#[tokio::test]
+async fn approve_resume_uses_the_persisted_policy_binding() {
+    let parent: Arc<dyn Plugin> = Arc::new(NopPlugin);
+    let (ctx, seen) = ctx_with_resume_tool(&parent).await;
+    let policy = attach_resume_policy(&ctx, "default", 7);
+    let args = serde_json::json!({"content": "original"});
+    let (exec, input) = resume_call(
+        ctx.clone(),
+        Arc::new(RecordingWriter::default()),
+        &[("strict", "strict")],
+        answer_fact("call-1", "approve"),
+        vec![policy_pending_artifact(
+            "call-1", "strict", &args, "default", 7,
+        )],
+    );
+
+    let out = ToolPort.execute(exec, input).await;
+    assert!(decode(&out).1, "{out:?}");
+    assert_eq!(seen.lock().unwrap().as_slice(), &[(args, true)]);
+    assert_eq!(policy.evaluate_calls.load(Ordering::SeqCst), 1);
+    assert!(ctx.get_raw("approval_grant").is_none());
+    assert!(ctx.get_raw("approved").is_none());
+}
+
+#[tokio::test]
+async fn approve_resume_rejects_missing_or_malformed_policy_binding() {
+    let parent: Arc<dyn Plugin> = Arc::new(NopPlugin);
+    for policy in [
+        serde_json::Value::Null,
+        serde_json::json!({"profile_id":"", "revision":7}),
+        serde_json::json!({"profile_id":"default", "revision":"7"}),
+    ] {
+        let (ctx, seen) = ctx_with_resume_tool(&parent).await;
+        attach_resume_policy(&ctx, "default", 7);
+        let args = serde_json::json!({"content": "original"});
+        let mut artifact = pending_artifact("call-1", "strict", &args);
+        artifact.payload["prompt"]["policy"] = policy;
+        let (exec, input) = resume_call(
+            ctx,
+            Arc::new(RecordingWriter::default()),
+            &[("strict", "strict")],
+            answer_fact("call-1", "approve"),
+            vec![artifact],
+        );
+        let out = ToolPort.execute(exec, input).await;
+        let (text, success, _) = decode(&out);
+        assert!(!success);
+        assert!(text.contains("恢复批准失败"), "{text}");
+        assert!(seen.lock().unwrap().is_empty());
+    }
+}
+
+#[tokio::test]
+async fn approve_resume_reasks_when_the_profile_revision_changed() {
+    let parent: Arc<dyn Plugin> = Arc::new(NopPlugin);
+    let (ctx, seen) = ctx_with_resume_tool(&parent).await;
+    attach_resume_policy(&ctx, "default", 8);
+    let args = serde_json::json!({"content": "original"});
+    let (exec, input) = resume_call(
+        ctx,
+        Arc::new(RecordingWriter::default()),
+        &[("strict", "strict")],
+        answer_fact("call-1", "approve"),
+        vec![policy_pending_artifact(
+            "call-1", "strict", &args, "default", 7,
+        )],
+    );
+    let out = ToolPort.execute(exec, input).await;
+    let (_, success, pending) = decode(&out);
+    assert!(success, "停等卡是信息性结果：{out:?}");
+    assert_eq!(
+        pending.unwrap()["failure_kind"],
+        failure_kind::NEEDS_APPROVAL
+    );
+    assert!(seen.lock().unwrap().is_empty());
 }
 
 /// 新鲜沙箱裁决拒绝时不签发、不执行、不落批准授权事实。
@@ -1016,6 +1168,14 @@ async fn concurrent_approve_resume_executes_only_once() {
 
     let parent: Arc<dyn Plugin> = Arc::new(NopPlugin);
     let (ctx, seen) = ctx_with_resume_tool(&parent).await;
+    attach_resume_sandbox(
+        &ctx,
+        symbio_plugin_api::SandboxDecision {
+            permitted: true,
+            profile_version: 11,
+            ..Default::default()
+        },
+    );
     let args = serde_json::json!({"content": "original"});
     let answer = answer_fact("call-1", "approve");
     let (entered_tx, mut entered_rx) = tokio::sync::mpsc::channel(1);
@@ -1957,6 +2117,13 @@ async fn ctx_with_probes(
     req.set(CAPABILITY_VISITOR, registry);
     req.set(PORT_BINDINGS, Arc::new(PortBindings::default()));
     let ctx: Arc<dyn PluginInvokeRequest> = Arc::new(req);
+    attach_resume_sandbox(
+        &ctx,
+        symbio_plugin_api::SandboxDecision {
+            permitted: true,
+            ..Default::default()
+        },
+    );
     for tool in tools {
         symbio_plugin_api::collectors::register_tool(&ctx, tool.meta(), None, tool).await;
     }
@@ -2212,6 +2379,13 @@ async fn ctx_with_strict_tool(
     req.set(CAPABILITY_VISITOR, registry);
     req.set(PORT_BINDINGS, Arc::new(PortBindings::default()));
     let ctx: Arc<dyn PluginInvokeRequest> = Arc::new(req);
+    attach_resume_sandbox(
+        &ctx,
+        symbio_plugin_api::SandboxDecision {
+            permitted: true,
+            ..Default::default()
+        },
+    );
     let tool = StrictTool {
         meta: CapabilityMeta {
             name: name.to_string(),

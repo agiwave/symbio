@@ -15,8 +15,12 @@ use crate::sdk::capability::port::{
     port_result, PortErrorClass, PortExecContext, PortExecutor, PortFactEmit, PortInput,
     PortOutcome,
 };
-use crate::sdk::capability::ApprovalGrant;
-use crate::sdk::keys::{SESSION_ID, TOOL_CALL_ID};
+use crate::sdk::capability::{ApprovalGrant, PolicyBinding};
+use crate::sdk::collectors::{
+    approval_policy_init_slot, approval_policy_publish, ApprovalEvaluation, ApprovalPolicy,
+    ApprovalScopes,
+};
+use crate::sdk::keys::{SANDBOX_ID, SESSION_ID, TOOL_CALL_ID};
 use crate::sdk::sandbox::{sandbox_init_slot, sandbox_publish, SandboxDecision, SandboxFace};
 use serde_json::json;
 use std::sync::atomic::{AtomicUsize, Ordering};
@@ -123,6 +127,7 @@ impl SandboxFace for FakeSandbox {
 
 fn ctx_with_sandbox(decision: SandboxDecision) -> (Arc<dyn PluginInvokeRequest>, Arc<FakeSandbox>) {
     let ctx = ctx();
+    ctx.set(SANDBOX_ID, "default".to_string());
     let sandbox = FakeSandbox::new(decision);
     sandbox_init_slot(&ctx);
     assert!(sandbox_publish(&ctx, sandbox.clone()));
@@ -312,7 +317,7 @@ fn valid_grant_passes_once_and_replay_is_consumed() {
         "vdfs_delete",
         &args,
         Some("session-1".into()),
-        7,
+        Some(PolicyBinding::new("default", 7)),
         Duration::from_secs(60),
     )
     .attach(&c);
@@ -344,9 +349,9 @@ fn valid_grant_passes_once_and_replay_is_consumed() {
     assert_eq!(sandbox.decide_calls.load(Ordering::SeqCst), 2);
 }
 
-/// grant 的 call/tool/args/session/version 任一变化都不能放行。
+/// grant 的 call/tool/args/session/profile binding 任一变化都不能放行。
 #[test]
-fn grant_is_bound_to_call_tool_args_session_and_profile_version() {
+fn grant_is_bound_to_call_tool_args_session_and_policy_binding() {
     let tool = StubTool::new("vdfs_delete", CapabilityRiskLevel::High);
     let original = json!({"path": "tmp/x"});
     let cases = [
@@ -355,26 +360,45 @@ fn grant_is_bound_to_call_tool_args_session_and_profile_version() {
             "vdfs_delete",
             original.clone(),
             "session-1",
-            7,
+            PolicyBinding::new("default", 7),
         ),
-        ("call-1", "other_tool", original.clone(), "session-1", 7),
+        (
+            "call-1",
+            "other_tool",
+            original.clone(),
+            "session-1",
+            PolicyBinding::new("default", 7),
+        ),
         (
             "call-1",
             "vdfs_delete",
             json!({"path": "tmp/y"}),
             "session-1",
-            7,
+            PolicyBinding::new("default", 7),
         ),
         (
             "call-1",
             "vdfs_delete",
             original.clone(),
             "other-session",
-            7,
+            PolicyBinding::new("default", 7),
         ),
-        ("call-1", "vdfs_delete", original.clone(), "session-1", 6),
+        (
+            "call-1",
+            "vdfs_delete",
+            original.clone(),
+            "session-1",
+            PolicyBinding::new("strict", 7),
+        ),
+        (
+            "call-1",
+            "vdfs_delete",
+            original.clone(),
+            "session-1",
+            PolicyBinding::new("default", 6),
+        ),
     ];
-    for (call_id, granted_tool, args, session_id, version) in cases {
+    for (call_id, granted_tool, args, session_id, binding) in cases {
         let (c, _) = ctx_with_sandbox(SandboxDecision {
             permitted: true,
             profile_version: 7,
@@ -386,7 +410,7 @@ fn grant_is_bound_to_call_tool_args_session_and_profile_version() {
             granted_tool,
             &original,
             Some(session_id.into()),
-            version,
+            Some(binding.clone()),
             Duration::from_secs(60),
         )
         .attach(&c);
@@ -398,7 +422,7 @@ fn grant_is_bound_to_call_tool_args_session_and_profile_version() {
                 &args,
             )
             .is_some(),
-            "grant 绑定变化必须失效: call={call_id}, tool={granted_tool}, session={session_id}, version={version}"
+            "grant 绑定变化必须失效: call={call_id}, tool={granted_tool}, session={session_id}, binding={binding:?}"
         );
     }
 }
@@ -414,7 +438,7 @@ async fn expired_grant_cannot_pass() {
         "vdfs_delete",
         &args,
         Some("session-1".into()),
-        0,
+        None,
         Duration::from_millis(1),
     )
     .attach(&c);
@@ -484,7 +508,7 @@ fn sandbox_deny_and_intercept_are_honored_before_grant_consumption() {
         "vdfs_delete",
         &args,
         Some("session-1".into()),
-        0,
+        None,
         Duration::from_secs(60),
     )
     .attach(&c);
@@ -501,7 +525,7 @@ fn sandbox_deny_and_intercept_are_honored_before_grant_consumption() {
             "vdfs_delete",
             &args,
             Some("session-1"),
-            0,
+            None,
         ),
         "沙箱 deny 必须先于 grant 消费"
     );
@@ -661,7 +685,10 @@ fn grant_ceiling_below_the_call_risk_still_asks() {
 async fn executor_executes_inner_with_a_valid_grant() {
     let tool = StubTool::new("vdfs_delete", CapabilityRiskLevel::High);
     let g = gated(&tool);
-    let c = ctx();
+    let (c, _) = ctx_with_sandbox(SandboxDecision {
+        permitted: true,
+        ..Default::default()
+    });
     bind_call(&c, "call-1", "session-1");
     let args = json!({"path": "tmp/x"});
     ApprovalGrant::issue(
@@ -669,7 +696,7 @@ async fn executor_executes_inner_with_a_valid_grant() {
         "vdfs_delete",
         &args,
         Some("session-1".into()),
-        0,
+        None,
         Duration::from_secs(60),
     )
     .attach(&c);
@@ -702,7 +729,10 @@ async fn executor_executes_inner_with_a_valid_grant() {
 async fn executor_ignores_raw_approved_argument() {
     let tool = StubTool::new("vdfs_delete", CapabilityRiskLevel::High);
     let g = gated(&tool);
-    let c = ctx();
+    let (c, _) = ctx_with_sandbox(SandboxDecision {
+        permitted: true,
+        ..Default::default()
+    });
     bind_call(&c, "call-1", "session-1");
     let out = g
         .execute(
@@ -725,9 +755,13 @@ async fn executor_ignores_raw_approved_argument() {
 async fn executor_returns_card_without_running_inner() {
     let tool = StubTool::new("vdfs_delete", CapabilityRiskLevel::High);
     let g = gated(&tool);
+    let (c, _) = ctx_with_sandbox(SandboxDecision {
+        permitted: true,
+        ..Default::default()
+    });
     let out = g
         .execute(
-            exec_ctx(ctx()),
+            exec_ctx(c),
             PortInput {
                 port: "vdfs_delete".to_string(),
                 payload: json!({"path": "tmp/x"}),
@@ -745,6 +779,184 @@ async fn executor_returns_card_without_running_inner() {
     );
 }
 
+/// 端口执行体必须先发布沙箱策略；策略缺席时连低风险工具也不得绕过闸门。
+#[tokio::test]
+async fn executor_without_approval_policy_fails_closed() {
+    let tool = StubTool::new("vdfs_read", CapabilityRiskLevel::Low);
+    let g = gated(&tool);
+    let out = g
+        .execute(
+            exec_ctx(ctx()),
+            PortInput {
+                port: "vdfs_read".to_string(),
+                payload: json!({}),
+            },
+        )
+        .await;
+    assert_eq!(
+        result_of(&out)["failure_kind"].as_str(),
+        Some(failure_kind::PERMISSION_DENIED),
+    );
+    assert!(result_of(&out)["error"]
+        .as_str()
+        .is_some_and(|message| message.contains("审批策略不可用")));
+    assert!(!tool.executed.load(std::sync::atomic::Ordering::SeqCst));
+}
+
+struct StaticPolicy {
+    evaluation: ApprovalEvaluation,
+    binding: PolicyBinding,
+}
+
+impl ApprovalPolicy for StaticPolicy {
+    fn evaluate(
+        &self,
+        _facts: &[SandboxFact],
+        _tool_name: &str,
+        _args: &Value,
+        _tool_risk: CapabilityRiskLevel,
+        _session_threshold: CapabilityRiskLevel,
+    ) -> ApprovalEvaluation {
+        self.evaluation.clone()
+    }
+
+    fn binding(&self) -> Option<PolicyBinding> {
+        Some(self.binding.clone())
+    }
+}
+
+fn ctx_with_policy(evaluation: ApprovalEvaluation) -> Arc<dyn PluginInvokeRequest> {
+    let c = ctx();
+    approval_policy_init_slot(&c);
+    assert!(approval_policy_publish(
+        &c,
+        Arc::new(StaticPolicy {
+            evaluation,
+            binding: PolicyBinding::new("default", 3),
+        }),
+    ));
+    c
+}
+
+#[tokio::test]
+async fn executor_uses_published_policy_and_profile_binding() {
+    let tool = StubTool::new("vdfs_delete", CapabilityRiskLevel::High);
+    let g = gated(&tool);
+    let c = ctx_with_policy(ApprovalEvaluation::require_approval(
+        CapabilityRiskLevel::High,
+        "interactive",
+        ApprovalScopes::ALL,
+        Some("删除文件需要确认".into()),
+        None,
+    ));
+    bind_call(&c, "call-1", "session-1");
+    let out = g
+        .execute(
+            exec_ctx(c.clone()),
+            PortInput {
+                port: "vdfs_delete".to_string(),
+                payload: json!({"path": "tmp/x"}),
+            },
+        )
+        .await;
+    assert_eq!(
+        result_of(&out)["prompt"]["policy"],
+        json!({"profile_id": "default", "revision": 3}),
+    );
+    assert_eq!(
+        result_of(&out)["prompt"]["approval_scopes"],
+        json!(["once", "session", "permanent"]),
+    );
+    assert_eq!(
+        result_of(&out)["prompt"]["approval_reason"],
+        json!("删除文件需要确认"),
+    );
+    assert!(!tool.executed.load(std::sync::atomic::Ordering::SeqCst));
+
+    ApprovalGrant::issue(
+        "call-1",
+        "vdfs_delete",
+        &json!({"path": "tmp/x"}),
+        Some("session-1".into()),
+        Some(PolicyBinding::new("default", 3)),
+        Duration::from_secs(60),
+    )
+    .attach(&c);
+    let out = g
+        .execute(
+            exec_ctx(c),
+            PortInput {
+                port: "vdfs_delete".to_string(),
+                payload: json!({"path": "tmp/x"}),
+            },
+        )
+        .await;
+    assert!(out.success());
+    assert!(tool.executed.load(std::sync::atomic::Ordering::SeqCst));
+}
+
+#[tokio::test]
+async fn auto_session_denies_instead_of_producing_a_card_for_interactive_policy() {
+    let tool = StubTool::new("vdfs_delete", CapabilityRiskLevel::High);
+    let g = gated(&tool);
+    let c = ctx_with_policy(ApprovalEvaluation::require_approval(
+        CapabilityRiskLevel::High,
+        "interactive",
+        ApprovalScopes::ALL,
+        Some("删除文件需要确认".into()),
+        None,
+    ));
+    c.set(MODE, "auto".to_string());
+    bind_call(&c, "call-1", "session-1");
+    let out = g
+        .execute(
+            exec_ctx(c),
+            PortInput {
+                port: "vdfs_delete".to_string(),
+                payload: json!({"path": "tmp/x"}),
+            },
+        )
+        .await;
+    assert_eq!(
+        result_of(&out)["failure_kind"].as_str(),
+        Some(failure_kind::PERMISSION_DENIED),
+        "无人值守会话不得产出无人可批的确认卡"
+    );
+    assert!(result_of(&out)["prompt"].is_null());
+    assert!(!tool.executed.load(std::sync::atomic::Ordering::SeqCst));
+}
+
+#[tokio::test]
+async fn policy_deny_cannot_be_overridden_by_a_valid_grant() {
+    let tool = StubTool::new("vdfs_delete", CapabilityRiskLevel::High);
+    let g = gated(&tool);
+    let c = ctx_with_policy(ApprovalEvaluation::deny("profile blocks deletes"));
+    bind_call(&c, "call-1", "session-1");
+    ApprovalGrant::issue(
+        "call-1",
+        "vdfs_delete",
+        &json!({"path": "tmp/x"}),
+        Some("session-1".into()),
+        Some(PolicyBinding::new("default", 3)),
+        Duration::from_secs(60),
+    )
+    .attach(&c);
+    let out = g
+        .execute(
+            exec_ctx(c),
+            PortInput {
+                port: "vdfs_delete".to_string(),
+                payload: json!({"path": "tmp/x"}),
+            },
+        )
+        .await;
+    assert_eq!(
+        result_of(&out)["failure_kind"].as_str(),
+        Some(failure_kind::PERMISSION_DENIED),
+    );
+    assert!(!tool.executed.load(std::sync::atomic::Ordering::SeqCst));
+}
+
 #[tokio::test]
 async fn executor_forwards_registered_approval_summary() {
     let tool = StubTool::new("vdfs_delete", CapabilityRiskLevel::High);
@@ -757,9 +969,13 @@ async fn executor_forwards_registered_approval_summary() {
             "目标路径",
         ),
     );
+    let (c, _) = ctx_with_sandbox(SandboxDecision {
+        permitted: true,
+        ..Default::default()
+    });
     let out = g
         .execute(
-            exec_ctx(ctx()),
+            exec_ctx(c),
             PortInput {
                 port: "vdfs_delete".to_string(),
                 payload: json!({"path": "tmp/x"}),

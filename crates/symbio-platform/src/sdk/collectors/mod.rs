@@ -10,11 +10,18 @@
 
 // 子模块私有：本文件是唯一出口。
 mod approval;
+mod approval_policy;
 mod tool_visitor;
 
+pub use crate::sdk::capability::ApprovalGrants;
+pub use crate::sdk::keys::APPROVAL_GRANTS;
 pub use approval::{
     approval_gate, approval_gate_with_facts, ApprovalEffect, ApprovalSummary, AsyncFactsOf,
     FactsOf, RiskOf,
+};
+pub use approval_policy::{
+    approval_policy_init_slot, approval_policy_of, approval_policy_publish, ApprovalEvaluation,
+    ApprovalPolicy, ApprovalScopes, PolicyBinding, APPROVAL_POLICY,
 };
 pub use tool_visitor::{
     register_tool, register_tool_with_async_facts, register_tool_with_facts,

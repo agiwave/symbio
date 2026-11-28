@@ -32,8 +32,8 @@
 //! 收集方在 traverse 前 [`sandbox_init_slot`]、发布方在 traverse 里 [`sandbox_publish`]、
 //! 收集结束后由会话把同一个 Arc 挂回轮 ctx，执行期 [`sandbox_of`] 即可读到。
 //!
-//! **缺席语义**：没有槽 / 槽是空的 = 本会话没有沙箱 ⇒ 全放行（消费方自行降级，
-//! 并保留既有的「无默认沙箱、批准不等于隔离」诚实提示）。
+//! **缺席语义**：旧查询句柄缺席只影响仍使用 `SandboxFace` 的兼容消费方；工具执行的
+//! 新审批路径以 [`crate::sdk::collectors::ApprovalPolicy`] 为判据，策略缺席必须拒绝执行。
 
 use std::sync::{Arc, OnceLock};
 
@@ -97,8 +97,8 @@ impl SandboxDecision {
 pub trait SandboxFace: Send + Sync {
     /// 工具查询：提交本次调用的意图事实，问「这一笔许可吗」。
     ///
-    /// **只返回 bool**：`ask` 由沙箱在拦截点统一产出，工具不实现询问逻辑。
-    /// 无沙箱句柄时消费方全放行——缺席语义由消费方保证（见模块首注释）。
+    /// **只返回 bool**：审批载荷由 sandbox 策略与平台执行闸门负责。
+    /// 此方法只供旧查询链兼容，无句柄时的执行放行不适用于新审批闸门。
     fn permits(&self, facts: &[SandboxFact]) -> bool;
 
     /// 规则风险档查询：`permits` 放行后，若这批事实命中了沙箱配置的某条**允许规则**
@@ -124,8 +124,8 @@ pub trait SandboxFace: Send + Sync {
     /// 通用 `MODE` / `RISK_LEVEL` ctx 键（裁决 B：会话只选 sandbox_id，语义由沙箱承接）。
     ///
     /// 返回的是引擎**算出的通用值**（两个普通字符串），不是沙箱配置结构——调用方
-    /// 看不到白名单、工具清单或任何内部开关。`None` = 该档案没配这一项，装配侧
-    /// 回落默认。缺席语义：没有句柄 = 装配侧保留 metadata 旧值或默认（全放行降级）。
+    /// 看不到白名单、工具清单或任何内部开关。`None` = 兼容查询不提供此项；新审批
+    /// 执行路径直接使用 `ApprovalPolicy`，不在装配侧回写第二份策略。
     ///
     /// 这是一个**只读查询**：`ask`/审批载荷不在工具侧实现，工具查询只拿 bool，
     /// 询问统一由沙箱在拦截点产出（与 [`Self::permits`] 同一裁决）。
@@ -191,7 +191,7 @@ pub fn sandbox_publish(ctx: &Arc<dyn PluginInvokeRequest>, face: Arc<dyn Sandbox
         .is_some()
 }
 
-/// 消费方读沙箱句柄。**没有槽 / 槽是空的 = 本会话没有沙箱** ⇒ 全放行降级。
+/// 消费方读旧沙箱查询句柄。新工具审批执行不依赖此可选句柄，策略缺席时失败关闭。
 pub fn sandbox_of(ctx: &dyn PluginInvokeRequest) -> Option<Arc<dyn SandboxFace>> {
     ctx.get(SANDBOX).and_then(|slot| slot.get().cloned())
 }

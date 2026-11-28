@@ -34,6 +34,9 @@ lists: [route-contracts=owner]
 | `hook/fire` | `session`（工具执行器）等插件 | `SimpleResponse` | 生命周期点调用；宿主常量 `crate::routes::ROUTE_HOOK_FIRE` |
 | `hook/list` | 仓内无调用方 | hook 清单 | — |
 | `hook/register` | 仓内无调用方 | `SimpleResponse` | — |
+| `sandbox/grant` | 前端（`services/sandboxGrant.ts`，可信 Manager） | `{profile_id, grants}` | 把指定沙箱档案对某工具的永久放行上限抬到请求风险档；策略与持久化由 sandbox 拥有，执行仍须经平台审批闸门 |
+| `sandbox/grants` | 前端（可信 Manager） | `{profile_id, grants}` | 读指定档案当前持久化授权；不接受 Model 身份 |
+| `sandbox/revoke` | 前端（可信 Manager） | `{profile_id, grants}` | 撤销指定档案对某工具的永久放行；仅管理面可调用 |
 | `session/changes` | 前端（`services/sessionChanges.ts`，会话头「变更」抽屉）/ e2e | `SessionChanges` | 只读读数：本会话改过的文件（`artifact.added` 的投影）；行呈现就绪（`{path, address, op, label, turn, changes}`），前端不解析工具参数；`address` 是**相对会话容器**的 `workdir/<path>`（与会话地址拼成完整地址）；`has_wal` / `readable` 把「没跑过」「不给看」「没改过」分成三种空 |
 | `session/stats` | 前端（`services/sessionStats.ts`）/ CLI（`client.rs`） | `SessionStats` | 只读读数；不得另写统计口径（DE-016 §4 复算判据） |
 | `skill/execute` | 仓内无调用方 | `SkillResponse` | 载荷 `{name, args}`，返回技能定义正文 |
@@ -183,7 +186,9 @@ lists: [route-contracts=owner]
 
 ### Shell 命令策略
 
-高危操作触发 `ToolApprovalRequest`，需用户显式授权。
+工具调用先由 sandbox 档案求值，平台的 `GatedExecutor` 再强制消费审批结论。交互模式需用户
+批准，自动模式返回 `PERMISSION_DENIED`；策略缺席时失败关闭。沙箱选择、阈值、动态规则与
+永久授权的职责见 [DE-058-沙箱机制](../003-design/058-沙箱机制.md)。
 
 ---
 
@@ -285,7 +290,7 @@ HTTP/WebSocket 入站网关（实现锚点见[入站网关专题设计](../../cr
 
 **只登记「路径 → 现在去哪」，不写过程叙述**（变更史与迁移审计只在 `git log`）：
 
-> `{plugin}/config/get` · `{plugin}/config/set` · `{plugin}/config/schema` · `{plugin}/entities/*` · `model/chat` · `model/status` · `model/chat_sync` · `agent/list` · `get` · `upload` · `delete` · `preview` · `export` · `session/append` · `session/open` · `session/update` · `session/clear` · `session/chat/send` · `session/chat/abort` · `session/chat/update_message` · `session/chat/delete_message` · `session/chat/clear_messages` · `session/get_messages` · `session/options/list` · `session/stream` · `session/heartbeat/trigger` · `hook/trigger` · `hooks/*` · `event_bus/publish`
+> `{plugin}/config/get` · `{plugin}/config/set` · `{plugin}/config/schema` · `{plugin}/entities/*` · `model/chat` · `model/status` · `model/chat_sync` · `agent/list` · `get` · `upload` · `delete` · `preview` · `export` · `session/append` · `session/open` · `session/update` · `session/clear` · `session/chat/send` · `session/chat/abort` · `session/chat/update_message` · `session/chat/delete_message` · `session/chat/clear_messages` · `session/get_messages` · `session/options/list` · `session/stream` · `session/heartbeat/trigger` · `session/grant` · `hook/trigger` · `hooks/*` · `event_bus/publish`
 
 ---
 

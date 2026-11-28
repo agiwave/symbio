@@ -42,6 +42,7 @@ use serde_json::json;
 use crate::breaker::{CircuitBreaker, GateDecision};
 use crate::declarations::EVENT_AUTHZ_DENIED;
 use crate::result_guard::{guard_result, DEFAULT_TOKEN_CAP};
+use symbio_plugin_api::collectors::{approval_policy_of, PolicyBinding};
 use symbio_plugin_api::hooks::{fire_hook, HookEvent};
 use symbio_plugin_api::{
     chat_node::{ChatNode, NodeStatus, CHAT_STYLE_TAG_TOOL},
@@ -940,39 +941,63 @@ async fn canonical_tool_for_resume(exec: &PortExecContext, wire: &str) -> Option
 
 /// 为一次已验证的 approve 恢复派生独立执行上下文，并签发短期一次性凭据。
 ///
-/// 会话 ctx 不被修改：grant 只挂在 fork 上。档案版本必须来自**原调用的新鲜裁决**；
-/// 裁决拒绝或拦截时不签发。真正执行时 collectors 还会再读一次快照，版本变化会使
-/// 旧 grant 失效并重新停等审批。
+/// 会话 ctx 不被修改：grant 只挂在 fork 上。策略绑定来自服务端持久化的原审批卡，
+/// 不用空事实重新裁决；真正执行时 collectors 再读当前快照，变化后旧 grant 失效。
 fn approved_resume_exec(
     exec: &PortExecContext,
     call_id: &str,
     canonical_tool: &str,
     original_args: &serde_json::Value,
+    artifact_payload: &serde_json::Value,
 ) -> Result<PortExecContext, String> {
     let request = exec
         .ctx
         .clone()
         .ok_or_else(|| "恢复批准失败：缺少调用方上下文".to_string())?;
-    let profile_version = match symbio_plugin_api::sandbox_of(request.as_ref()) {
-        Some(face) => {
-            let decision = face.decide(&[], canonical_tool, original_args);
-            if let Some(intercept) = decision.intercept {
-                return Err(format!(
-                    "恢复批准失败：沙箱拦截原调用：{}",
-                    sandbox_block_text(&intercept)
-                ));
+    let policy_binding = if approval_policy_of(request.as_ref()).is_some() {
+        let policy = artifact_payload
+            .get("prompt")
+            .and_then(|prompt| prompt.get("policy"))
+            .ok_or_else(|| "恢复批准失败：旧审批卡缺少策略绑定，请重新发起调用".to_string())?;
+        let profile_id = policy
+            .get("profile_id")
+            .and_then(serde_json::Value::as_str)
+            .filter(|value| !value.trim().is_empty())
+            .ok_or_else(|| "恢复批准失败：审批卡策略档案无效".to_string())?;
+        let revision = policy
+            .get("revision")
+            .and_then(serde_json::Value::as_u64)
+            .ok_or_else(|| "恢复批准失败：审批卡策略版本无效".to_string())?;
+        Some(PolicyBinding::new(profile_id, revision))
+    } else {
+        match symbio_plugin_api::sandbox_of(request.as_ref()) {
+            Some(face) => {
+                let decision = face.decide(&[], canonical_tool, original_args);
+                if let Some(intercept) = decision.intercept {
+                    return Err(format!(
+                        "恢复批准失败：沙箱拦截原调用：{}",
+                        sandbox_block_text(&intercept)
+                    ));
+                }
+                if !decision.permitted {
+                    let reason = decision
+                        .reason
+                        .unwrap_or_else(|| "sandbox denied the call".to_string());
+                    return Err(format!("恢复批准失败：沙箱拒绝原调用：{reason}"));
+                }
+                (decision.profile_version > 0).then(|| {
+                    PolicyBinding::new(
+                        request
+                            .get(SANDBOX_ID)
+                            .unwrap_or_else(|| "legacy".to_string()),
+                        decision.profile_version,
+                    )
+                })
             }
-            if !decision.permitted {
-                let reason = decision
-                    .reason
-                    .unwrap_or_else(|| "sandbox denied the call".to_string());
-                return Err(format!("恢复批准失败：沙箱拒绝原调用：{reason}"));
+            None if request.get(SANDBOX_ID).is_none() => None,
+            None => {
+                return Err("恢复批准失败：已选择沙箱但沙箱句柄不可用".to_string());
             }
-            decision.profile_version
-        }
-        None if request.get(SANDBOX_ID).is_none() => 0,
-        None => {
-            return Err("恢复批准失败：已选择沙箱但沙箱句柄不可用".to_string());
         }
     };
     let session_id = request
@@ -987,7 +1012,7 @@ fn approved_resume_exec(
         canonical_tool,
         original_args,
         session_id.clone(),
-        profile_version,
+        policy_binding,
         Duration::from_secs(60),
     );
     let approved_ctx = request.fork();
@@ -1711,47 +1736,52 @@ impl ToolPort {
                         ..PortOutcome::ok()
                     };
                 };
-                let (outcome, run_args) =
-                    match approved_resume_exec(&exec, &call_id, &canonical_tool, &original_args) {
-                        Ok(approved_exec) => {
-                            // 批准留痕：凭据签发后、执行前落事实；风险档从产物载荷原样搬。
-                            if let Some(draft) = approval_granted_draft(
-                                &exec.idempotency_key,
-                                &artifact.payload,
-                                &call_id,
-                                &canonical_tool,
-                            ) {
-                                exec.emit.emit(vec![draft]).await;
-                            }
-                            let outcome = self
-                                .run(
-                                    approved_exec,
-                                    PortInput {
-                                        port: TOOL.to_string(),
-                                        payload: json!({
-                                            KEY_TOOL_NAME: tool_name.clone(),
-                                            KEY_ARGS: original_args.clone(),
-                                            KEY_TOOL_CALL_ID: call_id.clone(),
-                                        }),
-                                    },
-                                )
-                                .await;
-                            (outcome, original_args)
+                let (outcome, run_args) = match approved_resume_exec(
+                    &exec,
+                    &call_id,
+                    &canonical_tool,
+                    &original_args,
+                    &artifact.payload,
+                ) {
+                    Ok(approved_exec) => {
+                        // 批准留痕：凭据签发后、执行前落事实；风险档从产物载荷原样搬。
+                        if let Some(draft) = approval_granted_draft(
+                            &exec.idempotency_key,
+                            &artifact.payload,
+                            &call_id,
+                            &canonical_tool,
+                        ) {
+                            exec.emit.emit(vec![draft]).await;
                         }
-                        Err(reason) => (
-                            finish_with(
-                                format!("Blocked: {reason}"),
-                                false,
-                                None,
-                                archive_vdfs.as_ref(),
-                                sid,
-                                Some(failure_kind::PERMISSION_DENIED),
-                                &reason,
+                        let outcome = self
+                            .run(
+                                approved_exec,
+                                PortInput {
+                                    port: TOOL.to_string(),
+                                    payload: json!({
+                                        KEY_TOOL_NAME: tool_name.clone(),
+                                        KEY_ARGS: original_args.clone(),
+                                        KEY_TOOL_CALL_ID: call_id.clone(),
+                                    }),
+                                },
                             )
-                            .await,
-                            original_args,
-                        ),
-                    };
+                            .await;
+                        (outcome, original_args)
+                    }
+                    Err(reason) => (
+                        finish_with(
+                            format!("Blocked: {reason}"),
+                            false,
+                            None,
+                            archive_vdfs.as_ref(),
+                            sid,
+                            Some(failure_kind::PERMISSION_DENIED),
+                            &reason,
+                        )
+                        .await,
+                        original_args,
+                    ),
+                };
                 (outcome, run_args)
             }
             // 拒绝：不执行，按失败收尾（`user_rejected` 是判决词，不是「等用户」）。

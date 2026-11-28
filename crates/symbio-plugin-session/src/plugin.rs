@@ -48,15 +48,11 @@ use symbio_platform::sdk::vdfs::host::VdfsChangeSubscriptions;
 use symbio_plugin_api::PLUGIN_ID_SESSION;
 use symbio_plugin_api::{plugin_dir_from_ctx, PluginConfigFile, PluginDir, PLUGIN_FILE};
 use symbio_plugin_api::{vdfs_context, VdfsItem, VdfsRequest, PLUGIN_ID_SUBAGENT};
-use tokio::sync::{Mutex, OnceCell, RwLock};
+use tokio::sync::{OnceCell, RwLock};
 
 /// Session 插件
 pub struct SessionPlugin {
     pub(crate) config: Arc<RwLock<SessionConfig>>,
-    /// 授权清单的读-改-写串行锁：`session/grant` 是「读整份配置 → 抬一格 → 落回」，
-    /// 两张审批卡同时点「永久放行」时后写的会丢掉先写的那一格。`apply` 仍是唯一
-    /// 落盘路径，本锁只把两次读-改-写排成队（不是第二套写口）。
-    pub(crate) grant_lock: Mutex<()>,
     /// 配置文件的呈现与校验（`<根>/session/PLUGIN.yml`）——落盘写自己目录里的文件
     pub(crate) config_file: PluginConfigFile,
     /// 父插件引用（用于获取工具列表等）
@@ -120,7 +116,6 @@ impl SessionPlugin {
         let convergence = Convergence::new(store, store_dir, config.clone(), active_mgr.clone());
         Self {
             config,
-            grant_lock: Mutex::new(()),
             config_file,
             parent,
             convergence,
@@ -409,10 +404,6 @@ impl Plugin for SessionPlugin {
         // 发消息 = `vdfs/write <会话地址>/inbox`，恢复 = `action(<消息地址>, <动作词>)`，
         // 中止 = `action(<会话地址>, "abort")`。裁决。
         match path {
-            // 控制：把某个工具的永久放行上限抬到这次的风险档（只抬不降）。
-            // 写的是本插件的全局配置（`<homedir>/session/PLUGIN.yml`），不是会话
-            // metadata——「永久」按定义要跨会话。
-            "grant" => return self.handle_grant(ctx).await,
             // 读数：本会话 v2 事实源的四列（时延 / 兜底 / 成本 / 断点）。
             // 纯计算、零副作用——既不落盘也不碰消息。
             "stats" => return self.handle_stats(ctx).await,
@@ -701,17 +692,6 @@ fn config_definition() -> DetailDefinition {
                         &d.presentation_tree,
                     ),
                 ],
-            },
-            DetailSection {
-                title: Some("工具授权".into()),
-                collapsed: true,
-                fields: vec![DetailField::map(
-                    "approval_grants",
-                    "永久放行",
-                    "工具名 → 允许的最高风险档（low / medium / high）。审批卡上的「永久放行」\
-                     写入这里，同档及以下从此不问；高于上限仍会审批。删掉一行即撤销授权。",
-                    json!(d.approval_grants),
-                )],
             },
         ],
         ..DetailDefinition::form("会话", vec![])

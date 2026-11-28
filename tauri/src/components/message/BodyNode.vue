@@ -220,10 +220,23 @@ async function copy() {
   color: var(--text-primary);
 }
 
-/* 无悬停设备：复制键常显（理由同 NodeShell 的操作区——hover 在触屏上不存在） */
+/* 无悬停设备：复制键常显（理由同 NodeShell 的操作区——hover 在触屏上不存在）。
+   但**不能沿用右上角浮层**：悬停态是瞬时的，常显态是永久的，浮层会一直压住正文
+   第一行的末尾字符（实测 375/768 宽下盖住「…正常。」的尾部）。常显时它回到流内、
+   排在正文之后，占自己的位置。 */
 @media (hover: none) {
   .copy-btn {
     opacity: 1;
+    position: static;
+    display: flex;
+    width: fit-content;
+    margin: 0.25rem 0 0 auto;
+    min-height: 1.75rem;
+    /* 常显后每条消息都多一个框，视觉噪声比悬停态重得多：去掉边框和底色，
+       只留一行可点的低对比度文字，触控目标仍是 1.75rem。 */
+    border: none;
+    background: transparent;
+    color: var(--text-muted);
   }
 }
 .user-bubble {

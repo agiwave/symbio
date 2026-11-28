@@ -179,7 +179,7 @@ import type { SessionRiskLevel } from '@/schemas/session_meta'
 import { logger } from '@/utils/logger'
 import { useHotkeys } from '@/composables/useHotkeys'
 import { useSessionsStore } from '@/stores/sessions'
-import { grantToolForever } from '@/services/sessionGrant'
+import { grantSandboxToolForever } from '@/services/sandboxGrant'
 import { useSessionUiStateStore } from '@/stores/sessionUiState'
 import { needsTypingRow } from '@/stores/sessionLive'
 import { dropUnselectedBranches } from '@/stores/sessionTranscript'
@@ -426,11 +426,12 @@ provide(ALLOW_FOR_SESSION_KEY, async (risk: SessionRiskLevel) => {
   await sessionsStore.raiseSessionRiskLevel(props.sessionId, risk)
 })
 
-// 「永久放行」：把某个工具的授权上限抬到这次的风险档（跨会话生效，存在会话插件的
-// 全局配置里）。与上一档的分工见 `ALLOW_FOREVER_KEY` 的文档：一个改本会话的阈值，
-// 一个改这份部署的授权清单。`tool` 是能力名，由审批卡原样回传。
-provide(ALLOW_FOREVER_KEY, async (tool: string, risk: SessionRiskLevel) => {
-  await grantToolForever(props.sessionId, tool, risk)
+// 「永久放行」：把某个工具在审批卡绑定的沙箱档案里的授权上限抬到这次的风险档。
+// 与上一档的分工见 `ALLOW_FOREVER_KEY` 的文档：一个改本会话的阈值，一个改 sandbox
+// 按档案保存的授权清单。档案只由渲染器从 `prompt.policy.profile_id` 传入，提供方
+// 不读取会话选择、不补 default；`tool` 是能力名，由审批卡原样回传。
+provide(ALLOW_FOREVER_KEY, async (profileId: string, tool: string, risk: SessionRiskLevel) => {
+  await grantSandboxToolForever(props.sessionId, profileId, tool, risk)
 })
 
 // --- 会话选项栏的三个入参（定义 / 值 / 条件作用域） ---

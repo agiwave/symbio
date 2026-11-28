@@ -1,26 +1,12 @@
 //! 审批闸门——所有工具调用进入执行的**唯一判据**，住在端口执行体的第一段。
 //!
-//! ## 为什么住在这里
+//! 工具提供意图事实、动态风险与审批摘要；sandbox 通过 [`ApprovalPolicy`] 决定放行、
+//! 拒绝、拦截或需审批。本模块只验证并原子消费可信 [`ApprovalGrant`]，把策略结果转换为
+//! 既有 prompt / 执行信封，再调用内层执行体。策略缺席时失败关闭。
 //!
-//! 闸门判的是「工具自声明的风险 vs 会话阈值 / 工具授权上限」，两个量都**在工具自己
-//! 身上与请求信封上**：风险函数由工具在注册收口处给出（`RiskOf` 闭包，shell 的
-//! 动态覆写原样生效），`ctx[RISK_LEVEL]` / `ctx[APPROVAL_GRANTS]` / `ctx[MODE]`
-//! 由信封给出。
-//! 判据是纯比较（[`CapabilityRiskLevel::approval_basis`]），不吃任何插件的私有状态，
-//! 因此**能**也**该**住到收集器这一层——它是所有能力注册的收口点，把闸门搬到这里，
-//! `vdfs` / `web` / `mcp` / `skill` 的裸注册也一并过闸。此前闸门长在 `local` 插件自己
-//! 的注册循环上（`SecureToolWrapper`），结果就是「风险是宣传语、执行无人读」：
-//! `vdfs_delete` 声明 `risk=High`，实测直接删。
-//!
-//! ## 判定与执行同体（ /  ③-A）
-//!
-//! 闸门不再是一个裹在能力外面的装饰器，而是**端口执行体的第一段**：[`GatedExecutor`]
-//! 先判 [`approval_gate`]，拦下就交回停等载荷（普通结果形态，派发侧的 pending 机制
-//! 照常工作），放行才拆信封落到内层。判定只有 [`approval_gate`] 一份——装饰器、
-//! 自由函数、端口桥三层合一后，再没有第二处「值得复制的判定」。
-//!
-//! 工具直接 `impl PortExecutor`（ ③ 终态）：风险函数在 `register_tool`
-//! 注册时给出，内层执行体就是工具自己，本模块只保留判定与执行体形状。
+//! [`GatedExecutor`] 与端口执行体第一段合一，`vdfs` / `web` / `mcp` / `skill` 等所有
+//! 注册入口都经 `register_tool` 绑定同一闸门。模型参数中的 `approved` 永远不是授权；
+//! 只有凭据消费成功后，平台才向内层执行体发布可信标记。
 
 use std::sync::Arc;
 
@@ -29,7 +15,8 @@ use crate::kernel::plugin::{PluginInvokeRequest, PluginInvokeRequestExt};
 use crate::sdk::capability::port::{
     AuthzVerdict, PortErrorClass, PortExecContext, PortExecutor, PortInput, PortOutcome, RESULT_KEY,
 };
-use crate::sdk::capability::{ApprovalGrant, ApprovalGrants};
+use crate::sdk::capability::{ApprovalGrant, ApprovalGrants, PolicyBinding};
+use crate::sdk::collectors::approval_policy::{approval_policy_of, ApprovalEvaluation};
 use crate::sdk::keys::{APPROVAL_GRANTS, MODE, RISK_LEVEL, SANDBOX_ID, SESSION_ID, TOOL_CALL_ID};
 use crate::sdk::sandbox::{sandbox_of, SandboxFact};
 use async_trait::async_trait;
@@ -259,13 +246,19 @@ fn approval_gate_inner(
     // profile version/expiry 全部由 SDK 原子校验；顶层 args.approved 在绑定比较中被忽略。
     let call_id = ctx.get(TOOL_CALL_ID).unwrap_or_default();
     let session_id = ctx.get(SESSION_ID).filter(|value| !value.trim().is_empty());
+    let policy_binding = (profile_version > 0).then(|| {
+        PolicyBinding::new(
+            ctx.get(SANDBOX_ID).unwrap_or_else(|| "legacy".to_string()),
+            profile_version,
+        )
+    });
     let is_approved = ApprovalGrant::take(
         ctx.as_ref(),
         &call_id,
         &meta.name,
         args,
         session_id.as_deref(),
-        profile_version,
+        policy_binding.as_ref(),
     );
     // 先覆盖掉任何继承来的旧标记，再只在本轮 grant 消费成功时发布 "true"。
     // 这样内层执行体不会把上一次调用（或调用方元数据）的字符串当成本轮授权。
@@ -284,6 +277,62 @@ fn approval_gate_inner(
 
     Some(confirm_prompt_payload(
         meta, args, tool_risk, &mode, approval,
+    ))
+}
+
+/// 新策略路径：sandbox 决定结果，平台只做凭据消费与执行信封转换。
+fn approval_policy_gate(
+    ctx: &Arc<dyn PluginInvokeRequest>,
+    meta: &CapabilityMeta,
+    tool_risk: CapabilityRiskLevel,
+    facts: &[SandboxFact],
+    args: &Value,
+    approval: Option<&ApprovalSummary>,
+) -> Option<Value> {
+    let policy = approval_policy_of(ctx.as_ref())?;
+    let evaluation = policy.evaluate(facts, &meta.name, args, tool_risk, threshold_from_ctx(ctx));
+    if let Some(intercept) = evaluation.intercept() {
+        return Some(intercept.clone());
+    }
+    if evaluation.is_denied() {
+        let reason = evaluation.reason().unwrap_or("sandbox denied the call");
+        return Some(json!({
+            "error": format!("沙箱未放行工具 {} 的本次调用：{reason}", meta.name),
+            "success": false,
+            "failure_kind": crate::kernel::capability::failure_kind::PERMISSION_DENIED,
+        }));
+    }
+    if evaluation.is_allowed() {
+        ctx.set_raw(TRUSTED_APPROVED, Arc::new("false".to_string()));
+        return None;
+    }
+
+    let call_id = ctx.get(TOOL_CALL_ID).unwrap_or_default();
+    let session_id = ctx.get(SESSION_ID).filter(|value| !value.trim().is_empty());
+    let current_binding = policy.binding();
+    let binding = evaluation
+        .binding()
+        .cloned()
+        .or_else(|| current_binding.clone());
+    let is_approved = ApprovalGrant::take(
+        ctx.as_ref(),
+        &call_id,
+        &meta.name,
+        args,
+        session_id.as_deref(),
+        binding.as_ref(),
+    );
+    ctx.set_raw(TRUSTED_APPROVED, Arc::new(is_approved.to_string()));
+    if is_approved {
+        return None;
+    }
+    Some(confirm_prompt_payload_from_evaluation(
+        ctx.as_ref(),
+        meta,
+        args,
+        approval,
+        &evaluation,
+        binding.as_ref(),
     ))
 }
 
@@ -324,6 +373,60 @@ fn confirm_prompt_payload(
     }
     json!({
         "content": format!("需要确认：{tool_description}"),
+        "success": false,
+        "failure_kind": crate::kernel::capability::failure_kind::NEEDS_APPROVAL,
+        "prompt": prompt,
+    })
+}
+
+fn confirm_prompt_payload_from_evaluation(
+    ctx: &dyn PluginInvokeRequest,
+    meta: &CapabilityMeta,
+    args: &Value,
+    approval: Option<&ApprovalSummary>,
+    evaluation: &ApprovalEvaluation,
+    binding: Option<&PolicyBinding>,
+) -> Value {
+    let risk_level = evaluation.risk().unwrap_or_default();
+    // 档案可以声明交互审批，但会话一旦是无人值守，就没有能批准的人：产卡只会把会话
+    // 钉死。运行模式是本次调用的硬约束，优先于档案的审批方式。
+    let mode = if ctx.get(MODE).as_deref() == Some("auto") {
+        "auto"
+    } else {
+        evaluation.mode().unwrap_or("interactive")
+    };
+    if mode == "auto" {
+        return json!({
+            "error": format!(
+                "权限不足：工具 {} 需要用户审批（风险等级 {}），但当前为自动模式，无人可授权。请勿反复重试——请改用手动方式完成，或提示用户切换到交互模式以授权后重试。",
+                meta.name, risk_level.as_str()
+            ),
+            "success": false,
+            "failure_kind": crate::kernel::capability::failure_kind::PERMISSION_DENIED,
+        });
+    }
+    let mut prompt = json!({
+        "kind": "confirm",
+        "tool_name": meta.name,
+        "args": args.clone(),
+        "risk_level": risk_level.as_str(),
+        "description": meta.description,
+        "approval_scopes": evaluation.scopes().names(),
+    });
+    if let Some(approval) = approval {
+        prompt["approval"] = approval.summary(args);
+    }
+    if let Some(binding) = binding {
+        prompt["policy"] = json!({
+            "profile_id": binding.profile_id(),
+            "revision": binding.revision(),
+        });
+    }
+    if let Some(reason) = evaluation.reason() {
+        prompt["approval_reason"] = json!(reason);
+    }
+    json!({
+        "content": format!("需要确认：{}", meta.description),
         "success": false,
         "failure_kind": crate::kernel::capability::failure_kind::NEEDS_APPROVAL,
         "prompt": prompt,
@@ -403,41 +506,78 @@ impl PortExecutor for GatedExecutor {
                 "工具端口执行体没有调用方上下文，无法判闸",
             );
         };
-        let intercepted = match &self.facts {
-            Some(FactSource::Sync(facts)) => approval_gate_with_facts(
+        let intercepted = if approval_policy_of(request.as_ref()).is_some() {
+            let tool_risk = (self.risk)(&input.payload);
+            let facts = match &self.facts {
+                Some(FactSource::Sync(facts)) => facts(&input.payload, &request),
+                Some(FactSource::Async(facts)) => match facts(&input.payload, &request).await {
+                    Ok(facts) => facts,
+                    Err(error) => {
+                        return PortOutcome {
+                            authz: AuthzVerdict::Authorized,
+                            facts: vec![json!({ RESULT_KEY: json!({
+                                "error": format!("工具意图事实解析失败：{error}"),
+                                "success": false,
+                                "failure_kind": crate::kernel::capability::failure_kind::PERMISSION_DENIED,
+                            }) })],
+                            error: None,
+                            reply: Default::default(),
+                        };
+                    }
+                },
+                None => Vec::new(),
+            };
+            approval_policy_gate(
                 &request,
                 &self.meta,
-                self.risk.as_ref(),
-                Some(facts),
+                tool_risk,
+                &facts,
                 &input.payload,
                 self.approval.as_ref(),
-            ),
-            Some(FactSource::Async(facts)) => match facts(&input.payload, &request).await {
-                Ok(facts) => approval_gate_inner(
+            )
+        } else if request.get(SANDBOX_ID).is_some() || sandbox_of(request.as_ref()).is_some() {
+            match &self.facts {
+                Some(FactSource::Sync(facts)) => approval_gate_with_facts(
+                    &request,
+                    &self.meta,
+                    self.risk.as_ref(),
+                    Some(facts),
+                    &input.payload,
+                    self.approval.as_ref(),
+                ),
+                Some(FactSource::Async(facts)) => match facts(&input.payload, &request).await {
+                    Ok(facts) => approval_gate_inner(
+                        &request,
+                        &self.meta,
+                        self.risk.as_ref(),
+                        &input.payload,
+                        Some(&facts),
+                        self.approval.as_ref(),
+                    ),
+                    Err(error) => Some(json!({
+                        "error": format!("工具意图事实解析失败：{error}"),
+                        "success": false,
+                        "failure_kind": crate::kernel::capability::failure_kind::PERMISSION_DENIED,
+                    })),
+                },
+                None if self.approval.is_none() => {
+                    approval_gate(&request, &self.meta, self.risk.as_ref(), &input.payload)
+                }
+                None => approval_gate_inner(
                     &request,
                     &self.meta,
                     self.risk.as_ref(),
                     &input.payload,
-                    Some(&facts),
+                    None,
                     self.approval.as_ref(),
                 ),
-                Err(error) => Some(json!({
-                    "error": format!("工具意图事实解析失败：{error}"),
-                    "success": false,
-                    "failure_kind": crate::kernel::capability::failure_kind::PERMISSION_DENIED,
-                })),
-            },
-            None if self.approval.is_none() => {
-                approval_gate(&request, &self.meta, self.risk.as_ref(), &input.payload)
             }
-            None => approval_gate_inner(
-                &request,
-                &self.meta,
-                self.risk.as_ref(),
-                &input.payload,
-                None,
-                self.approval.as_ref(),
-            ),
+        } else {
+            Some(json!({
+                "error": "审批策略不可用：未发布沙箱审批策略，拒绝执行工具",
+                "success": false,
+                "failure_kind": crate::kernel::capability::failure_kind::PERMISSION_DENIED,
+            }))
         };
         if let Some(payload) = intercepted {
             // 闸门拦下：停等载荷是普通结果形态（`failure_kind` 在载荷里），

@@ -311,13 +311,14 @@ const VOCAB_BASELINE = process.env.VOCAB_BASELINE
 // core-shape-allow structFields:  默认收集器整组从 providers 迁入 sdk——DefaultToolVisitor 的 rows/families 两格随既有实现换地址进入 CS-009 扫描面，没有新增类型、字段或业务词汇；GatedExecutor 收为 crate 内部实现，其执行状态不再占公共数据面。当前基线钉到迁后实测 609，不留余量。
 // 2026-11-16（）：实测已收到 608（614 是  /  时点的上限），基线同批
 // 钉到 608——余量不白留给下一次新增。2026-11-20（）：608 → 609，`DriveTarget`
-// 增 `session_dir` 一格（放宽行见上）。2026-11-21（）：609 → 611，图标自报的两个投影载体（放宽行见上）。2026-11-23（）：611 → 613，`SandboxFact` 的两格意图事实（放宽行见上）；同日 613 → 615，`Request.sandbox_id` / `DriveTarget.sandbox_id` 两格随会话选档入装订点（放宽行见上）。2026-11-24（）：615 → 622，`DetailColumn` 六格 + `DetailField.columns` 一格随通用表格 widget 入数据面（放宽行见上）。同日（）：622 → 630，`SandboxDecision` 七格 + `ApprovalGrant` 一格；枚举 256 → 258，`VdfsCaller` 两格（放宽行见上），此后照旧只许降。
+// 增 `session_dir` 一格（放宽行见上）。2026-11-21（）：609 → 611，图标自报的两个投影载体（放宽行见上）。2026-11-23（）：611 → 613，`SandboxFact` 的两格意图事实（放宽行见上）；同日 613 → 615，`Request.sandbox_id` / `DriveTarget.sandbox_id` 两格随会话选档入装订点（放宽行见上）。2026-11-24（）：615 → 622，`DetailColumn` 六格 + `DetailField.columns` 一格随通用表格 widget 入数据面（放宽行见上）。同日（）：622 → 630，`SandboxDecision` 七格 + `ApprovalGrant` 一格；枚举 256 → 258，`VdfsCaller` 两格（放宽行见上），此后照旧只许降。2026-11-28（）：609 → 613，审批策略协议四格（放宽行见上）。
+// core-shape-allow structFields:  审批策略协议需要四格——`PolicyBinding{profile_id, revision}` 两格把一次性批准绑到档案快照（删档重建不得复用、无关档案变化不得失效），`ApprovalEvaluation` 与 `ApprovalScopes` 各一格不透明 tuple 把策略裁决与服务端授权范围交给跨 crate 的平台/前端；内部表示均为私有 enum / 位集，不认工具名、路径策略或业务词。降 pub(crate) 跨不过 crate，折成一格必丢一条约束；决策见 [DE-058](../../docs/003-design/058-沙箱机制.md "DE-058-沙箱机制") D-001。基线钉到实测 613，不留余量。
 const DATA_BASELINE = process.env.CORE_DATA_BASELINE
   ? (() => {
       const [structFields, enumVariants] = process.env.CORE_DATA_BASELINE.split(':').map((n) => Number(n))
       return { structFields, enumVariants }
     })()
-  : { structFields: 609, enumVariants: 250 }
+  : { structFields: 613, enumVariants: 250 }
 
 const CELL_LABEL = {
   traits: '`pub trait` 数（接缝数）',

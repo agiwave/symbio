@@ -1,4 +1,4 @@
-//! `crate::sdk::sandbox` 的判据单测：缺席降级、发布唯一性、开放事实词表。
+//! `crate::sdk::sandbox` 的判据单测：旧查询句柄缺席、发布唯一性、开放事实词表。
 
 use super::*;
 use crate::kernel::plugin::{PluginInvokeRequest, PluginSimpleRequest};
@@ -28,11 +28,11 @@ fn ctx() -> Arc<dyn PluginInvokeRequest> {
 }
 
 #[test]
-fn absent_slot_means_no_sandbox() {
+fn absent_slot_has_no_legacy_face() {
     let c = ctx();
     assert!(
         sandbox_of(c.as_ref()).is_none(),
-        "没有槽 = 没有沙箱（全放行降级）"
+        "旧查询句柄缺席；新审批执行闸门另行失败关闭"
     );
 }
 

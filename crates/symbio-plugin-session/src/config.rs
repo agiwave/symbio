@@ -22,7 +22,6 @@
 
 use serde::{Deserialize, Serialize};
 use symbio_platform::kernel::chat::chat_node::{ChatNode, NodeRole};
-use symbio_platform::sdk::capability::ApprovalGrants;
 
 #[derive(Debug, Clone, Copy, PartialEq, Eq, serde::Serialize)]
 pub enum PresentationTree {
@@ -229,20 +228,6 @@ pub struct SessionConfig {
     /// 改造在 149-ii 接线。
     #[serde(default = "default_presentation_tree")]
     pub presentation_tree: String,
-    /// 跨会话的工具授权清单（审批卡第三档「永久放行」）：能力名 → 允许的最高风险档。
-    ///
-    /// ## 为什么住会话插件的全局配置
-    ///
-    /// 跨会话是它的定义（「永久」），所以不能进会话 metadata；而它与会话阈值
-    /// （`ctx[RISK_LEVEL]`）是同一件策略的两级（按工具 / 按会话），本插件已经是
-    /// 唯一注入执行阈值的地方，由同一个解析点落进 ctx 才不会出现两处口径
-    /// （ 决策 2）。
-    ///
-    /// 写入口是控制路由 `session/grant`（只抬不降）；撤销就是删掉这里的一行
-    /// ——没有第二套撤销动作。认不出的档位 / 空工具名在读侧逐条丢弃（fail-closed，
-    /// 见 [`ApprovalGrants`]）。
-    #[serde(default)]
-    pub approval_grants: ApprovalGrants,
 }
 
 pub fn default_presentation_tree() -> String {
@@ -330,7 +315,6 @@ impl Default for SessionConfig {
             progress_lease_ms: default_progress_lease_ms(),
             progress_max_attempts: default_progress_max_attempts(),
             presentation_tree: default_presentation_tree(),
-            approval_grants: ApprovalGrants::default(),
         }
     }
 }

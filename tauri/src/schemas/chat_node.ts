@@ -346,6 +346,70 @@ export const RESUME_ACTIONS = [
 
 export type ResumeAction = (typeof RESUME_ACTIONS)[number]
 
+// ==================== 审批范围与策略绑定 ====================
+
+/**
+ * 审批卡允许的授权范围——镜像后端 `ApprovalScopes::names()` 的线上词。
+ *
+ * `once` 是每次调用都必须保留的兜底；`session` / `permanent` 只有在服务端
+ * **明确列出**时才可出现。旧审批卡没有 `approval_scopes`，读侧因此返回空数组，
+ * 不替它猜测任何长期授权。
+ */
+export const APPROVAL_SCOPE_ONCE = 'once'
+export const APPROVAL_SCOPE_SESSION = 'session'
+export const APPROVAL_SCOPE_PERMANENT = 'permanent'
+
+export const APPROVAL_SCOPES = [
+  APPROVAL_SCOPE_ONCE,
+  APPROVAL_SCOPE_SESSION,
+  APPROVAL_SCOPE_PERMANENT,
+] as const
+
+export type ApprovalScope = (typeof APPROVAL_SCOPES)[number]
+
+/** 审批卡对当前沙箱档案快照的绑定；永久授权只能使用这个档案，不能自选或回落。 */
+export interface ApprovalPolicyBinding {
+  profile_id: string
+  /** 档案 revision；初次加载可以是 0，必须是 JSON 能精确表达的非负整数。 */
+  revision: number
+}
+
+export function isApprovalScope(value: unknown): value is ApprovalScope {
+  return typeof value === 'string' && (APPROVAL_SCOPES as readonly string[]).includes(value)
+}
+
+/**
+ * 读取可选 `approval_scopes`：只接收已知词，未知值和畸形值一律忽略。
+ *
+ * 这是严格读侧而非整卡拒绝：未来服务端增加范围时，旧前端仍保留 `once`，
+ * 也不会把未知词误显示成会话或永久授权。
+ */
+export function approvalScopesOf(value: unknown): ApprovalScope[] {
+  if (!Array.isArray(value)) return []
+  return [...new Set(value.filter(isApprovalScope))]
+}
+
+/** 只展示服务端给出的非空原因；畸形值不参与渲染。 */
+export function approvalReasonOf(value: unknown): string | null {
+  return typeof value === 'string' && value.trim() ? value : null
+}
+
+/**
+ * 读取可选 `policy` 绑定；任一字段缺失或类型不合法都返回 `null`。
+ *
+ * 不做 `default` 回落：服务端没给绑定就意味着这次卡没有可安全写入的档案。
+ * revision 只校验wire形状；`sandbox/grant` 的请求契约只接受 `profile_id/tool/risk`。
+ */
+export function approvalPolicyBindingOf(value: unknown): ApprovalPolicyBinding | null {
+  if (typeof value !== 'object' || value === null || Array.isArray(value)) return null
+  const policy = value as Record<string, unknown>
+  const profileId = policy.profile_id
+  const revision = policy.revision
+  if (typeof profileId !== 'string' || !profileId.trim()) return null
+  if (typeof revision !== 'number' || !Number.isSafeInteger(revision) || revision < 0) return null
+  return { profile_id: profileId, revision }
+}
+
 export interface ImageUrl {
   url: string;
   detail?: string;

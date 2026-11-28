@@ -127,7 +127,7 @@ describe('Onboarding 步态呈现', () => {
     const w = bench()
     const risk = w.find('.ob-risk')
     expect(risk.exists()).toBe(true)
-    expect(risk.text()).toContain('没有沙箱')
+    expect(risk.text()).toContain('使用默认沙箱审批档案')
     expect(risk.text()).toContain('审批只是授权，不等于隔离')
   })
 })

@@ -3,16 +3,20 @@
 
   两种子形态由数据契约判别键 `kind` 分派（`schemas/message_prompt.ts`）：
   · `question`：一个或多个问题，可单选 / 多选，含约定选项 `Other`（勾选后自由输入）；
-  · `confirm` ：工具名 + 风险等级 + 可选审批摘要 + 参数 + 描述——仅本次批准 /
-               本会话同档免问 / 此工具永久免问同档 / 拒绝。
+  · `confirm` ：工具名 + 风险等级 + 可选审批摘要 + 参数 + 描述——始终可仅本次批准，
+               服务端列出 `session` / `permanent` 时才显示对应的长期放行。
 
-  四键为什么是四个平级按钮，而不是「批准」加一个「以后别再问」的复选框：
-  `approve` 记的是「用户批了**这一次**」（`authz.granted`，一次调用一笔）；
-  「本会话放行」改的是**会话的执行阈值**（同档及以下的工具在本会话里从此不再问）；
-  「永久放行」改的是**该工具的授权上限**（会话插件的全局配置 `approval_grants`，
-  跨会话生效，撤销靠删掉那一行）。三笔事实的生命周期分别是「一次调用 / 一个会话 /
-  一份部署」，做成复选框就把后两档藏在一次批准里——用户点的是「批准」，后果却是
+  授权范围为什么是平级按钮，而不是「批准」加一个「以后别再问」的复选框：
+  `once` 记的是「用户批了**这一次**」（`authz.granted`，一次调用一笔）；
+  `session` 改的是**会话的执行阈值**（同档及以下的工具在本会话里从此不再问）；
+  `permanent` 改的是**当前审批卡绑定沙箱档案里的工具授权上限**，同一档案的后续
+  会话共享，撤销在沙箱设置中进行。三笔事实的生命周期分别是「一次调用 / 一个会话 /
+  一份沙箱档案」，做成复选框就把后两档藏在一次批准里——用户点的是「批准」，后果却是
   「以后都别再问」。分档也决定了误点的代价：越宽的档，按钮的视觉重量越轻。
+
+  长期范围**只认服务端 `approval_scopes`**：旧卡缺省时只显示 `once`，未知值不猜测。
+  永久授权只取当前卡的 `prompt.policy.profile_id`；绑定缺失或畸形时按钮禁用并给出
+  刷新 / 重发提示，绝不回落到 `default`，也不把点击静默降级成仅本次批准。
 
   **已回答态**（`status` 不再是 `waiting_user_action`）不再隐藏表单，而是整体降透明度
   并禁用控件：用户事后回看会话时，仍能看到自己当初选了什么。
@@ -125,23 +129,21 @@
           <button class="up-approve" :disabled="isAnswered" @click="submitConfirm(true)">
             {{ isAnswered ? '已处理' : '仅本次批准' }}
           </button>
-          <!-- 「本会话放行」只在这次调用确实带风险档时出现：没有档位就没有
-               「抬到哪一档」可言（未声明风险的工具按 Medium 兜底，那种情况下
-               抬档没有可读的因果）。点它 = 抬阈值 + 批准本次，两步见 submitAllowForSession。 -->
+          <!-- 长期放行只在服务端明确列出 scope 且本次有可抬风险档时出现。 -->
           <button
-            v-if="confirmRisk"
+            v-if="showSessionScope"
             class="up-allow-session"
             :disabled="isAnswered"
             @click="submitAllowForSession"
           >
             {{ isAnswered ? '已处理' : '本会话同档免问' }}
           </button>
-          <!-- 「永久放行」抬的是**这个工具**的授权上限（全局配置 `approval_grants`）。
-               它比「本会话放行」更宽（跨会话），因此视觉重量更轻；撤销在设置页。 -->
+          <!-- 永久授权按当前审批卡绑定的沙箱档案保存；无效绑定必须禁用，不能静默
+               回落 default 或降级为仅本次批准。 -->
           <button
-            v-if="confirmRisk"
+            v-if="showPermanentScope"
             class="up-allow-forever"
-            :disabled="isAnswered"
+            :disabled="isAnswered || !!permanentBlockReason"
             @click="submitAllowForever"
           >
             {{ isAnswered ? '已处理' : '此工具永久免问同档' }}
@@ -150,16 +152,18 @@
             {{ isAnswered ? '已处理' : '拒绝' }}
           </button>
         </div>
-        <!-- 四档的**后果**写在同一处：三个按钮的文字都只说了做什么，没说「管多久」。
-             永久放行改的是跨会话的授权清单，误点的代价最大，必须在这里说清楚。 -->
-        <p class="up-scope-hint">
-          仅批准只对这一次调用生效，不改变后续权限<template v-if="confirmRisk">；本会话同档免问仅持续到当前会话结束；此工具永久免问同档会跨会话保存，可在设置中撤销</template>。
+        <p v-if="showPermanentScope && permanentBlockReason && !isAnswered" class="up-hint">
+          {{ permanentBlockReason }}
         </p>
-        <!-- 与首启引导同一条边界声明：本仓无默认沙箱（README 诚实清单 / RE-011 §4）。
-             审批控制的是「让不让做」，不是「在隔离环境里做」——用户在这里做决定时
-             最需要听清这句，纯文案，不改变任何执行边界。 -->
+        <!-- 后果优先：按钮文字只说做什么，作用域在这里一次说清。 -->
+        <p v-if="approvalReason" class="up-approval-reason">{{ approvalReason }}</p>
+        <p class="up-scope-hint">
+          仅批准只对这一次调用生效，不改变后续权限<template v-if="showSessionScope">；本会话同档免问仅持续到当前会话结束</template><template v-if="showPermanentScope">；此工具永久免问同档会保存到当前审批卡绑定的沙箱档案<template v-if="!confirmPolicy">（当前绑定无效，暂不可保存）</template>，跨会话生效，可在沙箱设置中撤销</template>。
+        </p>
+        <!-- 审批控制的是「让不让做」，不是「在隔离环境里做」；未选档使用 default，
+             显式 none 才不限制，但两者都不提供进程、容器或网络隔离。 -->
         <p class="up-sandbox-hint">
-          注意：默认没有沙箱，工具会直接在选定的工作目录里执行；批准不等于隔离。
+          注意：沙箱审批不等于隔离，工具仍直接在选定的工作目录中执行；本产品不提供进程、容器或网络隔离。
         </p>
       </template>
     </div>
@@ -173,9 +177,14 @@
 <script setup lang="ts">
 import { computed, inject, ref } from 'vue'
 import {
+  APPROVAL_SCOPE_PERMANENT,
+  APPROVAL_SCOPE_SESSION,
   RESUME_ACTION_ANSWER,
   RESUME_ACTION_APPROVE,
   RESUME_ACTION_REJECT,
+  approvalPolicyBindingOf,
+  approvalReasonOf,
+  approvalScopesOf,
   type ChatNode,
 } from '@/schemas/chat_node'
 import {
@@ -246,17 +255,40 @@ const approvalTarget = computed(() => {
 })
 
 /**
- * 本次调用可读的风险档（「本会话放行」/「永久放行」两档的出现条件）。
+ * 本次调用可读的风险档（长期放行两档的必要条件）。
  *
- * 两档都要一个**可抬到的档位**：没有档位就没有「抬到哪一档」可言（未声明风险的
- * 工具按 Medium 兜底，那种情况下抬档没有可读的因果）。
- * 校验走契约层的词表（`isSessionRiskLevel`）而不是在组件里手写三个字面量：
- * `risk_level` 是后端产出的裸字符串，多一档时手写的判定会静默把它判成非法——
- * 表现是「这一档的审批卡少一个按钮」，没有任何东西会红。
+ * 没有档位就没有「抬到哪一档」可言。校验走契约层词表，不在组件里手写风险字面量。
  */
 const confirmRisk = computed<SessionRiskLevel | null>(() => {
   const raw = confirmPrompt.value?.risk_level
   return isSessionRiskLevel(raw) ? raw : null
+})
+
+/** 服务端明确列出的范围；旧卡 / 未知值不会补出任何长期授权。 */
+const approvalScopes = computed(() => approvalScopesOf(confirmPrompt.value?.approval_scopes))
+const approvalReason = computed(() => approvalReasonOf(confirmPrompt.value?.approval_reason))
+const showSessionScope = computed(
+  () => !!confirmRisk.value && approvalScopes.value.includes(APPROVAL_SCOPE_SESSION),
+)
+const showPermanentScope = computed(
+  () => !!confirmRisk.value && approvalScopes.value.includes(APPROVAL_SCOPE_PERMANENT),
+)
+
+/** 当前卡绑定的沙箱档案；缺失 / 畸形时返回 null，绝不回落 default。 */
+const confirmPolicy = computed(() => approvalPolicyBindingOf(confirmPrompt.value?.policy))
+
+const PERMANENT_POLICY_HINT =
+  '当前审批卡缺少有效的沙箱档案绑定，无法保存永久授权。请刷新审批卡或重新发起工具调用后再试；仍可仅本次批准。'
+const permanentBlockReason = computed(() => {
+  if (!showPermanentScope.value || isAnswered.value) return ''
+  if (!confirmPolicy.value) return PERMANENT_POLICY_HINT
+  if (!confirmPrompt.value?.tool_name) {
+    return '当前审批卡缺少工具名，无法保存永久授权。请刷新审批卡或重新发起工具调用后再试；仍可仅本次批准。'
+  }
+  if (!allowForever) {
+    return '当前视图未连接永久授权入口，无法保存永久授权。请回到会话审批卡重试；仍可仅本次批准。'
+  }
+  return ''
 })
 
 /** 已回答：状态不再是 waiting_user_action → 控件禁用并改为已提交态 */
@@ -330,45 +362,49 @@ function submitConfirm(approved: boolean) {
  * 同一条口径），用户看得见的是「还是问了」。
  *
  * 无人提供这一档（`allowForSession` 为 null，如嵌入式的只读视图）就当它不存在：
- * 按钮在模板里靠 `confirmRisk` 显示，这里再挡一次是防「有按钮没接线」。
+ * 按钮在模板里靠 `showSessionScope` 显示，这里再挡一次是防「有按钮没接线」。
  */
 async function submitAllowForSession() {
+  if (!showSessionScope.value) return
   const risk = confirmRisk.value
-  if (!risk) return
-  if (allowForSession) {
-    try {
-      await allowForSession(risk)
-    } catch (e) {
-      // 抬阈值失败不拦本次批准（理由见函数文档），但必须让用户知道
-      // 「本会话放行」没写进去——否则界面照常推进，用户误以为以后都不问了。
-      showToast('error', `本次已批准，但「本会话放行」未生效：${e instanceof Error ? e.message : String(e)}`)
-    }
+  if (!risk || !allowForSession) return
+  try {
+    await allowForSession(risk)
+  } catch (e) {
+    // 抬阈值失败不拦本次批准（理由见函数文档），但必须让用户知道
+    // 「本会话放行」没写进去——否则界面照常推进，用户误以为以后都不问了。
+    showToast('error', `本次已批准，但「本会话放行」未生效：${e instanceof Error ? e.message : String(e)}`)
   }
   submitConfirm(true)
 }
 
 /**
- * 「永久放行」= 先把**这个工具**的上限抬到本次风险档，再批准这一次。
+ * 「永久放行」= 先把**这个工具在当前卡绑定档案里**的上限抬到本次风险档，再批准这一次。
  *
  * 与会话放行同一条两步纪律、同一个顺序理由：抬上限必须在恢复之前落定，否则后端的
- * 授权级联读到的还是旧上限。区别只在作用域——这一格跨会话生效，并按 `tool`
- * 记名（`prompt.tool_name` 是能力名，后端 `session/grant` 直接拿它当键，前端不翻译）。
+ * 授权级联读到的还是旧上限。档案名只取 `prompt.policy.profile_id`，前端不选择、不翻译，
+ * 也不从会话设置补 `default`；`revision` 由读侧守卫校验，`sandbox/grant` 请求只发
+ * `{profile_id, tool, risk}`。
  *
- * 抬上限失败**不拦批准**：本次批准是用户此刻的明确意图，不该被一次配置写失败
- * 挡住；后果只是「以后不再问」没生效。
+ * 绑定缺失 / 畸形时**整次动作停止**：既不写授权，也不把「永久放行」静默降级成一次批准。
+ * 写入已获服务端确认会失败时仍批准本次，并明确告知长期授权未生效。
  */
 async function submitAllowForever() {
   const risk = confirmRisk.value
   const tool = confirmPrompt.value?.tool_name
-  if (!risk || !tool) return
-  if (allowForever) {
-    try {
-      await allowForever(tool, risk)
-    } catch (e) {
-      // 抬上限失败不拦本次批准（理由见函数文档），但这是安全敏感的
-      // 跨会话授权：必须如实告知没写进去，用户不能以为「永久放行」已生效。
-      showToast('error', `本次已批准，但「永久放行」未生效：${e instanceof Error ? e.message : String(e)}`)
-    }
+  const policy = confirmPolicy.value
+  if (!showPermanentScope.value || !risk || !tool) return
+  if (!policy) {
+    showToast('error', PERMANENT_POLICY_HINT)
+    return
+  }
+  if (!allowForever) return
+  try {
+    await allowForever(policy.profile_id, tool, risk)
+  } catch (e) {
+    // 写失败不拦本次批准，但这是跨会话授权：必须如实告知没写进去，
+    // 用户不能以为「永久放行」已生效。
+    showToast('error', `本次已批准，但「永久放行」未生效：${e instanceof Error ? e.message : String(e)}`)
   }
   submitConfirm(true)
 }
@@ -483,6 +519,12 @@ function submitQuestions() {
   font-size: 0.72rem;
   line-height: 1.5;
   color: var(--text-muted);
+}
+.up-approval-reason {
+  margin: 0;
+  font-size: 0.76rem;
+  line-height: 1.5;
+  color: var(--text-primary);
 }
 .up-sandbox-hint {
   margin: 0;

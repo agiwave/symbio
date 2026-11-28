@@ -174,14 +174,12 @@ define_string_key!(ToolNodeIdKey, TOOL_NODE_ID, "tool_node_id");
 define_string_key!(ModeKey, MODE, "mode");
 // 会话选定的 Model Provider ID（与 agent_id 同级别：随 chat_send 传输 + session.metadata 持久化）
 define_string_key!(ProviderIdKey, PROVIDER_ID, "provider_id");
-// 会话执行风险等级阈值：low / medium / high（与 agent_id 同级别：随 chat_send 传输 + session.metadata 持久化）
+// 会话自动放行偏好：low / medium / high；最终有效阈值由 sandbox 档案与本偏好取较小值。
 define_string_key!(RiskLevelKey, RISK_LEVEL, "risk_level");
-// 跨会话工具授权清单（JSON：能力名 → 允许的最高风险档）：与会话阈值同一份配置解析点
-// 落进 ctx，审批闸门与授权级联都读它。
+// sandbox 执行前投影的当前档案永久授权清单（能力名 → 允许的最高风险档），已按档案阈值封顶。
 define_string_key!(ApprovalGrantsKey, APPROVAL_GRANTS, "approval_grants");
-// 会话选中的沙箱档案 id（裁决 B / ）：取代原会话级 MODE / RISK_LEVEL 选项——
-// 用户只在会话里选一个沙箱，审批阈值与模式由沙箱引擎按这个 id 从自己的配置表里解析。
-// 与 provider_id 同为「会话选择」，随 chat 请求 / metadata 走 req>metadata>默认 回退链。
+// 会话选定的沙箱档案 id；缺省由 sandbox 解析为 default，显式 none 才表示不限制。
+// 审批模式与档案阈值由 sandbox 决定，随 chat 请求 / metadata 走 req>metadata>默认 回退链。
 define_string_key!(SandboxIdKey, SANDBOX_ID, "sandbox_id");
 
 // 常用业务属性 Key

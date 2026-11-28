@@ -755,17 +755,15 @@ describe('MessageNode：已折叠释放的骨架（[] 惰性重取 · 判据 4�
 })
 
 /**
- * 工具确认卡的四档 —— 批准本次 / 本会话放行 / 永久放行 / 拒绝。
+ * 工具确认卡的授权范围 —— once 始终可用，session / permanent 由服务端明确列出。
  *
- * 三档「放行」写的是**三笔不同的事实**：批准只批这一次（`authz.granted`）；
- * 本会话放行改会话的执行阈值（同档及以下在本会话里从此不问）；永久放行改
- * 该工具的授权上限（全局配置 `approval_grants`，跨会话生效）。所以这里钉的不是
- * 「按钮在哪」，而是三件事：点错按钮不会顺手改另一件事实，点两档放行时两笔的
- * **顺序**也对（先改策略、再批准本次）。
+ * 三档写的是**三笔不同的事实**：批准只批这一次（`authz.granted`）；会话放行改会话
+ * 执行阈值；永久放行改当前审批卡绑定沙箱档案里的工具授权上限。这里不仅钉按钮可见性，
+ * 也钉「先改策略、再批准本次」的顺序，以及永久授权的档案绑定缺失时不写、不批准。
  */
-describe('MessageNode：工具确认的四档', () => {
-  /** 一张带风险档的工具确认卡（父骨架 + 一个 waiting 的 interaction 子节点） */
-  function confirmTree(risk?: string): ChatNode {
+describe('MessageNode：工具确认的授权范围', () => {
+  /** 一张工具确认卡；不传 scope/policy 就是旧审批卡。 */
+  function confirmTree(risk?: string, approvalScopes?: unknown, policy?: unknown, approvalReason?: unknown): ChatNode {
     return msg({
       id: 'tc1',
       type: 'skeleton',
@@ -783,6 +781,9 @@ describe('MessageNode：工具确认的四档', () => {
               tool_name: 'shell',
               description: '删除文件',
               ...(risk ? { risk_level: risk } : {}),
+              ...(approvalScopes !== undefined ? { approval_scopes: approvalScopes } : {}),
+              ...(approvalReason !== undefined ? { approval_reason: approvalReason } : {}),
+              ...(policy !== undefined ? { policy } : {}),
             },
           },
           parent_id: 'tc1',
@@ -818,10 +819,10 @@ describe('MessageNode：工具确认的四档', () => {
             calls.push(`allow:${risk}`)
             allowed.push(risk)
           },
-          [ALLOW_FOREVER_KEY]: async (tool: string, risk: string) => {
+          [ALLOW_FOREVER_KEY]: async (profileId: string, tool: string, risk: string) => {
             await Promise.resolve()
-            calls.push(`grant:${tool}:${risk}`)
-            granted.push(`${tool}:${risk}`)
+            calls.push(`grant:${profileId}:${tool}:${risk}`)
+            granted.push(`${profileId}:${tool}:${risk}`)
           },
         },
       },
@@ -874,29 +875,76 @@ describe('MessageNode：工具确认的四档', () => {
     expect(w.find('.up-args pre').text()).toContain('tmp/x')
   })
 
-  it('确认卡说明「无默认沙箱、批准不等于隔离」——与首启同一条边界声明', () => {
+  it('确认卡说明「未选档使用 default、批准不等于隔离」——与首启同一条边界声明', () => {
     const w = mountWithPorts(confirmTree('high')).w
     const note = w.find('.up-sandbox-hint')
     expect(note.exists()).toBe(true)
-    expect(note.text()).toContain('没有沙箱')
-    expect(note.text()).toContain('批准不等于隔离')
+    expect(note.text()).toContain('不等于隔离')
+    expect(note.text()).toContain('不提供进程、容器或网络隔离')
   })
 
-  it('带风险档的确认卡给出两档放行；不带档位时两键都不出现', () => {
-    const withRisk = mountWithPorts(confirmTree('high')).w
-    expect(withRisk.find('button.up-allow-session').text()).toBe('本会话同档免问')
-    expect(withRisk.find('button.up-allow-forever').text()).toBe('此工具永久免问同档')
+  it('旧审批卡没有 scope/policy 仍可渲染：once 与拒绝可用，不猜长期放行', () => {
+    const legacy = mountWithPorts(confirmTree('high')).w
+    expect(legacy.find('button.up-approve').text()).toBe('仅本次批准')
+    expect(legacy.find('button.up-reject').exists()).toBe(true)
+    expect(legacy.find('button.up-allow-session').exists()).toBe(false)
+    expect(legacy.find('button.up-allow-forever').exists()).toBe(false)
+    expect(legacy.find('.up-scope-hint').text()).toContain('仅批准只对这一次调用生效')
+    expect(legacy.find('.up-scope-hint').text()).not.toContain('本会话')
+    expect(legacy.find('.up-scope-hint').text()).not.toContain('永久放行')
+  })
 
-    const bare = mountWithPorts(confirmTree()).w
+  it('服务端明确列出全部 scope 时显示两档长期放行，once 始终保留', () => {
+    const w = mountWithPorts(
+      confirmTree('high', ['once', 'session', 'permanent'], { profile_id: 'strict', revision: 0 }),
+    ).w
+    expect(w.find('button.up-approve').text()).toBe('仅本次批准')
+    expect(w.find('button.up-allow-session').text()).toBe('本会话同档免问')
+    expect(w.find('button.up-allow-forever').text()).toBe('此工具永久免问同档')
+    expect(w.find('button.up-allow-forever').attributes('disabled')).toBeUndefined()
+    expect(w.find('button.up-reject').exists()).toBe(true)
+  })
+
+  it('严格按 scope 显示：未列 session 不显示，未知词不猜成长期范围，once 不依赖列出', () => {
+    const w = mountWithPorts(
+      confirmTree('high', ['permanent', 'future_scope'], { profile_id: 'strict', revision: 2 }),
+    ).w
+    expect(w.find('button.up-approve').exists()).toBe(true)
+    expect(w.find('button.up-allow-session').exists()).toBe(false)
+    expect(w.find('button.up-allow-forever').exists()).toBe(true)
+    expect(w.findAll('.up-confirm-btns button')).toHaveLength(3)
+
+    const onceOnly = mountWithPorts(confirmTree('high', ['once'])).w
+    expect(onceOnly.find('button.up-approve').exists()).toBe(true)
+    expect(onceOnly.find('button.up-allow-session').exists()).toBe(false)
+    expect(onceOnly.find('button.up-allow-forever').exists()).toBe(false)
+
+    const unknownOnly = mountWithPorts(confirmTree('high', ['future_scope'])).w
+    expect(unknownOnly.find('button.up-approve').exists()).toBe(true)
+    expect(unknownOnly.find('button.up-allow-session').exists()).toBe(false)
+    expect(unknownOnly.find('button.up-allow-forever').exists()).toBe(false)
+  })
+
+  it('没有风险档时 once 仍可用，两档长期放行都不出现', () => {
+    const bare = mountWithPorts(
+      confirmTree(undefined, ['once', 'session', 'permanent'], { profile_id: 'strict', revision: 0 }),
+    ).w
     expect(bare.find('button.up-allow-session').exists()).toBe(false)
     expect(bare.find('button.up-allow-forever').exists()).toBe(false)
-    // 另外两键照旧
     expect(bare.find('button.up-approve').exists()).toBe(true)
     expect(bare.find('button.up-reject').exists()).toBe(true)
   })
 
+  it('展示沙箱给出的审批原因，且不自行推算或展示畸形值', () => {
+    const reason = '本次风险为 high，高于当前沙箱「默认」的自动放行上限 medium'
+    const w = mountWithPorts(confirmTree('high', ['once'], undefined, reason)).w
+    expect(w.find('.up-approval-reason').text()).toBe(reason)
+    const malformed = mountWithPorts(confirmTree('high', ['once'], undefined, { text: reason })).w
+    expect(malformed.find('.up-approval-reason').exists()).toBe(false)
+  })
+
   it('「本会话放行」= 先抬到这一档，再批准本次', async () => {
-    const { w, calls, resumed, allowed } = mountWithPorts(confirmTree('high'))
+    const { w, calls, resumed, allowed } = mountWithPorts(confirmTree('high', ['session']))
 
     await w.find('button.up-allow-session').trigger('click')
     await flushPromises()
@@ -908,16 +956,66 @@ describe('MessageNode：工具确认的四档', () => {
     expect(resumed[0].targetId).toBe('tc1')
   })
 
-  it('「永久放行」= 先把该工具的上限抬到这一档，再批准本次', async () => {
-    const { w, calls, resumed, granted } = mountWithPorts(confirmTree('high'))
+  it('「永久放行」= 先用当前卡 profile_id 写 sandbox 档案，再批准本次', async () => {
+    const { w, calls, resumed, granted } = mountWithPorts(
+      confirmTree('high', ['permanent'], { profile_id: 'strict', revision: 0 }),
+    )
 
     await w.find('button.up-allow-forever').trigger('click')
     await flushPromises()
 
-    expect(granted).toEqual(['shell:high'])
+    expect(granted).toEqual(['strict:shell:high'])
     expect(resumed.map((p) => p.action)).toEqual(['approve'])
-    expect(calls).toEqual(['grant:shell:high', 'resume:approve'])
+    expect(calls).toEqual(['grant:strict:shell:high', 'resume:approve'])
     expect(resumed[0].targetId).toBe('tc1')
+  })
+
+  it('永久放行只使用卡内档案：前端当前会话选择不能替代或改写 profile_id', async () => {
+    const { w, granted } = mountWithPorts(
+      confirmTree('high', ['permanent'], { profile_id: 'custom', revision: 7 }),
+    )
+
+    await w.find('button.up-allow-forever').trigger('click')
+    await flushPromises()
+
+    expect(granted).toEqual(['custom:shell:high'])
+    expect(granted[0]).not.toContain('default')
+  })
+
+  it('缺少 policy 时永久放行禁用且给出可恢复提示，不写授权也不静默批准本次', async () => {
+    const { w, calls, resumed, granted } = mountWithPorts(confirmTree('high', ['permanent']))
+    const button = w.find('button.up-allow-forever')
+    expect(button.attributes('disabled')).toBeDefined()
+    expect(w.find('.up-hint').text()).toContain('沙箱档案绑定')
+    expect(w.find('.up-hint').text()).toContain('刷新审批卡')
+    expect(w.find('.up-hint').text()).toContain('重新发起工具调用')
+
+    await button.trigger('click')
+    await flushPromises()
+    expect(granted).toEqual([])
+    expect(resumed).toEqual([])
+    expect(calls).toEqual([])
+    // 同卡的一次批准仍然可用，不会被长期授权绑定问题连带禁用。
+    expect(w.find('button.up-approve').attributes('disabled')).toBeUndefined()
+  })
+
+  it.each([
+    ['空 profile_id', { profile_id: '   ', revision: 0 }],
+    ['缺少 revision', { profile_id: 'strict' }],
+    ['字符串 revision', { profile_id: 'strict', revision: '0' }],
+    ['负 revision', { profile_id: 'strict', revision: -1 }],
+    ['非整数 revision', { profile_id: 'strict', revision: 1.5 }],
+    ['null policy', null],
+  ])('无效 policy（%s）同样阻止永久授权', async (_label, policy) => {
+    const { w, calls, resumed, granted } = mountWithPorts(
+      confirmTree('high', ['permanent'], policy),
+    )
+    expect(w.find('button.up-allow-forever').attributes('disabled')).toBeDefined()
+    await w.find('button.up-allow-forever').trigger('click')
+    await flushPromises()
+    expect(granted).toEqual([])
+    expect(resumed).toEqual([])
+    expect(calls).toEqual([])
   })
 
   it('「批准执行」不顺手抬阈值或写授权：三笔事实各走各的入口', async () => {
@@ -934,7 +1032,7 @@ describe('MessageNode：工具确认的四档', () => {
   it('抬阈值失败仍批准本次：一次写失败不该把用户挡在门外', async () => {
     const resumed: ResumePayload[] = []
     const w = mount(MessageNode, {
-      props: { node: confirmTree('high') },
+      props: { node: confirmTree('high', ['session']) },
       global: {
         provide: {
           [RESUME_KEY]: (p: ResumePayload) => resumed.push(p),
@@ -954,7 +1052,9 @@ describe('MessageNode：工具确认的四档', () => {
   it('写授权失败仍批准本次：同一纪律，永久放行不是批准的闸门', async () => {
     const resumed: ResumePayload[] = []
     const w = mount(MessageNode, {
-      props: { node: confirmTree('high') },
+      props: {
+        node: confirmTree('high', ['permanent'], { profile_id: 'strict', revision: 0 }),
+      },
       global: {
         provide: {
           [RESUME_KEY]: (p: ResumePayload) => resumed.push(p),
@@ -976,7 +1076,7 @@ describe('MessageNode：工具确认的四档', () => {
  * 审批卡的「管多久」与提问的「选没选」——两张卡此前都缺一句必要的话。
  */
 describe('MessageNode：交互卡的后果说明与作答校验', () => {
-  it('确认卡写明三档放行各自的作用域（永久放行跨会话）', () => {
+  it('确认卡写明可见范围各自的作用域（永久放行按沙箱档案跨会话）', () => {
     const w = mountNode(
       msg({
         id: 'up1',
@@ -989,6 +1089,8 @@ describe('MessageNode：交互卡的后果说明与作答校验', () => {
             tool_name: 'shell',
             risk_level: 'high',
             description: '删除文件',
+            approval_scopes: ['once', 'session', 'permanent'],
+            policy: { profile_id: 'strict', revision: 0 },
           },
         },
       }),
@@ -996,6 +1098,7 @@ describe('MessageNode：交互卡的后果说明与作答校验', () => {
     const hint = w.find('.up-scope-hint')
     expect(hint.exists()).toBe(true)
     expect(hint.text()).toContain('本会话')
+    expect(hint.text()).toContain('沙箱档案')
     expect(hint.text()).toContain('跨会话')
   })
 

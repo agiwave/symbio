@@ -9,8 +9,11 @@
 //! | [`plugin`] | 收集期发布引擎句柄 + 沙箱档案的 VDFS 通用管理面 |
 //!
 //! 架构层（`symbio_platform::sdk::sandbox`）只定义接口形状与 ctx 键；工具名、op 常量、黑白名单
-//! 规则一律不进 SDK、不进门面的词汇面。本插件因此可独立增删——没有它，会话全放行降级。
+//! 规则一律不进 SDK、不进门面的词汇面。本插件拥有审批策略与永久授权；平台保留不可绕过的
+//! 执行闸门，策略缺席时拒绝执行。
 
 mod detail;
 mod engine;
+mod grants;
 mod plugin;
+mod policy;
