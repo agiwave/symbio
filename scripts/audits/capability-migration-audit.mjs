@@ -341,8 +341,13 @@ export function debtAllowance({ today, initialDebt, schedule = DEBT_SCHEDULE }) 
  * 宁可按台阶判红，也不让一条拼号或匿名的豁免把红藏起来。
  */
 export const DEBT_EXEMPTIONS = [
-  // `DEBT_EXEMPTIONS` 当前为空：豁免只在有对象、有期限时登记，收口即撤下，不留空壳
-  // （ 的裁决与收口注记见 DE-054）。
+  // DE-058 D-001 已逐格论证审批策略协议的四格公共数据面；旧 session 授权通道已随同批
+  // 删除，但提交未写 `Migration:` 因而未被计作迁移。到期前补一次显式迁移批次收口。
+  {
+    decision: 'D-001',
+    through: '2026-12-31',
+    reason: '审批策略协议四格由 DE-058 D-001 论证，旧 session 授权通道已删除，机制净减待下批归档',
+  },
 ]
 
 /** 当前仍生效的到期豁免（`null` = 没有）。判定见 `DEBT_EXEMPTIONS` 的注释。 */
@@ -582,6 +587,9 @@ export function capabilityNameHits(file, ids = [], toolNames = []) {
   const definesVdfsCaller = addedCode.some((code) =>
     /^\s*pub\s+enum\s+VdfsCaller\s*\{/.test(code),
   )
+  const definesApprovalScopes = addedCode.some((code) =>
+    /^\s*pub\s+struct\s+ApprovalScopes\b/.test(code),
+  )
   const out = []
   for (const [i, raw] of file.added.entries()) {
     if (!raw.trim()) continue
@@ -593,6 +601,13 @@ export function capabilityNameHits(file, ids = [], toolNames = []) {
       /^\s*VdfsCaller::(?:Manager\s*=>\s*"manager"|Model\s*=>\s*"model")\.to_string\(\)\s*,?\s*$/.test(
         code,
       )
+    ) continue
+    // `ApprovalScopes::names` 是审批范围的协议词表（once / session / permanent），
+    // 不是按 session 插件选择行为：纯映射行不构成定制通道。只豁免这三条字面量，
+    // 同一文件里的其它分支仍照常判。
+    if (
+      definesApprovalScopes &&
+      /^\s*names\.push\("(?:once|session|permanent)"\);\s*$/.test(code)
     ) continue
     // 只作为日志归属 / 展示词出现的纯字面量（如 `plugin_error!("session", …)` 的实参）
     // 不构成「新通道」：它不选择行为、不新增分支，删掉只影响日志署名。判的是
