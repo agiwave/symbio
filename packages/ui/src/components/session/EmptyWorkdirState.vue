@@ -7,12 +7,12 @@
         </svg>
       </div>
     </div>
-    <h2 class="empty-title">未选择工作目录</h2>
+    <h2 class="empty-title">未选择运行目录</h2>
     <p class="empty-desc">
-      为当前会话绑定一个项目目录后，AI 才能在正确的上下文中回答，右栏文件树才能加载。
+      为当前会话指定一个运行目录后，智能体就能在这个目录里读写文件并正确回答。
     </p>
     <button class="primary-btn" @click="onPick" :disabled="picking">
-      {{ picking ? '选择中…' : '选择工作目录' }}
+      {{ picking ? '选择中…' : '选择运行目录' }}
     </button>
     <button
       v-if="store.lastUsedWorkdir"
@@ -20,7 +20,7 @@
       :disabled="picking"
       @click="onUseLast"
     >
-      {{ picking ? '应用中…' : '使用最近的工作目录' }}
+      {{ picking ? '应用中…' : '使用最近的目录' }}
     </button>
     <p v-if="lastError" class="error-text" role="alert">{{ lastError }}</p>
   </div>
@@ -28,7 +28,7 @@
   <DirectoryPicker
     v-if="pickerOpen"
     :visible="true"
-    title="选择工作目录"
+    title="选择运行目录"
     :initial-path="store.lastUsedWorkdir || undefined"
     :recent-paths="recentPaths"
     @close="pickerOpen = false"
@@ -61,7 +61,7 @@ async function onPick() {
     .catch(() => undefined)
   try {
     const selected = await pickPath('directory', {
-      title: '选择工作目录',
+      title: '选择运行目录',
       initialPath: store.lastUsedWorkdir || undefined,
       onBrowserPick: () => { pickerOpen.value = true },
     })

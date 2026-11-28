@@ -1,11 +1,14 @@
 <!--
-  DirectoryPicker — 数据文件夹选择器。
+  DirectoryPicker — 数据文件夹选择器（可展开的目录树）
 
-  只通过宿主目录 API 浏览当前连接目标的文件系统；不读取浏览器本机，不使用
-  <input type=file>。调用方负责维护 visible，并在 select 事件中写回所选路径。
+  主体是一棵懒加载目录树：每个节点首次展开时才向服务请求子目录，展开过的
+  节点缓存。点节点选中、双击确认；选中节点即作为返回值。
 
-  展示取舍：当前路径只出现在地址输入框里（不再另起一行重复一份）；目录条目
-  只显示文件夹名，最近路径显示末段短名，完整路径保留在 title 里供悬停核对。
+  辅助入口：「最近使用」快捷选中。选择文件夹由后端目录 API 完成，不读浏览器
+  本机、不用 <input type=file>。
+
+  展示取舍：树节点只显示文件夹名，完整路径保留在 title 上供悬停核对；底部
+  「当前选中」条给出唯一一处完整路径确认。
 -->
 <template>
   <BaseModal
@@ -19,25 +22,7 @@
       <button type="button" class="close-btn" aria-label="关闭" @click="close">×</button>
     </header>
 
-    <div class="picker-body" :aria-busy="loading ? 'true' : undefined">
-      <form class="path-form" @submit.prevent="goToPath">
-        <input
-          :id="pathInputId"
-          v-model="pathDraft"
-          aria-label="文件夹路径"
-          class="path-input"
-          type="text"
-          spellcheck="false"
-          autocomplete="off"
-          :disabled="loading"
-          placeholder="输入或粘贴文件夹路径"
-          aria-describedby="pathHelpId"
-        >
-        <button type="submit" class="btn" :disabled="loading">前往</button>
-      </form>
-      <span :id="pathHelpId" class="path-help">支持 Windows、Unix 与 UNC 路径；也可用 ~/ 开头</span>
-      <p v-if="pathError" class="error" role="alert">{{ pathError }}</p>
-
+    <div class="picker-body">
       <div v-if="recentPaths.length" class="recent" aria-label="最近使用的文件夹">
         <span class="path-label">最近使用</span>
         <div class="recent-list">
@@ -48,56 +33,47 @@
             class="root-btn"
             :disabled="loading"
             :title="path"
-            @click="navigate(path)"
+            @click="revealPath(path)"
           >{{ shortName(path) }}</button>
         </div>
       </div>
 
-      <div v-if="roots.length" class="roots" aria-label="根目录">
-        <button
-          v-for="root in roots"
-          :key="root.path"
-          type="button"
-          class="root-btn"
-          :disabled="loading"
-          :title="root.path"
-          @click="navigate(root.path)"
-        >{{ root.name }}</button>
+      <div class="tree-wrap" :aria-busy="loading ? 'true' : undefined">
+        <p v-if="error" class="error" role="alert">{{ error }}</p>
+        <button v-if="error" type="button" class="retry-btn" @click="initialize">重试</button>
+
+        <template v-else-if="loading">
+          <p class="loading-text">正在读取文件夹…</p>
+          <ul v-if="treeRoots.length" class="tree-root" role="tree">
+            <DirectoryTreeNode
+              v-for="node in treeRoots"
+              :key="node.path"
+              :node="node"
+              :selected-path="selectedPath"
+              @select="selectedPath = $event"
+              @confirm="emit('select', $event)"
+            />
+          </ul>
+        </template>
+
+        <ul v-else-if="treeRoots.length" class="tree-root" role="tree" aria-label="文件夹树">
+          <DirectoryTreeNode
+            v-for="node in treeRoots"
+            :key="node.path"
+            :node="node"
+            :selected-path="selectedPath"
+            @select="selectedPath = $event"
+            @confirm="emit('select', $event)"
+          />
+        </ul>
+
+        <p v-else class="empty">没有可浏览的文件夹</p>
       </div>
 
-      <div class="toolbar">
-        <button
-          type="button"
-          class="btn"
-          :disabled="loading || !listing?.parent || listing.parent === listing.path"
-          @click="navigate(listing!.parent!)"
-        >上一级</button>
-        <span v-if="loading" class="loading-text">正在读取文件夹…</span>
-        <span v-else class="path-crumb" :title="listing?.path || ''">{{ listing?.path || '' }}</span>
+      <div v-if="selectedPath" class="selection-bar">
+        <span class="selection-label">当前选中</span>
+        <span class="selection-path" :title="selectedPath">{{ selectedPath }}</span>
       </div>
-
-      <p v-if="error" class="error" role="alert">{{ error }}</p>
-      <div v-else-if="!loading && listing && entries.length === 0" class="empty">
-        这个文件夹里没有子文件夹
-      </div>
-      <ul v-else-if="listing" class="directory-list" aria-label="文件夹列表">
-        <li v-for="entry in entries" :key="entry.path">
-          <button
-            type="button"
-            class="directory-entry"
-            :disabled="loading"
-            :title="entry.path"
-            @click="navigate(entry.path)"
-          >
-            <span class="folder-icon" aria-hidden="true">▸</span>
-            <span class="entry-name">{{ entry.name }}</span>
-          </button>
-        </li>
-      </ul>
-
-      <button v-if="error" type="button" class="retry-btn" @click="load(listing?.path)">
-        重试
-      </button>
     </div>
 
     <footer class="picker-footer">
@@ -105,9 +81,9 @@
       <button
         type="button"
         class="btn btn-primary"
-        :disabled="loading || Boolean(error) || !listing"
-        @click="selectCurrent"
-      >选择当前文件夹</button>
+        :disabled="!selectedPath || loading || Boolean(error)"
+        @click="emit('select', selectedPath)"
+      >选择此文件夹</button>
     </footer>
   </BaseModal>
 </template>
@@ -115,10 +91,10 @@
 <script setup lang="ts">
 import { ref, useId, watch } from 'vue'
 import BaseModal from './BaseModal.vue'
+import DirectoryTreeNode, { type TreeNode } from './DirectoryTreeNode.vue'
 import {
   getHostRuntime,
   listHostDirectories,
-  type HostDirectoryListing,
   type HostDirectoryRoot,
 } from '@/services/hostDirectories'
 
@@ -139,15 +115,10 @@ const emit = defineEmits<{
 }>()
 
 const titleId = useId()
-const pathInputId = `${titleId}-path`
-const pathHelpId = `${titleId}-help`
-const pathDraft = ref('')
-const pathError = ref('')
-const listing = ref<HostDirectoryListing | null>(null)
-const roots = ref<HostDirectoryRoot[]>([])
-const entries = ref<HostDirectoryListing['entries']>([])
 const loading = ref(false)
 const error = ref('')
+const selectedPath = ref('')
+const treeRoots = ref<TreeNode[]>([])
 let requestSequence = 0
 
 /** 路径末段：用于最近使用的短标签，完整路径仍在 title 里 */
@@ -162,47 +133,41 @@ function absoluteServerPath(path: string | undefined): string | undefined {
   return trimmed && /^(?:[A-Za-z]:[\\/]|\/|\\\\|~(?:[\\/]|$))/.test(trimmed) ? trimmed : undefined
 }
 
-async function load(requestedPath?: string): Promise<void> {
+function rootNodes(roots: HostDirectoryRoot[]): TreeNode[] {
+  return roots.map((root) => ({ name: root.name, path: root.path, expandable: true }))
+}
+
+/** 初始化根节点列表：用目录 API 不带 path 的返回值（服务给出可浏览根） */
+async function initialize(): Promise<void> {
   const sequence = ++requestSequence
   loading.value = true
   error.value = ''
   try {
-    let path = absoluteServerPath(requestedPath)
-    if (!path) {
-      const runtime = await getHostRuntime()
-      if (sequence !== requestSequence) return
-      if (!runtime.capabilities.directory_browser) {
-        throw new Error('当前服务未开放文件夹浏览能力')
-      }
-      path = absoluteServerPath(runtime.homedir)
-    }
-    const next = await listHostDirectories(path)
+    const runtime = await getHostRuntime()
     if (sequence !== requestSequence) return
-    listing.value = next
-    pathDraft.value = next.path
-    roots.value = next.roots
-    entries.value = next.entries
+    if (!runtime.capabilities.directory_browser) {
+      throw new Error('当前服务未开放文件夹浏览能力')
+    }
+    const listing = await listHostDirectories()
+    if (sequence !== requestSequence) return
+    treeRoots.value = listing.roots.length
+      ? rootNodes(listing.roots)
+      : listing.entries.map((entry) => ({ name: entry.name, path: entry.path, expandable: true }))
+    // 初始路径作为选中态；完整路径在底部选中条确认
+    selectedPath.value = absoluteServerPath(props.initialPath) || ''
   } catch (cause) {
     if (sequence !== requestSequence) return
     error.value = cause instanceof Error ? cause.message : String(cause)
+    treeRoots.value = []
   } finally {
     if (sequence === requestSequence) loading.value = false
   }
 }
 
-function goToPath(): void {
-  pathError.value = ''
-  const path = absoluteServerPath(pathDraft.value)
-  if (!path) {
-    pathError.value = '请输入完整路径（如 C:\\projects 或 /srv/projects），或 ~/ 开头的路径'
-    return
-  }
-  void load(path)
-}
-
-function navigate(path: string): void {
-  pathError.value = ''
-  if (!loading.value) void load(path)
+/** 最近使用快捷入口：直接选中该路径 */
+function revealPath(path: string): void {
+  if (loading.value) return
+  selectedPath.value = path
 }
 
 function close(): void {
@@ -211,18 +176,12 @@ function close(): void {
   emit('close')
 }
 
-function selectCurrent(): void {
-  if (!listing.value || loading.value || error.value) return
-  emit('select', listing.value.path)
-}
-
 watch(
   () => props.visible,
   (visible) => {
     if (visible) {
-      pathError.value = ''
-      pathDraft.value = props.initialPath
-      void load(props.initialPath)
+      error.value = ''
+      void initialize()
     } else requestSequence += 1
   },
   { immediate: true },
@@ -273,36 +232,6 @@ watch(
   color: var(--text-secondary);
   font-size: var(--font-size-sm);
 }
-.path-crumb {
-  color: var(--text-muted);
-  font-family: var(--font-mono);
-  font-size: var(--font-size-xs);
-  overflow: hidden;
-  text-overflow: ellipsis;
-  white-space: nowrap;
-}
-.path-form {
-  display: flex;
-  gap: var(--space-2);
-}
-.path-input {
-  flex: 1;
-  min-width: 0;
-  padding: var(--space-2) var(--space-3);
-  border: 1px solid var(--border-default);
-  border-radius: var(--radius-md);
-  background: var(--surface-sunken);
-  color: var(--text-primary);
-  font-family: var(--font-mono);
-}
-.path-input:focus-visible {
-  outline: 2px solid var(--accent);
-  outline-offset: 2px;
-}
-.path-help {
-  color: var(--text-muted);
-  font-size: var(--font-size-xs);
-}
 .recent {
   display: flex;
   flex-direction: column;
@@ -313,16 +242,25 @@ watch(
   flex-wrap: wrap;
   gap: var(--space-2);
 }
-.roots,
-.toolbar {
-  display: flex;
-  align-items: center;
-  gap: var(--space-2);
-  flex-wrap: wrap;
+.tree-wrap {
+  min-height: 12rem;
+  max-height: 42vh;
+  overflow-y: auto;
+  padding: var(--space-2) var(--space-3);
+  border: 1px solid var(--border-default);
+  border-radius: var(--radius-md);
+  background: var(--surface-sunken);
 }
-.toolbar .path-crumb {
-  flex: 1;
-  min-width: 8rem;
+.tree-root {
+  list-style: none;
+  margin: 0;
+  padding: 0;
+}
+.loading-text,
+.empty {
+  margin: 0;
+  color: var(--text-muted);
+  font-size: var(--font-size-sm);
 }
 .root-btn,
 .retry-btn,
@@ -344,51 +282,26 @@ watch(
   opacity: 0.5;
   cursor: not-allowed;
 }
-.loading-text,
-.empty {
-  color: var(--text-muted);
-  font-size: var(--font-size-sm);
-}
-.directory-list {
-  list-style: none;
-  margin: 0;
-  padding: 0;
+.selection-bar {
   display: flex;
-  flex-direction: column;
-  gap: var(--space-1);
-}
-.directory-entry {
-  width: 100%;
-  display: flex;
-  align-items: center;
+  align-items: baseline;
   gap: var(--space-2);
   padding: var(--space-2) var(--space-3);
-  border: none;
+  border: 1px solid var(--border-default);
   border-radius: var(--radius-md);
-  background: transparent;
-  color: var(--text-primary);
-  text-align: left;
-  cursor: pointer;
+  background: var(--surface-panel);
 }
-.directory-entry:hover:not(:disabled),
-.directory-entry:focus-visible,
-.root-btn:hover:not(:disabled),
-.root-btn:focus-visible,
-.retry-btn:hover,
-.btn:hover:not(:disabled) {
-  background: var(--surface-hover);
+.selection-label {
+  flex-shrink: 0;
+  color: var(--text-muted);
+  font-size: var(--font-size-xs);
 }
-.directory-entry:focus-visible,
-.root-btn:focus-visible,
-.retry-btn:focus-visible,
-.btn:focus-visible,
-.close-btn:focus-visible {
-  outline: 2px solid var(--accent);
-  outline-offset: 2px;
+.selection-path {
+  min-width: 0;
+  overflow-wrap: anywhere;
+  font-family: var(--font-mono);
+  font-size: var(--font-size-sm);
 }
-.directory-entry:disabled { opacity: 0.5; cursor: not-allowed; }
-.folder-icon { color: var(--text-secondary); }
-.entry-name { font-weight: var(--font-weight-medium); overflow-wrap: anywhere; }
 .error {
   margin: 0;
   padding: var(--space-2) var(--space-3);
@@ -408,5 +321,12 @@ watch(
   background: var(--accent);
   border-color: var(--accent);
   color: var(--text-on-accent);
+}
+.root-btn:focus-visible,
+.retry-btn:focus-visible,
+.btn:focus-visible,
+.close-btn:focus-visible {
+  outline: 2px solid var(--accent);
+  outline-offset: 2px;
 }
 </style>

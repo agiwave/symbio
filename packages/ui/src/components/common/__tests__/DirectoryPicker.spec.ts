@@ -39,54 +39,73 @@ beforeEach(() => {
     deployment: 'server',
     capabilities: { directory_browser: true },
   })
-  H.listHostDirectories.mockResolvedValue(listing())
+  // 首次调用（无 path）返回根目录列表；后续按路径返回子节点
+  H.listHostDirectories.mockImplementation(async (path?: string) =>
+    path ? listing(path) : { path: '', parent: null, roots: [{ name: '/', path: '/' }], entries: [] },
+  )
 })
 
-describe('DirectoryPicker', () => {
+describe('DirectoryPicker — 目录树', () => {
   it('语义面板根规则显式跨组件，宽度与小视口高度约束才能命中 BaseModal', () => {
     const w = mountPicker('/srv/home/me')
     expect(directoryPickerSource).toContain(':global(.modal-panel.directory-picker) {')
     expect(w.get('.modal-panel.directory-picker').classes()).toContain('directory-picker')
   })
 
-  it('无初始绝对路径时从 Server runtime homedir 开始，并显示根目录', async () => {
-    const w = mountPicker('local-shell-path')
+  it('打开时从服务加载根节点，只显示文件夹名，完整路径在 title', async () => {
+    const w = mountPicker('/srv/home/me')
     await flushPromises()
 
     expect(H.getHostRuntime).toHaveBeenCalled()
-    expect(H.listHostDirectories).toHaveBeenCalledWith('/srv/home/me')
-    // 当前路径只在输入框显示一次，不再另起一行重复一份
-    expect((w.get('.path-input').element as HTMLInputElement).value).toBe('/srv/home/me')
-    expect(w.find('.root-btn').text()).toBe('/')
-    expect(w.find('.directory-entry').text()).toContain('projects')
-    // 条目只显示末段名称，完整路径留在 title 上供悬停核对
-    expect(w.find('.directory-entry').text()).not.toContain('/srv/home/me/projects')
-    expect(w.find('.directory-entry').attributes('title')).toBe('/srv/home/me/projects')
+    expect(H.listHostDirectories).toHaveBeenCalledWith()
+    expect(w.find('.tree-root').exists()).toBe(true)
+    const node = w.find('.node-label')
+    expect(node.find('.node-name').text()).toBe('/')
+    expect(node.attributes('title')).toBe('/')
+    // 初始路径作为选中态，完整路径只在底部选中条出现一次
+    expect(w.find('.selection-path').text()).toBe('/srv/home/me')
   })
 
-  it('绝对初始路径直接请求 Server 目录；进入子目录与上一步都带 Server 路径', async () => {
-    const w = mountPicker('/srv/projects')
-    await flushPromises()
-    expect(H.getHostRuntime).not.toHaveBeenCalled()
-    expect(H.listHostDirectories).toHaveBeenLastCalledWith('/srv/projects')
-
-    await w.find('.directory-entry').trigger('click')
-    await flushPromises()
-    expect(H.listHostDirectories).toHaveBeenLastCalledWith('/srv/home/me/projects')
-
-    await w.find('.toolbar .btn').trigger('click')
-    await flushPromises()
-    expect(H.listHostDirectories).toHaveBeenLastCalledWith('/srv')
-  })
-
-  it('仅在选择当前已加载目录后 emit select', async () => {
+  it('点箭头懒加载子目录；重复折叠/展开不再请求', async () => {
     const w = mountPicker('/srv/home/me')
     await flushPromises()
-    await w.find('.btn-primary').trigger('click')
-    expect(w.emitted('select')).toEqual([['/srv/home/me']])
+
+    // 打开时只有「无参」那一次调用
+    expect(H.listHostDirectories).toHaveBeenCalledTimes(1)
+
+    await w.find('.twisty').trigger('click')
+    await flushPromises()
+    expect(H.listHostDirectories).toHaveBeenLastCalledWith('/')
+    // 根节点 "/" 展开后载入 listing.entries 里的 projects
+    expect(w.findAll('.node-name').map((n) => n.text())).toContain('projects')
+
+    await w.find('.twisty').trigger('click') // 折叠
+    await w.find('.twisty').trigger('click') // 再展开（走缓存）
+    await flushPromises()
+    expect(H.listHostDirectories).toHaveBeenCalledTimes(2) // 无参 + "/" 各一次
   })
 
-  it('加载错误可见且禁止选择，可重试', async () => {
+  it('点节点选中；双击节点即确认，emit select 带该节点路径', async () => {
+    const w = mountPicker('')
+    await flushPromises()
+    await w.find('.node-label').trigger('click')
+    expect(w.find('.selection-path').text()).toBe('/')
+    await w.find('.node-label').trigger('dblclick')
+    expect(w.emitted('select')).toEqual([['/']])
+  })
+
+  it('子节点选中后，底部选择按钮 emit 该子路径', async () => {
+    const w = mountPicker('')
+    await flushPromises()
+    await w.find('.twisty').trigger('click')
+    await flushPromises()
+    await w.findAll('.node-label')[1].trigger('click')
+    expect(w.find('.selection-path').text()).toBe('/srv/home/me/projects')
+    await w.find('.btn-primary').trigger('click')
+    expect(w.emitted('select')).toEqual([['/srv/home/me/projects']])
+  })
+
+  it('加载根失败可见且禁止选择，可重试', async () => {
     H.listHostDirectories.mockRejectedValueOnce(new Error('Server 目录不可达'))
     const w = mountPicker('/srv/home/me')
     await flushPromises()
@@ -95,43 +114,36 @@ describe('DirectoryPicker', () => {
     expect(w.find('.btn-primary').attributes('disabled')).toBeDefined()
     await w.find('.retry-btn').trigger('click')
     await flushPromises()
-    expect((w.get('.path-input').element as HTMLInputElement).value).toBe('/srv/home/me')
+    expect(w.find('.tree-root').exists()).toBe(true)
     expect(w.find('.btn-primary').attributes('disabled')).toBeUndefined()
   })
 
-  it('可直接粘贴绝对路径或 ~/ 路径前往，非法相对路径在原地说明', async () => {
-    const w = mountPicker('/srv/home/me')
+  it('节点展开失败在节点旁给出错误（不炸整棵树）', async () => {
+    H.listHostDirectories.mockImplementationOnce(async () => ({
+      path: '', parent: null, roots: [{ name: '/', path: '/' }], entries: [],
+    }))
+    H.listHostDirectories.mockRejectedValueOnce(new Error('读不了'))
+    const w = mountPicker('')
     await flushPromises()
-    const input = w.get('.path-input')
-    await input.setValue('projects')
-    await w.find('.path-form').trigger('submit')
-    expect(w.get('[role="alert"]').text()).toContain('完整路径')
-    expect(H.listHostDirectories).toHaveBeenCalledTimes(1)
-
-    await input.setValue('~/projects')
-    await w.find('.path-form').trigger('submit')
+    await w.find('.twisty').trigger('click')
     await flushPromises()
-    expect(H.listHostDirectories).toHaveBeenLastCalledWith('~/projects')
-
-    await input.setValue('C:\\work\\project')
-    await w.find('.path-form').trigger('submit')
-    await flushPromises()
-    expect(H.listHostDirectories).toHaveBeenLastCalledWith('C:\\work\\project')
+    expect(w.find('.node-error').text()).toContain('读不了')
+    expect(w.find('.tree-root').exists()).toBe(true)
   })
 
-  it('最近目录可一键前往，不必从根逐层浏览', async () => {
+  it('最近使用一键选中', async () => {
     const w = mountPicker('/srv/home/me', ['/srv/projects', '/opt/repo'])
     await flushPromises()
     expect(w.findAll('.recent .root-btn')).toHaveLength(2)
     await w.findAll('.recent .root-btn')[1].trigger('click')
-    await flushPromises()
-    expect(H.listHostDirectories).toHaveBeenLastCalledWith('/opt/repo')
+    expect(w.find('.selection-path').text()).toBe('/opt/repo')
   })
 
-  it('取消只发 close，不提交路径', async () => {
-    const w = mountPicker('/srv/home/me')
+  it('无初始路径时选择按钮禁用；取消只发 close', async () => {
+    const w = mountPicker('')
     await flushPromises()
-    await w.findAll('.footer-buttons, .picker-footer .btn')[0].trigger('click')
+    expect(w.find('.btn-primary').attributes('disabled')).toBeDefined()
+    await w.findAll('.picker-footer .btn')[0].trigger('click')
     expect(w.emitted('close')).toHaveLength(1)
     expect(w.emitted('select')).toBeUndefined()
   })

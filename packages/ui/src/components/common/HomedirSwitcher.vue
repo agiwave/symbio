@@ -122,7 +122,7 @@
   <DirectoryPicker
     v-if="open && pickerOpen"
     :visible="true"
-    title="选择数据文件夹"
+    title="选择位置文件夹"
     :initial-path="localPath"
     @close="pickerOpen = false"
     @select="onDirectorySelected"
@@ -242,7 +242,7 @@ async function handleBrowse() {
   browsing.value = true
   try {
     const selected = await pickPath('directory', {
-      title: '选择数据文件夹',
+      title: '选择位置文件夹',
       initialPath: localPath.value,
       onBrowserPick: () => { pickerOpen.value = true },
     })
