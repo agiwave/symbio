@@ -19,7 +19,7 @@ impl: done
 > | 现在有什么（路由 / 工具 / 规模） | `docs/004-ref/006-当前事实表.md`（自动生成） |
 > | 路由语义与调用方 | `docs/004-ref/003-ROUTES.md` |
 > | VDFS 三栏规范（左栏 / 中栏 / 详情 / 浏览内部） | `docs/003-design/010-VDFS前端页面规范.md` |
-> | 「发言是入队、流式渲染」等前端机制约定 | `apps/desktop/docs/110-FRONTEND.md` |
+> | 「发言是入队、流式渲染」等前端机制约定 | `packages/ui/docs/110-FRONTEND.md` |
 > | 会话后端机制（消息词表、压缩分层、变更帧语义） | `crates/symbio-plugin-session/README.md` 与 `crates/symbio-plugin-session/src/docs/` |
 > | 「还能怎么提升」的提案 | `docs/003-design/020-前端UI-UX.md` |
 
@@ -35,7 +35,7 @@ impl: done
  **分派渲染器**（`packages/ui/src/registry/vdfsRenderers.ts` / `packages/ui/src/registry/messageRenderers.ts`）。
  新增一类资源或一种消息，交互代码零改动。
 3. **交互时间轴由后端驱动**：前端不做乐观回显，等待期一律用「状态 + 骨架」表达
- （理由见 `apps/desktop/docs/110-FRONTEND.md`）。
+ （理由见 `packages/ui/docs/110-FRONTEND.md`）。
 
 ---
 

@@ -248,8 +248,8 @@ board.columns: [impl]
 | [`DE-107-session-options`](../../crates/symbio-plugin-session/src/docs/107-session-options.md) | 会话选项 = 会话配置表单 | 与代码一致 |
 | [`DE-108-turn-tool-mechanisms`](../../crates/symbio-plugin-session/src/docs/108-turn-tool-mechanisms.md) | 工具失败回传与 Turn 终态机制 | 与代码一致 |
 | [`DE-109-vdfs-session-messages`](../../crates/symbio-plugin-session/src/docs/109-vdfs-session-messages.md) | 会话消息的 VDFS 化 —— 转写即列表，流式即追加 | 与代码一致 |
-| [`DE-110-FRONTEND`](../../apps/desktop/docs/110-FRONTEND.md) | 前端架构 | 与代码一致 |
-| [`DE-111-INTERACTION`](../../apps/desktop/docs/111-INTERACTION.md) | 前端交互面（用户视角） | 与代码一致 |
+| [`DE-110-FRONTEND`](../../packages/ui/docs/110-FRONTEND.md) | 前端架构 | 与代码一致 |
+| [`DE-111-INTERACTION`](../../packages/ui/docs/111-INTERACTION.md) | 前端交互面（用户视角） | 与代码一致 |
 | [`DE-112-architecture`](../../apps/cli/docs/112-architecture.md) | 架构 | 与代码一致 |
 | [`DE-113-heartbeat-mechanism`](../../crates/symbio-plugin-heartbeat/src/docs/113-heartbeat-mechanism.md) | 会话心跳机制（heartbeat） | 与代码一致 |
 | [`DE-114-HTTP入站网关`](../../crates/symbio-plugin-gateway/src/docs/114-HTTP入站网关.md) | HTTP 入站网关（插件专题设计） | 与代码一致 |

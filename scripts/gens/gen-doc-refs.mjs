@@ -163,8 +163,10 @@ const resolveFrom = (fromRel, target) => {
  * 三十几个 crate（core、内核、全部插件、provider、cli 壳各一个）——旧的两个根现在
  * 都不存在。`walk` 对不存在的目录静默返回空，于是「扫描 0 条注释链接」看上去像
  * 「没有问题」，实则 D-010 / D-019 只在 tauri 与 scripts 上跑。
+ * `packages` 是三端共享 Vue 实现（`packages/ui`）的落点；不列入就会让该目录的
+ * 源码注释静默脱检——与上面那条同族。
  */
-export const SRC_ROOTS = ['crates', 'apps', 'desktop', 'scripts', 'e2e', 'examples', '.github']
+export const SRC_ROOTS = ['crates', 'apps', 'desktop', 'packages', 'scripts', 'e2e', 'examples', '.github']
 
 /** 参与注释扫描的源码扩展名（`.md` 刻意不在：它由文档 pass 与 D-001 管）。 */
 export const SRC_EXT = new Set([

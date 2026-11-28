@@ -4208,6 +4208,7 @@ dependencies = [
 name = "symbio-cli"
 version = "0.1.0"
 dependencies = [
+ "include_dir",
  "serde",
  "serde_json",
  "symbio",
@@ -4806,7 +4807,6 @@ dependencies = [
  "symbio-platform",
  "symbio-plugin-api",
  "symbio-providers",
- "symbio-ui-assets",
  "tempfile",
  "tokio",
  "tokio-util",
@@ -4836,13 +4836,6 @@ dependencies = [
  "tokio-util",
  "tracing",
  "tracing-subscriber",
-]
-
-[[package]]
-name = "symbio-ui-assets"
-version = "0.1.14"
-dependencies = [
- "include_dir",
 ]
 
 [[package]]

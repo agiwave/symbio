@@ -8,6 +8,9 @@
 //!
 //! 运行时**不认识任何具体插件**：CLI / Tauri 在组合边界注入异步根工厂。
 //! 每次工厂调用返回独立根插件，控制面与会话执行体不共享插件树。
+//! UI 资源同样在边界注入（[`EmbeddedUi`]）：只有需要 serve 的交付物入口才把
+//! 编译期内嵌的 dist 编进二进制；桌面端的 UI 由 Tauri `generate_context!` 自己嵌入，
+//! 不经这条依赖，避免同一份 dist 被重复嵌入。
 //! 传输由 `symbio-http` 提供——它同时被扩展层的接入类插件依赖，所以留在
 //! 插件之下，不并入本 crate。
 
@@ -21,7 +24,7 @@ pub mod worker;
 pub use host::Host;
 pub use root_factory::{RootFactory, RootFactoryFn, RootFactoryFuture};
 pub use runtime::RuntimeHost;
-pub use server::{start, ServerConfig, ServerIngress};
+pub use server::{start, EmbeddedUi, ServerConfig, ServerIngress};
 pub use symbio_http::stop;
 
 /// 部署根是**进程级单例**：Home 构造与驱动用例都会写它。本测试二进制里任何

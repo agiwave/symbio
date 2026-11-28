@@ -23,7 +23,7 @@ desc: 怎么用——上手 / 贡献 / 排障
 
 `guide`（指南）的条目**在位存放**：文件本身就是登记，`title` 逐字等于正文首个 H1（RG-021 两面对账）。
 
-**计数**：active 17 · draft 0 · retired 0（共 17）
+**计数**：active 18 · draft 0 · retired 0（共 18）
 
 ## 现行文档（active）
 
@@ -46,6 +46,7 @@ desc: 怎么用——上手 / 贡献 / 排障
 | [`apps/web/README`](../../apps/web/README.md) | Symbio Web 交付物 |
 | [`docs/README`](../README.md) | Symbio 文档中心 |
 | [`e2e/README`](../../e2e/README.md) | e2e 测试环境（CLI 模式） |
+| [`packages/ui/README`](../../packages/ui/README.md) | Symbio 共享 Vue 前端 |
 
 ## 草案（draft）
 

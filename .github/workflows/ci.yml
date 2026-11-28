@@ -145,7 +145,7 @@ jobs:
         # （check / test / clippy / doc）**全红**，而报错指向的是一段完全正常的 Rust
         # 代码 —— 2026-10-07 首次在 v2-plan 上跑 CI 实测过这一失败形态。
         #
-        # 同一份 `packages/ui/dist` 还被 CLI 的 `symbio-ui-assets` 在编译期内嵌，
+        # 同一份 `packages/ui/dist` 还被 CLI 的 `embedded_ui` 在编译期内嵌，
         # 被 web 交付物静态部署——三端共用一个产物，不再各建一份。
         # `packages/ui/dist` 被 `dist/` 忽略，**只在开发者本机存在**。
         # 与「分支没接 CI」「本机不编 GTK」「cargo-audit 被项目 pin 拖住」同族：

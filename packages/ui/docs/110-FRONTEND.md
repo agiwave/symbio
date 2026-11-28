@@ -9,8 +9,10 @@ impl: done
 
 # 前端架构
 
+> 本文是**三端共享 Vue 实现**（desktop / cli serve / web）的前端架构 owner，住在
+> `packages/ui/docs/`，不挂在某一个交付物壳下面。
 > 前端 UI/UX 需求与设计方案详见 `docs/003-design/020-前端UI-UX.md`（根 docs/）。
-> 用户视角的交互语义（屏幕、动作、反馈、流式时间轴）见 `apps/desktop/docs/111-INTERACTION.md`。
+> 用户视角的交互语义（屏幕、动作、反馈、流式时间轴）见 `packages/ui/docs/111-INTERACTION.md`。
 > 本文只写前端代码结构与机制。
 
 ## 分层的边界：薄的是决策层，不是适配层

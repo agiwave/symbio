@@ -9,6 +9,7 @@
 
 mod args;
 mod client;
+mod embedded_ui;
 mod protocol;
 mod render;
 mod server;

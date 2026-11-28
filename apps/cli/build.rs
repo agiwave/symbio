@@ -1,4 +1,8 @@
-//! 编译期内嵌前端产物：把 `packages/ui/dist` 编进 CLI 二进制。
+//! CLI 的编译期内嵌：把 `packages/ui/dist` 编进 CLI 二进制。
+//!
+//! 内嵌只发生在需要 serve 的交付物入口（本 CLI），不放在共享 runtime：桌面端的 UI
+//! 由 Tauri `generate_context!` 嵌入，共享 runtime 若依赖资源 crate 会让桌面二进制
+//! 被迫多嵌一份同样的 dist。
 //!
 //! ## 为什么 build.rs 生成代码而不是直接 include_dir!
 //!
@@ -16,16 +20,16 @@ use std::env;
 use std::fs;
 use std::path::PathBuf;
 
-// panic-allow crates/symbio-ui-assets/build.rs::main: 构建期不变量——cargo 必须提供 CARGO_MANIFEST_DIR / OUT_DIR，环境变量缺失意味着构建环境损坏，继续只会生成指向错误位置的产物。
-// panic-allow crates/symbio-ui-assets/build.rs::main: 构建期不变量——crate 必须位于仓库的 crates/ 下，解析不出仓库根就没法定位 packages/ui/dist。
-// panic-allow crates/symbio-ui-assets/build.rs::main: 构建期不变量——OUT_DIR 必须可写，写不出生成代码时后续 include! 必然编译失败，早崩比晚崩更易定位。
+// panic-allow apps/cli/build.rs::main: 构建期不变量——cargo 必须提供 CARGO_MANIFEST_DIR / OUT_DIR，环境变量缺失意味着构建环境损坏，继续只会生成指向错误位置的产物。
+// panic-allow apps/cli/build.rs::main: 构建期不变量——crate 必须位于仓库的 apps/cli/ 下，解析不出仓库根就没法定位 packages/ui/dist。
+// panic-allow apps/cli/build.rs::main: 构建期不变量——OUT_DIR 必须可写，写不出生成代码时后续 include! 必然编译失败，早崩比晚崩更易定位。
 fn main() {
     let manifest = PathBuf::from(env::var("CARGO_MANIFEST_DIR").expect("CARGO_MANIFEST_DIR"));
-    // crate 在 <repo>/crates/symbio-ui-assets，向上两级到仓库根。
+    // crate 在 <repo>/apps/cli，向上两级到仓库根。
     let repo = manifest
         .parent()
         .and_then(|p| p.parent())
-        .expect("crate must live under <repo>/crates/");
+        .expect("crate must live under <repo>/apps/cli/");
     let dist = repo.join("packages").join("ui").join("dist");
 
     let out_dir = PathBuf::from(env::var("OUT_DIR").expect("OUT_DIR"));
@@ -36,7 +40,7 @@ fn main() {
         println!("cargo:rerun-if-changed={}", dist.display());
         dist
     } else {
-        // 占位目录也放 OUT_DIR：不污染源码树，且随 crate 清理一起消失。
+        // 占位目录也放 OUT_DIR：不污染源码树，且随 target 清理一起消失。
         let placeholder = out_dir.join("placeholder-dist");
         fs::create_dir_all(&placeholder).expect("create placeholder dist");
         fs::write(

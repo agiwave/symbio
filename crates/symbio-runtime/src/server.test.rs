@@ -2,6 +2,27 @@ use std::time::Duration;
 
 use super::*;
 
+/// 测试用的内嵌资源表。runtime 自身不带任何 dist 依赖，测试用最小夹具注入。
+struct TestEmbeddedUi;
+
+impl EmbeddedUi for TestEmbeddedUi {
+    fn get(path: &str) -> Option<&'static [u8]> {
+        match path {
+            "index.html" => Some(b"<html>test ui</html>" as &[u8]),
+            "assets/app.js" => Some(b"console.log(1)" as &[u8]),
+            _ => None,
+        }
+    }
+
+    fn content_type(path: &str) -> &'static str {
+        match path.rsplit_once('.').map(|(_, ext)| ext) {
+            Some("html") => "text/html; charset=utf-8",
+            Some("js") => "text/javascript; charset=utf-8",
+            _ => "application/octet-stream",
+        }
+    }
+}
+
 #[test]
 fn query_param_decodes_server_paths() {
     assert_eq!(
@@ -21,7 +42,9 @@ fn traversal_is_rejected_before_asset_lookup() {
 #[tokio::test]
 async fn embedded_assets_serve_spa_fallback() {
     // CLI 的默认形态：二进制内嵌 packages/ui/dist，不依赖磁盘目录。
-    let ingress = ServerIngress::embedded(Arc::new(RuntimeHost::from_root(Arc::new(NoopHost))));
+    let ingress = ServerIngress::embedded::<TestEmbeddedUi>(Arc::new(RuntimeHost::from_root(
+        Arc::new(NoopHost),
+    )));
     let index = ingress.static_response("/sessions/123").await;
     assert_eq!(index.status, 200);
     assert_eq!(index.content_type, "text/html; charset=utf-8");

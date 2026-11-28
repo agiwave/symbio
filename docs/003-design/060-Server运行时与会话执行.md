@@ -13,6 +13,7 @@ deps: [DE-002-架构总览, DE-005-协议规范, DE-058-沙箱机制]
 ## 统一运行时与入站边界
 
 - CLI、Tauri 内嵌与 `symbio-cli serve` 共用一个 `RuntimeHost`，不维护第二套会话或前端。
+- UI 内嵌属于**交付物入口**职责，不属于共享 runtime：桌面端由 Tauri `generate_context!` 嵌入，CLI serve 由 CLI 自己的 `embedded_ui` 模块经 `EmbeddedUi` 接口注入；shared runtime 不依赖任何资源 crate，桌面二进制不会被迫嵌入第二份 dist。内嵌逻辑不单独成 crate——唯一消费者是 CLI，就地放在 CLI 内。
 - `RuntimeHost` 在构造插件树前注册统一分发桥。控制面先处理会话删除，再由 Supervisor 派发会话动作，
   未命中才回落到宿主插件 `route`。
 - `symbio-http` 只管 HTTP/1.1、WS、SSE、鉴权、限制与连接生命周期；Ingress 决定公开端点、身份与策略。

@@ -40,9 +40,25 @@ impl Default for ServerConfig {
     }
 }
 
+/// 编译期内嵌 UI 的注入接口。
+///
+/// 由**交付物入口**实现并注入（CLI 用自己的 `embedded_ui` 模块），runtime 只认这条
+/// 窄接口、不依赖任何具体资源 crate。桌面端的 UI 由 Tauri `generate_context!` 自己
+/// 嵌入，不需要也不应该经过这里——否则桌面二进制会被迫多嵌一份同样的 dist。
+pub trait EmbeddedUi: Send + Sync + 'static {
+    /// 按 URL 路径取资源；查不到返回 `None`（由调用方决定 SPA 回退）。
+    fn get(path: &str) -> Option<&'static [u8]>;
+    /// 按资源路径给出 MIME 类型。
+    fn content_type(path: &str) -> &'static str;
+}
+
 /// 静态资源来源：CLI 默认内嵌（二进制自带 UI），显式 `--frontend-dist` 才走磁盘。
 enum FrontendSource {
-    Embedded,
+    /// 入口注入的内嵌资源查表函数（见 [`EmbeddedUi`]）。
+    Embedded {
+        get: fn(&str) -> Option<&'static [u8]>,
+        content_type: fn(&str) -> &'static str,
+    },
     Disk(PathBuf),
 }
 
@@ -60,9 +76,15 @@ impl ServerIngress {
         Self::with_source(host, FrontendSource::Disk(frontend_dist))
     }
 
-    /// 内嵌资源构造器：CLI 的默认形态。
-    pub fn embedded(host: Arc<RuntimeHost>) -> Self {
-        Self::with_source(host, FrontendSource::Embedded)
+    /// 内嵌资源构造器：入口注入的内嵌资源表（CLI → 自有 `embedded_ui` 模块）。
+    pub fn embedded<U: EmbeddedUi>(host: Arc<RuntimeHost>) -> Self {
+        Self::with_source(
+            host,
+            FrontendSource::Embedded {
+                get: U::get,
+                content_type: U::content_type,
+            },
+        )
     }
 
     fn with_source(host: Arc<RuntimeHost>, frontend: FrontendSource) -> Self {
@@ -76,9 +98,16 @@ impl ServerIngress {
     }
 }
 
-pub async fn start(config: ServerConfig, host: Arc<RuntimeHost>) -> Result<ServerHandle, String> {
+/// 启动浏览器 Server。
+///
+/// `U` 由交付物入口注入：CLI 传自己的 `embedded_ui` 适配类型。runtime 不持有
+/// 任何具体资源 crate 的依赖——桌面端因此不会被迫嵌入第二份 UI。
+pub async fn start<U: EmbeddedUi>(
+    config: ServerConfig,
+    host: Arc<RuntimeHost>,
+) -> Result<ServerHandle, String> {
     let ingress = match &config.frontend_dist {
-        None => Arc::new(ServerIngress::embedded(host)),
+        None => Arc::new(ServerIngress::embedded::<U>(host)),
         Some(dist) => {
             let canonical = std::fs::canonicalize(dist)
                 .map_err(|e| format!("前端静态目录不可用 {}: {e}", dist.display()))?;
@@ -323,28 +352,30 @@ impl ServerIngress {
             return HttpResponse::json(403, json!({ "error": "forbidden" }));
         }
         match &self.frontend {
-            FrontendSource::Embedded => self.embedded_static_response(&decoded),
+            FrontendSource::Embedded { .. } => self.embedded_static_response(&decoded),
             FrontendSource::Disk(root) => self.disk_static_response(root, relative).await,
         }
     }
 
-    /// 内嵌资源：查编译期嵌入的表；SPA 路由未命中时回退 index.html。
+    /// 内嵌资源：查入口注入的编译期资源表；SPA 路由未命中时回退 index.html。
+    // panic-allow crates/symbio-runtime/src/server.rs::embedded_static_response: 本函数只由 static_response 在 FrontendSource::Embedded 分支调用，Disk 分支不可达；不标注会被 panic 审计判红。
     fn embedded_static_response(&self, decoded: &str) -> HttpResponse {
+        let (get, content_type) = match &self.frontend {
+            FrontendSource::Embedded { get, content_type } => (*get, *content_type),
+            FrontendSource::Disk(_) => unreachable!("embedded_static_response 只服务内嵌来源"),
+        };
         let key = decoded.trim_start_matches('/');
         // 根路径（""）在资源表里映射到 index.html，MIME 必须按**实际资源名**取；
         // 直接用空串会让 content_type 落到 application/octet-stream。
         let resource = if key.is_empty() { "index.html" } else { key };
-        let (path, body) = match symbio_ui_assets::get(resource) {
+        let (path, body) = match get(resource) {
             Some(body) => (resource, body),
-            None => (
-                "index.html",
-                symbio_ui_assets::get("index.html").unwrap_or_default(),
-            ),
+            None => ("index.html", get("index.html").unwrap_or_default()),
         };
         if body.is_empty() {
             return HttpResponse::json(404, json!({ "error": "frontend asset not found" }));
         }
-        static_ok(path, symbio_ui_assets::content_type(path), body)
+        static_ok(path, content_type(path), body)
     }
 
     /// 磁盘资源：保留原有 canonicalize 防穿越 + SPA 回退，供显式 `--frontend-dist`。

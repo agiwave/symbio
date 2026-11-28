@@ -1,11 +1,13 @@
-//! 编译期内嵌的前端产物（`packages/ui/dist`），供 `symbio-cli serve` 直接提供。
+//! CLI 专属的编译期内嵌 UI 资源（`packages/ui/dist`）。
 //!
+//! 内嵌只属于 CLI 这个交付物入口：桌面端由 Tauri `generate_context!` 嵌入自己的 UI，
+//! 共享 runtime 不依赖本模块，因此桌面二进制不会被迫多嵌一份 dist。
 //! 与「运行时从磁盘读 `--frontend-dist`」并存：默认走内嵌资源，二进制自带 UI；
 //! 显式指定外部目录时才回退到磁盘。两者由 `symbio-runtime` 统一成同一套静态响应。
 
 include!(concat!(env!("OUT_DIR"), "/embedded_assets.rs"));
 
-/// 当前二进制内嵌的是占位页而不是真实前端产物。
+/// 当前二进制内嵌的是占位页而不是真实前端产物；serve 启动时据此给出显式告警。
 pub fn is_placeholder() -> bool {
     PLACEHOLDER
 }
@@ -43,5 +45,5 @@ pub fn content_type(path: &str) -> &'static str {
 }
 
 #[cfg(test)]
-#[path = "lib.test.rs"]
+#[path = "mod.test.rs"]
 mod tests;

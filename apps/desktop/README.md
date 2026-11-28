@@ -15,16 +15,13 @@ Symbio 桌面前端：Vue 3 + TypeScript + Tauri 2。
 
 ```
 apps/desktop/
-├── src-tauri/ # Tauri 宿主（Rust）：只有 `route_v2` 家族 command
-├── docs/ # 前端文档
-│   ├── 110-FRONTEND.md # 前端架构与机制（代码结构、与后端通信）
-│   └── 111-INTERACTION.md # 交互语义（用户看到什么、动作产生什么反馈）
+├── src-tauri/   # Tauri 宿主（Rust）：只有 `route_v2` 家族 command
 └── package.json # 薄壳脚本：Vue 开发/构建委托 packages/ui，tauri 用本目录 src-tauri
 ```
 
-Vue 源码与唯一构建产物都在 `packages/ui/`：`packages/ui/src` 是三端共享的实现，
-`packages/ui/dist` 同时供 Tauri `generate_context!`、`apps/web` 静态部署与 CLI 编译期内嵌。
-本目录只保留 Tauri 壳、文档与委托脚本，不再维护独立的前端源码或 dist。
+Vue 源码、文档与唯一构建产物都在 `packages/ui/`：`packages/ui/src` 是三端共享的实现，
+`packages/ui/dist` 同时供 Tauri `generate_context!`、`apps/web` 静态部署与 CLI 编译期内嵌，
+`packages/ui/docs/` 是三端共享的前端架构与交互语义文档。本目录只保留 Tauri 壳与委托脚本。
 
 ## 宿主命令（src-tauri）
 
@@ -32,10 +29,12 @@ Vue 源码与唯一构建产物都在 `packages/ui/`：`packages/ui/src` 是三�
 `gateway` 插件的 HTTP 入口是同一件事的另一条通道。
 
 本文不维护命令表：命令面由 [当前事实表](../../docs/004-ref/006-当前事实表.md "RE-006-当前事实表") §5.2 从代码投影，
-逐条职责见 `docs/110-FRONTEND.md`，网关端点见 [路由契约](../../docs/004-ref/003-ROUTES.md "RE-003-ROUTES") §Gateway 插件。
+逐条职责见 `packages/ui/docs/110-FRONTEND.md`，网关端点见 [路由契约](../../docs/004-ref/003-ROUTES.md "RE-003-ROUTES") §Gateway 插件。
 
 ## 文档
 
-- 前端架构与机制：`docs/110-FRONTEND.md`
-- 交互语义（屏幕 / 动作 / 状态 / 流式时间轴）：`docs/111-INTERACTION.md`
+前端文档属于三端共享的 Vue 实现，owner 在 `packages/ui/docs/`：
+
+- 前端架构与机制：`packages/ui/docs/110-FRONTEND.md`
+- 交互语义（屏幕 / 动作 / 状态 / 流式时间轴）：`packages/ui/docs/111-INTERACTION.md`
 - 后端总览：`../README.md`、`../docs/003-design/004-系统地图.md`
