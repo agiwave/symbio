@@ -45,6 +45,7 @@ pub mod spec;
 use serde::de::DeserializeOwned;
 use serde_json::Value;
 use std::sync::Arc;
+use symbio_plugin_api::collectors::ApprovalSummary;
 use symbio_plugin_api::{
     CapabilityCategory, CapabilityMeta, CapabilityRiskLevel, PluginError, PortExecutor,
 };
@@ -128,29 +129,39 @@ pub fn tool(
 ///
 /// 顺序固定（`tools_cover_all_ops` 测试锁死）：表装不下的两个（`list` / `read`）
 /// 手动插入到它们在原清单里的位置，其余六条由 [`spec::SPECS`] 按表序展开。
-/// 返回 `(meta, 执行体)` 二元组：meta 供注册点静态交档，执行体经 `register_tool`
-/// 落进装配期容器。
-pub fn vdfs_tools(provider: Arc<ToolVdfs>) -> Vec<(CapabilityMeta, Arc<dyn PortExecutor>)> {
-    let by_name = |name: &str| -> (CapabilityMeta, Arc<dyn PortExecutor>) {
+/// 返回 `(meta, 执行体, 审批摘要)`：meta 供注册点静态交档，执行体经注册收口
+/// 落进装配期容器；摘要与元数据分离，不进入内核能力数据面。
+pub fn vdfs_tools(
+    provider: Arc<ToolVdfs>,
+) -> Vec<(
+    CapabilityMeta,
+    Arc<dyn PortExecutor>,
+    Option<ApprovalSummary>,
+)> {
+    let by_name = |name: &str| -> (
+        CapabilityMeta,
+        Arc<dyn PortExecutor>,
+        Option<ApprovalSummary>,
+    ) {
         let s = spec::SPECS
             .iter()
             .find(|s| s.name == name)
             .unwrap_or_else(|| panic!("规格表缺少工具 {name}"));
         let t = spec::VdfsTool::new(provider.clone(), s);
-        (t.meta(), Arc::new(t))
+        (t.meta(), Arc::new(t), s.approval.clone())
     };
 
     let list_tool = list::ListTool::new(provider.clone());
     let read_tool = read::ReadTool::new(provider.clone());
     vec![
-        (list_tool.meta(), Arc::new(list_tool)), // 1. vdfs_list
-        by_name("vdfs_stat"),                    // 2. vdfs_stat
-        (read_tool.meta(), Arc::new(read_tool)), // 3. vdfs_read
-        by_name("vdfs_edit"),                    // 4. vdfs_edit
-        by_name("vdfs_search"),                  // 5. vdfs_search
-        by_name("vdfs_write"),                   // 6. vdfs_write
-        by_name("vdfs_delete"),                  // 7. vdfs_delete
-        by_name("vdfs_mkdir"),                   // 8. vdfs_mkdir
+        (list_tool.meta(), Arc::new(list_tool), None), // 1. vdfs_list
+        by_name("vdfs_stat"),                          // 2. vdfs_stat
+        (read_tool.meta(), Arc::new(read_tool), None), // 3. vdfs_read
+        by_name("vdfs_edit"),                          // 4. vdfs_edit
+        by_name("vdfs_search"),                        // 5. vdfs_search
+        by_name("vdfs_write"),                         // 6. vdfs_write
+        by_name("vdfs_delete"),                        // 7. vdfs_delete
+        by_name("vdfs_mkdir"),                         // 8. vdfs_mkdir
     ]
 }
 

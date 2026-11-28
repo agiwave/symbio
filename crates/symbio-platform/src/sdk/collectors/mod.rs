@@ -12,9 +12,13 @@
 mod approval;
 mod tool_visitor;
 
-pub use approval::{approval_gate, approval_gate_with_facts, AsyncFactsOf, FactsOf, RiskOf};
+pub use approval::{
+    approval_gate, approval_gate_with_facts, ApprovalEffect, ApprovalSummary, AsyncFactsOf,
+    FactsOf, RiskOf,
+};
 pub use tool_visitor::{
-    register_tool, register_tool_with_async_facts, register_tool_with_facts, DefaultToolVisitor,
+    register_tool, register_tool_with_async_facts, register_tool_with_facts,
+    register_tool_with_summary, DefaultToolVisitor,
 };
 
 use crate::kernel::capability::Registry;

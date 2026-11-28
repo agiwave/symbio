@@ -308,7 +308,7 @@ const VOCAB_BASELINE = process.env.VOCAB_BASELINE
 // core-shape-allow structFields:  同一次沙箱裁决的七格回体 `SandboxDecision` 与私有凭据载体 `ApprovalGrant` 各一格，是授权双方必须共同消费的完整快照和一次性凭据形状：缺许可/风险/拦截/审批模式/阈值/版本/原因任一项都会迫使执行闸门再次读策略或猜失败原因，重新引入  要消除的跨版本组合；凭据不能降为私有类型，因为签发方 tool 与消费方 collectors 跨 crate。八格承载的是通用授权结果，不含工具清单、路径策略或业务字段。基线钉到实测 630，不留余量。
 // core-shape-allow structFields:  请求级宿主执行绑定随异步事实驱动显式传递——`DriveTarget.port_bindings`(1) 是 worker 的内部启动口跨 append / kick / drain 任务边界唯一可见的装订点；绑定只能由请求快照经事实源携带，不能依赖调用栈或进程级全局状态，也不能降为私有字段（生产消费方 host 与声明方 session 跨 crate）。它只承载执行出口，不改变授权、审批或沙箱策略，也不是新业务数据面。基线钉到实测 631，不留余量。
 // core-shape-allow enumVariants:  `VdfsCaller::{Manager, Model}` 两格是宿主注入的进程内可信主体闭集：管理写入与模型文件访问必须可区分，且未知主体失败关闭；复用布尔或字符串都能由模型载荷伪造，开放枚举又失去闭集。它只表达调用来源，不认插件 id 或 VDFS 操作。基线钉到实测 258，不留余量。
-// core-shape-allow structFields:  默认收集器整组从 providers 迁入 sdk——DefaultToolVisitor 的 rows/families 两格与 GatedExecutor 的 meta/risk/facts/inner 四格随既有实现换地址进入 CS-009 扫描面，合计六格，没有新增类型、字段或业务词汇； 又将 TaskVocab 的五格归位 task，当前基线钉到迁后实测 611，本条只记录  的地址迁移，不构成继续放宽。
+// core-shape-allow structFields:  默认收集器整组从 providers 迁入 sdk——DefaultToolVisitor 的 rows/families 两格随既有实现换地址进入 CS-009 扫描面，没有新增类型、字段或业务词汇；GatedExecutor 收为 crate 内部实现，其执行状态不再占公共数据面。当前基线钉到迁后实测 609，不留余量。
 // 2026-11-16（）：实测已收到 608（614 是  /  时点的上限），基线同批
 // 钉到 608——余量不白留给下一次新增。2026-11-20（）：608 → 609，`DriveTarget`
 // 增 `session_dir` 一格（放宽行见上）。2026-11-21（）：609 → 611，图标自报的两个投影载体（放宽行见上）。2026-11-23（）：611 → 613，`SandboxFact` 的两格意图事实（放宽行见上）；同日 613 → 615，`Request.sandbox_id` / `DriveTarget.sandbox_id` 两格随会话选档入装订点（放宽行见上）。2026-11-24（）：615 → 622，`DetailColumn` 六格 + `DetailField.columns` 一格随通用表格 widget 入数据面（放宽行见上）。同日（）：622 → 630，`SandboxDecision` 七格 + `ApprovalGrant` 一格；枚举 256 → 258，`VdfsCaller` 两格（放宽行见上），此后照旧只许降。
@@ -317,7 +317,7 @@ const DATA_BASELINE = process.env.CORE_DATA_BASELINE
       const [structFields, enumVariants] = process.env.CORE_DATA_BASELINE.split(':').map((n) => Number(n))
       return { structFields, enumVariants }
     })()
-  : { structFields: 611, enumVariants: 250 }
+  : { structFields: 609, enumVariants: 250 }
 
 const CELL_LABEL = {
   traits: '`pub trait` 数（接缝数）',

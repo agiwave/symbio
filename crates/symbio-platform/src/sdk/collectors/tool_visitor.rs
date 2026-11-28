@@ -147,6 +147,18 @@ pub async fn register_tool_with_facts(
     facts: Option<super::approval::FactsOf>,
     executor: Arc<dyn PortExecutor>,
 ) {
+    register_tool_with_summary(ctx, meta, risk, facts, None, executor).await
+}
+
+/// 与 [`register_tool_with_facts`] 同形，但额外接收工具自声明的审批摘要。
+pub async fn register_tool_with_summary(
+    ctx: &Arc<dyn PluginInvokeRequest>,
+    meta: crate::kernel::capability::CapabilityMeta,
+    risk: Option<RiskOf>,
+    facts: Option<super::approval::FactsOf>,
+    approval: Option<super::approval::ApprovalSummary>,
+    executor: Arc<dyn PortExecutor>,
+) {
     let risk: RiskOf = {
         let m = meta.clone();
         risk.unwrap_or_else(|| Arc::new(move |_| m.effective_risk()))
@@ -156,6 +168,7 @@ pub async fn register_tool_with_facts(
         meta,
         risk,
         facts.map(super::approval::FactSource::Sync),
+        approval,
         executor,
     )
     .await
@@ -177,6 +190,7 @@ pub async fn register_tool_with_async_facts(
         meta,
         risk,
         facts.map(super::approval::FactSource::Async),
+        None,
         executor,
     )
     .await
@@ -187,20 +201,22 @@ async fn register_gated(
     meta: crate::kernel::capability::CapabilityMeta,
     risk: RiskOf,
     facts: Option<super::approval::FactSource>,
+    approval: Option<super::approval::ApprovalSummary>,
     executor: Arc<dyn PortExecutor>,
 ) {
-    let gated: Arc<dyn PortExecutor> = match facts {
-        Some(super::approval::FactSource::Sync(f)) => Arc::new(GatedExecutor::new_with_facts(
-            meta.clone(),
-            risk,
-            f,
-            executor,
-        )),
-        Some(super::approval::FactSource::Async(f)) => Arc::new(
-            GatedExecutor::new_with_async_facts(meta.clone(), risk, f, executor),
-        ),
-        None => Arc::new(GatedExecutor::new(meta.clone(), risk, executor)),
+    let gated = match facts {
+        Some(super::approval::FactSource::Sync(f)) => {
+            GatedExecutor::new_with_facts(meta.clone(), risk, f, executor)
+        }
+        Some(super::approval::FactSource::Async(f)) => {
+            GatedExecutor::new_with_async_facts(meta.clone(), risk, f, executor)
+        }
+        None => GatedExecutor::new(meta.clone(), risk, executor),
     };
+    let gated: Arc<dyn PortExecutor> = Arc::new(match approval {
+        Some(approval) => gated.with_approval(approval),
+        None => gated,
+    });
     if let Some(bindings) = ctx.get(crate::sdk::capability::port::PORT_BINDINGS) {
         let port = crate::sdk::capability::port::scoped_port_name(ctx, &meta.name);
         crate::sdk::capability::port::check_port_name(&port);

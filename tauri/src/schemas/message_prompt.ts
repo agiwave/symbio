@@ -28,6 +28,20 @@ export interface MessagePromptQuestion {
   options: MessagePromptOption[]
 }
 
+export type MessagePromptEffect =
+  | 'file_modify'
+  | 'file_delete'
+  | 'network_send'
+  | 'system_execute'
+  | 'other'
+
+export interface MessagePromptApproval {
+  action: string
+  effect: MessagePromptEffect
+  target_label?: string
+  target?: unknown
+}
+
 /** 工具确认载荷 */
 export interface MessagePromptConfirm {
   kind: 'confirm'
@@ -35,6 +49,7 @@ export interface MessagePromptConfirm {
   args?: unknown
   risk_level?: string
   description?: string
+  approval?: MessagePromptApproval
 }
 
 /** 提问载荷 */

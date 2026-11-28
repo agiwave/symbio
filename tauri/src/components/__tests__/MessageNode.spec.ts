@@ -270,7 +270,7 @@ describe('MessageNode：工具子骨架（skeleton 容器，自身正文提升�
     expect(w.text()).toContain('"ok"')
   })
 
-  it('内含待审批提问子节点 → 提问格出现审批入口（批准执行）', () => {
+  it('内含待审批提问子节点 → 提问格出现审批入口（仅本次批准）', () => {
     const w = mountNode(
       msg({
         id: 'tc1',
@@ -290,7 +290,7 @@ describe('MessageNode：工具子骨架（skeleton 容器，自身正文提升�
       }),
     )
     expect(w.find('.type-interaction').exists()).toBe(true)
-    expect(w.text()).toContain('批准执行')
+    expect(w.text()).toContain('仅本次批准')
   })
 
   it('可补充参数的可恢复失败（后端下发 supply）→ 出现补充参数入口', () => {
@@ -829,6 +829,51 @@ describe('MessageNode：工具确认的四档', () => {
     return { w, calls, resumed, allowed, granted }
   }
 
+  it('审批摘要先说明动作、目标与后果，原始参数默认折叠', () => {
+    const tree = confirmTree('high')
+    const interaction = tree.children![0]
+    interaction.meta = {
+      prompt: {
+        kind: 'confirm',
+        tool_name: 'vdfs_delete',
+        risk_level: 'high',
+        description: '通用工具说明',
+        args: { path: 'tmp/old.txt', recursive: true },
+        approval: {
+          action: '删除文件或目录',
+          effect: 'file_delete',
+          target_label: '目标路径',
+          target: 'tmp/old.txt',
+        },
+      },
+    }
+    const w = mountWithPorts(tree).w
+    expect(w.find('.up-confirm-action').text()).toBe('删除文件或目录')
+    expect(w.find('.up-confirm-target').text()).toContain('目标路径')
+    expect(w.find('.up-confirm-target code').text()).toBe('tmp/old.txt')
+    expect(w.find('.up-confirm-effect').text()).toContain('会删除')
+    expect(w.find('.up-risk').text()).toBe('高风险')
+    expect(w.find('.up-args pre').exists()).toBe(true)
+    expect(w.find('.up-args').attributes('open')).toBeUndefined()
+    expect(w.text()).not.toContain('通用工具说明')
+  })
+
+  it('没有审批摘要时保留描述与参数回退，不猜工具语义', () => {
+    const tree = confirmTree()
+    tree.children![0].meta = {
+      prompt: {
+        kind: 'confirm',
+        tool_name: 'custom_tool',
+        description: '自定义操作说明',
+        args: { path: 'tmp/x' },
+      },
+    }
+    const w = mountWithPorts(tree).w
+    expect(w.find('.up-confirm-desc').text()).toBe('自定义操作说明')
+    expect(w.find('.up-confirm-action').exists()).toBe(false)
+    expect(w.find('.up-args pre').text()).toContain('tmp/x')
+  })
+
   it('确认卡说明「无默认沙箱、批准不等于隔离」——与首启同一条边界声明', () => {
     const w = mountWithPorts(confirmTree('high')).w
     const note = w.find('.up-sandbox-hint')
@@ -839,8 +884,8 @@ describe('MessageNode：工具确认的四档', () => {
 
   it('带风险档的确认卡给出两档放行；不带档位时两键都不出现', () => {
     const withRisk = mountWithPorts(confirmTree('high')).w
-    expect(withRisk.find('button.up-allow-session').text()).toBe('本会话放行')
-    expect(withRisk.find('button.up-allow-forever').text()).toBe('永久放行')
+    expect(withRisk.find('button.up-allow-session').text()).toBe('本会话同档免问')
+    expect(withRisk.find('button.up-allow-forever').text()).toBe('此工具永久免问同档')
 
     const bare = mountWithPorts(confirmTree()).w
     expect(bare.find('button.up-allow-session').exists()).toBe(false)

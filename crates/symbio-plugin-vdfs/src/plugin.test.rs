@@ -71,7 +71,7 @@ fn tools_cover_all_ops() {
         Arc::new(symbio_plugin_api::collectors::DefaultToolVisitor::new());
     let names: Vec<String> = tools::vdfs_tools(Arc::new(ToolVdfs::new(visitor)))
         .iter()
-        .map(|(m, _)| m.name.clone())
+        .map(|(m, _, _)| m.name.clone())
         .collect();
     assert_eq!(
         names,

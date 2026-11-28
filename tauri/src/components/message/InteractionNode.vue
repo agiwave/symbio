@@ -3,8 +3,8 @@
 
   两种子形态由数据契约判别键 `kind` 分派（`schemas/message_prompt.ts`）：
   · `question`：一个或多个问题，可单选 / 多选，含约定选项 `Other`（勾选后自由输入）；
-  · `confirm` ：工具名 + 风险等级 + 参数 + 描述，四键——批准本次 / 本会话放行 /
-               永久放行 / 拒绝。
+  · `confirm` ：工具名 + 风险等级 + 可选审批摘要 + 参数 + 描述——仅本次批准 /
+               本会话同档免问 / 此工具永久免问同档 / 拒绝。
 
   四键为什么是四个平级按钮，而不是「批准」加一个「以后别再问」的复选框：
   `approve` 记的是「用户批了**这一次**」（`authz.granted`，一次调用一笔）；
@@ -104,17 +104,26 @@
               v-if="confirmPrompt.risk_level"
               class="up-risk"
               :class="'risk-' + confirmPrompt.risk_level"
-              >{{ confirmPrompt.risk_level }}</span
+              >{{ riskLabel }}</span
             >
           </div>
-          <div class="up-confirm-desc">{{ confirmPrompt.description }}</div>
-          <pre v-if="confirmPrompt.args !== undefined" class="up-args">{{
-            JSON.stringify(confirmPrompt.args, null, 2)
-          }}</pre>
+          <template v-if="confirmApproval">
+            <div class="up-confirm-action">{{ confirmApproval.action }}</div>
+            <div class="up-confirm-target">
+              <span>{{ confirmApproval.target_label || '目标' }}</span>
+              <code>{{ approvalTarget }}</code>
+            </div>
+            <div class="up-confirm-effect">{{ effectLabel }}</div>
+          </template>
+          <div v-else class="up-confirm-desc">{{ confirmPrompt.description }}</div>
+          <details v-if="confirmPrompt.args !== undefined" class="up-args">
+            <summary>技术详情</summary>
+            <pre>{{ JSON.stringify(confirmPrompt.args, null, 2) }}</pre>
+          </details>
         </div>
         <div class="up-confirm-btns">
           <button class="up-approve" :disabled="isAnswered" @click="submitConfirm(true)">
-            {{ isAnswered ? '已处理' : '批准执行' }}
+            {{ isAnswered ? '已处理' : '仅本次批准' }}
           </button>
           <!-- 「本会话放行」只在这次调用确实带风险档时出现：没有档位就没有
                「抬到哪一档」可言（未声明风险的工具按 Medium 兜底，那种情况下
@@ -125,7 +134,7 @@
             :disabled="isAnswered"
             @click="submitAllowForSession"
           >
-            {{ isAnswered ? '已处理' : '本会话放行' }}
+            {{ isAnswered ? '已处理' : '本会话同档免问' }}
           </button>
           <!-- 「永久放行」抬的是**这个工具**的授权上限（全局配置 `approval_grants`）。
                它比「本会话放行」更宽（跨会话），因此视觉重量更轻；撤销在设置页。 -->
@@ -135,7 +144,7 @@
             :disabled="isAnswered"
             @click="submitAllowForever"
           >
-            {{ isAnswered ? '已处理' : '永久放行' }}
+            {{ isAnswered ? '已处理' : '此工具永久免问同档' }}
           </button>
           <button class="up-reject" :disabled="isAnswered" @click="submitConfirm(false)">
             {{ isAnswered ? '已处理' : '拒绝' }}
@@ -144,7 +153,7 @@
         <!-- 四档的**后果**写在同一处：三个按钮的文字都只说了做什么，没说「管多久」。
              永久放行改的是跨会话的授权清单，误点的代价最大，必须在这里说清楚。 -->
         <p class="up-scope-hint">
-          批准只对这一次调用生效<template v-if="confirmRisk">；本会话放行让同档工具在本会话内不再询问；永久放行对该工具跨会话生效</template>。
+          仅批准只对这一次调用生效，不改变后续权限<template v-if="confirmRisk">；本会话同档免问仅持续到当前会话结束；此工具永久免问同档会跨会话保存，可在设置中撤销</template>。
         </p>
         <!-- 与首启引导同一条边界声明：本仓无默认沙箱（README 诚实清单 / RE-011 §4）。
              审批控制的是「让不让做」，不是「在隔离环境里做」——用户在这里做决定时
@@ -173,6 +182,7 @@ import {
   MESSAGE_PROMPT_OTHER,
   MESSAGE_REJECT_REASON,
   type MessagePromptAnswer,
+  type MessagePromptEffect,
   type MessagePromptQuestion,
 } from '@/schemas/message_prompt'
 import { RESUME_KEY, ALLOW_FOR_SESSION_KEY, ALLOW_FOREVER_KEY } from '@/composables/useChatConnection'
@@ -210,6 +220,30 @@ const questionPrompt = computed(() =>
   prompt.value?.kind === 'question' ? prompt.value : null,
 )
 const confirmPrompt = computed(() => (prompt.value?.kind === 'confirm' ? prompt.value : null))
+const confirmApproval = computed(() => confirmPrompt.value?.approval)
+
+const effectLabels: Record<MessagePromptEffect, string> = {
+  file_modify: '会修改文件内容',
+  file_delete: '会删除文件或目录',
+  network_send: '会向外部服务发送数据',
+  system_execute: '会在本机执行命令，具体影响取决于命令内容',
+  other: '可能改变当前状态',
+}
+const riskLabels: Record<string, string> = {
+  low: '低风险',
+  medium: '中风险',
+  high: '高风险',
+}
+const riskLabel = computed(() => riskLabels[confirmPrompt.value?.risk_level || ''] || '')
+const effectLabel = computed(() => {
+  const effect = confirmApproval.value?.effect
+  return effect ? effectLabels[effect] : ''
+})
+const approvalTarget = computed(() => {
+  const target = confirmApproval.value?.target
+  if (typeof target === 'string') return target
+  return target === undefined ? '' : JSON.stringify(target, null, 2)
+})
 
 /**
  * 本次调用可读的风险档（「本会话放行」/「永久放行」两档的出现条件）。
@@ -492,14 +526,47 @@ function submitQuestions() {
   font-size: 0.8rem;
   color: var(--text-secondary);
 }
-.up-args {
-  margin: 0;
-  padding: 0.5rem 0.6rem;
+.up-confirm-action {
+  font-size: 0.92rem;
+  font-weight: 600;
+  color: var(--text-primary);
+}
+.up-confirm-target {
+  display: flex;
+  flex-wrap: wrap;
+  gap: 0.35rem;
+  align-items: baseline;
+  font-size: 0.8rem;
+  color: var(--text-secondary);
+}
+.up-confirm-target code {
+  padding: 0.1rem 0.3rem;
+  border-radius: 0.25rem;
   background: var(--color-code-bg);
   color: var(--color-code-fg);
+  overflow-wrap: anywhere;
+  white-space: pre-wrap;
+}
+.up-confirm-effect {
+  font-size: 0.76rem;
+  color: var(--color-tag-warn-fg);
+}
+.up-args {
   border-radius: 0.5rem;
-  font-family: 'JetBrains Mono', ui-monospace, monospace;
+  background: var(--color-code-bg);
+  color: var(--color-code-fg);
   font-size: 0.74rem;
+  overflow: hidden;
+}
+.up-args summary {
+  padding: 0.35rem 0.6rem;
+  color: var(--text-secondary);
+  cursor: pointer;
+}
+.up-args pre {
+  margin: 0;
+  padding: 0 0.6rem 0.5rem;
+  font-family: 'JetBrains Mono', ui-monospace, monospace;
   line-height: 1.5;
   overflow-x: auto;
   max-height: 15rem;
@@ -507,6 +574,7 @@ function submitQuestions() {
 }
 .up-confirm-btns {
   display: flex;
+  flex-wrap: wrap;
   gap: 0.5rem;
 }
 .up-approve,

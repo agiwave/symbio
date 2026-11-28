@@ -11,7 +11,7 @@ use super::{
 use async_trait::async_trait;
 use serde_json::{json, Value};
 use std::sync::{Arc, Weak};
-use symbio_plugin_api::collectors::{FactsOf, RiskOf};
+use symbio_plugin_api::collectors::{ApprovalEffect, ApprovalSummary, FactsOf, RiskOf};
 use symbio_plugin_api::PLUGIN_ID_LOCAL;
 use symbio_plugin_api::{
     plugin_dir_from_ctx, CapabilityMeta, CapabilityRiskLevel, Plugin, PluginConfigFile, PluginDir,
@@ -135,6 +135,7 @@ struct ToolEntry {
     /// 把它翻成开放 kind 事实交给闸门查沙箱。沙箱不认识工具名，闸门不认识配置项。
     /// `None` = 该工具不提交事实（绝大多数工具），走原审批判定。
     facts: Option<FactsOf>,
+    approval: Option<ApprovalSummary>,
     executor: Arc<dyn PortExecutor>,
 }
 
@@ -241,30 +242,40 @@ impl LocalPlugin {
                 meta: shell.meta(),
                 risk: Some(shell_risk),
                 facts: Some(shell_facts),
+                approval: Some(ApprovalSummary::targeted(
+                    "执行系统命令",
+                    ApprovalEffect::SYSTEM_EXECUTE,
+                    "command",
+                    "命令",
+                )),
                 executor: shell,
             },
             ToolEntry {
                 meta: content_search.meta(),
                 risk: None,
                 facts: Some(search_facts.clone()),
+                approval: None,
                 executor: content_search,
             },
             ToolEntry {
                 meta: todo_write.meta(),
                 risk: None,
                 facts: None,
+                approval: None,
                 executor: todo_write,
             },
             ToolEntry {
                 meta: codebase_search.meta(),
                 risk: None,
                 facts: Some(search_facts),
+                approval: None,
                 executor: codebase_search,
             },
             ToolEntry {
                 meta: ask_user.meta(),
                 risk: None,
                 facts: None,
+                approval: None,
                 executor: ask_user,
             },
         ];
@@ -341,11 +352,12 @@ impl Plugin for LocalPlugin {
             // 纯数据的工具行。shell 的动态风险闭包与事实提取器随条目交上去，
             // 静态档工具传 `None`（判定回落 `meta.effective_risk()`）。
             for entry in self.tool_impls.iter() {
-                symbio_plugin_api::collectors::register_tool_with_facts(
+                symbio_plugin_api::collectors::register_tool_with_summary(
                     &ctx,
                     entry.meta.clone(),
                     entry.risk.clone(),
                     entry.facts.clone(),
+                    entry.approval.clone(),
                     Arc::clone(&entry.executor),
                 )
                 .await;

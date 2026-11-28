@@ -212,6 +212,45 @@ fn high_risk_over_default_threshold_produces_confirm_card() {
     );
 }
 
+#[test]
+fn approval_card_carries_tool_declared_summary_and_actual_target() {
+    let tool = StubTool::new("vdfs_delete", CapabilityRiskLevel::High);
+    let summary = ApprovalSummary::targeted(
+        "删除文件或目录",
+        ApprovalEffect::FILE_DELETE,
+        "path",
+        "目标路径",
+    );
+    let payload = approval_gate_inner(
+        &ctx(),
+        &tool.meta(),
+        StubTool::risk_of(&tool).as_ref(),
+        &json!({"path": "tmp/old.txt"}),
+        None,
+        Some(&summary),
+    )
+    .expect("应产卡");
+    assert_eq!(payload["prompt"]["approval"]["action"], "删除文件或目录");
+    assert_eq!(payload["prompt"]["approval"]["effect"], "file_delete");
+    assert_eq!(payload["prompt"]["approval"]["target_label"], "目标路径");
+    assert_eq!(payload["prompt"]["approval"]["target"], "tmp/old.txt");
+}
+
+#[test]
+fn approval_card_without_declared_summary_keeps_description_and_args() {
+    let tool = StubTool::new("custom_tool", CapabilityRiskLevel::High);
+    let payload = approval_gate(
+        &ctx(),
+        &tool.meta(),
+        StubTool::risk_of(&tool).as_ref(),
+        &json!({"custom": 1}),
+    )
+    .expect("应产卡");
+    assert_eq!(payload["prompt"]["description"], "custom_tool 的说明");
+    assert_eq!(payload["prompt"]["args"]["custom"], 1);
+    assert!(payload["prompt"].get("approval").is_none());
+}
+
 /// 阈值缺席 + `risk = Low` ⇒ 放行。
 #[test]
 fn low_risk_passes_through_default_threshold() {
@@ -704,6 +743,31 @@ async fn executor_returns_card_without_running_inner() {
         !tool.executed.load(std::sync::atomic::Ordering::SeqCst),
         "被拦下时绝不落到内层——这就是「拦下不落内层」的核心不变量"
     );
+}
+
+#[tokio::test]
+async fn executor_forwards_registered_approval_summary() {
+    let tool = StubTool::new("vdfs_delete", CapabilityRiskLevel::High);
+    let inner: Arc<dyn PortExecutor> = tool.clone();
+    let g = GatedExecutor::new(tool.meta(), StubTool::risk_of(&tool), inner).with_approval(
+        ApprovalSummary::targeted(
+            "删除文件或目录",
+            ApprovalEffect::FILE_DELETE,
+            "path",
+            "目标路径",
+        ),
+    );
+    let out = g
+        .execute(
+            exec_ctx(ctx()),
+            PortInput {
+                port: "vdfs_delete".to_string(),
+                payload: json!({"path": "tmp/x"}),
+            },
+        )
+        .await;
+    assert_eq!(result_of(&out)["prompt"]["approval"]["target"], "tmp/x");
+    assert!(!tool.executed.load(std::sync::atomic::Ordering::SeqCst));
 }
 
 /// 没有调用方上下文 ⇒ 诚实的非重试失败（闸门连判定的材料都没有）。

@@ -141,12 +141,13 @@ impl Plugin for VdfsPlugin {
                     }
                 },
             );
-            for (meta, executor) in tools::vdfs_tools(provider) {
-                symbio_plugin_api::collectors::register_tool_with_facts(
+            for (meta, executor, approval) in tools::vdfs_tools(provider) {
+                symbio_plugin_api::collectors::register_tool_with_summary(
                     &ctx,
                     meta,
                     None,
                     Some(path_facts.clone()),
+                    approval,
                     executor,
                 )
                 .await;

@@ -32,6 +32,7 @@ use async_trait::async_trait;
 use futures::future::BoxFuture;
 use serde_json::Value;
 use std::sync::Arc;
+use symbio_plugin_api::collectors::{ApprovalEffect, ApprovalSummary};
 use symbio_plugin_api::{
     missing_caller, port_result, CapabilityMeta, CapabilityRiskLevel, ExecEnv, PluginError,
     PluginInvokeRequest, PortExecContext, PortExecutor, PortInput, PortOutcome,
@@ -63,6 +64,7 @@ pub struct ToolSpec {
     /// 自声明的行为名（DE-025 ）。写族四个声明 `file_change`（产物格因此带上
     /// `file_op`，工作目录变更账按声明折，不按工具名猜）；读 / 统计族声明空集。
     pub behaviors: &'static [&'static str],
+    pub approval: Option<ApprovalSummary>,
     /// 真逻辑：取参数、调 provider、拼回执
     pub call: ToolCall,
 }
@@ -135,6 +137,7 @@ pub static SPECS: &[ToolSpec] = &[
         examples: &["{\"path\":\"README.md\"}"],
         risk: CapabilityRiskLevel::Low,
         behaviors: &[],
+        approval: None,
         call: |p, args, ctx| {
             Box::pin(async move {
                 super::ensure_required(&args, "path")?;
@@ -163,6 +166,12 @@ pub static SPECS: &[ToolSpec] = &[
         ],
         risk: CapabilityRiskLevel::High,
         behaviors: &[crate::behavior::FILE_CHANGE],
+        approval: Some(ApprovalSummary::targeted(
+            "删除文件或目录",
+            ApprovalEffect::FILE_DELETE,
+            "path",
+            "目标路径",
+        )),
         call: |p, args, ctx| {
             Box::pin(async move {
                 super::ensure_required(&args, "path")?;
@@ -191,6 +200,12 @@ pub static SPECS: &[ToolSpec] = &[
         examples: &["{\"path\":\"docs/notes\"}"],
         risk: CapabilityRiskLevel::Medium,
         behaviors: &[crate::behavior::FILE_CHANGE],
+        approval: Some(ApprovalSummary::targeted(
+            "创建目录",
+            ApprovalEffect::FILE_MODIFY,
+            "path",
+            "目标路径",
+        )),
         call: |p, args, ctx| {
             Box::pin(async move {
                 super::ensure_required(&args, "path")?;
@@ -221,6 +236,12 @@ pub static SPECS: &[ToolSpec] = &[
         examples: &["{\"path\":\"notes.md\",\"text\":\"# 标题\\n\"}"],
         risk: CapabilityRiskLevel::Medium,
         behaviors: &[crate::behavior::FILE_CHANGE],
+        approval: Some(ApprovalSummary::targeted(
+            "创建或覆盖文件",
+            ApprovalEffect::FILE_MODIFY,
+            "path",
+            "目标路径",
+        )),
         call: |p, args, ctx| {
             Box::pin(async move {
                 super::ensure_required(&args, "path")?;
@@ -258,6 +279,12 @@ pub static SPECS: &[ToolSpec] = &[
         examples: &["{\"path\":\"src/main.rs\",\"old_string\":\"fn old()\",\"new_string\":\"fn new()\"}"],
         risk: CapabilityRiskLevel::Medium,
         behaviors: &[crate::behavior::FILE_CHANGE],
+        approval: Some(ApprovalSummary::targeted(
+            "编辑文件内容",
+            ApprovalEffect::FILE_MODIFY,
+            "path",
+            "目标路径",
+        )),
         call: |p, args, ctx| {
             Box::pin(async move {
                 super::ensure_required(&args, "path")?;
@@ -301,6 +328,7 @@ pub static SPECS: &[ToolSpec] = &[
         ],
         risk: CapabilityRiskLevel::Low,
         behaviors: &[],
+        approval: None,
         call: |p, args, ctx| {
             Box::pin(async move {
                 super::ensure_required(&args, "pattern")?;

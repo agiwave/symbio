@@ -34,13 +34,34 @@ fn empty_provider() -> Arc<ToolVdfs> {
 
 #[test]
 fn metas_are_llm_ready() {
-    for (m, _) in vdfs_tools(empty_provider()) {
+    for (m, _, _) in vdfs_tools(empty_provider()) {
         assert!(!m.description.is_empty());
         assert_eq!(m.category, Some(CapabilityCategory::Resource));
         assert!(m.input_schema.get("type").is_some());
         // examples 由协议适配层（model）追加给 LLM —— 此处只校验「声明了 examples」，
         // 拼接格式归 model 的 `description_for_llm` 自己测（core 不再承载该格式）。
         assert!(m.examples.as_ref().is_some_and(|e| !e.is_empty()));
+    }
+}
+
+#[test]
+fn mutating_tools_declare_approval_targets_and_effects() {
+    let expected = [
+        ("vdfs_edit", "file_modify"),
+        ("vdfs_write", "file_modify"),
+        ("vdfs_delete", "file_delete"),
+        ("vdfs_mkdir", "file_modify"),
+    ];
+    for (meta, _, approval) in vdfs_tools(empty_provider()) {
+        if let Some((_, effect)) = expected.iter().find(|(name, _)| *name == meta.name) {
+            let summary = approval
+                .unwrap_or_else(|| panic!("{} 缺少审批摘要", meta.name))
+                .summary(&serde_json::json!({"path": "tmp/x"}));
+            assert_eq!(summary["effect"], *effect);
+            assert_eq!(summary["target"], "tmp/x");
+        } else {
+            assert!(approval.is_none(), "{} 无需修改状态", meta.name);
+        }
     }
 }
 
@@ -52,7 +73,7 @@ fn metas_are_llm_ready() {
 fn tools_cover_all_ops() {
     let names: Vec<String> = vdfs_tools(empty_provider())
         .iter()
-        .map(|(m, _)| m.name.clone())
+        .map(|(m, _, _)| m.name.clone())
         .collect();
     assert_eq!(
         names,

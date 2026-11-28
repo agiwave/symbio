@@ -11,7 +11,7 @@ use super::{
 // 的第二个洞随 `route` 执行分支一起消失。
 use async_trait::async_trait;
 use std::sync::{Arc, Weak};
-use symbio_plugin_api::collectors::FactsOf;
+use symbio_plugin_api::collectors::{ApprovalEffect, ApprovalSummary, FactsOf};
 use symbio_plugin_api::PLUGIN_ID_WEB;
 use symbio_plugin_api::{
     plugin_dir_from_ctx, CapabilityMeta, Plugin, PluginConfigFile, PluginDir, PluginError,
@@ -76,6 +76,7 @@ fn config_definition() -> DetailDefinition {
 struct ToolEntry {
     meta: CapabilityMeta,
     facts: Option<FactsOf>,
+    approval: Option<ApprovalSummary>,
     executor: Arc<dyn PortExecutor>,
 }
 
@@ -151,16 +152,24 @@ impl WebPlugin {
             ToolEntry {
                 meta: web_fetch.meta(),
                 facts: Some(url_facts.clone()),
+                approval: None,
                 executor: web_fetch,
             },
             ToolEntry {
                 meta: web_search.meta(),
                 facts: Some(search_facts),
+                approval: None,
                 executor: web_search,
             },
             ToolEntry {
                 meta: http_request.meta(),
                 facts: Some(url_facts),
+                approval: Some(ApprovalSummary::targeted(
+                    "发送网络请求",
+                    ApprovalEffect::NETWORK_SEND,
+                    "url",
+                    "目标地址",
+                )),
                 executor: http_request,
             },
         ];
@@ -244,11 +253,12 @@ impl Plugin for WebPlugin {
             // 注册收口点（`register_tool`）一次写两处：裹闸的端口绑定 + 纯数据的
             // 工具行。本插件全部工具都是静态档（`risk = None`）。
             for entry in self.tool_impls.iter() {
-                symbio_plugin_api::collectors::register_tool_with_facts(
+                symbio_plugin_api::collectors::register_tool_with_summary(
                     &ctx,
                     entry.meta.clone(),
                     None,
                     entry.facts.clone(),
+                    entry.approval.clone(),
                     Arc::clone(&entry.executor),
                 )
                 .await;

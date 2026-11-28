@@ -41,6 +41,62 @@ use serde_json::{json, Value};
 /// `"true"`。shell 等内层执行体只认这个 ctx 标记，绝不读 `args.approved`。
 const TRUSTED_APPROVED: &str = "approved";
 
+/// 工具自声明的审批摘要；属于注册机制，不进入内核能力数据面。
+#[derive(Debug, Clone)]
+pub struct ApprovalSummary(ApprovalSummarySpec);
+
+#[derive(Debug, Clone)]
+struct ApprovalSummarySpec {
+    action: &'static str,
+    effect: ApprovalEffect,
+    target_arg: Option<&'static str>,
+    target_label: Option<&'static str>,
+}
+
+impl ApprovalSummary {
+    pub const fn targeted(
+        action: &'static str,
+        effect: ApprovalEffect,
+        arg: &'static str,
+        label: &'static str,
+    ) -> Self {
+        Self(ApprovalSummarySpec {
+            action,
+            effect,
+            target_arg: Some(arg),
+            target_label: Some(label),
+        })
+    }
+
+    pub fn summary(&self, args: &Value) -> Value {
+        let spec = &self.0;
+        let mut summary = json!({
+            "action": spec.action,
+            "effect": spec.effect.as_str(),
+        });
+        if let Some(arg) = spec.target_arg {
+            summary["target_label"] = json!(spec.target_label);
+            summary["target"] = args.get(arg).cloned().unwrap_or(Value::Null);
+        }
+        summary
+    }
+}
+
+#[derive(Debug, Clone, Copy, PartialEq, Eq)]
+pub struct ApprovalEffect(&'static str);
+
+impl ApprovalEffect {
+    pub const FILE_MODIFY: Self = Self("file_modify");
+    pub const FILE_DELETE: Self = Self("file_delete");
+    pub const NETWORK_SEND: Self = Self("network_send");
+    pub const SYSTEM_EXECUTE: Self = Self("system_execute");
+    pub const OTHER: Self = Self("other");
+
+    pub const fn as_str(self) -> &'static str {
+        self.0
+    }
+}
+
 /// 工具自声明的**意图事实提取器**：把本次调用参数翻译成 `[SandboxFact]`。
 ///
 /// 这是工具侧的能力（只有工具知道 `command` / `path` 这些参数怎么解释），闸门与沙箱
@@ -125,7 +181,7 @@ pub fn approval_gate(
     risk: &dyn Fn(&Value) -> CapabilityRiskLevel,
     args: &Value,
 ) -> Option<Value> {
-    approval_gate_inner(ctx, meta, risk, args, None)
+    approval_gate_inner(ctx, meta, risk, args, None, None)
 }
 
 /// 带**工具声明事实**的闸门入口（ 能力约束接入）。
@@ -139,9 +195,10 @@ pub fn approval_gate_with_facts(
     risk: &dyn Fn(&Value) -> CapabilityRiskLevel,
     facts_of: Option<&FactsOf>,
     args: &Value,
+    approval: Option<&ApprovalSummary>,
 ) -> Option<Value> {
     let facts = facts_of.map(|f| f(args, ctx)).unwrap_or_default();
-    approval_gate_inner(ctx, meta, risk, args, Some(&facts))
+    approval_gate_inner(ctx, meta, risk, args, Some(&facts), approval)
 }
 
 fn approval_gate_inner(
@@ -150,6 +207,7 @@ fn approval_gate_inner(
     risk: &dyn Fn(&Value) -> CapabilityRiskLevel,
     args: &Value,
     facts: Option<&[SandboxFact]>,
+    approval: Option<&ApprovalSummary>,
 ) -> Option<Value> {
     // 风险由**工具自己**回答：静态档来自 `CapabilityMeta.risk`，随参数变化档（shell）
     // 覆写它。闸门不认工具名——新增/改名工具不必回来改这里。
@@ -225,11 +283,7 @@ fn approval_gate_inner(
     }
 
     Some(confirm_prompt_payload(
-        &meta.name,
-        &meta.description,
-        args,
-        tool_risk,
-        &mode,
+        meta, args, tool_risk, &mode, approval,
     ))
 }
 
@@ -239,12 +293,14 @@ fn approval_gate_inner(
 /// **user_prompt 节点由编排层构造**（`session/tools/tool_executor.rs`）：它拥有
 /// 结果节点 id（由调用 id 派生）与父 ToolCall 的终态。
 fn confirm_prompt_payload(
-    tool_name: &str,
-    tool_description: &str,
+    meta: &CapabilityMeta,
     args: &Value,
     risk_level: CapabilityRiskLevel,
     mode: &str,
+    approval: Option<&ApprovalSummary>,
 ) -> Value {
+    let tool_name = &meta.name;
+    let tool_description = &meta.description;
     let risk_str = risk_level.as_str();
     if mode == "auto" {
         return json!({
@@ -256,17 +312,21 @@ fn confirm_prompt_payload(
             "failure_kind": crate::kernel::capability::failure_kind::PERMISSION_DENIED,
         });
     }
+    let mut prompt = json!({
+        "kind": "confirm",
+        "tool_name": tool_name,
+        "args": args.clone(),
+        "risk_level": risk_str,
+        "description": tool_description,
+    });
+    if let Some(approval) = approval {
+        prompt["approval"] = approval.summary(args);
+    }
     json!({
         "content": format!("需要确认：{tool_description}"),
         "success": false,
         "failure_kind": crate::kernel::capability::failure_kind::NEEDS_APPROVAL,
-        "prompt": {
-            "kind": "confirm",
-            "tool_name": tool_name,
-            "args": args.clone(),
-            "risk_level": risk_str,
-            "description": tool_description,
-        },
+        "prompt": prompt,
     })
 }
 
@@ -276,10 +336,11 @@ fn confirm_prompt_payload(
 /// （工具自己的 `PortExecutor`）。`execute` 先判 [`approval_gate`]：拦下 ⇒
 /// 停等载荷按 [`RESULT_KEY`] 交回（普通结果形态，派发侧 pending 机制不变，
 /// `authz` 维持放行——停等不是拒绝）；放行 ⇒ 原样透传给内层。
-pub struct GatedExecutor {
+pub(crate) struct GatedExecutor {
     meta: CapabilityMeta,
     risk: RiskOf,
     facts: Option<FactSource>,
+    approval: Option<ApprovalSummary>,
     inner: Arc<dyn PortExecutor>,
 }
 
@@ -291,6 +352,7 @@ impl GatedExecutor {
             meta,
             risk,
             facts: None,
+            approval: None,
             inner,
         }
     }
@@ -306,6 +368,7 @@ impl GatedExecutor {
             meta,
             risk,
             facts: Some(FactSource::Sync(facts)),
+            approval: None,
             inner,
         }
     }
@@ -320,8 +383,14 @@ impl GatedExecutor {
             meta,
             risk,
             facts: Some(FactSource::Async(facts)),
+            approval: None,
             inner,
         }
+    }
+
+    pub fn with_approval(mut self, approval: ApprovalSummary) -> Self {
+        self.approval = Some(approval);
+        self
     }
 }
 
@@ -341,6 +410,7 @@ impl PortExecutor for GatedExecutor {
                 self.risk.as_ref(),
                 Some(facts),
                 &input.payload,
+                self.approval.as_ref(),
             ),
             Some(FactSource::Async(facts)) => match facts(&input.payload, &request).await {
                 Ok(facts) => approval_gate_inner(
@@ -349,6 +419,7 @@ impl PortExecutor for GatedExecutor {
                     self.risk.as_ref(),
                     &input.payload,
                     Some(&facts),
+                    self.approval.as_ref(),
                 ),
                 Err(error) => Some(json!({
                     "error": format!("工具意图事实解析失败：{error}"),
@@ -356,7 +427,17 @@ impl PortExecutor for GatedExecutor {
                     "failure_kind": crate::kernel::capability::failure_kind::PERMISSION_DENIED,
                 })),
             },
-            None => approval_gate(&request, &self.meta, self.risk.as_ref(), &input.payload),
+            None if self.approval.is_none() => {
+                approval_gate(&request, &self.meta, self.risk.as_ref(), &input.payload)
+            }
+            None => approval_gate_inner(
+                &request,
+                &self.meta,
+                self.risk.as_ref(),
+                &input.payload,
+                None,
+                self.approval.as_ref(),
+            ),
         };
         if let Some(payload) = intercepted {
             // 闸门拦下：停等载荷是普通结果形态（`failure_kind` 在载荷里），
