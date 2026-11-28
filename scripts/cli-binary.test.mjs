@@ -69,6 +69,18 @@ test('清单是一份集合：重叠的扫描根不产生重复项', () => {
   assert.equal(new Set(rels).size, rels.length, '同一文件被收两遍会让指纹口径模糊')
 })
 
+test('前端 dist 从无到有、内容变化 ⇒ 指纹变', () => {
+  const before = cliBuildFingerprint(root)
+  write('packages/ui/dist/index.html', '<div id="app"></div>\n')
+  const rels = cliBuildInputs(root).map((p) => path.relative(root, p).split(path.sep).join('/'))
+  assert.ok(rels.includes('packages/ui/dist/index.html'), '编译期内嵌的 dist 必须进指纹')
+  const withIndex = cliBuildFingerprint(root)
+  assert.notEqual(withIndex, before, 'dist 创建会改变 CLI 内嵌资源')
+  write('packages/ui/dist/assets/app.js', 'export default {}\n')
+  assert.notEqual(cliBuildFingerprint(root), withIndex, 'dist 内容变化必须让旧 exe 失效')
+  fs.rmSync(path.join(root, 'packages', 'ui', 'dist'), { recursive: true, force: true })
+})
+
 test('同一份输入 ⇒ 同一个指纹（否则「新鲜」永远判不出来）', () => {
   assert.equal(cliBuildFingerprint(root), cliBuildFingerprint(root))
 })

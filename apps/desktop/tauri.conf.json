@@ -4,7 +4,7 @@
   "version": "0.1.14",
   "identifier": "com.symbio.desktop",
   "build": {
-    "beforeDevCommand": "npm --prefix ../../packages/ui run dev",
+    "beforeDevCommand": "cargo build -p symbio-cli --bin symbio-cli && npm --prefix ../../packages/ui run dev",
     "beforeBuildCommand": "npm --prefix ../../packages/ui run build",
     "devUrl": "http://localhost:1420"
   },

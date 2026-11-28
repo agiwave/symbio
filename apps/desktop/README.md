@@ -38,7 +38,8 @@ Vue 源码、文档与唯一构建产物都在 `packages/ui/`：`packages/ui/src
 cd apps/desktop && npm install
 
 # 2) 原生窗口 + 前端热更新（等价旧 tauri dev）：
-#    Tauri 起 Vite（1420，HMR），窗口加载 1420，/api 由 Vite 代理到 CLI serve(9231)
+#    先构建当前 workspace 的 CLI，再起 Vite（1420，HMR），窗口加载 1420，
+#    /api 由 Vite 代理到 CLI serve(9231)
 npm run tauri dev
 
 # 3) 直接运行（不依赖 Vite）：窗口加载 CLI 内嵌 UI

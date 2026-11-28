@@ -32,12 +32,14 @@ fn main() {
         .expect("crate must live under <repo>/apps/cli/");
     let dist = repo.join("packages").join("ui").join("dist");
 
+    // 缺失时也要监视：先以占位页构建、随后前端构建生成 dist 时，cargo 必须重跑本脚本。
+    println!("cargo:rerun-if-changed={}", dist.display());
+
     let out_dir = PathBuf::from(env::var("OUT_DIR").expect("OUT_DIR"));
     let generated = out_dir.join("embedded_assets.rs");
 
     let real = dist.join("index.html").is_file();
     let asset_root = if real {
-        println!("cargo:rerun-if-changed={}", dist.display());
         dist
     } else {
         // 占位目录也放 OUT_DIR：不污染源码树，且随 target 清理一起消失。

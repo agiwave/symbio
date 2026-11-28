@@ -25,9 +25,9 @@ const bin = (p) => path.join(frontendDir, 'node_modules', p)
 export default {
   id: 'frontend-build',
   title: '前端构建（vite build）',
-  // 输入面：`frontend`。三端共用同一份源码与产物，与 `crates/**` 无关；后端改动时
-  // 重跑它买到的是同一份 dist。
-  needs: ['frontend'],
+  // Rust / e2e 改动也必须构建：T116 会从 CLI 内嵌资源验证完整 UI，而 backend 可能先于
+  // 本阶段把占位页编进 release CLI；e2e 前的指纹复核会据此再构建一次真实产物。
+  needs: ['frontend', 'rust', 'e2e'],
   tasks(ctx) {
     if (!fs.existsSync(path.join(frontendDir, 'package.json'))) return []
 

@@ -550,6 +550,15 @@ test('★ 阶段级并发必须连成**一批**：中间夹一个串行阶段就
   assert.equal(idx('rustdoc'), -1, 'rustdoc 阶段已废弃（）；要恢复先用决策推翻它')
 })
 
+test('★ 前端构建必须覆盖 Rust / e2e 输入：T116 依赖真实 dist 内嵌进 CLI', async () => {
+  const mod = await import(pathToFileURL(path.join(repoRoot, 'scripts', 'gate.d', '56-frontend-build.mjs')).href)
+  assert.deepEqual(
+    [...mod.default.needs].sort(),
+    ['e2e', 'frontend', 'rust'],
+    '只改前端源时构建不够：Rust / e2e 改动也要先产出 dist，再让 e2e 复核 CLI 内嵌资源',
+  )
+})
+
 test('★ 每个阶段都必须在 CI 里有一个点名它的 job：不许出现「只在本地跑」的守卫', async () => {
   // 拆阶段最危险的失效方式不是报错，是**从默认全量里消失**：本地默认还跑，CI 的某个
   // job 若没点名它，它就成了一条「推上去也没人跑」的守卫。
