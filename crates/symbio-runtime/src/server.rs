@@ -334,17 +334,17 @@ impl ServerIngress {
         // 根路径（""）在资源表里映射到 index.html，MIME 必须按**实际资源名**取；
         // 直接用空串会让 content_type 落到 application/octet-stream。
         let resource = if key.is_empty() { "index.html" } else { key };
-        let (path, body) = match symbio_frontend_assets::get(resource) {
+        let (path, body) = match symbio_ui_assets::get(resource) {
             Some(body) => (resource, body),
             None => (
                 "index.html",
-                symbio_frontend_assets::get("index.html").unwrap_or_default(),
+                symbio_ui_assets::get("index.html").unwrap_or_default(),
             ),
         };
         if body.is_empty() {
             return HttpResponse::json(404, json!({ "error": "frontend asset not found" }));
         }
-        static_ok(path, symbio_frontend_assets::content_type(path), body)
+        static_ok(path, symbio_ui_assets::content_type(path), body)
     }
 
     /// 磁盘资源：保留原有 canonicalize 防穿越 + SPA 回退，供显式 `--frontend-dist`。

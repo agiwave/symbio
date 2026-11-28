@@ -12,7 +12,11 @@ created: 2026-09-11
 支持**交互（REPL）**、**非交互（单次 / 管道）**、**心跳守护（`--heartbeat`）**与
 **浏览器 Server（`serve`）**四种形态。Server 不是另一个二进制。
 
-## 它和 tauri 前端的唯一差别是传输层
+## 三种交付物共享同一份 Vue 实现，差别只在传输层
+
+`apps/desktop`、`apps/cli serve` 与 `apps/web` 共用 `packages/ui` 的 Vue 源码和
+`packages/ui/dist` 产物：desktop 走 IPC，cli serve 走同源 HTTP（UI 默认二进制内嵌），
+web 走 browser HTTP / 离线兜底。CLI 的 REPL 形态不走 Vue，直接进程内调用插件树。
 
 ```
  ┌────────────────────┐
@@ -25,7 +29,7 @@ created: 2026-09-11
  └────────────────────┘ └───────────────────────────┘
 ```
 
-两者调用的是**同一套上下文键**（`PATH` / `PAYLOAD` / `SESSION_ID` / `WORKDIR` / …）
+走到后端时，三端调用的是**同一套上下文键**（`PATH` / `PAYLOAD` / `SESSION_ID` / `WORKDIR` / …）
 与**同一份协议**，因此本 CLI 的引入**没有改动 `symbio/` 的任何一行代码，也没有动协议**。
 
 - 上行：`PluginSimpleRequest` 装上下文 → `root.route(ctx)`（`Arc<dyn Plugin>` 进程内直连）

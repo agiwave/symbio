@@ -15,12 +15,16 @@ Symbio 桌面前端：Vue 3 + TypeScript + Tauri 2。
 
 ```
 apps/desktop/
-├── src/ # Vue3 应用（视图、组件、store、API 层）
 ├── src-tauri/ # Tauri 宿主（Rust）：只有 `route_v2` 家族 command
-└── docs/ # 前端文档
- ├── 110-FRONTEND.md # 前端架构与机制（代码结构、与后端通信）
- └── 111-INTERACTION.md # 交互语义（用户看到什么、动作产生什么反馈）
+├── docs/ # 前端文档
+│   ├── 110-FRONTEND.md # 前端架构与机制（代码结构、与后端通信）
+│   └── 111-INTERACTION.md # 交互语义（用户看到什么、动作产生什么反馈）
+└── package.json # 薄壳脚本：Vue 开发/构建委托 packages/ui，tauri 用本目录 src-tauri
 ```
+
+Vue 源码与唯一构建产物都在 `packages/ui/`：`packages/ui/src` 是三端共享的实现，
+`packages/ui/dist` 同时供 Tauri `generate_context!`、`apps/web` 静态部署与 CLI 编译期内嵌。
+本目录只保留 Tauri 壳、文档与委托脚本，不再维护独立的前端源码或 dist。
 
 ## 宿主命令（src-tauri）
 

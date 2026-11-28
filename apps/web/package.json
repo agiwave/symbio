@@ -5,15 +5,8 @@
   "type": "module",
   "private": true,
   "scripts": {
-    "dev": "node ../../packages/ui/node_modules/vite/bin/vite.js --config ../../packages/ui/vite.config.ts",
-    "build": "node ../../packages/ui/node_modules/vite/bin/vite.js build --config ../../packages/ui/vite.config.ts",
-    "preview": "node ../../packages/ui/node_modules/vite/bin/vite.js preview --config ../../packages/ui/vite.config.ts"
-  },
-  "dependencies": {
-    "@symbio/ui": "*"
-  },
-  "devDependencies": {
-    "@vitejs/plugin-vue": "^6.0.8",
-    "vite": "^8.2.2"
+    "dev": "npm --prefix ../../packages/ui run dev",
+    "build": "npm --prefix ../../packages/ui run build",
+    "preview": "npm --prefix ../../packages/ui run preview"
   }
 }

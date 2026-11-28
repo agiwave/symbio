@@ -13,7 +13,7 @@ unused_variables = "warn"
 dead_code = "warn"
 
 [dependencies]
-symbio-frontend-assets = { path = "../symbio-frontend-assets" }
+symbio-ui-assets = { path = "../symbio-ui-assets" }
 symbio-http = { path = "../symbio-http" }
 symbio-platform = { path = "../symbio-platform" }
 symbio-plugin-api = { path = "../symbio-plugin-api" }

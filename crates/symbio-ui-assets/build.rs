@@ -16,12 +16,12 @@ use std::env;
 use std::fs;
 use std::path::PathBuf;
 
-// panic-allow crates/symbio-frontend-assets/build.rs::main: 构建期不变量——cargo 必须提供 CARGO_MANIFEST_DIR / OUT_DIR，环境变量缺失意味着构建环境损坏，继续只会生成指向错误位置的产物。
-// panic-allow crates/symbio-frontend-assets/build.rs::main: 构建期不变量——crate 必须位于仓库的 crates/ 下，解析不出仓库根就没法定位 packages/ui/dist。
-// panic-allow crates/symbio-frontend-assets/build.rs::main: 构建期不变量——OUT_DIR 必须可写，写不出生成代码时后续 include! 必然编译失败，早崩比晚崩更易定位。
+// panic-allow crates/symbio-ui-assets/build.rs::main: 构建期不变量——cargo 必须提供 CARGO_MANIFEST_DIR / OUT_DIR，环境变量缺失意味着构建环境损坏，继续只会生成指向错误位置的产物。
+// panic-allow crates/symbio-ui-assets/build.rs::main: 构建期不变量——crate 必须位于仓库的 crates/ 下，解析不出仓库根就没法定位 packages/ui/dist。
+// panic-allow crates/symbio-ui-assets/build.rs::main: 构建期不变量——OUT_DIR 必须可写，写不出生成代码时后续 include! 必然编译失败，早崩比晚崩更易定位。
 fn main() {
     let manifest = PathBuf::from(env::var("CARGO_MANIFEST_DIR").expect("CARGO_MANIFEST_DIR"));
-    // crate 在 <repo>/crates/symbio-frontend-assets，向上两级到仓库根。
+    // crate 在 <repo>/crates/symbio-ui-assets，向上两级到仓库根。
     let repo = manifest
         .parent()
         .and_then(|p| p.parent())

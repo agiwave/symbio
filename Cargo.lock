@@ -4218,13 +4218,6 @@ dependencies = [
 ]
 
 [[package]]
-name = "symbio-frontend-assets"
-version = "0.1.14"
-dependencies = [
- "include_dir",
-]
-
-[[package]]
 name = "symbio-http"
 version = "0.1.14"
 dependencies = [
@@ -4809,11 +4802,11 @@ dependencies = [
  "serde_json",
  "serde_yaml_ng",
  "sha2",
- "symbio-frontend-assets",
  "symbio-http",
  "symbio-platform",
  "symbio-plugin-api",
  "symbio-providers",
+ "symbio-ui-assets",
  "tempfile",
  "tokio",
  "tokio-util",
@@ -4843,6 +4836,13 @@ dependencies = [
  "tokio-util",
  "tracing",
  "tracing-subscriber",
+]
+
+[[package]]
+name = "symbio-ui-assets"
+version = "0.1.14"
+dependencies = [
+ "include_dir",
 ]
 
 [[package]]

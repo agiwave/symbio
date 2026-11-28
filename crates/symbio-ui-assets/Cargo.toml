@@ -1,7 +1,7 @@
 [package]
-name = "symbio-frontend-assets"
+name = "symbio-ui-assets"
 version = "0.1.14"
-description = "Compile-time embedded frontend assets for symbio-cli serve"
+description = "Compile-time embedded packages/ui assets for symbio-cli serve"
 authors = ["Symbio Team"]
 license = "MIT"
 edition = "2021"

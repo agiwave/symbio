@@ -60,7 +60,7 @@ const bin = (p) => path.join(frontendDir, 'node_modules', p)
 export default {
   id: 'frontend-static',
   title: '前端静态检查（vue-tsc / vitest / eslint）',
-  // 输入面：`frontend`（`apps/desktop/` 下除 `src-tauri/` 的部分）。vue-tsc / vitest / eslint
+  // 输入面：`frontend`（`packages/ui/` 的共享源码与 `apps/web/` 的薄壳脚本；三端不再各持一份 src）。vue-tsc / vitest / eslint
   // 的输入里没有 `.rs` 也没有 `docs/`：Rust 侧改动不该让这三项重跑一遍。
   needs: ['frontend'],
   parallel: true,

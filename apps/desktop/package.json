@@ -10,13 +10,5 @@
     "tauri": "node ../../packages/ui/node_modules/@tauri-apps/cli/tauri.js",
     "stamp:dev": "node ../../scripts/tauri-binary.mjs --stamp",
     "stamp:release": "node ../../scripts/tauri-binary.mjs --stamp --release"
-  },
-  "dependencies": {
-    "@symbio/ui": "file:../../packages/ui"
-  },
-  "devDependencies": {
-    "@tauri-apps/cli": "^2.11.4",
-    "@vitejs/plugin-vue": "^6.0.8",
-    "vite": "^8.2.2"
   }
 }
