@@ -11,7 +11,7 @@ created: 2026-07-20
 # Contributing to Symbio
 
 感谢你考虑为 Symbio 贡献代码！本项目采用**分形插件架构 (Fractal Plugin Architecture)**，
-整套能力由一个 Rust 核心库 + Tauri (Vue 3) 前端 + 多个可选插件协同完成。
+整套能力由一个 Rust 核心库 + Vue 3 前端（桌面原生窗口 / CLI serve / web 共享）+ 多个可选插件协同完成。
 为了保持代码质量与可维护性，请先阅读以下约定。
 
 ---
@@ -24,8 +24,7 @@ created: 2026-07-20
 |---|---|---|
 | Rust | **1.93.1（锁定）** | 由根 `rust-toolchain.toml` 自动激活；CI 与本地必须同版，否则 `cargo fmt --check` 会因格式规则漂移而失败 |
 | Node.js | ≥ 18 | 前端构建 |
-| Tauri CLI | 2.x | `cargo install tauri-cli --version "^2.0"` |
-| 平台 | Windows / macOS / Linux | Tauri 三平台均已配置 CI |
+| 平台 | Windows / macOS / Linux | 三平台均配置 CI |
 | **系统库（仅 Linux）** | OpenSSL 开发包 + `pkg-config` | HTTP 出口的 TLS 走**平台原生栈**：Windows = SChannel、macOS = Security.framework、**Linux = 系统 OpenSSL** ⇒ Debian/Ubuntu 装 `libssl-dev pkg-config`，RHEL/Fedora 装 `openssl-devel` |
 
 可选：使用 [rustup](https://rustup.rs/) 安装 Rust — `rust-toolchain.toml` 会自动激活对应的 channel 与组件。
@@ -50,7 +49,7 @@ symbio/
 │ └── symbio-cli/ # 纯 Rust CLI 前端
 ├── apps/desktop/ # Vue 3 桌面端
 │ ├── src/ # 前端代码
-│ └── src-tauri/ # 仅 3 个 Tauri command 的薄适配层
+│ └── src/ # Tauri 原生窗口壳：拉起 CLI serve 并加载本机地址
 ├── docs/ # 系统级文档（历史只留 git log，不设归档目录）
 ├── scripts/ # 门禁与生成脚本（gate.mjs / facts/current.mjs …）
 └── rustfmt.toml · clippy.toml · rust-toolchain.toml # 位于仓库根
@@ -121,16 +120,12 @@ node scripts/gen.mjs              # 窄入口：只格式化 + 生成，不跑�
 「文件在就算新鲜」会把一份过期 exe 一直用下去，e2e 因此报出**与眼前源码直接矛盾**的断言失败
 （源码里明明有的字段，运行时是 `undefined`），排查方向被引到源码上——改用指纹判据就是为了消掉这个失败模式。
 
-**壳（Tauri）那一侧同理，而且更贵。** 它不会报错，只会让**日志**看起来来自当前源码：于是
-「日志里有一条源码中不存在的行」会被当成「代码没接上」，去读一遍代码。机制在
-`scripts/tauri-binary.mjs`，指纹覆盖壳自身的源码 / 权限集 / 清单 + **整棵 `crates/`
-插件树**（壳把它编译进去，插件日志正是从那里来的）。`npm run tauri dev|build` 会在构建**前**
-把指纹写成构建戳（`before*Command` → `npm run stamp:dev|release`），壳启动时读**自己旁边**
-那个戳并打进日志首行。于是任何一段日志自带「我是谁」，与 `node scripts/tauri-binary.mjs
---print` 一比即知是否同源；`--check` 则回答「本机产物对不对得上当前源码」。
-⚠️ 戳是**构建前**写的声明，所以判据里还有一条「产物不得比戳更旧」——构建失败时旧产物会留在
-原处而戳已指向新输入，那正是「把过期产物当最新」。配套地，输入未变时戳**不重写**，否则每次
-「什么都不用重建」的构建都会变成一次假警报。
+**CLI 产物这一侧同理，而且更贵。** 桌面交付物跑的就是 `symbio-cli` 二进制：它不会
+报错，只会让**日志**看起来来自当前源码。判据在 `scripts/cli-binary.mjs`，指纹覆盖
+`apps/cli/`、`crates/` 整棵插件树、根清单与 `packages/ui/dist`（前端编译期内嵌进 CLI）。
+使用前 `node scripts/cli-binary.mjs --check` 只判不建，不一致就
+`node scripts/cli-binary.mjs` 重建并写戳；产物旁 `.symbio-cli.build-stamp` 就是这份指纹。
+桌面原生窗口壳（`apps/desktop/src`）不进插件树，只拉起 CLI serve、等就绪并加载本机地址。
 
 MSRV 阶段会换编译器（`RUSTUP_TOOLCHAIN` 覆盖 `rust-toolchain.toml`）并写独立 target
 （`.workbuddy-ai/msrv-target/`），所以**不会**动日常构建缓存；本机没装该工具链时跳过并提示
@@ -264,7 +259,7 @@ CI 侧另有 `commit-msg-check` job，用 `--range` 把本次引入的提交逐�
  - 审计脚本 `scripts/audits/grep-audit.mjs` 中的 **S-002 规则**默认扫描全部插件（含测试代码）；这是邻近行启发式检查，不替代锁生命周期审查。
  - 已人工确认的 S-002 误报可在命中行末添加 `// grep-audit-allow S-002: 具体理由`，仅豁免该行，不应借此隐藏真实跨 await 持锁。回归测试 `node --test scripts/audits/grep-audit.test.mjs` 已接入统一门禁。
 - 日志：使用 `tracing`（`info!` / `warn!` / `error!` / `debug!`），**不要**用 `eprintln!` / `println!`。
- - 项目在 `apps/desktop/src-tauri/src/main.rs` 已初始化 `tracing-subscriber`。
+ - 项目在 `apps/cli/src/server.rs` 里通过 `symbio_platform::sdk::logger` 控制日志级别（serve 模式）。
 - 错误：实现 `thiserror` 派生 `PluginError` 变体，不要用 `String` 当错误类型。
 - 新增能力：优先在合适的 `Plugin` 下添加子路径（`worker/xxx/yyy`），
  路由规则见 [docs/003-design/002-架构总览.md](docs/003-design/002-架构总览.md "DE-002-架构总览")，

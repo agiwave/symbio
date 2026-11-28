@@ -24,7 +24,7 @@ import './_selfrun.mjs';
 // 表里那三条数的都是「转写里多出了什么」——落格那一半。下发那一半是另一件事，
 // 而且两者可以各自成立：WAL 一直按时序记着这句汇报，实时面却可以等轮末才见到它
 // （本用例补上这段之前正是如此），用户看到的就是「一个跑了几分钟的任务里助手
-// 一个字都没有」。所以 A 线在投递**之前**订阅会话实时面（与 Tauri 前端同构的
+// 一个字都没有」。所以 A 线在投递**之前**订阅会话实时面（与浏览器前端同构的
 // WS 边界），断言汇报帧早于末轮正文帧——末轮正文是流式的（生成那一刻就上实时面），
 // 它因此是一条不靠 sleep、不靠墙钟的时序基准。
 //
@@ -251,7 +251,7 @@ export default defineCase(
       const a = await startLine(SIDS.report, longTaskSession(), 'A 线进程');
       lines.push(a);
       // 实时面在**投递之前**订阅：本用例的时序判据看的是到达序，晚一步订阅
-      // 就等于把要验的那一段截掉（与 Tauri 前端同构：订阅一次覆盖整个会话目录）。
+      // 就等于把要验的那一段截掉（与浏览器前端同构：订阅一次覆盖整个会话目录）。
       const subA = await subscribeSessionRealtime(a.cli, {
         sessionId: SIDS.report,
         gatewayPort: a.port,

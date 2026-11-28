@@ -6,7 +6,7 @@
  *  L1 import 依赖图：从入口（index.html→main.ts、测试、.d.ts、构建配置）可达性。
  *  L2 字符串引用兜底：不可达但文件名仍被源码提及 → 降级「疑似」，不自动判死。
  *  L3 schema 契约：schemas/*.ts 若被 route 调用方以类型名引用则视为存活。
- *  L4 Rust 侧 **R-001（判定型）**：`pub` 声明但全仓（含 cli / tauri / 前端）
+ *  L4 Rust 侧 **R-001（判定型）**：`pub` 声明但全仓（含 cli / desktop / 前端）
  *     一次都没被提及。判据是「这个名字在整仓只出现一次（就是声明那行）」——
  *     `dead_code` lint 对 `pub` 项结构性失明（`symbio_sdk/mod.rs` 一句
  *     `pub use plugin::*` 就能让整批函数被当成对外 API），故需要这条补网。
@@ -268,7 +268,7 @@ if (unusedUnwaived.length) {
 // 为什么需要：前端侧有 import 依赖图这张硬网；**Rust 侧一张都没有**。`dead_code`
 // lint 对 `pub` 项结构性失明——`symbio_sdk/mod.rs` 里一句 `pub use plugin::*`
 // 就足以让整批函数被当成"对外 API"，于是攒出过一批零调用的 helper（8 个锁/错误
-// 辅助函数，全仓含 cli / tauri 零引用）。
+// 辅助函数，全仓含 cli / desktop 零引用）。
 //
 // ## 为什么这条能判失败，而 `plugin-entry-audit` 的 `refs=0` 不能
 //
@@ -305,12 +305,12 @@ const widen = (dir, exts, sink) => {
   }
 }
 // Rust 侧「整仓」的取范围： 拆 crate 后所有生产 .rs 都在 `crates/` 下
-// （core、内核、插件、provider、cli 各是一个 crate）；`apps/desktop/src-tauri` 是壳侧。
+// （core、内核、插件、provider、cli 各是一个 crate）；`apps/desktop/src` 是桌面原生窗口壳侧。
 // 拆分前这里是 symbio/ 与 cli/ 两个根——那两条路径现在都不存在，`widen` 会静默
-// 返回空，于是 R-001 只剩 tauri 一份语料：**语料越小，越容易把活代码判成死代码**，
+// 返回空，于是 R-001 只剩 CLI 一份语料：**语料越小，越容易把活代码判成死代码**，
 // 而它在真仓里表现成「R-001 通过」。
 widen(join(REPO, 'crates'), ['.rs'], rustSources)
-widen(join(REPO, 'apps', 'desktop', 'src-tauri'), ['.rs'], rustSources)
+widen(join(REPO, 'apps', 'desktop', 'src'), ['.rs'], rustSources)
 // 名字可能被非 Rust 侧提及（路由串常量等），一并纳入「是否被提过」的语料
 widen(join(REPO, 'packages', 'ui', 'src'), ['.ts', '.vue'], tsSources)
 

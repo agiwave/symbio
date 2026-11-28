@@ -249,15 +249,15 @@ inbound_max_connections: 64
 
 | 键 | 默认值 | 说明 |
 |----|--------|------|
-| `inbound_enabled` | `false` | 是否启动 HTTP/WS 入站服务（默认仅 Tauri IPC，不监听端口） |
-| `inbound_protocol` | `native` | `native`（仅 IPC）或 `http`（监听端口） |
+| `inbound_enabled` | `false` | 是否启动 HTTP/WS 入站服务（默认不监听端口） |
+| `inbound_protocol` | `native` | `native`（不监听）或 `http`（监听端口） |
 | `inbound_bind` | `127.0.0.1` | 监听地址 |
 | `inbound_port` | `9231` | 监听端口 |
 | `inbound_token` | 空 | Bearer 令牌；**为空仅允许回环地址**，非回环监听必须设置 |
 | `inbound_readonly` | `false` | 只读模式：仅放行查询类路径（白名单见 `symbio-http/src/ingress_policy.rs::is_readonly_allowed`） |
 | `inbound_max_connections` | `64` | 同时存活的连接上限（HTTP 一次调用占一个、WS 一条连接活到关闭）；到顶后新连接在内核队列等待（背压），不报错 |
 
-> 出站配置（前端连向何处）不在这里——连接目标由前端"系统目录"切换器统一管理（localStorage 为权威），经 `initGatewayTransport` 决定 native / http 出站。
+> 出站配置（前端连向何处）不在这里——连接目标由前端"系统目录"切换器统一管理（localStorage 为权威），经 `initGatewayTransport` 决定同源 / 远端 HTTP 出站。
 >
 > 只读白名单（精确匹配，源码 `symbio-http/src/ingress_policy.rs::is_readonly_allowed`）：`vdfs/root`、`vdfs/list`、`vdfs/tree`、`vdfs/stat`、`vdfs/read`、`vdfs/search`。资源一律经 VDFS，故放行的是它的**读操作**——`vdfs/write` / `delete` / `mkdir` / `edit` 与节点动作 `vdfs/action` 都不在列；`vdfs/watch` / `unwatch` 是长连接订阅而非一次性读，同样不在列（取舍见共享策略模块）；SSE 实时面（`GET /api/v1/events`）是同一订阅面的另一种传输，只读模式下直接 `403`。**白名单与可达面必须一致**：home 的四条臂（`home/get_homedir` · `home/reload` · `home/set_workspace` · `home/get_workspace`）不登记——gateway 的入站 router 是 worker composite，`Composite::route` 不向上转发，这些臂经入站走不到（e2e t69 ⑦ 实测 400），放进白名单只是永不生效的死条目；撤销条件见 `symbio-http/src/ingress_policy.rs` 的注释。设计定位是**兜底而非完整安全边界**：即便令牌泄露到可信内网，也只能读取而无法触发写操作与命令执行。
 >

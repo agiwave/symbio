@@ -8,7 +8,7 @@
 //! 后再 `serde_json::from_value` 解回来只为分辨「这是 `Warn` 还是别的 op」。
 //!
 //! 问题不在帧本身，而在**帧被用错了地方**：`PluginChannel` 是**跨进程传输原语**
-//! （前端链路要过 Tauri IPC / HTTP），而 `provider.round_trip` 与 `tool.execute`
+//! （前端链路要过 HTTP/WS），而 `provider.round_trip` 与 `tool.execute`
 //! 的两端**始终在同一个进程、同一个 spawn 里**（见 `crates/symbio-plugin-model/src/bound_provider.rs`）。
 //! 进程内的调用不该付进程外的代价。
 //!

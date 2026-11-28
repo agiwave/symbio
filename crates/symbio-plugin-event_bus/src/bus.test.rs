@@ -22,7 +22,7 @@ static SERIAL: LazyLock<tokio::sync::Mutex<()>> = LazyLock::new(|| tokio::sync::
 
 /// **满通道不得摘除订阅**——本模块最重要的一条不变量。
 ///
-/// 摘除是**不可逆**的：前端不会收到任何信号（Tauri 连接仍活着，不触发
+/// 摘除是**不可逆**的：前端不会收到任何信号（连接仍活着，不触发
 /// `disconnected`），此后永久收不到 VDFS 变更。而丢一帧只是「少一次状态更新」。
 #[tokio::test]
 async fn full_channel_keeps_subscription() {
@@ -161,7 +161,7 @@ fn take_bus_frame(rx: &mut mpsc::Receiver<PluginFrame>, tag: &str) -> Option<Arc
 
 /// **扇出不复制载荷**——`PluginFrame::Data(Arc<Value>)` 存在的全部理由。
 ///
-/// VDFS 变更可能同时送给多个订阅者（Tauri 前端 + 各 CLI + 子智能体桥），
+/// VDFS 变更可能同时送给多个订阅者（浏览器前端 + 各 CLI + 子智能体桥），
 /// 每个订阅者拿到的必须是**同一份**载荷分配（引用计数自增），而不是各一份深拷贝。
 #[tokio::test]
 async fn fan_out_shares_one_payload_allocation() {

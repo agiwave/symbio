@@ -374,7 +374,7 @@ const ENUM_SETS = [
  */
 const STRUCT_SETS = [
   {
-    what: '线路层消息容器（Tauri IPC 与 HTTP/WS 共用同一份线上格式）',
+    what: '线路层消息容器（HTTP/WS 与进程内直连共用同一份线上格式）',
     rust: { file: TRANSPORT_RS, struct: 'PluginMessageWire' },
     ts: { file: PLUGIN_TS, interface: 'PluginMessage' },
   },

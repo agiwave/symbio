@@ -1,0 +1,9 @@
+{
+  "$schema": "../gen/schemas/desktop-schema.json",
+  "identifier": "default",
+  "description": "原生窗口壳：只加载本机 CLI serve 地址；目录选择走后端 HTTP API、文件选择走 <input file>，无需 dialog 插件",
+  "windows": ["main"],
+  "permissions": [
+    "core:default"
+  ]
+}

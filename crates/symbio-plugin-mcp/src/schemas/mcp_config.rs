@@ -24,7 +24,7 @@ pub enum McpTransportType {
 /// - `include_tools` / `exclude_tools`：工具过滤
 /// - `enabled`：运行时是否启用（仅作为"激活"标记，不影响持久化存储）
 ///
-/// 该结构同时被前端（`tauri` 配置 UI）和后端（`crates/symbio-plugin-mcp/src/`）使用。
+/// 该结构同时被前端（浏览器配置 UI）和后端（`crates/symbio-plugin-mcp/src/`）使用。
 /// 前端只做配置的增删改查；后端在 agent 真正需要某个工具时按需加载 transport。
 #[derive(Debug, Clone, Serialize, Deserialize)]
 pub struct McpServerConfig {

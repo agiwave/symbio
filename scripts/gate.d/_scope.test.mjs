@@ -99,7 +99,7 @@ test('只有 docs 改动 ⇒ 命中 docs、不命中 rust/e2e/scripts', () => {
   assert.equal(scope.hits([]), true, '没声明 needs 的阶段恒跑')
 })
 
-test('crates 下的清单与源码归 rust；tauri 前端源归 frontend', () => {
+test('crates 下的清单与源码归 rust；共享前端源归 frontend', () => {
   const root = repoWith()
   commit(root, {
     'crates/symbio-platform/src/sdk/mod.rs': 'pub fn a() {}\n',

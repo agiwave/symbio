@@ -10,7 +10,7 @@ impl: done
 # 架构
 
 `symbio-cli` 与 `apps/desktop/` 调用的是**同一套上下文键**（`PATH` / `PAYLOAD` / `SESSION_ID` /
-`WORKDIR` / …）和**同一份协议**，差别只在「传输层」。Tauri 走 `route_v2` IPC；本 CLI 直接拿到
+`WORKDIR` / …）和**同一份协议**，差别只在「传输层」。浏览器前端走 HTTP/WS 网关；本 CLI 直接拿到
 `Arc<dyn Plugin>` 根节点在**进程内**调用 `root.route(ctx)`。因此本 CLI 的引入**零侵入**
 `symbio/` 与协议。
 

@@ -40,7 +40,7 @@ impl: done
 | 设置页清单 | `ConfigurableVisitor` 收集通道（`crates/symbio-platform/src/sdk/capability/configurable.rs`）：插件在 `traverse` 里 `capability_announce_configurable` 一次 | 网关的「开放接口」自动出现在设置页，**前端零改动** |
 | 设置页表单 | 由配置的**拥有者**产出 `DetailDefinition`（作为节点 `schema` 下发） | 网关表单由后端下发定义，前端表单渲染器自动渲染 |
 | 宿主级上下文注册表先例 | `HomedirRegistry`（`crates/symbio-plugin-home/src/homedir.rs`） | 全局弱引用登记表的同款风格（见 §4.1 的 `parent` 转发） |
-| 连接管理 | `RouteConnectionManager`（tauri 宿主层，纯 tokio） | 宿主层用它管前端流式连接；网关在 WS 循环内自持连接生命周期 |
+| 连接管理 | 网关 WS 循环 + `RuntimeHost` | 网关在 WS 循环内自持连接生命周期，与 CLI serve 共用同一条路径 |
 | 事件总线 | `EventBus` + `event_bus/subscribe` + `vdfs/watch` | 直接复用（AI 流的信源 = VDFS 变更，见 §5.3） |
 
 > 依托点**不是** `config/get` / `config/set` 协议、`SETTING_SECTIONS` 分区表或
@@ -101,7 +101,7 @@ crates/symbio-plugin-gateway/src/
 | 配置写入 | `vdfs/write` `<根>/gateway/PLUGIN.yml` → `PluginConfigFile::apply` 落盘 → 本插件在自己的 `write` 返回后 **stop 旧 server + start 新 server**（端口/开关变更必须重启监听，不能像普通配置那样只改内存） |
 | `home/reload` | 插件实例被重建（worker composite 清空重建），旧实例 `Drop` → cancel token → 端口释放；新实例按新配置启动 |
 | `Drop` | `CancellationToken::cancel` + `abort` task |
-| 客户端断开 | 连接读写半关闭 → 结束该会话的 pump 任务（**不** abort 后端任务，与 `tauri://destroyed` 行为一致：AI 继续跑完并持久化） |
+| 客户端断开 | 连接读写半关闭 → 结束该会话的 pump 任务（**不** abort 后端任务，AI 继续跑完并持久化） |
 
 > ⚠️ 注意：改配置**不会**自动触发 `home/reload`（`reload` 只在切 homedir 时用）。
 > 所以"开关/端口热生效"必须由插件自己在写配置之后完成，这是插件自治，符合机制

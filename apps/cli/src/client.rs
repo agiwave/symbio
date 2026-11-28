@@ -2,14 +2,14 @@
 //!
 //! ## 设计要点
 //!
-//! CLI 与 Tauri 前端的差别只在「传输层」：Tauri 走 `route_v2` IPC，本 CLI 直接
+//! CLI 与浏览器前端的差别只在「传输层」：浏览器走 HTTP/WS 网关，本 CLI 直接
 //! 拿到 `Arc<dyn Plugin>` 根节点在**进程内**调用 `root.route(ctx)`。二者用的是
 //! 同一套上下文键（PATH / payload / SESSION_ID / WORKDIR / …），因此不需要任何
 //! 协议改动 —— 换传输 = 换「请求 → PluginSimpleRequest」这一层适配。
 //!
 //! ## 下行通道：事件总线的 `vdfs` 频道
 //!
-//! 与 Tauri 前端**同构**（前端 `services/eventBus.ts` 的 `subscribe({ kind: 'vdfs' })`）：
+//! 与浏览器前端**同构**（前端 `services/eventBus.ts` 的 `subscribe({ kind: 'vdfs' })`）：
 //!
 //! ```text
 //! vdfs 频道   一条订阅、单一 FIFO、按路径归属
@@ -56,7 +56,7 @@ use symbio_runtime::RuntimeHost;
 use symbio_platform::sdk::keys::{PATH, SESSION_ID, WORKDIR};
 use symbio_plugin_api::{event_bus_resync_of, event_bus_vdfs_change_of, EVENT_BUS_KIND_VDFS};
 // 读数面板方言：后端下发描述、CLI 只渲染。
-//  这三个名字随返回值流动（C-002：插件侧不深引 core 域目录），与 Tauri 前端
+//  这三个名字随返回值流动（C-002：插件侧不深引 core 域目录），与浏览器前端
 //  `schemas/reading.ts` 是同一份契约的两半。
 use symbio_platform::kernel::present::{ReadingPanel, ReadingTone};
 
@@ -83,8 +83,8 @@ use crate::protocol::{MESSAGES_SEG, OUTCOME_ABORTED, SESSION_SEG};
 
 /// 留痕开关（`SYMBIO_ROUTE_LOG=1`）：出站 `route` 与**入站变更帧**都打到 stderr。
 ///
-/// CLI 走**进程内**路由，没有 Tauri 那层的 `Start routing`
-/// （`apps/desktop/src-tauri/src/commands.rs`），于是「一次会话到底发了多少请求」在 CLI
+/// CLI 走**进程内**路由，没有前端那层的 `Start routing`
+/// （`crates/symbio-plugin-gateway/src/plugin.rs`），于是「一次会话到底发了多少请求」在 CLI
 /// 上无处可查——排查多余 IPC 只能靠它。与 `SYMBIO_LOG` 同一套约定：默认关闭，
 /// 逐行输出走 stderr（与 stdout 的正文分流，`2>&1 | grep '^\[route\]'` 即可统计）。
 ///
@@ -681,12 +681,12 @@ impl SymbioClient {
     /// ## 本方法是**渲染器**，不是统计器
     ///
     /// 它只做三件事：调 `session/stats`、取响应里的 `panel` 描述（
-    /// `symbio_platform::kernel::present::ReadingPanel`——与 Tauri 前端的 `ReadingPanel` 组件吃的是
+    /// `symbio_platform::kernel::present::ReadingPanel`——与浏览器前端的 `ReadingPanel` 组件吃的是
     /// **同一份**）、按终端排版打出来。**没有任何一个数的含义在这里**：标签、
     /// 单位、精度、语气全由后端排好。
     ///
     /// 这正是「两个前端都是渲染器」的落点：换一个产者（成本、记忆、任何只读
-    /// 路由）本方法零改动，Tauri 侧同样零改动。
+    /// 路由）本方法零改动，浏览器前端同样零改动。
     pub async fn print_stats(&self) -> Result<(), String> {
         let resp = self
             .route("session/stats", json!({}), Some(&self.session_id), None)

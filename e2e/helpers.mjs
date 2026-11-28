@@ -13,7 +13,7 @@ import { tmpdir } from 'node:os';
 import { join, resolve, dirname } from 'node:path';
 import { fileURLToPath } from 'node:url';
 import { cliBinaryPath, ensureCliBinary } from '../scripts/cli-binary.mjs';
-// gateway WS 的客户端：复用前端依赖（Tauri 侧已装 `ws`，不为测试再引一份）
+// gateway WS 的客户端：复用共享前端依赖（packages/ui 已装 `ws`，不为测试再引一份）
 import WebSocket from '../packages/ui/node_modules/ws/index.js';
 
 const HERE = dirname(fileURLToPath(import.meta.url));
@@ -696,7 +696,7 @@ const CLI_BUILTIN_GATEWAY_PORT = 9231; // gateway 默认端口（gateway/config.
  *
  * 为什么是 REPL 而不是 one-shot：one-shot（`-m`）一轮结束进程即退出，
  * 进程内插件树连同 gateway 一起消失——「发送」与「中止」两个入口要同时活着，
- * 只有常驻进程能做到（与 Tauri 前端同构）。
+ * 只有常驻进程能做到（与浏览器前端同构）。
  */
 export function startLongLivedCli({ homedir, workdir, session = 'e2e-live', mode = 'auto', provider = null, gatewayPort = CLI_BUILTIN_GATEWAY_PORT, headers: baseHeaders = {} }) {
   const argv = [
@@ -785,7 +785,7 @@ export function startLongLivedCli({ homedir, workdir, session = 'e2e-live', mode
   return api;
 }
 
-// ---------- 会话实时面（与 Tauri 前端同构） ----------
+// ---------- 会话实时面（与浏览器前端同构） ----------
 
 /**
  * 会话集合在 VDFS 根下的**顶层段名**（后端 `crates/symbio-plugin-session` 的 `SESSION_SEG`）。
@@ -800,7 +800,7 @@ export const SESSION_SEG = 'session';
 export const SEG_MESSAGES = 'message';
 
 /**
- * 在 gateway WS 边界上订阅**会话实时面**——与 Tauri 前端逐字同构的两步：
+ * 在 gateway WS 边界上订阅**会话实时面**——与浏览器前端逐字同构的两步：
  *
  * 1. `event_bus/subscribe`（WS 首帧）→ 拿到总线广播口，收 `kind = "vdfs"` 的帧；
  * 2. `vdfs/watch`（HTTP）→ 把 sink 登记进 provider 的变更表（**谁来 publish**）。

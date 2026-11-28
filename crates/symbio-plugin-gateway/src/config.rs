@@ -16,7 +16,7 @@ pub struct GatewayConfig {
     // ---- 入站：本应用对外提供服务 ----
     /// 是否开放入站服务
     pub inbound_enabled: bool,
-    /// 入站协议：`native`（仅 Tauri IPC，不监听）| `http`
+    /// 入站协议：`native`（不监听）| `http`
     pub inbound_protocol: String,
     /// 监听地址（默认 `127.0.0.1`；`0.0.0.0` 对外暴露需谨慎）
     pub inbound_bind: String,

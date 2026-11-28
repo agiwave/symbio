@@ -16,7 +16,6 @@ created: 2026-09-07
 |------|------|----------|
 | Rust | ≥ 1.91 | [rustup.rs](https://rustup.rs/) |
 | Node.js | ≥ 18 | [nodejs.org](https://nodejs.org/) |
-| Tauri CLI | 2.x | `cargo install tauri-cli --version "^2.0"` |
 
 ## 5 分钟跑通
 
@@ -31,11 +30,22 @@ cargo build -p symbio          # 宿主装配 crate（连带编出 kernel / sdk 
 
 ### 2. 启动桌面端
 
+桌面交付物是 Tauri 原生窗口壳：窗口加载本机 CLI serve 的 UI，前端走 HTTP/WS。
+
+开发态（原生窗口 + 前端热更新，等价旧 tauri dev）：
 ```bash
-cd tauri
-npm install
+cd apps/desktop && npm install
 npm run tauri dev
 ```
+
+直接运行（不依赖 Vite，窗口加载 CLI 内嵌 UI）：
+```bash
+cd packages/ui && npm ci && npm run build
+cd ../.. && cargo build -p symbio-cli -p symbio-desktop
+./target/debug/symbio-desktop        # Windows: .\target\debug\symbio-desktop.exe
+```
+
+也可直接 `cargo run -p symbio-cli -- serve --browser` 用系统浏览器访问。
 
 ### 3. 配置 API Key
 
@@ -93,8 +103,7 @@ cargo test --workspace
 ### 前端测试
 
 ```bash
-cd tauri
-npm test
+cd packages/ui && npm test
 ```
 
 ### Clippy 检查

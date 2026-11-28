@@ -19,7 +19,7 @@ impl: done
 
 「薄前端」在本仓指**业务决策与事实源都不在这一层**：标题、图标、可用动作、统计量由后端随
 `vdfs/node` 下发，前端只按 `NodeKind` 登记表渲染。它**不**指「TS 只做渲染」——传输选择
-（native / http / gateway）、帧合并、重连与重同步、协议归一、地址口径换算都在
+（http / ws / gateway）、帧合并、重连与重同步、协议归一、地址口径换算都在
 `packages/ui/src/services/` 与 `packages/ui/src/composables/`；这些文件的规模**不在此复述**，唯一权威是
 [当前事实表 §5.1](../../../docs/004-ref/006-当前事实表.md "RE-006-当前事实表")（`packages/ui/src` 实现与测试分列），
 会随代码变化由脚本重算。`packages/ui/src/services/` 与 `packages/ui/src/composables/` 只承担协议适配、状态桥接与展示编排，
@@ -28,25 +28,25 @@ impl: done
 ## 技术栈
 
 - Vue 3（Composition API）+ TypeScript + Vite
-- Tauri 2 桌面宿主
+- 普通浏览器运行时（三端统一，无 WebView / IPC 分支）
 
 ## 与后端通信
 
-Vue 实现只有一份（`packages/ui/src`），三端差异只在 transport 注入：
+Vue 实现只有一份（`packages/ui/src`），三端 transport 完全一致：
 
-- desktop：Tauri IPC → `route_v2` 家族 → 进程内插件树；
-- cli serve：同源 HTTP → `/api/v1/invoke` → CLI 进程内插件树，UI 由二进制编译期内嵌；
+- desktop：启动器拉起本机 `symbio-cli serve --browser`，浏览器同源 HTTP → CLI 进程内插件树，UI 由二进制编译期内嵌；
+- cli serve：同源 HTTP → `/api/v1/invoke` → CLI 进程内插件树，UI 默认二进制内嵌（`--frontend-dist` 可覆盖）；
 - web：browser 环境默认无后端，读类走 `packages/ui/src/services/fallback.ts` 兜底；显式配置后才经 HTTP 连 `symbio-cli serve`。
 
 前端不直接感知插件树的具体形状；走到后端时，三条通道装的是同一份请求：
 
 ```
-Vue 组件 → API 层（native invoke / browser fetch） → route_v2 家族或 HTTP 入口 → 插件树
+Vue 组件 → API 层（browser fetch / WebSocket） → HTTP/WS 入口 → 网关路由 → 插件树
 ```
 
-- `route_v2`：通用同步调用（PATH/PAYLOAD/SESSION_ID），与 gateway 的 HTTP 入口等价（端点见 [003-ROUTES.md §Gateway 插件](../../../docs/004-ref/003-ROUTES.md "RE-003-ROUTES")）。
-- `route_v2_send`：向活动会话发送用户输入，接收流式帧。
-- `route_v2_close`：关闭会话连接。
+一次性调用走 `POST /api/v1/invoke`，持久会话走 `WS /api/v1/ws`（首帧为 PluginMessageWire，
+其后双向转发 PluginFrame）。两路与 gateway 的路由入口等价（端点见
+[003-ROUTES.md §Gateway 插件](../../../docs/004-ref/003-ROUTES.md "RE-003-ROUTES")）。
 
 ## 关键约定
 

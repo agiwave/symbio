@@ -48,7 +48,7 @@ vi.mock('@/stores/sessionInboxSync', () => ({
 }))
 vi.mock('@/services/completionChime', () => ({ setChimeSettingsSource: vi.fn() }))
 // 面板打开会取一次清单；本文件断言的是**键**，不是取数（取数由面板自己的单测钉）。
-// 不拦这一层，测试会去打真的 Tauri IPC 并喷一屏 `transformCallback` 堆栈。
+// 不拦这一层，测试会去打真实的 Server HTTP 并喷一屏 fetch 失败堆栈。
 vi.mock('@/services/vdfs', () => ({
   treeVdfs: vi.fn(async () => ({ nodes: [], truncated: false })),
   listVdfs: vi.fn(async () => ({ items: [] })),

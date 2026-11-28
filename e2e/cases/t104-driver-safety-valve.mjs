@@ -2,7 +2,7 @@ import './_selfrun.mjs';
 // T104 驱动安全阀出口的**反向**用例。
 //
 // 两条安全阀（`Exhausted` / `Stalled`）原先只有 `eprintln!` 一个出口：CLI 的 stderr
-// 就是调用面的读数，但 Tauri / gateway 这类没有控制台的宿主读不到。出口落成一条
+// 就是调用面的读数，但 gateway 这类没有控制台的宿主读不到。出口落成一条
 // 机制事实 `driver.stalled`（`crates/symbio-runtime/src/host/entry.rs`），会话投影再把它折成
 // `outcome = "failed"`（`symbio-plugin-session` 的 `runtime`）。
 //
@@ -93,7 +93,7 @@ export default defineCase(
         `正常轮 stderr 不得有安全阀文案（尾部：${cli.out.stderr.slice(-300)}）`,
       );
 
-      // ③ 非 CLI 面：会话节点（VDFS `vdfs/stat`，Tauri 前端读的就是它）仍是 completed。
+      // ③ 非 CLI 面：会话节点（VDFS `vdfs/stat`，浏览器前端读的就是它）仍是 completed。
       const root = await cli.invoke('vdfs/root', {});
       const rootPath = root.body?.data?.path;
       assert(typeof rootPath === 'string' && rootPath.length > 0, 'vdfs/root 应有根地址');

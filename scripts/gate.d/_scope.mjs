@@ -44,9 +44,9 @@ import { spawnSync } from 'node:child_process'
 const SURFACE_RULES = [
   // 前端源（Vue / TS / vite 配置 / 前端依赖锁）：共享包 `packages/ui/` 与三端薄壳的构建配置。
   ['frontend', (f) => (f.startsWith('packages/ui/') || f.startsWith('apps/web/')) && !f.endsWith('.md')],
-  // Rust 源与它的构建输入。`crates/` 与 `apps/desktop/src-tauri/` 下的**一切非 .md 文件**
+  // Rust 源与它的构建输入。`crates/`、`apps/cli/` 与 `apps/desktop/` 下的**一切非 .md 文件**
   // （含 `PLUGIN.yml` / `Cargo.toml` / 测试夹具）都算：清单在运行时被读。
-  ['rust', (f) => !f.endsWith('.md') && (f.startsWith('crates/') || f.startsWith('apps/desktop/src-tauri/'))],
+  ['rust', (f) => !f.endsWith('.md') && (f.startsWith('crates/') || f.startsWith('apps/cli/') || f.startsWith('apps/desktop/'))],
   ['rust', (f) => /^(Cargo\.toml|Cargo\.lock|rust-toolchain\.toml|rustfmt\.toml|clippy\.toml)$/.test(f)],
   // 端到端用例本身（改了用例就得跑用例）。
   ['e2e', (f) => f.startsWith('e2e/')],

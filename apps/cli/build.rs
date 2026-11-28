@@ -1,7 +1,7 @@
 //! CLI 的编译期内嵌：把 `packages/ui/dist` 编进 CLI 二进制。
 //!
 //! 内嵌只发生在需要 serve 的交付物入口（本 CLI），不放在共享 runtime：桌面端的 UI
-//! 由 Tauri `generate_context!` 嵌入，共享 runtime 若依赖资源 crate 会让桌面二进制
+//! 由桌面启动器拉起的 CLI serve 提供，共享 runtime 若依赖资源 crate 会让每个消费者
 //! 被迫多嵌一份同样的 dist。
 //!
 //! ## 为什么 build.rs 生成代码而不是直接 include_dir!

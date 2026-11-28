@@ -28,4 +28,4 @@ created: 2026-09-11
 - **构建**：`apps/cli/scripts/build-cli.mjs`（离线构建并打印产物路径）
 
 > 设计铁律：CLI **不改动** `symbio/` 的任何一行代码、不改动协议。它只是把「请求 →
-> `PluginSimpleRequest`」这一层适配从 Tauri IPC 换成进程内直连。
+> `PluginSimpleRequest`」这一层适配换成进程内直连。

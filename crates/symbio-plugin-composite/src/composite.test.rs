@@ -102,7 +102,7 @@ fn host() -> Arc<dyn PluginInvokeRequest> {
 
 // ==================== 全局收尾：整树 stop(Shutdown) ====================
 //
-// CLI / Tauri 的退出路径对本根调一次 `stop(Shutdown)`（第三态收尾）。
+// CLI 的退出路径对本根调一次 `stop(Shutdown)`（第三态收尾）。
 // 遍历 owner 是 `PluginRegistry::shutdown_all`；这里的探针钉三件事：
 // **每个子插件恰一次**、**理由可读**（`Shutdown`，不是 Disabled/Uninstalled）、
 // **单家失败不拦其余**（收尾是对全表的广播，一家报错不等于其余不用落盘）。

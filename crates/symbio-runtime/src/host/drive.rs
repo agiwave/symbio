@@ -204,7 +204,7 @@ pub async fn drive_on_new_fact(
 // ── 驱动收口：事实写入成功之后踢一次 ────────────────────────────────────
 //
 // 这是**唯一实现**。写口（会话事实源 `append`）经 `drive_entry` 契约调到这
-// 里；Tauri / gateway / CLI 都不再各自记得「写完要驱动」。
+// 里；gateway / CLI 都不再各自记得「写完要驱动」。
 
 /// 一份部署根的驱动实例：根 + 按会话的重入位。
 ///
@@ -489,7 +489,7 @@ fn drive_notice(session_id: &str, outcome: &super::DriveOutcome) -> Option<Strin
 }
 
 /// 安全阀出口落成**机制事实**：CLI 有 stderr，但没有控制台的宿主
-/// （Tauri / gateway）读不到 `eprintln!`——出口落格后经 VDFS 订阅面可见。
+/// （gateway）读不到 `eprintln!`——出口落格后经 VDFS 订阅面可见。
 ///
 /// 走**只读开面**（`drive == None`）：这条事实是通知，不是环的输入。若经绑定驱动的
 /// 写口落地，`append` 会再踢一次驱动——`Exhausted` 就从「停下」变成「写完再跑一轮」，

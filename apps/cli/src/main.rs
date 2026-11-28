@@ -1,7 +1,7 @@
 //! Symbio CLI 前端入口。
 //!
 //! 与 `apps/desktop/` 并列的第二种前端形态：**同一套插件树、同一份协议**，只是把
-//! 传输层从 Tauri IPC 换成进程内直连 + 终端渲染。支持两种使用方式：
+//! 传输层从浏览器 HTTP/WS 换成进程内直连 + 终端渲染。支持两种使用方式：
 //!
 //! - 非交互：`symbio-cli -m "问题"` 或 `echo 问题 | symbio-cli`（可管道、可脚本化）
 //! - 交互：`symbio-cli`（REPL，多轮对话）
@@ -399,7 +399,7 @@ async fn handle_command(client: &mut SymbioClient, cmd: &str) -> Result<bool, St
             //
             // 「这些数是什么意思、单位与精度怎么取」只有产者知道。CLI 自己拼就是把
             // 口径抄进第二处，而读数一改，抄本不报错、只静静显示旧标签。
-            // 这里与 Tauri 前端的 `ReadingPanel` 组件**吃同一份描述**，两个前端都
+            // 这里与浏览器前端的 `ReadingPanel` 组件**吃同一份描述**，两个前端都
             // 是渲染器——差别只在排版（终端 vs DOM）。
             client.print_stats().await?;
             Ok(true)

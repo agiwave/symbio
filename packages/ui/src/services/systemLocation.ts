@@ -1,27 +1,26 @@
 /**
  * 系统目录 (System Location) —— 前端持久化的「连接目标」事实源。
  *
- * 运行环境与连接目标是两条独立坐标，不能互相推断：
- * - 运行环境：`embedded`（Tauri WebView，有 IPC）或 `browser`（普通浏览器，无 IPC）；
- * - 连接目标：`native`（embedded 进程内后端）或 `server`（HTTP/WS Server）。
+ * 三端交付物（桌面启动器 / CLI serve / web）的 Vue 实现完全跑在普通浏览器里：
+ * 桌面端由启动器拉起本机 `symbio-cli serve --browser`，浏览器同源 HTTP 访问本机
+ * 后端；web 端可选择连接另一个 Server；两者都不存在 Tauri IPC 这条分支。
  *
  * `local` / `remote` 只是连接目标的 UI 兼容写法：
- * - embedded + local：native，homedir 位于这台机器；
- * - browser + local：同源 Server，homedir 位于该 Server，而不是浏览器本机；
+ * - local：同源 Server（桌面端就是本机 CLI serve，homedir 位于该 Server）；
  * - remote：另一台 Server 的 HTTP/WS 地址，Bearer token 只放 Authorization 请求头。
  *
- * 浏览器没有 native 出口：远端不可达只记录 `locationError`，绝不回退 Tauri IPC。
- * `forceNative` 只是控制面提示；embedded 已选 Server 时仍走该 Server，browser 中表示
- * 当前 Server 的控制面 HTTP。homedir 是 Symbio 配置根，workdir 是会话工作区，两者不互换。
+ * 远端不可达只记录 `locationError`，绝不回退任何不存在的原生通道。
+ * `forceNative` 只是控制面兼容提示，不改变已选择的 Server 地址。
+ * homedir 是 Symbio 配置根，workdir 是会话工作区，两者不互换。
  */
 
 import { ref, type Ref } from 'vue'
 
-/** 前端运行环境；由 Tauri IPC 是否存在决定，不由持久化配置决定。 */
-export type RuntimeEnvironment = 'embedded' | 'browser'
+/** 前端运行环境：所有交付物都在普通浏览器里，不再有 WebView/IPC 形态。 */
+export type RuntimeEnvironment = 'browser'
 
-/** 传输连接目标；server 同时覆盖同源 Server 与远端 Server。 */
-export type ConnectionTarget = 'native' | 'server'
+/** 传输连接目标：同源 Server 与远端 Server 统一为 server。 */
+export type ConnectionTarget = 'server'
 
 /** 运行环境 + 连接目标的显式模型。 */
 export interface FrontendConnectionModel {
@@ -45,17 +44,13 @@ export interface SystemLocation {
 }
 
 /**
- * 是否运行在无 Tauri IPC 的浏览器中。
+ * 是否运行在浏览器中。所有交付物都是普通浏览器环境，故此值恒为 true。
  *
- * Tauri v2 在注入原生桥时提供 `window.__TAURI_INTERNALS__.invoke`；Node 单测或普通
- * 浏览器没有它，一律按 browser 处理。宁可保守判定，也不能在无 IPC 时尝试原生调用。
+ * 保留这个函数是为了让调用方（HomedirEntry / HomedirSwitcher / 测试）不必知道
+ * 「原生形态已被移除」这件事；它不再是能力探测，只是一条环境事实。
  */
 export function isBrowserEnvironment(): boolean {
-  if (typeof window === 'undefined') return true
-  const internals = (window as Window & {
-    __TAURI_INTERNALS__?: { invoke?: unknown }
-  }).__TAURI_INTERNALS__
-  return typeof internals?.invoke !== 'function'
+  return true
 }
 
 const STORAGE_KEY = 'symbio.systemLocation'
@@ -158,6 +153,5 @@ export function isValidRemoteUrl(url: string): boolean {
 /** 展示用文本 */
 export function formatLocation(loc: SystemLocation): string {
   if (loc.kind === 'remote') return loc.remoteUrl || '(远端)'
-  if (isBrowserEnvironment()) return loc.localPath ? `当前 Server：${loc.localPath}` : '当前 Server'
-  return loc.localPath ? loc.localPath : '默认 (~/.symbio)'
+  return loc.localPath ? `当前 Server：${loc.localPath}` : '当前 Server'
 }

@@ -3,7 +3,7 @@
 //! ## 职责划分
 //!
 //! - **后端**（本插件）：MCP **配置**（CRUD）+ **客户端 transport**（stdio/http）
-//! - **前端**（`tauri`）：**仅**负责 MCP Server 的配置管理（CRUD UI），
+//! - **前端**（浏览器）：**仅**负责 MCP Server 的配置管理（CRUD UI），
 //!   不实现任何 transport 客户端
 //!
 //! ## 系统工具机制集成

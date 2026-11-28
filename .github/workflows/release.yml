@@ -21,6 +21,11 @@ permissions:
   contents: write
   packages: write
 
+# 桌面交付物 = Tauri 原生窗口壳（symbio-desktop）+ CLI 后端（symbio-cli）。
+# desktop 窗口加载本机 CLI serve 的地址；前端由 packages/ui 构建一次、由 CLI 的
+# build.rs 编译期内嵌进二进制。前端走 HTTP/WS、没有 IPC command，但原生窗口本身
+# 仍需系统 WebView：Linux 要 WebKitGTK/GTK，Windows 要 WebView2（Win11 自带）。
+
 jobs:
   # 代码质量预检（防御性）
   # 日常开发由 ci.yml 拦截；此处防止有人用 workflow_dispatch 跳过 ci 直接出包
@@ -31,7 +36,6 @@ jobs:
       - uses: actions/checkout@v5
 
       - name: Setup Node.js
-        # 项目脚本已统一为平台无关的 Node 脚本（scripts/*.mjs），不再依赖 bash / ripgrep
         uses: actions/setup-node@v5
         with:
           node-version: '22'
@@ -51,16 +55,10 @@ jobs:
             target
           key: ${{ runner.os }}-cargo-release-gate-${{ hashFiles('**/Cargo.lock') }}
 
-      - name: Install Linux system libs (GTK/WebKit)
-        # 根 workspace 的 members 含 `apps/desktop/src-tauri`：`cargo test --workspace`
-        # 会编 Tauri，Linux 上要 pkg-config 找得到 GTK / WebKit（同 ci.yml 的理由）。
-        # 这层此前从未暴露——`working-directory: symbio` 让整个 job 在第一步就红，
-        # 修掉路径后它才第一次真正跑起来。
-        run: >
-          sudo apt-get update && sudo apt-get install -y
-          libssl-dev pkg-config
-          libwebkit2gtk-4.1-dev libgtk-3-dev
-          libayatana-appindicator3-dev librsvg2-dev libxdo-dev
+      - name: Install Linux system libs (OpenSSL + WebView)
+        # HTTP 出口的 TLS 走系统 OpenSSL（D-013）；desktop 是 Tauri 原生窗口壳，
+        # tao + wry 在 Linux 需要 WebKitGTK / GTK3 / appindicator / rsvg 头文件。
+        run: sudo apt-get update && sudo apt-get install -y libssl-dev pkg-config libwebkit2gtk-4.1-dev libgtk-3-dev libayatana-appindicator3-dev librsvg2-dev
 
       - name: Install frontend dependencies
         working-directory: packages/ui
@@ -68,12 +66,8 @@ jobs:
 
       - name: Backend gate
         # 与日常 ci.yml 同一条命令（fmt + workspace 测试 + clippy + session 台账）。
-        # 检查项只在 scripts/gate.mjs / gate.d 里定义一处，这里不另抄 cargo 命令。
-        run: node scripts/gate.mjs --preset=rust --ci
-
-      - name: Frontend gate
-        # vue-tsc + vitest（含覆盖率阈值）+ vite build。
-        run: node scripts/gate.mjs --preset=frontend --ci
+        # CLI 的 build.rs 在编译期内嵌 packages/ui/dist，前端产物已在下面的 gate 中构建。
+        run: node scripts/gate.mjs --preset=frontend --ci && node scripts/gate.mjs --preset=rust --ci
 
       - name: Docs, facts & baseline gate
         # 静态审计 + 事实表复核 + 基线变更审。tag 上没有 PR base 时，
@@ -88,7 +82,7 @@ jobs:
       version: ${{ steps.get_version.outputs.version }}
     steps:
       - uses: actions/checkout@v5
-      
+
       - name: Get version from tag
         id: get_version
         run: |
@@ -98,11 +92,11 @@ jobs:
             VERSION=${{ github.event.inputs.create_release && github.sha || '0.0.0' }}
           fi
           echo "version=$VERSION" >> $GITHUB_OUTPUT
-          
+
       - name: Verify version matches
         run: |
           TAG_VERSION=${{ steps.get_version.outputs.version }}
-          CARGO_VERSION=$(grep '^version = ' apps/desktop/src-tauri/Cargo.toml | head -1 | sed 's/version = "\(.*\)"/\1/')
+          CARGO_VERSION=$(grep '^version = ' Cargo.toml | head -1 | sed 's/version = "\(.*\)"/\1/')
           echo "Tag version: $TAG_VERSION"
           echo "Cargo version: $CARGO_VERSION"
           if [[ "$TAG_VERSION" != "$CARGO_VERSION" && "$TAG_VERSION" != "0.0.0" ]]; then
@@ -129,14 +123,6 @@ jobs:
         with:
           toolchain: 1.93.1
 
-      - name: Install Webview2
-        run: |
-          $WebView2InstallPath = "$env:ProgramFiles\Microsoft\EdgeWebView\Application\msedgewebviewinstaller.exe"
-          if (!(Test-Path $WebView2InstallPath)) {
-            Invoke-WebRequest -Uri "https://go.microsoft.com/fwlink/p/?LinkId=2124703" -OutFile "$env:TEMP\MicrosoftEdgeWebview2Setup.exe"
-            & "$env:TEMP\MicrosoftEdgeWebview2Setup.exe" /silent /install
-          }
-
       - name: Install dependencies
         working-directory: packages/ui
         run: npm ci
@@ -145,43 +131,27 @@ jobs:
         working-directory: packages/ui
         run: npm run build
 
-      - name: Build Tauri app (NSIS installer)
-        uses: tauri-apps/tauri-action@v0
-        env:
-          GITHUB_TOKEN: ${{ secrets.GITHUB_TOKEN }}
-        with:
-          projectPath: tauri
-          appSrcPath: tauri
-          args: --bundles nsis
+      - name: Build CLI and desktop launcher
+        run: cargo build --release -p symbio-cli -p symbio-desktop
 
       - name: Create portable ZIP
+        shell: pwsh
         run: |
-          # 复制编译好的可执行文件到单独目录
-          mkdir portable-app
-          Copy-Item "target/release/symbio-tauri.exe" -Destination "portable-app/"
+          # 两个二进制同目录：启动器按同目录查找 CLI，无需额外配置。
+          New-Item -ItemType Directory -Path portable-app -Force | Out-Null
+          Copy-Item "target/release/symbio-cli.exe" -Destination "portable-app/"
+          Copy-Item "target/release/symbio-desktop.exe" -Destination "portable-app/"
           Copy-Item "target/release/*.dll" -Destination "portable-app/" -ErrorAction SilentlyContinue
-
-          # 创建压缩包
           Compress-Archive -Path "portable-app\*" -DestinationPath "symbio-portable-windows-x64.zip" -Force
-
-      - name: Upload NSIS installer
-        uses: actions/upload-artifact@v4
-        with:
-          name: windows-x64-installer
-          path: |
-            target/release/bundle/nsis/*.exe
-          if-no-files-found: warn
 
       - name: Upload portable ZIP
         uses: actions/upload-artifact@v4
         with:
           name: windows-x64-portable
-          path: |
-            symbio-portable-windows-x64.zip
-          if-no-files-found: warn
+          path: symbio-portable-windows-x64.zip
+          if-no-files-found: error
 
   # macOS 构建 - 支持多架构
-  # 注意：GitHub 正在弃用 Intel macOS runner，因此使用交叉编译
   build-macos:
     name: Build macOS (${{ matrix.arch }})
     needs: [check-version, quality-gate]
@@ -220,22 +190,22 @@ jobs:
         working-directory: packages/ui
         run: npm run build
 
-      - name: Build Tauri app
-        uses: tauri-apps/tauri-action@v0
-        env:
-          GITHUB_TOKEN: ${{ secrets.GITHUB_TOKEN }}
-        with:
-          projectPath: tauri
-          appSrcPath: tauri
-          args: --target ${{ matrix.target }} --bundles dmg
+      - name: Build CLI and desktop launcher
+        run: cargo build --release --target ${{ matrix.target }} -p symbio-cli -p symbio-desktop
+
+      - name: Create portable archive
+        run: |
+          mkdir -p portable-app
+          cp "target/${{ matrix.target }}/release/symbio-cli" portable-app/
+          cp "target/${{ matrix.target }}/release/symbio-desktop" portable-app/
+          tar -czf "symbio-portable-macos-${{ matrix.arch }}.tar.gz" -C portable-app .
 
       - name: Upload artifacts
         uses: actions/upload-artifact@v4
         with:
           name: macos-${{ matrix.arch }}
-          path: |
-            target/${{ matrix.target }}/release/bundle/dmg/*.dmg
-          if-no-files-found: warn
+          path: symbio-portable-macos-${{ matrix.arch }}.tar.gz
+          if-no-files-found: error
 
   # Linux 构建
   build-linux:
@@ -258,26 +228,8 @@ jobs:
           toolchain: 1.93.1
 
       - name: Install Linux dependencies
-        run: |
-          sudo apt-get update
-          sudo apt-get install -y \
-            build-essential \
-            curl \
-            wget \
-            file \
-            libxdo-dev \
-            libssl-dev \
-            libayatana-appindicator3-dev \
-            librsvg2-dev \
-            libgtk-3-dev \
-            libsoup-3.0-dev \
-            libwebkit2gtk-4.1-dev \
-            libjavascriptcoregtk-4.1-dev \
-            libfuse2 \
-            desktop-file-utils \
-            libglib2.0-dev \
-            libcairo2-dev \
-            libpango1.0-dev
+        # TLS 走系统 OpenSSL；desktop 原生窗口壳需要 WebKitGTK/GTK3 前置。
+        run: sudo apt-get update && sudo apt-get install -y libssl-dev pkg-config libwebkit2gtk-4.1-dev libgtk-3-dev libayatana-appindicator3-dev librsvg2-dev
 
       - name: Install dependencies
         working-directory: packages/ui
@@ -287,22 +239,22 @@ jobs:
         working-directory: packages/ui
         run: npm run build
 
-      - name: Build Tauri app (deb only)
-        uses: tauri-apps/tauri-action@v0
-        env:
-          GITHUB_TOKEN: ${{ secrets.GITHUB_TOKEN }}
-        with:
-          projectPath: tauri
-          appSrcPath: tauri
-          args: --bundles deb
+      - name: Build CLI and desktop launcher
+        run: cargo build --release -p symbio-cli -p symbio-desktop
+
+      - name: Create portable archive
+        run: |
+          mkdir -p portable-app
+          cp target/release/symbio-cli portable-app/
+          cp target/release/symbio-desktop portable-app/
+          tar -czf symbio-portable-linux-x64.tar.gz -C portable-app .
 
       - name: Upload artifacts
         uses: actions/upload-artifact@v4
         with:
           name: linux-binaries
-          path: |
-            target/release/bundle/deb/*.deb
-          if-no-files-found: warn
+          path: symbio-portable-linux-x64.tar.gz
+          if-no-files-found: error
 
   # 创建 Release
   create-release:
@@ -312,30 +264,14 @@ jobs:
     if: startsWith(github.ref, 'refs/tags/') || github.event.inputs.create_release == 'true'
     steps:
       - uses: actions/checkout@v5
-      
+
       - name: Download all artifacts
         uses: actions/download-artifact@v4
         with:
           path: artifacts
 
       - name: List downloaded artifacts
-        run: |
-          echo "=== Artifacts structure ==="
-          find artifacts/ -type f
-          echo "========================="
-
-      - name: Prepare release files list
-        id: get_files
-        run: |
-          # 找到所有要上传的文件
-          FILES=""
-          for f in artifacts/windows-x64-installer/*.exe artifacts/windows-x64-portable/*.zip artifacts/macos-x86_64/*.dmg artifacts/macos-aarch64/*.dmg artifacts/linux-binaries/*.deb; do
-            if [ -f "$f" ]; then
-              FILES="$FILES $f"
-              echo "Found: $f"
-            fi
-          done
-          echo "files=$FILES" >> $GITHUB_OUTPUT
+        run: find artifacts/ -type f
 
       - name: Prepare release notes
         id: release_notes
@@ -343,7 +279,6 @@ jobs:
           VERSION=${{ needs.check-version.outputs.version }}
           echo "version=$VERSION" >> $GITHUB_OUTPUT
 
-          # 生成更新日志
           echo "## 更新内容" > RELEASE_NOTES.md
           echo "" >> RELEASE_NOTES.md
           git log $(git describe --tags --abbrev=0 HEAD^)..HEAD --pretty=format:"- %s (%h)" >> RELEASE_NOTES.md 2>/dev/null || \
@@ -353,16 +288,13 @@ jobs:
           echo "" >> RELEASE_NOTES.md
           echo "## 下载" >> RELEASE_NOTES.md
           echo "" >> RELEASE_NOTES.md
-          echo "### Windows" >> RELEASE_NOTES.md
-          echo "- **x64 安装包**: Windows x64 NSIS 安装包（推荐）" >> RELEASE_NOTES.md
-          echo "- **x64 绿色版**: Windows x64 便携版（ZIP 压缩包，无需安装）" >> RELEASE_NOTES.md
+          echo "每个压缩包内含两个二进制：\`symbio-cli\`（后端 + 内嵌 UI）与 \`symbio-desktop\`（Tauri 原生窗口）。" >> RELEASE_NOTES.md
+          echo "运行 \`symbio-desktop\` 打开原生桌面窗口（窗口加载本机 CLI serve 的 UI）；也可直接运行 \`symbio-cli serve --browser\` 用浏览器访问。" >> RELEASE_NOTES.md
           echo "" >> RELEASE_NOTES.md
-          echo "### macOS" >> RELEASE_NOTES.md
-          echo "- **x64 (Intel)**: macOS Intel (x86_64) DMG - 适用于 Intel 芯片 Mac" >> RELEASE_NOTES.md
-          echo "- **ARM64 (Apple Silicon)**: macOS Apple Silicon (M1/M2/M3) DMG - 适用于 Apple 芯片 Mac" >> RELEASE_NOTES.md
-          echo "" >> RELEASE_NOTES.md
-          echo "### Linux" >> RELEASE_NOTES.md
-          echo "- **x64**: Linux x64 DEB 包" >> RELEASE_NOTES.md
+          echo "- **Windows x64**: symbio-portable-windows-x64.zip" >> RELEASE_NOTES.md
+          echo "- **macOS Intel**: symbio-portable-macos-x86_64.tar.gz" >> RELEASE_NOTES.md
+          echo "- **macOS Apple Silicon**: symbio-portable-macos-aarch64.tar.gz" >> RELEASE_NOTES.md
+          echo "- **Linux x64**: symbio-portable-linux-x64.tar.gz" >> RELEASE_NOTES.md
 
           cat RELEASE_NOTES.md
 
@@ -375,11 +307,10 @@ jobs:
           draft: true
           prerelease: false
           files: |
-            artifacts/windows-x64-installer/*.exe
             artifacts/windows-x64-portable/*.zip
-            artifacts/macos-x86_64/*.dmg
-            artifacts/macos-aarch64/*.dmg
-            artifacts/linux-binaries/*.deb
+            artifacts/macos-x86_64/*.tar.gz
+            artifacts/macos-aarch64/*.tar.gz
+            artifacts/linux-binaries/*.tar.gz
           fail_on_unmatched_files: false
         env:
           GITHUB_TOKEN: ${{ secrets.GITHUB_TOKEN }}

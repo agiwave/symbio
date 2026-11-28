@@ -547,28 +547,37 @@ function ciYml() {
   return fs.readFileSync(path.join(repoRoot, '.github/workflows/ci.yml'), 'utf8')
 }
 
-test('ci.yml：e2e job 必须装 tauri 的 node 依赖，否则 42 例在 import 期全灭', () => {
+test('ci.yml：e2e job 必须装共享前端的 node 依赖，否则用例在 import 期全灭', () => {
   const block = jobBlock(ciYml(), 'e2e-check', 'docs-validation')
   assert.match(
     block,
     /working-directory:\s*packages\/ui\s*\n\s*run:\s*npm ci\s*$/m,
-    // 缺了它：`e2e/helpers.mjs` 第 16 行 `import '../apps/desktop/node_modules/ws/index.js'`
-    // 解析失败 ⇒ 每个用例 import 期 exit=1 ⇒ 实测「42/42 全红、每例 0s」，
+    // 缺了它：`e2e/helpers.mjs` 的 `import '../packages/ui/node_modules/ws/index.js'`
+    // 解析失败 ⇒ 每个用例 import 期 exit=1 ⇒ 实测「所有用例全红、每例 0s」，
     // 与"用例本身坏了"同形。`frontend-checks` 有 `npm ci` 不代表这个 job 有。
     'e2e job 没有在 packages/ui/ 跑 npm ci ⇒ 42 个用例全部在 import 期失败（与用例坏了同形）',
   )
 })
 
-test('ci.yml：rust-checks 必须装 GTK 系统库，否则 workspace 编不过', () => {
+test('ci.yml：rust-checks 必须装 OpenSSL 与 WebView 开发库（Linux 系统栈）', () => {
   const block = jobBlock(ciYml(), 'rust-checks', 'msrv-check')
   assert.match(
     block,
-    /libwebkit2gtk|libgtk-3-dev/,
-    // workspace 的 members 含 `apps/desktop/src-tauri` ⇒ Linux 上 `gobject-sys` / `gtk-sys` /
-    // `webkit2gtk-sys` 都要跑 pkg-config。实测首红是
-    // 「Package gobject-2.0 was not found in the pkg-config search path」。
-    // 只装 openssl 是不够的：openssl 那步当时是绿的，红的是它后面的 GTK 链。
-    'rust-checks 没装 GTK/WebKit 开发库 ⇒ `cargo check --tests --workspace` 在第一个 sys crate 就红',
+    /libssl-dev/,
+    // HTTP 出口的 TLS 在 Linux 走系统 OpenSSL（D-013）⇒ `openssl-sys` 要跑 pkg-config。
+    'rust-checks 没装 libssl-dev ⇒ `openssl-sys` 在 Linux 上找不到系统库而红',
+  )
+  assert.match(
+    block,
+    /libwebkit2gtk-4\.1-dev/,
+    // desktop 是 Tauri 原生窗口壳（tao + wry），Linux 编译需要 WebKitGTK 头文件。
+    // `--workspace` 会编到它，缺了前置整个 rust-checks job 红在编译期。
+    'rust-checks 没装 libwebkit2gtk-4.1-dev ⇒ desktop 的 tauri/wry 在 Linux 上编译失败',
+  )
+  assert.match(
+    block,
+    /libgtk-3-dev/,
+    'desktop 的 tao 窗口需要 GTK3 开发库，缺了前置 rust-checks 会红',
   )
 })
 
@@ -591,16 +600,15 @@ test('ci.yml：cargo-audit 不能用项目 pin 的工具链编（会红在装工
 
 // 第二轮 CI（2026-10-07，run 37635738557）暴露的两处：同样是「前置只存在于开发者的
 // 机器上」，且同样是剥掉上一层壳之后才露出来的。
-test('ci.yml：rust-checks 必须自己产出 packages/ui/dist，否则 generate_context! 编译期炸', () => {
+test('ci.yml：rust-checks 必须自己产出 packages/ui/dist，否则 CLI build.rs 编译期内嵌落空', () => {
   const block = jobBlock(ciYml(), 'rust-checks', 'msrv-check')
   assert.match(
     block,
     /working-directory:\s*packages\/ui\s*\n\s*run:\s*npm ci && npm run build/,
-    // `tauri::generate_context!()` 是编译期宏，读 `frontendDist: "../dist"` 且要求该
-    // 路径存在；`packages/ui/dist` 被 apps/desktop/.gitignore 忽略、**只在开发者本机存在**。
-    // 缺了它：`error: proc macro panicked` ⇒ `--workspace` 的 check/test/clippy/doc
-    // 四步**全红**，而报错指向的是一段完全正常的 Rust 代码。
-    'rust-checks 没有构建前端产物 ⇒ symbio-tauri 编译期 panic，四步全红且报错指向正常代码',
+    // CLI 的 `build.rs` 在编译期内嵌 `packages/ui/dist`；该目录被忽略、**只在开发者本机
+    // 存在**。缺了它 CLI 会退化成占位页（编译能过，但 serve 出的 UI 不可用）⇒ 必须
+    // 在 rust-checks 里显式构建一次，保证 workspace 编译用的就是真产物。
+    'rust-checks 没有构建前端产物 ⇒ CLI 只能内嵌占位页，编译绿灯但 serve 的 UI 不可用',
   )
 })
 

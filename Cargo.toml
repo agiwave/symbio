@@ -1,12 +1,12 @@
-# 根 workspace：cli / symbio / tauri 三者共用仓库根的 target/，
+# 根 workspace：cli / desktop 原生窗口壳 / symbio 三者共用仓库根的 target/，
 # symbio 只编译一次（此前三个独立 workspace 各编译一遍，约 70G 重复产物）。
 #
-# 工具链统一锁在根 rust-toolchain.toml（1.93.1），含 tauri——不再走 stable。
+# 工具链统一锁在根 rust-toolchain.toml（1.93.1）——不再走 stable。
 # 单个 target 目录要求所有 crate 用同一个 rustc，否则会触发 E0514
 # （found crate compiled by incompatible version of rustc）/ 全量重编。
 [workspace]
 resolver = "2"
-members = ["crates/*", "apps/cli", "apps/desktop/src-tauri"]
+members = ["crates/*", "apps/cli", "apps/desktop"]
 
 # 外部依赖的**唯一版本源**：成员只声明「用不用、带哪些 feature」，不写版本。
 # 内部 crate 之间仍用 path（相对路径是目录结构的投影，集中到根反而多一处要同步的地址）。
@@ -38,6 +38,8 @@ serde = "1.0.229"
 serde_json = "1.0.151"
 serde_yaml_ng = "0.10.0"
 shellexpand = "3.1.2"
+# 桌面原生窗口壳：tao 窗口 + wry WebView（Tauri v2 内核）。
+# WebView 只加载本机 CLI serve 的 HTTP 地址，前端走 HTTP/WS，不用 IPC command。
 tauri = "2.0"
 tauri-build = "2.0"
 tauri-plugin-dialog = "2.0"

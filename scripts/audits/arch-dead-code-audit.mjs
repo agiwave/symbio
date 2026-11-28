@@ -106,8 +106,8 @@ export const ARCH_TREES = [
   'crates/symbio-plugin-api',
 ]
 
-/** 调用语料：整个 `crates` 树 + Tauri 宿主的 Rust 源码（插件与宿主都可能调它们）。 */
-export const CALL_TREES = ['crates', 'apps/cli/src', 'apps/desktop/src-tauri/src']
+/** 调用语料：整个 `crates` 树 + CLI / 桌面原生窗口壳的 Rust 源码（插件与宿主都可能调它们）。 */
+export const CALL_TREES = ['crates', 'apps/cli/src', 'apps/desktop/src']
 
 /** `pub fn` 的声明面。`pub(crate)` 不算公开面（`pub` 后必须紧跟空白）。 */
 const FN_DECL_RE =

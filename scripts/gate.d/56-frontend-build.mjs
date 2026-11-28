@@ -1,13 +1,13 @@
 // frontend-build 阶段：`vite build`（**只**这一步）。
 //
-// 文件名 56- 与「不进并发批」（2026-10-09 拆分）：backend 编译 `symbio-tauri` 时
-// `generate_context!` 在**编译期**读 `tauri.conf.json` 的 `frontendDist`（现为
-// `../../../packages/ui/dist`），而 `vite build` 会**清空重写**同一目录 ⇒ 并发就是
-// 「编译读到半截 dist ⇒ 假红」。所以构建必须留在批后；批前的静态检查在
-// `20-frontend-static.mjs`。
+// 文件名 56- 与「不进并发批」（2026-10-09 拆分）：backend 编译 CLI 时
+// `build.rs` 在**编译期**内嵌 `packages/ui/dist` 进二进制，而 `vite build` 会
+// **清空重写**同一目录 ⇒ 并发就是「编译读到半截 dist ⇒ 假红」。所以构建必须留在
+// 批后；批前的静态检查在 `20-frontend-static.mjs`。
 //
-// 单一产物：desktop（generate_context!）、web（静态部署）、CLI（build.rs 编译期内嵌）
-// 都读 `packages/ui/dist` 这一份，不再构建两份、也不再有 desktop/web 内容分叉。
+// 单一产物：web（静态部署）与 CLI（build.rs 编译期内嵌）都读 `packages/ui/dist`
+// 这一份；desktop 原生窗口壳不内嵌 UI，它加载的 CLI serve 提供同一份产物。不再构建
+// 两份、也不再有 desktop/web 内容分叉。
 //
 // 也**不与 58-e2e 并发**：e2e 用例对 CPU 竞争时序敏感，再叠加外部负载会把
 // 「等实时面收敛」的用例推过超时线。
@@ -48,7 +48,7 @@ export default {
             if (blockedBySandboxDelete(r.output)) return 'skipped'
             return { ok: false, note: `exit=${r.code}`, logFile: r.logFile }
           }
-          // 产物必须可用：index.html 是 Tauri generate_context! 与 CLI 内嵌的共同入口。
+          // 产物必须可用：index.html 是 web 静态部署与 CLI 编译期内嵌的共同入口。
           if (!fs.existsSync(path.join(dist, 'index.html'))) {
             return { ok: false, note: 'vite build 未产出 packages/ui/dist/index.html' }
           }

@@ -16,7 +16,7 @@
  *    滚动锚定没关时就是这样）往下窜一大截。happy-dom 没有布局，这里按已铺条数造高度。
  *
  * 环境说明：`useChatConnection` 与 `useChatScroll` 都整体替换为可控桩（前者经
- * `services/vdfs` / Tauri 通道出站，后者要真实布局才有意义）；`MessageNode` 换成
+ * `services/vdfs` / HTTP 通道出站，后者要真实布局才有意义）；`MessageNode` 换成
  * 只报 id 的替身——本文件判的是**铺了多少条、铺哪几条**，不是节点内容。
  */
 import { afterEach, beforeEach, describe, expect, it, vi, type Mock } from 'vitest'

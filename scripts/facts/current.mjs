@@ -197,7 +197,7 @@ function scopeRows() {
     sharedScopeRow(ROOT, "crates", [".rs"]),
     sharedScopeRow(ROOT, "crates/symbio-platform/src/kernel", [".rs"]),
     sharedScopeRow(ROOT, "apps/cli/src", [".rs"]),
-    sharedScopeRow(ROOT, "apps/desktop/src-tauri/src", [".rs"]),
+    sharedScopeRow(ROOT, "apps/desktop/src", [".rs"]),
     sharedScopeRow(ROOT, "packages/ui/src", [".ts", ".vue"]),
   ];
 }
@@ -330,40 +330,8 @@ export function requiredHits(list, what) {
   return list;
 }
 
-/** `generate_handler![…]` 里**实际注册**的 command（先剥注释，被注释掉的不算接缝） */
-function tauriCommands() {
-  const file = path.join(ROOT, "apps", "desktop", "src-tauri", "src", "main.rs");
-  const txt = stripComments(requiredSource(file, "Tauri IPC 命令"));
-  const m = txt.match(/generate_handler!\s*\[([\s\S]*?)\]/);
-  if (!m) throw new Error("结构事实提取为空：`generate_handler![…]` 在 main.rs 里找不到");
-  return requiredHits(
-    [...m[1].matchAll(/(?:commands|crate)::([a-z0-9_]+)|^\s*([a-z0-9_]+)\s*,/gm)]
-      .map((g) => g[1] ?? g[2])
-      .filter(Boolean),
-    "Tauri IPC 命令",
-  );
-}
-
-/** `#[tauri::command]` 声明总数（与 generate_handler 注册数对比——差值才是「未注册历史函数」，不许硬编码） */
-function tauriCommandDeclared() {
-  const dir = path.join(ROOT, "apps", "desktop", "src-tauri", "src");
-  let n = 0;
-  const walk = (d) => {
-    for (const ent of readdirSync(d, { withFileTypes: true })) {
-      const p = path.join(d, ent.name);
-      if (ent.isDirectory()) walk(p);
-      else if (ent.name.endsWith(".rs"))
-        n += (readFileSync(p, "utf8").match(/#\[tauri::command\]/g) ?? []).length;
-    }
-  };
-  // 目录缺失不是「0 个声明」，是「这一格没输入」——与 `requiredSource` 同一条口径。
-  if (!existsSync(dir)) throw new Error(`结构事实的源目录不存在：Tauri 宿主 —— ${path.relative(ROOT, dir)}`);
-  walk(dir);
-  return n;
-}
-
 /** 前端 router：route 条数与真实组件数（redirect 不算组件——视图收敛程度是可数的事实） */
-function tauriViews() {
+function frontendViews() {
   const file = path.join(ROOT, "packages", "ui", "src", "router", "index.ts");
   // 判据只认代码：注释里写 `redirect: () => …` 是在解释「为什么不用 redirect」，
   // 不是又一条 route。剥注释后再数，两处都不会被自己的说明文字喂成假读数。
@@ -657,17 +625,7 @@ function render() {
   L.push("");
   L.push("### 5.2 宿主接缝（前端到底有多大）");
   L.push("");
-  const ipc = tauriCommands();
-  const unregisteredN = tauriCommandDeclared() - ipc.length;
-  L.push(
-    `- **Tauri IPC**：注册 ${ipc.length} 个 command —— ${fmtList(ipc)}（` +
-      "`apps/desktop/src-tauri/src/main.rs::generate_handler!`" +
-      (unregisteredN > 0
-        ? `；另有 ${unregisteredN} 个已声明未注册的 \`#[tauri::command]\`，不计入接缝`
-        : "") +
-      "）"
-  );
-  const views = tauriViews();
+  const views = frontendViews();
   L.push(
     `- **前端路由**：${views.routes} 条 route，其中真实组件 ${views.components} 个（${fmtList(
       views.components_list

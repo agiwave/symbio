@@ -1,6 +1,6 @@
 //! CLI 专属的编译期内嵌 UI 资源（`packages/ui/dist`）。
 //!
-//! 内嵌只属于 CLI 这个交付物入口：桌面端由 Tauri `generate_context!` 嵌入自己的 UI，
+//! 内嵌只属于 CLI 这个交付物入口：桌面启动器不内嵌 UI，它拉起的 CLI serve 提供同一份 UI，
 //! 共享 runtime 不依赖本模块，因此桌面二进制不会被迫多嵌一份 dist。
 //! 与「运行时从磁盘读 `--frontend-dist`」并存：默认走内嵌资源，二进制自带 UI；
 //! 显式指定外部目录时才回退到磁盘。两者由 `symbio-runtime` 统一成同一套静态响应。

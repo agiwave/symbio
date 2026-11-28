@@ -9,7 +9,7 @@ impl: done
 
 # Gateway 插件
 
-入站网关：把 HTTP/WebSocket 客户端请求适配为插件路由调用，是外部接入 Symbio 的统一入口（与 Tauri 宿主的 route_v2 同构）。
+入站网关：把 HTTP/WebSocket 客户端请求适配为插件路由调用，是三端前端与外部接入 Symbio 的统一入口。
 
 ## 路由
 

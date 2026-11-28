@@ -6,7 +6,7 @@ import './_selfrun.mjs';
 // RE-005 的「通道与自动化面」行（`telegram` 6 路由 · `hook` · `home`）此前**整面零用例**。
 // 本用例先落 `hook` 格——它是三格里唯一**驱动面已在生产里存在**的一格：
 // `hook/fire` / `hook/register` / `hook/list` 都是插件路由，经 gateway 的 HTTP 边界
-// （与 Tauri 前端同构的 `invoke`）直发即可，不需要 mock 任何外部服务。
+// （与浏览器前端同构的 `invoke`）直发即可，不需要 mock 任何外部服务。
 //
 // ## 为什么读法取「靶子收到请求」+「路由回包」
 //
@@ -35,8 +35,8 @@ import './_selfrun.mjs';
 // **父**（`home` 挂 worker），`Composite::route` 对认不出的名字直接 `NotFound`、
 // **不向上转发** ⇒ home 的四条臂（`home/get_homedir` · `home/reload` ·
 // `home/set_workspace` · `home/get_workspace`）
-// 经 gateway **不可达**（实测 400）。它们的生产驱动面是 Tauri 的 `callPlugin`
-// （`packages/ui/src/services/home.ts`，进程内 `root.route`），归前端形态 e2e。
+// 经 gateway **不可达**（实测 400）。它们的生产驱动面是浏览器前端的 `callPlugin`
+// （`packages/ui/src/services/home.ts`，经 HTTP `POST /api/v1/invoke`），归前端形态 e2e。
 //
 // 这条断言是**事实钉住**而不是「期望如此」：若将来 gateway 的 router 抬到 home
 // （已按裁决②「收白名单」收口——只读白名单删掉两条走不到的死条目、

@@ -40,7 +40,7 @@ fn config_definition() -> DetailDefinition {
                 vec![
                     DetailOption {
                         value: "native".into(),
-                        label: "native（仅本机 Tauri IPC，不监听端口）".into(),
+                        label: "native（不监听端口）".into(),
                         description: None,
                     },
                     DetailOption {

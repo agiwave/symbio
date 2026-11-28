@@ -7,7 +7,9 @@ target/
 
 # Build outputs
 dist/
-src-tauri/target/
+target/
+# Tauri 生成的 schema（tauri dev / build 每次重生成，不入库）
+gen/
 # 覆盖率产物（`npm run test:coverage` 生成，含 .tmp 中间文件）
 coverage/
 

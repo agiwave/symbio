@@ -2,45 +2,41 @@
  * 路由信封的**来源字段**（`metadata.origin`）单测
  *
  * 这一条守的是「诊断事实能不能到达日志」：`origin` 的整条价值链是
- * 「调用方给理由 → `buildMetadata` 写进 `metadata.origin` → Tauri 的
+ * 「调用方给理由 → `buildMetadata` 写进 `metadata.origin` → 后端
  * `Start routing` 留痕打出」。中间任何一环断掉都**不会报错**——日志里只是少了
  * 那个字段，于是又回到「从时间戳反推谁发的」。
  *
- * 因此这里不测「函数被调过」，而是直接断言**送上 IPC 的那个信封**里有什么：
+ * 因此这里不测「函数被调过」，而是直接断言**送上 Server 的那个信封**里有什么：
  * 有理由就必须有 `origin`；没给理由就**一个键都不多**（否则「有没有来源」
  * 本身不可判，且所有路由的信封形状都会悄悄变一遍）。
  */
 
 import { afterEach, beforeEach, describe, expect, it, vi } from 'vitest'
 
-vi.mock('@tauri-apps/api/core', () => ({ invoke: vi.fn() }))
-vi.mock('@tauri-apps/api/event', () => ({ listen: vi.fn(async () => () => {}) }))
 vi.mock('@/utils/logger', () => ({
   logger: { error: vi.fn(), warn: vi.fn(), debug: vi.fn(), info: vi.fn() },
 }))
 
-import { invoke } from '@tauri-apps/api/core'
+const H = vi.hoisted(() => ({ fetch: vi.fn() }))
+
 import { callPlugin, HEAD_ORIGIN, HEAD_PATH } from '../plugin'
 
-/** 取第 n 次 `invoke('route_v2', …)` 送上 IPC 的信封 */
+/** 取第 n 次 `POST /api/v1/invoke` 的请求体（即 PluginMessageWire） */
 function envelope(n = 0): { metadata: Record<string, string>; payload: unknown } {
-  const call = vi.mocked(invoke).mock.calls[n]
-  expect(call[0], '只走 route_v2 这一条原生通道').toBe('route_v2')
-  return (call[1] as { request: { metadata: Record<string, string> } }).request as never
-}
-
-/** 让 `route_v2` 立即回一个同步 Data 帧（`timeoutMs = 0` 时不挂超时竞速） */
-function stubImmediateData(): void {
-  vi.mocked(invoke).mockResolvedValue({
-    metadata: {},
-    payload: { type: 'Data', data: null },
-  } as never)
+  const call = H.fetch.mock.calls[n]
+  expect(String(call[0]), '只走同源 Server HTTP').toBe('http://localhost:1420/api/v1/invoke')
+  return JSON.parse((call[1] as RequestInit).body as string) as never
 }
 
 beforeEach(() => {
-  vi.stubGlobal('window', { __TAURI_INTERNALS__: { invoke: vi.fn() } })
-  vi.mocked(invoke).mockReset()
-  stubImmediateData()
+  vi.stubGlobal('window', {})
+  vi.stubGlobal('location', { origin: 'http://localhost:1420' })
+  H.fetch.mockReset()
+  H.fetch.mockResolvedValue({
+    ok: true,
+    text: async () => JSON.stringify({ type: 'Data', data: null }),
+  })
+  vi.stubGlobal('fetch', H.fetch)
 })
 
 afterEach(() => {

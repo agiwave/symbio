@@ -36,7 +36,7 @@ impl: done
 
 - **入口**（人直接敲的）：`gate.mjs`、`registry-board.mjs`、`doc-find.mjs`、
   `windows-restart.mjs` / `-prepare`、`cargo-offline-refresh.mjs`、
-  `obligation-ring-accept.mjs`、`check-commit-msg.mjs`、`cli-binary.mjs` / `tauri-binary.mjs`
+  `obligation-ring-accept.mjs`、`check-commit-msg.mjs`、`cli-binary.mjs`
   （后两者是「按指纹决定要不要重建」的构建入口）。
 - **共享库**（只被 import，声明 `@gate lib`）：`color`、`md-table`、`fs-walk`、`rust-scan`、
   `line-count`、`registry-lib`、`route-facts`、`commit`、

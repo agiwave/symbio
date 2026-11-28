@@ -171,7 +171,7 @@ impl PluginRegistry {
     /// 与停用/卸载是**两条路**：那些是对单个插件的处置（走插件管理插件的注册表
     /// 动词、理由是 `Disabled` / `Uninstalled`）；这里是对全表的广播，语义是
     /// 「进程要走了，各插件做最后落盘」。调用点 = 生产退出路径：CLI `main` 的
-    /// 唯一出口（`apps/cli/src/main.rs`）与 Tauri 的 `RunEvent::Exit`。
+    /// 唯一出口（`apps/cli/src/main.rs`）。
     pub async fn shutdown_all(&self) {
         for (name, plugin) in self.snapshot() {
             if let Err(e) = plugin.stop(PluginStopReason::Shutdown).await {

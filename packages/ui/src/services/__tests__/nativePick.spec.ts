@@ -1,66 +1,33 @@
 import { afterEach, beforeEach, describe, expect, it, vi } from 'vitest'
 
-const H = vi.hoisted(() => ({
-  open: vi.fn(),
-  protocol: 'native' as 'native' | 'http',
-}))
-vi.mock('@tauri-apps/plugin-dialog', () => ({ open: H.open }))
-vi.mock('../plugin', () => ({
-  getOutboundConfig: () => ({ protocol: H.protocol, endpoint: '', token: '' }),
-}))
-
 import { pickPath } from '../nativePick'
 
-beforeEach(() => {
-  H.open.mockReset()
-  H.protocol = 'native'
-})
+beforeEach(() => { vi.clearAllMocks() })
+afterEach(() => { vi.unstubAllGlobals() })
 
-afterEach(() => {
-  vi.unstubAllGlobals()
-})
-
-describe('统一路径取值', () => {
-  it('browser 目录请求交给 DirectoryPicker，不打开原生或浏览器文件对话框', async () => {
+describe('统一路径取值（三端统一走 Server 目录 API）', () => {
+  it('目录请求交给 DirectoryPicker，不打开任何本机文件对话框', async () => {
     vi.stubGlobal('window', {})
     const onBrowserPick = vi.fn()
 
     await expect(pickPath('directory', { initialPath: '/srv', onBrowserPick })).resolves.toBeNull()
     expect(onBrowserPick).toHaveBeenCalledWith({ kind: 'directory', initialPath: '/srv' })
-    expect(H.open).not.toHaveBeenCalled()
   })
 
-  it('browser 未提供组件回调时明确报错，不静默降级', async () => {
+  it('未提供组件回调时明确报错，不静默降级', async () => {
     vi.stubGlobal('window', {})
     await expect(pickPath('directory')).rejects.toThrow('DirectoryPicker')
-    expect(H.open).not.toHaveBeenCalled()
   })
 
-  it('Server 目录 API 不提供文件选择时，browser 文件字段要求手动路径', async () => {
+  it('文件路径字段要求手动填写（浏览器拿不到绝对路径）', async () => {
     vi.stubGlobal('window', {})
     const onBrowserPick = vi.fn()
     await expect(pickPath('file', { onBrowserPick })).rejects.toThrow('文件路径请手动填写')
     expect(onBrowserPick).not.toHaveBeenCalled()
-    expect(H.open).not.toHaveBeenCalled()
   })
 
-  it('embedded 连接远端 Server 时也交给 Server 目录 API，不读取客户端路径', async () => {
-    vi.stubGlobal('window', { __TAURI_INTERNALS__: { invoke: vi.fn() } })
-    H.protocol = 'http'
-    const onBrowserPick = vi.fn()
-
-    await expect(pickPath('directory', { initialPath: '/srv', onBrowserPick })).resolves.toBeNull()
-    expect(onBrowserPick).toHaveBeenCalledWith({ kind: 'directory', initialPath: '/srv' })
-    expect(H.open).not.toHaveBeenCalled()
-  })
-
-  it('embedded 动态调用 Tauri dialog，并保留取消语义', async () => {
-    vi.stubGlobal('window', { __TAURI_INTERNALS__: { invoke: vi.fn() } })
-    H.open.mockResolvedValue('/picked/dir')
-    await expect(pickPath('directory')).resolves.toBe('/picked/dir')
-    expect(H.open).toHaveBeenCalledWith({ directory: true, multiple: false, title: '选择目录' })
-
-    H.open.mockResolvedValue(null)
-    await expect(pickPath('directory')).resolves.toBeNull()
+  it('不支持的 pick 种类返回 null，不抛错', async () => {
+    await expect(pickPath(undefined)).resolves.toBeNull()
+    await expect(pickPath('unknown' as never)).resolves.toBeNull()
   })
 })

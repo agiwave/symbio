@@ -2,7 +2,7 @@
 
 use super::*;
 
-/// 载荷的**键名是契约的一部分**：这些键进 `model.assist` 行的线格式，前端（Tauri
+/// 载荷的**键名是契约的一部分**：这些键进 `model.assist` 行的线格式，前端（浏览器
 /// 命令参数）与外部网关都按它们拼 JSON——改名 = 跨栈同步，改值没有任何东西会红。
 #[test]
 fn assist_payload_keys_are_the_wire_contract() {

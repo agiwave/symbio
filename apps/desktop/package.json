@@ -1,14 +1,15 @@
 {
   "name": "@symbio/desktop",
   "version": "0.1.14",
-  "description": "Symbio 桌面交付物：Tauri 壳，Vue 实现共享自 packages/ui",
+  "description": "Symbio 桌面交付物：Tauri 原生窗口，加载本机 CLI serve 提供的 UI",
   "type": "module",
   "private": true,
   "scripts": {
     "dev": "npm --prefix ../../packages/ui run dev",
-    "build": "npm --prefix ../../packages/ui run build",
-    "tauri": "node ../../packages/ui/node_modules/@tauri-apps/cli/tauri.js",
-    "stamp:dev": "node ../../scripts/tauri-binary.mjs --stamp",
-    "stamp:release": "node ../../scripts/tauri-binary.mjs --stamp --release"
+    "tauri": "tauri",
+    "build": "npm --prefix ../../packages/ui run build"
+  },
+  "devDependencies": {
+    "@tauri-apps/cli": "^2.12.6"
   }
 }

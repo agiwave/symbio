@@ -115,46 +115,22 @@ jobs:
         # Security.framework、**Linux = 系统 OpenSSL** ⇒ 只有 Ubuntu runner 需要它。
         # runner 镜像通常已预装，此处显式声明是为了：① 让这条平台前置在 CI 里可见；
         # ② 镜像变更时以「openssl-sys 找不到库」之外的方式暴露出来。
-        run: sudo apt-get update && sudo apt-get install -y libssl-dev pkg-config
+        run: sudo apt-get update && sudo apt-get install -y libssl-dev pkg-config libwebkit2gtk-4.1-dev libgtk-3-dev libayatana-appindicator3-dev librsvg2-dev
 
-      - name: Install Linux system libs (GTK/WebKit)
-        # workspace 的 members 含 `apps/desktop/src-tauri`，而 Tauri v2 在 Linux 上走
-        # GTK/WebKit ⇒ `glib-sys` / `gobject-sys` / `gtk-sys` / `webkit2gtk-sys` /
-        # `libappindicator` 的 build script 逐个跑 pkg-config。
+      - name: Build frontend assets (CLI build.rs 编译期内嵌要求 packages/ui/dist)
+        # CLI 的 `build.rs` 在编译期内嵌 `packages/ui/dist` 进二进制；dist 被忽略，
+        # 只存在于开发者本机。缺了它，CLI 会静默退化成占位页：workspace 编译四步
+        # （check / test / clippy / doc）全绿，但 serve 出的 UI 不可用——一个只亮绿灯
+        # 的检查比报错更难发现，故必须在 Rust 构建前显式产出真产物。
         #
-        # 2026-10-07 首次在 `v2-plan` 上跑 CI 时实测：`cargo check --tests --workspace`
-        # 在第一个 sys crate 就红——
-        #   `Package gobject-2.0 was not found in the pkg-config search path.`
-        # 在此之前这条路径**从未被执行过**：本地是 Windows，Tauri 走 WebView2，
-        # 根本不编 GTK ⇒ 与「分支没接 CI」同族，是**没有信号的漏跑**的第三次。
-        #
-        # 只装 openssl 是不够的：openssl 那步当时是绿的，红的是它后面的 GTK 链。
-        # 清单取 Tauri 官方 Linux 前置（webkit2gtk 4.1 对应 Ubuntu 24.04）。
-        # ⚠️ `msrv-check` / `e2e-check` 只编**声明了 `rust-version` 的成员**（不含
-        # `symbio-tauri`，它没声明），不碰 tauri 的 GTK 链，故这两处不装上面这组。
-        run: >
-          sudo apt-get update && sudo apt-get install -y
-          libssl-dev pkg-config
-          libwebkit2gtk-4.1-dev libgtk-3-dev
-          libayatana-appindicator3-dev librsvg2-dev libxdo-dev
-
-      - name: Build frontend assets (tauri::generate_context! 要求 packages/ui/dist)
-        # `apps/desktop/src-tauri/src/main.rs` 的 `tauri::generate_context!()` 是**编译期**
-        # 宏：它读 `tauri.conf.json` 的 `"frontendDist": "../../../packages/ui/dist"` 并要求
-        # 该路径存在，不存在就直接 `error: proc macro panicked`。于是 `--workspace` 的四步
-        # （check / test / clippy / doc）**全红**，而报错指向的是一段完全正常的 Rust
-        # 代码 —— 2026-10-07 首次在 v2-plan 上跑 CI 实测过这一失败形态。
-        #
-        # 同一份 `packages/ui/dist` 还被 CLI 的 `embedded_ui` 在编译期内嵌，
-        # 被 web 交付物静态部署——三端共用一个产物，不再各建一份。
+        # 同一份 `packages/ui/dist` 还被 web 交付物静态部署；桌面启动器拉起的 CLI
+        # serve 提供的就是这份内嵌产物。三端共用一个产物，不再各建一份。
         # `packages/ui/dist` 被 `dist/` 忽略，**只在开发者本机存在**。
-        # 与「分支没接 CI」「本机不编 GTK」「cargo-audit 被项目 pin 拖住」同族：
+        # 与「分支没接 CI」「cargo-audit 被项目 pin 拖住」同族：
         # 前置只存在于开发者的机器上，于是这条路径在本机天天绿、在 CI 一次没跑过。
         #
-        # 这里真的跑一次 `vite build` 而不是 `mkdir dist` 占位：占位能让 cargo check
-        # 过，但那等于把「前端产物与 tauri.conf.json 是否搭得上」从 Rust 构建里抹掉，
-        # 而 `generate_context!` 恰恰就是在编译期做这层校验的——占位会让它去校验一个
-        # 我们刚编出来的空壳。
+        # 这里真的跑一次 `vite build` 而不是 `mkdir dist` 占位：占位会让 CLI
+        # 把空壳当真产物内嵌，serve 出空白页而 CI 全绿——这正是要防的假信号。
         # （前端自身的类型 / 单测 / lint 归 `frontend-checks`；这里只要它的产物。）
         working-directory: packages/ui
         run: npm ci && npm run build
@@ -202,7 +178,7 @@ jobs:
 
       - name: Install Linux system libs (OpenSSL)
         # 同 rust-checks：Linux 侧 TLS 依赖系统 OpenSSL（D-013）
-        run: sudo apt-get update && sudo apt-get install -y libssl-dev pkg-config
+        run: sudo apt-get update && sudo apt-get install -y libssl-dev pkg-config libwebkit2gtk-4.1-dev libgtk-3-dev libayatana-appindicator3-dev librsvg2-dev
 
       - name: Cache cargo registry
         uses: actions/cache@v4
@@ -283,7 +259,7 @@ jobs:
         #    构建此前只在上线打 tag 时才跑 ⇒ 构建错误要等发布才暴露，现已前置到 PR。
         # ⚠️ 前端是**两个阶段**（2026-10-09 拆分）：`frontend-static`（类型 / 单测 / lint）
         #    与 `frontend-build`（vite build）。本地前者在并发批里、后者在批后（vite build
-        #    会重写 packages/ui/dist，与 backend 的 generate_context! 编译期读冲突）；CI 这边
+        #    会重写 packages/ui/dist，与 backend 编译 CLI 时 build.rs 的编译期内嵌冲突）；CI 这边
         #    没有并发批的约束，但**两个 id 都要写**——只写 `frontend-static` 是个合法 id，
         #    不会报错，只会**静默丢掉构建**。
         # ⚠️ 必须带 `--ci`：`frontend-static` 的测试数棘轮在本地会「自动上调并落盘」
@@ -332,7 +308,7 @@ jobs:
         run: npm ci
 
       - name: Install Linux system libs (OpenSSL)
-        run: sudo apt-get update && sudo apt-get install -y libssl-dev pkg-config
+        run: sudo apt-get update && sudo apt-get install -y libssl-dev pkg-config libwebkit2gtk-4.1-dev libgtk-3-dev libayatana-appindicator3-dev librsvg2-dev
 
       - name: Cache cargo registry
         uses: actions/cache@v4

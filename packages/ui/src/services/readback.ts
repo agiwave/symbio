@@ -1,6 +1,6 @@
 /**
  * 回读的**理由**（闭集）——四个回读动词（`listVdfs` / `treeVdfs` / `statVdfs` / `readVdfs`）的
- * 必填首参，随请求进 `metadata.origin`，由 Tauri 侧的 `Start routing` 留痕打出。
+ * 必填首参，随请求进 `metadata.origin`，由后端的 `Start routing` 留痕打出。
  *
  * ## 为什么要有它
  *

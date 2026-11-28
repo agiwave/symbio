@@ -51,7 +51,7 @@
  *
  * 两个「看着能并发、实际不能」的坑，判据各归其主文件：
  *   - frontend-build 不与 backend 并发：vite build 重写 `packages/ui/dist`，而 backend 编译
- *     symbio-tauri 时 `generate_context!` 在**编译期**读它（56-frontend-build.mjs）。
+ *     CLI 时 `build.rs` 在**编译期**内嵌它（56-frontend-build.mjs）。
  *     前端另外三个任务**不碰 `dist`**，故拆到 `20-frontend-static.mjs` 进批——那是
  *     同一个阶段的另一半，拆开只是为了让不冲突的那一半不再串行；
  *   - e2e 不与任何重负载并发：用例对 CPU 竞争时序敏感（58-e2e.mjs）。

@@ -8,7 +8,7 @@
 //! - **后端**（`crates/symbio-plugin-mcp/src/`）：实现 MCP 客户端（stdio / http transport），
 //!   作为 agent 工具机制的延伸，**仅在 agent 实际需要某个 MCP 工具时**才按需
 //!   spawn 子进程 / 建立 HTTP 连接（lazy-load），调用结束后立即关闭。
-//! - **前端**（`tauri`）：仅负责 MCP Server 的**配置管理**（CRUD），不实现
+//! - **前端**（浏览器）：仅负责 MCP Server 的**配置管理**（CRUD），不实现
 //!   任何 transport 客户端。
 //!
 //! 因此 `McpServerConfig` 的权威定义在本插件的 `schemas/mcp_config.rs`

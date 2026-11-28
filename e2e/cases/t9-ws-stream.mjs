@@ -1,8 +1,8 @@
 // T9 gateway WS 实时面：前端同构边界上的「变更帧序 + 增量拼接」契约。
 import './_selfrun.mjs';
 //
-// `WS /api/v1/ws` 是 Tauri 前端「会话实时面」的真实等价物：首帧发
-// `PluginMessageWire`（与 route_v2 同线格式），此后这条连接只承载该频道的帧。
+// `WS /api/v1/ws` 是浏览器前端「会话实时面」的真实等价物：首帧发
+// `PluginMessageWire`（与 invoke 同线格式），此后这条连接只承载该频道的帧。
 //
 // ## 实时面**只有一条通道**（/ ）
 //
@@ -22,7 +22,7 @@ import './_selfrun.mjs';
 // | 全部变更 `path` 在会话作用域内 | 广播语义下消费端按地址归属 |
 // | 离开 working 的会话帧**到达晚于**全部消息帧 | 「不忙 ⇒ 本轮已终态」的唯一依据 |
 //
-// 相对 cases/：上两层即仓库根（ws 依赖来自 tauri 前端的 node_modules）
+// 相对 cases/：上两层即仓库根（ws 依赖来自 packages/ui 的 node_modules）
 import {
   MockLlm,
   makeHomedir,

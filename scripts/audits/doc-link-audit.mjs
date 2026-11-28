@@ -134,7 +134,7 @@
  * 扫描范围（与「文档下沉原则」对齐：单模块文档在该模块目录内）：
  *   docs/                系统级文档（**archive/ 除外**，见下）
  *   crates/          插件模块文档（plugins/<plugin>/README.md + plugins/<plugin>/docs/）
- *   apps/desktop/               Tauri 壳文档（README.md）
+ *   apps/desktop/               桌面原生窗口壳文档（README.md）
  *   apps/cli/                  命令行交付物文档（README.md + docs/）
  *   packages/ui/               三端共享 Vue 实现文档（README.md + docs/）
  *   e2e/                 e2e 用例说明（README.md）
@@ -143,7 +143,7 @@
  *   根目录 *.md          AGENTS / README / CONTRIBUTING / CODE_OF_CONDUCT
  *
  * 源码注释（D-010）的范围由 `gen-doc-refs` 的 `SRC_ROOTS` / `listSourceFiles` 给出
- *   （symbio / tauri / cli / scripts / e2e / examples / .github 下的非 .md 源码），
+ *   （symbio / cli / desktop / scripts / e2e / examples / .github 下的非 .md 源码），
  *   两边共用同一份口径。
  *
  * **不设历史快照豁免**：本仓没有归档目录（历史只归 `git log`，），所以扫描面里
@@ -784,7 +784,7 @@ function checkAnchor(fromRel, absFile, rawFrag, toLabel) {
  * 等六个根，或 `../` / `./` 前缀）。这样 `[]`、`[[DE-001 §5]]`、`[文字]`
  * 这类正常括号不误报——它们不可能是「丢了地址的路径链接」。
  */
-const REPO_PATH_HEAD = /^(?:\.{1,2}\/)?(?:docs|scripts|symbio|tauri|cli|e2e|examples)\//
+const REPO_PATH_HEAD = /^(?:\.{1,2}\/)?(?:docs|scripts|symbio|cli|desktop|e2e|examples)\//
 const BRACKET = /\[([^\[\]]+)\](?!\()/g
 const malformedLinks = []
 let malformedChecked = 0
@@ -1033,7 +1033,7 @@ const WAIVER_D010_RE = /doc-link-allow\s+D-010\s*:\s*\S/
  * 无前缀的缩写（`session/docs/x.md`）判定不了相对谁——D-006 在 md 侧靠双根解析收窄过，
  * 源码侧的缩写变体太多（同一份文档被写成 4 种短路径），只收这一闭集，宁可漏判不误报。
  */
-const SRC_TICK_CANDIDATE = /^(?:docs|scripts|symbio|tauri|cli|e2e|examples|\.github)\/|^\.\.?\//
+const SRC_TICK_CANDIDATE = /^(?:docs|scripts|symbio|cli|desktop|e2e|examples|\.github)\/|^\.\.?\//
 
 /** 构建产物 / 机器本地段：gitignore 掉的目录「存不存在」在别的机器上不可复现 */
 const SRC_SEG_SKIP = new Set(['target', 'dist', 'build', 'node_modules', 'vendor', '.cargo', '.git'])

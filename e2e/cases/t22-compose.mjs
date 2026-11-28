@@ -285,7 +285,7 @@ export default defineCase(
       // ── B 首响剔除：再接一句「读一下 README」⇒ Escalate ⇒ 首响 + 工具循环 ──
       base = await reqCount();
       // 实时面在**投递之前**订阅：本步的时序判据看的是到达序，晚一步订阅等于把要验的
-      // 那一段截掉（与 Tauri 前端同构：订阅一次覆盖整个会话目录）。
+      // 那一段截掉（与浏览器前端同构：订阅一次覆盖整个会话目录）。
       subB2 = await subscribeSessionRealtime(cli, {
         sessionId: SIDS.generate,
         gatewayPort: GATEWAY_PORT,

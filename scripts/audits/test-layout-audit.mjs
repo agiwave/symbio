@@ -63,14 +63,14 @@ const RATCHETS = {
   'crates': { files: 0, tests: 0 },
   'crates/symbio-platform/src/kernel': { files: 0, tests: 0 },
   'apps/cli/src': { files: 0, tests: 0 },
-  'apps/desktop/src-tauri/src': { files: 0, tests: 0 },
+  'apps/desktop/src': { files: 0, tests: 0 },
 }
 const DEFAULT_RATCHET = { files: 0, tests: 0 }
 
-/** `ROOT=` 给了就只审那一个；否则审全部 Rust crate（cli / tauri 此前完全没被覆盖） */
+/** `ROOT=` 给了就只审那一个；否则审全部 Rust crate（cli / desktop 此前完全没被覆盖） */
 const ROOTS = rootArg
   ? [rootArg.slice(5)]
-  : ['crates', 'crates/symbio-platform/src/kernel', 'apps/cli/src', 'apps/desktop/src-tauri/src']
+  : ['crates', 'crates/symbio-platform/src/kernel', 'apps/cli/src', 'apps/desktop/src']
 const STRICT = process.argv.includes('--strict')
 
 /**

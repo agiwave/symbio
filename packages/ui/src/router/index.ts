@@ -83,7 +83,7 @@ const router = createRouter({
         // 而不是 404 白屏，所以删掉不改变任何**代码可达**的行为。
         // 兜底：**不认识的首段一律回首页**。
         //
-        // 为什么必须有它（而不是让它 404）：打包后的 Tauri webview 从自定义协议
+        // 为什么必须有它（而不是让它 404）：打包后的浏览器从静态服务器
         // 加载前端资源，`location.pathname` 可能是 `/index.html` 或
         // `C:/…/index.html` 这类**任何路由都不匹配**的路径（实测二者
         // `matched.length === 0`）。没有兜底时应用会渲染成**空白页**——而这一条
@@ -114,7 +114,7 @@ const router = createRouter({
  *
  * ## 判据为什么是**路由名**而不是 `to.path === '/'`
  *
- * 曾经写的是 `if (to.path !== '/') return true`。**在打包后的 Tauri webview 里
+ * 曾经写的是 `if (to.path !== '/') return true`。**在打包后的浏览器 SPA 里
  * 这是个静默失效的判断**：前端资源走自定义协议加载，`createWebHistory()` 取
  * `location.pathname`，它**不保证恰好是 `'/'`**（WebView2 上可能是
  * `C:/…/index.html` 或带前缀的路径）。于是守卫**每次都提前 return**，位置记忆

@@ -196,7 +196,7 @@ const RULES = {
   directInvoke: {
     rule: 'M-003',
     severity: 'error',
-    test: (c) => c.match(/\binvoke\s*\(/) || c.match(/from\s+['"]@tauri-apps\/api\/core['"]/),
+    test: (c) => c.match(/\binvoke\s*\(/),
     message: '不得直接 invoke —— 出站请求一律经 services/（协议切换只改那一层）',
   },
   // M-004 registry / schemas 不得 import 组件（*Renderers.ts 是刻意的装配点）

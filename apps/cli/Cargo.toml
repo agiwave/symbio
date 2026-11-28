@@ -18,7 +18,7 @@ symbio-plugin-api = { path = "../../crates/symbio-plugin-api" }
 symbio = { path = "../../crates/symbio" }
 symbio-runtime = { path = "../../crates/symbio-runtime" }
 # include_dir 只被 CLI 的 build.rs / embedded_ui 用来编译期内嵌 packages/ui/dist。
-# 内嵌只属于需要 serve 的 CLI 入口；桌面端由 Tauri generate_context! 嵌自己的 UI。
+# 内嵌只属于需要 serve 的 CLI 入口；桌面原生窗口也是加载 CLI serve 的地址，不另嵌 UI。
 include_dir = { workspace = true }
 # 版本与 features 刻意与 ../../crates/symbio/Cargo.toml 完全一致：
 # 同一份 tokio 单元 → 复用仓库根 target/ 里已编译好的 rlib，避免重复编译。

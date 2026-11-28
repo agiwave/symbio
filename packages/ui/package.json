@@ -1,7 +1,7 @@
 {
   "name": "@symbio/ui",
   "version": "0.1.14",
-  "description": "Symbio 三端共享的 Vue 前端：desktop / cli serve / web 的唯一源码与构建产物",
+  "description": "Symbio 三端共享的 Vue 前端：桌面启动器 / cli serve / web 的唯一源码与构建产物",
   "type": "module",
   "private": true,
   "scripts": {
@@ -16,8 +16,6 @@
     "lint:styles": "node ../../scripts/audits/style-audit.mjs"
   },
   "dependencies": {
-    "@tauri-apps/api": "^2.11.1",
-    "@tauri-apps/plugin-dialog": "^2.7.3",
     "marked": "^18.0.11",
     "pinia": "^4.0.3",
     "vue": "^3.5.42",
@@ -25,7 +23,6 @@
   },
   "devDependencies": {
     "@eslint/js": "^10.0.1",
-    "@tauri-apps/cli": "^2.11.4",
     "@vitejs/plugin-vue": "^6.0.8",
     "@vitest/coverage-v8": "^4.1.11",
     "@vue/test-utils": "^2.5.0",

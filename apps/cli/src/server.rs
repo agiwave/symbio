@@ -8,7 +8,7 @@ use crate::args::ServeArgs;
 /// CLI 入口把编译期内嵌的 `packages/ui/dist` 注入共享 runtime。
 ///
 /// 内嵌逻辑就住在 [`crate::embedded_ui`]（CLI 自己的模块，不再单独成 crate）：
-/// 只有需要 serve 的 CLI 二进制才把它编进自身；桌面端由 Tauri `generate_context!`
+/// 只有需要 serve 的 CLI 二进制才把它编进自身；桌面启动器不内嵌 UI，
 /// 嵌自己的 UI，共享 runtime 不依赖任何资源 crate，因此不会被迫嵌入第二份 dist。
 struct CliEmbeddedUi;
 
@@ -55,6 +55,7 @@ pub async fn run(args: ServeArgs) -> ExitCode {
         eprintln!("      在 packages/ui 下运行 npm run build 后重新构建 CLI。");
     }
 
+    let needs_token = !args.config.token.is_empty();
     let config = args.config;
     let handle = match symbio_runtime::start::<CliEmbeddedUi>(config, Arc::clone(&host)).await {
         Ok(handle) => handle,
@@ -66,7 +67,15 @@ pub async fn run(args: ServeArgs) -> ExitCode {
             return ExitCode::FAILURE;
         }
     };
-    println!("Symbio Server 已启动: http://{}", handle.local_addr());
+    let url = format!("http://{}", handle.local_addr());
+    println!("Symbio Server 已启动: {url}");
+
+    if args.browser {
+        match open_browser(&url, needs_token) {
+            Ok(()) => println!("已在系统默认浏览器中打开 {url}"),
+            Err(error) => eprintln!("无法打开浏览器（服务仍在运行）: {error}\n请手动访问 {url}"),
+        }
+    }
 
     if wait_for_shutdown_signal().await.is_err() {
         eprintln!("无法监听退出信号，Server 将继续运行");
@@ -77,6 +86,36 @@ pub async fn run(args: ServeArgs) -> ExitCode {
         return ExitCode::FAILURE;
     }
     ExitCode::SUCCESS
+}
+
+/// 用系统默认浏览器打开本机服务地址。
+///
+/// 只走标准库 `Command`，不引入 `open` / `webbrowser` 依赖（最小依赖树约定）。
+/// 带 token 的 Server 不把令牌拼进 URL——那是凭据泄漏；此时返回错误让调用方
+/// 打印地址由用户手动打开。桌面启动器走的是回环免 token 路径，不受此限制。
+fn open_browser(url: &str, needs_token: bool) -> Result<(), String> {
+    if needs_token {
+        return Err("Server 启用了访问令牌，请在浏览器手动打开并配置 Bearer Token".to_string());
+    }
+    // 环境变量可能携带用户偏好；空值一律回落到平台默认命令。
+    let (program, args): (&str, Vec<String>) = if cfg!(windows) {
+        (
+            "cmd",
+            vec!["/C".into(), "start".into(), "".into(), url.into()],
+        )
+    } else if cfg!(target_os = "macos") {
+        ("open", vec![url.into()])
+    } else {
+        ("xdg-open", vec![url.into()])
+    };
+    std::process::Command::new(program)
+        .args(&args)
+        .stdin(std::process::Stdio::null())
+        .stdout(std::process::Stdio::null())
+        .stderr(std::process::Stdio::null())
+        .spawn()
+        .map(|_| ())
+        .map_err(|e| format!("启动 {program} 失败: {e}"))
 }
 
 #[cfg(windows)]

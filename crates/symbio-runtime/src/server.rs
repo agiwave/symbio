@@ -43,7 +43,7 @@ impl Default for ServerConfig {
 /// 编译期内嵌 UI 的注入接口。
 ///
 /// 由**交付物入口**实现并注入（CLI 用自己的 `embedded_ui` 模块），runtime 只认这条
-/// 窄接口、不依赖任何具体资源 crate。桌面端的 UI 由 Tauri `generate_context!` 自己
+/// 窄接口、不依赖任何具体资源 crate。只有 CLI serve 需要内嵌 UI，它经此接口注入，
 /// 嵌入，不需要也不应该经过这里——否则桌面二进制会被迫多嵌一份同样的 dist。
 pub trait EmbeddedUi: Send + Sync + 'static {
     /// 按 URL 路径取资源；查不到返回 `None`（由调用方决定 SPA 回退）。

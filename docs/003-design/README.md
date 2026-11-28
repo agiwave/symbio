@@ -255,7 +255,7 @@ board.columns: [impl]
 | [`DE-114-HTTP入站网关`](../../crates/symbio-plugin-gateway/src/docs/114-HTTP入站网关.md) | HTTP 入站网关（插件专题设计） | 与代码一致 |
 | [`DE-115-技能编译与自我改进`](../../crates/symbio-plugin-skill/src/docs/115-技能编译与自我改进.md) | 技能编译与自我改进（插件专题设计） | 与代码一致 |
 | [`DE-116-长期记忆与语义检索`](../../crates/symbio-plugin-memory/src/docs/116-长期记忆与语义检索.md) | 长期记忆与语义检索（插件专题设计） | 与代码一致 |
-| [`apps/desktop/README`](../../apps/desktop/README.md) | Tauri 前端 | 与代码一致 |
+| [`apps/desktop/README`](../../apps/desktop/README.md) | 桌面交付物（Tauri 原生窗口） | 与代码一致 |
 | [`crates/symbio-plugin-classify/README`](../../crates/symbio-plugin-classify/README.md) | Classify 插件（对话面：判决） | 与代码一致 |
 | [`crates/symbio-plugin-compact/README`](../../crates/symbio-plugin-compact/README.md) | 上下文压缩能力包（compact） | 与代码一致 |
 | [`crates/symbio-plugin-compose/README`](../../crates/symbio-plugin-compose/README.md) | Compose 插件（对话面：措辞） | 与代码一致 |

@@ -6,7 +6,7 @@
  * 路径输入各自演化），而漏掉的表现是**用户正在打的字被直接提交出去**。
  *
  * `isComposing` 是标准字段；`keyCode === 229` 覆盖旧 WebView 在组合期间只报
- * 229 的情形（Tauri WebView2 / WebKit 历史版本）。
+ * 229 的情形（旧浏览器 WebView2 / WebKit 历史版本）。
  *
  * 注意：组合态的 Enter 还**不能** `preventDefault`——那会阻止输入法上屏。
  * 因此判据必须先于 `preventDefault`，模板里也应写成 `@keydown.enter` 再在

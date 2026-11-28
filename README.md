@@ -16,9 +16,9 @@ created: 2026-07-20
 | 层 | 目录 / 挂载点 | 职责 |
 | --- | --- | --- |
 | **核心库** | `crates/` | `symbio-platform` 平台（kernel 语法 / contract ABI / sdk 机制 / deploy 装配常量 四臂）· `symbio-runtime` 运行时 · `symbio-plugin-api` 门面 · 插件与 provider 各一个 crate · `symbio` 装配 |
-| **桌面前端** | `apps/desktop/` | Vue 3 + Pinia + Tauri 2；`src-tauri/` 是只暴露 3 个 IPC 命令（`route_v2` / `route_v2_send` / `route_v2_close`）的薄适配层 |
+| **桌面交付物** | `apps/desktop/` | Tauri 原生窗口壳：加载本机 `symbio-cli serve` 的 UI；前端走 HTTP/WS，无 IPC command |
 | **命令行前端** | `apps/cli/` | 纯 Rust：REPL / 单次 / 管道 / 心跳守护，进程内直连插件树，不经 IPC |
-| **入站通道** | `gateway` · `telegram` 插件 | 树内插件：HTTP / WS 入站请求转发给父级路由（与 `route_v2` 同构）；Telegram 长轮询收发 |
+| **入站通道** | `gateway` · `telegram` 插件 | 树内插件：HTTP / WS 入站请求转发给父级路由（前端统一 HTTP/WS 入站）；Telegram 长轮询收发 |
 
 设计原则：**UI 只做配置与展示，业务逻辑全在核心库**；各前端各自建树、不共享内存，但共用同一套插件装配与路径协议。
 **用它做什么**：多轮 Agent 会话 · 本地开发助手（shell / 搜索 / VDFS / 技能 / MCP） · 无头自动化（CLI 管道 / 网关 webhook / Telegram） · 多供应商 LLM。
@@ -95,7 +95,7 @@ node e2e/run-tests.mjs # 端到端：mock LLM / MCP / HTTP，不需要真 API Ke
 
 ```
 symbio/
-├── apps/ # 交付物：desktop（Tauri 壳）· cli（REPL / serve）· web（纯浏览器，可选连 CLI serve）
+├── apps/ # 交付物：desktop（Tauri 原生窗口）· cli（REPL / serve）· web（纯浏览器，可选连 CLI serve）
 ├── packages/ui/ # 三端共享的 Vue 3 实现（views / components / services / transport 接口）
 ├── crates/ # Rust 库：symbio-platform（语法 / ABI / 机制 / 装配四臂）· symbio-runtime · symbio-plugin-api · 插件与 provider 各一 crate
 ├── docs/ # 系统级文档（目标 / 场景 / 架构 / 参考 / 指南 / 规范 / 任务；历史只在 git log）

@@ -1,8 +1,7 @@
 // msrv 阶段：用 `rust-version` 声明的**最低**工具链实编译验证。
 //
 // 范围由声明自己圈出来：`cargo metadata --no-deps` 给出每个 workspace 成员的
-// `rust_version`，**声明了的**才纳入本判据（不声明的不在，比如 `symbio-tauri`——
-// CI 的 msrv job 不装 GTK，把它编进来只会红在缺库上，与 MSRV 无关）。
+// `rust_version`，**声明了的**才纳入本判据（不声明的不在，与 MSRV 无关）。
 //
 // 两个硬约束（都是踩出来的）：
 // ① `RUSTUP_TOOLCHAIN` 只对 rustup 安装的 cargo 生效——发行版包会**静默忽略**它，

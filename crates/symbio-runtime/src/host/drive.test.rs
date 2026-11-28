@@ -165,7 +165,7 @@ fn exhausted_and_stalled_are_both_visible() {
 
 // ==================== 安全阀出口落格 ====================
 //
-// stderr 只对 CLI 有意义：Tauri / gateway 没有控制台，两条安全阀出口在界面上与
+// stderr 只对 CLI 有意义：gateway 没有控制台，两条安全阀出口在界面上与
 // 「正常结束」同形。出口必须同时是**一条机制事实**，非 CLI 宿主经 VDFS 订阅面读到。
 //
 // 落格本体 `land_stall` 的端到端用例在 `crates/symbio-runtime/src/host/entry.test.rs`：它要先

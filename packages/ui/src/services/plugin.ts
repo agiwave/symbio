@@ -1,34 +1,32 @@
 // Corresponding Backend: crates/symbio-platform/src/kernel/plugin/transport.rs
 /**
- * Symbio 插件通讯内核：统一消息模型 + 出站传输选择（native IPC / HTTP / gateway）。
- * 
+ * Symbio 插件通讯内核：统一消息模型 + HTTP/WS 出站传输。
+ *
+ * 三端交付物（桌面启动器 / CLI serve / web）的 Vue 实现完全一致，都经由
+ * Server 的 HTTP/WS 边界访问插件树；不再有 Tauri IPC 分支。
+ *
  * 核心目标：
  * 1. 统一消息模型 (PluginMessage)，对称处理请求与响应。
  * 2. 统一术语，使用 metadata 替代 head，使用 payload 替代 body。
  * 3. 增强类型安全性与协议严格性。
  */
 
-import type { UnlistenFn } from '@tauri-apps/api/event'
 import { logger } from '@/utils/logger'
 import {
-  isBrowserEnvironment,
   loadSystemLocation,
   parseRemoteAddress,
   setCurrentLocation,
   setLocationError,
-  type ConnectionTarget,
   type FrontendConnectionModel,
-  type RuntimeEnvironment,
 } from './systemLocation'
 
 /**
  * 网关插件名（它的路由都是**控制面**接口：读写当前目标的网关设置）。
  *
- * embedded 中控制面固定走本机 native；browser 中固定走当前 Server 的控制面 HTTP。
- * 两种环境都不允许 browser 回退 IPC。判定在 `sendRouteRequest`。
+ * 三端统一：控制面固定走当前 Server（同源或远端）的 HTTP。判定在 `sendRouteRequest`。
  */
 
-/** 未知值是否为可索引的对象——IPC 边界所有结构判定的唯一守卫。 */
+/** 未知值是否为可索引的对象——传输边界所有结构判定的唯一守卫。 */
 function isRecord(v: unknown): v is Record<string, unknown> {
   return typeof v === 'object' && v !== null && !Array.isArray(v)
 }
@@ -111,11 +109,9 @@ export class Connection {
   constructor(
     public readonly connectionId: string,
     public readonly path: string,
-    private unlistenFn: UnlistenFn,
-    private eofUnlistenFn: UnlistenFn
   ) { }
 
-  get isConnected() { 
+  get isConnected() {
     const isHealthy = this.active && (Date.now() - this.lastActivity < 60000);
     return isHealthy;
   }
@@ -124,39 +120,12 @@ export class Connection {
     this.lastActivity = Date.now();
   }
 
-  async send(data: unknown): Promise<void> {
-    if (!this.active) {
-      throw new Error(`[Protocol Error] Cannot send to a disconnected session: ${this.connectionId} (${this.path})`);
-    }
-    if (!this.isConnected) {
-      throw new Error(`[Protocol Error] Connection is stale or inactive: ${this.connectionId} (${this.path})`);
-    }
-    this.lastActivity = Date.now();
-    const { invoke } = await import('@tauri-apps/api/core');
-    await invoke('route_v2_send', {
-      connectionId: this.connectionId,
-      frame: { Data: data }
-    });
-  }
-
-  async close(): Promise<void> {
-    if (!this.active) return;
-    this.active = false;
-    this.unlistenFn();
-    this.eofUnlistenFn();
-    try {
-      const { invoke } = await import('@tauri-apps/api/core');
-      await invoke('route_v2_close', { connectionId: this.connectionId });
-    } catch (err) {
-      logger.warn('Connection', `Close error for ${this.path}:`, err);
-    }
-  }
+  /** 由具体传输实现覆写（当前只有 WS：关闭套接字）。 */
+  async send(_data: unknown): Promise<void> { /* 由子类实现 */ }
+  async close(): Promise<void> { /* 由子类实现 */ }
 
   markDisconnected() {
-    if (!this.active) return;
     this.active = false;
-    this.unlistenFn();
-    this.eofUnlistenFn();
   }
 }
 
@@ -202,7 +171,7 @@ class ProtocolEnforcer {
 
 // ==================== 2.5 出站传输选择（由「系统目录」切换器 / localStorage 驱动） ====================
 
-export type TransportMode = 'native' | 'http'
+export type TransportMode = 'http'
 
 /** 出站配置的唯一真相；宿主 HTTP API 也从此处取 endpoint/token。 */
 export interface OutboundConfig {
@@ -211,37 +180,28 @@ export interface OutboundConfig {
   token: string
 }
 
-const browser = (): RuntimeEnvironment => isBrowserEnvironment() ? 'browser' : 'embedded'
-
 function sameOriginEndpoint(): string {
   return typeof location === 'undefined' ? '' : location.origin
 }
 
 function defaultOutbound(): OutboundConfig {
-  return isBrowserEnvironment()
-    ? { protocol: 'http', endpoint: sameOriginEndpoint(), token: '' }
-    : { protocol: 'native', endpoint: '', token: '' }
+  return { protocol: 'http', endpoint: sameOriginEndpoint(), token: '' }
 }
 
-/**
- * 出站配置：embedded 默认 native，browser 默认同源 Server HTTP。
- * remote 选择另一台 Server；browser 永不切换到 native。
- */
+/** 出站配置：local 走同源 Server，remote 走另一台 Server。 */
 let outbound: OutboundConfig = defaultOutbound()
 let outboundReady: Promise<void> | null = null
 
-/** 当前运行环境与连接目标；供 UI 区分“本机”与“当前 Server”。 */
+/** 当前运行环境与连接目标；供 UI 区分连接状态（三端统一为 browser + server）。 */
 export function getConnectionModel(): FrontendConnectionModel {
-  const target: ConnectionTarget = outbound.protocol === 'native' ? 'native' : 'server'
-  return { environment: browser(), target }
+  return { environment: 'browser', target: 'server' }
 }
 
 /**
  * 应用启动时调用一次：读取持久化选择并决定传输。
  *
- * browser + local → 同源 HTTP；embedded + local → native；remote → HTTP。
- * 远端不可达时保留所选 Server HTTP 并显示错误；任何运行环境都不回退 native。
- * 返回的 Promise 被缓存，供首次出站请求等待，消除初始化竞态。
+ * local → 同源 HTTP；remote → 指定 Server HTTP。远端不可达时保留所选 Server HTTP
+ * 并显示错误。返回的 Promise 被缓存，供首次出站请求等待，消除初始化竞态。
  */
 export function initGatewayTransport(): Promise<void> {
   if (!outboundReady) outboundReady = doInitGatewayTransport()
@@ -279,7 +239,7 @@ async function doInitGatewayTransport(): Promise<void> {
   }
 
   outbound = defaultOutbound()
-  if (outbound.protocol === 'http' && !outbound.endpoint) {
+  if (!outbound.endpoint) {
     setLocationError('无法确定浏览器同源 Server 地址')
   } else {
     setLocationError(null)
@@ -309,14 +269,14 @@ export function reloadGatewayTransport(): Promise<void> {
 
 /**
  * 基于 WebSocket 的连接（出站协议为 http 时，`connectPlugin` 使用）。
- * 复用 Connection 的对外接口，底层走 WebSocket 而非 Tauri IPC 事件。
+ * 复用 Connection 的对外接口，底层走 WebSocket 双向帧。
  */
 class WsConnection extends Connection {
   constructor(public ws: WebSocket, path: string) {
-    super('ws', path, () => {}, () => {})
+    super('ws', path)
   }
   get isConnected(): boolean {
-    return this.ws.readyState === WebSocket.OPEN
+    return this.active && this.ws.readyState === WebSocket.OPEN
   }
   async send(data: unknown): Promise<void> {
     if (!this.active) {
@@ -352,8 +312,8 @@ export interface PluginOptions {
    */
   origin?: string;
   /**
-   * 控制面提示：native 目标走 Tauri IPC；已选 Server HTTP 时仍走该 Server。
-   * browser 中此选项绝不会触发原生调用，也不会改变已选择的 Server 地址。
+   * 控制面兼容提示：保留给旧调用方，三端统一 HTTP 后不改变已选择的 Server 地址。
+   * @deprecated 传输恒为 HTTP/WS，该选项已无效果。
    */
   forceNative?: boolean;
 }
@@ -364,7 +324,7 @@ interface SendRouteOptions extends PluginOptions {
 }
 
 /**
- * 构造路由请求的 metadata（native 与 http 两套传输共用，保证对称）
+ * 构造路由请求的 metadata（call 与 connect 两种语义共用，保证对称）
  */
 function buildMetadata(request: SendRouteOptions): Record<string, string> {
   const sessionId = `v2_sess_${Math.random().toString(36).substring(2, 10)}`
@@ -404,9 +364,9 @@ function buildMetadata(request: SendRouteOptions): Record<string, string> {
  * 内部核心：发起路由请求并处理握手。
  *
  * mode 决定「出站语义」：
- * - 'call'（默认）：一次性/同步语义。native 走 `route_v2`；http 走 `POST /api/v1/invoke`
+ * - 'call'（默认）：一次性/同步语义，走 `POST /api/v1/invoke`
  *   （服务端把会话折叠到 EOF 的最后一帧，与 callPlugin 的一次性语义一致）。
- * - 'connect'：持久会话语义。native 走 `route_v2` + 事件通道；http 走 `WS /api/v1/ws`
+ * - 'connect'：持久会话语义，走 `WS /api/v1/ws`
  *   （首帧发送 PluginMessageWire，之后双向转发 PluginFrame）。
  *
  * 出站协议由 `initGatewayTransport()` 依据「系统目录」切换器的选择决定；每次调用前
@@ -420,96 +380,10 @@ async function sendRouteRequest(
 ): Promise<{ response: PluginMessage; connection?: Connection }> {
   await initGatewayTransport();
   const ob = getOutboundConfig();
-  const serverSelected = ob.protocol === 'http' && !!ob.endpoint;
-
-  // 浏览器只有 Server HTTP 一个出口；embedded 一旦显式选择 Server，控制面提示
-  // （forceNative / gateway 路径）也不得把请求偷偷送回本机 IPC。
-  if (!serverSelected && isBrowserEnvironment()) {
-    throw new Error('[Transport] 浏览器需要可用的 Server HTTP 地址，不能回退 Tauri IPC')
+  if (!ob.endpoint) {
+    throw new Error('[Transport] 需要可用的 Server HTTP 地址（同源或远端）')
   }
-  return serverSelected
-    ? httpTransport(request, mode, ob, onFrame, onEof)
-    : nativeTransport(request, onFrame, onEof);
-}
-
-// ==================== 原生传输（Tauri IPC，现状） ====================
-
-async function nativeTransport(
-  request: SendRouteOptions,
-  onFrame?: (frame: PluginFrame) => void,
-  onEof?: () => void
-): Promise<{ response: PluginMessage; connection?: Connection }> {
-  const metadata = buildMetadata(request);
-  const sessionId = metadata[HEAD_SESSION_ID];
-  const wireRequest: PluginMessage = {
-    metadata,
-    payload: request.payload,
-  };
-
-  let currentUnlisten: UnlistenFn | undefined;
-  let currentEofUnlisten: UnlistenFn | undefined;
-
-  // 只有 embedded 分支能到达这里；动态导入避免浏览器静态初始化原生能力。
-  const [{ invoke }, { listen }] = await Promise.all([
-    import('@tauri-apps/api/core'),
-    import('@tauri-apps/api/event'),
-  ]);
-
-  // 1. 预监听 (消除竞态)
-  currentUnlisten = await listen<unknown>(`route/${sessionId}`, (event) => {
-    try {
-      const frame = ProtocolEnforcer.validate(event.payload, request.path);
-      onFrame?.(frame);
-    } catch (err) {
-      logger.error('Protocol', `Critical Violation in ${request.path}`, err);
-    }
-  });
-
-  currentEofUnlisten = await listen<unknown>(`route/${sessionId}/eof`, () => {
-    onEof?.();
-  });
-
-  try {
-    const response = await invoke<PluginMessage>('route_v2', {
-      request: wireRequest,
-      clientId: sessionId,
-    });
-
-    const payload = response.payload as PluginPayloadWire;
-
-    if (payload && payload.type === 'Connection') {
-      // ## 契约：`conn_id` 恒等于 `clientId`
-      //
-      // 后端 `route_v2` 在收到 `clientId` 时**恒**用它作为 conn_id
-      // （`apps/desktop/src-tauri/src/commands.rs` 的 `register_fixed`），而本函数恒传
-      // `clientId: sessionId`。因此事件名与**预注册**的监听器必然一致——这正是
-      // 「先 listen 再 invoke」能消除握手竞态的原因。
-      //
-      // 历史上这里有一段「后端可能改 id ⇒ 重新 listen 并迁移监听器」的补救分支，
-      // 它**不可达**。留着它的危害不是浪费几行代码，而是掩盖真实缺口：若后端将来
-      // 真改了 id，预注册的监听器会挂在旧事件名上，**切换窗口内的帧静默丢失且不报错**。
-      // 故删除该分支，把契约写成断言——破坏契约时当场报错，而不是安静地收空气。
-      if (payload.data !== sessionId) {
-        // 交给下方 catch 统一清理——避免同一对监听器被 unlisten 两次
-        throw new Error(
-          `[Protocol Error] route_v2 返回的 conn_id (${payload.data}) 与 clientId ` +
-            `(${sessionId}) 不一致。前端已在 clientId 上预注册监听器，后端改 id 会导致` +
-            `帧静默丢失。请检查后端 register_fixed 契约（${request.path}）。`,
-        );
-      }
-
-      return { response, connection: new Connection(sessionId, request.path, currentUnlisten, currentEofUnlisten) };
-    }
-
-    // 如果是同步响应，立即清理监听器
-    currentUnlisten?.();
-    currentEofUnlisten?.();
-    return { response };
-  } catch (err) {
-    currentUnlisten?.();
-    currentEofUnlisten?.();
-    throw err;
-  }
+  return httpTransport(request, mode, ob, onFrame, onEof);
 }
 
 // ==================== HTTP 传输（连接远端 Symbio 实例的网关入站） ====================
@@ -613,7 +487,7 @@ async function httpWsTransport(
     conn.markDisconnected();
   };
 
-  // 与 native 对称：返回 Connection 型 payload，connectPlugin 据此拿到连接对象
+  // 返回 Connection 型 payload，connectPlugin 据此拿到连接对象
   return {
     response: { metadata: {}, payload: { type: 'Connection', data: 'ws' } as PluginPayloadWire },
     connection: conn,

@@ -17,7 +17,7 @@
  *   判键与让路的机制在 `useHotkeys`（那里另有单测）。
  *
  * 环境说明：`useVdfs` 被整体替换为可控桩（它经 `services/vdfs` 出站），
- * 渲染器登记表也被挡掉（那会把整条会话渲染链连同 Tauri 通道拉进来）。
+ * 渲染器登记表也被挡掉（那会把整条会话渲染链连同传输层拉进来）。
  */
 
 // @vitest-environment happy-dom
@@ -46,7 +46,7 @@ vi.mock('@/composables/useVdfs', () => ({ useVdfs: () => hoisted.stub }))
 // 本控件只用到 store 的**一个**能力：声明「当前空间」（当前目录能新建会话时）。
 // 用桩而不是真 store，本文件的用例就不必为一个与新建/转发无关的机制架 Pinia。
 vi.mock('@/stores/sessions', () => ({ useSessionsStore: () => hoisted.sessions }))
-// 真实的渲染器登记表会把整条会话渲染链（连同 Tauri 通道）拉进来，故挡掉；
+// 真实的渲染器登记表会把整条会话渲染链（连同传输层）拉进来，故挡掉；
 // 需要「详情渲染器」在场的用例改用下面登记的桩（见 RendererStub）。
 vi.mock('@/registry/vdfsRenderers', () => ({}))
 

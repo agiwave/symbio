@@ -37,7 +37,7 @@ const { SCHEME } = vi.hoisted(() => ({
   SCHEME: { mountDir: '@vfs/session', messagesSeg: 'message', inboxSeg: 'inbox' },
 }))
 
-// 服务层依赖 Tauri API 与本地存储，这里只测映射逻辑，故整体替身
+// 服务层依赖 HTTP  transport 与本地存储，这里只测映射逻辑，故整体替身
 vi.mock('@/services/plugin', () => ({ callPlugin: vi.fn() }))
 vi.mock('@/services/vdfs', () => ({
   listVdfs: vi.fn(),

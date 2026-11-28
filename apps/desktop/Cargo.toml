@@ -1,0 +1,25 @@
+[package]
+name = "symbio-desktop"
+version = "0.1.14"
+description = "Symbio 桌面交付物：Tauri 原生窗口，加载本机 CLI serve 提供的 UI"
+authors = ["Symbio Team"]
+license = "MIT"
+edition = "2021"
+rust-version = "1.91"
+
+[build-dependencies]
+tauri-build = { workspace = true, features = [] }
+
+# 桌面壳只负责开一个原生窗口并加载本机 CLI serve 的地址；
+# 前端逻辑、后端插件树、UI 内嵌全在 CLI 二进制里。
+# 因此这里不依赖 symbio / symbio-runtime 等插件树 crate，也不注册任何 IPC command
+# （route_v2 家族已删除）——前端统一走 HTTP/WS。
+[dependencies]
+tauri = { workspace = true, features = [] }
+dirs = { workspace = true }
+serde = { workspace = true, features = ["derive"] }
+serde_json = { workspace = true }
+
+[features]
+default = ["custom-protocol"]
+custom-protocol = ["tauri/custom-protocol"]

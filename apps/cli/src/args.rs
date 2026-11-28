@@ -9,7 +9,7 @@ use std::path::PathBuf;
 ///
 /// `auto`（无人值守）：CLI 没有交互卡的应答入口，遇到需审批的工具时
 /// 应让后端返回友好错误继续，而不是挂起等待一个永远不会到来的点击。
-/// 人在环的审批流属于 Tauri 前端的职责；CLI 只播报到达的等待卡片。
+/// 人在环的审批流属于浏览器前端的职责；CLI 只播报到达的等待卡片。
 pub const DEFAULT_MODE: &str = crate::protocol::MODE_AUTO;
 
 /// 解析结果。
@@ -25,6 +25,8 @@ pub enum Command {
 pub struct ServeArgs {
     pub homedir: PathBuf,
     pub config: symbio_runtime::ServerConfig,
+    /// 就绪后用系统默认浏览器打开实际监听地址（桌面启动器走这条）。
+    pub browser: bool,
     pub verbose: bool,
 }
 
@@ -122,6 +124,7 @@ Server 选项:
       --frontend-dist <路径> 覆盖内嵌 UI，改用外部 Vue 构建产物（默认内嵌）
       --max-connections <数>  并发连接上限（默认 64）
       --allowed-origin <源>   允许的精确浏览器 Origin；设置时必须同时提供 token
+      --browser               就绪后用系统默认浏览器打开本机地址（桌面启动器用）
   -v, --verbose              显示更多诊断
   -h, --help                 显示本帮助
   -V, --version              显示版本
@@ -268,6 +271,7 @@ fn parse_serve<I: IntoIterator<Item = String>>(
     let mut args = ServeArgs {
         homedir: cwd.join(".symbio"),
         config,
+        browser: false,
         verbose: false,
     };
     let mut it = argv.into_iter();
@@ -311,6 +315,7 @@ fn parse_serve<I: IntoIterator<Item = String>>(
                     .filter(|value| *value > 0)
                     .ok_or_else(|| "--max-connections 必须是正整数".to_string())?
             }
+            "--browser" => args.browser = true,
             "-v" | "--verbose" => args.verbose = true,
             other if other.starts_with('-') => {
                 return Err(format!(

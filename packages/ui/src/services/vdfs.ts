@@ -269,7 +269,7 @@ export function base64ToBytes(b64: string): Uint8Array<ArrayBuffer> {
 /**
  * 触发一次文件下载（动作结果带回的文件落地）。
  *
- * 只用标准 DOM API：Tauri webview 与浏览器行为一致。文件**内容**由 provider
+ * 只用标准 DOM API：三端浏览器行为一致。文件**内容**由 provider
  * 产出（如「导出」打包的 zip），本层只负责把字节交给用户。
  */
 export function downloadBlob(filename: string, data: BlobPart, mime = 'application/zip'): void {

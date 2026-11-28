@@ -104,6 +104,20 @@ fn serve_subcommand_parses_server_options() {
 }
 
 #[test]
+fn serve_browser_flag_is_bool_and_defaults_off() {
+    let Command::Serve(args) = parse(["serve".to_string()]).unwrap() else {
+        panic!("expected Serve");
+    };
+    assert!(!args.browser);
+
+    let Command::Serve(args) = parse(["serve".to_string(), "--browser".to_string()]).unwrap()
+    else {
+        panic!("expected Serve");
+    };
+    assert!(args.browser);
+}
+
+#[test]
 fn serve_help_and_invalid_values_are_explicit() {
     assert!(matches!(
         parse(["serve".to_string(), "--help".to_string()]),

@@ -372,9 +372,6 @@ const dirNames = new Set(pluginDirs.map((p) => p.dirName))
 // 常量表：先收全仓（装配方 `crates/symbio-platform/src/deploy/mod.rs` 的 `PLUGIN_ID_*`、`routes.rs` 的 `ROUTE_*`、
 // 前端 `constants/routes.gen.ts` 的生成常量）
 //
-// `apps/desktop/src-tauri/src` 也在列：它是第三个独立 cargo workspace，且**整棵插件树
-// 被编译进壳**——它引用内核的方式必须和 `symbio/src` 同一套规则（此前它不在任何
-// 扫描范围内，见 `gate.d/10-backend.mjs`）。
 // `crates/symbio-platform/src/kernel` 同样在列： 之后词表常量（`VDFS_STATUS_*` 等）与协议
 // 契约住那个 crate，漏掉它会让「文档词表 == 代码词表」判成「代码里没有这套词」。
 const CODE_ROOTS = [
@@ -382,7 +379,6 @@ const CODE_ROOTS = [
   'crates/symbio-platform/src/kernel',
   'apps/cli/src',
   'packages/ui/src',
-  'apps/desktop/src-tauri/src',
 ]
 
 const codeFiles = CODE_ROOTS.flatMap((r) => walk(path.join(repoRoot, r), isCode))

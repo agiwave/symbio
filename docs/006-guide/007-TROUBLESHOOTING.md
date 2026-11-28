@@ -61,39 +61,32 @@ INFO trace_id=abc123 origin=vdfs-browser path=vdfs/list Start routing
 是「一轮里同一个 `origin` 出现几次」而不是「出现了几次 `vdfs/stat`」——前者才
 对得上设计意图。
 
-### 先确认「这段日志由哪份源码产出」，再去读代码
+### 先确认「这份产物由哪份源码产出」，再去读代码
 
 日志里出现一条当前源码中**不存在**的行（或反过来，某条新加的日志始终不出现）时，
 第一反应往往是去源码里找「是不是没接上」——而真相可能是**跑的是过期产物**，排查
 方向从第一步就错了。所以这一步要**先做**。
 
-壳启动时会把自己的**构建指纹**打进日志首行：
-
-```
-INFO symbio_tauri: Symbio shell starting build=6ea35239b585b180… version="0.1.13"
-```
-
-与当前源码的指纹一比即知：
+桌面原生窗口壳拉起 `symbio-cli` 二进制（前后端与 UI 都在这一份），窗口只负责显示
+二进制里。CLI 侧有构建戳机制：产物旁 `.symbio-cli.build-stamp` 内容是构建输入的
+内容指纹，使用前比对当前指纹。
 
 ```bash
-node scripts/tauri-binary.mjs --print # 当前源码的指纹
-node scripts/tauri-binary.mjs --check # 本机产物是否对应当前源码（不可信则退出码 1）
+node scripts/cli-binary.mjs --check  # 只判不建：产物是否对应当前源码（不一致则退出码 1）
+node scripts/cli-binary.mjs          # 需要就重建并写戳（等价于 cargo build --release）
 ```
 
-| 日志里的 `build` | 结论 |
+| 状态 | 结论 |
 |---|---|
-| 与 `--print` **一致** | 日志确实来自眼前这份源码，可以放心去读代码 |
-| 与 `--print` **不一致** | 先重建再复现，别在过期产物上找原因 |
-| `unknown` | 产物没带构建戳（打包分发、或直接用 `cargo build`）⇒ **来源不可判断**，请用 `npm run tauri dev` 重新构建后复现 |
+| 与当前源码一致 | 产物可信，可以放心去读代码 |
+| 构建输入已改变 | 先重建再复现，别在过期产物上找原因 |
+| 没有构建戳 / 二进制不存在 | 来源不可判断或还没构建，先跑一次 `node scripts/cli-binary.mjs` |
 
-指纹覆盖壳自身的源码 / 权限集 / 清单，以及**整棵 `crates/` 插件树**——壳把它
-编译进去，插件那几类日志（`[session INFO]` / `[model INFO]` / `[Tool]`）正是从那里
-来的。`packages/ui/src`（前端）**不在**其中：dev 下它由 Vite 现服、release 下由同一条命令
-先行构建，所以「前端新不新鲜」不是这个指纹回答的问题。
+指纹覆盖 `apps/cli/`、`crates/` 整棵插件树、根清单与 `packages/ui/dist`（前端产物由
+CLI 的 `build.rs` 编译期内嵌，改了 UI 却复用旧 exe 就等于 serve 出旧页面）。详见
+`scripts/cli-binary.mjs` 的文件头。
 
-戳写在产物旁边（仓库根 `target/<profile>/`，与壳二进制同目录），由 `npm run tauri dev|build`
-的 `before*Command` 在**构建前**写入。判据与实现见 `scripts/tauri-binary.mjs`。
-
+桌面原生窗口壳（`apps/desktop/src`）不进入插件树，只拉起 CLI serve、等就绪并加载本机地址。
 ---
 
 ## 编译问题
@@ -168,13 +161,15 @@ curl -X POST ... -d '{"path": "_root"}'
 
 ### 问题：前端无法连接后端
 
-**症状**：Tauri 应用白屏或报错
+**症状**：桌面原生窗口白屏或报错
 
 **排查步骤**：
-1. 确认 `npm install` 已执行
-2. 检查 `tauri.conf.json` 配置
-3. 查看浏览器控制台 (F12) 是否有错误
-4. 检查 `src-tauri` 是否编译成功
+1. 确认 `packages/ui` 下 `npm ci && npm run build` 已执行，且 CLI 是在那之后重建的
+   （UI 由 CLI 编译期内嵌，改了 UI 不重建 CLI 就会 serve 出旧页面或占位页）
+2. 确认窗口壳找到了 CLI：同目录 `symbio-cli` 或 `SYMBIO_CLI` 显式指定的路径存在
+3. 查看浏览器控制台 (F12) 是否有错误：前端一律走同源 HTTP/WS，无 IPC 分支
+4. 确认 CLI 进程仍在运行：窗口关闭时会终止 CLI；CLI 若先退出，窗口页面会失去后端
+5. 单机离线时确认 serve 监听的是回环地址（默认 `127.0.0.1`）且未被其它进程占用
 
 ---
 
@@ -214,8 +209,9 @@ curl -X POST ... -d '{"path": "_root"}'
 
 ### 问题：内存占用高
 
-**排查方法**：先用发布档观察常驻内存（桌面壳 `target/release/symbio-tauri`、CLI
-`target/release/symbio-cli`），再换 debug 档对比——两者差值就是「没被优化掉的那部分」。
+**排查方法**：先用发布档观察常驻内存（桌面交付物实际运行的是 CLI
+`target/release/symbio-cli`，原生窗口壳 `symbio-desktop` 本身不含插件树），再换 debug 档
+对比——两者差值就是「没被优化掉的那部分」。
 需要堆剖析时用平台工具（Linux `valgrind --tool=massif`，Windows 用 Visual Studio 的
 「诊断工具」附加到进程）。
 

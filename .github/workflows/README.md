@@ -24,20 +24,22 @@ created: 2026-07-20
 
 #### 构建目标
 
+桌面交付物是「CLI 二进制 + 系统浏览器」的轻量启动器，没有 WebView / 安装包链。
+每个平台构建两个 Rust 二进制并打成便携压缩包：
+
 | 平台 | 架构 | 输出格式 |
 |------|------|----------|
-| Windows | x64 | NSIS (.exe), MSI (.msi) |
-| Windows | ARM64 | NSIS (.exe), MSI (.msi) |
-| macOS | Intel (x86_64) | DMG (.dmg) |
-| macOS | Apple Silicon (aarch64) | DMG (.dmg) |
-| Linux | x64 | AppImage, DEB |
-| Linux | ARM64 | AppImage, DEB |
+| Windows | x64 | ZIP（含 `symbio-cli.exe` + `symbio-desktop.exe`） |
+| macOS | Intel (x86_64) | tar.gz（含两个二进制） |
+| macOS | Apple Silicon (aarch64) | tar.gz（含两个二进制） |
+| Linux | x64 | tar.gz（含两个二进制） |
 
 #### 构建产物
 
 - 所有构建产物会作为 Artifacts 上传
 - 如果通过标签触发，会自动创建 GitHub Release（草稿状态）
-- Release 包含所有平台的安装包和更新日志
+- Release 包含所有平台的便携包和更新日志
+- 运行 `symbio-desktop` 即在系统默认浏览器打开本机 UI（CLI 二进制内嵌 UI，回环通讯）
 
 #### 手动触发步骤
 
@@ -51,10 +53,8 @@ created: 2026-07-20
 #### 发布新版本
 
 ```bash
-# 1. 更新版本号（三处需要同步更新）
-# - package.json: "version": "0.2.0"
-# - src-tauri/tauri.conf.json: "version": "0.2.0"
-# - src-tauri/Cargo.toml: version = "0.2.0"
+# 1. 更新版本号（以根 Cargo.toml 为准）
+# - Cargo.toml: version = "0.1.14"
 
 # 2. 提交更改
 git add .
@@ -100,20 +100,10 @@ git push origin v0.2.0
    - Rust 编译错误：检查 Cargo.toml 配置
    - 磁盘空间不足：使用 `actions/cache` 优化
 
-### macOS 构建警告
-
-如果不配置 Apple 证书，macOS 版本会显示"无法验证开发者"。用户需要：
-```bash
-# 在终端运行以下命令绕过 Gatekeeper
-xattr -rd com.apple.quarantine /Applications/Symbio.app
-```
-
 ### 版本不一致
 
-工作流会检查 tag 版本与 Cargo.toml 版本是否一致。如果收到警告：
+工作流会检查 tag 版本与根 `Cargo.toml` 版本是否一致。如果收到警告：
 ```bash
 # 检查版本号
-grep '^version = ' src-tauri/Cargo.toml
-cat package.json | grep version
-cat src-tauri/tauri.conf.json | grep version
+grep '^version = ' Cargo.toml | head -1
 ```

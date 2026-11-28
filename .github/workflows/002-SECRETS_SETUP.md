@@ -9,7 +9,9 @@ created: 2026-07-20
 
 # GitHub Actions 密钥配置指南
 
-本文档详细说明如何生成和配置 GitHub Actions 所需的所有密钥，以实现自动打包各平台应用。
+本文档说明 GitHub Actions 发布所需的密钥。发布产物是**便携压缩包**（Windows ZIP /
+macOS·Linux tar.gz），内含 `symbio-cli` 与 `symbio-desktop` 两个二进制，不是安装包，
+因此没有自动更新签名需求。
 
 ---
 
@@ -20,8 +22,7 @@ created: 2026-07-20
 | 密钥名称 | 用途 | 必需 | 平台 |
 |---------|------|------|------|
 | `GITHUB_TOKEN` | GitHub 自动提供，用于创建 Release | ✅ 是 | 全部 |
-| `TAURI_SIGNING_PRIVATE_KEY` | Tauri 自动更新签名 | ❌ 可选 | 全部 |
-| `APPLE_CERTIFICATE` | macOS 代码签名证书 | ❌ 可选 | macOS |
+| `APPLE_CERTIFICATE` | macOS 代码签名证书（可选） | ❌ 可选 | macOS |
 | `APPLE_CERTIFICATE_PASSWORD` | 证书密码 | ❌ 可选 | macOS |
 | `APPLE_SIGNING_IDENTITY` | Apple 签名身份 | ❌ 可选 | macOS |
 | `APPLE_ID` | Apple ID（用于公证） | ❌ 可选 | macOS |
@@ -30,8 +31,8 @@ created: 2026-07-20
 
 **说明**:
 - ✅ **GITHUB_TOKEN** 由 GitHub 自动提供，无需手动配置
-- 不配置其他密钥也能正常构建，但 macOS 会有未签名警告
-- macOS 未签名时，用户需要手动绕过 Gatekeeper（见文档底部）
+- 发布的是命令行二进制便携包，不配置 Apple 证书也能直接运行
+- Apple 密钥仅为将来打包 `.app` 时预留
 
 ---
 
@@ -42,121 +43,78 @@ created: 2026-07-20
 **你不需要配置任何额外密钥即可开始测试！**
 
 ```bash
-# 更新版本号（三个文件）
-# - package.json: "version": "0.2.0"
-# - src-tauri/tauri.conf.json: "version": "0.2.0"
-# - src-tauri/Cargo.toml: version = "0.2.0"
+# 更新版本号（根 Cargo.toml）
+# version = "0.1.14"
 
 # 提交并推送标签
 git add .
-git commit -m "chore: bump version to 0.2.0"
-git tag v0.2.0
-git push origin v0.2.0
+git commit -m "chore: bump version to 0.1.14"
+git tag v0.1.14
+git push origin v0.1.14
 ```
 
 GitHub Actions 会自动：
-1. ✅ 构建 Windows (x64) NSIS/MSI 安装包
-2. ✅ 构建 macOS DMG（未签名，有警告）
-3. ✅ 构建 Linux AppImage/DEB
-4. ✅ 创建 GitHub Release 草稿
+1. ✅ 构建 Windows / macOS (x86_64 + aarch64) / Linux 的便携压缩包
+2. ✅ 创建 GitHub Release 草稿
 
 ### 1.2 构建产物
 
 | 平台 | 格式 | 状态 |
 |------|------|------|
-| Windows x64 | `.exe` (NSIS), `.msi` | ✅ 完全可用 |
-| macOS Intel | `.dmg` | ⚠️ 未签名（可运行） |
-| macOS Apple Silicon | `.dmg` | ⚠️ 未签名（可运行） |
-| Linux x64 | `.AppImage`, `.deb` | ✅ 完全可用 |
+| Windows x64 | `.zip` | ✅ 完全可用 |
+| macOS Intel | `.tar.gz` | ✅ 完全可用 |
+| macOS Apple Silicon | `.tar.gz` | ✅ 完全可用 |
+| Linux x64 | `.tar.gz` | ✅ 完全可用 |
 
 ---
 
-## 二、配置 Tauri 更新签名密钥（可选）
+## 二、配置 macOS 代码签名（预留，可选）
 
-如果需要 Tauri 自动更新功能：
+> 便携压缩包里的命令行二进制不受 Gatekeeper 的 `.app` 签名要求约束。
+> 本节仅在未来增加 `.app` / `.dmg` 打包时才需要。
 
-### 2.1 生成密钥
-
-```bash
-# 安装 Tauri CLI
-npm install -g @tauri-apps/cli
-
-# 生成密钥
-cd <仓库根>
-tauri signer generate
-```
-
-按提示输入密码（可为空）。
-
-### 2.2 获取私钥
-
-```powershell
-# Windows PowerShell
-type $env:USERPROFILE\.tauri\.key
-```
-
-### 2.3 配置到 GitHub
-
-1. 打开: `https://github.com/用户名/symbio/settings/secrets/actions`
-2. 点击 **New repository secret**
-3. Name: `TAURI_SIGNING_PRIVATE_KEY`
-4. Secret: 粘贴私钥内容
-
----
-
-## 三、配置 macOS 代码签名（可选但推荐）
-
-### 3.1 前提条件
+### 2.1 前提条件
 
 - 需要 Apple Developer Program 账号（$99/年）
 - 需要 macOS 电脑来生成证书
 
-### 3.2 创建证书
-
-#### 方法 1: 使用 Xcode（最简单）
-
-1. 打开 Xcode → Settings → Accounts
-2. 添加 Apple ID
-3. Manage Certificates → + → Developer ID Application
-4. 下载并安装证书
-
-#### 方法 2: Apple Developer 网站
+### 2.2 创建证书
 
 1. 访问 https://developer.apple.com/account/resources/certificates/list
 2. 创建 Developer ID Application 证书
 3. 下载 .cer 文件，双击安装到钥匙串
 
-### 3.3 导出为 .p12
+### 2.3 导出为 .p12
 
 1. 打开 macOS **钥匙串访问**
 2. 找到证书，右键 → 导出
 3. 选择 .p12 格式，设置密码
 
-### 3.4 转换为 Base64
+### 2.4 转换为 Base64
 
 ```bash
 base64 -i certificate.p12 -o cert.base64
 cat cert.base64  # 复制输出内容
 ```
 
-### 3.5 获取签名身份
+### 2.5 获取签名身份
 
 ```bash
 security find-identity -v -p codesigning
 # 输出: Developer ID Application: Your Name (TEAM123)
 ```
 
-### 3.6 获取团队 ID
+### 2.6 获取团队 ID
 
 访问 https://developer.apple.com/account，在 Membership 标签找到 Team ID
 
-### 3.7 生成应用专用密码
+### 2.7 生成应用专用密码
 
 1. 访问 https://appleid.apple.com
 2. Sign-In and Security → App-Specific Passwords
 3. 生成新密码（格式: xxxx-xxxx-xxxx-xxxx）
 
-### 3.8 配置到 GitHub
+### 2.8 配置到 GitHub
 
 在 GitHub Settings → Secrets and variables → Actions 中添加：
 
@@ -171,30 +129,7 @@ security find-identity -v -p codesigning
 
 ---
 
-## 四、macOS 未签名版本的用户指南
-
-如果不配置 macOS 签名证书，用户下载后需要手动信任：
-
-### 方法 1: 右键打开
-
-1. 右键点击应用
-2. 按住 Option 键
-3. 选择"打开"
-4. 点击"仍要打开"
-
-### 方法 2: 终端命令
-
-```bash
-xattr -rd com.apple.quarantine /Applications/Symbio.app
-```
-
-### 方法 3: 系统设置
-
-系统偏好设置 → 隐私与安全性 → 仍要打开
-
----
-
-## 五、使用配置脚本（Windows）
+## 三、使用配置脚本（Windows）
 
 我们提供了 PowerShell 脚本来帮助你配置：
 
@@ -205,16 +140,13 @@ cd .github\workflows
 # 查看帮助
 .\setup-secrets.ps1 -Help
 
-# 生成 Tauri 签名密钥
-.\setup-secrets.ps1 -GenerateTauriKey
-
 # 跳过 macOS 指导
 .\setup-secrets.ps1 -SkipMacOS
 ```
 
 ---
 
-## 六、常见问题
+## 四、常见问题
 
 ### Q: 能否跳过 macOS 构建？
 
@@ -241,9 +173,7 @@ git push origin v0.0.1-test
 
 ---
 
-## 七、相关链接
+## 五、相关链接
 
-- [Tauri CI/CD 文档](https://tauri.app/distribute/pipelines/)
-- [Tauri 签名文档](https://tauri.app/distribute/sign/)
 - [Apple 代码签名](https://developer.apple.com/support/code-signing/)
 - [GitHub Actions](https://docs.github.com/actions)

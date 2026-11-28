@@ -1,8 +1,8 @@
 // backend 阶段：根 workspace（仓库根的 `Cargo.toml`）统一检查链。
 //
-// 仓库根现在有一个 `Cargo.toml` `[workspace]`，成员为 `symbio`、`cli`、`apps/desktop/src-tauri`，
-// 三者共用一个 `target/`。因此 `cargo … --workspace` 一次就能覆盖全部，不必再像
-// 从前那样分三个独立 workspace 各跑一遍（`symbio`/cli/tauri 在 A 下跑不到 B 的测试）。
+// 仓库根现在有一个 `Cargo.toml` `[workspace]`，成员为 `symbio`、`cli` 与 `apps/desktop`（Tauri 原生窗口壳），
+// 共用一个 `target/`。因此 `cargo … --workspace` 一次就能覆盖全部，不必再像
+// 从前那样分多个独立 workspace 各跑一遍（A 下跑不到 B 的测试）。
 //
 import path from 'node:path'
 import { fileURLToPath } from 'node:url'
@@ -17,7 +17,7 @@ const backendDir = repoRoot
 export default {
   id: 'backend',
   title: '后端（cargo，根 workspace）',
-  // 输入面：`rust`（`crates/**` 与 `apps/desktop/src-tauri/**` 的非 `.md` 文件、各 `Cargo.*`、
+  // 输入面：`rust`（`crates/**` 与 `apps/cli/**`、`apps/desktop/**` 的非 `.md` 文件、各 `Cargo.*`、
   // 工具链 / lint 档位）。**判据**是「编译与测试」，而它的输入里没有一个 `.md`
   // ——改文档时跑 `cargo test --workspace` 是纯代价（实测冷 1m24s、clippy 3m34s），
   // 得到的结论与上一轮逐字相同。范围求不出时 `needs` 不生效（全跑），见 `_scope.mjs`。
@@ -26,7 +26,7 @@ export default {
   // 源码与 scripts，baseline 只读 git 历史与 scripts，msrv 用独立的
   // `.workbuddy-ai/msrv-target`（不与 backend 争 `.cargo-lock`）。fmt 已拆到
   // `05-fmt.mjs` 屏障阶段（rustfmt 就地重写非原子，必须先于一切读 `.rs` 的泳道）。
-  // ⚠️ frontend-build 不能进这批：编译 symbio-tauri 时 `generate_context!` 在编译期读
+  // ⚠️ frontend-build 不能进这批：编译 CLI 时 `build.rs` 在编译期内嵌
   //    `packages/ui/dist`，而 vite build 会重写它——见 `56-frontend-build.mjs`。前端另外三个
   //    任务不碰 `dist`，故拆到 `20-frontend-static.mjs` 进批（上面那句「只写 `target/`」
   //    对它同样成立）。
@@ -109,7 +109,7 @@ export default {
     }
 
     if (ctx.profile) {
-      // 仅构建后端（symbio + cli），壳的发布构建由 release.yml 的 tauri-action 负责。
+      // 仅构建后端（symbio + cli）；桌面原生窗口壳单独在 release 打包。
       tasks.push({
         label: `cargo build --profile ${ctx.profile} -p symbio -p symbio-cli`,
         cmd: 'cargo',

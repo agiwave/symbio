@@ -84,10 +84,10 @@ export const HOST_FACADE = 'crates/symbio/src/lib.rs'
 export const HOST_MANIFEST = 'crates/symbio/Cargo.toml'
 
 /** 扫描面：只有会被编译的 Rust 源码与清单算边。 */
-const SCAN_ROOTS = ['crates', 'apps/desktop/src-tauri']
+const SCAN_ROOTS = ['crates', 'apps/desktop/src']
 
-/** 不进的目录（`target` 是产物；其余是 Tauri 的非 Rust 生成面）。 */
-const SKIP_DIRS = new Set(['target', 'node_modules', '.git', 'gen', 'capabilities', 'icons'])
+/** 不进的目录（`target` 是产物）。 */
+const SKIP_DIRS = new Set(['target', 'node_modules', '.git'])
 
 /**
  * 可卸载插件：`crates/symbio-plugin-*` 里 `plugin_undisablable` 不为 `true` 的那些。
@@ -199,11 +199,11 @@ export function linkLineRe(target) {
   return new RegExp(`^\\s*(?:pub\\s+)?use\\s+${c}\\s+as\\s+_;?\\s*$`)
 }
 
-/** 文件所属 crate 目录（`crates/<crate>` / `apps/desktop/src-tauri`）。 */
+/** 文件所属 crate 目录（`crates/<crate>` / `apps/desktop`）。 */
 export function crateDirOf(relPath) {
   const parts = relPath.split('/')
   if (parts[0] === 'crates' && parts.length >= 2) return `crates/${parts[1]}`
-  if (parts[0] === 'apps' && parts[1] === 'desktop' && parts[2] === 'src-tauri') return 'apps/desktop/src-tauri'
+  if (parts[0] === 'apps' && parts[1] === 'desktop') return 'apps/desktop'
   return ''
 }
 

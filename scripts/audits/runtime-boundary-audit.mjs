@@ -2,7 +2,7 @@
 /**
  * runtime-boundary-audit — 运行时与装配根的依赖方向（RB-001）
  *
- * 运行时只接收异步 RootFactory；具体插件链接属于 CLI / Tauri 的组合边界。
+ * 运行时只接收异步 RootFactory；具体插件链接属于 CLI 的组合边界。
  * `symbio-runtime` 一旦在生产、构建或开发清单里依赖 `symbio`，运行时就会重新
  * 认识装配入口，方案 H 的服务组合也会沿旧方向回流。开发依赖同样禁止：测试
  * 可以用最小假根，发布二进制由入口提供完整装配工厂。
@@ -52,7 +52,7 @@ try {
   const manifest = fs.readFileSync(path.join(ROOT, MANIFEST), 'utf8')
   const dependency = /^\s*(?:symbio|"symbio"|'symbio')\s*=\s*(?=\{|"|true|false)/m
   if (dependency.test(manifest.replace(/^\s*#.*$/gm, ''))) {
-    report(MANIFEST, '运行时不得依赖装配根 symbio；请由 CLI / Tauri 注入 RootFactory')
+    report(MANIFEST, '运行时不得依赖装配根 symbio；请由 CLI 注入 RootFactory')
   }
 
   for (const abs of rustFiles(path.join(ROOT, SRC))) {

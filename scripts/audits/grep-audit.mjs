@@ -441,7 +441,7 @@ console.log()
 //
 // 输出是判据的对外契约：标题、逐条 err、末尾 ok、空行的顺序与文案逐字不动；
 // 重叠 roots 造成的重复项也照旧保留（S-014 的棘轮读数依赖它）。
-const RS_ROOTS = ['crates', 'apps/cli/src', 'apps/desktop/src-tauri/src', 'docs/003-design/verify']
+const RS_ROOTS = ['crates', 'apps/cli/src', 'apps/desktop/src', 'docs/003-design/verify']
 
 /** 注释行（`//` / `/*` / 块注释续行）——S-014 / S-015 / S-016 / S-017 的同一种跳过。 */
 const isCommentStart = (l) => /^\s*(?:\/\/|\/\*|\*)/.test(l)

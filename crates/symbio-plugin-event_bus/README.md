@@ -22,7 +22,7 @@ impl: done
 
 ## 机制
 
-- 推送（VDFS 变更、`connected` 握手）经 event_bus 取得广播帧；前端 / CLI / tauri 宿主同理。
+- 推送（VDFS 变更、`connected` 握手）经 event_bus 取得广播帧；浏览器前端 / CLI 同理。
 - 帧 payload 与 PluginChannel 的 Session 帧同构，客户端按 `kind` 分发（闭集与常量见
  `docs/003-design/005-协议规范.md` §事件总线频道）。
 - 本插件是**纯传输层**：不认识任何业务频道语义；会话域只有 `vdfs` 一条频道
