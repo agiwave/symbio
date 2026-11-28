@@ -9,7 +9,7 @@
  * ——只会慢慢腐烂，直到某天有人发现"加一个类型要改五个文件"。本脚本把那几个
  * 「知识该待的地方」写成可执行的规则。
  *
- * ## 规则（分层见 tauri/src/registry 与 tauri/src/schemas 的文件头注释）
+ * ## 规则（分层见 packages/ui/src/registry 与 packages/ui/src/schemas 的文件头注释）
  *
  * | 编号  | 规则                                                  | 为什么                       |
  * |-------|-------------------------------------------------------|------------------------------|
@@ -21,8 +21,8 @@
  * | M-006 | 各层不得用字面量比较消息词表（components / composables / services / stores / registry） | 词表只有 `schemas/chat_node` |
  * | M-007 | 地址常量只能在 `schemas/vdfs.ts` **定义**                | 段名常量不得有第二份真相      |
  * | M-008 | 控制面路由名只能取自 `constants/routes.gen.ts`           | 它是后端生成的，手写一份就是抄本 |
- * | M-009 | `crates/symbio-cli/src` 不得直读业务 `meta` 字段                      | CLI 的协议读法收口到 `protocol.rs` |
- * | M-010 | 地址 / 协议词常量只能在 `crates/symbio-cli/src/protocol.rs` **定义**   | 第二个前端不得有第二份段名    |
+ * | M-009 | `apps/cli/src` 不得直读业务 `meta` 字段                      | CLI 的协议读法收口到 `protocol.rs` |
+ * | M-010 | 地址 / 协议词常量只能在 `apps/cli/src/protocol.rs` **定义**   | 第二个前端不得有第二份段名    |
  *
  * M-004 的例外是 `*Renderers.ts`：那是**刻意**的唯一组件装配点（把渲染器标识绑到
  * 具体组件），否则「新增一种形态只登记一行」就无从谈起。
@@ -38,7 +38,7 @@
  *
  * ## 用法
  *
- *   node scripts/audits/mechanism-audit.mjs                 # 审计 tauri/src
+ *   node scripts/audits/mechanism-audit.mjs                 # 审计 packages/ui/src
  *   node scripts/audits/mechanism-audit.mjs --strict        # warning 也算失败
  *   node scripts/audits/mechanism-audit.mjs --root=<dir>    # 换根目录（回归测试用）
  *
@@ -100,8 +100,8 @@ const isVue = (p) => p.endsWith('.vue')
 const isTs = (p) => p.endsWith('.ts') && !p.endsWith('.d.ts')
 const isVueOrTs = (p) => isVue(p) || isTs(p)
 
-const SRC = path.join(repoRoot, 'tauri', 'src')
-const CLI_SRC = path.join(repoRoot, 'crates', 'symbio-cli', 'src')
+const SRC = path.join(repoRoot, 'packages', 'ui', 'src')
+const CLI_SRC = path.join(repoRoot, 'apps', 'cli', 'src')
 const isRs = (p) => p.endsWith('.rs')
 
 /** M-008 的判定对象：那份清单**本身**就是词表，不在脚本里抄一份 */
@@ -279,12 +279,12 @@ const RULES = {
       '控制面路由名只能取自 constants/routes.gen.ts（后端 route() 臂的生成物）—— 此处不得写死',
   },
   /**
-   * M-009 `crates/symbio-cli/src` 不得直读业务 `meta` 字段
+   * M-009 `apps/cli/src` 不得直读业务 `meta` 字段
    *
    * CLI 是**第二个前端**。同一个后端字段名若在两处各解释一次，改字段时只有一处
    * 会跟着改，另一处静默错读——没有测试会红，只是某个视图少了一行。
    * 协议读法（哪些 `meta` 键存在、某个形状是什么意思）因此收口到
-   * `crates/symbio-cli/src/protocol.rs`，判定范围也只排除那一个文件。
+   * `apps/cli/src/protocol.rs`，判定范围也只排除那一个文件。
    *
    * 判据是**读取**（`.meta.<field>`），不是整体透传：把 `meta` 原样序列化 /
    * 赋值给快照不构成解释。变量别名（`let m = &node.meta; m.get(…)`）抓不到——
@@ -295,10 +295,10 @@ const RULES = {
     severity: 'error',
     test: (c) => c.match(/\.meta\s*\.\s*[A-Za-z_$]/),
     message:
-      'CLI 不得直读后端 meta 字段 —— 协议读法收口到 crates/symbio-cli/src/protocol.rs（后端改字段名只改那一处）',
+      'CLI 不得直读后端 meta 字段 —— 协议读法收口到 apps/cli/src/protocol.rs（后端改字段名只改那一处）',
   },
   /**
-   * M-010 地址 / 协议词常量的**定义权**只在 `crates/symbio-cli/src/protocol.rs`
+   * M-010 地址 / 协议词常量的**定义权**只在 `apps/cli/src/protocol.rs`
    *
    * 与 M-007 同型：使用常量是允许的（导入即可），**再定义**一份就是第二份真相。
    * CLI 的段名是自持副本（session 插件的段名是 `pub(crate)`），正因为它是副本，
@@ -314,7 +314,7 @@ const RULES = {
     severity: 'error',
     test: (c) => c.match(/\b(?:const|static)\s+(?:[A-Z][A-Z0-9_]*_SEG|OUTCOME_[A-Z0-9_]+)\s*:/),
     message:
-      '地址 / 协议词常量的定义权在 crates/symbio-cli/src/protocol.rs —— 此处不得再定义一份（导入使用是允许的）',
+      '地址 / 协议词常量的定义权在 apps/cli/src/protocol.rs —— 此处不得再定义一份（导入使用是允许的）',
   },
 }
 
@@ -331,34 +331,34 @@ if (!fs.existsSync(SRC)) {
 
 console.log('--- M-001: 组件不得解释后端 meta 字段 ---')
 auditFiles(
-  'tauri/src/components',
+  'packages/ui/src/components',
   walk(path.join(SRC, 'components'), isVueOrTs),
   [RULES.metaField],
 )
 
 console.log('--- M-002: 组件 / 组合式不得硬编码 .vdfs 地址 ---')
 auditFiles(
-  'tauri/src/components + tauri/src/composables',
+  'packages/ui/src/components + packages/ui/src/composables',
   [...walk(path.join(SRC, 'components'), isVueOrTs), ...walk(path.join(SRC, 'composables'), isTs)],
   [RULES.vdfsAddr],
 )
 
 console.log('--- M-003: 不得直接 invoke（services/ 除外） ---')
 auditFiles(
-  'tauri/src（不含 services/）',
+  'packages/ui/src（不含 services/）',
   walk(SRC, isVueOrTs).filter((f) => !f.startsWith(path.join(SRC, 'services') + path.sep)),
   [RULES.directInvoke],
 )
 
 console.log('--- M-004: registry / schemas 不得 import 组件 ---')
 auditFiles(
-  'tauri/src/registry + tauri/src/schemas',
+  'packages/ui/src/registry + packages/ui/src/schemas',
   [...walk(path.join(SRC, 'registry'), isTs), ...walk(path.join(SRC, 'schemas'), isTs)],
   [RULES.componentImport],
 )
 
 console.log('--- M-005: schemas 不得依赖 registry / components / composables ---')
-auditFiles('tauri/src/schemas', walk(path.join(SRC, 'schemas'), isTs), [RULES.schemaReverseDep])
+auditFiles('packages/ui/src/schemas', walk(path.join(SRC, 'schemas'), isTs), [RULES.schemaReverseDep])
 
 console.log('--- M-006: 组件 / 组合式 / 服务层 / store / registry 不得用字面量比较消息词表 ---')
 // 范围必须覆盖 **所有消费消息词表的地方**，而不只是组件：
@@ -371,7 +371,7 @@ console.log('--- M-006: 组件 / 组合式 / 服务层 / store / registry 不得
 // 明明已经 import 了 `NODE_STATUS_*` 常量——同文件两种写法并存）。
 // 教训：门禁的**扫描范围**和它的**规则**一样会漏，而漏了不会红。
 auditFiles(
-  'tauri/src/components + composables + services + stores + registry',
+  'packages/ui/src/components + composables + services + stores + registry',
   [
     ...walk(path.join(SRC, 'components'), isVueOrTs),
     ...walk(path.join(SRC, 'composables'), isTs),
@@ -384,7 +384,7 @@ auditFiles(
 
 console.log('--- M-007: 地址常量只能在 schemas/vdfs.ts 定义（不禁止导入使用） ---')
 auditFiles(
-  'tauri/src（不含 schemas/vdfs.ts）',
+  'packages/ui/src（不含 schemas/vdfs.ts）',
   walk(SRC, isVueOrTs).filter((f) => f !== path.join(SRC, 'schemas', 'vdfs.ts')),
   [RULES.vdfsConstDef],
 )
@@ -393,21 +393,21 @@ console.log('--- M-008: 控制面路由名只能取自 constants/routes.gen.ts -
 // 词表来自生成物本身：后端加一条臂 ⇒ 生成物多一行 ⇒ 前端任何手写同一条地址的地方
 // 下一次门禁就红。规则代码里因此没有一份路由清单。
 auditFiles(
-  `tauri/src（不含 constants/routes.gen.ts，词表 ${GEN_ROUTES.size} 条）`,
+  `packages/ui/src（不含 constants/routes.gen.ts，词表 ${GEN_ROUTES.size} 条）`,
   walk(SRC, isVueOrTs).filter((f) => f !== ROUTES_GEN),
   [RULES.routeLiteral],
 )
 
 // ── CLI 侧：第二个前端用同一套机制判据 ────────────────────────────────────
-// 范围只有 `crates/symbio-cli/src`（实现文件 + 测试）。**测试文件也在范围内**：判据说的是
+// 范围只有 `apps/cli/src`（实现文件 + 测试）。**测试文件也在范围内**：判据说的是
 // 「知识只有一个定义点」，测试若自带一份字面量，同样是第二份真相。
-console.log('--- M-009: crates/symbio-cli/src 不得直读业务 meta 字段 ---')
-console.log('--- M-010: 地址 / 协议词常量只能在 crates/symbio-cli/src/protocol.rs 定义 ---')
+console.log('--- M-009: apps/cli/src 不得直读业务 meta 字段 ---')
+console.log('--- M-010: 地址 / 协议词常量只能在 apps/cli/src/protocol.rs 定义 ---')
 if (fs.existsSync(CLI_SRC)) {
   const cliFiles = walk(CLI_SRC, isRs).filter(
     (f) => f !== path.join(CLI_SRC, 'protocol.rs'),
   )
-  auditFiles('crates/symbio-cli/src（不含 protocol.rs）', cliFiles, [
+  auditFiles('apps/cli/src（不含 protocol.rs）', cliFiles, [
     RULES.cliMetaField,
     RULES.cliSegmentDef,
   ])

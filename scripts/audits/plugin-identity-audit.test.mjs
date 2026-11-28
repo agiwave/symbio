@@ -31,7 +31,7 @@ const DIRS = [
   'docs/008-release',
   'docs/branding',
   'crates',
-  'tauri/src',
+  'packages/ui/src',
 ]
 const BASE = Object.fromEntries(DIRS.map((d) => [`${d}/.keep`, '']))
 

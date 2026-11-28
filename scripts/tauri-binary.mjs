@@ -18,7 +18,7 @@
  *      `beforeBuildCommand` 会先调一次，因此走 `npm run tauri dev|build` 就自动带上；
  *    - `ensureTauriBinary` 在构建**后**写它（手工重建那条路）。
  * 2. **运行时回显**：壳启动时读**自己旁边**那个戳文件，把值打进日志首行
- *    （`tauri/src-tauri/src/main.rs` 的 `build_id`）。于是任何一段日志自带
+ *    （`apps/desktop/src-tauri/src/main.rs` 的 `build_id`）。于是任何一段日志自带
  *    「我是哪份源码产出的」——与 `node scripts/tauri-binary.mjs --print` 一比即知。
  *
  * ## 为什么指纹在 JS 侧算，而不是在 Rust 的 `build.rs` 里
@@ -54,13 +54,13 @@
  *
  * ## 构建输入 = 什么
  *
- * - `tauri/src-tauri/src`、`capabilities`、`Cargo.toml` / `Cargo.lock` /
+ * - `apps/desktop/src-tauri/src`、`capabilities`、`Cargo.toml` / `Cargo.lock` /
  *   `build.rs` / `tauri.conf.json`（壳自身）；
  * - `crates/` 整棵树——壳的 `Cargo.toml` 写着
  *   `symbio = { path = "../../crates/symbio" }`，**整棵插件树被编译进壳**；
  *   那几条「源码里不存在」的日志正是从这里来的。
  *
- * **不含 `tauri/src`（前端）**：dev 下前端由 Vite 现服（改了就热更，产物无需重建），
+ * **不含 `packages/ui/src`（前端）**：dev 下前端由 Vite 现服（改了就热更，产物无需重建），
  * release 下前端由**同一条命令**先行构建（`beforeBuildCommand: npm run build`）。
  * 因此「前端新不新鲜」不是这个指纹能回答、也不需要它回答的问题。
  *
@@ -94,7 +94,7 @@ const STAMP_NAME = '.symbio-tauri.build-stamp'
 
 /**
  * 壳二进制的落点：根 workspace 统一后，产物落在仓库根 `target/<profile>/`
- * （不再在 `tauri/src-tauri/target/`）。两个 profile 都探：dev 走 debug、打包走
+ * （不再在 `apps/desktop/src-tauri/target/`）。两个 profile 都探：dev 走 debug、打包走
  * release，而「哪一份是你手上那个」不该由调用方猜。
  *
  * ⚠️ debug 在前：dev 是日常路径，而「候选都还没构建出来」时默认要建的就是它。
@@ -177,14 +177,14 @@ export function tauriBuildInputs(repoRoot) {
     seen.add(abs)
     files.push(abs)
   }
-  for (const sub of ['tauri/src-tauri/src', 'tauri/src-tauri/capabilities', 'crates']) {
+  for (const sub of ['apps/desktop/src-tauri/src', 'apps/desktop/src-tauri/capabilities', 'crates']) {
     for (const p of walkFiles(path.join(repoRoot, sub))) push(p)
   }
   for (const rel of [
-    'tauri/src-tauri/Cargo.toml',
-    'tauri/src-tauri/Cargo.lock',
-    'tauri/src-tauri/build.rs',
-    'tauri/src-tauri/tauri.conf.json',
+    'apps/desktop/src-tauri/Cargo.toml',
+    'apps/desktop/src-tauri/Cargo.lock',
+    'apps/desktop/src-tauri/build.rs',
+    'apps/desktop/src-tauri/tauri.conf.json',
     'Cargo.toml',
     'Cargo.lock',
     'crates/symbio/Cargo.toml',
@@ -328,7 +328,7 @@ export function ensureTauriBinary(repoRoot, { build = true, log = null, release 
   if (!build) {
     throw new Error(
       `Tauri 壳产物不可信（${before.staleReason}）：${before.binaryPath}\n` +
-        `请先构建：node scripts/tauri-binary.mjs（等价于 cd tauri/src-tauri && cargo build）`,
+        `请先构建：node scripts/tauri-binary.mjs（等价于 cd apps/desktop/src-tauri && cargo build）`,
     )
   }
 
@@ -340,7 +340,7 @@ export function ensureTauriBinary(repoRoot, { build = true, log = null, release 
   const args = ['build']
   if (profile === 'release') args.push('--release')
   const r = spawnSync('cargo', args, {
-    cwd: path.join(repoRoot, 'tauri', 'src-tauri'),
+    cwd: path.join(repoRoot, 'apps', 'desktop', 'src-tauri'),
     encoding: 'utf8',
     maxBuffer: 64 * 1024 * 1024,
   })

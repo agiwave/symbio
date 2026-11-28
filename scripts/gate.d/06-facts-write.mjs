@@ -25,7 +25,7 @@
 //
 // 依赖关系决定它只能在这个位置：**必须**在 `05-fmt` 之后（它读 `.rs`，而 rustfmt 就地
 // 重写），也**必须**在 `30-docs` 之前（docs 的 D-007 / RF-003 要看已展开的最终形态）。
-// 放在批前串行跑是 10s；放进批里则会让 `tauri/src/constants/routes.gen.ts` 在
+// 放在批前串行跑是 10s；放进批里则会让 `packages/ui/src/constants/routes.gen.ts` 在
 // `20-frontend-static` 读它的同时被重写——那是新的竞态，不值得为 10s 冒。
 //
 // ## 为什么生成可以提前，而 --check 必须留到最后

@@ -1,4 +1,4 @@
-// Corresponding Frontend: tauri/src/services/plugin.ts
+// Corresponding Frontend: packages/ui/src/services/plugin.ts
 //! 插件双向分形路由协议
 //!
 //! 定义了统一的消息载荷模型 (PluginPayload) 和对称的消息容器 (PluginMessage)。

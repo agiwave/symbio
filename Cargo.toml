@@ -6,7 +6,7 @@
 # （found crate compiled by incompatible version of rustc）/ 全量重编。
 [workspace]
 resolver = "2"
-members = ["crates/*", "tauri/src-tauri"]
+members = ["crates/*", "apps/cli", "apps/desktop/src-tauri"]
 
 # 外部依赖的**唯一版本源**：成员只声明「用不用、带哪些 feature」，不写版本。
 # 内部 crate 之间仍用 path（相对路径是目录结构的投影，集中到根反而多一处要同步的地址）。

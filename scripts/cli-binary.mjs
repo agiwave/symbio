@@ -111,14 +111,12 @@ function walkFiles(dir, out = []) {
  * 需要网络语义），而这里只需要**宁可多算**——多纳入一个文件只会多触发一次无害的
  * cargo 增量构建，漏掉一个才会让过期产物蒙混过关。
  *
- * ## 为什么只有一个源码根
+ * ## 两个不相交的源码根
  *
- * CLI 复用整棵插件树，构建输入就是整个 `crates/`。写成 `crates/symbio-cli/src` 与
- * `crates/` 两个根时，**后者包含前者** ⇒ 同一文件收两遍，清单里出现重复项（指纹仍然
- * 可用，但清单本身不再是一份集合）。
- *
- * 故只走一个根，并用 `Set` 去重：清单是**文件集合**这件事由数据结构保证，
- * 而不是靠调用方小心不要写出包含关系的子根。
+ * CLI 的可执行源码在 `apps/cli/`，它复用的整棵插件树在 `crates/`。两者不再有
+ * 包含关系（CLI 迁出 crates 之前，`crates/` 一个根就够）——故现在必须各扫一个：
+ * 漏掉 `apps/cli/` 会让「改了 CLI 源码却复用旧产物」蒙混过关。
+ * 用 `Set` 去重：清单是**文件集合**这件事由数据结构保证，而不是靠调用方小心。
  */
 export function cliBuildInputs(repoRoot) {
   const seen = new Set()
@@ -129,6 +127,7 @@ export function cliBuildInputs(repoRoot) {
     seen.add(abs)
     files.push(abs)
   }
+  for (const p of walkFiles(path.join(repoRoot, 'apps', 'cli'))) push(p)
   for (const p of walkFiles(path.join(repoRoot, 'crates'))) push(p)
   for (const rel of ['Cargo.toml', 'Cargo.lock', '.cargo/config.toml']) {
     const p = path.join(repoRoot, rel)
@@ -214,7 +213,7 @@ export function ensureCliBinary(repoRoot, { build = true, log = null } = {}) {
   if (log) log(`${before.staleReason} ⇒ cargo build --release`)
 
   const r = spawnSync('cargo', ['build', '--release'], {
-    cwd: path.join(repoRoot, 'crates', 'symbio-cli'),
+    cwd: path.join(repoRoot, 'apps', 'cli'),
     encoding: 'utf8',
     maxBuffer: 64 * 1024 * 1024,
   })

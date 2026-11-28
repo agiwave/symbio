@@ -57,7 +57,7 @@ board.columns: [scope]
 | `SP-016` | 出口口径总册——逐阶出口必须是用户可见的一列，CI 断言必须是可执行判据 | SLO 出口表、任何「这一阶长出来了」的声称、CI 断言清单与守卫脚本 | `scripts/audits/slo-exit-audit.mjs` | — | — |
 | `SP-022` | 验证纪律总册——声称、断言、反向用例与编译期反例 | docs/003-design/verify/ 下的验证程序与任何「已证明」的声称 | `scripts/gate.d/55-verify.mjs` | — | — |
 | `SP-028` | 判据豁免与存量登记——四处「该豁免存在」的登记与它们的清除任务 | doc-link D-004 全文豁免 / dead-code R-002 账本 / panic-allow 登记 / color 守卫自指豁免 | `scripts/audits/doc-link-audit.mjs` | — | — |
-| `SP-032` | 设计文档的编号分区——0xx 系统级、1xx 组件级 | docs/003-design/ 的系统级设计，与就地存放的组件级设计（crates/**、tauri/docs、crates/symbio-cli/docs） | `scripts/audits/registry-audit.mjs` | — | — |
+| `SP-032` | 设计文档的编号分区——0xx 系统级、1xx 组件级 | docs/003-design/ 的系统级设计，与就地存放的组件级设计（crates/**、apps/desktop/docs、apps/cli/docs） | `scripts/audits/registry-audit.mjs` | — | — |
 | `SP-033` | 控制面终态判据：六条不变量与判据的退场规则 | 控制面（义务环 / 派发面 / 驱动循环）的验收判据；不覆盖文档登记、插件入口、前端与 SLO 等其它判据命名空间 | `scripts/audits/control-plane-audit.test.mjs` | — | — |
 
 ## 草案（draft）

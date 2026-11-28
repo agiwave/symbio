@@ -1,0 +1,1446 @@
+/**
+ * useVdfs —— 三栏工作台的唯一数据逻辑（绑定一个 vdfs 数据地址）
+ *
+ * 不含任何资源类型知识：目录内容来自 `vdfs/list`、详情渲染器由节点的 `ext`
+ * 决定（`registry/vdfsTypes`）。新增一种资源 = 后端实现一个 `VdfsProvider`，
+ * 本文件零改动。
+ *
+ * ## 绑定模型（控件自包含，见 VdfsWorkbench）
+ *
+ * 宿主给一个**数据地址**（`addr`，如 `<根>` 或 `<根>/session/<id>`），本层
+ * 完成全部数据装配，**不感知浏览器路由**——数据地址与浏览器地址是两个概念：
+ *
+ * - **左栏导航** = `addr` 的内容（其子目录清单，后端 order 排列）。
+ *   **挂载层例外**：`addr` 是 `<根>` 的直接子节点时（冷启动落点 `<根>/session`
+ *   就是这种），左栏回到根的子目录（= 类别清单，当前挂载高亮），点一下换类别页
+ *   —— 会话是叶子节点、没有子目录，照直译的话会话页左栏会是空的（见 `atMountLevel`）；
+ * - **当前目录**（`cwd`）= 选中的左栏子目录（缺省第一个）；`addr` 无子目录时
+ *   落在 `addr` 自身。中栏列表 = `cwd` 内容，点文件选中、点目录钻入
+ *   （钻入由控件 emit `open`，宿主决定呈现方式，通常是 push 新地址页）；
+ * - **选中节点**（`selectedNode`）：详情来源，按 `ext` 解析渲染器；
+ * - **选中记忆**：同一数据地址的左栏选中项会被记住（往返 push / 返回后恢复）；
+ * - **实时**：订阅总线 `vdfs` 频道，受影响的目录防抖刷新（非轮询）。信封没有
+ *   操作枚举，语义全在载荷的字段上：
+ *   - 带**正文**的（`delta` 增量 / `content` 整条替换）只改一个节点的内容，
+ *     就地落地、**不重拉目录**——命中当前详情才动手（见 `applyAppend` /
+ *     `applyReplace`）。转写列表的消息增量由 `stores/sessionTranscriptSync`
+ *     消费；本页只顺带消费「正打开的详情恰是一条流式消息」的场景。
+ *   - 其余（资源信号 / 状态帧）重拉收敛，但只在变更**真的影响本目录的条目集合**
+ *     时才拉（见 `affects`：自身 / 直接子项 / 祖先）。
+ *
+ * ## UI 约定
+ *
+ * - **无面包屑**：路径即导航，层级靠左栏切目录 + 中栏点目录钻入 + 宿主返回键；
+ * - **无「新建目录」按钮**：新建 = 新建一种**类型**（会话 / 模型 / …）；
+ *   类型由当前目录节点声明（`new_type`，至多一个），点添加即**直接进入该类型的
+ *   详情页**（草稿态：无 id / 名字，与选中一项同一条通道，见 `startNew`）。
+ *   详情页上可能另有一条「导入整包」动作（由 `DetailAction.pack` 声明），
+ *   它取一个本地文件作为动作载荷——**不是第二种新建入口**，只是同一页上的动作；
+ *   目录结构节点由后端 provider 自持，前端不暴露 mkdir 入口。
+ *
+ * ## 校验错误的消费约定（要点五的消费端）
+ *
+ * `write` 失败时 provider 自持校验会返回**字段级**错误。服务层抛错，本层用
+ * `parseVdfsValidation` 还原为 `fieldErrors`，供表单渲染器逐字段高亮。
+ */
+
+import { computed, onBeforeUnmount, ref, shallowRef, watch, type Ref } from 'vue'
+import {
+  arrayBufferToBase64,
+  base64ToBytes,
+  deleteVdfs,
+  downloadBlob,
+  listVdfs,
+  readVdfs,
+  runVdfsAction,
+  statVdfs,
+  writeVdfs,
+} from '@/services/vdfs'
+import { READBACK_REASON } from '@/services/readback'
+import { subscribeVdfsChanged } from '@/services/eventBus'
+import {
+  actionFileOf,
+  isVdfsDir,
+  isVdfsDraft,
+  isVdfsUnder,
+  parseVdfsValidation,
+  VDFS_ACTION_TEST,
+  vdfsAccessOf,
+  vdfsBase,
+  vdfsJoin,
+  vdfsParent,
+  type DetailAction,
+  type VdfsChange,
+  type VdfsFieldError,
+  type VdfsItem,
+  type VdfsNewType,
+  type VdfsNode,
+  type VdfsTreeNode,
+} from '@/schemas/vdfs'
+import { vdfsRoot } from '@/schemas/vdfsRoot'
+import {
+  isFormRenderer,
+  isTextualRenderer,
+  rendererReadsNodeText,
+  resolveVdfsRenderer,
+  type VdfsRenderer,
+} from '@/registry/vdfsTypes'
+import { iconForNode } from '@/registry/vdfsIcons'
+import { useToast } from '@/composables/useToast'
+import { useGenerationGuard } from '@/composables/useGenerationGuard'
+import {
+  affects,
+  draftNodeOf,
+  findTreeNode,
+  focusNameOf,
+  nodeMatchesFilter,
+} from '@/composables/vdfsHelpers'
+import { logger } from '@/utils/logger'
+import type { WorkbenchRailItem } from '@/components/common/Workbench.vue'
+
+/** 各数据地址的左栏选中记忆（模块级：往返 push / 返回后恢复原选中） */
+const selectedMemo = new Map<string, string>()
+
+/**
+ * 各**当前目录**的右栏选中记忆（模块级：往返 push / 返回后恢复原会话）。
+ *
+ * 为什么不用 URL `?select=`：那是「打开父目录下的一个文件」的深链语义，它只接受
+ * 一个直接子项名。会话列表页并没有自己的 URL 概念可挂——把选中项写进 query 会
+ * 改变当前历史条目，返回键的来源、焦点落位与左栏高亮会一起漂移（实测返回后落到
+ * 资源根、左栏没有选中类别）。选中态是工作台内部状态，就该由工作台自己记住。
+ *
+ * 键是 `cwd` 而不是 `addr`：同一地址页里切过子目录后，返回时要恢复的是**那一层**
+ * 当时看的那一项，而不是别的目录里的旧详情。值在使用前一定回读校验，删掉的东西
+ * 不会从记忆里复活。
+ */
+const selectedNodeMemo = new Map<string, VdfsItem>()
+
+/**
+ * 中栏一页的**名义**条数。
+ *
+ * 名义 = 后端可以返回更多（会话转写按「根」计量，一个根级骨架不拆），
+ * 也可以返回更少（不认窗口参数的 provider 会返回全部——那种情况下
+ * 「加载更早」一点就到底，见 `hasMore` 的说明）。
+ */
+const VDFS_PAGE_SIZE = 100
+
+export interface UseVdfsOptions {
+  /** 绑定的数据地址（如 `<根>` 或 `<根>/session/<id>`）；变化 = 整体重载 */
+  addr: Ref<string>
+  /**
+   * 到达后要顺带选中的**末段名**（`addr` 的直接子项；对应路由 `?select=`）。
+   *
+   * 「打开文件」没有独立地址页（详情在右栏），只有「父目录 + 选中项」一种形态。
+   * 有值时当前目录**定在 `addr` 自身**——否则三栏的缺省会落到第一个子目录，
+   * 文件所在的那一层反而看不到。用户随后自己点左栏/列表即离开这个定住态。
+   */
+  select?: Ref<string | null>
+}
+
+export function useVdfs(opts: UseVdfsOptions) {
+  const { showToast } = useToast()
+  const addr = opts.addr
+  const selectName = opts.select ?? ref<string | null>(null)
+
+  // ==================== 左栏导航 ====================
+  /**
+   * 绑定地址是不是**挂载层**：`<根>` 的直接子节点（`session` / `model` / …）。
+   *
+   * 挂载层是**类别层**：`<根>/session` 的内容是「一个个会话」，它自己的子目录
+   * 并不是用户想看的第二级导航（会话是叶子，没有子目录）。若照「左栏 = 绑定地址
+   * 的子目录」直译，会话页的左栏就是**空的**——冷启动恰好落在这里，用户于是看不到
+   * 任何类别，也无处可去（只能靠左上角那个语义含糊的返回键回资源根）。
+   *
+   * 因此挂载层的左栏回到**类别清单**（根的子目录，当前挂载高亮），点一下 = 换到
+   * 那个类别的地址页（由宿主 push，见 `VdfsWorkbench` 的 `onRailSelect`）。
+   * 判据纯从地址结构导出（`<根>` 的直接子节点），不需要任何类型名或后端新字段。
+   */
+  const atMountLevel = computed(() => {
+    const root = vdfsRoot()
+    const a = addr.value
+    return a !== root && vdfsParent(a) === root
+  })
+
+  /** 挂载层里当前挂载的段名（高亮用；非挂载层为空串） */
+  const mountKey = computed(() => (atMountLevel.value ? vdfsBase(addr.value) : ''))
+
+  /**
+   * 左栏的**数据源地址**：一般为绑定地址；挂载层例外，读根（类别清单）。
+   * 两处（拉取与实时收敛）共用它，免得各写一条相同的三元式。
+   */
+  const navDir = computed(() => (atMountLevel.value ? vdfsRoot() : addr.value))
+
+  /** `navDir` 的内容（其子目录 = 左栏导航项）；条目 = 地址 + 节点（`VdfsItem`） */
+  const navDirs = ref<VdfsItem[]>([])
+
+  /** 选中的左栏子目录名；null = `addr` 无子目录（中栏显示 `addr` 自身内容） */
+  const selectedName = ref<string | null>(null)
+
+  /**
+   * 深链（`select`）把当前目录**定在 `addr` 自身**。
+   *
+   * 三栏的缺省是「选第一个子目录」——打开文件时那样会落到兄弟目录，文件所在的
+   * 这一层反而看不到。定住只是一次性的到达态：用户点左栏 / 点目录即解除
+   * （见 `selectDir`；换地址或路由选中项变化时由 `applyFocusIfChanged` 重算）。
+   */
+  const pinnedAtAddr = ref(false)
+
+  /** 待选中的末段名；应用一次即清（后续刷新不得把用户的选择抢回去） */
+  const pendingSelect = ref<string | null>(null)
+
+  /**
+   * 深链定位失败的**可见理由**。
+   *
+   * `?select=` 指向的条目不存在（已删 / 不属于当前目录 / 形状非法）时，此前一律
+   * 静默忽略：右栏只留着「← 选择一个资源」，用户不知道地址里的那一项去了哪儿。
+   * 空串 = 没有待解释的失败。
+   */
+  const focusNotice = ref('')
+
+  /**
+   * 当前目录全路径 = 绑定地址 + 选中的子目录（深链 / 挂载层 = 绑定地址本身）。
+   *
+   * **挂载层不取选中项**：那一层的左栏是**类别清单**（`navDir` = 根），`selectedName`
+   * 是「本目录的子目录」而不是类别。工作台在地址页之间复用同一个控件实例，`selectedName`
+   * 会留着上一页的值（如从会话页回退到挂载页时留着 `subsession`）——拼上去就是
+   * `<挂载目录>/<上一页的选中名>` 这种不存在的地址，后端只能回「会话不存在」，而
+   * 当前目录本是那个挂载目录。
+   */
+  const cwd = computed(() =>
+    pinnedAtAddr.value || atMountLevel.value
+      ? addr.value
+      : selectedName.value
+        ? vdfsJoin(addr.value, selectedName.value)
+        : addr.value
+  )
+
+  /**
+   * 左栏导航 = `addr` 的子目录（图标为纯 UI 映射），高亮 = 选中项。
+   *
+   * 图标查找**必须与列表卡片同一函数**（[`iconForNode`]，回退链与其顺序规则见该
+   * 函数文档）。这一行曾引发重大回归：`<根>` 的挂载点 `kind` 全是 `"dir"`，
+   * 按 kind 优先会让六个挂载点整排退成同一张默认图——完整记录见
+   * `../../../../docs/003-design/020-前端UI-UX.md` §9。护栏见本文件同目录的 spec。
+   */
+  const navItems = computed<WorkbenchRailItem[]>(() => {
+    // 挂载层的高亮是**当前挂载**（地址导出的身份），不是 selectedName——
+    // 那里 selectedName 恒为 null（当前目录就是绑定地址自身）。
+    const activeName = atMountLevel.value ? mountKey.value : selectedName.value
+    return navDirs.value
+      .filter(isVdfsDir)
+      .map((n) => ({
+        key: n.name,
+        label: n.title || n.name,
+        icon: iconForNode(n) ?? null,
+        active: n.name === activeName,
+      }))
+  })
+
+  /** 页标题 = 当前目录节点的标题（列表加载后即为当前目录的自述） */
+  const title = computed(() => cwdNode.value?.title || cwdNode.value?.name || '资源')
+
+  // ==================== 目录内容 ====================
+  /** 中栏条目 = 地址 + 节点；`cwdNode` 是**目录自身的自述**（纯节点，不带地址） */
+  const items = ref<VdfsItem[]>([])
+  const cwdNode = shallowRef<VdfsNode | null>(null)
+  /**
+   * `cwdNode` 是**哪个地址**的自述（= 读回它时请求的 `cwd`）。
+   *
+   * 换目录时 `cwd` 立刻变、`cwdNode` 要等 `refresh()` 回来才换，中间那一拍两者
+   * 是错位的。任何「按目录自述决定行为」的消费方都必须拿这一对**同源**判断，
+   * 否则会把这一个目录的自述（如「这里能新建会话」）套到**另一个**目录上
+   * （真实事故：进入会话后左栏切到 `message`，工作台仍拿着会话节点的
+   * `new_type.ext = session`，把 `<sid>/message` 声明成了「当前会话空间」，
+   * 于是清单、转写、收件箱全都按一个不是挂载目录的地址去寻址）。
+   */
+  const cwdAddr = ref('')
+  const loading = ref(false)
+  const loadError = ref('')
+  const listGuard = useGenerationGuard()
+  const navGuard = useGenerationGuard()
+
+  // ── 目录树（中栏的第二种形态）────────────────────────────────────
+  // 判据只有一条：**当前目录声明了 `t`（traverse）位**。这是后端对「这棵目录
+  // 值得递归呈现」的声明（工作目录的目录节点带 `lt`，见 workdir/mod.rs），前端
+  // 不认识任何类型 / 段名——加一个新树目录只要后端声明 `t`，这里零改动。
+  // 树只装当前层的 items；目录首次展开时才按该目录地址 list 一次，绝不预取整棵子树。
+  const treeMode = computed(() => vdfsAccessOf(cwdNode.value).traverse)
+  const treeNodes = shallowRef<VdfsTreeNode[]>([])
+  let treeGeneration = 0
+  const treeRequestTokens = new Map<string, number>()
+  const treeRefreshTimers = new Map<string, ReturnType<typeof setTimeout>>()
+
+  function lazyTreeNode(item: VdfsItem): VdfsTreeNode {
+    return { item, children: [], loaded: isVdfsDir(item) ? false : true }
+  }
+
+  function updateTreeNode(
+    nodes: VdfsTreeNode[],
+    path: string,
+    update: (node: VdfsTreeNode) => VdfsTreeNode,
+  ): VdfsTreeNode[] {
+    return nodes.map((node) => {
+      if (node.item.path === path) return update(node)
+      return { ...node, children: updateTreeNode(node.children, path, update) }
+    })
+  }
+
+  /** 目录层重拉时保留已加载分支；加载中的分支回到可重试态。 */
+  function mergeTreeLevel(fresh: VdfsItem[], previous: VdfsTreeNode[]): VdfsTreeNode[] {
+    const oldByPath = new Map(previous.map((node) => [node.item.path, node]))
+    return fresh.map((item) => {
+      const old = oldByPath.get(item.path)
+      if (!old || !isVdfsDir(item)) return lazyTreeNode(item)
+      return {
+        ...old,
+        item,
+        loading: false,
+        loadError: old.loading ? '' : old.loadError,
+        loaded: old.loaded === true,
+      }
+    })
+  }
+
+  function resetTreeRequests() {
+    treeGeneration += 1
+    treeRequestTokens.clear()
+    for (const timer of treeRefreshTimers.values()) clearTimeout(timer)
+    treeRefreshTimers.clear()
+  }
+
+  /** 目录首次展开 / 失败重试 / 已加载目录实时收敛都走同一个按层读取口。 */
+  async function loadTreeChildren(path: string, force = false) {
+    if (!treeMode.value || !isVdfsUnder(path, cwd.value) || path === cwd.value) return
+    const current = findTreeNode(treeNodes.value, path)
+    if (!current || !isVdfsDir(current.item) || current.loading) return
+    if (!force && current.loaded === true) return
+    // `vdfs/tree` 预装节点的 loaded 缺省视为已加载；懒加载节点显式为 false。
+    if (!force && current.loaded !== false) return
+
+    const token = (treeRequestTokens.get(path) ?? 0) + 1
+    treeRequestTokens.set(path, token)
+    const generation = treeGeneration
+    const requestedCwd = cwd.value
+    treeNodes.value = updateTreeNode(treeNodes.value, path, (node) => ({
+      ...node,
+      loading: true,
+      loadError: '',
+    }))
+    try {
+      let readErr: unknown
+      const resp = await listVdfs(
+        READBACK_REASON.VDFS_BROWSER,
+        path,
+        undefined,
+        (err) => { readErr = err },
+      )
+      if (readErr) throw readErr
+      if (
+        generation !== treeGeneration
+        || requestedCwd !== cwd.value
+        || treeRequestTokens.get(path) !== token
+      ) return
+      treeNodes.value = updateTreeNode(treeNodes.value, path, (node) => ({
+        ...node,
+        item: { ...resp.node, path: resp.path },
+        children: mergeTreeLevel(resp.items, node.children),
+        loaded: true,
+        loading: false,
+        loadError: '',
+      }))
+    } catch (err) {
+      if (
+        generation !== treeGeneration
+        || requestedCwd !== cwd.value
+        || treeRequestTokens.get(path) !== token
+      ) return
+      treeNodes.value = updateTreeNode(treeNodes.value, path, (node) => ({
+        ...node,
+        loading: false,
+        loadError: `加载失败：${readableError(err)}`,
+      }))
+      logger.error('useVdfs', `加载目录子项失败 ${path}:`, err)
+    }
+  }
+
+  /** 已加载目录的变更只重拉那一层，不重新预取整棵树。 */
+  function scheduleTreeRefresh(path: string) {
+    const parent = vdfsParent(path)
+    if (parent === cwd.value) return
+    const node = findTreeNode(treeNodes.value, parent)
+    if (!node || node.loaded === false) return
+    const pending = treeRefreshTimers.get(parent)
+    if (pending) clearTimeout(pending)
+    treeRefreshTimers.set(parent, setTimeout(() => {
+      treeRefreshTimers.delete(parent)
+      void loadTreeChildren(parent, true)
+    }, 400))
+  }
+
+  /** 选中深层文件时按路径补齐尚未加载的祖先，让选择在树中可见。 */
+  async function revealTreePath(path: string) {
+    if (!treeMode.value || !isVdfsUnder(path, cwd.value)) return
+    const dirs: string[] = []
+    let parent = vdfsParent(path)
+    while (parent !== cwd.value) {
+      if (!isVdfsUnder(parent, cwd.value)) return
+      dirs.unshift(parent)
+      parent = vdfsParent(parent)
+    }
+    for (const dir of dirs) {
+      if (dir !== cwd.value && !isVdfsUnder(dir, cwd.value)) return
+      const node = findTreeNode(treeNodes.value, dir)
+      if (!node) return
+      if (node.loaded === false) await loadTreeChildren(dir)
+    }
+  }
+
+  /** 当前视图里是否看得到这条路径；未加载分支不等于“项已删除”。 */
+  function isVisibleInCwd(path: string): boolean {
+    if (!treeMode.value) return items.value.some((n) => n.path === path)
+    if (vdfsParent(path) === cwd.value) return items.value.some((n) => n.path === path)
+    let ancestor = vdfsParent(path)
+    while (ancestor !== cwd.value) {
+      const node = findTreeNode(treeNodes.value, ancestor)
+      if (node) return node.loaded !== false && findTreeNode(treeNodes.value, path) !== null
+      if (!isVdfsUnder(ancestor, cwd.value)) return true
+      ancestor = vdfsParent(ancestor)
+    }
+    return findTreeNode(treeNodes.value, path) !== null
+  }
+
+  /**
+   * 是否还有更早的条目。
+   *
+   * 它是**启发值**：后端返回满页 ⇒ 可能还有；点「加载更早」拿到 0 条新项即判到底。
+   * 之所以不要求后端回 `has_more`：那要每个 provider 都多算一次，而「多翻一次空页」
+   * 的代价只是一次请求——**宁可多问一次，也不要为了精确给机制加字段**。
+   */
+  const hasMore = ref(false)
+  const loadingMore = ref(false)
+  /**
+   * 「加载更早」的失败信息（与 `loadError` 分开：首屏失败与续页失败是两件事）。
+   *
+   * 失败时**保留 `hasMore`**——把它置 false 会让按钮直接消失，而用户会把这读成
+   * 「已经到底了」，同时也失去了重试入口。
+   */
+  const loadMoreError = ref('')
+
+  /** 加载当前目录（**有界**：默认只取最新一页） */
+  async function refresh() {
+    const token = listGuard.advance()
+    const requestedCwd = cwd.value
+    const previousTree = treeNodes.value
+    resetTreeRequests()
+    loading.value = true
+    loadError.value = ''
+    loadMoreError.value = ''
+    try {
+      const resp = await listVdfs(
+        READBACK_REASON.VDFS_BROWSER,
+        requestedCwd,
+        { limit: VDFS_PAGE_SIZE },
+        (err) => {
+          // listVdfs 吞错返空列表（服务层口径不变），这里借观测器把「读不到」
+          // 与「真的空」分开——否则后端故障会被显示成「此目录为空/可新建」。
+          if (listGuard.revision() === token) {
+            loadError.value = `加载失败：${readableError(err)}`
+          }
+        }
+      )
+      if (listGuard.revision() !== token || requestedCwd !== cwd.value) return
+      items.value = resp.items
+      cwdNode.value = resp.node
+      // 自述与请求地址同源登记（见 `cwdAddr` 的说明）
+      cwdAddr.value = resp.path
+      hasMore.value = resp.items.length >= VDFS_PAGE_SIZE
+      treeNodes.value = treeMode.value ? mergeTreeLevel(resp.items, previousTree) : []
+
+      // 选中项若已不在当前目录（被删/被移走），清理选中态。
+      // ⚠️ 有界列表下**不能**仅凭「不在这页里」就判它没了——它可能只是落在更早的
+      // 一页（深链直开旧会话就是这种情形）。只有确信已拿全时才清理。
+      // ⚠️ **草稿不受此判**：它本来就不在清单里（还没落盘），路径为空。
+      const sel = selectedNode.value
+      if (sel && !isVdfsDraft(sel) && !hasMore.value && !isVisibleInCwd(sel.path)) {
+        // 确实不在当前视图里 = 被删 / 被移走，连同记忆一起忘掉，别在下次返回时复活。
+        clearSelection(true)
+      }
+    } catch (err) {
+      if (listGuard.revision() !== token || requestedCwd !== cwd.value) return
+      loadError.value = readableError(err)
+      items.value = []
+      treeNodes.value = []
+      hasMore.value = false
+      logger.error('useVdfs', `加载目录失败 ${requestedCwd}:`, err)
+    } finally {
+      // 旧目录的 finally 不能把新目录的加载态提前关掉。
+      if (listGuard.revision() === token) loading.value = false
+    }
+  }
+
+  /**
+   * 加载更早的一页（追加到列表尾部）。
+   *
+   * 游标 = 当前最后一项的 `name`（后端按它定位「这一条之后」）。追加时按 `path`
+   * 去重：不认窗口参数的 provider 每次都返回同一整页，去重后**新项为 0**，
+   * 于是 `hasMore` 收敛为 false —— 一次空转换来的正确性，比引入 `has_more`
+   * 协议字段便宜。
+   */
+  async function loadMore() {
+    if (loadingMore.value || !hasMore.value) return
+    const last = items.value[items.value.length - 1]
+    if (!last) return
+    const requestedCwd = cwd.value
+    const token = listGuard.revision()
+    loadingMore.value = true
+    loadMoreError.value = ''
+    try {
+      let readErr: unknown
+      const resp = await listVdfs(
+        READBACK_REASON.VDFS_BROWSER,
+        requestedCwd,
+        { limit: VDFS_PAGE_SIZE, before: last.name },
+        (err) => { readErr = err },
+      )
+      if (readErr) throw readErr
+      if (listGuard.revision() !== token || requestedCwd !== cwd.value) return
+      const known = new Set(items.value.map((n) => n.path))
+      const fresh = resp.items.filter((n) => !known.has(n.path))
+      items.value = items.value.concat(fresh)
+      if (treeMode.value) treeNodes.value = mergeTreeLevel(items.value, treeNodes.value)
+      hasMore.value = fresh.length > 0 && resp.items.length >= VDFS_PAGE_SIZE
+    } catch (err) {
+      if (listGuard.revision() !== token || requestedCwd !== cwd.value) return
+      logger.error('useVdfs', `加载更早失败 ${requestedCwd}:`, err)
+      loadMoreError.value = '加载更早的条目失败，请重试'
+    } finally {
+      if (listGuard.revision() === token) loadingMore.value = false
+    }
+  }
+
+  /**
+   * 重拉左栏导航并落位选中：记忆优先（仍存在时），缺省第一个子目录。
+   * 选中变化时内部已就地刷新当前目录（返回值告知调用方免重复刷）。
+   */
+  async function refreshNav(): Promise<boolean> {
+    const token = navGuard.advance()
+    const requestedAddr = addr.value
+    const requestedNavDir = navDir.value
+    const resp = await listVdfs(READBACK_REASON.VDFS_BROWSER, requestedNavDir)
+    if (navGuard.revision() !== token || requestedAddr !== addr.value) return false
+    navDirs.value = resp.items
+    // 挂载层：左栏是类别清单，点击 = 换类别页（宿主 push），当前目录恒为绑定地址
+    // 本身，因此没有「选中的子目录」可落位。
+    if (atMountLevel.value) return false
+    // 深链定住了当前目录（打开某个文件）：不让「缺省第一个子目录」把落点抢走。
+    // 左栏照常刷新，只是没有高亮项——当前目录就是 `addr` 自身。
+    if (pinnedAtAddr.value) {
+      selectedName.value = null
+      return false
+    }
+    const names = resp.items.filter(isVdfsDir).map((n) => n.name)
+    const want = selectedMemo.get(requestedAddr)
+    const next = want && names.includes(want) ? want : (names[0] ?? null)
+    if (next === selectedName.value) return false
+    selectedName.value = next
+    if (next) selectedMemo.set(requestedAddr, next)
+    clearSelection()
+    void refresh()
+    return true
+  }
+
+  /**
+   * 已应用过的「地址 + 选中项」。
+   *
+   * 只在两者之一真的变了时重新应用：订阅重同步 / 刷新收敛会走 `reload()`，
+   * 若每次都重放路由里的选中项，用户刚点开的另一个文件会被悄悄抢回去。
+   */
+  let appliedFocusKey: string | null = null
+
+  /** 把当前路由的选中项落到内存态（定住当前目录 + 记下待选项）；未变化则不动。 */
+  function applyFocusIfChanged() {
+    const raw = (selectName.value ?? '').trim()
+    const name = focusNameOf(selectName.value)
+    const key = `${addr.value}\u0000${name ?? ''}`
+    if (key === appliedFocusKey) return
+    appliedFocusKey = key
+    pinnedAtAddr.value = Boolean(name)
+    pendingSelect.value = name
+    if (name) selectedName.value = null
+    // 形状非法的选中项（带分隔符 / `..`）在归一化时就被丢弃了，这里如实说一句。
+    focusNotice.value = raw && !name ? `地址中的选中项「${raw}」无法定位：它不是本目录的直接子项` : ''
+  }
+
+  /**
+   * 列表回来之后选中深链指向的那一项。
+   *
+   * 先在本页条目里找；不在（有界列表只取最新一页 / 刚被删）就按地址 `stat`
+   * 一次——不清空目标，让右栏给出「读不到」或真正的详情。目标已不在当前目录
+   * 之下（期间用户换了目录）则放弃。
+   */
+  async function settleSelect() {
+    const name = pendingSelect.value
+    if (!name) return
+    pendingSelect.value = null
+    const target = vdfsJoin(addr.value, name)
+    if (vdfsParent(target) !== cwd.value) return
+    const found = items.value.find((n) => n.path === target)
+    if (found) {
+      void select(found)
+      return
+    }
+    const node = await statVdfs(READBACK_REASON.VDFS_BROWSER, target)
+    if (vdfsParent(target) !== cwd.value) return
+    if (!node) {
+      focusNotice.value = `地址中的选中项「${name}」不在当前目录中（可能已被删除）`
+      return
+    }
+    void select({ ...node, path: target })
+  }
+
+  /**
+   * 返回原地址页（或刷新后）恢复这一层上次选中的项。
+   *
+   * 只在没有路由深链、且右栏当前为空时才动手：用户还没选 / 已经选了别的 / 正被
+   * `?select=` 定位，都不该被记忆抢回去。目标必须仍存在于当前视图，否则忘掉它。
+   */
+  async function restoreMemoSelection() {
+    if (selectName.value || selectedNode.value) return
+    const key = cwd.value
+    const memo = selectedNodeMemo.get(key)
+    if (!memo) return
+    const found = treeMode.value
+      ? findTreeNode(treeNodes.value, memo.path)?.item
+      : items.value.find((n) => n.path === memo.path)
+    if (found) {
+      await select(found)
+      return
+    }
+    if (!treeMode.value || !isVdfsUnder(memo.path, cwd.value)) {
+      selectedNodeMemo.delete(key)
+      return
+    }
+    // 懒加载树尚未展开到记忆项时，不能据“当前没装进树”判它已删除；用 stat 确认，
+    // select 会顺带按路径补齐祖先层。
+    const node = await statVdfs(READBACK_REASON.VDFS_BROWSER, memo.path)
+    if (cwd.value !== key) return
+    if (!node) {
+      selectedNodeMemo.delete(key)
+      return
+    }
+    await select({ ...node, path: memo.path })
+  }
+
+  /**
+   * 整体重载（绑定地址 / 路由选中项变化 / 宿主要求）：落位左栏选中 + 刷新当前目录。
+   * 选中落位变化时 refreshNav 已就地刷新，无需重复。
+   */
+  async function reload() {
+    applyFocusIfChanged()
+    if (await refreshNav()) {
+      await restoreMemoSelection()
+      return
+    }
+    await refresh()
+    await settleSelect()
+    await restoreMemoSelection()
+  }
+
+  /**
+   * 点左栏某项 = 就地切换当前目录（不产生新页面）。
+   *
+   * **挂载层不适用**：那里的左栏项是类别（兄弟挂载），点一下是换一个地址页，
+   * 由宿主 `VdfsWorkbench` 播成 `open` 事件（本层不认识浏览器路由）。
+   */
+  async function selectDir(name: string) {
+    if (atMountLevel.value) return
+    if (name === selectedName.value && !pinnedAtAddr.value) return
+    const n = navDirs.value.find((x) => x.name === name && isVdfsDir(x))
+    if (!n) return
+    // 用户自己点左栏 = 离开深链的到达态（之后按缺省/记忆落位，不再定在 addr 上）
+    pinnedAtAddr.value = false
+    pendingSelect.value = null
+    selectedName.value = name
+    selectedMemo.set(addr.value, name)
+    clearSelection()
+    await refresh()
+  }
+
+  // ==================== 换目录 ⇒ 旧选中项失效 ====================
+  //
+  // 右栏显示的必须是**当前目录**里的东西。目录一换（切左栏类别 / 换绑定地址），
+  // 上一个目录的选中项立刻作废——否则右栏会一直挂着别的目录的详情（用户报的
+  // 「切了侧边栏，详情页还是上一个类别的内容」）。
+  //
+  // 判据是**归属**（选中项的地址是否落在当前目录之下），不是「它还在不在已加载的
+  // 列表里」：后者要等列表回来才判得出（中间那一拍右栏仍是旧的），且在还有更早
+  // 分页时根本判不了——那正是旧选中项能一直挂着的漏洞。
+  //
+  // ⚠️ **草稿必须清**：它还没有地址（`isVdfsDraft`），归属判据套不上，但草稿正是
+  // 从**旧目录**开出来的——换地址后它必然失效。曾在这里 `if (isVdfsDraft(sel)) return`
+  // 跳过草稿，结果切类别时右栏一直挂着上一类别的草稿；新类别 `canCreate` 为真时
+  // `showList = !(hasDraft && canCreate)` 为假，中栏整个收起——用户看到的就是「左栏
+  // 切换后右侧内容区不跟着变」（真回归）。
+  watch(
+    () => cwd.value,
+    (dir) => {
+      listGuard.advance()
+      resetTreeRequests()
+      items.value = []
+      cwdNode.value = null
+      cwdAddr.value = ''
+      treeNodes.value = []
+      hasMore.value = false
+      loadMoreError.value = ''
+      loadingMore.value = false
+      loading.value = true
+      const sel = selectedNode.value
+      if (!sel) return
+      // 草稿无 path ⇒ 无法判归属，但它属于旧目录，换地址即作废
+      if (!isVdfsDraft(sel) && isVdfsUnder(sel.path, dir)) return
+      clearSelection()
+    },
+    { flush: 'sync' },
+  )
+
+  // ==================== 列表筛选 ====================
+  //
+  // 只筛**已加载**的条目，不发请求。
+  //
+  // 为什么不接 `vdfs/search`：那是**全库**搜索（后端 ripgrep 式内容检索），
+  // 与「在当前目录这一页里找那一项」是两件事。前者结果不保证在当前目录里，
+  // 混进中栏会让「点目录即钻入」的空间心智立刻失效。全库搜索属于命令面板
+  // （`vdfs/search` 另有用武之地），不是列表筛选。
+  //
+  // 于是与分页**不冲突**：筛选是纯投影，`items` 与游标一律不动。代价是
+  // 「只筛已加载的那些」（未加载的更早页里可能有命中）——这一点必须对用户
+  // 说出来，否则「搜不到」会被读成「不存在」。故 `filterTruncated` 单独暴露。
+
+  /**
+   * 检索入口是否可用 —— **服务端声明**（`cwdNode.search`，与「新建」看
+   * `new_type` 同一条通道）。
+   *
+   * 为什么不在这里判「条目够不够多」：那是一条**阈值**，各前端各判一份必然分叉
+   * （网页 20 条、桌面 5 条、CLI 干脆不做），而用户看到的应该是同一个答案。
+   * 后端在**列表分发**里统一回答（`plugins/vdfs/host.rs::LIST_SEARCH_MIN_ITEMS`），
+   * provider 也可以按自己的资源特征覆盖（`VdfsNode::search`）——前端只读结果。
+   *
+   * 未声明（`undefined`，如 `stat` 上的节点）一律按**不启用**处理：没有声明的
+   * 功能不自己长出来。
+   */
+  const searchable = computed(() => cwdNode.value?.search === true)
+
+  /** 筛选词（大小写不敏感的**子串**匹配：中文没有词边界，分词反而搜不到） */
+  const filter = ref('')
+
+  // 入口消失（换到条目很少的目录 / 服务端收起它）时，筛选词必须一并清掉：
+  // 否则列表仍在被一个**看不见的词**过滤——用户既看不到自己筛了什么，也找不到
+  // 清除入口，看到的只是「条目莫名少了一半」。
+  watch(searchable, (on) => {
+    if (!on) filter.value = ''
+  })
+
+  /** 归一化筛选词（去首尾空白；空 = 不过滤） */
+  const activeFilter = computed(() => filter.value.trim().toLowerCase())
+
+  /** 过滤后的列表（`items` 的纯投影，不改底层数据） */
+  const filteredItems = computed<VdfsItem[]>(() => {
+    const q = activeFilter.value
+    if (!q) return items.value
+    return items.value.filter((n) => nodeMatchesFilter(n, q))
+  })
+
+  /** 筛选是否命中为 0（区分「目录为空」与「筛掉了」——两者提示不同） */
+  const filterEmpty = computed(
+    () => Boolean(activeFilter.value) && items.value.length > 0 && filteredItems.value.length === 0
+  )
+
+  /**
+   * 「结果可能不全」：正在筛选 + 还有更早的页没加载。
+   *
+   * 此时列表下方的「加载更早」仍然是唯一能把命中捞出来的手段，故控件要
+   * 在筛选态下保留它（而不是像普通空态那样只说「没有匹配项」）。
+   */
+  const filterTruncated = computed(() => Boolean(activeFilter.value) && hasMore.value)
+
+  // ==================== 选中项与详情 ====================
+  /**
+   * 当前选中项 = **条目**（地址 + 节点）或**草稿**。
+   *
+   * 草稿（新建态）还没有落盘，因此没有地址——`path` 是空串，这正是
+   * `isVdfsDraft` 的判据（见 `schemas/vdfs.isVdfsDraft`）。
+   */
+  const selectedNode = shallowRef<VdfsItem | null>(null)
+  const selectedId = computed(() => selectedNode.value?.path ?? null)
+
+  /** 详情渲染器（**前端选择详情页面的唯一入口**，按 ext 解析） */
+  const renderer = computed<VdfsRenderer>(() => resolveVdfsRenderer(selectedNode.value))
+
+  /** 文本类渲染器（text / json / markdown）的内容副本 */
+  const nodeText = ref('')
+  /** form 渲染器的数据（`vdfs/read` 文本按 JSON 解析） */
+  const formData = ref<Record<string, unknown> | null>(null)
+  const loadingDetail = ref(false)
+  /**
+   * 详情**读取**失败（与保存 / 动作失败分开）。
+   *
+   * 读取失败时右栏只显示错误与重试，不能把尚未读到的空值当成可编辑表单；
+   * 保存或动作失败则仍保留当前详情与输入，因此不能复用同一个错误分支。
+   */
+  const detailLoadError = ref('')
+
+  const saving = ref(false)
+  /** 动作执行中（与 saving 分开：动作不写数据，别让保存态跟着转） */
+  const actionBusy = ref(false)
+  /** 保存 / 动作 / 删除失败（纯文本）；与读取失败分开，失败后保留当前详情。 */
+  const detailError = ref('')
+  /** 字段级校验错误（provider 自持校验的产物；机制不解释其含义） */
+  const fieldErrors = ref<VdfsFieldError[]>([])
+  /** 连接测试的持久回执；字段一旦修改即作废，不能被误当成新配置的结果。 */
+  const testResult = ref<{ ok: boolean; message: string } | null>(null)
+  function clearTestResult(): void {
+    testResult.value = null
+  }
+
+  /**
+   * 详情读取的**代次守卫**（机制唯一实现，见 `useGenerationGuard`）。
+   *
+   * 连点多项时，慢响应不得覆盖新选中项的数据；清空选中同样要使在途响应作废
+   * （`clearSelection` advance 一次即可）。
+   */
+  const detailGuard = useGenerationGuard()
+
+  /**
+   * 追加的**代际守卫**（键控：键 = 节点路径）——防「在途重读覆盖已应用的增量」。
+   *
+   * 场景：节点正文流式追加（`updated` + `delta` 就地拼接，**不发重读**），而此前
+   * 发出的一次 `read` 响应稍后到达——它带的是**旧快照**，会把刚拼上去的字抹掉，
+   * 随后的追加再拼上去就得到损坏文本。失败是**静默的**：不报错、不崩溃，只少一段字。
+   *
+   * 记法：读取前记下该路径「已应用过几次追加」，响应回来若这个数变了，说明读取
+   * 期间有增量落地（本地内容比响应新），**丢弃该响应**。丢弃是安全的：节点增删
+   * 另有 `created` / `deleted` 事件兜底。
+   *
+   * 与详情读取的代次**必须是两个实例**：两者作废时机不同（前者随选中变化，
+   * 后者随增量落地），共用一个代次会互相误伤。转写列表那份同款守卫在
+   * `stores/sessionTranscriptSync.ts`（同一规则、不同视图）。
+   */
+  const appendGuard = useGenerationGuard()
+
+  // 详情渲染器里「正文即文本缓冲」的那些（追加可安全拼接）——判定在
+  // `registry/vdfsTypes::isTextualRenderer`（那里也是 `VdfsRenderer` 的定义处）。
+  // 先前这里手写了一份 `new Set([...])`，与另外两处各写一份、且其中一处其实
+  // 不是同一个集合（见该函数的注释）。
+
+  /**
+   * 就地应用一条**带增量的**变更；返回是否命中**当前打开的详情**。
+   *
+   * `delta` 有 ⇒ 尾部追加。命中即拼接，且**不触发刷新**——载荷存在就是为了
+   * 让消费端零回读：它只说「尾部多了这些字」，列表项的结构与预览首行都不受
+   * 尾部追加影响，为它重拉整目录是纯粹的浪费（流式正文逐帧到达，那会变成
+   * O(n²) 的 `vdfs/list` 流量）。
+   */
+  function applyAppend(change: VdfsChange): boolean {
+    // 载荷在 `data` 上——消息帧是 `{id, delta}` 窄载荷；无载荷或载荷里
+    // 没有 `delta`（全量帧 / 节点视图）都不是「尾部追加」。
+    const data = change.data as { delta?: unknown } | null | undefined
+    const delta = typeof data?.delta === 'string' ? data.delta : null
+    const node = selectedNode.value
+    if (!delta || !node || node.path !== change.path) return false
+    if (!isTextualRenderer(renderer.value)) return false
+    nodeText.value += delta
+    appendGuard.advance(node.path)
+    return true
+  }
+
+  /**
+   * 就地应用一条**带全量正文的**变更；返回是否命中**当前打开的详情**。
+   *
+   * `content` 有 ⇒ 整条替换（后端首帧发的就是图里合并后的全量副本）。与
+   * `applyAppend` 同一条道理：它只改一个节点的**内容**，不改变任何节点的存在
+   * 与顺序，列表也不内联正文——所以同样不该重拉目录。
+   *
+   * 只有**纯文本缓冲**能就地替换；`form` 渲染器要从正文 parse 出字段值（那是
+   * `select` 的活），故返回 `false` 由调用方走一次详情重读。
+   */
+  function applyReplace(change: VdfsChange): boolean {
+    const data = change.data as { content?: unknown } | null | undefined
+    const content = data?.content
+    const node = selectedNode.value
+    if (typeof content !== 'string' || !node || node.path !== change.path) return false
+    if (!isTextualRenderer(renderer.value)) return false
+    nodeText.value = content
+    appendGuard.advance(node.path)
+    return true
+  }
+
+  /**
+   * 清空详情。`forget = true` 才删掉该目录的返回记忆：
+   * - 换目录 / 离开地址页时的清空只是暂时收起，返回还要恢复；
+   * - 删除条目 / 回读确认它已不在当前视图时则必须忘掉，否则旧项会复活。
+   */
+  function clearSelection(forget = false) {
+    const memoKey = cwd.value
+    detailGuard.advance()
+    selectedNode.value = null
+    nodeText.value = ''
+    formData.value = null
+    loadingDetail.value = false
+    detailLoadError.value = ''
+    detailError.value = ''
+    fieldErrors.value = []
+    clearTestResult()
+    if (forget) selectedNodeMemo.delete(memoKey)
+  }
+
+  /** 选中节点并按其渲染器加载数据 */
+  async function select(node: VdfsItem | null) {
+    if (!node) {
+      clearSelection()
+      return
+    }
+    // 选中成功 ⇒ 上一条「找不到选中项」的说明已不再成立
+    focusNotice.value = ''
+    // 同一个节点的**重读**（刷新收敛）不清空正文缓冲：清空会让详情区先白一下
+    // 再填回来，而这次重读拿到的往往就是同一份内容。换到别的节点才清。
+    const sameNode = selectedNode.value?.path === node.path
+    selectedNode.value = node
+    if (!sameNode) {
+      nodeText.value = ''
+      formData.value = null
+      clearTestResult()
+    }
+    // 新选中项（或同一节点的重读）开始时都不再展示上一条读取失败；骨架优先于
+    // 任何旧正文，失败时再由本次回执写入 detailLoadError。
+    loadingDetail.value = false
+    detailLoadError.value = ''
+    detailError.value = ''
+    fieldErrors.value = []
+    // 记住这一层当时在看什么；换目录 / 进下一级只是暂时收起，返回时按此恢复。
+    if (!isVdfsDraft(node)) selectedNodeMemo.set(cwd.value, node)
+    if (!isVdfsDraft(node) && treeMode.value) void revealTreePath(node.path)
+
+    // 草稿（新建态）**没有内容可读**：它还没落盘，路径是空的——去读它只会落到
+    // 目录地址上。详情渲染器自己知道怎么呈现「还没有的东西」（表单给默认值、
+    // 会话给新建引导），机制只需保证不替它读一个不存在的节点。
+    if (isVdfsDraft(node)) return
+
+    const r = resolveVdfsRenderer(node)
+    if (!rendererReadsNodeText(r)) {
+      // 选中变化**必须**让在途正文响应作废——即使新渲染器不消费这些数据。
+      // 否则上一次慢响应仍会落地，写进新节点的 nodeText/formData。
+      detailGuard.advance()
+      return
+    }
+
+    // 读取代次令牌：连点多项时，慢响应不得覆盖新选中项的数据
+    const token = detailGuard.advance()
+    // 追加代际快照：读取期间若有增量落地，本地内容比这次响应新 → 丢弃响应
+    const gen = appendGuard.revision(node.path)
+    loadingDetail.value = true
+    try {
+      let readErr: unknown
+      const content = await readVdfs(READBACK_REASON.VDFS_BROWSER, node.path, (e) => {
+        readErr = e
+      })
+      if (detailGuard.revision() !== token) return
+      if (appendGuard.revision(node.path) !== gen) return
+      if (!content) {
+        detailLoadError.value = `读取失败：${readErr instanceof Error ? readErr.message : '后端未返回内容'}`
+        return
+      }
+      const text = content.text ?? ''
+      if (isFormRenderer(r)) {
+        try {
+          formData.value = text.trim() ? (JSON.parse(text) as Record<string, unknown>) : {}
+        } catch (err) {
+          detailLoadError.value = `内容不是合法 JSON：${err}`
+        }
+      } else {
+        nodeText.value = text
+      }
+    } catch (err) {
+      if (detailGuard.revision() !== token) return
+      detailLoadError.value = `读取失败：${readableError(err)}`
+      logger.error('useVdfs', `读取详情失败 ${node.path}:`, err)
+    } finally {
+      // 用**自己取到的那个代次**比对，不重新 revision()：中途自增会让加载态
+      // 永远复位不了（见 useGenerationGuard 的「边界」）
+      if (detailGuard.revision() === token) loadingDetail.value = false
+    }
+  }
+
+  /** 重试当前选中节点的详情读取；草稿没有正文，不需要重试。 */
+  async function retryDetail() {
+    const node = selectedNode.value
+    if (!node || isVdfsDraft(node) || loadingDetail.value) return
+    await select(node)
+  }
+
+  // ==================== 机制动作（单一定义点） ====================
+  //
+  // 「删除」不是某个资源的私有动作，而是**任何已落盘且可写的节点**都能做的默认
+  // 动作。它由本层算一次，经控件注入所有详情渲染器；渲染器只声明自己特有的动作
+  // （save / reset / test / open-container…）。
+  //
+  // 此前这组动作有 4 份实现（form / session / text / readonly 各算一遍，形态还
+  // 有两种），而后端 `detail_definition.actions` 又对同一概念各声明一次——同一件
+  // 事三个来源。收敛到此处后，**存在与否只有一个来源**；渲染器若要用更贴切的
+  // 文案重新声明同名动作，由渲染器声明的那一份胜出（见 DetailShell.mergeActions）。
+  //
+  // 判据只用**访问位**：可写位 `w` ⇒ 可删除。
+  //
+  // **曾经还有「重命名」**（= 同一地址空间内移动），随 `vdfs/move` 整条下线了：
+  // 移动不是 VDFS 的核心原语（跨子树时它是 copy+delete，见 `VdfsRequest` 的
+  // 「没有 `Move`」一节），当前外层也没有提供。要加回来时它属于**访问层的组合
+  // 操作**，不是渲染器动作——别再从这里塞一个必然报错的按钮。
+  //
+  // 草稿（新建态）不给删除：还没落盘的东西无从删除。
+
+  /** 页面对当前节点的默认动作集（渲染器自有的动作不在此列） */
+  const mechanismActions = computed<DetailAction[]>(() => {
+    const node = selectedNode.value
+    if (!node || isVdfsDraft(node) || !vdfsAccessOf(node).write) return []
+    return [{ id: 'delete', label: '删除', style: 'danger', busy_label: '删除中…' }]
+  })
+
+  /**
+   * 正在执行的机制动作 id（当前只有 `'delete'` / null）。
+   *
+   * 只驱动按钮的进行中文案（`busy_label`）与禁用态，不参与任何判据——「有写操作
+   * 在途」那个更宽的概念是 `saving`，它还要锁住列表上的新建 / 刷新按钮。
+   */
+  const mechanismBusyId = ref<string | null>(null)
+
+  // ==================== 写入 / 删除 / 新建 ====================
+  function readableError(err: unknown): string {
+    const parsed = parseVdfsValidation(err)
+    if (parsed?.message) return parsed.message
+    const text = err instanceof Error ? err.message : String(err)
+    return text.replace(/^\[Gateway HTTP\]\s*/, '')
+  }
+
+  /** 还原字段级校验错误；非本协议载荷按纯文本展示 */
+  function captureError(err: unknown): string {
+    const parsed = parseVdfsValidation(err)
+    if (parsed) {
+      fieldErrors.value = parsed.fields ?? []
+      return parsed.message
+    }
+    fieldErrors.value = []
+    return readableError(err)
+  }
+
+  /**
+   * 写入选中节点内容（form 传字段值对象，文本渲染器传文本）。
+   *
+   * **草稿（新建态）的写入目标 = 当前目录自身**：使用方没有给名字，名字由
+   * provider 生成（`id 归 provider`）——这正是「新建」在机制上的形态，与
+   * 「保存一项已有资源」是同一个动作（同一条 `vdfs/write`），差别只有
+   * 目标地址与 `create` 意图（目录自身没有可覆盖的目标，必须带 create）。
+   *
+   * 写完落到 provider 在响应里给出的**新名字**上（`VdfsWriteResponse.name`；
+   * 只有匿名写才有它）——新建的落点是刚建出来的那一项，而不是那张已经失效的草稿。
+   */
+  async function write(payload: Record<string, unknown> | string): Promise<boolean> {
+    // 详情未读到时禁止写入 / 动作：不能让旧快照或空模型被保存到真实节点上。
+    if (saving.value || actionBusy.value || loadingDetail.value || detailLoadError.value) return false
+    const node = selectedNode.value
+    if (!node) return false
+    const draft = isVdfsDraft(node)
+    const text = typeof payload === 'string' ? payload : JSON.stringify(payload)
+    saving.value = true
+    detailError.value = ''
+    fieldErrors.value = []
+    try {
+      const resp = await writeVdfs(draft ? cwd.value : node.path, text, draft ? { create: true } : undefined)
+      showToast('success', draft ? '已新建' : `已保存「${node.title || node.name}」`)
+      // 写入可能改变节点元数据（大小/状态）→ 就地重载
+      await refresh()
+      if (!draft) {
+        await select(node)
+      } else {
+        // 新建：选中 provider 建出来的那一项。回执只给**名字**（匿名写由 provider
+        // 生成），地址由「当前目录 + 名字」构成——但中栏刚重载过，按名字找回即可
+        // （名字是目录内的路径段，唯一）。
+        const created = items.value.find((n) => n.name === resp.name)
+        if (created) {
+          await select(created)
+        } else {
+          // 回执没给名字 / 名字被 provider 归一化：不能停在已失效的草稿页上却
+          // 只说「已新建」。告诉用户已创建但未定位，并保留列表已刷新的事实。
+          logger.warn('useVdfs', `新建成功但未能定位条目：${resp.name}`)
+          showToast('info', '已新建，但未能在列表中定位，请从列表中选择')
+        }
+      }
+      return true
+    } catch (err) {
+      detailError.value = captureError(err)
+      showToast('error', `保存失败：${detailError.value}`)
+      return false
+    } finally {
+      saving.value = false
+    }
+  }
+
+  /** form 渲染器保存入口（DetailForm option 绑定语义：纯字段值） */
+  async function saveFields(values: Record<string, unknown>): Promise<boolean> {
+    return write(values)
+  }
+
+  /** 文本渲染器保存入口 */
+  async function saveText(): Promise<boolean> {
+    return write(nodeText.value)
+  }
+
+  /**
+   * 执行**节点动作**（如「测试连接」「导入整包」「导出」）。
+   *
+   * 动作标识由详情定义声明、由 provider 解释，本层只负责把它送到
+   * `vdfs/action` 并把结果（成功 / 失败 + 说明）呈现出来；**前端不认识
+   * 任何具体动作**，新增动作无需改动这里。
+   *
+   * 唯一例外是**文件载荷**，且两个方向都是形状判定而非动作判定：
+   * - 结果里带 `filename` + `b64` → 下载它（见 `actionFileOf`，如「导出」）；
+   * - 动作声明了 `pack` → 载荷是一个本地文件（见 `runPackAction`，如「导入」）。
+   *
+   * 目标地址与 `write` 同一条规则：**草稿（新建态）打在当前目录上**——使用方
+   * 只说「在这个目录里做这件事」，名字 / 落点由 provider 决定。
+   */
+  async function runAction(action: string, payload?: unknown): Promise<boolean> {
+    // 详情未读到时禁止写入 / 动作：不能让旧快照或空模型被保存到真实节点上。
+    if (saving.value || actionBusy.value || loadingDetail.value || detailLoadError.value) return false
+    const node = selectedNode.value
+    if (!node) return false
+    const target = isVdfsDraft(node) ? cwd.value : node.path
+    const draftToken = draftSeq.value
+    actionBusy.value = true
+    detailError.value = ''
+    clearTestResult()
+    try {
+      const r = await runVdfsAction(target, action, payload)
+      if (r?.ok) {
+        showToast('success', r.message || '执行成功')
+        const file = actionFileOf(r.data)
+        if (file) downloadBlob(file.filename, base64ToBytes(file.b64))
+      } else {
+        detailError.value = r?.message || '执行失败'
+        showToast('error', detailError.value)
+      }
+      // 动作可能改变条目集合（导入建出一条、清空删掉一片）→ 重拉收敛
+      await refresh()
+      const current = selectedNode.value
+      const selectionUnchanged = isVdfsDraft(node)
+        ? current === node && draftSeq.value === draftToken
+        : current?.path === node.path
+      if (action === VDFS_ACTION_TEST && r?.ok && selectionUnchanged) {
+        testResult.value = { ok: true, message: r.message }
+      }
+      if (r?.ok && action !== VDFS_ACTION_TEST && selectionUnchanged) {
+        const data = r.data
+        const createdId = data && typeof data === 'object' && 'id' in data
+          ? (data as { id?: unknown }).id
+          : undefined
+        if (typeof createdId === 'string' && createdId) {
+          const target = items.value.find((n) => n.path === vdfsJoin(cwd.value, createdId))
+          if (target) void select(target)
+          else if (isVdfsDraft(node)) {
+            clearSelection()
+            showToast('info', '已保存，但未能在列表中定位，请从列表中选择')
+          }
+        } else if (isVdfsDraft(node)) {
+          clearSelection()
+        }
+      }
+      return r?.ok === true
+    } catch (err) {
+      detailError.value = captureError(err)
+      showToast('error', `执行失败：${detailError.value}`)
+      return false
+    } finally {
+      actionBusy.value = false
+    }
+  }
+
+  /** 删除选中节点（目录递归）；可显式传入确认时冻结的目标 */
+  async function removeSelected(target?: VdfsItem): Promise<boolean> {
+    // 详情未读到时禁止写入 / 动作：不能让旧快照或空模型被保存到真实节点上。
+    if (saving.value || actionBusy.value || loadingDetail.value || detailLoadError.value) return false
+    const node = target ?? selectedNode.value
+    if (!node) return false
+    saving.value = true
+    mechanismBusyId.value = 'delete'
+    detailError.value = ''
+    try {
+      await deleteVdfs(node.path, isVdfsDir(node))
+      showToast('success', `已删除「${node.title || node.name}」`)
+      clearSelection(true)
+      await refresh()
+      return true
+    } catch (err) {
+      detailError.value = captureError(err)
+      showToast('error', `删除失败：${detailError.value}`)
+      return false
+    } finally {
+      saving.value = false
+      mechanismBusyId.value = null
+    }
+  }
+
+  // ==================== 可接受的新建类型（§5） ====================
+  //
+  // 当前目录节点声明自己能新建**哪一类**东西（`new_type`，至多一个）；前端只
+  // 负责「进入详情页」，不认识任何具体类型——创建语义由 provider 自持。
+  // `<根>/session` 这类子目录节点由后端合成时携带其 `new_type`，因此无需任何
+  // 「按目录名回退」的特判。
+  //
+  // **新建 = 选中一张草稿节点**，与「选中一项」走同一条详情通道：同一个
+  // `ext` → 同一个渲染器 → 同一个保存入口。名字不由前端先问：它是 provider
+  // 的私有知识，保存时由后端生成（写目录自身，见 `write`）。
+  //
+  // 「导入整包」不在这里：它是**详情页上的一条动作**（由定义声明、经
+  // `DetailAction.pack` 表明载荷是一个本地文件），由 `runPackAction` 执行。
+  // 曾经它被表达成类型的第二种「入口形态」，于是前端要先问「选哪种方式」，
+  // 还得为类型补上 `source` / `import` 两个与呈现无关的字段。
+
+  /**
+   * 当前目录可接受的新建类型（至多一个；`undefined` = 该目录不可新建）。
+   *
+   * ⚠️ **自述必须与当前目录同源**：换类别时 `cwd` 立刻变，而 `cwdNode` 要等
+   * `refresh()` 的 list 回执才更新（见 `cwdAddr` 的说明），中间那一拍它还是
+   * **上一个类别**的自述。若照直取 `cwdNode.new_type`，从 MCP 切到 Skill 的
+   * 那一拍里 Skill 页会顶着「新建 MCP」的标题，点下去开的也是 MCP 的草稿
+   * ——用户报的「Mcp 项和 Skill 项都显示新建 Mcp、Skill 功能出不来」正是这条
+   * 一步滞后。判据与「当前空间声明」（`VdfsWorkbench`）同源：`cwdAddr === cwd`
+   * 才认这份自述，否则当作「还没拿到」——新建按钮与自动草稿都缺席一拍，
+   * 回执到了自然补齐，绝不会串到上一类。
+   */
+  const creatableType = computed<VdfsNewType | undefined>(() =>
+    cwdAddr.value === cwd.value ? cwdNode.value?.new_type : undefined
+  )
+
+  /** 是否可新建（添加按钮可见性；机制只认节点声明） */
+  const canCreate = computed(() => Boolean(creatableType.value))
+
+  /**
+   * 草稿代际：每进一次新建态 +1。
+   *
+   * 详情组件的 `:key` 用节点路径——草稿没有路径，连续新建时 key 会撞在一起，
+   * 组件不重挂载就会**留着上一份草稿的内容**。这个自增号就是草稿的临时身份。
+   */
+  const draftSeq = ref(0)
+
+  /** 进入新建态：选中一张该类型的草稿节点（详情区按 `ext` 渲染） */
+  function startNew() {
+    const type = creatableType.value
+    if (!type) return
+    draftSeq.value += 1
+    void select(draftNodeOf(type))
+  }
+
+  /**
+   * 把一个**本地文件**作为动作载荷执行（`DetailAction.pack` 声明的动作）。
+   *
+   * 后端唤不起原生对话框、也拿不到用户刚选的文件，故「取文件」这一步只能由前端
+   * 做。载荷形状 `{filename, b64}` 与「导出」的结果同形（`actionFileOf` 认的那
+   * 一个）——两者对称，因此前端**不必认识「导入」这个动作**：它只认
+   * 「这个动作的载荷是一个文件」这个**形状**。
+   *
+   * 目标地址由 `runAction` 决定（草稿态 = 当前目录，与 `write` 同一条规则）。
+   */
+  async function runPackAction(action: string, file: File, payload?: unknown): Promise<boolean> {
+    let b64: string
+    try {
+      b64 = arrayBufferToBase64(await file.arrayBuffer())
+    } catch (err) {
+      detailError.value = `读取文件失败：${captureError(err)}`
+      showToast('error', detailError.value)
+      return false
+    }
+    const declared = payload && typeof payload === 'object' && !Array.isArray(payload)
+      ? payload as Record<string, unknown>
+      : {}
+    return runAction(action, { ...declared, filename: file.name, b64 })
+  }
+
+  // ==================== 实时（总线 vdfs 频道，非轮询） ====================
+  // 变更影响当前目录**的条目集合**才刷新；绑定地址一层的变化（左栏子目录增删）
+  // 顺带重拉导航。其余变更防抖重拉当前目录收敛。
+  //
+  // **带正文的变更是唯一的例外**：`delta` 就地拼接、`content` 就地替换，两者都
+  // **不重拉**（见 `applyAppend` / `applyReplace`）。它们不改变任何节点的存在与
+  // 顺序，也不改变列表项（列表不内联正文）——让它们走下面的通用分支，等于给流式
+  // 每一帧都挂一次防抖刷新（一次会话下来就是几十次白跑的 `vdfs/list`），正好抵消
+  // 载荷存在的意义。
+  let refreshTimer: ReturnType<typeof setTimeout> | null = null
+  function scheduleRefresh(delay = 400) {
+    if (refreshTimer) clearTimeout(refreshTimer)
+    refreshTimer = setTimeout(() => {
+      refreshTimer = null
+      void refresh()
+      const sel = selectedNode.value
+      if (sel) void select(sel)
+    }, delay)
+  }
+
+  /**
+   * 带正文的变更里，若命中的是一条**本目录还不认识的直接子项**，说明条目集合真的
+   * 变了 ⇒ 重拉。
+   *
+   * 带正文的帧一律不重拉，是为流式逐帧省流量（见 `applyAppend` 的说明）；但那条
+   * 豁免默认了一个前提——**被改的节点已经在列表里**。新建出来的那一项不满足这个
+   * 前提：它的首帧就是带正文的（写入即带内容 / 流式首帧即增量），此时不重拉会让
+   * 新条目**永远不出现在中栏**，要等下一次无关的刷新才补上。
+   *
+   * 判据只用「列表里有没有这条路径」，**不问帧里带的是 `delta` 还是 `content`**
+   * ——帧形状是协议的实现细节，「条目集合有没有变」才是本层要知道的事。
+   *
+   * 代价被两件事夹住：① 只对**直接子项**生效（孙辈的流式帧照旧不打扰本目录）；
+   * ② 一旦该项进入列表就不再命中（同一条消息的后续帧不会再拉）。合起来是
+   * 「每新增一条最多多拉一次」，而不是「每帧一次」。
+   */
+  function refreshIfUnknownChild(changePath: string) {
+    if (vdfsParent(changePath) !== cwd.value) return
+    if (items.value.some((n) => n.path === changePath)) return
+    scheduleRefresh()
+  }
+
+  /** 数据变更回调（路径过滤在 handler 内，订阅恒定一条） */
+  function onChange(change: VdfsChange) {
+    const data = change.data as { delta?: unknown; content?: unknown } | null | undefined
+
+    // ① 带增量的变更：命中当前详情就就地拼接，未命中就什么也不做。
+    if (typeof data?.delta === 'string') {
+      applyAppend(change)
+      refreshIfUnknownChild(change.path)
+      return
+    }
+
+    // ② 带全量正文的变更（首帧发的就是合并后的全量副本）：命中当前详情就就地
+    //    替换，同样不重拉目录。命中当前详情但渲染器不吃纯文本（`form` 要从正文
+    //    parse 字段值）⇒ 只重读这一条，仍不重拉目录。
+    if (data != null && typeof data === 'object' && data.content != null) {
+      const sel = selectedNode.value
+      if (!applyReplace(change) && sel && sel.path === change.path) void select(sel)
+      refreshIfUnknownChild(change.path)
+      return
+    }
+
+    // ③ 其余变更（资源信号 / 只有状态的消息帧）：只有真的影响本目录的条目集合
+    //    才重拉。
+    if (affects(cwd.value, change.path)) scheduleRefresh()
+    else scheduleTreeRefresh(change.path)
+    // 左栏数据源那一层（子目录增删）→ 导航跟着变
+    if (change.path === navDir.value || vdfsParent(change.path) === navDir.value) {
+      void refreshNav()
+    }
+  }
+
+  // 订阅范围 = **绑定地址**（含整棵子树）。三件事由 `subscribeVdfsChanged` 一次办妥：
+  // 后端 `vdfs/watch` 登记（引用计数 + 串行链，最后一个订阅者撤走才摘除）、
+  // 总线 `vdfs` 频道、以及**前端本地通道**（`publishVdfsChangedLocal`——会话 store
+  // 的乐观写靠它通知其它页面；从前用裸 `subscribe` 收不到这条通道）。
+  //
+  // 订「绑定地址」而不是「当前目录」：左栏子目录的增删要能刷新导航，而那类变更
+  // 落在 `addr` 上、不在 `cwd` 子树里；`cwd` 只是 `addr` 的子目录，本就在其子树内，
+  // 后端按前缀投递子树变更，因此订 `addr` 覆盖得住。代价是邻目录的变更也会送到
+  // handler，由 `affects` 收窄。
+  //
+  // 「虚拟根不在任何 provider 身上、不该登记 watch」这条知识归 `subscribeVdfsChanged`
+  // 所有（它内部跳过根），本层不再复述。
+  let releaseChanges: (() => void) | null = null
+
+  // 绑定地址变化 = 换了一个数据地址：换订阅 + 整体重载（左栏、选中、当前目录）。
+  // 深链末段名（`select`）变化不换订阅（地址没变），但同样要重载一次以重放焦点。
+  watch(
+    [addr, selectName],
+    ([next], [prev]) => {
+      if (next !== prev) {
+        releaseChanges?.()
+        releaseChanges = subscribeVdfsChanged({ prefix: next }, onChange, () =>
+          // 重同步：后端通道曾满，本端可能漏了增删改。整份重载本地址（含左栏与当前目录）
+          // ——本页是通用资源浏览器，没有比「按绑定地址重读」更权威的收敛方式。
+          void reload()
+        )
+      }
+      void reload()
+    },
+    { immediate: true }
+  )
+
+  onBeforeUnmount(() => {
+    releaseChanges?.()
+    resetTreeRequests()
+    if (refreshTimer) clearTimeout(refreshTimer)
+  })
+
+  return {
+    // 左栏导航
+    navItems,
+    selectDir,
+    selectedName,
+    /** 深链是否仍定住当前目录；自动草稿不得抢走尚未落位的深链选择。 */
+    pinnedAtAddr,
+    /** 绑定地址是否处于**挂载层**（类别层）：宿主据此决定左栏点击 = 就地切换还是换地址页 */
+    atMountLevel,
+    // 目录
+    cwd,
+    title,
+    cwdNode,
+    /** `cwdNode` 对应的地址（换目录后到新自述回来之前会与 `cwd` 不一致） */
+    cwdAddr,
+    items,
+    // 目录树模式（当前目录声明 `t` 位时，中栏改渲染树）
+    treeMode,
+    treeNodes,
+    loadTreeChildren,
+    loading,
+    loadError,
+    hasMore,
+    loadingMore,
+    loadMoreError,
+    refresh,
+    loadMore,
+    reload,
+    select,
+    // 列表筛选（纯投影，不与分页冲突；入口可见性由服务端声明）
+    searchable,
+    filter,
+    activeFilter,
+    filteredItems,
+    filterEmpty,
+    filterTruncated,
+    // 选中 / 详情
+    selectedNode,
+    selectedId,
+    focusNotice,
+    renderer,
+    nodeText,
+    formData,
+    loadingDetail,
+    detailLoadError,
+    retryDetail,
+    saving,
+    actionBusy,
+    detailError,
+    fieldErrors,
+    testResult,
+    clearTestResult,
+    clearSelection,
+    // 机制动作（单一定义点，经控件注入所有渲染器）
+    mechanismActions,
+    mechanismBusyId,
+    // 操作
+    saveFields,
+    saveText,
+    /** 原样写入（选择器类渲染器用：如插件市场只抛选中项，不经正文缓冲） */
+    write,
+    runAction,
+    runPackAction,
+    removeSelected,
+    startNew,
+    draftSeq,
+    creatableType,
+    canCreate,
+  }
+}

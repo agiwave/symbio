@@ -17,7 +17,7 @@
  *
  * **B. 缺席检查**（前端**不得再出现**）
  *   会话的两个地址段（挂载段 `session`、转写段 `消息`）已改为**运行期发现**
- *   （见 `tauri/src/services/vdfsScheme.ts`），前端不再持有它们。这两条保证
+ *   （见 `packages/ui/src/services/vdfsScheme.ts`），前端不再持有它们。这两条保证
  *   它们不会悄悄回来——回来就是第二份真相。
  *
  * **C. 闭集词表**（取值**集合**必须相等）
@@ -51,7 +51,7 @@
  *   `// Corresponding Backend: <路径>`，两个方向都是**人**在两边之间跳转的入口。
  *   它腐烂得很安静：对面改名 / 删除后，头照旧指向旧路径，没人会被告知。实测 8 条里 **7 条悬空**，其中 6 条指向
  *   doc-link-allow D-010: 下一行的目录正是 E 组判出的那批悬空，史实叙述不是入链
- *   `tauri/src/protocols/`，而那个目录**从未在版本史里出现过**。
+ *   `packages/ui/src/protocols/`，而那个目录**从未在版本史里出现过**。
  *
  *   约定因此收紧为：**写了就必须指向真实文件；前端没有镜像就别写**——假指针比
  *   没有更糟（不写只是缺个跳转，写假的会让人以为那边有人在看）。
@@ -113,26 +113,26 @@ const VDFS_ERROR_RS = 'crates/symbio-platform/src/kernel/vdfs/error.rs'
 const VDFS_REQUEST_RS = 'crates/symbio-platform/src/kernel/vdfs/request.rs'
 const VDFS_CHANGE_RS = 'crates/symbio-platform/src/kernel/vdfs/change.rs'
 const VDFS_PROTOCOL_RS = 'crates/symbio-plugin-vdfs/src/protocol.rs'
-const VDFS_TS = 'tauri/src/schemas/vdfs.ts'
+const VDFS_TS = 'packages/ui/src/schemas/vdfs.ts'
 
 const CHAT_NODE_RS = 'crates/symbio-platform/src/kernel/chat/chat_node.rs'
-const CHAT_NODE_TS = 'tauri/src/schemas/chat_node.ts'
+const CHAT_NODE_TS = 'packages/ui/src/schemas/chat_node.ts'
 const DETAIL_RS = 'crates/symbio-platform/src/kernel/present/detail.rs'
-const FORM_TS = 'tauri/src/schemas/vdfs-form.ts'
+const FORM_TS = 'packages/ui/src/schemas/vdfs-form.ts'
 const RISK_LEVEL_RS = 'crates/symbio-platform/src/kernel/capability/mod.rs'
-const SESSION_META_TS = 'tauri/src/schemas/session_meta.ts'
+const SESSION_META_TS = 'packages/ui/src/schemas/session_meta.ts'
 const READING_RS = 'crates/symbio-platform/src/kernel/present/reading.rs'
-const READING_TS = 'tauri/src/schemas/reading.ts'
+const READING_TS = 'packages/ui/src/schemas/reading.ts'
 // home 控制面四条臂：后端一份 `schemas.rs`（四个模块），前端一份 `schemas/home.ts`
 // （四个同名 namespace）。见 [] 决策 2。
 const HOME_SCHEMAS_RS = 'crates/symbio-plugin-home/src/schemas.rs'
-const HOME_TS = 'tauri/src/schemas/home.ts'
+const HOME_TS = 'packages/ui/src/schemas/home.ts'
 
 // 线路层信封：后端 `transport.rs` 是唯一真源，前端 `services/plugin.ts` 是手写副本。
 // 四个类型里只有容器字段名（`metadata` / `payload`）能被 D 组的正则读出来；
 // 两个 `enum` 的**变体集合**由前端运行期的帧白名单（`ProtocolEnforcer`）兜底。
 const TRANSPORT_RS = 'crates/symbio-platform/src/kernel/plugin/transport.rs'
-const PLUGIN_TS = 'tauri/src/services/plugin.ts'
+const PLUGIN_TS = 'packages/ui/src/services/plugin.ts'
 
 /** 后端常量源：自动发现其中 `VDFS_*` 前缀的 `&str` 常量 */
 const RUST_CONST_FILES = [VDFS_WORDS_RS, VDFS_PROTOCOL_RS]
@@ -590,7 +590,7 @@ const META_KEYS = [
   },
   {
     key: 'error',
-    owner: 'tauri/src/registry/messageFacts.ts',
+    owner: 'packages/ui/src/registry/messageFacts.ts',
     what: '失败原因（兜底读点：失败文本已由重建面写进父节点顶层 `error`，本键只剩前端兜底）',
   },
   {
@@ -600,7 +600,7 @@ const META_KEYS = [
   },
   {
     key: 'started_at',
-    owner: 'tauri/src/registry/messageFacts.ts',
+    owner: 'packages/ui/src/registry/messageFacts.ts',
     what: '工具开始执行的时刻（运行时长锚点；写方随 B2 退场，当前只剩前端读点）',
   },
   {
@@ -1091,7 +1091,7 @@ for (const [name, ts] of tsAll) {
 // ---------- B ----------
 console.log()
 console.log('--- B. 缺席检查（前端不得再持有会话地址段）---')
-const frontendFiles = walk(path.join(REPO, 'tauri', 'src'))
+const frontendFiles = walk(path.join(REPO, 'packages', 'ui', 'src'))
 for (const a of ABSENT) {
   const hits = []
   for (const f of frontendFiles) {
@@ -1246,8 +1246,8 @@ for (const s of STRUCT_SETS) {
  * 这类头是跨栈导航的入口（从一侧的协议文件跳到它在另一侧的镜像），而它腐烂的方式很安静：
  * 对面文件改名 / 删除后，头照旧指向旧路径，**没人会被告知**——实测 8 条里 **7 条**
  * doc-link-allow D-010: 下一行的目录正是 E 组判出的那批悬空，史实叙述不是入链
- * 悬空，其中 6 条指向 `tauri/src/protocols/`，而那个目录**从未在版本史里出现过**
- * （`git log --diff-filter=A -- 'tauri/src/protocols/*'` 为空）。
+ * 悬空，其中 6 条指向 `packages/ui/src/protocols/`，而那个目录**从未在版本史里出现过**
+ * （`git log --diff-filter=A -- 'packages/ui/src/protocols/*'` 为空）。
  *
  * 为什么反方向同样要判：只守后端→前端，前端那份指针就是**免检的**。它坏了没有任何
  * 信号，而读前端代码的人恰恰是靠它找后端的。
@@ -1278,7 +1278,7 @@ console.log('E. 跨栈导航头（Corresponding Frontend / Backend）')
 {
   const headers = [
     ...collectHeaders(walkRs(path.join(REPO, 'crates')), HEADER_RE).map((h) => ({ ...h, side: '后端' })),
-    ...collectHeaders(walk(path.join(REPO, 'tauri', 'src')), BACK_HEADER_RE).map((h) => ({ ...h, side: '前端' })),
+    ...collectHeaders(walk(path.join(REPO, 'packages', 'ui', 'src')), BACK_HEADER_RE).map((h) => ({ ...h, side: '前端' })),
   ]
 
   let bad = 0
@@ -1306,7 +1306,7 @@ console.log('E. 跨栈导航头（Corresponding Frontend / Backend）')
  * 一次「顺手往顶层加个 `tool_call_id`」的 PR 就能把纪律抹掉——没有这条守卫，纪律只是口号。
  *
  * 判据（只钉「被 meta 代理」这一种违规，不误伤别处）：
- * - 对字段 `F`，扫 `tauri/src`（`.ts`/`.vue`，排除 `__tests__`）与 `crates/symbio-cli/src`（`.rs`）里
+ * - 对字段 `F`，扫 `packages/ui/src`（`.ts`/`.vue`，排除 `__tests__`）与 `apps/cli/src`（`.rs`）里
  *   的 `\.F\b` 命中点（含 `?.F` 可选链）；
  * - 命中点若其紧邻前文是 `meta`（`node.meta.F` / `node.meta?.F`）→ 记**间接**，否则记**直接**；
  * - **`直接命中 === 0` 且 `间接命中 >= 1`** ⇒ 该字段只被 `meta` 代理消费 ⇒ 违规（该字段
@@ -1343,14 +1343,14 @@ console.log('E. 跨栈导航头（Corresponding Frontend / Backend）')
         }
       }
       // CLI 语料：**真仓里这一面必须非空**才算判过。 把 CLI 拆成独立 crate
-      // （`crates/symbio-cli/`）之后这里曾指向旧目录，`walkRs` 扫到 0 文件而判据照绿
+      // （`apps/cli/`）之后这里曾指向旧目录，`walkRs` 扫到 0 文件而判据照绿
       // ——「全绿」对第二前端不携带信息量（DE-017「读空即全绿」）。
       // `--repo` 指向的是夹具树：它只搭判据要用到的那几棵，可以没有 CLI；
       // 真仓（门禁的调用形态，不传 `--repo`）少一棵就是「扫描面坏了」。
-      const cliFiles = walkRs(path.join(REPO, 'crates', 'symbio-cli', 'src'))
+      const cliFiles = walkRs(path.join(REPO, 'apps', 'cli', 'src'))
       if (cliFiles.length === 0 && !argValue('repo')) {
         errors++
-        console.log(`  ${red(BAD)} G 组 CLI 语料为空：crates/symbio-cli/src 下一份 .rs 都没扫到`)
+        console.log(`  ${red(BAD)} G 组 CLI 语料为空：apps/cli/src 下一份 .rs 都没扫到`)
       }
       for (const f of cliFiles) {
         const src = fs.readFileSync(f, 'utf8').replace(/\/\*[\s\S]*?\*\//g, '')

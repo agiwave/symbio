@@ -52,7 +52,7 @@ jobs:
           key: ${{ runner.os }}-cargo-release-gate-${{ hashFiles('**/Cargo.lock') }}
 
       - name: Install Linux system libs (GTK/WebKit)
-        # 根 workspace 的 members 含 `tauri/src-tauri`：`cargo test --workspace`
+        # 根 workspace 的 members 含 `apps/desktop/src-tauri`：`cargo test --workspace`
         # 会编 Tauri，Linux 上要 pkg-config 找得到 GTK / WebKit（同 ci.yml 的理由）。
         # 这层此前从未暴露——`working-directory: symbio` 让整个 job 在第一步就红，
         # 修掉路径后它才第一次真正跑起来。
@@ -63,7 +63,7 @@ jobs:
           libayatana-appindicator3-dev librsvg2-dev libxdo-dev
 
       - name: Install frontend dependencies
-        working-directory: tauri
+        working-directory: packages/ui
         run: npm ci
 
       - name: Backend gate
@@ -102,7 +102,7 @@ jobs:
       - name: Verify version matches
         run: |
           TAG_VERSION=${{ steps.get_version.outputs.version }}
-          CARGO_VERSION=$(grep '^version = ' tauri/src-tauri/Cargo.toml | head -1 | sed 's/version = "\(.*\)"/\1/')
+          CARGO_VERSION=$(grep '^version = ' apps/desktop/src-tauri/Cargo.toml | head -1 | sed 's/version = "\(.*\)"/\1/')
           echo "Tag version: $TAG_VERSION"
           echo "Cargo version: $CARGO_VERSION"
           if [[ "$TAG_VERSION" != "$CARGO_VERSION" && "$TAG_VERSION" != "0.0.0" ]]; then
@@ -122,7 +122,7 @@ jobs:
         with:
           node-version: '22'
           cache: 'npm'
-          cache-dependency-path: tauri/package-lock.json
+          cache-dependency-path: packages/ui/package-lock.json
 
       - name: Install Rust
         uses: dtolnay/rust-toolchain@stable
@@ -138,11 +138,11 @@ jobs:
           }
 
       - name: Install dependencies
-        working-directory: tauri
+        working-directory: packages/ui
         run: npm ci
 
       - name: Build frontend
-        working-directory: tauri
+        working-directory: packages/ui
         run: npm run build
 
       - name: Build Tauri app (NSIS installer)
@@ -204,7 +204,7 @@ jobs:
         with:
           node-version: '22'
           cache: 'npm'
-          cache-dependency-path: tauri/package-lock.json
+          cache-dependency-path: packages/ui/package-lock.json
 
       - name: Install Rust
         uses: dtolnay/rust-toolchain@stable
@@ -213,11 +213,11 @@ jobs:
           targets: ${{ matrix.target }}
 
       - name: Install dependencies
-        working-directory: tauri
+        working-directory: packages/ui
         run: npm ci
 
       - name: Build frontend
-        working-directory: tauri
+        working-directory: packages/ui
         run: npm run build
 
       - name: Build Tauri app
@@ -250,7 +250,7 @@ jobs:
         with:
           node-version: '22'
           cache: 'npm'
-          cache-dependency-path: tauri/package-lock.json
+          cache-dependency-path: packages/ui/package-lock.json
 
       - name: Install Rust
         uses: dtolnay/rust-toolchain@stable
@@ -280,11 +280,11 @@ jobs:
             libpango1.0-dev
 
       - name: Install dependencies
-        working-directory: tauri
+        working-directory: packages/ui
         run: npm ci
 
       - name: Build frontend
-        working-directory: tauri
+        working-directory: packages/ui
         run: npm run build
 
       - name: Build Tauri app (deb only)

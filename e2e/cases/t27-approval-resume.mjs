@@ -31,7 +31,7 @@ import './_selfrun.mjs';
 //
 // ## 恢复入口为什么是 gateway 直发节点动作
 //
-// CLI 把 `resume: None` 写死（`crates/symbio-cli/src/client.rs`），**没有恢复入口**。
+// CLI 把 `resume: None` 写死（`apps/cli/src/client.rs`），**没有恢复入口**。
 // 这里取「e2e 直发」形态：经 gateway HTTP 边界（与 Tauri 前端同构的
 // `/api/v1/invoke`）发一条恢复请求。
 //

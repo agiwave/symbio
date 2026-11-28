@@ -10,7 +10,7 @@
 //     `docs-facts` 档位不含它；
 //   - 回归测试仍归 `30-docs`（GW-004 按「目录事实」枚举全部 `.test.mjs`，不分桶）。
 //
-// 纯只读（扫 `tauri/` / `crates/` / git blob），不读任何生成物 ⇒ 可独立成 job，
+// 纯只读（扫 `apps/desktop/` / `crates/` / git blob），不读任何生成物 ⇒ 可独立成 job，
 // 与生成链无次序约束。真的只读：往 `scripts/gate.d/` 写临时产物会被 `GW-005` 报成
 // 「未登记阶段」。
 import path from 'node:path'

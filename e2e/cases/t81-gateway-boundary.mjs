@@ -19,7 +19,7 @@ import './_selfrun.mjs';
 //    判据用「800ms 内无响应 + 释放后 200」，而不是问插件「你到顶了吗」——后者
 //    在限额根本没接上线时也会说「是」。
 import net from 'node:net';
-import WebSocket from '../../tauri/node_modules/ws/index.js';
+import WebSocket from '../../packages/ui/node_modules/ws/index.js';
 import {
   makeHomedir,
   cleanupHomedir,

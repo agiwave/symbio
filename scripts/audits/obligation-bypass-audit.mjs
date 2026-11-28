@@ -154,7 +154,7 @@ const SKIP_DIRS = new Set([
   'dist',
   'archive',
 ])
-const SCAN_ROOTS = ['crates', 'crates/symbio-cli/src', 'tauri/src-tauri/src']
+const SCAN_ROOTS = ['crates', 'apps/cli/src', 'apps/desktop/src-tauri/src']
 
 /** 扫 `SCAN_ROOTS` 下的 `.rs`（跳过测试文件与垃圾目录） */
 function rustFiles() {

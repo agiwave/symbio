@@ -37,15 +37,15 @@ import { auditCase, expectAudit } from '../audit-assert.mjs'
 const script = fileURLToPath(new URL('./protocol-mirror-audit.mjs', import.meta.url))
 
 const CHAT_RS = 'crates/symbio-platform/src/kernel/chat/chat_node.rs'
-const CHAT_TS = 'tauri/src/schemas/chat_node.ts'
+const CHAT_TS = 'packages/ui/src/schemas/chat_node.ts'
 const DETAIL_RS = 'crates/symbio-platform/src/kernel/present/detail.rs'
-const FORM_TS = 'tauri/src/schemas/vdfs-form.ts'
+const FORM_TS = 'packages/ui/src/schemas/vdfs-form.ts'
 const RISK_LEVEL_RS = 'crates/symbio-platform/src/kernel/capability/mod.rs'
-const SESSION_META_TS = 'tauri/src/schemas/session_meta.ts'
+const SESSION_META_TS = 'packages/ui/src/schemas/session_meta.ts'
 const READING_RS = 'crates/symbio-platform/src/kernel/present/reading.rs'
-const READING_TS = 'tauri/src/schemas/reading.ts'
+const READING_TS = 'packages/ui/src/schemas/reading.ts'
 const TRANSPORT_RS = 'crates/symbio-platform/src/kernel/plugin/transport.rs'
-const PLUGIN_TS = 'tauri/src/services/plugin.ts'
+const PLUGIN_TS = 'packages/ui/src/services/plugin.ts'
 
 /** 后端结构体（最小形态）：`pub struct X { pub a: String, }` */
 const rsStruct = (name, ...fields) =>
@@ -361,7 +361,7 @@ const READING_TS_SRC = [
 ].join('\n')
 
 /** H 组：一个提到 ChatNode、且读了一个已登记 meta 键的前端生产文件 */
-const META_READER_TS = 'tauri/src/registry/messageTypes.ts'
+const META_READER_TS = 'packages/ui/src/registry/messageTypes.ts'
 const META_READER_TS_SRC = [
   "import type { ChatNode } from '@/schemas/chat_node'",
   'export function toolNameOf(node: Pick<ChatNode, "meta">): string | undefined {',
@@ -379,7 +379,7 @@ const META_READER_TS_SRC = [
 const HOME_SCHEMAS_RS = 'crates/symbio-plugin-home/src/schemas.rs'
 const HOME_SCHEMAS_RS_SRC = [
   'pub mod home_reload {',
-  '    //! Corresponding Frontend: tauri/src/schemas/home.ts',
+  '    //! Corresponding Frontend: packages/ui/src/schemas/home.ts',
   '    pub struct Request {',
   '        pub homedir: Option<String>',
   '    }',
@@ -392,7 +392,7 @@ const HOME_SCHEMAS_RS_SRC = [
   '    }',
   '}',
   'pub mod home_get_workspace {',
-  '    //! Corresponding Frontend: tauri/src/schemas/home.ts',
+  '    //! Corresponding Frontend: packages/ui/src/schemas/home.ts',
   '    pub struct Response {',
   '        pub workdir: String',
   '        pub expanded_path: String',
@@ -400,7 +400,7 @@ const HOME_SCHEMAS_RS_SRC = [
   '    }',
   '}',
   'pub mod home_set_workspace {',
-  '    //! Corresponding Frontend: tauri/src/schemas/home.ts',
+  '    //! Corresponding Frontend: packages/ui/src/schemas/home.ts',
   '    pub struct Request {',
   '        pub path: String',
   '    }',
@@ -411,7 +411,7 @@ const HOME_SCHEMAS_RS_SRC = [
   '    }',
   '}',
   'pub mod home_get_homedir {',
-  '    //! Corresponding Frontend: tauri/src/schemas/home.ts',
+  '    //! Corresponding Frontend: packages/ui/src/schemas/home.ts',
   '    pub struct Response {',
   '        pub homedir: String',
   '        pub bootstrap_path: String',
@@ -425,7 +425,7 @@ const HOME_SCHEMAS_RS_SRC = [
  *
  * 接口体里每行一个 `name: type`（与后端夹具同形）——D 组按行读字段，两侧同形才比得动。
  */
-const HOME_TS = 'tauri/src/schemas/home.ts'
+const HOME_TS = 'packages/ui/src/schemas/home.ts'
 const HOME_TS_SRC = [
   '// Corresponding Backend: crates/symbio-plugin-home/src/schemas.rs',
   'export namespace home_reload {',
@@ -472,10 +472,10 @@ const BASE = {
   ...VDFS_TYPES_RS,
   'crates/symbio-plugin-vdfs/src/protocol.rs': PROTOCOL_RS_SRC,
   'crates/symbio-plugin-api/src/routes.rs': ROUTE_RS_SRC,
-  // E 组：这条跨栈导航头指向真实存在的 `tauri/src/schemas/vdfs.ts`
+  // E 组：这条跨栈导航头指向真实存在的 `packages/ui/src/schemas/vdfs.ts`
   'crates/symbio-platform/src/contract/event_bus.rs':
-    '// Corresponding Frontend: tauri/src/schemas/vdfs.ts\npub const EVENT_BUS_KIND_VDFS: &str = "vdfs";\n',
-  'tauri/src/schemas/vdfs.ts': VDFS_TS_SRC,
+    '// Corresponding Frontend: packages/ui/src/schemas/vdfs.ts\npub const EVENT_BUS_KIND_VDFS: &str = "vdfs";\n',
+  'packages/ui/src/schemas/vdfs.ts': VDFS_TS_SRC,
   [CHAT_RS]: CHAT_RS_SRC,
   [CHAT_TS]: CHAT_TS_SRC,
   [DETAIL_RS]: DETAIL_RS_SRC,
@@ -488,7 +488,7 @@ const BASE = {
   [HOME_SCHEMAS_RS]: HOME_SCHEMAS_RS_SRC,
   [HOME_TS]: HOME_TS_SRC,
   [META_READER_TS]: META_READER_TS_SRC,
-  'tauri/src/services/session.ts': 'export const x = 1\n',
+  'packages/ui/src/services/session.ts': 'export const x = 1\n',
   // D 组：线路层信封（后端唯一真源 ↔ 前端手写副本）
   [TRANSPORT_RS]: rsStruct('PluginMessageWire', 'metadata', 'payload'),
   [PLUGIN_TS]: tsIface('PluginMessage', 'metadata', 'payload'),
@@ -590,7 +590,7 @@ test('后端改了别名目标（`ROUTE_VDFS_ROOT`）→ 变红，且报出别�
 
 test('前端持有后端没有的 VDFS_* 常量且未登记 → 变红（不许静默漏网）', () => {
   const r = mirror({
-    'tauri/src/schemas/vdfs.ts': `${VDFS_TS_SRC}\nexport const VDFS_TOTALLY_NEW = 'nope'\n`,
+    'packages/ui/src/schemas/vdfs.ts': `${VDFS_TS_SRC}\nexport const VDFS_TOTALLY_NEW = 'nope'\n`,
   })
   assert.equal(r.status, 1)
   assert.match(r.stdout, /VDFS_TOTALLY_NEW/)
@@ -599,7 +599,7 @@ test('前端持有后端没有的 VDFS_* 常量且未登记 → 变红（不许�
 
 test('前端把常量改成别名（不再是第二份真相）→ 不红', () => {
   const r = mirror({
-    'tauri/src/schemas/vdfs.ts': `${VDFS_TS_SRC}\nexport const VDFS_EXT_TEXT = VDFS_EXT_MESSAGE\n`,
+    'packages/ui/src/schemas/vdfs.ts': `${VDFS_TS_SRC}\nexport const VDFS_EXT_TEXT = VDFS_EXT_MESSAGE\n`,
   })
   // `VDFS_EXT_TEXT` 后端没有，但它右侧不是字面量 ⇒ 不进镜像集，也不触发「未登记」
   assert.equal(r.status, 0, r.stdout)
@@ -612,7 +612,7 @@ test('后端常量源文件被删 → 变红（不是静默跳过）', () => {
 })
 
 test('前端常量源文件被删 → 变红（不是静默跳过）', () => {
-  const r = mirror({ 'tauri/src/schemas/vdfs.ts': null })
+  const r = mirror({ 'packages/ui/src/schemas/vdfs.ts': null })
   assert.equal(r.status, 1)
   assert.match(r.stdout, /前端常量源不存在/)
 })
@@ -621,7 +621,7 @@ test('前端常量源文件被删 → 变红（不是静默跳过）', () => {
 
 test('把会话挂载段常量写回前端生产代码 → 变红', () => {
   const r = mirror({
-    'tauri/src/services/session.ts': "export const VDFS_SESSION_DIR = 'session'\n",
+    'packages/ui/src/services/session.ts': "export const VDFS_SESSION_DIR = 'session'\n",
   })
   assert.equal(r.status, 1)
   assert.match(r.stdout, /VDFS_SESSION_DIR/)
@@ -629,7 +629,7 @@ test('把会话挂载段常量写回前端生产代码 → 变红', () => {
 
 test('把转写段常量写回前端生产代码 → 变红', () => {
   const r = mirror({
-    'tauri/src/services/session.ts': "export const VDFS_SEG_MESSAGES = '消息'\n",
+    'packages/ui/src/services/session.ts': "export const VDFS_SEG_MESSAGES = '消息'\n",
   })
   assert.equal(r.status, 1)
   assert.match(r.stdout, /VDFS_SEG_MESSAGES/)
@@ -637,7 +637,7 @@ test('把转写段常量写回前端生产代码 → 变红', () => {
 
 test('同样的常量写在 __tests__ 里 → 不红（测试持有协议夹具是它的职责）', () => {
   const r = mirror({
-    'tauri/src/services/__tests__/session.spec.ts':
+    'packages/ui/src/services/__tests__/session.spec.ts':
       "const SCHEME = { mountDir: '.vdfs/session', messagesSeg: '消息' }\nexport const VDFS_SESSION_DIR = 'session'\n",
   })
   assert.equal(r.status, 0, r.stdout)
@@ -850,7 +850,7 @@ test('#[serde(rename)] → 比对的是**线格式名**，不是 Rust 字段名'
   // 前端改用线格式名 ⇒ 不红
   const r2 = mirror({
     [VDFS_NODE_RS]: renamed,
-    'tauri/src/schemas/vdfs.ts': VDFS_TS_SRC.replace(
+    'packages/ui/src/schemas/vdfs.ts': VDFS_TS_SRC.replace(
       tsIface('VdfsNode', 'path', 'name'),
       tsIface('VdfsNode', 'path', 'n'),
     ),
@@ -894,8 +894,8 @@ test('常量组闭集：前端词表多出一个词 → 变红（反向也不许
 test('home 模块限定：后端该模块少一个字段 → 变红（证明限定真的在比对）', () => {
   const r = mirror({
     [HOME_SCHEMAS_RS]: HOME_SCHEMAS_RS_SRC.replace(
-      ['pub mod home_get_homedir {', "    //! Corresponding Frontend: tauri/src/schemas/home.ts", '    pub struct Response {', '        pub homedir: String', '        pub bootstrap_path: String', '    }', '}'].join('\n'),
-      ['pub mod home_get_homedir {', "    //! Corresponding Frontend: tauri/src/schemas/home.ts", '    pub struct Response {', '        pub homedir: String', '    }', '}'].join('\n'),
+      ['pub mod home_get_homedir {', "    //! Corresponding Frontend: packages/ui/src/schemas/home.ts", '    pub struct Response {', '        pub homedir: String', '        pub bootstrap_path: String', '    }', '}'].join('\n'),
+      ['pub mod home_get_homedir {', "    //! Corresponding Frontend: packages/ui/src/schemas/home.ts", '    pub struct Response {', '        pub homedir: String', '    }', '}'].join('\n'),
     ),
   })
   assert.equal(r.status, 1)
@@ -964,7 +964,7 @@ test('详情方言取值原语：后端改了 `DETAIL_PICK_*` 的取值 → 变�
 test('跨栈导航头指向不存在的文件 → 变红（前端改名后这条头就悬空了）', () => {
   const r = mirror({
     'crates/symbio-platform/src/contract/event_bus.rs':
-      '// Corresponding Frontend: tauri/src/protocols/chat_input.ts\npub const EVENT_BUS_KIND_VDFS: &str = "vdfs";\n',
+      '// Corresponding Frontend: packages/ui/src/protocols/chat_input.ts\npub const EVENT_BUS_KIND_VDFS: &str = "vdfs";\n',
   })
   assert.equal(r.status, 1)
   assert.match(r.stdout, /目标不存在/)
@@ -972,11 +972,11 @@ test('跨栈导航头指向不存在的文件 → 变红（前端改名后这条
 
 test('跨栈导航头指向真实文件 → 不红（两个方向都判）', () => {
   const r = mirror()
-  expectAudit(r, 0, [/✓ 后端 crates\/symbio-platform\/src\/contract\/event_bus\.rs:1 → tauri\/src\/schemas\/vdfs\.ts/])
+  expectAudit(r, 0, [/✓ 后端 crates\/symbio-platform\/src\/contract\/event_bus\.rs:1 → packages\/ui\/src\/schemas\/vdfs\.ts/])
   // 反方向：前端 `Corresponding Backend` 同样有守卫（此前它是免检的）
   assert.match(
     r.stdout,
-    /✓ 前端 tauri\/src\/schemas\/home\.ts:1 → crates\/symbio-plugin-home\/src\/schemas\.rs/,
+    /✓ 前端 packages\/ui\/src\/schemas\/home\.ts:1 → crates\/symbio-plugin-home\/src\/schemas\.rs/,
   )
 })
 
@@ -988,7 +988,7 @@ test('前端 Corresponding Backend 悬空 → 变红（只守后端一侧时这�
     ),
   })
   assert.equal(r.status, 1)
-  assert.match(r.stdout, /前端 tauri\/src\/schemas\/home\.ts:1 → .*（目标不存在）/)
+  assert.match(r.stdout, /前端 packages\/ui\/src\/schemas\/home\.ts:1 → .*（目标不存在）/)
 })
 
 auditCase('没有任何跨栈导航头 → 不红（没写不违规，写了假指针才违规）', () => mirror({
@@ -1018,7 +1018,7 @@ test('顶层字段只被 meta 代理消费（fake_field）→ 变红', () => {
   const r = mirror({
     ...chatNodeWith('fake_field'),
     // 唯一消费点走 node.meta.fake_field——没有任何 `node.fake_field` 的直接读法
-    'tauri/src/g/reader.ts': 'export function r(node) {\n  return node.meta.fake_field\n}\n',
+    'packages/ui/src/g/reader.ts': 'export function r(node) {\n  return node.meta.fake_field\n}\n',
   })
   assert.equal(r.status, 1)
   assert.match(r.stdout, /fake_field/)
@@ -1029,7 +1029,7 @@ test('顶层字段被前端直接消费（total）→ 不红', () => {
   const r = mirror({
     ...chatNodeWith('total'),
     // 直接读法（`.total` 不经 meta）⇒ G 判绿；即便同时有 meta 读法也不该红
-    'tauri/src/g/reader.ts':
+    'packages/ui/src/g/reader.ts':
       'export function r(node) {\n  return node.stats.total + node.meta.total\n}\n',
   })
   assert.equal(r.status, 0, r.stdout)
@@ -1044,7 +1044,7 @@ test('顶层字段零命中（谁都不读）→ 不红（死字段不归 G 管�
 test('CLI 侧直接消费也算直接（Rust 读法）→ 不红', () => {
   const r = mirror({
     ...chatNodeWith('seq_no'),
-    'crates/symbio-cli/src/render.rs': 'fn show(node: &ChatNode) -> u64 {\n    node.seq_no\n}\n',
+    'apps/cli/src/render.rs': 'fn show(node: &ChatNode) -> u64 {\n    node.seq_no\n}\n',
   })
   assert.equal(r.status, 0, r.stdout)
 })
@@ -1095,7 +1095,7 @@ test('前端自持的键（owner: null）不要求后端存在 → 不红', () =
 
 test('没有提到 ChatNode 的文件不进入 H 组扫描 → `import.meta.env` 不误报', () => {
   const r = mirror({
-    'tauri/src/utils/logger.ts': 'export const env = import.meta.env\n',
+    'packages/ui/src/utils/logger.ts': 'export const env = import.meta.env\n',
   })
   assert.equal(r.status, 0, r.stdout)
 })

@@ -90,7 +90,7 @@ crates/symbio-plugin-gateway/src/
 `home/get_workspace`）——home 是 composite 的**父**，而 `Composite::route` 不向上
 转发（实测回 400，判据 e2e `t69` ⑦）。RuntimeHost 的接管清单不包含这些控制面路由，
 因此分发桥不会把可达面抬到 root。那四条臂的生产驱动面是前端的**进程内**
-`callPlugin`（`tauri/src/services/home.ts` ⇒ `root.route`），不经 HTTP。
+`callPlugin`（`packages/ui/src/services/home.ts` ⇒ `root.route`），不经 HTTP。
 若将来要把边界抬到 root，先重审只读白名单（[RE-001](../../../../docs/004-ref/001-CONFIGURATION.md "RE-001-CONFIGURATION") 的「白名单与可达面必须一致」）再改这里。
 
 ### 4.2 启动 / 重启 / 停止

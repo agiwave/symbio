@@ -236,7 +236,7 @@ E2E_PROFILE=real node e2e/run-tests.mjs # 真实 provider 对照：等待沿用�
 参考 `t37`（转写读列）。注意别让临时改动**遮蔽同名函数**（局部 `let transcript`
 会盖住 `transcript`，那是编译错、不是判据红——改完记得 `grep` 一遍临时标记）。
 
-**恢复（resume）的驱动入口**：CLI 把 `resume: None` 写死（`crates/symbio-cli/src/client.rs`），
+**恢复（resume）的驱动入口**：CLI 把 `resume: None` 写死（`apps/cli/src/client.rs`），
 `runCli` / `startLongLivedCli.send` 都**不带** resume。要在 e2e 里驱动恢复（审批 / 回填答案），
 走 **gateway HTTP 边界直发节点动作** `vdfs/action`，动作词取 `ResumeAction` 的线上词形：
 

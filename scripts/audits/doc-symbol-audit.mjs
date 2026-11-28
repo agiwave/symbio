@@ -9,9 +9,9 @@
  * 判据：
  *   **D-005**（`module::symbol` 形态）：提取所有 *.md 中反引号包裹、以 `::` 分段且
  *     **每段为标识符**的路径（≥2 段，剥尾部 `()`），取最后一段查它是否以整词出现在
- *     Rust 源码（整棵 `crates/`、`tauri/src-tauri/src`）的 .rs 语料里；查不到 ⇒ ERROR。
+ *     Rust 源码（整棵 `crates/`、`apps/desktop/src-tauri/src`）的 .rs 语料里；查不到 ⇒ ERROR。
  *   **D-009**（裸常量名形态）：反引号里的单段全大写名（形如 `ROUTE_SESSION_CHAT_SEND`，
- *     `^[A-Z][A-Z0-9]*(_[A-Z0-9]+)+$`）必须在 Rust ∪ 前端（tauri/src）∪ 门禁脚本
+ *     `^[A-Z][A-Z0-9]*(_[A-Z0-9]+)+$`）必须在 Rust ∪ 前端（packages/ui/src）∪ 门禁脚本
  *     （scripts）语料里逐字存在——
  *     但**仅当它的同族**（首段 + `_`，如 `ROUTE_`）在代码里另有成员时才判红。
  *   **D-011**（名册锚点列）：[DE-008 §6.1 能力名册](../../docs/003-design/008-能力注册表与能力坐标系.md "DE-008-能力注册表与能力坐标系")
@@ -97,9 +97,9 @@ const REPO_ROOT = rootArg ? resolve(rootArg.slice(7)) : resolve(__dirname, '..',
 
 /** Rust 语料根：任一缺失可容忍，全缺即「范围读不出」。`docs/003-design/verify` 是硬证据程序
  *  的 Rust 源（`rustc` 直接编译的那批文件），它们声明的常量同样是文档指认的对象。 */
-const RS_ROOTS = ['crates', 'tauri/src-tauri/src', 'docs/003-design/verify']
+const RS_ROOTS = ['crates', 'apps/cli/src', 'apps/desktop/src-tauri/src', 'docs/003-design/verify']
 /** D-009 的第二份语料：裸常量名是跨栈事实，前端声明的常量同样被文档指认 */
-const FE_ROOTS = ['tauri/src']
+const FE_ROOTS = ['packages/ui/src']
 /** D-009 的第三份语料：只回答存在性，不开族（原因见文件头）。
  *  `e2e` 与 `scripts` 同侧：md 侧本来就扫 `e2e/README.md`，代码侧却不认 `e2e` 里声明的
  *  常量 ⇒ 文档指向夹具旋钮（`CONTEXT_WINDOW_TOKENS` 这类）恒假红。存在性口径下加它
@@ -552,8 +552,8 @@ function auditCliArtifactPaths () {
 /**
  * 该 md 里命令的**执行目录**：最近的 crate 目录（有 `Cargo.toml` 的那层），没有就是仓库根。
  *
- * 为什么不是「md 自己所在目录」：`crates/symbio-cli/docs/004-usage.md` 里的 `node scripts/build-cli.mjs`
- * 是在 `crates/symbio-cli/` 下执行的（文档从 crate 根链接过来），拿该 crate 的 `docs/` 当基准会把正确的
+ * 为什么不是「md 自己所在目录」：`apps/cli/docs/004-usage.md` 里的 `node scripts/build-cli.mjs`
+ * 是在 `apps/cli/` 下执行的（文档从 crate 根链接过来），拿该 crate 的 `docs/` 当基准会把正确的
  * `./../target/…` 算成 `cli/target/…`——判据自己造的假红。
  */
 function docBase (rel) {

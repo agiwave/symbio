@@ -64,7 +64,7 @@ impl: done
 | [design · 设计](003-design/README.md "DE-000-设计总览") | 编号前缀 `DE-` | 产品与系统怎么设计——现状、目标形态与关键取舍（每篇的时态由 impl 标注） | 105 | draft 0 · active 104 · retired 1 | — |
 | [ref · 参考](004-ref/README.md "RE-000-参考汇总") | 编号前缀 `RE-` | 查数据——路由 / 错误码 / 配置等权威表 | 13 | draft 0 · active 13 · retired 0 | — |
 | [spec · 规范](005-spec/README.md "SP-000-规范汇总") | 编号前缀 `SP-` | 必须成立的条文——机制与判据的规范面 | 9 | draft 0 · active 9 · retired 0 | — |
-| [guide · 指南](006-guide/README.md "GU-000-指南汇总") | 编号前缀 `GU-` | 怎么用——上手 / 贡献 / 排障 | 15 | draft 0 · active 15 · retired 0 | — |
+| [guide · 指南](006-guide/README.md "GU-000-指南汇总") | 编号前缀 `GU-` | 怎么用——上手 / 贡献 / 排障 | 16 | draft 0 · active 16 · retired 0 | — |
 | [task · 任务](007-task/README.md "T-000-任务汇总") | 编号前缀 `T-` | 要做什么、做到哪一步——可勾销的最小工作单元，收口即删（只留 git 历史） | 0 | todo 0 · doing 0 · done 0 · wont 0 | — |
 | [release · 发布版本](008-release/README.md "RV-000-发布版本汇总") | 编号前缀 `RV-` | 发布说明——一篇一个已发布版本；active 条目即需要数据兼容的版本集合 | 0 | draft 0 · active 0 · retired 0 | — |
 
@@ -208,7 +208,7 @@ owner 从各文档 front-matter 的 `lists: [<id>=owner]` 读（与 [RE-007-清�
 | `docs/006-guide/` | 上手 / 插件开发 / 排障 |
 | `docs/007-task/` | 在办任务（过程类；完成后由提交者删除，`git log` 保留） |
 | `docs/008-release/` | 发布版本说明（一篇一个版本；`active` 组即需要数据兼容的版本清单，自动生成） |
-| 模块目录 | `crates/symbio-plugin-<plugin>/README.md`（+ `docs/`）、`crates/*/README.md`、`tauri/`、`e2e/`——就近放置，同一套登记机制管 |
+| 模块目录 | `crates/symbio-plugin-<plugin>/README.md`（+ `docs/`）、`crates/*/README.md`、`apps/desktop/`、`e2e/`——就近放置，同一套登记机制管 |
 
 **加一篇文档 = 建文件 + 写 front-matter**（`kind` / `id` / `title` / `status` / `created`，设计再加 `impl`），
 文件名按编号规范起，`id` 与文件名一致；不需要改任何清单：汇总页由脚本重生成。

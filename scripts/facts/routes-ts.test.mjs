@@ -18,7 +18,7 @@ import { controlPlaneRoutes, extractRouteArms, routeConstName } from '../route-f
 import { render } from './routes-ts.mjs'
 
 const REPO = path.resolve(path.dirname(fileURLToPath(import.meta.url)), '..', '..')
-const GEN_FILE = path.join(REPO, 'tauri', 'src', 'constants', 'routes.gen.ts')
+const GEN_FILE = path.join(REPO, 'packages', 'ui', 'src', 'constants', 'routes.gen.ts')
 
 /** 一棵只有 `demo` 插件的临时仓库（route-facts 读 `<root>/crates/symbio-plugin-*`） */
 function fixtureRepo(pluginName, routeSource) {

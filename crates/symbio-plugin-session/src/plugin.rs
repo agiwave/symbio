@@ -152,7 +152,7 @@ impl SessionPlugin {
     /// **运行态**的消费端（CLI / 心跳守护）不需要回读——运行态变更恒带视图，
     /// 因此无载荷对它就等于「与本轮无关」，直接丢弃即可。判据是**用途**，不是
     /// 「无载荷」本身（CLI 侧原有一段"无载荷就回读 `stat` 分辨"的代码，实测
-    /// 那笔请求永远改变不了结论，已删——见 `crates/symbio-cli/src/client.rs` 的说明）。
+    /// 那笔请求永远改变不了结论，已删——见 `apps/cli/src/client.rs` 的说明）。
     pub(crate) fn notify_change(&self, id: &str) {
         self.change_subs.notify(&VdfsChange::bare(id));
     }

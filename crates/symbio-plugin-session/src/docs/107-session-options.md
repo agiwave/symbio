@@ -15,8 +15,8 @@ impl: done
 `crates/symbio-platform/src/kernel/present/detail.rs`（`DetailDefinition` / `DetailField` 方言权威定义）、
 `crates/symbio-platform/src/sdk/capability/option.rs`（选项读协议 `capability_option_fields`；收集管线 `collect_options` 在 `crates/symbio-plugin-session/src/capabilities.rs`）、
 `crates/symbio-plugin-session/src/options/mod.rs`（选项宿主：会话自有字段的声明）、
-`tauri/src/schemas/vdfs-form.ts`（前端方言 + 条件求值 / 紧凑取值规则）、
-`tauri/src/composables/useSessionOptionBar.ts` + `tauri/src/components/chat/ChatOptionBar.vue`
+`packages/ui/src/schemas/vdfs-form.ts`（前端方言 + 条件求值 / 紧凑取值规则）、
+`packages/ui/src/composables/useSessionOptionBar.ts` + `packages/ui/src/components/chat/ChatOptionBar.vue`
 （前端唯一实现）
 
 > 本文件只写**规范与机制**。具体选项（工作目录、智能体、模型、运行模式、
@@ -119,7 +119,7 @@ impl: done
  ——那会让新建会话一上来就把工作目录锁死）。这是这条规则最容易踩的坑，
  已在 `crates/symbio-plugin-session/src/options/tests.rs` 钉死。
 
-求值与紧凑取值的唯一实现在 `tauri/src/schemas/vdfs-form.ts`
+求值与紧凑取值的唯一实现在 `packages/ui/src/schemas/vdfs-form.ts`
 （`evalDetailCondition` / `compactFieldText`），纵向表单与选项栏**共用**，防两形态漂移。
 
 ## 4. 紧凑渲染形态的取值规则
@@ -256,7 +256,7 @@ session ──collect_options(parent, ctx)──▶ parent.traverse(available_op
 
 ## 7. 图标
 
-图标名 → emoji 的映射只有一处：`tauri/src/registry/vdfsIcons.ts` 的
+图标名 → emoji 的映射只有一处：`packages/ui/src/registry/vdfsIcons.ts` 的
 `fieldIcon`（含 `DEFAULT_FIELD_ICON`）。后端只给**名字**（`folder` / `agent` /
 `model` / `risk` / `run-mode` / `heartbeat`…），前端负责视觉。这是允许前端持有的
 「UI 映射」，与业务契约严格分离。

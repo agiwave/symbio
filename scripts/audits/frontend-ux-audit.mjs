@@ -19,7 +19,7 @@
  * 不许假。
  *
  * ## 用法
- *   node scripts/audits/frontend-ux-audit.mjs                 # 审计 tauri/src
+ *   node scripts/audits/frontend-ux-audit.mjs                 # 审计 packages/ui/src
  *   node scripts/audits/frontend-ux-audit.mjs --root=<dir>    # 换仓库根（回归测试用）
  *
  * 退出码：0 = 通过；1 = 存在 ERROR；2 = 审计范围读不出
@@ -41,7 +41,7 @@ import { walkFiles } from '../fs-walk.mjs'
 const scriptDir = path.dirname(fileURLToPath(import.meta.url))
 const rootArg = process.argv.find((a) => a.startsWith('--root='))
 const ROOT = rootArg ? path.resolve(rootArg.slice('--root='.length)) : path.resolve(scriptDir, '..', '..')
-const SRC = path.join(ROOT, 'tauri', 'src')
+const SRC = path.join(ROOT, 'packages', 'ui', 'src')
 
 const red = paint('31')('ERROR')
 const green = paint('32')('OK')

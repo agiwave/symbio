@@ -104,7 +104,7 @@ test('crates 下的清单与源码归 rust；tauri 前端源归 frontend', () =>
   commit(root, {
     'crates/symbio-platform/src/sdk/mod.rs': 'pub fn a() {}\n',
     'crates/symbio-plugin-memory/PLUGIN.yml': 'id: memory\n',
-    'tauri/src/App.vue': '<template/>\n',
+    'packages/ui/src/App.vue': '<template/>\n',
   })
   const scope = resolveScope({ repoRoot: root, base: 'origin/v2' })
   assert.equal(scope.hits(['rust']), true, 'PLUGIN.yml 在运行时被读 ⇒ 算 rust')

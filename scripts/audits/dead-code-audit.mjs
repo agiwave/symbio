@@ -49,7 +49,7 @@ const __dirname = dirname(fileURLToPath(import.meta.url))
 // 守卫等于没有守卫」，而它腐烂的方式恰恰是「规则写错了所以永远不命中」。
 const rootArg = process.argv.find((a) => a.startsWith('--root='))
 const REPO_ROOT = rootArg ? resolve(rootArg.slice(7)) : resolve(__dirname, '..', '..')
-const ROOT = join(REPO_ROOT, 'tauri')
+const ROOT = join(REPO_ROOT, 'packages', 'ui')
 const SRC = join(ROOT, 'src')
 const EXT = ['.vue', '.ts', '.js', '.tsx', '.mts']
 /** 打印「未被引用的导出」明细（默认只给个数，见文件末段说明） */
@@ -101,6 +101,7 @@ const addEntry = (p, why) => {
   }
 }
 
+// index.html 与 src 同住共享 UI 包；入口 /src/main.ts 相对它解析。
 if (existsSync(join(ROOT, 'index.html')))
   for (const m of readFileSync(join(ROOT, 'index.html'), 'utf8').matchAll(/\ssrc=["']([^"']+)["']/g))
     addEntry(projPath(m[1]))
@@ -304,14 +305,14 @@ const widen = (dir, exts, sink) => {
   }
 }
 // Rust 侧「整仓」的取范围： 拆 crate 后所有生产 .rs 都在 `crates/` 下
-// （core、内核、插件、provider、cli 各是一个 crate）；`tauri/src-tauri` 是壳侧。
+// （core、内核、插件、provider、cli 各是一个 crate）；`apps/desktop/src-tauri` 是壳侧。
 // 拆分前这里是 symbio/ 与 cli/ 两个根——那两条路径现在都不存在，`widen` 会静默
 // 返回空，于是 R-001 只剩 tauri 一份语料：**语料越小，越容易把活代码判成死代码**，
 // 而它在真仓里表现成「R-001 通过」。
 widen(join(REPO, 'crates'), ['.rs'], rustSources)
-widen(join(REPO, 'tauri', 'src-tauri'), ['.rs'], rustSources)
+widen(join(REPO, 'apps', 'desktop', 'src-tauri'), ['.rs'], rustSources)
 // 名字可能被非 Rust 侧提及（路由串常量等），一并纳入「是否被提过」的语料
-widen(join(REPO, 'tauri', 'src'), ['.ts', '.vue'], tsSources)
+widen(join(REPO, 'packages', 'ui', 'src'), ['.ts', '.vue'], tsSources)
 
 const read = (files) => files.map((f) => [f, readFileSync(f, 'utf8')])
 const rustCorpus = read(rustSources)

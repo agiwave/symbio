@@ -9,7 +9,7 @@
  * 完整真相，**没有别的地方登记它**。
  *
  * 三份判定都要读它：`docs/004-ref/006-当前事实表.md` §1 的路由列、前端常量
- * `tauri/src/constants/routes.gen.ts`、以及 `plugin-entry-audit`（判某条地址是否真实
+ * `packages/ui/src/constants/routes.gen.ts`、以及 `plugin-entry-audit`（判某条地址是否真实
  * 存在、报告每条路由的消费方）。各写一遍正则 = 各有一份「什么算一条路由」的判据，
  * 它们会在某个不引人注目的下午分叉（比如一份开始把 `|` 复合臂漏掉）。
  * 本模块因此从 `facts/current.mjs` 与 `plugin-entry-audit.mjs` 里提出这段解析。

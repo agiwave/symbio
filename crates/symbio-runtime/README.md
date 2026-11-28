@@ -26,7 +26,7 @@ impl: partial
 ## 运行
 
 ```text
-symbio-cli serve --bind 127.0.0.1 --port 9231 --homedir <系统根> --frontend-dist tauri/dist
+symbio-cli serve --bind 127.0.0.1 --port 9231 --homedir <系统根> --frontend-dist apps/desktop/dist
 ```
 
 非回环监听必须提供令牌；浏览器 WebSocket 通过 `bearer.<token>` 子协议携带同一个令牌。

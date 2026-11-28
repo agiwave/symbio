@@ -452,7 +452,7 @@ async fn disk_loaded_index_is_cached_for_subsequent_calls() {
 /// 生成物不进索引：锁文件 / 压缩产物按名字挡掉
 #[test]
 fn generated_files_are_not_indexed() {
-    assert!(!is_source_file(Path::new("tauri/package-lock.json")));
+    assert!(!is_source_file(Path::new("apps/desktop/package-lock.json")));
     assert!(!is_source_file(Path::new("symbio/Cargo.lock")));
     assert!(!is_source_file(Path::new("a/yarn.lock")));
     assert!(!is_source_file(Path::new("dist/app.min.js")));
@@ -463,13 +463,15 @@ fn generated_files_are_not_indexed() {
     assert!(is_source_file(Path::new(
         "crates/symbio-plugin-local/src/lib.rs"
     )));
-    assert!(is_source_file(Path::new("tauri/src/stores/sessions.ts")));
+    assert!(is_source_file(Path::new(
+        "packages/ui/src/stores/sessions.ts"
+    )));
     // doc-link-allow D-010: 下一行是这条测试的史实叙述（已删除文件），不是入链
     // 这里原本拿一份文档当「.md 也是源文件」的例子；仓库已不维护变更日志
     // （变更历史即 `git log`）且该文件已删除，换成仍在的文档，避免留一个指向
     // 不存在文件的例子。
     assert!(is_source_file(Path::new("docs/DECISIONS.md")));
-    assert!(is_source_file(Path::new("tauri/package.json"))); // 非 lock 的 json 仍要
+    assert!(is_source_file(Path::new("apps/desktop/package.json"))); // 非 lock 的 json 仍要
     assert!(is_source_file(Path::new("examples/x.yaml")));
 }
 

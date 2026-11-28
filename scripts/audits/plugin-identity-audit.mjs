@@ -127,7 +127,7 @@ const SCAN_DIRS = [
   'docs/008-release',
   'docs/branding',
   'crates',
-  'tauri/src',
+  'packages/ui/src',
 ]
 const EXTS = new Set(['.md', '.rs', '.ts', '.toml'])
 

@@ -9,10 +9,10 @@
 pub mod home_reload {
     //! home/reload 路由的请求/响应 schema（对应 HomePlugin::route 的 reload 分支）
     //!
-    //! 前端镜像在 `tauri/src/schemas/home.ts` 的 **同名 namespace** `home_reload` 里——
+    //! 前端镜像在 `packages/ui/src/schemas/home.ts` 的 **同名 namespace** `home_reload` 里——
     //! 一个文件四个模块，namespace 就是模块名，两侧类型名逐字相同。
     //!
-    //! Corresponding Frontend: tauri/src/schemas/home.ts
+    //! Corresponding Frontend: packages/ui/src/schemas/home.ts
 
     use serde::{Deserialize, Serialize};
 
@@ -46,7 +46,7 @@ pub mod home_reload {
 pub mod home_get_workspace {
     //! home/get_workspace 路由的响应 schema
     //!
-    //! Corresponding Frontend: tauri/src/schemas/home.ts
+    //! Corresponding Frontend: packages/ui/src/schemas/home.ts
 
     use serde::{Deserialize, Serialize};
 
@@ -65,7 +65,7 @@ pub mod home_get_workspace {
 pub mod home_set_workspace {
     //! home/set_workspace 路由的请求/响应 schema
     //!
-    //! Corresponding Frontend: tauri/src/schemas/home.ts
+    //! Corresponding Frontend: packages/ui/src/schemas/home.ts
 
     use serde::{Deserialize, Serialize};
 
@@ -94,7 +94,7 @@ pub mod home_set_workspace {
 pub mod home_get_homedir {
     //! home/get_homedir 路由的响应 schema
     //!
-    //! Corresponding Frontend: tauri/src/schemas/home.ts
+    //! Corresponding Frontend: packages/ui/src/schemas/home.ts
 
     use serde::{Deserialize, Serialize};
 

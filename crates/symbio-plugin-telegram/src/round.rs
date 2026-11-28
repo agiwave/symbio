@@ -31,7 +31,7 @@
 //!
 //! | 消费方 | 拿帧做什么 |
 //! |---|---|
-//! | `crates/symbio-cli/src/client.rs` | 逐帧**渲染**（增量 / 状态提示 / 重同步） |
+//! | `apps/cli/src/client.rs` | 逐帧**渲染**（增量 / 状态提示 / 重同步） |
 //! | owner 插件的转发位 | **翻译并转发**进父会话视图（锚定 / 改角色） |
 //! | 本文件 | **只攒最终正文**——不渲染、不翻译、不转发 |
 //!
@@ -56,7 +56,7 @@ use symbio_plugin_api::{message_of_node, SEG_MESSAGES};
 use symbio_plugin_api::{PluginPayload, PLUGIN_ID_SESSION};
 use tokio::sync::mpsc;
 
-/// 等待一轮结束的上限。与 `crates/symbio-cli/src/client.rs` 的 `ROUND_TIMEOUT` 同量级：一轮里
+/// 等待一轮结束的上限。与 `apps/cli/src/client.rs` 的 `ROUND_TIMEOUT` 同量级：一轮里
 /// 可能有长工具调用（构建 / 测试），超时是**兜底**，不是预期路径。
 const ROUND_TIMEOUT: Duration = Duration::from_secs(900);
 

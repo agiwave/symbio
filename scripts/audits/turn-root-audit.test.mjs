@@ -20,7 +20,7 @@ import { fileURLToPath } from 'node:url'
 
 const script = fileURLToPath(new URL('./turn-root-audit.mjs', import.meta.url))
 
-const CHAT_NODE = 'tauri/src/schemas/chat_node.ts'
+const CHAT_NODE = 'packages/ui/src/schemas/chat_node.ts'
 const BASELINE_REL = 'scripts/turn-root-baseline.json'
 
 /** 干净夹具：各面恰好等于基线（见 `cleanBaseline`）。 */
@@ -35,7 +35,7 @@ function cleanFiles() {
     'crates/symbio/src/main.rs': 'fn row() {\n    let _ = turn: 0;\n}\n',
     // F4：两处（迁移通道那一行也算前端词根）；F5：迁移通道 = 1
     [CHAT_NODE]: 'const LEGACY = { turn: NODE_KIND_SKELETON }\n',
-    'tauri/src/services/row.ts': 'export interface Row {\n  turn: number\n}\n',
+    'packages/ui/src/services/row.ts': 'export interface Row {\n  turn: number\n}\n',
   }
 }
 
@@ -174,7 +174,7 @@ test('TR-003 空扫：整个范围读不出 ⇒ 红（不许「没什么可判 �
 
 test('TR-004 陈旧 allow：条目指向的文件不存在 ⇒ 红', () => {
   const baseline = cleanBaseline()
-  baseline.allow[0].file = 'tauri/src/schemas/gone.ts'
+  baseline.allow[0].file = 'packages/ui/src/schemas/gone.ts'
   const box = sandbox(cleanFiles(), baseline)
   try {
     const r = run(box.root)

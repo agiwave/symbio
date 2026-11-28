@@ -370,7 +370,7 @@ async fn route(
 
 ## 前端集成
 
-新增一条控制面路由**不需要在前端登记**：`tauri/src/constants/routes.gen.ts` 是后端
+新增一条控制面路由**不需要在前端登记**：`packages/ui/src/constants/routes.gen.ts` 是后端
 `route` 的 `match` 臂的**生成物**（`scripts/facts/routes-ts.mjs`，门禁自动重跑并暂存），
 加一条臂就多一个同名常量 `ROUTE_<插件目录名>_<操作>`。在前端别处写死同一条地址，
 由 `mechanism-audit` 的 M-008 判红。
@@ -380,7 +380,7 @@ async fn route(
 出站请求一律经 `services/`（M-003：组件不得直接 `invoke`）：
 
 ```typescript
-// tauri/src/services/myPlugin.ts
+// packages/ui/src/services/myPlugin.ts
 import { callPlugin } from './plugin'
 import { ROUTE_MY_PLUGIN_GREET } from '@/constants/routes.gen'
 

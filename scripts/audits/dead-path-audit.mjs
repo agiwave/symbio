@@ -6,7 +6,7 @@
  *
  * | 编号 | 规则 | 它拦的是哪一种回潮 |
  * |---|---|---|
- * | DR-001 | 代码与现行文档（`crates/` · `scripts/` · `e2e/` · `tauri/` · `docs/004-ref` · `docs/005-spec` · `docs/006-guide`）里出现**仓内没有的 crate 名**（`symbio_<名字>::` 或 `crates/symbio-<名字>/`） | 改完架构留下的死指针：读者按图索骥找不到东西，而所有判据都绿 |
+ * | DR-001 | 代码与现行文档（`crates/` · `scripts/` · `e2e/` · `apps/desktop/` · `docs/004-ref` · `docs/005-spec` · `docs/006-guide`）里出现**仓内没有的 crate 名**（`symbio_<名字>::` 或 `crates/symbio-<名字>/`） | 改完架构留下的死指针：读者按图索骥找不到东西，而所有判据都绿 |
  * | DR-002 | `docs/003-design/` · `docs/007-task/` 里出现不存在的 crate 名，且同一行**没有历史标记**（曾 / 原先 / 当时 / 迁移 / 删 / 退役 /  …） | 把「过去」写成「现在」：决策记录允许写历史，但不许让历史冒充现状 |
  * | DR-003 | 判据自己的范围读不出（没有 `crates/`、或一个目标文件都没扫到） | 判据的对象消失后扫到 0 条 ⇒ 0 处违规 ⇒ 绿（） |
  *
@@ -62,7 +62,7 @@ const ROOT = rootArg ? path.resolve(rootArg.slice('--root='.length)) : path.reso
 const SHOW_ALL = process.argv.includes('--list')
 
 /** 判 DR-001 的目录：代码与**现行**文档（读者会照抄的地方）。 */
-const STRICT_DIRS = ['crates', 'scripts', 'e2e', 'tauri']
+const STRICT_DIRS = ['crates', 'scripts', 'e2e', 'apps', 'desktop']
 /** 判 DR-002 的目录：决策记录与任务账（允许写历史，但必须写明是历史）。 */
 const HISTORY_DIRS = ['docs/003-design', 'docs/007-task']
 /** 归 DR-001 的文档目录：规范 / 参考 / 指南都描述**现在**。 */

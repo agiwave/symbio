@@ -57,16 +57,16 @@ jobs:
         with:
           node-version: '22'
           cache: 'npm'
-          cache-dependency-path: tauri/package-lock.json
+          cache-dependency-path: packages/ui/package-lock.json
 
       - name: Install frontend dependencies
-        working-directory: tauri
+        working-directory: packages/ui
         run: npm ci
 
       - name: Build frontend assets
         # `tauri::generate_context!` 在编译期读 `frontendDist: ../dist`；
         # 缺产物时 workspace 的 cargo test / clippy 会在 proc macro 处全红。
-        working-directory: tauri
+        working-directory: packages/ui
         run: npm run build
 
       - name: Rust gate

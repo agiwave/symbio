@@ -16,9 +16,9 @@ deps: [DE-009-VDFS规范]
 `docs/003-design/009-VDFS规范.md`（**机制规范，权威**：接口、访问位、协议操作、分层）、
 `crates/symbio-platform/src/kernel/vdfs/`（纯接口）、
 `crates/symbio-plugin-vdfs/src/protocol.rs`（线路信封）、
-`tauri/src/schemas/vdfs.ts`（前端数据契约）、
-`tauri/src/composables/useVdfs.ts`（页面逻辑）、
-`tauri/src/views/VdfsView.vue`（页面装配）
+`packages/ui/src/schemas/vdfs.ts`（前端数据契约）、
+`packages/ui/src/composables/useVdfs.ts`（页面逻辑）、
+`packages/ui/src/views/VdfsView.vue`（页面装配）
 
 > 本文件只写**前端页面规范**与**现行装配形态**（§7）。机制（trait、访问位、协议操作）
 > 一律以 `013-vdfs.md` 为准，本文件不重复、不覆盖。凡与本文件冲突，以 `013-vdfs.md`

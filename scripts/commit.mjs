@@ -256,14 +256,14 @@ function guessScope() {
     else if (f.startsWith('crates/symbio-plugin-')) {
       const m = f.match(/^crates\/symbio-plugin-([^/]+)\//)
       s = m ? m[1] : null
-    } else if (f.startsWith('crates/symbio-cli/')) s = 'cli'
+    } else if (f.startsWith('apps/cli/')) s = 'cli'
     else if (
       f.startsWith('crates/symbio/') ||
       f.startsWith('crates/symbio-platform/src/sdk/') ||
       f.startsWith('crates/symbio-platform/src/kernel/')
     ) {
       s = 'core'
-    } else if (f.startsWith('tauri/')) s = 'ui'
+    } else if (f.startsWith('apps/desktop/')) s = 'ui'
     else if (f.startsWith('docs/')) s = 'docs'
     if (s) counts.set(s, (counts.get(s) ?? 0) + 1)
   }

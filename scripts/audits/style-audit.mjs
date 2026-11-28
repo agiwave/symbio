@@ -8,7 +8,7 @@
  *   C. 已存在的组件必须被使用 —— import 依赖图不可达的 .vue = WARNING
  *
  * 覆盖范围：
- *   - 全局 CSS：tauri/src 下的 styles/ 与 assets/ 目录
+ *   - 全局 CSS：packages/ui/src 下的 styles/ 与 assets/ 目录
  *   - Vue 组件：<style> / <style scoped> 块；scoped 样式视为组件私有
  *     （`:global(...)` 段除外），非 scoped 的 <style> 视为全局定义
  *   - 类名使用来源：静态 class="a b"、:class="{ key: ... }" / :class="['a']"
@@ -28,7 +28,7 @@
  * （运行时由 JS 写入）、ALLOW_UNUSED_PROPS（设计系统成员）。不要为消警告绕过登记。
  *
  * 用法：
- *   node scripts/audits/style-audit.mjs                 # 审计 tauri/src
+ *   node scripts/audits/style-audit.mjs                 # 审计 packages/ui/src
  *   node scripts/audits/style-audit.mjs --strict        # WARNING 也算失败
  *   node scripts/audits/style-audit.mjs --root=<dir>    # 换仓库根（回归测试用）
  *
@@ -51,7 +51,7 @@ const defaultRoot = path.resolve(path.dirname(fileURLToPath(import.meta.url)), '
 // （与 `mechanism-audit` 同一约定）。
 const rootArg = process.argv.find((a) => a.startsWith('--root='));
 const ROOT = rootArg ? path.resolve(rootArg.slice(7)) : defaultRoot;
-const SRC = path.join(ROOT, 'tauri', 'src');
+const SRC = path.join(ROOT, 'packages', 'ui', 'src');
 
 // ── 白名单：允许"定义了但没被静态引用"的类名前缀（多为第三方库钩子）──
 const ALLOW_UNUSED_CLASS_PREFIXES = [
@@ -86,8 +86,8 @@ const isAllowedUnused = (name) =>
 // 「registry 词表」规则自动认（组件 import 的 registry 模块即其修饰类来源），
 // 因为它在仓库这一侧、可解析；登记表只留给「词表在后端、前端只是照做」的情形。
 const ALLOW_UNUSED_SCOPED = new Map([
-  ['tauri/src/components/vdfs/VdfsActions.vue', new Set(['primary', 'danger'])], // DetailAction.style
-  ['tauri/src/components/vdfs/DetailForm.vue', new Set(['disabled', 'accent'])], // DetailBadge.style
+  ['packages/ui/src/components/vdfs/VdfsActions.vue', new Set(['primary', 'danger'])], // DetailAction.style
+  ['packages/ui/src/components/vdfs/DetailForm.vue', new Set(['disabled', 'accent'])], // DetailBadge.style
 ]);
 
 // ── 工具 ────────────────────────────────────────────────────────

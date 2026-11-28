@@ -17,14 +17,14 @@ import { maybeSandboxDeleteHint, blockedBySandboxDelete } from './_shared.mjs'
 
 const scriptDir = path.dirname(fileURLToPath(import.meta.url))
 const repoRoot = path.resolve(scriptDir, '..', '..')
-const frontendDir = path.join(repoRoot, 'tauri')
+const frontendDir = path.join(repoRoot, 'packages', 'ui')
 const bin = (p) => path.join(frontendDir, 'node_modules', p)
 
 export default {
   id: 'frontend-build',
   title: '前端构建（vite build）',
-  // 输入面：`frontend`。vite build 只读 `tauri/` 下的前端源与它自己的配置，
-  // 与 `crates/**` 无关；后端改动时重跑它买到的是同一份 `tauri/dist`。
+  // 输入面：`frontend`。vite build 只读 `apps/desktop/` 下的前端源与它自己的配置，
+  // 与 `crates/**` 无关；后端改动时重跑它买到的是同一份 `apps/desktop/dist`。
   needs: ['frontend'],
   tasks(ctx) {
     if (!fs.existsSync(path.join(frontendDir, 'package.json'))) return []
@@ -41,7 +41,7 @@ export default {
             cwd: frontendDir,
           })
           if (!r.ok) {
-            console.log('      ↳ 构建失败：本地复现用 `npm run build`（在 tauri/ 下）')
+            console.log('      ↳ 构建失败：本地复现用 `npm run build`（在 apps/desktop/ 下）')
             maybeSandboxDeleteHint(r.output)
             if (blockedBySandboxDelete(r.output)) return 'skipped'
             return { ok: false, note: `exit=${r.code}`, logFile: r.logFile }

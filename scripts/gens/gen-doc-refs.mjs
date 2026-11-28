@@ -164,7 +164,7 @@ const resolveFrom = (fromRel, target) => {
  * 都不存在。`walk` 对不存在的目录静默返回空，于是「扫描 0 条注释链接」看上去像
  * 「没有问题」，实则 D-010 / D-019 只在 tauri 与 scripts 上跑。
  */
-export const SRC_ROOTS = ['crates', 'tauri', 'scripts', 'e2e', 'examples', '.github']
+export const SRC_ROOTS = ['crates', 'apps', 'desktop', 'scripts', 'e2e', 'examples', '.github']
 
 /** 参与注释扫描的源码扩展名（`.md` 刻意不在：它由文档 pass 与 D-001 管）。 */
 export const SRC_EXT = new Set([

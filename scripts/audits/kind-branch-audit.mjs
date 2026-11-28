@@ -20,7 +20,7 @@
  * 比较按 `===` / `!==` 运算符计数（一个原子一个选择点）；一张映射表 = 一格，
  * 表内每个键不另计。`switch` 的 `case` 本仓不用。
  *
- * 排除：注释、测试文件（`__tests__/`、`*.spec.ts`、`*.test.ts`）、`tauri/src/schemas/`
+ * 排除：注释、测试文件（`__tests__/`、`*.spec.ts`、`*.test.ts`）、`packages/ui/src/schemas/`
  * （`NODE_KINDS` 词表、`VDFS_EXT_*` / `VDFS_KIND_*` 常量与归一表是**数据契约**，
  * 不是分派）。
  *
@@ -28,7 +28,7 @@
  *
  * | 格 | 范围 | 目标 |
  * |---|---|---|
- * | `registry` | `tauri/src/registry/**` | 机制层：两条轴的唯一判据与映射表住在这里，**允许存在** |
+ * | `registry` | `packages/ui/src/registry/**` | 机制层：两条轴的唯一判据与映射表住在这里，**允许存在** |
  * | `framework` | 其余前端代码（组件 / store / service / composable / view） | **零**：框架只问具名谓词（`isFormRenderer` / `isSessionNode` / `isMessagesSeg` …），不自己认形态或资源类型 |
  *
  * 两格都是上限（只许降）。`framework` 的目标是 0——它正是 GO-002 §3 那条
@@ -67,9 +67,9 @@ const ROOT = rootArg
   ? path.resolve(rootArg.slice('--root='.length))
   : path.resolve(path.dirname(fileURLToPath(import.meta.url)), '..', '..')
 
-const SRC_REL = 'tauri/src'
-const REGISTRY_PREFIX = 'tauri/src/registry/'
-const SCHEMA_PREFIX = 'tauri/src/schemas/'
+const SRC_REL = 'packages/ui/src'
+const REGISTRY_PREFIX = 'packages/ui/src/registry/'
+const SCHEMA_PREFIX = 'packages/ui/src/schemas/'
 
 /**
  * 两格上限（当前实测值）。只许降；改数字本身由 `gate.d/35-baseline.mjs` 判「不得比基准版本更松」。

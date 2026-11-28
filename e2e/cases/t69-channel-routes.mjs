@@ -36,7 +36,7 @@ import './_selfrun.mjs';
 // **不向上转发** ⇒ home 的四条臂（`home/get_homedir` · `home/reload` ·
 // `home/set_workspace` · `home/get_workspace`）
 // 经 gateway **不可达**（实测 400）。它们的生产驱动面是 Tauri 的 `callPlugin`
-// （`tauri/src/services/home.ts`，进程内 `root.route`），归前端形态 e2e。
+// （`packages/ui/src/services/home.ts`，进程内 `root.route`），归前端形态 e2e。
 //
 // 这条断言是**事实钉住**而不是「期望如此」：若将来 gateway 的 router 抬到 home
 // （已按裁决②「收白名单」收口——只读白名单删掉两条走不到的死条目、

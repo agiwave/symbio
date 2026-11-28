@@ -88,7 +88,7 @@ node scripts/tauri-binary.mjs --check # 本机产物是否对应当前源码（�
 
 指纹覆盖壳自身的源码 / 权限集 / 清单，以及**整棵 `crates/` 插件树**——壳把它
 编译进去，插件那几类日志（`[session INFO]` / `[model INFO]` / `[Tool]`）正是从那里
-来的。`tauri/src`（前端）**不在**其中：dev 下它由 Vite 现服、release 下由同一条命令
+来的。`packages/ui/src`（前端）**不在**其中：dev 下它由 Vite 现服、release 下由同一条命令
 先行构建，所以「前端新不新鲜」不是这个指纹回答的问题。
 
 戳写在产物旁边（仓库根 `target/<profile>/`，与壳二进制同目录），由 `npm run tauri dev|build`

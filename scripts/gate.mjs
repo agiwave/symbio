@@ -50,7 +50,7 @@
  * 该不该标 `parallel`；两件事都不做，默认结果就是「悄悄地多串行一整段」。
  *
  * 两个「看着能并发、实际不能」的坑，判据各归其主文件：
- *   - frontend-build 不与 backend 并发：vite build 重写 `tauri/dist`，而 backend 编译
+ *   - frontend-build 不与 backend 并发：vite build 重写 `apps/desktop/dist`，而 backend 编译
  *     symbio-tauri 时 `generate_context!` 在**编译期**读它（56-frontend-build.mjs）。
  *     前端另外三个任务**不碰 `dist`**，故拆到 `20-frontend-static.mjs` 进批——那是
  *     同一个阶段的另一半，拆开只是为了让不冲突的那一半不再串行；
@@ -268,7 +268,7 @@ const USAGE = `用法：node scripts/gate.mjs [选项]
   阶段表；条目级明细在每份任务日志与本轮 _summary.md 里），失败项当场印出条目名、
   攒下的输出与日志路径。环境变量 GATE_VERBOSE=1 恢复逐条目实时刷输出。
 
-  默认行为是「按本次改动收窄」：只有 crates/ 变了才跑 cargo，只有 tauri/ 变了才跑前端，
+  默认行为是「按本次改动收窄」：只有 crates/ 变了才跑 cargo，只有 apps/desktop/ 变了才跑前端，
   只有 scripts/ 变了才跑那些**检查器自己的回归测试**。范围求不出（浅克隆 / 无上游 /
   拼错 --base）时一律全跑——少跑的代价是假绿，多跑的代价是几分钟。
   被跳过的阶段在汇总上是一行 ⊘ 加理由，不是消失（）。

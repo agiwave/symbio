@@ -3,7 +3,7 @@
 // 本脚本是**报告型**（退出码恒 0），所以它的失效形态不是「假绿灯」而是**说假话**：
 // 报告把在用的东西列成「死文件 / 死导出」，读的人顺着去改本来没坏的东西。
 //
-// 被测面只剩**前端镜像**（`tauri/src/schemas`）。后端半边（`symbio_sdk/schemas`）已随
+// 被测面只剩**前端镜像**（`packages/ui/src/schemas`）。后端半边（`symbio_sdk/schemas`）已随
 //  退役、其机器与三条夹具测试于 2026-11-13 删除——那三条测试守的是一个真仓里
 // **不存在**的目录，夹具非空、被测物扫 0 个文件，测试全绿而判据空转。
 //
@@ -28,8 +28,8 @@ const script = path.join(path.dirname(fileURLToPath(import.meta.url)), 'schema-a
  */
 function audit(files) {
   return withTempTree({}, (root) => {
-    // 脚本无条件 walk `tauri/src`，缺了会抛 ⇒ 给个空目录占位
-    fs.mkdirSync(path.join(root, 'tauri', 'src', 'schemas'), { recursive: true })
+    // 脚本无条件 walk `packages/ui/src`，缺了会抛 ⇒ 给个空目录占位
+    fs.mkdirSync(path.join(root, 'packages', 'ui', 'src', 'schemas'), { recursive: true })
     for (const [rel, content] of Object.entries(files)) {
       const p = path.join(root, rel)
       fs.mkdirSync(path.dirname(p), { recursive: true })
@@ -54,10 +54,10 @@ function frontHalf(out) {
 test('相对路径导入构成引用 ⇒ 不被报成死文件', () => {
   const out = frontHalf(
     audit({
-      'tauri/src/schemas/vdfs-form.ts': 'export interface FormField { id: string }\n',
+      'packages/ui/src/schemas/vdfs-form.ts': 'export interface FormField { id: string }\n',
       // `export * from` 也是引用（统一出口再导出一份的形态）
-      'tauri/src/schemas/vdfs.ts': "export * from './vdfs-form'\nexport const a = 1\n",
-      'tauri/src/components/Detail.vue': "<script setup lang=\"ts\">\nimport { a } from '../schemas/vdfs'\n</script>\n",
+      'packages/ui/src/schemas/vdfs.ts': "export * from './vdfs-form'\nexport const a = 1\n",
+      'packages/ui/src/components/Detail.vue': "<script setup lang=\"ts\">\nimport { a } from '../schemas/vdfs'\n</script>\n",
     }),
   )
   assert.match(out, /vdfs-form\.ts\s+【单消费方】/, out)
@@ -69,13 +69,13 @@ test('只在定义文件内被用的导出不是死导出（自引用计数）',
   // 曾被列进「死导出」——那不是保守，是报告在说假话。
   const out = frontHalf(
     audit({
-      'tauri/src/schemas/vdfs.ts': [
+      'packages/ui/src/schemas/vdfs.ts': [
         "export const OUTCOME_COMPLETED = 'completed'",
         'export function isDone(x: string) {',
         '  return x === OUTCOME_COMPLETED',
         '}',
       ].join('\n'),
-      'tauri/src/services/vdfs.ts': "import { isDone } from '../schemas/vdfs'\nexport const y = isDone('a')\n",
+      'packages/ui/src/services/vdfs.ts': "import { isDone } from '../schemas/vdfs'\nexport const y = isDone('a')\n",
     }),
   )
   assert.doesNotMatch(out, /OUTCOME_COMPLETED/, out)
@@ -84,7 +84,7 @@ test('只在定义文件内被用的导出不是死导出（自引用计数）',
 test('真死导出要列出来；带豁免理由的标「已承认保留」', () => {
   const out = frontHalf(
     audit({
-      'tauri/src/schemas/home.ts': [
+      'packages/ui/src/schemas/home.ts': [
         '// dead-code-allow R-001: 与后端 schemas.rs 的请求半边对应，前端只传字面量',
         'export type home_reload = { path: string }',
         'export interface NobodyUses { x: number }',

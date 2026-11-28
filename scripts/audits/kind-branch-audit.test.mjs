@@ -11,7 +11,7 @@
  *      `Record<NodeKind, …>` 计 1；
  *   2. 框架层超过基线 ⇒ KB-001 红；等于基线 ⇒ 绿；
  *   3. `schemas/` 是数据契约，不算分支；
- *   4. 范围读不出（没有 `tauri/src`）⇒ 红，不是静默通过。
+ *   4. 范围读不出（没有 `packages/ui/src`）⇒ 红，不是静默通过。
  *
  * 用法：node --test scripts/audits/kind-branch-audit.test.mjs
  */
@@ -42,7 +42,7 @@ function audit(files, { baseline = '0:1' } = {}) {
   }, { prefix: 'kind-branch-' })
 }
 
-const REG = 'tauri/src/registry/messageFacts.ts'
+const REG = 'packages/ui/src/registry/messageFacts.ts'
 const REG_SRC = "export const isBodyKind = (kind: NodeKind) => kind === NODE_KIND_BODY\n"
 
 test('countSites：一行两处比较计 2；布尔原子只计形态那一侧', () => {
@@ -78,7 +78,7 @@ test('框架层与机制层都等于基线 ⇒ 通过', () => {
 test('框架层自己认形态 ⇒ KB-001 变红', () => {
   const r = audit({
     [REG]: REG_SRC,
-    'tauri/src/components/Foo.vue': '<script setup lang="ts">\nconst x = kind === NODE_KIND_BODY\n</script>\n',
+    'packages/ui/src/components/Foo.vue': '<script setup lang="ts">\nconst x = kind === NODE_KIND_BODY\n</script>\n',
   }, { baseline: '0:1' })
   expectAudit(r, 1, [onStderr(/KB-001/), onStderr(/框架层分支.*实测 1 > 基线 0/)])
 })
@@ -86,7 +86,7 @@ test('框架层自己认形态 ⇒ KB-001 变红', () => {
 test('框架层自己认资源类型 ⇒ KB-001 变红', () => {
   const r = audit({
     [REG]: REG_SRC,
-    'tauri/src/services/session.ts': 'export const keep = (n) => n.ext === VDFS_EXT_SESSION\n',
+    'packages/ui/src/services/session.ts': 'export const keep = (n) => n.ext === VDFS_EXT_SESSION\n',
   }, { baseline: '0:1' })
   expectAudit(r, 1, [onStderr(/KB-001/), onStderr(/框架层分支.*实测 1 > 基线 0/)])
 })
@@ -94,12 +94,12 @@ test('框架层自己认资源类型 ⇒ KB-001 变红', () => {
 test('反向：schemas/ 是数据契约，不算分支（多数会误报）', () => {
   const r = audit({
     [REG]: REG_SRC,
-    'tauri/src/schemas/chat_node.ts': 'export const x = kind === NODE_KIND_BODY\n',
+    'packages/ui/src/schemas/chat_node.ts': 'export const x = kind === NODE_KIND_BODY\n',
   }, { baseline: '0:1' })
   assert.equal(r.status, 0, r.stdout + r.stderr)
 })
 
-test('范围读不出（没有 tauri/src）⇒ 红，不是静默通过', () => {
+test('范围读不出（没有 packages/ui/src）⇒ 红，不是静默通过', () => {
   const r = audit({ 'docs/x.md': 'nothing\n' }, { baseline: '0:0' })
   assert.equal(r.status, 1)
   assert.match(r.stderr, /读不出前端范围/)

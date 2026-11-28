@@ -283,7 +283,7 @@ pub struct VdfsSearchResult {
 // [`VdfsChange`] 形状完全重合（`path` + 可选 `data`，且 `path` 由门面补成展示
 // 地址后原样透传），复制一份只会造出「两个名字、一个形状」的翻译层——门面
 // （`super::fs::UnifiedFs`）把 [`VdfsChange`] **原样**投上总线
-// （`subscribe({ kind: 'vdfs' })`）。前端形状见 `tauri/src/schemas/vdfs.ts::VdfsChange`。
+// （`subscribe({ kind: 'vdfs' })`）。前端形状见 `packages/ui/src/schemas/vdfs.ts::VdfsChange`。
 //
 // `VdfsChange`
 

@@ -48,7 +48,7 @@ const RS = {
 
 /** 最小前端语料：只有跨栈常量名，后端 .rs 里没有 */
 const TS = {
-  'tauri/src/constants/pages.ts': 'export const VDFS_PAGE_SIZE = 50\n',
+  'packages/ui/src/constants/pages.ts': 'export const VDFS_PAGE_SIZE = 50\n',
 }
 
 auditCase('失效指认变红：文档指认源码里不存在的符号（exit 1）', () => audit({ ...RS, 'README.md': '桶名见 `symbio_platform::sdk::GONE_FN`。\n' }), 1, [/D-005 README\.md:1/, /GONE_FN/])
@@ -97,7 +97,7 @@ test('D-009 族名不被引号污染：`env!("CARGO_PKG_VERSION")` 开不出 CAR
 test('D-009 族名不由注释开出：注释提过 CHAT_FLOW_* 而代码没有 ⇒ 文档的 CHAT_SEND 不判（exit 0）', () => {
   const r = audit({
     ...RS,
-    'tauri/src/stores/sessions.ts': '// CHAT_FLOW_ANALYSIS 早就不在了\nexport const unrelated = 1\n',
+    'packages/ui/src/stores/sessions.ts': '// CHAT_FLOW_ANALYSIS 早就不在了\nexport const unrelated = 1\n',
     'README.md': '发送开关叫 `CHAT_SEND`。\n',
   })
   assert.equal(r.status, 0, r.stdout)

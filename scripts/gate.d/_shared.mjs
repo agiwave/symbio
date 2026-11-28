@@ -474,7 +474,7 @@ export function codeTextOf(src) {
 /**
  * `vitest run --coverage` 的**静态基准**墙钟预算（真正用哪个数由 `_machine.mjs::budget` 定）。
  *
- * 它**不是判据**——判定在覆盖率阈值（`tauri/vitest.config.ts` 的 `thresholds`）与
+ * 它**不是判据**——判定在覆盖率阈值（`packages/ui/vitest.config.ts` 的 `thresholds`）与
  * 用例通过数上，这里只防「跑飞了还不肯停」。
  *
  * 陷阱：冷全量（基座大改后 backend 全量重编）会把 coverage 推过静态预算，
@@ -531,7 +531,7 @@ export function coverageLinesPct(output) {
   return m ? Number(m[4]) : null
 }
 
-/** `tauri/vitest.config.ts` 里 `thresholds.lines` 的当前取值 */
+/** `packages/ui/vitest.config.ts` 里 `thresholds.lines` 的当前取值 */
 export function coverageThreshold(frontendDir) {
   const cfg = path.join(frontendDir, 'vitest.config.ts')
   if (!fs.existsSync(cfg)) return null

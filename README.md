@@ -16,8 +16,8 @@ created: 2026-07-20
 | 层 | 目录 / 挂载点 | 职责 |
 | --- | --- | --- |
 | **核心库** | `crates/` | `symbio-platform` 平台（kernel 语法 / contract ABI / sdk 机制 / deploy 装配常量 四臂）· `symbio-runtime` 运行时 · `symbio-plugin-api` 门面 · 插件与 provider 各一个 crate · `symbio` 装配 |
-| **桌面前端** | `tauri/` | Vue 3 + Pinia + Tauri 2；`src-tauri/` 是只暴露 3 个 IPC 命令（`route_v2` / `route_v2_send` / `route_v2_close`）的薄适配层 |
-| **命令行前端** | `crates/symbio-cli/` | 纯 Rust：REPL / 单次 / 管道 / 心跳守护，进程内直连插件树，不经 IPC |
+| **桌面前端** | `apps/desktop/` | Vue 3 + Pinia + Tauri 2；`src-tauri/` 是只暴露 3 个 IPC 命令（`route_v2` / `route_v2_send` / `route_v2_close`）的薄适配层 |
+| **命令行前端** | `apps/cli/` | 纯 Rust：REPL / 单次 / 管道 / 心跳守护，进程内直连插件树，不经 IPC |
 | **入站通道** | `gateway` · `telegram` 插件 | 树内插件：HTTP / WS 入站请求转发给父级路由（与 `route_v2` 同构）；Telegram 长轮询收发 |
 
 设计原则：**UI 只做配置与展示，业务逻辑全在核心库**；各前端各自建树、不共享内存，但共用同一套插件装配与路径协议。
@@ -55,7 +55,7 @@ created: 2026-07-20
 ### 桌面端（推荐）
 
 ```bash
-cd tauri && npm install && npm run tauri dev
+cd packages/ui && npm install && npm run dev
 ```
 
 首次启动后在左侧**模型**面板新建条目填入 API Key（模型不是「设置」页的选项——资源型插件的配置就是它自己在 `<根>/model/<id>` 的资源树）。
@@ -74,7 +74,7 @@ cd examples && zip -r fullstack-dev.zip fullstack-dev
 ### 命令行
 
 ```bash
-node crates/symbio-cli/scripts/build-cli.mjs # 产物落在仓库根：target/debug/symbio-cli.exe
+node apps/cli/scripts/build-cli.mjs # 产物落在仓库根：target/debug/symbio-cli.exe
 ./target/debug/symbio-cli.exe -m "你好" # 单条；系统目录默认 <当前目录>/.symbio
 ./target/debug/symbio-cli.exe # REPL；系统目录在别处时加 --homedir <路径>
 ```
@@ -95,8 +95,9 @@ node e2e/run-tests.mjs # 端到端：mock LLM / MCP / HTTP，不需要真 API Ke
 
 ```
 symbio/
-├── crates/ # Rust：symbio-platform（语法 / ABI / 机制 / 装配四臂）· symbio-runtime（运行时）· symbio-plugin-api（门面）· 插件与 provider 各一 crate · symbio-cli
-├── tauri/ # Vue 3 桌面端（src-tauri = 3 命令的薄适配层）
+├── apps/ # 交付物：desktop（Tauri 壳）· cli（REPL / serve）· web（纯浏览器，可选连 CLI serve）
+├── packages/ui/ # 三端共享的 Vue 3 实现（views / components / services / transport 接口）
+├── crates/ # Rust 库：symbio-platform（语法 / ABI / 机制 / 装配四臂）· symbio-runtime · symbio-plugin-api · 插件与 provider 各一 crate
 ├── docs/ # 系统级文档（目标 / 场景 / 架构 / 参考 / 指南 / 规范 / 任务；历史只在 git log）
 ├── e2e/ # 端到端用例（mock LLM / MCP / HTTP + 网关 WS）
 ├── examples/ # Agent 示例包
@@ -116,7 +117,7 @@ symbio/
 | **参考** | [事实表](docs/004-ref/006-当前事实表.md "RE-006-当前事实表") · [路由](docs/004-ref/003-ROUTES.md "RE-003-ROUTES") · [错误码](docs/004-ref/002-ERROR_CODES.md "RE-002-ERROR_CODES") · [配置](docs/004-ref/001-CONFIGURATION.md "RE-001-CONFIGURATION") |
 | **开发** | [插件开发](docs/006-guide/005-PLUGIN_DEVELOPMENT.md "GU-005-PLUGIN_DEVELOPMENT") · [排障](docs/006-guide/007-TROUBLESHOOTING.md "GU-007-TROUBLESHOOTING") · [文档中心与登记](docs/README.md "docs/README") · [贡献指南](CONTRIBUTING.md "CONTRIBUTING") |
 | **设计** | [VDFS](docs/003-design/010-VDFS前端页面规范.md "DE-010-VDFS前端页面规范") · [Agent 目录](docs/003-design/011-Agent目录规范.md "DE-011-Agent目录规范") · [上下文压缩](crates/symbio-plugin-session/src/docs/101-context-compression-design.md "DE-101-context-compression-design") · [目标架构 v2](docs/003-design/002-架构总览.md "DE-002-架构总览") |
-| **CLI** | [cli/README](crates/symbio-cli/README.md "crates/symbio-cli/README") · [架构](crates/symbio-cli/docs/112-architecture.md "DE-112-architecture") · [构建](crates/symbio-cli/docs/003-building.md "GU-003-building") · [用法](crates/symbio-cli/docs/004-usage.md "GU-004-usage") |
+| **CLI** | [cli/README](apps/cli/README.md "apps/cli/README") · [架构](apps/cli/docs/112-architecture.md "DE-112-architecture") · [构建](apps/cli/docs/003-building.md "GU-003-building") · [用法](apps/cli/docs/004-usage.md "GU-004-usage") |
 
 > 每个插件与前端都维护自己的 `README.md`，全部模块的文档地图在[文档中心](docs/README.md "docs/README")。
 > 变更历史 = `git log`（本仓库不另维护变更日志，理由见[贡献指南](CONTRIBUTING.md "CONTRIBUTING")）。

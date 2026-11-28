@@ -498,7 +498,7 @@ ToolCall 合成占位 tool 结果而**始终合法**——于是「模型看得�
  因为每条变更都指向一个明确的 `path`。因此**不需要第二种通道**。判断「本轮 /
  子会话结束」看会话节点的 `status`（不再有 `Status idle` 帧可等），**不是**根 Turn
  的终态（一轮里它会多次定格）。旧事件频道（`kind = "session"`）已整体废除——前端
- （`stores/sessionNodeSync.ts` / `composables/useVdfs.ts`）、CLI（`crates/symbio-cli/src/client.rs`）
+ （`stores/sessionNodeSync.ts` / `composables/useVdfs.ts`）、CLI（`apps/cli/src/client.rs`）
  与子智能体转播（`agent/host/subagent.rs`）三处消费者都订同一条 `EVENT_BUS_KIND_VDFS` 变更。
 11. **ToolCall 的 `streaming` 覆盖执行窗口**：`finalize_assistant_turn` 不得提前定格；
  每个 ToolCall 都必须以终态收场（未执行者收口为 `Completed` +

@@ -174,7 +174,7 @@ function obligationPrecheckCells(text) {
   return cells
 }
 
-/** `tauri/vitest.config.ts` 的 `coverage.thresholds`：一个嵌套块，四条全局 + 一条分目录。
+/** `packages/ui/vitest.config.ts` 的 `coverage.thresholds`：一个嵌套块，四条全局 + 一条分目录。
  *  **只扫 `thresholds: {` 块**——同一文件里别处也有 `lines:` 这类键。 */
 function coverageCells(text) {
   const cells = new Map()
@@ -438,7 +438,7 @@ const RATCHETS = [
   },
   {
     id: 'coverage',
-    file: 'tauri/vitest.config.ts',
+    file: 'packages/ui/vitest.config.ts',
     dir: 'floor',
     cellsOf: coverageCells,
     waivers: waiverReader('coverage-allow'),

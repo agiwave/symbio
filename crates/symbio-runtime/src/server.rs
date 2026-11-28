@@ -33,7 +33,7 @@ impl Default for ServerConfig {
             port: 9231,
             token: String::new(),
             max_connections: 64,
-            frontend_dist: PathBuf::from("tauri/dist"),
+            frontend_dist: PathBuf::from("apps/desktop/dist"),
             allowed_origin: None,
         }
     }

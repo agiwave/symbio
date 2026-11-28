@@ -1,7 +1,7 @@
 // e2e 基座：临时 homedir 夹具、Mock LLM/MCP 进程编排、CLI 运行、会话落盘读取。
 //
 // 设计：
-// - CLI 与后端是**进程内直连**（crates/symbio-cli/src/client.rs），单进程即可跑完整链路
+// - CLI 与后端是**进程内直连**（apps/cli/src/client.rs），单进程即可跑完整链路
 //   （路由 → session 插件 → model 插件 → HTTP → mock LLM；工具 → mcp 插件 → stdio → mock MCP）。
 // - mock 与 CLI 全部走真实边界：HTTP（SSE）、stdio（JSON-RPC）、磁盘（homedir）。
 // - 每个用例独立的临时 homedir + 独立 mock 实例，互不串扰。
@@ -14,7 +14,7 @@ import { join, resolve, dirname } from 'node:path';
 import { fileURLToPath } from 'node:url';
 import { cliBinaryPath, ensureCliBinary } from '../scripts/cli-binary.mjs';
 // gateway WS 的客户端：复用前端依赖（Tauri 侧已装 `ws`，不为测试再引一份）
-import WebSocket from '../tauri/node_modules/ws/index.js';
+import WebSocket from '../packages/ui/node_modules/ws/index.js';
 
 const HERE = dirname(fileURLToPath(import.meta.url));
 export const E2E_ROOT = resolve(HERE, '..');
@@ -813,7 +813,7 @@ export const SEG_MESSAGES = 'message';
  * 帧数为零，看起来就像"模型没有产出内容"。判据：订阅后跑一轮对话，若一条
  * `vdfs` 帧都没有，就是这里少了一半。
  *
- * 与 CLI（`crates/symbio-cli/src/client.rs`）同款：watch 的是**父目录** `<根>/session`，不是
+ * 与 CLI（`apps/cli/src/client.rs`）同款：watch 的是**父目录** `<根>/session`，不是
  * `<根>/session/<sid>`——订阅一次覆盖全部会话，切会话不必重连；且会话尚不存在时
  * 父目录一定在（`<根>/session/<sid>` 可能还没被创建）。归属由客户端按作用域过滤。
  *
@@ -944,7 +944,7 @@ export function settledAfterWorking(sc) {
  * 这是「边跑边等、等到了再断言」的统一入口：等的是**实时面**（用户如何看到就
  * 如何等），转写 / 读数断言随后走 `cli.invoke`（`vdfs/read` 等生产路由）。
  * REPL 与一次性 CLI 走同一条收件箱地址面（`ask` 写 `<根>/session/<sid>/inbox`，
- * 见 `crates/symbio-cli/src/client.rs`），因此会话节点的运行态帧对这条入口一样成立。
+ * 见 `apps/cli/src/client.rs`），因此会话节点的运行态帧对这条入口一样成立。
  *
  * @param cli `startLongLivedCli` / `startRealtimeSession` 给出的进程句柄
  * @param sub `subscribeSessionRealtime` 给出的实时面句柄

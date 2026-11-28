@@ -5,13 +5,13 @@
 //
 // ## 为什么它能进批，而同属前端的 `vite build` 不能
 //
-// backend 编译 `symbio-tauri` 时 `generate_context!` 在**编译期**读 `tauri/dist`，
+// backend 编译 `symbio-tauri` 时 `generate_context!` 在**编译期**读 `apps/desktop/dist`，
 // 而 `vite build` 会**清空重写**那个目录 ⇒ 并发就是「编译读到半截 dist ⇒ 假红」。
 // 所以构建留在 `56-frontend-build.mjs`（批后）。
 //
 // 本阶段的三个任务**都不碰 `dist`**，而且对磁盘几乎**只读**：
 //   - `vue-tsc --noEmit`   只读类型，不产出文件
-//   - `vitest run`         coverage 走 `reporter: ['text']`（`tauri/vitest.config.ts`），
+//   - `vitest run`         coverage 走 `reporter: ['text']`（`packages/ui/vitest.config.ts`），
 //                          只打印不落盘 ⇒ 连 `coverage/` 都不写
 //   - `eslint .`           只读（不带 `--fix`）
 // 反过来，批内没有哪个阶段会写本阶段要读的东西（backend 只写 `target/`，docs 只读，
@@ -54,13 +54,13 @@ import { machine, budget } from './_machine.mjs'
 
 const scriptDir = path.dirname(fileURLToPath(import.meta.url))
 const repoRoot = path.resolve(scriptDir, '..', '..')
-const frontendDir = path.join(repoRoot, 'tauri')
+const frontendDir = path.join(repoRoot, 'packages', 'ui')
 const bin = (p) => path.join(frontendDir, 'node_modules', p)
 
 export default {
   id: 'frontend-static',
   title: '前端静态检查（vue-tsc / vitest / eslint）',
-  // 输入面：`frontend`（`tauri/` 下除 `src-tauri/` 的部分）。vue-tsc / vitest / eslint
+  // 输入面：`frontend`（`apps/desktop/` 下除 `src-tauri/` 的部分）。vue-tsc / vitest / eslint
   // 的输入里没有 `.rs` 也没有 `docs/`：Rust 侧改动不该让这三项重跑一遍。
   needs: ['frontend'],
   parallel: true,
@@ -124,7 +124,7 @@ export default {
             const note = r.timedOut
               ? '超时终止'
               : coverageRed
-                ? '覆盖率低于阈值（见 tauri/vitest.config.ts 的 coverage.thresholds）'
+                ? '覆盖率低于阈值（见 packages/ui/vitest.config.ts 的 coverage.thresholds）'
                 : `exit=${r.code}, signal=${r.signal}`
             return { ok: false, note, logFile: r.logFile }
           }
@@ -145,7 +145,7 @@ export default {
             if (slack > BASELINE_GRACE) {
               const line =
                 `行覆盖率 ${pct}% 已高出阈值 ${thr}% ${(pct - thr).toFixed(1)} 个点，` +
-                `超出回填容差 ${BASELINE_GRACE} ⇒ 上调 tauri/vitest.config.ts 的 thresholds.lines`
+                `超出回填容差 ${BASELINE_GRACE} ⇒ 上调 packages/ui/vitest.config.ts 的 thresholds.lines`
               console.log(red(`      ↳ ${line}`))
               return { ok: false, note: line }
             }

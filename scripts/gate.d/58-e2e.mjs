@@ -9,7 +9,7 @@
 //
 // 以机制接入：用例清单**不在这里维护**——`e2e/cases/*.mjs` 按文件名序逐个以
 // 独立子进程运行（与 `node e2e/run-tests.mjs` 同一套发现逻辑），新增用例文件
-// 自动纳入门控。前置：`crates/symbio-cli/` 的 release 二进制。
+// 自动纳入门控。前置：`apps/cli/` 的 release 二进制。
 //
 // 用例数量只作信息展示；删除重复或过时用例不会因数量变化判红。
 import path from 'node:path'
@@ -26,7 +26,7 @@ import { orderForStart, loadTimes, recordTimes, suggestConcurrency } from '../e2
 
 const scriptDir = path.dirname(fileURLToPath(import.meta.url))
 const repoRoot = path.resolve(scriptDir, '..', '..')
-const cliDir = path.join(repoRoot, 'crates', 'symbio-cli')
+const cliDir = path.join(repoRoot, 'apps', 'cli')
 const e2eDir = path.join(repoRoot, 'e2e')
 const caseFileRe = /^t\d.*\.mjs$/
 
@@ -43,7 +43,7 @@ function discoverCases() {
 export default {
   id: 'e2e',
   title: '端到端（CLI × mock LLM × mock MCP）',
-  // 输入面：`rust`（被测件是 `crates/symbio-cli` 的 release 二进制）+ `e2e`（用例自己）。
+  // 输入面：`rust`（被测件是 `apps/cli` 的 release 二进制）+ `e2e`（用例自己）。
   // 前端改动不进这个集合：e2e 跑的是 CLI，不加载任何前端产物。**这是全量门禁里最贵的
   // 单阶段之一（实测 1m40s、88 例）**，而它对「改了一句文档」的结论恒等于上一轮。
   needs: ['rust', 'e2e'],
@@ -219,7 +219,7 @@ export default {
           // 反了——本地有 `.workbuddy-ai/gate-logs/` 可以打开，CI 上那个目录在 runner
           // 里、没人上传，于是「（详见日志）+ 一条本机路径」就是一条**零信息的红**。
           // 2026-10-07 首次在 v2-plan 上跑 CI 正是如此：42/42 全红，日志里只有 42 个
-          // 文件名，真正的原因（缺 `tauri/node_modules`）一行没露。
+          // 文件名，真正的原因（缺 `apps/desktop/node_modules`）一行没露。
           console.log(dim(r.output.split('\n').slice(-6).join('\n      ')))
         }
         // 并发度判据：用**本轮**逐例耗时当场算，结论印出来（不单独判红）。

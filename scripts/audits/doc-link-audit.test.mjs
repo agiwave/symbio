@@ -20,7 +20,7 @@ import { auditCase, expectAudit } from '../audit-assert.mjs'
 const script = fileURLToPath(new URL('./doc-link-audit.mjs', import.meta.url))
 
 /** 脚本要求 5 个扫描根都存在（缺了会以「找不到扫描根」退出 1），故夹具先铺空目录 */
-const SCAN_ROOTS = ['docs', 'crates', 'tauri', 'cli', 'examples']
+const SCAN_ROOTS = ['docs', 'crates', 'apps', 'desktop', 'cli', 'examples']
 
 function audit(files, argv = []) {
   return withTempTree({}, (root) => {
@@ -388,7 +388,7 @@ test('D-004：正文后的豁免注释不整篇豁免（全文档只认首行非
 
 // ── D-006：反引号里的文件路径（D-001 的盲区补丁）─────────────────────────
 // D-001 只认 `[文字](目标)`，而本仓正文**更常**用行内反引号指路。实测
-// `tauri/docs/110-FRONTEND.md` 首段引用的两个文件都不存在，D-001 却报「失效 0 条」
+// `apps/desktop/docs/110-FRONTEND.md` 首段引用的两个文件都不存在，D-001 却报「失效 0 条」
 // 很久了——**守卫报 0 不等于没有坏链，只等于它看不见**。这组用例钉住它会红。
 test('D-006：反引号指向不存在的路径 → 失败（D-001 看不见这类）', () => {
   const r = audit({ 'docs/a.md': '# A\n\n详见 `docs/nope.md`。\n' })

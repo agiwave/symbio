@@ -4,7 +4,7 @@ name: CI
 #
 # 原先这里是一份白名单，只列 `*.rs` / `*.ts` / `*.vue` / `Cargo.*` / `package.json` /
 # 工具链文件 / `scripts/**`。它**漏掉了 `*.css` / `*.yml` / `*.html`**：
-# `tauri/src/styles/` 下 4 个 CSS 文件若被单独修改，**四个作业一个都不跑**，
+# `packages/ui/src/styles/` 下 4 个 CSS 文件若被单独修改，**四个作业一个都不跑**，
 # 于是 `style-audit` 那条 ERROR 级规则（使用的类必须有定义）对纯 CSS 改动完全不生效。
 #
 # 白名单的隐含假设是"没列进来的文件不影响任何检查"，CSS 这条反例直接证伪了它；
@@ -38,7 +38,7 @@ on:
       - '**/target/**'
       - '**/dist/**'
       - '**/coverage/**'
-      - 'tauri/.vbuild*/**'
+      - 'apps/desktop/.vbuild*/**'
       - '.workbuddy-ai/**'
   pull_request:
     # 这里是**目标**分支：`v2 → main` 的 PR 命中 `main`，早已会跑；
@@ -49,7 +49,7 @@ on:
       - '**/target/**'
       - '**/dist/**'
       - '**/coverage/**'
-      - 'tauri/.vbuild*/**'
+      - 'apps/desktop/.vbuild*/**'
       - '.workbuddy-ai/**'
   workflow_dispatch:
 
@@ -118,7 +118,7 @@ jobs:
         run: sudo apt-get update && sudo apt-get install -y libssl-dev pkg-config
 
       - name: Install Linux system libs (GTK/WebKit)
-        # workspace 的 members 含 `tauri/src-tauri`，而 Tauri v2 在 Linux 上走
+        # workspace 的 members 含 `apps/desktop/src-tauri`，而 Tauri v2 在 Linux 上走
         # GTK/WebKit ⇒ `glib-sys` / `gobject-sys` / `gtk-sys` / `webkit2gtk-sys` /
         # `libappindicator` 的 build script 逐个跑 pkg-config。
         #
@@ -138,8 +138,8 @@ jobs:
           libwebkit2gtk-4.1-dev libgtk-3-dev
           libayatana-appindicator3-dev librsvg2-dev libxdo-dev
 
-      - name: Build frontend assets (tauri::generate_context! 要求 tauri/dist)
-        # `tauri/src-tauri/src/main.rs:110` 的 `tauri::generate_context!()` 是**编译期**
+      - name: Build frontend assets (tauri::generate_context! 要求 apps/desktop/dist)
+        # `apps/desktop/src-tauri/src/main.rs:110` 的 `tauri::generate_context!()` 是**编译期**
         # 宏：它读 `tauri.conf.json` 的 `"frontendDist": "../dist"` 并要求该路径存在，
         # 不存在就直接 `error: proc macro panicked`。于是 `--workspace` 的四步
         # （check / test / clippy / doc）**全红**，而报错指向的是一段完全正常的 Rust
@@ -147,7 +147,7 @@ jobs:
         #   = help: message: The `frontendDist` configuration is set to `"../dist"`
         #           but this path doesn't exist
         #
-        # `tauri/dist` 被 `tauri/.gitignore` 忽略（`dist/`），**只在开发者本机存在**。
+        # `apps/desktop/dist` 被 `apps/desktop/.gitignore` 忽略（`dist/`），**只在开发者本机存在**。
         # 与「分支没接 CI」「本机不编 GTK」「cargo-audit 被项目 pin 拖住」同族：
         # 前置只存在于开发者的机器上，于是这条路径在本机天天绿、在 CI 一次没跑过。
         #
@@ -156,7 +156,7 @@ jobs:
         # 而 `generate_context!` 恰恰就是在编译期做这层校验的——占位会让它去校验一个
         # 我们刚编出来的空壳。
         # （前端自身的类型 / 单测 / lint 归 `frontend-checks`；这里只要它的产物。）
-        working-directory: tauri
+        working-directory: packages/ui
         run: npm ci && npm run build
 
       - name: Cache cargo registry
@@ -269,11 +269,11 @@ jobs:
         with:
           node-version: '22'
           cache: 'npm'
-          # package-lock.json 位于 tauri/ 子目录，必须显式指定，否则 cache 解析失败
-          cache-dependency-path: tauri/package-lock.json
+          # package-lock.json 位于 apps/desktop/ 子目录，必须显式指定，否则 cache 解析失败
+          cache-dependency-path: packages/ui/package-lock.json
       
       - name: Check frontend dependencies
-        working-directory: tauri
+        working-directory: packages/ui
         run: npm ci
 
       - name: Frontend gate
@@ -283,7 +283,7 @@ jobs:
         #    构建此前只在上线打 tag 时才跑 ⇒ 构建错误要等发布才暴露，现已前置到 PR。
         # ⚠️ 前端是**两个阶段**（2026-10-09 拆分）：`frontend-static`（类型 / 单测 / lint）
         #    与 `frontend-build`（vite build）。本地前者在并发批里、后者在批后（vite build
-        #    会重写 tauri/dist，与 backend 的 generate_context! 编译期读冲突）；CI 这边
+        #    会重写 apps/desktop/dist，与 backend 的 generate_context! 编译期读冲突）；CI 这边
         #    没有并发批的约束，但**两个 id 都要写**——只写 `frontend-static` 是个合法 id，
         #    不会报错，只会**静默丢掉构建**。
         # ⚠️ 必须带 `--ci`：`frontend-static` 的测试数棘轮在本地会「自动上调并落盘」
@@ -298,7 +298,7 @@ jobs:
         run: |
           npm pkg get name version
           npm pkg get name version > /dev/null
-        working-directory: tauri
+        working-directory: packages/ui
 
   # 端到端回归：构建 CLI 二进制后，按 e2e/cases/ 发现式运行全部用例
   # （CLI × mock LLM（OpenAI 兼容 SSE）× mock MCP（stdio JSON-RPC）× 临时 homedir）。
@@ -320,15 +320,15 @@ jobs:
       - name: Install frontend deps (e2e 要用的 WS 客户端)
         # ⚠️ 这一步不能省，且**缺了不报"缺依赖"、报的是"全部用例一起失败"**：
         # `e2e/helpers.mjs` 第 16 行 `import WebSocket from
-        # '../tauri/node_modules/ws/index.js'`——**不为测试再引一份**（该文件头注明说）。
-        # 而每个 `e2e/cases/t*.mjs` 都 import helpers ⇒ `tauri/node_modules` 不存在时，
+        # '../apps/desktop/node_modules/ws/index.js'`——**不为测试再引一份**（该文件头注明说）。
+        # 而每个 `e2e/cases/t*.mjs` 都 import helpers ⇒ `apps/desktop/node_modules` 不存在时，
         # **每一个** e2e 用例都在 import 期抛模块解析错误、立即 exit=1，
         # 表现为「全部用例全红、每例 0s」，与"用例本身坏了"完全同形。
         # 用例条数的唯一 owner 是 `e2e/cases/` 与 `e2e/run-tests.mjs` 的发现式 runner，
         # 注释不抄一份数字。2026-10-07 首次在 v2-plan 上跑 CI 时实测：CLI 二进制
         # 重建成功（ok 2m2s），随后当时那 42 例在 0.4 秒内全灭。
         # `frontend-checks` 有 `npm ci`、这个 job 没有——依赖存在与否是**按 job**的。
-        working-directory: tauri
+        working-directory: packages/ui
         run: npm ci
 
       - name: Install Linux system libs (OpenSSL)

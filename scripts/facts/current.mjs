@@ -196,9 +196,9 @@ function scopeRows() {
   return [
     sharedScopeRow(ROOT, "crates", [".rs"]),
     sharedScopeRow(ROOT, "crates/symbio-platform/src/kernel", [".rs"]),
-    sharedScopeRow(ROOT, "crates/symbio-cli/src", [".rs"]),
-    sharedScopeRow(ROOT, "tauri/src-tauri/src", [".rs"]),
-    sharedScopeRow(ROOT, "tauri/src", [".ts", ".vue"]),
+    sharedScopeRow(ROOT, "apps/cli/src", [".rs"]),
+    sharedScopeRow(ROOT, "apps/desktop/src-tauri/src", [".rs"]),
+    sharedScopeRow(ROOT, "packages/ui/src", [".ts", ".vue"]),
   ];
 }
 
@@ -303,7 +303,7 @@ function pluginProductionSources(root) {
  * 结构事实的输入契约：**读不到就是「这一格坏了」，不是「这一格是 0」**。
  *
  * 生成物是「改代码即变」的投影，它的可信度上界是「输入确实被读到」。此前的写法是
- * `catch { return [] }`： 把 CLI 拆成独立 crate（`crates/symbio-cli/`）之后，`cliSurface()`
+ * `catch { return [] }`： 把 CLI 拆成独立 crate（`apps/cli/`）之后，`cliSurface()`
  * 的路径没跟着改，CLI 面被**确定性地**投影成 0/0/0，而 `gen-facts --check` 只比对
  * 「生成结果 == 当前文件」，于是本地与 CI 同样全绿——`DE-017` 命名过这种失效
  * （「读空即全绿」），它的第二种形态不依赖任何开关，比漏写 `--ci` 更隐蔽。
@@ -332,7 +332,7 @@ export function requiredHits(list, what) {
 
 /** `generate_handler![…]` 里**实际注册**的 command（先剥注释，被注释掉的不算接缝） */
 function tauriCommands() {
-  const file = path.join(ROOT, "tauri", "src-tauri", "src", "main.rs");
+  const file = path.join(ROOT, "apps", "desktop", "src-tauri", "src", "main.rs");
   const txt = stripComments(requiredSource(file, "Tauri IPC 命令"));
   const m = txt.match(/generate_handler!\s*\[([\s\S]*?)\]/);
   if (!m) throw new Error("结构事实提取为空：`generate_handler![…]` 在 main.rs 里找不到");
@@ -346,7 +346,7 @@ function tauriCommands() {
 
 /** `#[tauri::command]` 声明总数（与 generate_handler 注册数对比——差值才是「未注册历史函数」，不许硬编码） */
 function tauriCommandDeclared() {
-  const dir = path.join(ROOT, "tauri", "src-tauri", "src");
+  const dir = path.join(ROOT, "apps", "desktop", "src-tauri", "src");
   let n = 0;
   const walk = (d) => {
     for (const ent of readdirSync(d, { withFileTypes: true })) {
@@ -364,7 +364,7 @@ function tauriCommandDeclared() {
 
 /** 前端 router：route 条数与真实组件数（redirect 不算组件——视图收敛程度是可数的事实） */
 function tauriViews() {
-  const file = path.join(ROOT, "tauri", "src", "router", "index.ts");
+  const file = path.join(ROOT, "packages", "ui", "src", "router", "index.ts");
   // 判据只认代码：注释里写 `redirect: () => …` 是在解释「为什么不用 redirect」，
   // 不是又一条 route。剥注释后再数，两处都不会被自己的说明文字喂成假读数。
   const txt = stripComments(requiredSource(file, "前端路由"));
@@ -386,12 +386,12 @@ function tauriViews() {
 /**
  * CLI 面：进程选项 + REPL 内置命令。
  *
- * 权威来源是 `crates/symbio-cli/src/args.rs` 的 `HELP` 与 `SERVE_HELP` 常量。
+ * 权威来源是 `apps/cli/src/args.rs` 的 `HELP` 与 `SERVE_HELP` 常量。
  * 之所以用提取而非手写清单：手写时我把「交互模式内置命令」当成了不存在的
  * 「子命令」，还漏掉了 `--heartbeat`——事实表里的清单一旦手写就会腐烂。
  */
 function cliSurface() {
-  const file = path.join(ROOT, "crates", "symbio-cli", "src", "args.rs");
+  const file = path.join(ROOT, "apps", "cli", "src", "args.rs");
   const txt = requiredSource(file, "CLI 面（进程选项与 REPL 命令）");
   const m = txt.match(/const HELP: &str = "\s*([\s\S]*?)\n"/);
   if (!m) throw new Error("结构事实提取为空：CLI 的 `HELP` 常量在 args.rs 里找不到");
@@ -595,7 +595,7 @@ function render() {
   // 条数只在 §2.3 报一次（同一数字写两遍，读的人会以为是两个口径）。
   L.push(`- 静态可提取地址共 **${staticRoutes.length}** 条，逐条与各自职责见 §2.3；`);
   L.push(
-    `- **前端侧常量**：\`tauri/src/constants/routes.gen.ts\`——同 ${staticRoutes.length} 条，` +
+    `- **前端侧常量**：\`packages/ui/src/constants/routes.gen.ts\`——同 ${staticRoutes.length} 条，` +
       "由后端 `route()` 的 `match` 臂**生成**（`scripts/facts/routes-ts.mjs`），不是手写登记处；" +
       "前端在别处写死同一条地址由 `mechanism-audit` 的 M-008 判红。",
   );
@@ -661,7 +661,7 @@ function render() {
   const unregisteredN = tauriCommandDeclared() - ipc.length;
   L.push(
     `- **Tauri IPC**：注册 ${ipc.length} 个 command —— ${fmtList(ipc)}（` +
-      "`tauri/src-tauri/src/main.rs::generate_handler!`" +
+      "`apps/desktop/src-tauri/src/main.rs::generate_handler!`" +
       (unregisteredN > 0
         ? `；另有 ${unregisteredN} 个已声明未注册的 \`#[tauri::command]\`，不计入接缝`
         : "") +
@@ -686,9 +686,9 @@ function render() {
       cli.longs
     )}）；交互模式内置命令 ${cli.repl.length} 个（${fmtList(
       cli.repl
-    )}）。不依赖 clap，权威来源是 \`crates/symbio-cli/src/args.rs\` 的 \`HELP\` / \`SERVE_HELP\`。` +
-      ' 本清单的 owner 是本行：它从 `crates/symbio-cli/src/args.rs` 的 `HELP` 提取，改代码即变。' +
-      '`crates/symbio-cli/README.md` 与 `crates/symbio-cli/docs/004-usage.md` 是它的 `view`（只指路，不抄表）。'
+    )}）。不依赖 clap，权威来源是 \`apps/cli/src/args.rs\` 的 \`HELP\` / \`SERVE_HELP\`。` +
+      ' 本清单的 owner 是本行：它从 `apps/cli/src/args.rs` 的 `HELP` 提取，改代码即变。' +
+      '`apps/cli/README.md` 与 `apps/cli/docs/004-usage.md` 是它的 `view`（只指路，不抄表）。'
   );
   L.push("");
 

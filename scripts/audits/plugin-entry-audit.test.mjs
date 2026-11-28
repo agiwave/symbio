@@ -607,7 +607,7 @@ test('E-009 不误报：文档链接（注释里的 `crate::plugins::web`）', (
 test('E-009 不误报：不在插件 crate 之下的同类引用（如 `cli/`）', () => {
   const r = audit({
     ...CLEAN,
-    'crates/symbio-cli/src/client.rs': 'use crate::plugins::web::something;\n',
+    'apps/cli/src/client.rs': 'use crate::plugins::web::something;\n',
   })
   assert.equal(r.status, 0, r.stdout)
   assert.doesNotMatch(r.stdout, E009_HIT)

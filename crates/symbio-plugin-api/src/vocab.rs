@@ -40,7 +40,7 @@ pub const PORT_SESSION_SUBAGENT: &str = "session.subagent";
 pub const SEG_INBOX: &str = "inbox";
 
 /// 详情表单的能力位条件键：前端把 `cap.<能力>` 解析成表单能力表
-/// （`tauri/src/components/vdfs/DetailForm.vue`）；`mcp` 与 `model` 的详情动作
+/// （`packages/ui/src/components/vdfs/DetailForm.vue`）；`mcp` 与 `model` 的详情动作
 /// 各写一次同一个键，故它的 Rust 侧住处在这里。
 pub const COND_CAP_TEST_CONNECTION: &str = "cap.test_connection";
 

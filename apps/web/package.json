@@ -1,0 +1,19 @@
+{
+  "name": "@symbio/web",
+  "version": "0.1.14",
+  "description": "Symbio Web 交付物：纯浏览器运行，可选经 HTTP 连接 CLI serve 后端",
+  "type": "module",
+  "private": true,
+  "scripts": {
+    "dev": "vite",
+    "build": "vite build",
+    "preview": "vite preview"
+  },
+  "dependencies": {
+    "@symbio/ui": "*"
+  },
+  "devDependencies": {
+    "@vitejs/plugin-vue": "^6.0.8",
+    "vite": "^8.2.2"
+  }
+}

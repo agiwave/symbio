@@ -112,7 +112,7 @@ const IS_REPO = path.resolve(BASE) === path.resolve(repoRoot)
 const lineCache = new Map()
 /**
  * 读一份 .rs 的行数组并缓存；读不到 ⇒ null（与原先各规则 `catch → continue` 同义）。
- * 扫描根里 `crates` 与 `crates/symbio-cli/src` 重叠，重叠文件过去每条规则各读两遍。
+ * 扫描根里 `crates` 与 `apps/cli/src` 重叠，重叠文件过去每条规则各读两遍。
  * 缓存后只读一次，但**文件表里的重复项照旧保留**——S-014 的棘轮读数依赖它，
  * 顺手去重会悄悄改掉读数。
  */
@@ -374,7 +374,7 @@ const S010_SKIP_DIRS = new Set([
 // 与 resolveScope 同策略：cwd 是仓库树就用 cwd（回归测试注入临时树），否则退回仓库根。
 // 「是不是仓库树」由 `looksLikeRepoTree` 统一判——从前这里各写一份 `isDir(cwd/'symbio')`，
 //  之后根下再无 symbio/，标记恒假 ⇒ 夹具永远落到 `repoRoot`，S-010 的用例测的是
-// **真仓**而不是自己造的树（实测造在 tauri/src/schemas/x.ts 的违规被去真仓里找 ⇒ 全红）。
+// **真仓**而不是自己造的树（实测造在 packages/ui/src/schemas/x.ts 的违规被去真仓里找 ⇒ 全红）。
 const S010_ROOT = looksLikeRepoTree(cwd) ? cwd : repoRoot
 
 function walkS010(dir) {
@@ -403,7 +403,7 @@ const s010Files = walkS010(S010_ROOT).filter((f) => {
   const rel = path.relative(S010_ROOT, f).split(path.sep).join('/')
   if (rel.startsWith('crates/symbio-plugin-vdfs/')) return false // 所有者（含 README：根名在它的文档里本来就该出现）
   if (rel.startsWith('docs/archive/')) return false // 历史
-  if (rel.startsWith('cli/target/') || rel.startsWith('tauri/target/')) return false // 构建产物
+  if (rel.startsWith('cli/target/') || rel.startsWith('apps/desktop/target/')) return false // 构建产物
   return true
 })
 
@@ -436,12 +436,12 @@ console.log()
 //
 // S-012…S-017 过去各写一份「BASE 推断 + IS_REPO + roots + walk + readFileSync +
 // 注释跳过 + 双行豁免 + 汇总」：同一份 .rs 被读六遍，roots 里 `crates` 与
-// `crates/symbio-cli/src` 还彼此重叠，重叠部分每条规则再读一遍。这里收成
+// `apps/cli/src` 还彼此重叠，重叠部分每条规则再读一遍。这里收成
 // **一份语料缓存 + 一张规则表**：规则只声明「扫哪些根、哪一行算命中、汇总怎么说」。
 //
 // 输出是判据的对外契约：标题、逐条 err、末尾 ok、空行的顺序与文案逐字不动；
 // 重叠 roots 造成的重复项也照旧保留（S-014 的棘轮读数依赖它）。
-const RS_ROOTS = ['crates', 'crates/symbio-cli/src', 'tauri/src-tauri/src', 'docs/003-design/verify']
+const RS_ROOTS = ['crates', 'apps/cli/src', 'apps/desktop/src-tauri/src', 'docs/003-design/verify']
 
 /** 注释行（`//` / `/*` / 块注释续行）——S-014 / S-015 / S-016 / S-017 的同一种跳过。 */
 const isCommentStart = (l) => /^\s*(?:\/\/|\/\*|\*)/.test(l)

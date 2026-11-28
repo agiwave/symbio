@@ -213,7 +213,7 @@ const S010_SUSPECT_MD = '# 指南\n\n会话在 `.vdfs/session` 之下。\n'
 
 test('S-010 fires outside the vdfs plugin (ts / md / rust)', () => {
   for (const [rel, content] of [
-    ['tauri/src/schemas/x.ts', S010_SUSPECT_TS],
+    ['packages/ui/src/schemas/x.ts', S010_SUSPECT_TS],
     ['docs/006-guide/x.md', S010_SUSPECT_MD],
     ['crates/symbio-plugin-session/src/memory.rs', 'pub const A: &str = ".vdfs/session";\n'],
   ]) {
@@ -224,8 +224,8 @@ test('S-010 fires outside the vdfs plugin (ts / md / rust)', () => {
 })
 
 test('S-010 catches stale and suffixed root spellings too', () => {
-  assert.equal(s010Audit({ 'tauri/src/x.ts': "const a = '.vdfsv2'\n" }).status, 1)
-  assert.equal(s010Audit({ 'tauri/src/x.ts': "const b = '.vdfs2/x'\n" }).status, 1)
+  assert.equal(s010Audit({ 'packages/ui/src/x.ts': "const a = '.vdfsv2'\n" }).status, 1)
+  assert.equal(s010Audit({ 'packages/ui/src/x.ts': "const b = '.vdfs2/x'\n" }).status, 1)
 })
 
 test('S-010 stays silent inside the vdfs plugin (the owner)', () => {
@@ -251,7 +251,7 @@ test('S-010 exempts historical records (archive)', () => {
 test('S-010 is not fooled by lookalike tokens (browser route / import paths)', () => {
   const r = s010Audit({
     'crates/symbio-plugin-vdfs/src/fs.rs': '', // 标记：这是一个仓库树
-    'tauri/src/x.ts': [
+    'packages/ui/src/x.ts': [
       "import { vdfsJoin } from '../vdfs'", // 相对导入
       "import { vdfsRoot } from '@/schemas/vdfsRoot'", // 别名导入
       "const route = '/vdfs/session'", // 浏览器路由（无前导点）
@@ -319,7 +319,7 @@ test('S-012 does not touch runtime prose about a batch of tool calls', () => {
 })
 
 test('S-012 covers cli and the verify programs, not just symbio', () => {
-  for (const file of ['crates/symbio-cli/src/client.rs', 'docs/003-design/verify/scenario_ladder.rs']) {
+  for (const file of ['apps/cli/src/client.rs', 'docs/003-design/verify/scenario_ladder.rs']) {
     const r = s010Audit({ [file]: '/// 这一格随批 3 补。\n' })
     assert.equal(r.status, 1, `${file} ⇒ ${r.stdout}`)
   }

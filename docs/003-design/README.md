@@ -248,13 +248,14 @@ board.columns: [impl]
 | [`DE-107-session-options`](../../crates/symbio-plugin-session/src/docs/107-session-options.md) | 会话选项 = 会话配置表单 | 与代码一致 |
 | [`DE-108-turn-tool-mechanisms`](../../crates/symbio-plugin-session/src/docs/108-turn-tool-mechanisms.md) | 工具失败回传与 Turn 终态机制 | 与代码一致 |
 | [`DE-109-vdfs-session-messages`](../../crates/symbio-plugin-session/src/docs/109-vdfs-session-messages.md) | 会话消息的 VDFS 化 —— 转写即列表，流式即追加 | 与代码一致 |
-| [`DE-110-FRONTEND`](../../tauri/docs/110-FRONTEND.md) | 前端架构 | 与代码一致 |
-| [`DE-111-INTERACTION`](../../tauri/docs/111-INTERACTION.md) | 前端交互面（用户视角） | 与代码一致 |
-| [`DE-112-architecture`](../../crates/symbio-cli/docs/112-architecture.md) | 架构 | 与代码一致 |
+| [`DE-110-FRONTEND`](../../apps/desktop/docs/110-FRONTEND.md) | 前端架构 | 与代码一致 |
+| [`DE-111-INTERACTION`](../../apps/desktop/docs/111-INTERACTION.md) | 前端交互面（用户视角） | 与代码一致 |
+| [`DE-112-architecture`](../../apps/cli/docs/112-architecture.md) | 架构 | 与代码一致 |
 | [`DE-113-heartbeat-mechanism`](../../crates/symbio-plugin-heartbeat/src/docs/113-heartbeat-mechanism.md) | 会话心跳机制（heartbeat） | 与代码一致 |
 | [`DE-114-HTTP入站网关`](../../crates/symbio-plugin-gateway/src/docs/114-HTTP入站网关.md) | HTTP 入站网关（插件专题设计） | 与代码一致 |
 | [`DE-115-技能编译与自我改进`](../../crates/symbio-plugin-skill/src/docs/115-技能编译与自我改进.md) | 技能编译与自我改进（插件专题设计） | 与代码一致 |
 | [`DE-116-长期记忆与语义检索`](../../crates/symbio-plugin-memory/src/docs/116-长期记忆与语义检索.md) | 长期记忆与语义检索（插件专题设计） | 与代码一致 |
+| [`apps/desktop/README`](../../apps/desktop/README.md) | Tauri 前端 | 与代码一致 |
 | [`crates/symbio-plugin-classify/README`](../../crates/symbio-plugin-classify/README.md) | Classify 插件（对话面：判决） | 与代码一致 |
 | [`crates/symbio-plugin-compact/README`](../../crates/symbio-plugin-compact/README.md) | 上下文压缩能力包（compact） | 与代码一致 |
 | [`crates/symbio-plugin-compose/README`](../../crates/symbio-plugin-compose/README.md) | Compose 插件（对话面：措辞） | 与代码一致 |
@@ -291,7 +292,6 @@ board.columns: [impl]
 | [`crates/symbio-runtime/README`](../../crates/symbio-runtime/README.md) | Server 与共享运行时 | 部分落地 |
 | [`scripts/README`](../../scripts/README.md) | ''`scripts/` —— 脚本目录的布局与机制'' | 与代码一致 |
 | [`scripts/facts/README`](../../scripts/facts/README.md) | ''`scripts/facts/` —— 事实生成器目录'' | 与代码一致 |
-| [`tauri/README`](../../tauri/README.md) | Tauri 前端 | 与代码一致 |
 
 ## 草案（draft）
 

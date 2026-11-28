@@ -17,7 +17,7 @@
  * | `F1` | 标识符：`Turn…` / `turn_…` / `TURN_…` / 裸 `turn` 字段 | `crates/**`（`.rs`） |
  * | `F2` | `turn.<x>` 字面量、`Entity::Turn`、`FinalizesTurn` / `StopsTurn`、`turn_head` 等视图名、`*-turn` 行名 | `crates/**`（`.rs` / `.yml`） |
  * | `F3` | Rust DTO 字段 `turn:` / `turn?` | `crates/symbio/**` + 搬进运行时的两个驱动入口文件（`.rs`） |
- * | `F4` | 前端 / 展示层 `turn` | `tauri/src/**`（`.ts` / `.vue`） |
+ * | `F4` | 前端 / 展示层 `turn` | `packages/ui/src/**`（`.ts` / `.vue`） |
  * | `F5` | 存量数据迁移通道（`chat_node.ts` 旧词折叠） | 单文件 |
  *
  * 每面分**生产 / 测试**两组计数：生产面严格冻结（新增即红），测试面只许降。
@@ -109,14 +109,14 @@ const FACE_DEFS = [
   {
     id: 'F4',
     label: '前端 / 展示层',
-    roots: ['tauri/src'],
+    roots: ['packages/ui/src'],
     exts: ['.ts', '.vue'],
     pattern: /\bturn\b/g,
   },
   {
     id: 'F5',
     label: '存量数据迁移通道',
-    files: ['tauri/src/schemas/chat_node.ts'],
+    files: ['packages/ui/src/schemas/chat_node.ts'],
     exts: ['.ts'],
     pattern: /turn:\s*NODE_KIND_SKELETON/g,
   },

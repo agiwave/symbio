@@ -2,7 +2,7 @@
 /**
  * schema-audit.mjs —— schemas 定义使用情况审计
  *
- * 范围：**只审前端镜像面**（`tauri/src/schemas`）。后端那半边（`symbio_sdk/schemas`）
+ * 范围：**只审前端镜像面**（`packages/ui/src/schemas`）。后端那半边（`symbio_sdk/schemas`）
  * 已随  退役——它的 owner 是 `core-export-audit` C-003，本脚本不再维护第二份口径。
  *
  * 目标：
@@ -58,8 +58,8 @@ console.log('==================== 后端 schemas 审计 ====================\n')
 console.log('  ⊘ 后端半边已退役（）：契约定义的消费方判据由 core-export-audit C-003 承接。\n');
 
 // ---------- 前端 ----------
-const feFiles = walk(join(ROOT, 'tauri/src'), ['.ts', '.vue']);
-const feSchemasRoot = join(ROOT, 'tauri/src/schemas');
+const feFiles = walk(join(ROOT, 'packages/ui/src'), ['.ts', '.vue']);
+const feSchemasRoot = join(ROOT, 'packages/ui/src/schemas');
 // 测试文件本身不是「schema 定义」，不参与被审计集合；但**仍作为消费方**计入
 // （测试引用某个 schema 说明它被使用）。
 const isTestFile = (p) => /[\\/]__tests__[\\/]/.test(p) || /\.(spec|test)\.[cm]?[jt]sx?$/.test(p);

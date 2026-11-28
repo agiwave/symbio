@@ -33,7 +33,7 @@
  *
  * D-006 存在的理由（它是 D-001 的**盲区补丁**）：D-001 只认 Markdown 链接语法
  *   `[文字](目标)`，而本仓正文里指路**更常**写成行内反引号（"详见 `docs/003-design/009-VDFS规范.md`"）。
- *   这种写法 D-001 一个字都看不到——实测 `tauri/docs/110-FRONTEND.md` 首段引用的
+ *   这种写法 D-001 一个字都看不到——实测 `apps/desktop/docs/110-FRONTEND.md` 首段引用的
  *   doc-link-allow D-010: 下行是讲述 D-006 缺陷的史实指认（文件确已不存在），非入链
  *   `docs/003-design/frontend-ui-ux-prd.md` 与 `-design.md` **两个文件均不存在**，
  *   而 D-001 报「失效 0 条」已经很久了。**守卫报 0 不等于没有坏链，只等于它看不见。**
@@ -134,7 +134,7 @@
  * 扫描范围（与「文档下沉原则」对齐：单模块文档在该模块目录内）：
  *   docs/                系统级文档（**archive/ 除外**，见下）
  *   crates/          插件模块文档（plugins/<plugin>/README.md + plugins/<plugin>/docs/）
- *   tauri/               前端模块文档（README.md + docs/）
+ *   apps/desktop/               前端模块文档（README.md + docs/）
  *   cli/                 命令行模块文档（README.md + docs/）
  *   e2e/                 e2e 用例说明（README.md）
  *   .github/             工作流说明文档
@@ -200,7 +200,7 @@ const repoRoot = rootArg ? path.resolve(rootArg.slice(7)) : defaultRoot
 // "没加 --strict 所以没拦住"是预期行为。
 
 /** 扫描根（相对 repoRoot）；目录递归，文件直接检查 */
-const ROOTS = ['docs', 'crates', 'tauri', 'e2e', '.github', 'examples']
+const ROOTS = ['docs', 'crates', 'apps', 'desktop', 'e2e', '.github', 'examples']
 
 /** 根目录下的散落 Markdown */
 const ROOT_FILES = ['AGENTS.md', 'README.md', 'CONTRIBUTING.md', 'CODE_OF_CONDUCT.md']
@@ -875,7 +875,7 @@ if (malformedLinks.length > 0) {
 // 扫描范围 = 活文档根（`docs/` + 模块文档 + `e2e` / `.github` 说明 + 根目录散落 md）；
 // `examples/` 是示例包内容，不是项目文档，跳过（同 D-002 一直以来的口径）。
 // 三条规矩**共用同一次读盘**：分三遍读等于让守卫的代价翻三倍，而它们的扫描范围完全一致。
-const BODY_ROOTS = ['docs', 'crates', 'tauri', 'e2e', '.github']
+const BODY_ROOTS = ['docs', 'crates', 'apps', 'desktop', 'e2e', '.github']
 /**
  * 散文体检整体豁免 `docs/007-task/` 与 `docs/005-spec/`：
  *   · `007-task` 的 `## 处理过程` 就是它的职责（唯一允许写过程的 kind）；

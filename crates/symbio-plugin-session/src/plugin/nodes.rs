@@ -353,7 +353,7 @@ pub(crate) const TITLE_MESSAGES: &str = "消息";
 ///
 /// `name` = 路径段（[`SEG_MESSAGES`]，ASCII）、`title` = 展示名（[`TITLE_MESSAGES`]）。
 /// `kind` 承担对外标识：消费者按它发现这一段，不必把段名写进自己的地址模板
-/// （见 `tauri/src/services/vdfsScheme.ts::resolveMessagesSeg`）。
+/// （见 `packages/ui/src/services/vdfsScheme.ts::resolveMessagesSeg`）。
 pub(crate) fn messages_dir_node() -> VdfsNode {
     let mut node = VdfsNode::dir(SEG_MESSAGES, TITLE_MESSAGES, VdfsAccess::LIST);
     node.kind = KIND_MESSAGES.to_string();

@@ -20,18 +20,18 @@ import { auditCase } from '../audit-assert.mjs'
 const script = fileURLToPath(new URL('./mechanism-audit.mjs', import.meta.url))
 
 /**
- * 在临时目录里搭一棵最小 `tauri/src` 树并跑审计。
+ * 在临时目录里搭一棵最小 `packages/ui/src` 树并跑审计。
  *
- * @param {Record<string, string>} files 相对 `tauri/src`（或以 `crates/symbio-cli/` 开头时相对
- *   `crates/symbio-cli/src`）的路径 → 内容
+ * @param {Record<string, string>} files 相对 `packages/ui/src`（或以 `apps/cli/` 开头时相对
+ *   `apps/cli/src`）的路径 → 内容
  * @param {{strict?: boolean}} [opts]
  */
 function audit(files, { strict = false } = {}) {
   return withTempTree({}, (root) => {
     for (const [rel, content] of Object.entries(files)) {
       const abs = rel.startsWith('cli/')
-        ? path.join(root, 'crates', 'symbio-cli', 'src', rel.slice('cli/'.length))
-        : path.join(root, 'tauri', 'src', rel)
+        ? path.join(root, 'apps', 'cli', 'src', rel.slice('cli/'.length))
+        : path.join(root, 'packages', 'ui', 'src', rel)
       fs.mkdirSync(path.dirname(abs), { recursive: true })
       fs.writeFileSync(abs, content)
     }
@@ -298,7 +298,7 @@ test('M-008 不误报：注释里提到地址（判定看去注释后的代码�
 })
 
 // ── M-009 / M-010：CLI 的协议读法与地址常量 ─────────────────────────────
-test('M-009 命中：crates/symbio-cli/src 里直接读 meta 字段', () => {
+test('M-009 命中：apps/cli/src 里直接读 meta 字段', () => {
   const r = audit({
     ...CLEAN,
     'cli/client.rs': `fn kind(node: &ChatNode) -> bool {\n    node.meta.is_some()\n}\n`,
@@ -323,7 +323,7 @@ test('M-009 不误报：整体透传 meta（赋值 / 序列化）不算解释字
   assert.equal(r.status, 0, r.stdout)
 })
 
-test('M-010 命中：crates/symbio-cli/src 里再定义一份地址段常量（第二份真相）', () => {
+test('M-010 命中：apps/cli/src 里再定义一份地址段常量（第二份真相）', () => {
   const r = audit({
     ...CLEAN,
     'cli/client.rs': `const SESSION_SEG: &str = "session";\nconst OUTCOME_ABORTED: &str = "aborted";\n`,

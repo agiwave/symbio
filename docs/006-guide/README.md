@@ -23,7 +23,7 @@ desc: 怎么用——上手 / 贡献 / 排障
 
 `guide`（指南）的条目**在位存放**：文件本身就是登记，`title` 逐字等于正文首个 H1（RG-021 两面对账）。
 
-**计数**：active 16 · draft 0 · retired 0（共 16）
+**计数**：active 17 · draft 0 · retired 0（共 17）
 
 ## 现行文档（active）
 
@@ -34,15 +34,16 @@ desc: 怎么用——上手 / 贡献 / 排障
 | [`CONTRIBUTING`](../../CONTRIBUTING.md) | Contributing to Symbio |
 | [`GU-001-QUICKSTART_CN`](../../.github/workflows/001-QUICKSTART_CN.md) | 🚀 自动构建指南 |
 | [`GU-002-SECRETS_SETUP`](../../.github/workflows/002-SECRETS_SETUP.md) | GitHub Actions 密钥配置指南 |
-| [`GU-003-building`](../../crates/symbio-cli/docs/003-building.md) | 构建 |
-| [`GU-004-usage`](../../crates/symbio-cli/docs/004-usage.md) | 用法 |
+| [`GU-003-building`](../../apps/cli/docs/003-building.md) | 构建 |
+| [`GU-004-usage`](../../apps/cli/docs/004-usage.md) | 用法 |
 | [`GU-005-PLUGIN_DEVELOPMENT`](005-PLUGIN_DEVELOPMENT.md) | Symbio 插件开发指南 |
 | [`GU-006-QUICK_START`](006-QUICK_START.md) | Symbio 快速上手 |
 | [`GU-007-TROUBLESHOOTING`](007-TROUBLESHOOTING.md) | Symbio 故障排查指南 |
 | [`GU-008-ORIENTATION`](008-ORIENTATION.md) | Symbio 心智模型入门（30 分钟） |
 | [`README`](../../README.md) | Symbio |
-| [`crates/symbio-cli/README`](../../crates/symbio-cli/README.md) | symbio-cli |
-| [`crates/symbio-cli/docs/README`](../../crates/symbio-cli/docs/README.md) | symbio-cli 文档中心 |
+| [`apps/cli/README`](../../apps/cli/README.md) | symbio-cli |
+| [`apps/cli/docs/README`](../../apps/cli/docs/README.md) | symbio-cli 文档中心 |
+| [`apps/web/README`](../../apps/web/README.md) | Symbio Web 交付物 |
 | [`docs/README`](../README.md) | Symbio 文档中心 |
 | [`e2e/README`](../../e2e/README.md) | e2e 测试环境（CLI 模式） |
 

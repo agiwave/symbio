@@ -1,6 +1,6 @@
 #!/usr/bin/env node
 /**
- * 事实 · `tauri/src/constants/routes.gen.ts` —— 控制面路由常量的前端侧投影
+ * 事实 · `packages/ui/src/constants/routes.gen.ts` —— 控制面路由常量的前端侧投影
  *
  * ## 它解决的是「同一个契约手写两份」
  *
@@ -33,7 +33,7 @@ import path from "node:path";
 
 // 本文件住 `scripts/facts/`，故仓根要上溯两级（原来在 `scripts/` 下只需一级）。
 const ROOT = path.resolve(path.dirname(fileURLToPath(import.meta.url)), "..", "..");
-const OUT_REL = "tauri/src/constants/routes.gen.ts";
+const OUT_REL = "packages/ui/src/constants/routes.gen.ts";
 
 const HEADER = `/**
  * 控制面路由常量 —— **由后端生成，请勿手改**。

@@ -48,7 +48,7 @@ symbio/
 │ ├── symbio-provider-*/ # 基础设施（嵌入、文件存储）
 │ ├── symbio/ # 装配 crate：根插件装配入口
 │ └── symbio-cli/ # 纯 Rust CLI 前端
-├── tauri/ # Vue 3 桌面端
+├── apps/desktop/ # Vue 3 桌面端
 │ ├── src/ # 前端代码
 │ └── src-tauri/ # 仅 3 个 Tauri command 的薄适配层
 ├── docs/ # 系统级文档（历史只留 git log，不设归档目录）
@@ -264,7 +264,7 @@ CI 侧另有 `commit-msg-check` job，用 `--range` 把本次引入的提交逐�
  - 审计脚本 `scripts/audits/grep-audit.mjs` 中的 **S-002 规则**默认扫描全部插件（含测试代码）；这是邻近行启发式检查，不替代锁生命周期审查。
  - 已人工确认的 S-002 误报可在命中行末添加 `// grep-audit-allow S-002: 具体理由`，仅豁免该行，不应借此隐藏真实跨 await 持锁。回归测试 `node --test scripts/audits/grep-audit.test.mjs` 已接入统一门禁。
 - 日志：使用 `tracing`（`info!` / `warn!` / `error!` / `debug!`），**不要**用 `eprintln!` / `println!`。
- - 项目在 `tauri/src-tauri/src/main.rs` 已初始化 `tracing-subscriber`。
+ - 项目在 `apps/desktop/src-tauri/src/main.rs` 已初始化 `tracing-subscriber`。
 - 错误：实现 `thiserror` 派生 `PluginError` 变体，不要用 `String` 当错误类型。
 - 新增能力：优先在合适的 `Plugin` 下添加子路径（`worker/xxx/yyy`），
  路由规则见 [docs/003-design/002-架构总览.md](docs/003-design/002-架构总览.md "DE-002-架构总览")，
@@ -332,7 +332,7 @@ mod tests;
  `capability_announce_configurable(&ctx, &self.config_file)`——设置页列的就是各插件
  自己交出来的这份配置文档，**没有中心注册表**要改。
 5. 若插件要出现在前端：**无需手写路由常量**——在插件 `route` 里加一条 `match` 臂，生成器即把它
- 投影进 `tauri/src/constants/routes.gen.ts`；再到 `tauri/src/services/` 下加对应 TS 客户端、导入那个常量。
+ 投影进 `packages/ui/src/constants/routes.gen.ts`；再到 `packages/ui/src/services/` 下加对应 TS 客户端、导入那个常量。
 6. 文档按**唯一来源**更新：**新增路由只在 [003-ROUTES.md](docs/004-ref/003-ROUTES.md "RE-003-ROUTES") 登记**（模块 `README.md` 不抄路由表，只写机制并指向它）；配置项进 001-CONFIGURATION.md、错误码进 002-ERROR_CODES.md；插件 / 挂载点 / 工具变更后重跑 `node scripts/facts/current.mjs`。
 
 > **变更历史就是 `git log`，本仓库不维护 `CHANGELOG.md`**——git 记录比手抄更准确、不会漂移，
@@ -352,7 +352,7 @@ mod tests;
 
  <details>
  ```
- scope 例：`agent` / `tauri/services` / `docs`。
+ scope 例：`agent` / `apps/desktop/services` / `docs`。
 3. 推送后通过 PR 提交，CI 必须全绿。
 4. 至少 1 位 maintainer 审阅通过后可合入。
 5. 涉及架构变更的 PR：先更新最贴题的设计规范与跨模块约束，「改了什么 / 为什么」写在提交信息里；

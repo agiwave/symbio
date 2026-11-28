@@ -11,27 +11,27 @@ import { auditCase, expectAudit } from '../audit-assert.mjs'
 // 有「注入真实违规并断言脚本变红」的回归测试——否则规则写错了也不会有人发现。
 //
 // 脚本的仓库根由 `--root=` 注入，故这里在临时目录造一棵**最小仓库**：
-//   <root>/tauri/index.html  → /src/main.ts   （前端侧需要一个可达入口，否则
-//   <root>/tauri/src/main.ts                   前端分支会把 fixture 当死代码）
+//   <root>/packages/ui/index.html   → /src/main.ts   （前端侧需要一个可达入口，否则
+//   <root>/packages/ui/src/main.ts                   前端分支会把 fixture 当死代码）
 //   <root>/crates/*.rs                    （Rust 侧被检对象）
 const script = fileURLToPath(new URL('./dead-code-audit.mjs', import.meta.url))
 
 function audit(rustFiles, { waiver = null, env: extraEnv = {}, ts = {} } = {}) {
   return withTempTree({}, (root) => {
-    fs.mkdirSync(path.join(root, 'tauri/src'), { recursive: true })
+    fs.mkdirSync(path.join(root, 'packages/ui/src'), { recursive: true })
     fs.writeFileSync(
-      path.join(root, 'tauri/index.html'),
+      path.join(root, 'packages/ui/index.html'),
       '<script type="module" src="/src/main.ts"></script>\n',
     )
     // 前端夹具：`ts` 里每份文件都从 `main.ts` 静态 import 一次，好让它们进**可达集**
     // （L1 依赖图只扫可达文件——没被 import 的文件根本不会进 R-003 的判定面）。
     const imports = Object.keys(ts).map((name) => `import './${name}'`)
     fs.writeFileSync(
-      path.join(root, 'tauri/src/main.ts'),
+      path.join(root, 'packages/ui/src/main.ts'),
       [...imports, 'const app = 1', 'console.log(app)'].join('\n') + '\n',
     )
     for (const [name, src] of Object.entries(ts)) {
-      fs.writeFileSync(path.join(root, 'tauri/src', name), src)
+      fs.writeFileSync(path.join(root, 'packages/ui/src', name), src)
     }
     fs.mkdirSync(path.join(root, 'crates'), { recursive: true })
     for (const [name, src] of Object.entries(rustFiles)) {

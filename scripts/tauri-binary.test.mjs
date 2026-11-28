@@ -44,10 +44,10 @@ const write = (rel, content) => {
   fs.writeFileSync(p, content)
 }
 
-write('tauri/src-tauri/src/main.rs', 'fn main() { println!("v1"); }\n')
-write('tauri/src-tauri/capabilities/default.json', '{ "identifier": "default" }\n')
-write('tauri/src-tauri/tauri.conf.json', '{ "productName": "symbio" }\n')
-write('tauri/src-tauri/Cargo.toml', '[package]\nname = "symbio-tauri"\nversion = "0.1.0"\n')
+write('apps/desktop/src-tauri/src/main.rs', 'fn main() { println!("v1"); }\n')
+write('apps/desktop/src-tauri/capabilities/default.json', '{ "identifier": "default" }\n')
+write('apps/desktop/src-tauri/tauri.conf.json', '{ "productName": "symbio" }\n')
+write('apps/desktop/src-tauri/Cargo.toml', '[package]\nname = "symbio-tauri"\nversion = "0.1.0"\n')
 write('crates/symbio/lib.rs', 'pub fn f() -> u32 { 1 }\n')
 write('crates/symbio/Cargo.toml', '[package]\nname = "symbio"\nversion = "0.1.0"\n')
 
@@ -64,12 +64,12 @@ after(() => {
 test('构建输入清单覆盖壳自身与它挂载的插件树', () => {
   const rels = tauriBuildInputs(root).map((p) => path.relative(root, p).split(path.sep).join('/'))
   assert.deepEqual(rels, [
+    'apps/desktop/src-tauri/Cargo.toml',
+    'apps/desktop/src-tauri/capabilities/default.json',
+    'apps/desktop/src-tauri/src/main.rs',
+    'apps/desktop/src-tauri/tauri.conf.json',
     'crates/symbio/Cargo.toml',
     'crates/symbio/lib.rs',
-    'tauri/src-tauri/Cargo.toml',
-    'tauri/src-tauri/capabilities/default.json',
-    'tauri/src-tauri/src/main.rs',
-    'tauri/src-tauri/tauri.conf.json',
   ])
 })
 
@@ -79,7 +79,7 @@ test('同一份输入 ⇒ 同一个指纹（否则「新鲜」永远判不出来
 
 test('壳源码改一个字节 ⇒ 指纹变', () => {
   const before = tauriBuildFingerprint(root)
-  write('tauri/src-tauri/src/main.rs', 'fn main() { println!("v2"); }\n')
+  write('apps/desktop/src-tauri/src/main.rs', 'fn main() { println!("v2"); }\n')
   assert.notEqual(tauriBuildFingerprint(root), before, '壳侧源码改动必须让指纹失效')
 })
 
@@ -99,7 +99,7 @@ test('新增一个插件源文件 ⇒ 指纹变', () => {
 
 test('capabilities 改动 ⇒ 指纹变（权限集是产物的一部分）', () => {
   const before = tauriBuildFingerprint(root)
-  write('tauri/src-tauri/capabilities/default.json', '{ "identifier": "default", "windows": [] }\n')
+  write('apps/desktop/src-tauri/capabilities/default.json', '{ "identifier": "default", "windows": [] }\n')
   assert.notEqual(tauriBuildFingerprint(root), before)
 })
 
@@ -162,7 +162,7 @@ test('产物比戳旧 ⇒ 不新鲜（写戳之后的那次构建没有产出它
 })
 
 test('源码再改 ⇒ 已写好的戳立刻失效（这就是它要防的那一刻）', () => {
-  write('tauri/src-tauri/src/main.rs', 'fn main() { println!("v3"); }\n')
+  write('apps/desktop/src-tauri/src/main.rs', 'fn main() { println!("v3"); }\n')
   const st = tauriBinaryState(root)
   assert.equal(st.fresh, false)
   assert.equal(st.staleReason, '构建输入自上次构建后已改变')
@@ -198,7 +198,7 @@ test('构建输入未变 ⇒ 戳不重写（否则「什么都不用重建」会
   assert.equal(fs.statSync(again.stamp).mtimeMs, before, '未改写 ⇒ 戳的 mtime 必须原地不动')
 
   // 输入真的变了才重写
-  write('tauri/src-tauri/capabilities/default.json', '{ "identifier": "default", "permissions": [] }\n')
+  write('apps/desktop/src-tauri/capabilities/default.json', '{ "identifier": "default", "permissions": [] }\n')
   const changed = writeTauriStamp(root, { profile: 'debug' })
   assert.equal(changed.rewritten, true)
 })

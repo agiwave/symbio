@@ -200,7 +200,7 @@ export default defineCase('T15 子智能体空间自驱动：写 inbox → 空�
     // ── ③b 排队条目的**节点视图** = 前端「待发送」气泡的唯一数据源
     //
     // 气泡不显示全文（全文由落库后的转写帧给，**同一个 id**，见
-    // `tauri/src/stores/sessionInboxSync.ts`）：排队期间它拿得到的只有 `stat` /
+    // `packages/ui/src/stores/sessionInboxSync.ts`）：排队期间它拿得到的只有 `stat` /
     // `list` 给的节点视图。于是 `kind = inbox`（分清「待发」与「已发生」）与
     // `description` 的「待消费 · <预览>」是一条**对外契约**——改了它，前端的
     // 排队气泡只会退化成一串空壳，而后端一切照旧。

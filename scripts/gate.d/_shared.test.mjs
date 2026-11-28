@@ -521,7 +521,7 @@ test('gate：调守卫必须传 --strict，否则 WARNING 级判定永不红', (
 // ── 首次真实 CI（2026-10-07，run 37629977724）暴露的四个配置缺口 ──────────────
 //
 // 这四条的共同点是：**缺口只在 CI 环境里存在，本机永远复现不出来**——本地 Windows
-// 不编 GTK、本地 `tauri/node_modules` 一直在、本地 1.93.1 编 cargo-audit 时依赖还没
+// 不编 GTK、本地 `apps/desktop/node_modules` 一直在、本地 1.93.1 编 cargo-audit 时依赖还没
 // 跑到需要 1.96、本地日志文件直接能打开。所以它们不会以"跑得慢"或"报错"的形式被人
 // 发现，只会以**红了但没人看得懂**或**绿了但根本没跑**的形式存在。四个都是实测，
 // 不是推演；断言钉住的是「改回去也照样红」。
@@ -551,11 +551,11 @@ test('ci.yml：e2e job 必须装 tauri 的 node 依赖，否则 42 例在 import
   const block = jobBlock(ciYml(), 'e2e-check', 'docs-validation')
   assert.match(
     block,
-    /working-directory:\s*tauri\s*\n\s*run:\s*npm ci\s*$/m,
-    // 缺了它：`e2e/helpers.mjs` 第 16 行 `import '../tauri/node_modules/ws/index.js'`
+    /working-directory:\s*packages\/ui\s*\n\s*run:\s*npm ci\s*$/m,
+    // 缺了它：`e2e/helpers.mjs` 第 16 行 `import '../apps/desktop/node_modules/ws/index.js'`
     // 解析失败 ⇒ 每个用例 import 期 exit=1 ⇒ 实测「42/42 全红、每例 0s」，
     // 与"用例本身坏了"同形。`frontend-checks` 有 `npm ci` 不代表这个 job 有。
-    'e2e job 没有在 tauri/ 跑 npm ci ⇒ 42 个用例全部在 import 期失败（与用例坏了同形）',
+    'e2e job 没有在 packages/ui/ 跑 npm ci ⇒ 42 个用例全部在 import 期失败（与用例坏了同形）',
   )
 })
 
@@ -564,7 +564,7 @@ test('ci.yml：rust-checks 必须装 GTK 系统库，否则 workspace 编不过'
   assert.match(
     block,
     /libwebkit2gtk|libgtk-3-dev/,
-    // workspace 的 members 含 `tauri/src-tauri` ⇒ Linux 上 `gobject-sys` / `gtk-sys` /
+    // workspace 的 members 含 `apps/desktop/src-tauri` ⇒ Linux 上 `gobject-sys` / `gtk-sys` /
     // `webkit2gtk-sys` 都要跑 pkg-config。实测首红是
     // 「Package gobject-2.0 was not found in the pkg-config search path」。
     // 只装 openssl 是不够的：openssl 那步当时是绿的，红的是它后面的 GTK 链。
@@ -591,13 +591,13 @@ test('ci.yml：cargo-audit 不能用项目 pin 的工具链编（会红在装工
 
 // 第二轮 CI（2026-10-07，run 37635738557）暴露的两处：同样是「前置只存在于开发者的
 // 机器上」，且同样是剥掉上一层壳之后才露出来的。
-test('ci.yml：rust-checks 必须自己产出 tauri/dist，否则 generate_context! 编译期炸', () => {
+test('ci.yml：rust-checks 必须自己产出 apps/desktop/dist，否则 generate_context! 编译期炸', () => {
   const block = jobBlock(ciYml(), 'rust-checks', 'msrv-check')
   assert.match(
     block,
-    /working-directory:\s*tauri\s*\n\s*run:\s*npm ci && npm run build/,
+    /working-directory:\s*packages\/ui\s*\n\s*run:\s*npm ci && npm run build/,
     // `tauri::generate_context!()` 是编译期宏，读 `frontendDist: "../dist"` 且要求该
-    // 路径存在；`tauri/dist` 被 tauri/.gitignore 忽略、**只在开发者本机存在**。
+    // 路径存在；`apps/desktop/dist` 被 apps/desktop/.gitignore 忽略、**只在开发者本机存在**。
     // 缺了它：`error: proc macro panicked` ⇒ `--workspace` 的 check/test/clippy/doc
     // 四步**全红**，而报错指向的是一段完全正常的 Rust 代码。
     'rust-checks 没有构建前端产物 ⇒ symbio-tauri 编译期 panic，四步全红且报错指向正常代码',

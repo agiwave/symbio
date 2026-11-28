@@ -1,0 +1,104 @@
+/**
+ * VDFS 地址换算 —— 「浏览器地址 ↔ 数据地址」的**唯一来源**
+ *
+ * 数据地址（`<根>/<rel>`）与浏览器地址（`/vdfs/<rel>`）是**两个概念**：
+ * 前者是 VDFS 的寻址空间（控件只认它），后者只是路由的承载形式。
+ * 换算规则原先内联在 `views/VdfsView.vue` 里——那里是路由宿主，装配多、依赖多
+ * （vue-router / store / 子组件），换算规则因此**测不到**。搬到这里之后规则与
+ * 实现同处，回归由 `schemas/__tests__/vdfsAddress.spec.ts` 钉住。
+ *
+ * ## 三条规则
+ *
+ * 1. **相对路径 → 数据地址**：空 → 根锚点；否则 `<根>/<rel>`。
+ *    vue-router 的 `:dir(.*)*` 参数在**多级**时给数组、单级时给字符串、缺省时给
+ *    空串，这里统一收口，调用方不必分辨。
+ * 2. **数据地址 → 浏览器地址**：根 → `/vdfs`；根之下 → `/vdfs/<rel>`。
+ *    ⚠️ 非虚拟地址（不在根之下）**一律兜底 `/vdfs`**，绝不把外来地址
+ *    拼进 URL——拼错的地址会静默打开一个空页面。
+ * 3. **深地址判定**：`/vdfs/<something>` 才是深地址，但深地址 ≠ 该显示返回键——
+ *    冷启动 `replace` 落点也是深地址却没有来源页；**一级类别页**（`/vdfs/<挂载名>`，
+ *    左栏切类别得到）虽有来源页，也不是「进入子页」。返回键判据见 `shouldShowBack`。
+ *
+ * 根叫什么不归本文件：一律读 [`vdfsRoot`]（启动期经 `vdfs/root` 引导）。
+ *
+ * 规范：../../../../docs/003-design/010-VDFS前端页面规范.md（路由宿主只做承载）
+ */
+
+import { vdfsRoot } from './vdfsRoot'
+
+/** 首页的浏览器地址 */
+export const VDFS_HOME_PATH = '/vdfs'
+
+/**
+ * 路由参数（相对路径）→ 数据地址。
+ *
+ * `:dir(.*)*` 的取值有三种形态：多级 = `string[]`、单级 = `string`、
+ * 缺省 = `''`。这里统一成「相对路径字符串」再拼。
+ */
+export function vdfsAddrOf(rel: string | string[] | undefined | null): string {
+  const root = vdfsRoot()
+  if (Array.isArray(rel)) {
+    const joined = rel.filter(Boolean).join('/')
+    return joined ? `${root}/${joined}` : root
+  }
+  const s = (rel ?? '').trim()
+  return s ? `${root}/${s}` : root
+}
+
+/**
+ * 数据地址 → 浏览器地址。
+ *
+ * ⚠️ 非虚拟地址兜底 `/vdfs`：宁可回首页，也不把外来地址拼进 URL。
+ * ⚠️ 根**未引导**时同样兜底：此时前缀判据退化成「以 `/` 开头」，而那正是
+ *    **浏览器地址**自己的形状——外来地址会被当成虚拟地址接出去，得到一个
+ *    谁也打不开的空页面。判不出虚拟就不是虚拟。
+ */
+export function vdfsBrowserPathOf(addr: string): string {
+  const root = vdfsRoot()
+  const a = (addr ?? '').trim()
+  if (!root) return VDFS_HOME_PATH
+  if (a === root) return VDFS_HOME_PATH
+  if (a.startsWith(`${root}/`)) return `${VDFS_HOME_PATH}/${a.slice(root.length + 1)}`
+  return VDFS_HOME_PATH
+}
+
+/**
+ * 是否**深地址页**（`/vdfs/<…>` 形态，而非首页 `/vdfs`）。
+ *
+ * ⚠️ 这只是「地址形状」判定，**不等于**「该显示返回键」——冷启动 `replace` 落点
+ * 也是深地址，却没有来源页可返。要判返回键，用 [`shouldShowBack`]。
+ */
+export function isVdfsDeepPage(path: string): boolean {
+  return (path ?? '').startsWith(`${VDFS_HOME_PATH}/`)
+}
+
+/**
+ * 左上角返回键该不该出现。
+ *
+ * 三个条件缺一不可：
+ * 1. **深地址**（`isVdfsDeepPage`）——首页恒不显示；
+ * 2. **有 push 来源**——`window.history.state.back` 非空。冷启动落点虽是深地址
+ *    （会话目录），却是 `replace` 进去的、没有上一页，不是「进入子页面」，
+ *    因此不显示；
+ * 3. **地址深过一级类别页**——`/vdfs/<挂载名>`（如 `/vdfs/session` /
+ *    `/vdfs/model`）是**左栏切类别**得到的平级页面，不是子页。菜单切换本身就是
+ *    导航，给它配返回键等于在每条类别之间塞一个无意义的「回上一类」；只有
+ *    `/vdfs/<挂载名>/<…>`（点开容器 / 会话 / 工作目录钻进去）才是子页。
+ *
+ * 第 2、3 条是两件事：只看来源会把「会话 → 模型」这类平级切换误判成钻入
+ * （push 当然有来源），只看段数又会在冷启动落点上误显。两者同时成立才算
+ * 「用户从上一个页面钻进了这里」。
+ *
+ * `hasBackSource` 由调用方从 `window.history.state?.back != null` 求出并传入：
+ * 判据本体因此不碰 DOM，可在 `vdfsAddress.spec.ts` 里直接测。与 `VdfsView.goBack`
+ * 的兜底判据同源——显示与点击走同一份真相，不会出现「有键却无处可返」。
+ *
+ * @param path 浏览器地址（传 `route.path` 或 `route.fullPath` 均可，query 不影响段数判定）
+ * @param hasBackSource 是否存在真实的 push 来源页
+ */
+export function shouldShowBack(path: string, hasBackSource: boolean): boolean {
+  if (!hasBackSource || !isVdfsDeepPage(path)) return false
+  // 去掉 query / hash 再数段；空段（`/vdfs/model/`）不算一级子页。
+  const rel = (path ?? '').split(/[?#]/, 1)[0].slice(VDFS_HOME_PATH.length + 1)
+  return rel.split('/').filter(Boolean).length >= 2
+}

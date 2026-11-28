@@ -55,40 +55,40 @@ const ok = true
 </script>
 `
 
-auditCase('干净夹具 → 通过（不误报正常写法）', () => run({ 'tauri/src/Clean.vue': clean }), 0, [
+auditCase('干净夹具 → 通过（不误报正常写法）', () => run({ 'packages/ui/src/Clean.vue': clean }), 0, [
   /frontend-ux-audit|结果/,
 ])
 
 test('UX-001：原生 confirm 会冻结 WebView → 红', () => {
   const r = run({
-    'tauri/src/Bad.vue': '<script>confirm("真的删除？")</script>',
+    'packages/ui/src/Bad.vue': '<script>confirm("真的删除？")</script>',
   })
   expectAudit(r, 1, [/UX-001/, /Bad\.vue/])
 })
 
 test('UX-002：纯 SVG 按钮没有可访问名称 → 红', () => {
   const r = run({
-    'tauri/src/Bad.vue': '<template><button @click="go"><svg /></button></template>',
+    'packages/ui/src/Bad.vue': '<template><button @click="go"><svg /></button></template>',
   })
   expectAudit(r, 1, [/UX-002/, /Bad\.vue/])
 })
 
 test('UX-003：只有 placeholder 的输入框 → 红', () => {
   const r = run({
-    'tauri/src/Bad.vue': '<template><input placeholder="输入模型名" /></template>',
+    'packages/ui/src/Bad.vue': '<template><input placeholder="输入模型名" /></template>',
   })
   expectAudit(r, 1, [/UX-003/, /Bad\.vue/])
 })
 
 test('UX-004：图片没有 alt → 红', () => {
   const r = run({
-    'tauri/src/Bad.vue': '<template><img src="logo.png" /></template>',
+    'packages/ui/src/Bad.vue': '<template><img src="logo.png" /></template>',
   })
   expectAudit(r, 1, [/UX-004/, /Bad\.vue/])
 })
 
 test('边界：读不到 .vue 时不能静默全绿 → 退出码 2', () => {
-  const r = run({ 'tauri/src/readme.txt': 'not a vue file' })
+  const r = run({ 'packages/ui/src/readme.txt': 'not a vue file' })
   assert.equal(r.status, 2, r.stdout + r.stderr)
   assert.match(r.stderr, /读不到任何 \.vue/)
 })
