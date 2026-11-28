@@ -55,9 +55,13 @@ describe('DirectoryPicker', () => {
 
     expect(H.getHostRuntime).toHaveBeenCalled()
     expect(H.listHostDirectories).toHaveBeenCalledWith('/srv/home/me')
-    expect(w.find('.current-path').text()).toBe('/srv/home/me')
+    // 当前路径只在输入框显示一次，不再另起一行重复一份
+    expect((w.get('.path-input').element as HTMLInputElement).value).toBe('/srv/home/me')
     expect(w.find('.root-btn').text()).toBe('/')
     expect(w.find('.directory-entry').text()).toContain('projects')
+    // 条目只显示末段名称，完整路径留在 title 上供悬停核对
+    expect(w.find('.directory-entry').text()).not.toContain('/srv/home/me/projects')
+    expect(w.find('.directory-entry').attributes('title')).toBe('/srv/home/me/projects')
   })
 
   it('绝对初始路径直接请求 Server 目录；进入子目录与上一步都带 Server 路径', async () => {
@@ -91,7 +95,7 @@ describe('DirectoryPicker', () => {
     expect(w.find('.btn-primary').attributes('disabled')).toBeDefined()
     await w.find('.retry-btn').trigger('click')
     await flushPromises()
-    expect(w.find('.current-path').text()).toBe('/srv/home/me')
+    expect((w.get('.path-input').element as HTMLInputElement).value).toBe('/srv/home/me')
     expect(w.find('.btn-primary').attributes('disabled')).toBeUndefined()
   })
 
@@ -101,7 +105,7 @@ describe('DirectoryPicker', () => {
     const input = w.get('.path-input')
     await input.setValue('projects')
     await w.find('.path-form').trigger('submit')
-    expect(w.get('[role="alert"]').text()).toContain('绝对路径')
+    expect(w.get('[role="alert"]').text()).toContain('完整路径')
     expect(H.listHostDirectories).toHaveBeenCalledTimes(1)
 
     await input.setValue('~/projects')

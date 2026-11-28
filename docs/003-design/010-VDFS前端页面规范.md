@@ -87,7 +87,7 @@ deps: [DE-009-VDFS规范]
 | `components/vdfs/rendererContract.ts` | 渲染器统一契约（所有渲染器共用的 props 一份接口） |
 | `components/vdfs/*.vue` | form / text / session / message / readonly 五个详情渲染器 |
 | `components/vdfs/VdfsWorkbench.vue` | **VDFS 三栏工作台（全 App 唯一）**：绑定数据地址，自取左栏 / 中栏 / 详情 |
-| `views/VdfsView.vue` | 路由宿主：浏览器地址 ↔ 数据地址换算 + 宿主件注入（返回键 / logo / 系统目录） |
+| `views/VdfsView.vue` | 路由宿主：浏览器地址 ↔ 数据地址换算 + 宿主件注入（返回键 / logo / 数据位置） |
 | `router/index.ts` | `/vdfs/:dir(.*)*`（`MainLayout` 子路由；深链/返回键多级地址） |
 
 **实时面只有一条通道**：`event_bus` 的 `vdfs` 频道 + `vdfs/watch` 登记（§6）。
@@ -175,7 +175,7 @@ deps: [DE-009-VDFS规范]
  渲染：左栏 = 绑定地址的子目录清单、中栏 = 选中子目录内容、右栏 = 详情。
  **没有独立的导航数据层**，`useVdfs.ts` 是唯一数据层，
  首页与内部管理页只有绑定地址不同：
- - 首页绑 `<根>`（路由 `/vdfs`），左下角注入系统目录入口；
+ - 首页绑 `<根>`（路由 `/vdfs`），左下角注入数据位置入口；
 - 有 push 来源的**子地址页**绑 `<根>/<dir…>`（如会话内部 `<根>/session/<id>`），
   左上角注入返回键（回 **push 来源页** = 浏览器历史 back）。判据是「深地址 +
   有来源 + 深过一级类别页」三件事：`shouldShowBack`（`schemas/vdfsAddress`）

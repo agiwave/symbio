@@ -150,8 +150,11 @@ export function isValidRemoteUrl(url: string): boolean {
   return host === 'localhost' || host.includes('.') || isIp
 }
 
-/** 展示用文本 */
+/**
+ * 展示用短标签：只给路径本身，不再叠加「当前 Server」之类的实现前缀
+ * （入口按钮已有明确文案，再加前缀就是同一信息显示两遍）。
+ */
 export function formatLocation(loc: SystemLocation): string {
-  if (loc.kind === 'remote') return loc.remoteUrl || '(远端)'
-  return loc.localPath ? `当前 Server：${loc.localPath}` : '当前 Server'
+  if (loc.kind === 'remote') return loc.remoteUrl || '远端服务'
+  return loc.localPath || '默认位置'
 }

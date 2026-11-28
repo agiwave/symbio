@@ -42,7 +42,7 @@ function isRecord(value: unknown): value is Record<string, unknown> {
 async function fetchHostJson(pathname: string): Promise<unknown> {
   await initGatewayTransport()
   const endpoint = getOutboundEndpoint().replace(/\/+$/, '')
-  if (!endpoint) throw new Error('当前连接没有可用的 Server HTTP 地址')
+  if (!endpoint) throw new Error('当前没有可用的服务连接，请检查数据位置')
 
   const headers: Record<string, string> = { Accept: 'application/json' }
   const token = getOutboundToken()
@@ -63,12 +63,12 @@ async function fetchHostJson(pathname: string): Promise<unknown> {
       const detail = isRecord(parsed) && parsed.error != null
         ? String(parsed.error)
         : `HTTP ${response.status}`
-      throw new Error(`Server 目录接口失败：${detail}`)
+      throw new Error(`读取文件夹失败：${detail}`)
     }
     return parsed
   } catch (error) {
     if (error instanceof Error && error.name === 'AbortError') {
-      throw new Error('Server 目录接口请求超时')
+      throw new Error('读取文件夹超时，请重试')
     }
     throw error
   } finally {
@@ -82,7 +82,7 @@ export async function getHostRuntime(): Promise<HostRuntime> {
   if (!isRecord(value) || typeof value.homedir !== 'string' ||
       typeof value.bootstrap_path !== 'string' || value.deployment !== 'server' ||
       !isRecord(value.capabilities) || typeof value.capabilities.directory_browser !== 'boolean') {
-    throw new Error('Server 运行时响应格式无效')
+    throw new Error('服务返回的数据格式有误')
   }
   return {
     homedir: value.homedir,
@@ -114,7 +114,7 @@ export async function listHostDirectories(path?: string): Promise<HostDirectoryL
   const value = await fetchHostJson(`/api/v1/host/directories${query}`)
   if (!isRecord(value) || typeof value.path !== 'string' ||
       !(value.parent === null || typeof value.parent === 'string') || !Array.isArray(value.entries)) {
-    throw new Error('Server 目录列表响应格式无效')
+    throw new Error('文件夹列表的数据格式有误')
   }
 
   const entries: HostDirectoryEntry[] = []

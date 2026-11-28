@@ -70,21 +70,21 @@ beforeEach(() => {
 })
 
 describe('HomedirEntry — 显示', () => {
-  it('标题说清当前目标：本地 + 路径', async () => {
+  it('标题说清当前数据位置：本机 + 路径', async () => {
     currentLocation.value = { kind: 'local', localPath: '/home/x/.symbio' }
     const w = mount(HomedirEntry)
     await new Promise((r) => setTimeout(r, 0))
-    expect(w.find('.nav-btn').attributes('title')).toContain('本地')
+    expect(w.find('.nav-btn').attributes('title')).toContain('本机数据位置')
     expect(w.find('.nav-btn').attributes('title')).toContain('/home/x/.symbio')
   })
 
-  it('browser local 标注当前 Server，连接错误不声称回退本地', () => {
+  it('browser local 不声称回退本地，错误只提示检查', () => {
     hoisted.browser = true
     currentLocation.value = { kind: 'local', localPath: '/server/home/x' }
     locationError.value = '远端不可达'
     const w = mount(HomedirEntry)
     const title = w.find('.nav-btn').attributes('title')
-    expect(title).toContain('当前 Server')
+    expect(title).toContain('本机数据位置')
     expect(title).toContain('/server/home/x')
     expect(title).not.toContain('已回退本地')
   })
@@ -96,14 +96,15 @@ describe('HomedirEntry — 显示', () => {
     expect(w.find('.nav-btn').attributes('title')).toContain('远端')
   })
 
-  it('纯图标入口：aria-label 与 title 说明当前系统目录', async () => {
+  it('标签 + 图标入口：aria-label / title / 可见短名一致', async () => {
     currentLocation.value = { kind: 'local', localPath: '/home/x/.symbio' }
     const w = mount(HomedirEntry)
     await new Promise((r) => setTimeout(r, 0))
-    expect(w.find('.nav-btn').attributes('aria-label')).toContain('本地')
+    expect(w.find('.nav-btn').attributes('aria-label')).toContain('本机数据位置')
     expect(w.find('.nav-btn').attributes('aria-label')).toContain('/home/x/.symbio')
     expect(w.find('.nav-btn svg').exists()).toBe(true)
-    expect(w.find('.nav-btn .nav-label').exists()).toBe(false)
+    expect(w.find('.nav-btn .nav-label').exists()).toBe(true)
+    expect(w.find('.nav-btn .nav-label').text()).toBe('.symbio')
   })
 })
 

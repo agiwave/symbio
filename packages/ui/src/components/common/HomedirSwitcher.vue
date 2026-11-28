@@ -1,132 +1,139 @@
 <!--
-  HomedirSwitcher.vue  —  系统目录 (System Location) 切换对话框
+  HomedirSwitcher.vue — 「数据位置」切换对话框
 
-  统一「当前 Server（或本机）/ 远端地址」两类连接目标：
-  - local：embedded 连本机 native；browser 连同源 Server，可切换 Server homedir
-  - remote：连另一台 Symbio Server（HTTP/WS），地址字符串可内嵌 key（?token=）
+  这是全 App 唯一能改「数据放在哪儿 / 连到哪儿」的入口。对用户的表述统一为
+  「数据位置」，不再暴露 homedir / bootstrap / Server 等实现术语。
 
-  控制面在 embedded 中走 native，在 browser 中走当前 Server HTTP；浏览器没有 IPC
-  回退。目录浏览始终操作目标 Server 的文件系统，homedir 不是会话 workdir。
+  两类目标（internal 仍沿用 local / remote 兼容层）：
+  - local：本机数据目录（Web 交付物里就是当前服务的数据目录）
+  - remote：另一台服务的 HTTP/WS 地址，密钥只走 Authorization 请求头
 
-  对应后端: symbio/src/plugins/home/plugin.rs::route "home/reload"
-            symbio/src/plugins/gateway/plugin.rs（入站配置 = `<根>/gateway/PLUGIN.yml`）
-  对应服务: packages/ui/src/services/home.ts (switchHomedir / getHomedirInfo)
-            packages/ui/src/services/systemLocation.ts (系统目录模型与持久化)
-  对应 schema: packages/ui/src/schemas/home.ts (home_reload 命名空间)
+  设计取舍：
+  - 路径只出现一次：当前值只在输入框里显示，bootstrap 路径不再重复展示。
+  - 主操作被弱化：默认只引导「选择目录」，手动输入收进「手动填写」折叠区，
+    避免一上来就是一条长路径 + 一段术语说明。
+  - 破坏性操作仍必经二次确认，校验与失败回滚语义完全保留。
 -->
 <template>
   <BaseModal :visible="open" panel-class="modal" @close="handleClose">
-      <header class="modal-header">
-        <h3 id="sysdir-title">系统目录</h3>
-        <button class="close-btn" @click="handleClose" aria-label="关闭">×</button>
-      </header>
+    <header class="modal-header">
+      <h3 id="sysdir-title">数据位置</h3>
+      <button class="close-btn" @click="handleClose" aria-label="关闭">×</button>
+    </header>
 
-      <div class="modal-body">
-        <!-- 模式切换 -->
-        <div class="seg" role="group" aria-label="连接方式">
-          <button
-            class="seg-btn"
-            :class="{ active: mode === 'local' }"
-            :aria-pressed="mode === 'local'"
-            @click="mode = 'local'"
-          >{{ inBrowser ? '当前 Server' : '本地目录' }}</button>
-          <button
-            class="seg-btn"
-            :class="{ active: mode === 'remote' }"
-            :aria-pressed="mode === 'remote'"
-            @click="mode = 'remote'"
-          >远端地址</button>
-        </div>
-
-        <!-- 本地目录 -->
-        <template v-if="mode === 'local'">
-          <div class="row">
-            <label class="label" for="sysdir-input">{{ inBrowser ? '当前 Server homedir 路径' : '本地 homedir 路径' }}</label>
-            <div class="input-row">
-              <input
-                id="sysdir-input"
-                v-model="localPath"
-                class="text-input mono"
-                type="text"
-                placeholder="例如 ~/.symbio 或 /path/to/your/homedir"
-                @keydown.enter="onKeyEnter"
-              />
-              <button class="btn" @click="handleBrowse" :disabled="browsing">浏览…</button>
-            </div>
-            <div class="hint">
-              切换后，Symbio 会从新 homedir 重新加载所有子插件（Agent / LLM / MCP / Skill / Session）。
-              homedir 是配置根，不是会话工作目录。
-              <br />
-              bootstrap 写入位置: <span class="mono">{{ bootstrapPath || '—' }}</span>
-            </div>
-          </div>
-        </template>
-
-        <!-- 远端地址 -->
-        <template v-else>
-          <div class="row">
-            <label class="label" for="sysdir-url">远端网关地址（可内含 key）</label>
-            <input
-              id="sysdir-url"
-              v-model="remoteUrl"
-              class="text-input mono"
-              type="text"
-              placeholder="http://host:port 或 http://host:port?token=KEY"
-              @keydown.enter="onKeyEnter"
-            />
-            <div class="hint">
-              直接粘贴远端地址；若地址内含访问密钥，可写成
-              <span class="mono">?token=KEY</span> 形式一并带入。
-              含有密钥的 URL 不要分享；WS 不会把 token 放进 URL。
-            </div>
-          </div>
-          <div class="row">
-            <label class="label" for="sysdir-key">访问密钥（可选，也可写在地址里）</label>
-            <input
-              id="sysdir-key"
-              v-model="remoteKey"
-              class="text-input mono"
-              type="text"
-              placeholder="Bearer Token（留空则仅用地址中的 key）"
-              @keydown.enter="onKeyEnter"
-            />
-          </div>
-          <div class="hint warn" v-if="currentIsRemote">
-            当前已连接到远端：<span class="mono">{{ currentRemoteLabel }}</span>
-          </div>
-        </template>
-
-        <div v-if="error" class="error">{{ error }}</div>
+    <div class="modal-body">
+      <!-- 目标类型 -->
+      <div class="seg" role="group" aria-label="位置类型">
+        <button
+          class="seg-btn"
+          :class="{ active: mode === 'local' }"
+          :aria-pressed="mode === 'local'"
+          @click="mode = 'local'"
+        >本机目录</button>
+        <button
+          class="seg-btn"
+          :class="{ active: mode === 'remote' }"
+          :aria-pressed="mode === 'remote'"
+          @click="mode = 'remote'"
+        >远端服务</button>
       </div>
 
-      <footer class="modal-footer">
-        <button class="btn" @click="handleClose" :disabled="busy">取消</button>
-        <button
-          class="btn btn-primary"
-          @click="handleSubmit"
-          :disabled="busy || !canSubmit"
-        >
-          {{ busy ? '切换中…' : '切换' }}
-        </button>
-      </footer>
+      <!-- 本机目录 -->
+      <template v-if="mode === 'local'">
+        <div class="row">
+          <!-- 当前位置只显示一次：浏览态是一行摘要，手动态才换成输入框，不并排重复 -->
+          <div v-if="!manualOpen" class="current-card">
+            <span class="current-label">当前位置</span>
+            <span class="current-path mono" :title="localPath">{{ localPath || '默认位置' }}</span>
+          </div>
+          <div v-else class="manual-row">
+            <label class="label" for="sysdir-input">文件夹路径</label>
+            <input
+              id="sysdir-input"
+              v-model="localPath"
+              class="text-input mono"
+              type="text"
+              placeholder="粘贴一个文件夹路径"
+              @keydown.enter="onKeyEnter"
+            />
+          </div>
+
+          <div class="actions-row">
+            <button class="primary-pick" type="button" @click="handleBrowse" :disabled="browsing">
+              <svg viewBox="0 0 24 24" width="18" height="18" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round" aria-hidden="true">
+                <path d="M3 7a2 2 0 0 1 2-2h4l2 2h8a2 2 0 0 1 2 2v8a2 2 0 0 1-2 2H5a2 2 0 0 1-2-2V7z" />
+              </svg>
+              <span>{{ browsing ? '打开中…' : '选择文件夹' }}</span>
+            </button>
+            <button class="manual-toggle" type="button" :aria-expanded="manualOpen" @click="manualOpen = !manualOpen">
+              {{ manualOpen ? '完成填写' : '手动填写' }}
+            </button>
+          </div>
+
+          <p class="hint">
+            切换后将从新位置加载模型、会话等数据，当前对话会结束并回到首页。
+          </p>
+        </div>
+      </template>
+
+      <!-- 远端服务 -->
+      <template v-else>
+        <div class="row">
+          <label class="label" for="sysdir-url">服务地址</label>
+          <input
+            id="sysdir-url"
+            v-model="remoteUrl"
+            class="text-input mono"
+            type="text"
+            placeholder="http://主机:端口"
+            @keydown.enter="onKeyEnter"
+          />
+          <label class="label" for="sysdir-key">访问密钥（可选）</label>
+          <input
+            id="sysdir-key"
+            v-model="remoteKey"
+            class="text-input mono"
+            type="text"
+            placeholder="可留空，也可写在地址后面"
+            @keydown.enter="onKeyEnter"
+          />
+          <p class="hint">含密钥的地址请勿分享给他人。</p>
+          <p v-if="currentIsRemote" class="hint warn">
+            当前正在使用：{{ currentRemoteLabel }}
+          </p>
+        </div>
+      </template>
+
+      <div v-if="error" class="error" role="alert">{{ error }}</div>
+    </div>
+
+    <footer class="modal-footer">
+      <button class="btn" @click="handleClose" :disabled="busy">取消</button>
+      <button
+        class="btn btn-primary"
+        @click="handleSubmit"
+        :disabled="busy || !canSubmit"
+      >
+        {{ busy ? '切换中…' : '切换' }}
+      </button>
+    </footer>
   </BaseModal>
 
   <DirectoryPicker
     v-if="open && pickerOpen"
     :visible="true"
-    title="选择系统目录（homedir）"
+    title="选择数据文件夹"
     :initial-path="localPath"
     @close="pickerOpen = false"
     @select="onDirectorySelected"
   />
 
   <!-- 二次确认：提示活跃 chat 会话将被关闭。
-       它原本嵌在遮罩内（靠更高的 z-index 盖在上面）；现在与 BaseModal 平级，
-       用 `v-if="open"` 保持「父弹窗关了它也走」的原行为。 -->
+       与 BaseModal 平级，用 `v-if="open"` 保持「父弹窗关了它也走」的原行为。 -->
   <ConfirmDialog
     v-if="open"
     :visible="confirmOpen"
-    title="确认切换系统目录？"
+    title="切换到这个数据位置？"
     :message="confirmMessage"
     confirm-text="切换"
     cancel-text="取消"
@@ -137,7 +144,7 @@
 </template>
 
 <script setup lang="ts">
-import { computed, onMounted, ref, watch } from 'vue'
+import { computed, ref, watch } from 'vue'
 import {
   getHomedirInfo,
   switchHomedir,
@@ -149,8 +156,6 @@ import {
   parseRemoteAddress,
   isValidRemoteUrl,
   formatLocation,
-  isBrowserEnvironment,
-  type SystemLocation,
 } from '@/services/systemLocation'
 import { reloadGatewayTransport } from '@/services/plugin'
 import { pickPath } from '@/services/nativePick'
@@ -172,19 +177,18 @@ const emit = defineEmits<{
 }>()
 
 const { showToast } = useToast()
-const inBrowser = isBrowserEnvironment()
 
 const mode = ref<'local' | 'remote'>('local')
 const localPath = ref('')
 const remoteUrl = ref('')
 const remoteKey = ref('')
-const bootstrapPath = ref('')
 const error = ref('')
 const busy = ref(false)
 const browsing = ref(false)
 const pickerOpen = ref(false)
 const confirmOpen = ref(false)
 const confirmMessage = ref('')
+const manualOpen = ref(false)
 
 const currentIsRemote = computed(() => currentLocation.value.kind === 'remote')
 const currentRemoteLabel = computed(() => formatLocation(currentLocation.value))
@@ -201,12 +205,9 @@ watch(
   }
 )
 
-onMounted(async () => {
-  if (props.open) await refresh()
-})
-
 async function refresh() {
   error.value = ''
+  manualOpen.value = false
   const saved = loadSystemLocation()
   mode.value = saved.kind
   if (saved.kind === 'remote') {
@@ -214,15 +215,14 @@ async function refresh() {
     remoteKey.value = saved.remoteKey ?? ''
   } else {
     localPath.value = saved.localPath ?? ''
-  }
-  // local 模式拉取目标后端（embedded 本机 / browser 当前 Server）的 homedir 与 bootstrap。
-  if (saved.kind === 'local') {
-    try {
-      const info = await getHomedirInfo()
-      bootstrapPath.value = info.bootstrap_path || ''
-      if (!localPath.value) localPath.value = info.homedir || ''
-    } catch (err) {
-      logger.warn('sysdir-switcher', '读取 homedir 信息失败（不影响切换）', err)
+    // saved 只有「用户手动选过的路径」；空值才向服务问当前数据位置，避免两处重复显示
+    if (!localPath.value) {
+      try {
+        const info = await getHomedirInfo()
+        localPath.value = info.homedir || ''
+      } catch (err) {
+        logger.warn('data-location', '读取当前数据位置失败（仍可手动选择）', err)
+      }
     }
   }
 }
@@ -235,20 +235,21 @@ function handleClose() {
   remoteUrl.value = ''
   remoteKey.value = ''
   pickerOpen.value = false
+  manualOpen.value = false
 }
 
 async function handleBrowse() {
   browsing.value = true
   try {
     const selected = await pickPath('directory', {
-      title: '选择系统目录 (homedir)',
+      title: '选择数据文件夹',
       initialPath: localPath.value,
       onBrowserPick: () => { pickerOpen.value = true },
     })
     if (selected) localPath.value = selected
   } catch (err) {
-    logger.error('sysdir-switcher', 'Browse failed:', err)
-    showToast('error', `选择目录失败：${err instanceof Error ? err.message : String(err)}`)
+    logger.error('data-location', '选择文件夹失败:', err)
+    showToast('error', `选择文件夹失败：${err instanceof Error ? err.message : String(err)}`)
   } finally {
     browsing.value = false
   }
@@ -272,19 +273,19 @@ function handleSubmit() {
   if (mode.value === 'local') {
     const trimmed = localPath.value.trim()
     if (!trimmed) {
-      error.value = '请输入目标 homedir 路径'
+      error.value = '请选择或填写一个文件夹'
       return
     }
   } else {
     const { url } = parseRemoteAddress(remoteUrl.value)
     if (!isValidRemoteUrl(url)) {
-      error.value = '远端地址格式无效（需以 http:// 或 https:// 开头且含 host）'
+      error.value = '地址格式无效（需以 http:// 或 https:// 开头）'
       return
     }
   }
 
   confirmMessage.value =
-    '即将切换系统目录：所有活跃 chat 会话将被关闭，界面数据将重新加载，并回到资源根目录（当前浏览位置会重置）。是否继续？'
+    '切换后当前对话会结束，模型、会话等数据将从新位置加载。是否继续？'
   confirmOpen.value = true
 }
 
@@ -302,7 +303,7 @@ async function handleConfirm() {
     emit('update:open', false)
     resetFields()
   } catch (err: unknown) {
-    logger.error('sysdir-switcher', '切换失败:', err)
+    logger.error('data-location', '切换失败:', err)
     error.value = `切换失败: ${err instanceof Error ? err.message : String(err)}`
   } finally {
     busy.value = false
@@ -312,7 +313,7 @@ async function handleConfirm() {
 /** local：先切出站传输，再让新目标执行 home/reload；失败恢复原目标与传输。 */
 async function applyLocal(path: string) {
   const previous = loadSystemLocation()
-  const loc: SystemLocation = { kind: 'local', localPath: path }
+  const loc = { kind: 'local' as const, localPath: path }
   saveSystemLocation(loc)
   try {
     await reloadGatewayTransport()
@@ -322,12 +323,11 @@ async function applyLocal(path: string) {
     try {
       await reloadGatewayTransport()
     } catch (rollbackError) {
-      logger.error('sysdir-switcher', '恢复原传输失败:', rollbackError)
+      logger.error('data-location', '恢复原位置失败:', rollbackError)
     }
     throw error
   }
-  const label = inBrowser ? '当前 Server' : '本地目录'
-  showToast('success', `已切换到${label}：${path}`)
+  showToast('success', `已切换到：${path}`)
 }
 
 /** 远端地址：解析(含 key) + 校验 + 重载传输；不可达时保留 HTTP 并显示连接错误。 */
@@ -335,29 +335,24 @@ async function applyRemote() {
   const { url, key: urlKey } = parseRemoteAddress(remoteUrl.value)
   const key = (remoteKey.value.trim() || urlKey).trim()
   if (!isValidRemoteUrl(url)) {
-    throw new Error('远端地址格式无效')
+    throw new Error('地址格式无效')
   }
-  const loc: SystemLocation = { kind: 'remote', remoteUrl: url, remoteKey: key }
-  saveSystemLocation(loc)
-  // browser 与 embedded 都保留已选 Server HTTP；不可达由 locationError 显示。
+  saveSystemLocation({ kind: 'remote', remoteUrl: url, remoteKey: key })
   await reloadGatewayTransport()
-  const suffix = '（不可达时会显示连接错误，不会回退本机）'
-  showToast('info', `已切换到远端：${url}${suffix}`)
+  showToast('info', `已连接到：${url}（连接不上时会提示，不会自动切回本机）`)
 }
 
 function resetFields() {
   localPath.value = ''
   remoteUrl.value = ''
   remoteKey.value = ''
+  manualOpen.value = false
 }
 </script>
 
 <style scoped>
-/* 遮罩与面板底色 / 圆角 / 阴影 / 层级由 `BaseModal` 统一提供；这里只写尺寸。
-   顺带修掉一处层级错位：原遮罩用 `--z-overlay`(1000)，低于其它弹窗的
-   `--z-dialog`(1500)，与内嵌确认框的层级关系反直觉。 */
 :global(.modal-panel.modal) {
-  width: min(38rem, 92vw);
+  width: min(34rem, 92vw);
   display: flex;
   flex-direction: column;
 }
@@ -417,17 +412,71 @@ function resetFields() {
   flex-direction: column;
   gap: var(--space-2);
 }
+.current-card {
+  display: flex;
+  flex-direction: column;
+  gap: var(--space-1);
+  padding: var(--space-3);
+  border: 1px solid var(--border-default);
+  border-radius: var(--radius-md);
+  background: var(--surface-sunken);
+}
+.current-label {
+  font-size: var(--font-size-xs);
+  color: var(--text-muted);
+}
+.current-path {
+  font-size: var(--font-size-sm);
+  color: var(--text-primary);
+  overflow-wrap: anywhere;
+}
+.actions-row {
+  display: flex;
+  align-items: center;
+  justify-content: space-between;
+  gap: var(--space-2);
+}
+.primary-pick {
+  display: flex;
+  align-items: center;
+  justify-content: center;
+  gap: var(--space-2);
+  padding: var(--space-3);
+  border: 1px dashed var(--accent);
+  border-radius: var(--radius-md);
+  background: transparent;
+  color: var(--accent);
+  font-size: var(--font-size-base);
+  cursor: pointer;
+  transition: background var(--motion-fast) var(--motion-ease);
+}
+.primary-pick:hover:not(:disabled) { background: var(--surface-hover); }
+.primary-pick:disabled { opacity: 0.5; cursor: not-allowed; }
+.manual-toggle {
+  align-self: flex-start;
+  padding: var(--space-1) 0;
+  border: none;
+  background: transparent;
+  color: var(--text-secondary);
+  font-size: var(--font-size-sm);
+  cursor: pointer;
+  text-decoration: underline;
+  text-underline-offset: 2px;
+}
+.manual-toggle:hover { color: var(--text-primary); }
+.manual-row {
+  display: flex;
+  flex-direction: column;
+  gap: var(--space-2);
+}
+/* .text-input 共享定义见 src/styles/controls.css */
 .label {
   font-size: var(--font-size-sm);
   color: var(--text-secondary);
   font-weight: var(--font-weight-medium);
 }
-.input-row {
-  display: flex;
-  gap: var(--space-2);
-}
-/* .text-input 不再持副本：共享定义见 src/styles/controls.css（按本处的实际渲染取值） */
 .hint {
+  margin: 0;
   font-size: var(--font-size-xs);
   color: var(--text-secondary);
   line-height: var(--line-height-normal);

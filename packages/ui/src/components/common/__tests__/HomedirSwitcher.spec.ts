@@ -70,12 +70,22 @@ import { useToast } from '@/composables/useToast'
 
 const flush = () => new Promise((r) => setTimeout(r, 0))
 
-async function openSwitcher(saved: Record<string, unknown>): Promise<VueWrapper> {
+async function openSwitcher(saved: Record<string, unknown>, manual = false): Promise<VueWrapper> {
   hoisted.loadSystemLocation.mockReturnValue({ kind: 'local', localPath: '', ...saved } as never)
   const w = mount(HomedirSwitcher, { props: { open: false } })
   await w.setProps({ open: true })
   await flush()
+  if (manual) {
+    await w.find('.manual-toggle').trigger('click')
+    await flush()
+  }
   return w
+}
+
+/** 浏览态用摘要卡片显示当前路径；手动态才有输入框 */
+function currentPathText(w: VueWrapper): string {
+  const card = w.find('.current-path')
+  return card.exists() ? card.text() : (w.find('#sysdir-input').element as HTMLInputElement).value
 }
 
 beforeEach(() => {
@@ -102,16 +112,18 @@ describe('HomedirSwitcher — 打开与预填', () => {
     expect(mount(HomedirSwitcher, { props: { open: false } }).find('.modal').exists()).toBe(false)
   })
 
-  it('打开时读持久化并预填本地路径', async () => {
+  it('打开时读持久化并显示本地路径（只显示一次）', async () => {
     const w = await openSwitcher({ localPath: '/saved' })
-    expect((w.find('#sysdir-input').element as HTMLInputElement).value).toBe('/saved')
+    expect(currentPathText(w)).toBe('/saved')
+    expect(w.findAll('.current-path')).toHaveLength(1)
   })
 
-  it('本地模式顺带拉 bootstrap 位置；路径为空时用真实 homedir 兜底', async () => {
+  it('路径为空时用当前数据位置兜底，且不再展示 bootstrap 等技术字段', async () => {
     const w = await openSwitcher({ localPath: '' })
     expect(hoisted.getHomedirInfo).toHaveBeenCalled()
-    expect((w.find('#sysdir-input').element as HTMLInputElement).value).toBe('/home/x/.symbio')
-    expect(w.text()).toContain('/home/x/.symbio/BOOTSTRAP.md')
+    expect(currentPathText(w)).toBe('/home/x/.symbio')
+    expect(w.text()).not.toContain('BOOTSTRAP')
+    expect(w.text()).not.toContain('homedir')
   })
 
   it('读取 homedir 失败不炸（只 warn，仍可手动输入切换）', async () => {
@@ -130,7 +142,7 @@ describe('HomedirSwitcher — 打开与预填', () => {
 
 describe('HomedirSwitcher — 提交前校验', () => {
   it('本地路径为空 → 切换按钮禁用', async () => {
-    const w = await openSwitcher({ localPath: '' })
+    const w = await openSwitcher({ localPath: '' }, true)
     await w.find('#sysdir-input').setValue('')
     expect(w.find('.btn-primary').attributes('disabled')).toBeDefined()
   })
@@ -160,11 +172,11 @@ describe('HomedirSwitcher — 提交前校验', () => {
   })
 
   it('本地空路径：按钮禁用（点不动），但**回车也走同一套校验**不绕过', async () => {
-    const w = await openSwitcher({ localPath: '' })
+    const w = await openSwitcher({ localPath: '' }, true)
     await w.find('#sysdir-input').setValue('   ')
     // 按钮在非法时已禁用，点它不会触发提交；输入框的回车是另一条入口
     await w.find('#sysdir-input').trigger('keydown.enter')
-    expect(w.find('.error').text()).toContain('请输入目标 homedir 路径')
+    expect(w.find('.error').text()).toContain('请选择或填写一个文件夹')
     expect(w.find('.confirm-dialog').exists()).toBe(false)
     expect(hoisted.switchHomedir).not.toHaveBeenCalled()
   })
@@ -173,12 +185,12 @@ describe('HomedirSwitcher — 提交前校验', () => {
     const w = await openSwitcher({ kind: 'remote' })
     await w.find('#sysdir-url').setValue('ftp://x')
     await w.find('#sysdir-url').trigger('keydown.enter')
-    expect(w.find('.error').text()).toContain('远端地址格式无效')
+    expect(w.find('.error').text()).toContain('地址格式无效')
     expect(hoisted.saveSystemLocation).not.toHaveBeenCalled()
   })
 
   it('回车与按钮是同一入口：合法时回车也开确认框', async () => {
-    const w = await openSwitcher({ localPath: '/x' })
+    const w = await openSwitcher({ localPath: '/x' }, true)
     await w.find('#sysdir-input').trigger('keydown.enter')
     expect(w.find('.confirm-dialog').exists()).toBe(true)
   })
@@ -220,7 +232,8 @@ describe('HomedirSwitcher — 二次确认与执行', () => {
     const w = mount(HomedirSwitcher, { props: { open: false } })
     await w.setProps({ open: true })
     await flush()
-    await w.findAll('.seg-btn').find((button) => button.text() === '本地目录')!.trigger('click')
+    await w.findAll('.seg-btn').find((button) => button.text() === '本机目录')!.trigger('click')
+    await w.find('.manual-toggle').trigger('click')
     await w.find('#sysdir-input').setValue('/local/home')
     await w.find('.btn-primary').trigger('click')
     await w.findComponent({ name: 'ConfirmDialog' }).vm.$emit('confirm')
@@ -238,7 +251,8 @@ describe('HomedirSwitcher — 二次确认与执行', () => {
   it('browser local 先切到同源 Server，再经 HTTP home/reload（不 force native）', async () => {
     hoisted.browser = true
     const w = await openSwitcher({ localPath: '/srv/new/home' })
-    expect(w.text()).toContain('当前 Server')
+    expect(w.text()).not.toContain('当前 Server')
+    expect(w.text()).not.toContain('homedir')
 
     await w.find('.btn-primary').trigger('click')
     await w.findComponent({ name: 'ConfirmDialog' }).vm.$emit('confirm')
@@ -272,7 +286,7 @@ describe('HomedirSwitcher — 二次确认与执行', () => {
     expect(hoisted.reloadGatewayTransport).toHaveBeenCalledTimes(1)
     const { toasts } = useToast()
     const toast = toasts.value[toasts.value.length - 1]
-    expect(toast?.text).toContain('不会回退本机')
+    expect(toast?.text).toContain('不会自动切回本机')
     expect(toast?.text).not.toContain('自动回退本地')
   })
 
@@ -310,7 +324,7 @@ describe('HomedirSwitcher — 失败与忙态', () => {
   it('browser local 重载失败：恢复原连接目标与传输，不报告成功', async () => {
     hoisted.browser = true
     hoisted.switchHomedir.mockRejectedValueOnce(new Error('Server reload 失败'))
-    const w = await openSwitcher({ localPath: '/srv/old' })
+    const w = await openSwitcher({ localPath: '/srv/old' }, true)
     await w.find('#sysdir-input').setValue('/srv/new')
     await w.find('.btn-primary').trigger('click')
     await w.findComponent({ name: 'ConfirmDialog' }).vm.$emit('confirm')
@@ -360,7 +374,7 @@ describe('HomedirSwitcher — 浏览目标目录', () => {
       return null
     })
     const w = await openSwitcher({ localPath: '/srv/old' })
-    await w.findAll('.btn').find((b) => b.text() === '浏览…')!.trigger('click')
+    await w.find('.primary-pick').trigger('click')
     await flush()
 
     const picker = w.findComponent(DirectoryPicker)
@@ -368,7 +382,7 @@ describe('HomedirSwitcher — 浏览目标目录', () => {
     expect(picker.props('initialPath')).toBe('/srv/old')
     picker.vm.$emit('select', '/srv/new')
     await flush()
-    expect((w.find('#sysdir-input').element as HTMLInputElement).value).toBe('/srv/new')
+    expect(currentPathText(w)).toBe('/srv/new')
     expect(hoisted.pickPath).toHaveBeenCalledWith('directory', expect.objectContaining({
       onBrowserPick: expect.any(Function),
     }))
@@ -376,16 +390,16 @@ describe('HomedirSwitcher — 浏览目标目录', () => {
 
   it('选中后填入路径', async () => {
     const w = await openSwitcher({ localPath: '' })
-    await w.findAll('.btn').find((b) => b.text() === '浏览…')!.trigger('click')
+    await w.find('.primary-pick').trigger('click')
     await flush()
     expect(hoisted.pickPath).toHaveBeenCalled()
-    expect((w.find('#sysdir-input').element as HTMLInputElement).value).toBe('/ picked/dir')
+    expect(currentPathText(w)).toBe('/ picked/dir')
   })
 
   it('对话框抛错不炸（只记日志）', async () => {
     hoisted.pickPath.mockRejectedValueOnce(new Error('用户取消'))
     const w = await openSwitcher({ localPath: '' })
-    await w.findAll('.btn').find((b) => b.text() === '浏览…')!.trigger('click')
+    await w.find('.primary-pick').trigger('click')
     await flush()
     expect(w.find('.modal').exists()).toBe(true)
   })
@@ -393,8 +407,8 @@ describe('HomedirSwitcher — 浏览目标目录', () => {
   it('用户未选（返回 null）时不覆盖已填路径', async () => {
     hoisted.pickPath.mockResolvedValueOnce(null as unknown as string)
     const w = await openSwitcher({ localPath: '/keep' })
-    await w.findAll('.btn').find((b) => b.text() === '浏览…')!.trigger('click')
+    await w.find('.primary-pick').trigger('click')
     await flush()
-    expect((w.find('#sysdir-input').element as HTMLInputElement).value).toBe('/keep')
+    expect(currentPathText(w)).toBe('/keep')
   })
 })

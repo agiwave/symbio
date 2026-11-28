@@ -2,7 +2,7 @@
   Onboarding — 首启引导（三步，可跳过，可由调用方重开）
 
   ## 它只说三件事
-  1. **系统目录**就位（本机 homedir / 远端网关）——状态只读展示，切换入口在左下角；
+  1. **数据位置**就位（本机文件夹 / 远端服务）——状态只读展示，切换入口在左下角；
   2. **配一个模型**——这是唯一的阻塞点：模型不是「设置」里的一项，而是
      `<根>/model` 下的一个资源条目（要填 API Key）。没有它，输入框里的话发不出去；
   3. **发第一条消息**——会话就在冷启动落点，点「新建」即可。
@@ -12,7 +12,7 @@
   （`findMountDirByNewTypeExt`，而不是写死 `/vdfs/model`）：段名由后端 provider 决定，
   写死会在段名变更时静默跳到一个空目录。文案里的「模型」是**产品词**，不是地址。
 
-  系统目录一栏刻意**不给切换按钮**：切换器是左下角那个常驻入口（`HomedirEntry`），
+  数据位置一栏刻意**不给切换按钮**：切换器是左下角那个常驻入口（`HomedirEntry`），
   此处再放一个等于同一件事两条路——引导应当把用户送到**目的地**，而不是复制导航。
 -->
 <template>
@@ -31,7 +31,7 @@
       <li class="ob-step" :class="{ 'is-done': store.systemReady, 'is-error': systemError }">
         <span class="ob-mark" aria-hidden="true">{{ store.systemReady ? '✓' : '!' }}</span>
         <div class="ob-body">
-          <p class="ob-step-title">系统目录</p>
+          <p class="ob-step-title">数据位置</p>
           <p class="ob-step-desc">{{ systemText }}</p>
         </div>
       </li>
@@ -99,7 +99,7 @@ const systemError = computed(() => Boolean(locationError.value))
 const systemText = computed(() =>
   systemError.value
     ? locationError.value || '连接异常'
-    : `已连接：${formatLocation(currentLocation.value)}（可在左下角切换）`,
+    : `已就绪：${formatLocation(currentLocation.value)}（可在左下角更换）`,
 )
 
 /**

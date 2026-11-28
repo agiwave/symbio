@@ -1,8 +1,11 @@
 <!--
-  DirectoryPicker — 浏览器端的 Server 目录选择器。
+  DirectoryPicker — 数据文件夹选择器。
 
   只通过宿主目录 API 浏览当前连接目标的文件系统；不读取浏览器本机，不使用
   <input type=file>。调用方负责维护 visible，并在 select 事件中写回所选路径。
+
+  展示取舍：当前路径只出现在地址输入框里（不再另起一行重复一份）；目录条目
+  只显示文件夹名，最近路径显示末段短名，完整路径保留在 title 里供悬停核对。
 -->
 <template>
   <BaseModal
@@ -11,105 +14,102 @@
     :labelledby="titleId"
     @close="close"
   >
-      <header class="picker-header">
-        <h3 :id="titleId">{{ title }}</h3>
-        <button type="button" class="close-btn" aria-label="关闭" @click="close">×</button>
-      </header>
+    <header class="picker-header">
+      <h3 :id="titleId">{{ title }}</h3>
+      <button type="button" class="close-btn" aria-label="关闭" @click="close">×</button>
+    </header>
 
-      <div class="picker-body" :aria-busy="loading ? 'true' : undefined">
-        <div class="current-path-wrap">
-          <label class="path-label" :for="pathInputId">目录绝对路径</label>
-          <form class="path-form" @submit.prevent="goToPath">
-            <input
-              :id="pathInputId"
-              v-model="pathDraft"
-              class="path-input"
-              type="text"
-              spellcheck="false"
-              autocomplete="off"
-              :disabled="loading"
-              placeholder="粘贴 Server 绝对路径"
-              aria-describedby="pathHelpId"
-            >
-            <button type="submit" class="btn" :disabled="loading">前往</button>
-          </form>
-          <span :id="pathHelpId" class="path-help">支持 Windows、Unix 与 UNC 路径</span>
-          <div class="current-path" role="status" aria-live="polite">
-            {{ loading ? '加载中…' : listing?.path || '尚未加载' }}
-          </div>
-          <p v-if="pathError" class="error" role="alert">{{ pathError }}</p>
-        </div>
+    <div class="picker-body" :aria-busy="loading ? 'true' : undefined">
+      <form class="path-form" @submit.prevent="goToPath">
+        <input
+          :id="pathInputId"
+          v-model="pathDraft"
+          aria-label="文件夹路径"
+          class="path-input"
+          type="text"
+          spellcheck="false"
+          autocomplete="off"
+          :disabled="loading"
+          placeholder="输入或粘贴文件夹路径"
+          aria-describedby="pathHelpId"
+        >
+        <button type="submit" class="btn" :disabled="loading">前往</button>
+      </form>
+      <span :id="pathHelpId" class="path-help">支持 Windows、Unix 与 UNC 路径；也可用 ~/ 开头</span>
+      <p v-if="pathError" class="error" role="alert">{{ pathError }}</p>
 
-        <div v-if="recentPaths.length" class="recent" aria-label="最近使用的目录">
-          <span class="path-label">最近使用</span>
-          <div class="recent-list">
-            <button
-              v-for="path in recentPaths"
-              :key="path"
-              type="button"
-              class="root-btn"
-              :disabled="loading"
-              :title="path"
-              @click="navigate(path)"
-            >{{ path }}</button>
-          </div>
-        </div>
-
-        <div v-if="roots.length" class="roots" aria-label="Server 根目录">
+      <div v-if="recentPaths.length" class="recent" aria-label="最近使用的文件夹">
+        <span class="path-label">最近使用</span>
+        <div class="recent-list">
           <button
-            v-for="root in roots"
-            :key="root.path"
+            v-for="path in recentPaths"
+            :key="path"
             type="button"
             class="root-btn"
             :disabled="loading"
-            @click="navigate(root.path)"
-          >{{ root.name }}</button>
+            :title="path"
+            @click="navigate(path)"
+          >{{ shortName(path) }}</button>
         </div>
-
-        <div class="toolbar">
-          <button
-            type="button"
-            class="btn"
-            :disabled="loading || !listing?.parent || listing.parent === listing.path"
-            @click="navigate(listing!.parent!)"
-          >上一步</button>
-          <span v-if="loading" class="loading-text">正在读取 Server 目录…</span>
-        </div>
-
-        <p v-if="error" class="error" role="alert">{{ error }}</p>
-        <div v-else-if="!loading && listing && entries.length === 0" class="empty">
-          当前目录下没有子目录
-        </div>
-        <ul v-else-if="listing" class="directory-list" aria-label="目录列表">
-          <li v-for="entry in entries" :key="entry.path">
-            <button
-              type="button"
-              class="directory-entry"
-              :disabled="loading"
-              @click="navigate(entry.path)"
-            >
-              <span class="folder-icon" aria-hidden="true">▸</span>
-              <span class="entry-name">{{ entry.name }}</span>
-              <span class="entry-path">{{ entry.path }}</span>
-            </button>
-          </li>
-        </ul>
-
-        <button v-if="error" type="button" class="retry-btn" @click="load(listing?.path)">
-          重试
-        </button>
       </div>
 
-      <footer class="picker-footer">
-        <button type="button" class="btn" @click="close">取消</button>
+      <div v-if="roots.length" class="roots" aria-label="根目录">
+        <button
+          v-for="root in roots"
+          :key="root.path"
+          type="button"
+          class="root-btn"
+          :disabled="loading"
+          :title="root.path"
+          @click="navigate(root.path)"
+        >{{ root.name }}</button>
+      </div>
+
+      <div class="toolbar">
         <button
           type="button"
-          class="btn btn-primary"
-          :disabled="loading || Boolean(error) || !listing"
-          @click="selectCurrent"
-        >选择此目录</button>
-      </footer>
-    </BaseModal>
+          class="btn"
+          :disabled="loading || !listing?.parent || listing.parent === listing.path"
+          @click="navigate(listing!.parent!)"
+        >上一级</button>
+        <span v-if="loading" class="loading-text">正在读取文件夹…</span>
+        <span v-else class="path-crumb" :title="listing?.path || ''">{{ listing?.path || '' }}</span>
+      </div>
+
+      <p v-if="error" class="error" role="alert">{{ error }}</p>
+      <div v-else-if="!loading && listing && entries.length === 0" class="empty">
+        这个文件夹里没有子文件夹
+      </div>
+      <ul v-else-if="listing" class="directory-list" aria-label="文件夹列表">
+        <li v-for="entry in entries" :key="entry.path">
+          <button
+            type="button"
+            class="directory-entry"
+            :disabled="loading"
+            :title="entry.path"
+            @click="navigate(entry.path)"
+          >
+            <span class="folder-icon" aria-hidden="true">▸</span>
+            <span class="entry-name">{{ entry.name }}</span>
+          </button>
+        </li>
+      </ul>
+
+      <button v-if="error" type="button" class="retry-btn" @click="load(listing?.path)">
+        重试
+      </button>
+    </div>
+
+    <footer class="picker-footer">
+      <button type="button" class="btn" @click="close">取消</button>
+      <button
+        type="button"
+        class="btn btn-primary"
+        :disabled="loading || Boolean(error) || !listing"
+        @click="selectCurrent"
+      >选择当前文件夹</button>
+    </footer>
+  </BaseModal>
 </template>
 
 <script setup lang="ts">
@@ -128,7 +128,7 @@ const props = withDefaults(defineProps<{
   initialPath?: string
   recentPaths?: string[]
 }>(), {
-  title: '选择目录',
+  title: '选择文件夹',
   initialPath: '',
   recentPaths: () => [],
 })
@@ -150,6 +150,12 @@ const loading = ref(false)
 const error = ref('')
 let requestSequence = 0
 
+/** 路径末段：用于最近使用的短标签，完整路径仍在 title 里 */
+function shortName(path: string): string {
+  const parts = path.replace(/[\\/]+$/, '').split(/[\\/]/).filter(Boolean)
+  return parts[parts.length - 1] || path
+}
+
 /** 接受 Server 绝对路径与后端支持的 `~` / `~/` 简写。 */
 function absoluteServerPath(path: string | undefined): string | undefined {
   const trimmed = path?.trim()
@@ -166,7 +172,7 @@ async function load(requestedPath?: string): Promise<void> {
       const runtime = await getHostRuntime()
       if (sequence !== requestSequence) return
       if (!runtime.capabilities.directory_browser) {
-        throw new Error('当前 Server 未开放目录浏览能力')
+        throw new Error('当前服务未开放文件夹浏览能力')
       }
       path = absoluteServerPath(runtime.homedir)
     }
@@ -188,7 +194,7 @@ function goToPath(): void {
   pathError.value = ''
   const path = absoluteServerPath(pathDraft.value)
   if (!path) {
-    pathError.value = '请输入 Server 绝对路径或 ~/ 路径，例如 C:\\projects 或 /srv/projects'
+    pathError.value = '请输入完整路径（如 C:\\projects 或 /srv/projects），或 ~/ 开头的路径'
     return
   }
   void load(path)
@@ -225,7 +231,7 @@ watch(
 
 <style scoped>
 :global(.modal-panel.directory-picker) {
-  width: min(42rem, 92vw);
+  width: min(38rem, 92vw);
   max-height: 88vh;
   display: flex;
   flex-direction: column;
@@ -263,23 +269,17 @@ watch(
   flex-direction: column;
   gap: var(--space-3);
 }
-.current-path-wrap {
-  display: flex;
-  flex-direction: column;
-  gap: var(--space-1);
-}
 .path-label {
   color: var(--text-secondary);
   font-size: var(--font-size-sm);
 }
-.current-path {
-  padding: var(--space-2) var(--space-3);
-  border: 1px solid var(--border-default);
-  border-radius: var(--radius-md);
-  background: var(--surface-sunken);
+.path-crumb {
+  color: var(--text-muted);
   font-family: var(--font-mono);
-  overflow-wrap: anywhere;
-  user-select: text;
+  font-size: var(--font-size-xs);
+  overflow: hidden;
+  text-overflow: ellipsis;
+  white-space: nowrap;
 }
 .path-form {
   display: flex;
@@ -320,6 +320,10 @@ watch(
   gap: var(--space-2);
   flex-wrap: wrap;
 }
+.toolbar .path-crumb {
+  flex: 1;
+  min-width: 8rem;
+}
 .root-btn,
 .retry-btn,
 .btn {
@@ -355,8 +359,7 @@ watch(
 }
 .directory-entry {
   width: 100%;
-  display: grid;
-  grid-template-columns: auto minmax(0, 1fr) minmax(0, 1fr);
+  display: flex;
   align-items: center;
   gap: var(--space-2);
   padding: var(--space-2) var(--space-3);
@@ -386,14 +389,6 @@ watch(
 .directory-entry:disabled { opacity: 0.5; cursor: not-allowed; }
 .folder-icon { color: var(--text-secondary); }
 .entry-name { font-weight: var(--font-weight-medium); overflow-wrap: anywhere; }
-.entry-path {
-  color: var(--text-muted);
-  font-family: var(--font-mono);
-  font-size: var(--font-size-xs);
-  overflow: hidden;
-  text-overflow: ellipsis;
-  white-space: nowrap;
-}
 .error {
   margin: 0;
   padding: var(--space-2) var(--space-3);
@@ -413,9 +408,5 @@ watch(
   background: var(--accent);
   border-color: var(--accent);
   color: var(--text-on-accent);
-}
-@media (max-width: 40rem) {
-  .directory-entry { grid-template-columns: auto minmax(0, 1fr); }
-  .entry-path { grid-column: 2; }
 }
 </style>

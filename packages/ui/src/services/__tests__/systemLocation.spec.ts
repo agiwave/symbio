@@ -16,10 +16,10 @@ describe('运行环境模型', () => {
     expect(isBrowserEnvironment()).toBe(true)
   })
 
-  it('local 展示当前 Server，不把 homedir 说成浏览器本机', () => {
+  it('local 只给路径本身，不再叠加「当前 Server」前缀（入口已有文案）', () => {
     vi.stubGlobal('window', {})
     expect(formatLocation({ kind: 'local', localPath: '/server/home/me' }))
-      .toBe('当前 Server：/server/home/me')
-    expect(formatLocation({ kind: 'local', localPath: '' })).toBe('当前 Server')
+      .toBe('/server/home/me')
+    expect(formatLocation({ kind: 'local', localPath: '' })).toBe('默认位置')
   })
 })
