@@ -27,7 +27,7 @@ export default {
   // `.workbuddy-ai/msrv-target`（不与 backend 争 `.cargo-lock`）。fmt 已拆到
   // `05-fmt.mjs` 屏障阶段（rustfmt 就地重写非原子，必须先于一切读 `.rs` 的泳道）。
   // ⚠️ frontend-build 不能进这批：编译 symbio-tauri 时 `generate_context!` 在编译期读
-  //    `apps/desktop/dist`，而 vite build 会重写它——见 `56-frontend-build.mjs`。前端另外三个
+  //    `packages/ui/dist`，而 vite build 会重写它——见 `56-frontend-build.mjs`。前端另外三个
   //    任务不碰 `dist`，故拆到 `20-frontend-static.mjs` 进批（上面那句「只写 `target/`」
   //    对它同样成立）。
   parallel: true,

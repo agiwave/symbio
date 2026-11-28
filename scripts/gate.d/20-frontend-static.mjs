@@ -5,7 +5,7 @@
 //
 // ## 为什么它能进批，而同属前端的 `vite build` 不能
 //
-// backend 编译 `symbio-tauri` 时 `generate_context!` 在**编译期**读 `apps/desktop/dist`，
+// backend 编译 `symbio-tauri` 时 `generate_context!` 在**编译期**读 `packages/ui/dist`，
 // 而 `vite build` 会**清空重写**那个目录 ⇒ 并发就是「编译读到半截 dist ⇒ 假红」。
 // 所以构建留在 `56-frontend-build.mjs`（批后）。
 //

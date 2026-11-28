@@ -5,9 +5,9 @@
   "type": "module",
   "private": true,
   "scripts": {
-    "dev": "vite",
-    "build": "vite build",
-    "preview": "vite preview"
+    "dev": "node ../../packages/ui/node_modules/vite/bin/vite.js --config ../../packages/ui/vite.config.ts",
+    "build": "node ../../packages/ui/node_modules/vite/bin/vite.js build --config ../../packages/ui/vite.config.ts",
+    "preview": "node ../../packages/ui/node_modules/vite/bin/vite.js preview --config ../../packages/ui/vite.config.ts"
   },
   "dependencies": {
     "@symbio/ui": "*"

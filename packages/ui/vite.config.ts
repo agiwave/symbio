@@ -3,7 +3,9 @@ import vue from '@vitejs/plugin-vue'
 import path from 'path'
 
 const uiRoot = import.meta.dirname
-const desktopDist = path.resolve(uiRoot, '../../apps/desktop/dist')
+// 唯一产物源：desktop 的 generate_context!、web 静态部署、CLI 二进制内嵌都读这一个目录。
+// Tauri API 是动态 import，browser 分支不会加载，因此一份产物可同时服务三端。
+const dist = path.resolve(uiRoot, 'dist')
 
 export default defineConfig({
   root: uiRoot,
@@ -14,7 +16,7 @@ export default defineConfig({
   clearScreen: false,
   server: { port: 1420, strictPort: true },
   build: {
-    outDir: desktopDist,
+    outDir: dist,
     emptyOutDir: true,
     target: ['es2021', 'chrome100', 'safari14'],
     minify: !process.env.TAURI_DEBUG ? 'oxc' : false,

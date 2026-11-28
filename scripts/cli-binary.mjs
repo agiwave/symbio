@@ -111,11 +111,13 @@ function walkFiles(dir, out = []) {
  * 需要网络语义），而这里只需要**宁可多算**——多纳入一个文件只会多触发一次无害的
  * cargo 增量构建，漏掉一个才会让过期产物蒙混过关。
  *
- * ## 两个不相交的源码根
+ * ## 三个不相交的源码根 + 一份编译期内嵌资源
  *
  * CLI 的可执行源码在 `apps/cli/`，它复用的整棵插件树在 `crates/`。两者不再有
  * 包含关系（CLI 迁出 crates 之前，`crates/` 一个根就够）——故现在必须各扫一个：
  * 漏掉 `apps/cli/` 会让「改了 CLI 源码却复用旧产物」蒙混过关。
+ * 第三个根是 `packages/ui/dist`：前端产物由 build.rs 编译期内嵌进 CLI，
+ * 它是二进制内容的一部分，改了 UI 却复用旧 exe 就等于 serve 出旧页面。
  * 用 `Set` 去重：清单是**文件集合**这件事由数据结构保证，而不是靠调用方小心。
  */
 export function cliBuildInputs(repoRoot) {
@@ -129,6 +131,9 @@ export function cliBuildInputs(repoRoot) {
   }
   for (const p of walkFiles(path.join(repoRoot, 'apps', 'cli'))) push(p)
   for (const p of walkFiles(path.join(repoRoot, 'crates'))) push(p)
+  // 编译期内嵌产物：dist 是生成物、常被清理，缺失时跳过（build.rs 会嵌占位页）。
+  const dist = path.join(repoRoot, 'packages', 'ui', 'dist')
+  if (fs.existsSync(dist)) for (const p of walkFiles(dist)) push(p)
   for (const rel of ['Cargo.toml', 'Cargo.lock', '.cargo/config.toml']) {
     const p = path.join(repoRoot, rel)
     if (fs.existsSync(p)) push(p)

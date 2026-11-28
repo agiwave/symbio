@@ -138,16 +138,16 @@ jobs:
           libwebkit2gtk-4.1-dev libgtk-3-dev
           libayatana-appindicator3-dev librsvg2-dev libxdo-dev
 
-      - name: Build frontend assets (tauri::generate_context! 要求 apps/desktop/dist)
-        # `apps/desktop/src-tauri/src/main.rs:110` 的 `tauri::generate_context!()` 是**编译期**
-        # 宏：它读 `tauri.conf.json` 的 `"frontendDist": "../dist"` 并要求该路径存在，
-        # 不存在就直接 `error: proc macro panicked`。于是 `--workspace` 的四步
+      - name: Build frontend assets (tauri::generate_context! 要求 packages/ui/dist)
+        # `apps/desktop/src-tauri/src/main.rs` 的 `tauri::generate_context!()` 是**编译期**
+        # 宏：它读 `tauri.conf.json` 的 `"frontendDist": "../../../packages/ui/dist"` 并要求
+        # 该路径存在，不存在就直接 `error: proc macro panicked`。于是 `--workspace` 的四步
         # （check / test / clippy / doc）**全红**，而报错指向的是一段完全正常的 Rust
-        # 代码 —— 2026-10-07 首次在 v2-plan 上跑 CI 实测：
-        #   = help: message: The `frontendDist` configuration is set to `"../dist"`
-        #           but this path doesn't exist
+        # 代码 —— 2026-10-07 首次在 v2-plan 上跑 CI 实测过这一失败形态。
         #
-        # `apps/desktop/dist` 被 `apps/desktop/.gitignore` 忽略（`dist/`），**只在开发者本机存在**。
+        # 同一份 `packages/ui/dist` 还被 CLI 的 `symbio-frontend-assets` 在编译期内嵌，
+        # 被 web 交付物静态部署——三端共用一个产物，不再各建一份。
+        # `packages/ui/dist` 被 `dist/` 忽略，**只在开发者本机存在**。
         # 与「分支没接 CI」「本机不编 GTK」「cargo-audit 被项目 pin 拖住」同族：
         # 前置只存在于开发者的机器上，于是这条路径在本机天天绿、在 CI 一次没跑过。
         #
@@ -283,7 +283,7 @@ jobs:
         #    构建此前只在上线打 tag 时才跑 ⇒ 构建错误要等发布才暴露，现已前置到 PR。
         # ⚠️ 前端是**两个阶段**（2026-10-09 拆分）：`frontend-static`（类型 / 单测 / lint）
         #    与 `frontend-build`（vite build）。本地前者在并发批里、后者在批后（vite build
-        #    会重写 apps/desktop/dist，与 backend 的 generate_context! 编译期读冲突）；CI 这边
+        #    会重写 packages/ui/dist，与 backend 的 generate_context! 编译期读冲突）；CI 这边
         #    没有并发批的约束，但**两个 id 都要写**——只写 `frontend-static` 是个合法 id，
         #    不会报错，只会**静默丢掉构建**。
         # ⚠️ 必须带 `--ci`：`frontend-static` 的测试数棘轮在本地会「自动上调并落盘」

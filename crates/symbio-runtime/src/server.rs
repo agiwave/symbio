@@ -22,7 +22,8 @@ pub struct ServerConfig {
     pub port: u16,
     pub token: String,
     pub max_connections: usize,
-    pub frontend_dist: PathBuf,
+    /// `None` = 用编译期内嵌的 `packages/ui/dist`（默认）；`Some` = 从外部磁盘目录读。
+    pub frontend_dist: Option<PathBuf>,
     pub allowed_origin: Option<String>,
 }
 
@@ -33,25 +34,41 @@ impl Default for ServerConfig {
             port: 9231,
             token: String::new(),
             max_connections: 64,
-            frontend_dist: PathBuf::from("apps/desktop/dist"),
+            frontend_dist: None,
             allowed_origin: None,
         }
     }
 }
 
+/// 静态资源来源：CLI 默认内嵌（二进制自带 UI），显式 `--frontend-dist` 才走磁盘。
+enum FrontendSource {
+    Embedded,
+    Disk(PathBuf),
+}
+
 pub struct ServerIngress {
     host: Arc<RuntimeHost>,
-    frontend_dist: PathBuf,
+    frontend: FrontendSource,
     runtime_gate: Arc<RwLock<()>>,
     realtime: Arc<RealtimeConnections>,
     idempotency: Arc<Idempotency>,
 }
 
 impl ServerIngress {
+    /// 磁盘资源构造器（测试夹具与显式 `--frontend-dist` 路径）。
     pub fn new(host: Arc<RuntimeHost>, frontend_dist: PathBuf) -> Self {
+        Self::with_source(host, FrontendSource::Disk(frontend_dist))
+    }
+
+    /// 内嵌资源构造器：CLI 的默认形态。
+    pub fn embedded(host: Arc<RuntimeHost>) -> Self {
+        Self::with_source(host, FrontendSource::Embedded)
+    }
+
+    fn with_source(host: Arc<RuntimeHost>, frontend: FrontendSource) -> Self {
         Self {
             host,
-            frontend_dist,
+            frontend,
             runtime_gate: Arc::new(RwLock::new(())),
             realtime: Arc::new(RealtimeConnections::default()),
             idempotency: Idempotency::new(),
@@ -60,12 +77,17 @@ impl ServerIngress {
 }
 
 pub async fn start(config: ServerConfig, host: Arc<RuntimeHost>) -> Result<ServerHandle, String> {
-    let frontend_dist = std::fs::canonicalize(&config.frontend_dist)
-        .map_err(|e| format!("前端静态目录不可用 {}: {e}", config.frontend_dist.display()))?;
-    if !frontend_dist.is_dir() {
-        return Err(format!("前端静态路径不是目录: {}", frontend_dist.display()));
-    }
-    let ingress = Arc::new(ServerIngress::new(host, frontend_dist));
+    let ingress = match &config.frontend_dist {
+        None => Arc::new(ServerIngress::embedded(host)),
+        Some(dist) => {
+            let canonical = std::fs::canonicalize(dist)
+                .map_err(|e| format!("前端静态目录不可用 {}: {e}", dist.display()))?;
+            if !canonical.is_dir() {
+                return Err(format!("前端静态路径不是目录: {}", canonical.display()));
+            }
+            Arc::new(ServerIngress::new(host, canonical))
+        }
+    };
     symbio_http::start(
         HttpServerConfig {
             bind: config.bind,
@@ -300,43 +322,74 @@ impl ServerIngress {
         {
             return HttpResponse::json(403, json!({ "error": "forbidden" }));
         }
-        let mut candidate = self.frontend_dist.join(relative);
+        match &self.frontend {
+            FrontendSource::Embedded => self.embedded_static_response(&decoded),
+            FrontendSource::Disk(root) => self.disk_static_response(root, relative).await,
+        }
+    }
+
+    /// 内嵌资源：查编译期嵌入的表；SPA 路由未命中时回退 index.html。
+    fn embedded_static_response(&self, decoded: &str) -> HttpResponse {
+        let key = decoded.trim_start_matches('/');
+        // 根路径（""）在资源表里映射到 index.html，MIME 必须按**实际资源名**取；
+        // 直接用空串会让 content_type 落到 application/octet-stream。
+        let resource = if key.is_empty() { "index.html" } else { key };
+        let (path, body) = match symbio_frontend_assets::get(resource) {
+            Some(body) => (resource, body),
+            None => (
+                "index.html",
+                symbio_frontend_assets::get("index.html").unwrap_or_default(),
+            ),
+        };
+        if body.is_empty() {
+            return HttpResponse::json(404, json!({ "error": "frontend asset not found" }));
+        }
+        static_ok(path, symbio_frontend_assets::content_type(path), body)
+    }
+
+    /// 磁盘资源：保留原有 canonicalize 防穿越 + SPA 回退，供显式 `--frontend-dist`。
+    async fn disk_static_response(&self, root: &Path, relative: &Path) -> HttpResponse {
+        let mut candidate = root.join(relative);
         if candidate.is_dir() || !candidate.exists() {
-            candidate = self.frontend_dist.join("index.html");
+            candidate = root.join("index.html");
         }
         let canonical = match tokio::fs::canonicalize(&candidate).await {
-            Ok(path) if path.starts_with(&self.frontend_dist) => path,
+            Ok(path) if path.starts_with(root) => path,
             Ok(_) => return HttpResponse::json(403, json!({ "error": "forbidden" })),
             Err(_) => {
                 return HttpResponse::json(404, json!({ "error": "frontend asset not found" }))
             }
         };
         match tokio::fs::read(&canonical).await {
-            Ok(body) => {
-                let immutable = canonical
-                    .extension()
-                    .and_then(|extension| extension.to_str())
-                    .is_some_and(|extension| extension != "html");
-                HttpResponse {
-                    status: 200,
-                    content_type: content_type(&canonical).to_string(),
-                    body,
-                    headers: vec![(
-                        "Cache-Control".to_string(),
-                        if immutable {
-                            "public, max-age=31536000, immutable"
-                        } else {
-                            "no-cache"
-                        }
-                        .to_string(),
-                    )],
-                }
-            }
+            Ok(body) => static_ok(
+                canonical.to_string_lossy().as_ref(),
+                content_type(&canonical),
+                &body,
+            ),
             Err(error) => HttpResponse::json(
                 500,
                 json!({ "error": format!("read frontend asset failed: {error}") }),
             ),
         }
+    }
+}
+
+/// 两条资源来源共用的 200 响应：不可变资源长缓存，HTML 不缓存。
+fn static_ok(path: &str, content_type: &str, body: &[u8]) -> HttpResponse {
+    let immutable = path.rsplit_once('.').is_some_and(|(_, ext)| ext != "html");
+    HttpResponse {
+        status: 200,
+        content_type: content_type.to_string(),
+        body: body.to_vec(),
+        headers: vec![(
+            "Cache-Control".to_string(),
+            if immutable {
+                "public, max-age=31536000, immutable"
+            } else {
+                "no-cache"
+            }
+            .to_string(),
+        )],
     }
 }
 

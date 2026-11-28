@@ -100,13 +100,18 @@ printf '第一轮\n/provider\n/exit\n' | ../../target/debug/symbio-cli.exe --rep
 ### ⑤ 浏览器 Server（`serve`）
 
 ```bash
+# UI 已在编译期内嵌进二进制，serve 默认直接提供它，不需要外部 dist 目录
+../../target/debug/symbio-cli.exe serve --homedir ~/.symbio
+
+# 显式指定外部 Vue 构建产物可覆盖内嵌 UI（前端热调试等场景）
 ../../target/debug/symbio-cli.exe serve \
   --homedir ~/.symbio \
-  --frontend-dist ../../apps/desktop/dist
+  --frontend-dist ../../packages/ui/dist
 ```
 
-Server 与 CLI 共用同一个二进制和 `RuntimeHost`，通过 HTTP/WS 提供 Tauri 的 Vue 构建
-产物。目录选择读取的是 Server 文件系统；非回环监听必须提供 `--token`。默认只允许
+Server 与 CLI 共用同一个二进制和 `RuntimeHost`，通过 HTTP/WS 提供 Vue 前端：默认用
+编译期从 `packages/ui/dist` 内嵌的静态资源； `--frontend-dist` 显式指定时改为读 Server
+文件系统，此时目录选择在 Server 侧解析。非回环监听必须提供 `--token`。默认只允许
 同源访问；确需跨源时同时提供 `--allowed-origin https://console.example` 与 `--token`，
 Origin 必须精确匹配且不能使用通配符。接入与生命周期边界见
 [crates/symbio-runtime/README](../../../crates/symbio-runtime/README.md)，完整 Server 选项用 `symbio-cli serve --help` 查看。

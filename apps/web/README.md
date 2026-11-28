@@ -19,7 +19,7 @@ created: 2026-11-28
 ## 构建
 
 ```
-npm run build   # 产物在 apps/web/dist，纯静态可部署
+npm run build   # 产物在 packages/ui/dist，纯静态可部署
 ```
 
 Vue 实现不在这里维护：改界面去 `packages/ui/src`。

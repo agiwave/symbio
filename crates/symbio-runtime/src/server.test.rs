@@ -19,6 +19,20 @@ fn traversal_is_rejected_before_asset_lookup() {
 }
 
 #[tokio::test]
+async fn embedded_assets_serve_spa_fallback() {
+    // CLI 的默认形态：二进制内嵌 packages/ui/dist，不依赖磁盘目录。
+    let ingress = ServerIngress::embedded(Arc::new(RuntimeHost::from_root(Arc::new(NoopHost))));
+    let index = ingress.static_response("/sessions/123").await;
+    assert_eq!(index.status, 200);
+    assert_eq!(index.content_type, "text/html; charset=utf-8");
+    // 根路径经资源表的别名映射到 index.html；MIME 必须按实际资源名取，不能是空串的 octet-stream。
+    let root = ingress.static_response("/").await;
+    assert_eq!(root.status, 200);
+    assert_eq!(root.content_type, "text/html; charset=utf-8");
+    assert_eq!(ingress.static_response("/%2e%2e/secret").await.status, 403);
+}
+
+#[tokio::test]
 async fn serves_spa_fallback_and_static_assets() {
     let temp = tempfile::tempdir().expect("tempdir");
     std::fs::write(temp.path().join("index.html"), "<div>app</div>").expect("index");

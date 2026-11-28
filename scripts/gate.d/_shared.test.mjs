@@ -591,13 +591,13 @@ test('ci.yml：cargo-audit 不能用项目 pin 的工具链编（会红在装工
 
 // 第二轮 CI（2026-10-07，run 37635738557）暴露的两处：同样是「前置只存在于开发者的
 // 机器上」，且同样是剥掉上一层壳之后才露出来的。
-test('ci.yml：rust-checks 必须自己产出 apps/desktop/dist，否则 generate_context! 编译期炸', () => {
+test('ci.yml：rust-checks 必须自己产出 packages/ui/dist，否则 generate_context! 编译期炸', () => {
   const block = jobBlock(ciYml(), 'rust-checks', 'msrv-check')
   assert.match(
     block,
     /working-directory:\s*packages\/ui\s*\n\s*run:\s*npm ci && npm run build/,
     // `tauri::generate_context!()` 是编译期宏，读 `frontendDist: "../dist"` 且要求该
-    // 路径存在；`apps/desktop/dist` 被 apps/desktop/.gitignore 忽略、**只在开发者本机存在**。
+    // 路径存在；`packages/ui/dist` 被 apps/desktop/.gitignore 忽略、**只在开发者本机存在**。
     // 缺了它：`error: proc macro panicked` ⇒ `--workspace` 的 check/test/clippy/doc
     // 四步**全红**，而报错指向的是一段完全正常的 Rust 代码。
     'rust-checks 没有构建前端产物 ⇒ symbio-tauri 编译期 panic，四步全红且报错指向正常代码',

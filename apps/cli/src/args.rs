@@ -119,7 +119,7 @@ Server 选项:
       --port <端口>          监听端口（默认 9231）
       --token <令牌>         Bearer Token；非回环地址必填
       --homedir <路径>       系统目录（默认 <当前目录>/.symbio）
-      --frontend-dist <路径> Vue 构建产物（默认 apps/desktop/dist）
+      --frontend-dist <路径> 覆盖内嵌 UI，改用外部 Vue 构建产物（默认内嵌）
       --max-connections <数>  并发连接上限（默认 64）
       --allowed-origin <源>   允许的精确浏览器 Origin；设置时必须同时提供 token
   -v, --verbose              显示更多诊断
@@ -261,9 +261,9 @@ fn parse_serve<I: IntoIterator<Item = String>>(
         })
         .transpose()?
         .unwrap_or(config.max_connections);
-    config.frontend_dist = std::env::var("SYMBIO_FRONTEND_DIST")
-        .map(|value| resolve_path(&value, cwd))
-        .unwrap_or(config.frontend_dist);
+    if let Ok(value) = std::env::var("SYMBIO_FRONTEND_DIST") {
+        config.frontend_dist = Some(resolve_path(&value, cwd));
+    }
 
     let mut args = ServeArgs {
         homedir: cwd.join(".symbio"),
@@ -302,7 +302,7 @@ fn parse_serve<I: IntoIterator<Item = String>>(
             "--homedir" => args.homedir = resolve_path(&take_value("--homedir", inline)?, cwd),
             "--frontend-dist" => {
                 args.config.frontend_dist =
-                    resolve_path(&take_value("--frontend-dist", inline)?, cwd)
+                    Some(resolve_path(&take_value("--frontend-dist", inline)?, cwd))
             }
             "--max-connections" => {
                 args.config.max_connections = take_value("--max-connections", inline)?

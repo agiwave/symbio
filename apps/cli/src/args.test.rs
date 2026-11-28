@@ -94,7 +94,7 @@ fn serve_subcommand_parses_server_options() {
     assert_eq!(args.config.bind, "0.0.0.0");
     assert_eq!(args.config.port, 9232);
     assert_eq!(args.config.token, "secret");
-    assert_eq!(args.config.frontend_dist, cwd.join("web"));
+    assert_eq!(args.config.frontend_dist, Some(cwd.join("web")));
     assert_eq!(args.config.max_connections, 12);
     assert_eq!(
         args.config.allowed_origin.as_deref(),

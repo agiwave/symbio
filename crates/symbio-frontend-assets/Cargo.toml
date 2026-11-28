@@ -1,0 +1,16 @@
+[package]
+name = "symbio-frontend-assets"
+version = "0.1.14"
+description = "Compile-time embedded frontend assets for symbio-cli serve"
+authors = ["Symbio Team"]
+license = "MIT"
+edition = "2021"
+rust-version = "1.91"
+
+[lints.rust]
+unused_imports = "warn"
+unused_variables = "warn"
+dead_code = "warn"
+
+[dependencies]
+include_dir = { workspace = true }

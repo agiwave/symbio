@@ -65,8 +65,11 @@ printf '第一轮\n/provider\n/exit\n' | ../../target/debug/symbio-cli.exe --rep
 # 心跳守护：驻留并为本目录所有启用心跳的会话触发空闲心跳
 ../../target/debug/symbio-cli.exe --homedir ~/.symbio --heartbeat
 
-# Server：同一个二进制通过 HTTP/WS 提供 Tauri 的 Vue 前端
-../../target/debug/symbio-cli.exe serve --homedir ~/.symbio --frontend-dist ../../apps/desktop/dist
+# Server：同一个二进制通过 HTTP/WS 提供 Vue 前端（UI 已编译期内嵌，无需外部 dist）
+../../target/debug/symbio-cli.exe serve --homedir ~/.symbio
+
+# 需要用外部构建产物覆盖内嵌 UI 时（如热替换前端调试）：
+../../target/debug/symbio-cli.exe serve --homedir ~/.symbio --frontend-dist ../../packages/ui/dist
 ```
 
 Server 默认只允许同源访问；跨源部署必须同时提供 `--token` 和精确的

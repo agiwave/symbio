@@ -20,6 +20,8 @@ encoding_rs = "0.8.35"
 futures = "0.3.34"
 glob = "0.3.4"
 globset = "0.4.20"
+# 编译期内嵌前端产物：CLI 二进制自带 UI，不依赖外部 dist 目录。
+include_dir = "0.7.4"
 grep = "0.4.1"
 http = "1.4.0"
 ignore = "0.4.33"

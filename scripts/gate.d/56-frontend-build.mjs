@@ -1,15 +1,16 @@
 // frontend-build 阶段：`vite build`（**只**这一步）。
 //
 // 文件名 56- 与「不进并发批」（2026-10-09 拆分）：backend 编译 `symbio-tauri` 时
-// `generate_context!` 在**编译期**读 `tauri.conf.json` 的 `frontendDist`（`../dist`），
-// 而 `vite build` 会**清空重写**同一目录 ⇒ 并发就是「编译读到半截 dist ⇒ 假红」。
-// 所以构建必须留在批后；批前的静态检查在 `20-frontend-static.mjs`。
+// `generate_context!` 在**编译期**读 `tauri.conf.json` 的 `frontendDist`（现为
+// `../../../packages/ui/dist`），而 `vite build` 会**清空重写**同一目录 ⇒ 并发就是
+// 「编译读到半截 dist ⇒ 假红」。所以构建必须留在批后；批前的静态检查在
+// `20-frontend-static.mjs`。
 //
-// 拆分的理由见 `20-frontend-static.mjs` 头部（那里有收益与「为什么不反过来」）。
-// 本阶段本身很轻（实测 ~6s，热缓存），留在关键路径上不值得再动它。
+// 单一产物：desktop（generate_context!）、web（静态部署）、CLI（build.rs 编译期内嵌）
+// 都读 `packages/ui/dist` 这一份，不再构建两份、也不再有 desktop/web 内容分叉。
 //
-// 也**不与 58-e2e 并发**：e2e 用例对 CPU 竞争时序敏感（并发 6 是贴着实测最优调的，
-// 再叠加外部负载会把「等实时面收敛」的用例推过超时线，2026-10-08 实测）。
+// 也**不与 58-e2e 并发**：e2e 用例对 CPU 竞争时序敏感，再叠加外部负载会把
+// 「等实时面收敛」的用例推过超时线。
 import path from 'node:path'
 import { fileURLToPath } from 'node:url'
 import fs from 'node:fs'
@@ -18,13 +19,14 @@ import { maybeSandboxDeleteHint, blockedBySandboxDelete } from './_shared.mjs'
 const scriptDir = path.dirname(fileURLToPath(import.meta.url))
 const repoRoot = path.resolve(scriptDir, '..', '..')
 const frontendDir = path.join(repoRoot, 'packages', 'ui')
+const dist = path.join(frontendDir, 'dist')
 const bin = (p) => path.join(frontendDir, 'node_modules', p)
 
 export default {
   id: 'frontend-build',
   title: '前端构建（vite build）',
-  // 输入面：`frontend`。vite build 只读 `apps/desktop/` 下的前端源与它自己的配置，
-  // 与 `crates/**` 无关；后端改动时重跑它买到的是同一份 `apps/desktop/dist`。
+  // 输入面：`frontend`。三端共用同一份源码与产物，与 `crates/**` 无关；后端改动时
+  // 重跑它买到的是同一份 dist。
   needs: ['frontend'],
   tasks(ctx) {
     if (!fs.existsSync(path.join(frontendDir, 'package.json'))) return []
@@ -41,10 +43,14 @@ export default {
             cwd: frontendDir,
           })
           if (!r.ok) {
-            console.log('      ↳ 构建失败：本地复现用 `npm run build`（在 apps/desktop/ 下）')
+            console.log('      ↳ 构建失败：本地复现用 `npm run build`（在 packages/ui 下）')
             maybeSandboxDeleteHint(r.output)
             if (blockedBySandboxDelete(r.output)) return 'skipped'
             return { ok: false, note: `exit=${r.code}`, logFile: r.logFile }
+          }
+          // 产物必须可用：index.html 是 Tauri generate_context! 与 CLI 内嵌的共同入口。
+          if (!fs.existsSync(path.join(dist, 'index.html'))) {
+            return { ok: false, note: 'vite build 未产出 packages/ui/dist/index.html' }
           }
           return { ok: true }
         },
